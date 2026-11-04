@@ -26,6 +26,8 @@ import {
   BuiltInAgentWithSaneHistory,
   CloningRemoteAgent,
   IntelligenceKnowingANewThread,
+  isThreadTitleRun,
+  type LearningRefusal,
   RUNTIME_STATE_TOOLS,
   RunBuiltAgent,
   UnavailableAgent,
@@ -73,8 +75,6 @@ import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
-import type { ProductTelemetry } from "./telemetry/product";
-import { productRuntimeHook } from "./telemetry/product-boundaries";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { RemoteLearnedSkillsMiddleware } from "./learning/remote";
 import {
@@ -98,6 +98,8 @@ import {
 } from "./plugins/selection";
 import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
+import type { ProductTelemetry } from "./telemetry/product";
+import { productRuntimeHook } from "./telemetry/product-boundaries";
 import { inlineToolImages } from "./tool-images";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
@@ -1736,6 +1738,8 @@ function remoteAgentWithStandingRole(
    */
   return new CloningRemoteAgent(remote, (target) => {
     target.use((input, next) => {
+      // The runtime naming the thread runs this Bot too. It is offered none of the Bot's tools and runs none.
+      if (isThreadTitleRun(input)) return next.run({ ...input, tools: [] });
       const stream = defer(() =>
         from(
           Promise.all([
@@ -1830,7 +1834,8 @@ function mastraOpenBotContext({
 export async function resolveRuntimeAgents(
   loadAgents: () => Promise<RegisteredAgent[]>,
   model: RuntimeModel,
-  resolveModelApiKey: () => Promise<string | null>,
+  /** Given the built-in Bots the key is resolved for, so the vault records which Bots read it. */
+  resolveModelApiKey: (botIds?: string[]) => Promise<string | null>,
   stallGuard?: StallGuard,
   loadTools?: LoadToolsForBot,
   signRun?: SignRun,
@@ -1890,7 +1895,11 @@ export async function resolveRuntimeAgents(
   if (registered.length === 0) return {};
 
   const apiKey = registered.some((agent) => agent.type === "built_in")
-    ? await resolveModelApiKey()
+    ? await resolveModelApiKey(
+        registered
+          .filter((agent) => agent.type === "built_in")
+          .map((agent) => agent.id),
+      )
     : null;
   return buildAgents(
     registered,
@@ -1942,6 +1951,26 @@ export type SignRun = (
   /** A prior signed delegation, verified by the deployment signer before being preserved. */
   previousAssertion?: unknown,
 ) => string;
+
+/** When each container and reason was last logged as refused, so a refused container writes a line per window, not per run. */
+const learningRefusalsLogged = new Map<string, number>();
+const LEARNING_REFUSAL_LOG_MS = 10 * 60_000;
+
+/** A thread went on without the Learning container it named: one line for the operator, at most every ten minutes. */
+function warnLearningRefused(refusal: LearningRefusal): void {
+  const key = `${refusal.learningContainerId}\n${refusal.code}`;
+  if ((learningRefusalsLogged.get(key) ?? 0) > Date.now()) return;
+  learningRefusalsLogged.set(key, Date.now() + LEARNING_REFUSAL_LOG_MS);
+  console.warn(
+    JSON.stringify({
+      type: "learning-container-refused",
+      code: refusal.code,
+      containerId: refusal.learningContainerId,
+      message:
+        "Intelligence would not use this Learning container, so the conversation went on without Learning. Admin, Automatic learning shows why.",
+    }),
+  );
+}
 
 /** Who is asking. Agent visibility is decided per person, so a run has to know this first. */
 export type IdentifyActor = (request: Request) => Promise<AgentActor>;
@@ -2089,6 +2118,8 @@ export function mountCopilotRuntime(
                 trajectoryCapture.selectLearningContainers,
             }
           : {}),
+        // The conversation goes on without it. The admin sees why on the Learning page.
+        onLearningRefused: (refusal) => warnLearningRefused(refusal),
       }),
     );
 

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
-import { type CredentialStore, encryptSecret } from "../credentials";
+import type { CredentialStore } from "../credentials";
 import { logLinkAuditFailure } from "./audit-failure";
 import {
   exchangeGithubCode,
@@ -126,10 +126,8 @@ export function githubCallbackRoutes(
         provider: "github-user-token",
         keyId: `${state.userId}:${user.id}:${randomUUID()}`,
         metadata: { login: user.login },
-        encryptedValue: await encryptSecret(
-          deps.encryptionKey,
-          JSON.stringify(tokens),
-        ),
+        ownerUserId: state.userId,
+        plaintext: JSON.stringify(tokens),
       });
 
       stage = "link";

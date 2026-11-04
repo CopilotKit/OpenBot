@@ -4,7 +4,7 @@ import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import { type AuditEventInput, createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import {
   recorderConnectCodes,
   recorderConnections,
@@ -13,7 +13,11 @@ import {
   createRecorderConnectionStore,
   type RecorderConnectionLifetime,
 } from "../src/recorder/connections";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+
+// A connection's audit row is read back from the trail in Intelligence (one case below).
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-connections-${randomUUID()}`;
@@ -456,13 +460,9 @@ describe("a connection's row is written with it", () => {
         installId: CHROME,
       });
       expect(made?.userId).toBe(person);
-      const written = await database
-        .select({
-          eventType: auditEvents.eventType,
-          actorUserId: auditEvents.actorUserId,
-        })
-        .from(auditEvents)
-        .where(eq(auditEvents.targetId, made!.connection.id));
+      const written = (await auditRows({ targetId: made!.connection.id })).map(
+        ({ eventType, actorUserId }) => ({ eventType, actorUserId }),
+      );
       expect(written).toEqual([
         { eventType: "recorder.connected", actorUserId: person },
       ]);

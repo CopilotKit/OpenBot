@@ -1,0 +1,28 @@
+{{- if eq .Values.computers.mode "sandbox" }}
+{{/*
+Which release this computers namespace belongs to.
+
+ONE RELEASE PER COMPUTERS NAMESPACE, and this object is what holds it to that. See
+`openbot.computersClaimName` in `_helpers.tpl` for why sharing one is unsafe rather than untidy: the
+server lists, and its culler suspends, every Sandbox in the namespace, and its Role grants every
+Sandbox there.
+
+The name is fixed so that a second release asking for the same namespace collides with it. Helm
+refuses to install an object another release owns, and `validation.yaml` reads this one first so the
+refusal names the release that holds the namespace. The data is what that check compares; nothing
+else reads it.
+
+Created in the namespace, never the namespace itself. A namespace Helm created is a namespace Helm
+deletes on `helm uninstall`, and that would take every person's computer, and their logins, with it.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openbot.computersClaimName" . }}
+  namespace: {{ include "openbot.computersNamespace" . }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" "computer") | indent 4 }}
+data:
+  release: {{ .Release.Name | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+{{- end }}

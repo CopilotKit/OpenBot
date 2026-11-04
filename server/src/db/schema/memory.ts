@@ -8,9 +8,14 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type { MemoryRecord, MemorySource } from "../../memory/types";
-import { agents, users } from "./core";
+import { users } from "./core";
 import { jsonb } from "./json";
 
+/*
+ * NO LONGER WRITTEN. A person's memory sources and memories live in Intelligence (memory/intelligence.ts).
+ * These tables stay for one release so an upgraded deployment can copy them in at boot (memory/upgrade.ts),
+ * and are then dropped.
+ */
 export const memorySources = pgTable(
   "memory_sources",
   {
@@ -18,9 +23,7 @@ export const memorySources = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     toolRef: text("tool_ref").notNull(),
     title: text("title").notNull(),
     args: jsonb("args").$type<Record<string, unknown>>().notNull().default({}),
@@ -75,9 +78,7 @@ export const personalMemories = pgTable(
       .$type<MemoryRecord["formedBy"]>()
       .notNull()
       .default("person"),
-    formedByAgentId: text("formed_by_agent_id").references(() => agents.id, {
-      onDelete: "cascade",
-    }),
+    formedByAgentId: text("formed_by_agent_id"),
     sourceApp: text("source_app"),
     sourceRef: text("source_ref"),
     sourceLink: text("source_link"),

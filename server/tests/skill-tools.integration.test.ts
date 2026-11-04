@@ -1,19 +1,19 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
+import { mcpTools, users } from "../src/db/schema";
 import {
-  agents,
-  mcpServers,
-  mcpTools,
-  skills,
-  skillTools,
-  users,
-} from "../src/db/schema";
-import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
+  createPluginStore,
+  type PluginStore,
+  PluginRefusedError,
+} from "../src/plugins/store";
+import { removeBots, seedBot, useTestConfiguration } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 /**
  * A skill saying which tools it needs, and that saying so grants nothing.
@@ -28,14 +28,7 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: { readSecret: async () => null },
-  encryptionKey: "x".repeat(44),
-  policy: () => policy,
-});
+let store: PluginStore;
 
 const suite = randomUUID().slice(0, 8);
 const author = `user_author_${suite}`;
@@ -51,23 +44,25 @@ const withheldRef = `${server}/delete_everything`;
 const actor = { id: author, isAdmin: true };
 
 beforeAll(async () => {
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => policy,
+  });
   await database
     .insert(users)
     .values({ id: author, email: `${author}@example.test`, name: author })
     .onConflictDoNothing();
-  await database
-    .insert(agents)
-    .values({ id: bot, name: bot, type: "remote_ag_ui", configuration: {} })
-    .onConflictDoNothing();
-  await database
-    .insert(mcpServers)
-    .values({
-      id: server,
-      title: "A test server",
-      vendor: "Test",
-      url: "https://mcp.example.invalid/v1",
-    })
-    .onConflictDoNothing();
+  await seedBot({ id: bot, name: bot });
+  await seedServer({
+    id: server,
+    title: "A test server",
+    vendor: "Test",
+    url: "https://mcp.example.invalid/v1",
+  });
   await database
     .insert(mcpTools)
     .values([
@@ -90,12 +85,19 @@ beforeAll(async () => {
   await store.grant("mcp", heldRef, bot, "admin@openbot.local");
 });
 
+/** A skill as Intelligence holds it now, or null. */
+async function storedSkill(slug: string) {
+  return (await useTestConfiguration()).client.skills.get(slug);
+}
+
 afterAll(async () => {
-  await database
-    .delete(skills)
-    .where(inArray(skills.slug, [skill, otherSkill]));
-  await database.delete(mcpServers).where(eq(mcpServers.id, server));
-  await database.delete(agents).where(eq(agents.id, bot));
+  const configuration = await useTestConfiguration();
+  for (const slug of [skill, otherSkill]) {
+    await configuration.client.skills.remove(slug, `test:${randomUUID()}`);
+    configuration.skills.forget(slug);
+  }
+  await removeServers([server]);
+  await removeBots([bot]);
   await database.delete(users).where(eq(users.id, author));
 });
 
@@ -187,10 +189,9 @@ describe("declaring a tool is not granting it", () => {
   test("granting a skill does not grant the tools it names", async () => {
     // Same property from the grant surface's side: the skill grant above added a skill and nothing
     // else, so the tool the Bot was never granted is still absent.
-    const [row] = await database
-      .select()
-      .from(skillTools)
-      .where(eq(skillTools.ref, withheldRef));
+    const row = (await storedSkill(skill))?.tools.find(
+      (tool) => tool.ref === withheldRef,
+    );
     expect(row).toBeDefined();
 
     const held = await store.listForAgent(bot);
@@ -205,11 +206,9 @@ describe("a skill going away", () => {
 
     await store.uninstallSkill(otherSkill, "admin@openbot.local");
 
-    const left = await database
-      .select()
-      .from(skillTools)
-      .where(eq(skillTools.skillId, otherSkill));
-    expect(left).toHaveLength(0);
+    // The skill and every declaration of it, gone from Intelligence together.
+    expect(await storedSkill(otherSkill)).toBeNull();
+    expect(await declaredBy(otherSkill)).toEqual([]);
   });
 });
 

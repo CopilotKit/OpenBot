@@ -1,21 +1,29 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { createHandoffDesk } from "../src/agents/handoff";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  auditEvents,
-  pluginGrants,
-  workItems,
-} from "../src/db/schema";
+import { workItems } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
-import { createPluginStore } from "../src/plugins/store";
+import { createPluginStore, type PluginStore } from "../src/plugins/store";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows, useTestAuditTrail } from "./support/audit";
+import { changeAccess, removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  purgeSecrets,
+  recordingCredentialStore,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * A Bot at its own endpoint hands work on, through the plugin store's own grant read.
@@ -23,7 +31,12 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * The desk in `agent-handoff.integration.test.ts` reads grants with its own query, so it could not
  * see the store keeping only built-in grantees. This one is wired the way `index.ts` wires the
  * desk: `mayAddress` is `botsReachableFrom`, failing closed.
+ *
+ * What the desk records is read back from the audit trail in Intelligence, by this suite's own Bots
+ * and actor: the trail is shared by every run.
  */
+
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
@@ -55,26 +68,10 @@ const broker: ConnectedAppBroker = {
 };
 
 const auditStore = createAuditStore(database);
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore,
-  credentials: {
-    readSecret: async () => null,
-    create: async () => {
-      throw new Error("a handoff grant asked the vault to create a secret");
-    },
-    updateSecret: async () => {
-      throw new Error("a handoff grant asked the vault to write a secret");
-    },
-    revoke: async () => {
-      throw new Error("a handoff grant asked the vault to revoke a secret");
-    },
-  },
-  encryptionKey: "x".repeat(44),
-  policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
-  broker,
-});
+/** What a handoff grant asked of the real vault: nothing, since a grant on a Bot holds no secret. */
+const vaultCalls: string[] = [];
+const vaultCreated: string[] = [];
+let store: PluginStore;
 
 const desk = createHandoffDesk({
   queue: createWorkQueue(database),
@@ -94,16 +91,26 @@ async function clean() {
   await database
     .delete(workItems)
     .where(sql`${workItems.payload}->>'actorId' = ${ACTOR}`);
-  await database.delete(pluginGrants).where(inArray(pluginGrants.agentId, ALL));
-  await database
-    .delete(agentProfiles)
-    .where(inArray(agentProfiles.agentId, ALL));
-  await database.delete(agents).where(inArray(agents.id, ALL));
+  // No Bot of the suite's holds another: what a test granted is taken back.
+  await changeAccess([{ op: "revokeMatching", kind: "bot", botIds: ALL }]);
 }
 
-beforeEach(async () => {
-  await clean();
-  const rows = [
+// Made once: every test reads the same three Bots and changes none of them.
+beforeAll(async () => {
+  await useTestVault();
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore,
+    credentials: await recordingCredentialStore({
+      calls: vaultCalls,
+      created: vaultCreated,
+    }),
+    encryptionKey: "x".repeat(44),
+    policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
+    broker,
+  });
+  const bots = [
     {
       id: REMOTE,
       name: "Remote Asker",
@@ -123,21 +130,25 @@ beforeEach(async () => {
       configuration: { endpoint: "http://127.0.0.1:2/agui" },
     },
   ];
-  for (const row of rows) {
-    await database.insert(agents).values(row);
-    await database.insert(agentProfiles).values({
-      agentId: row.id,
-      name: row.name,
+  for (const bot of bots) {
+    await seedBot({
+      ...bot,
       title: "",
       roleDescription: "",
-      avatarSeed: row.id,
+      avatarSeed: bot.id,
       visibility: "public",
     });
   }
 });
 
+beforeEach(async () => {
+  await clean();
+});
+
 afterAll(async () => {
   await clean();
+  await purgeSecrets(vaultCreated);
+  await removeBots(ALL);
   await database.$client.end({ timeout: 5 });
 });
 
@@ -156,6 +167,7 @@ describe("a Bot at its own endpoint, handing work on", () => {
     await store.grant("bot", BUILT_IN, REMOTE, "test");
 
     expect(await store.botsReachableFrom(REMOTE)).toEqual([BUILT_IN]);
+    expect(vaultCalls).toEqual([]);
   });
 
   test("the screen is told it can hold the grant", async () => {
@@ -172,16 +184,10 @@ describe("a Bot at its own endpoint, handing work on", () => {
     });
     expect(refused.ok).toBe(false);
 
-    const [row] = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "agent.handoff_refused"),
-          eq(auditEvents.targetId, REMOTE),
-        ),
-      )
-      .limit(1);
+    const [row] = await auditRows({
+      eventType: "agent.handoff_refused",
+      targetId: REMOTE,
+    });
     expect(row).toBeDefined();
   });
 
@@ -203,14 +209,16 @@ describe("a Bot at its own endpoint, handing work on", () => {
     });
     expect(toRemote).toMatchObject({ ok: true, to: OTHER_REMOTE });
 
-    const offered = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(eq(auditEvents.eventType, "agent.handoff_offered"));
+    // By this suite's actor, which every hop it sends carries: the trail is shared by every run.
+    const offered = await auditRows({
+      eventType: "agent.handoff_offered",
+      actorUserId: ACTOR,
+    });
     const targets = offered
       .map((row) => row.payload as Record<string, unknown>)
       .filter((payload) => payload.from === REMOTE)
       .map((payload) => payload.to);
     expect(targets).toEqual(expect.arrayContaining([BUILT_IN, OTHER_REMOTE]));
+    expect(vaultCalls).toEqual([]);
   });
 });

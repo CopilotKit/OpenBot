@@ -1,23 +1,29 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import type { SaveVoiceSessionInput } from "@openbot/shared/voice-session";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AppVariables } from "../src/auth/guards";
 import {
-  CHANNEL_ACTIVITY_TOPIC,
   type ChannelActivityEvent,
   createChannelEventHub,
-  startChannelActivityListener,
 } from "../src/channels/events";
+import { deliverConversationChanges } from "../src/channels/live";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import { agents, channels, users } from "../src/db/schema";
+import { users } from "../src/db/schema";
 import { createVoiceSessionRoutes } from "../src/voice/session-routes";
 import { createVoiceSessionStore } from "../src/voice/sessions";
 import type { VoiceSummarizer } from "../src/voice/summary";
+import { removeBots, useTestBots } from "./support/bots";
+import {
+  eventually,
+  purgeConversations,
+  storedConversation,
+  useTestConversations,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -31,22 +37,19 @@ const channelStore = createChannelStore(
   profiles,
   createThreadIdentity("voice-preview-test"),
 );
-const store = createVoiceSessionStore(database, channelStore);
+const store = createVoiceSessionStore(channelStore);
 const owner = { id: `voice-preview-${randomUUID()}`, role: "user" } as const;
 const channelIds: string[] = [];
 let agentId: string;
 const hub = createChannelEventHub();
 const delivered: ChannelActivityEvent[] = [];
-const barriers = new Map<string, () => void>();
-let listener: Awaited<ReturnType<typeof startChannelActivityListener>>;
+let stopLive: (() => void) | undefined;
 hub.register(owner.id, (payload) => {
-  const event: ChannelActivityEvent = JSON.parse(payload);
-  const resolve = barriers.get(event.channelId);
-  if (resolve) resolve();
-  else delivered.push(event);
+  delivered.push(JSON.parse(payload));
 });
 
 beforeAll(async () => {
+  await useTestBots();
   await database.insert(users).values({
     id: owner.id,
     email: `${owner.id}@example.test`,
@@ -59,14 +62,17 @@ beforeAll(async () => {
     visibility: "private",
   });
   agentId = profile.id;
-  listener = await startChannelActivityListener(databaseUrl, hub);
+  // What Intelligence announces, to this hub, as the server wires it (channels/live.ts).
+  stopLive = deliverConversationChanges(
+    (await useTestConversations()).conversations,
+    hub,
+  );
 });
 
 afterAll(async () => {
-  await listener?.stop();
-  if (channelIds.length)
-    await database.delete(channels).where(inArray(channels.id, channelIds));
-  if (agentId) await database.delete(agents).where(eq(agents.id, agentId));
+  stopLive?.();
+  await purgeConversations(channelIds);
+  if (agentId) await removeBots([agentId]);
   await database.delete(users).where(eq(users.id, owner.id));
   await database.$client.close();
 });
@@ -103,11 +109,7 @@ async function fixture() {
     return response.json();
   }
   async function row() {
-    const [result] = await database
-      .select()
-      .from(channels)
-      .where(eq(channels.id, channel.id));
-    return result;
+    return storedConversation(channel.id);
   }
   const failedRouter = router(async () => {
     throw new Error("Summary unavailable");
@@ -123,35 +125,6 @@ async function fixture() {
         (event) => event.channelId === channel.id && event.lastMessage !== null,
       ),
   };
-}
-
-/** A later NOTIFY on the same topic confirms the listener consumed all preceding committed writes. */
-async function flushNotifications() {
-  const id = `barrier-${randomUUID()}`;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const arrived = new Promise<void>((resolve, reject) => {
-    barriers.set(id, resolve);
-    timer = setTimeout(
-      () => reject(new Error("Channel notifications did not arrive")),
-      5000,
-    );
-  });
-  try {
-    const event: ChannelActivityEvent = {
-      channelId: id,
-      memberIds: [owner.id],
-      lastMessage: null,
-      lastMessageAt: null,
-      lastMessageAgentId: null,
-    };
-    await database.execute(
-      sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
-    );
-    await arrived;
-  } finally {
-    clearTimeout(timer);
-    barriers.delete(id);
-  }
 }
 
 test("failed summary retries enrich the durable preview and notify once across replicas", async () => {
@@ -184,7 +157,7 @@ test("failed summary retries enrich the durable preview and notify once across r
     lastMessageAt: new Date(f.input.endedAt),
   });
   await Promise.all([f.post(first), f.post(second)]);
-  await flushNotifications();
+  await eventually(() => f.events().length >= 2, { quietMs: 1_000 });
   expect(f.events().map((event) => event.lastMessage)).toEqual([
     "Voice chat",
     `Voice chat: ${durable?.summary}`,
@@ -204,7 +177,7 @@ test("a retry preserves and does not announce over newer conversation activity",
     at,
   });
   await f.post(f.router(async () => "Discussed launch plans."));
-  await flushNotifications();
+  await eventually(() => f.events().length >= 2, { quietMs: 1_000 });
   expect(await f.row()).toMatchObject({
     lastMessage: "A newer message",
     lastMessageAt: at,
@@ -227,7 +200,7 @@ test("equal timestamps and placeholder text cannot enrich another source's activ
     );
     await f.fail();
     await f.post(f.router(async () => "Discussed launch plans."));
-    await flushNotifications();
+    await eventually(() => f.events().length >= 1, { quietMs: 1_000 });
     expect(await f.row()).toMatchObject({
       lastMessage: "Voice chat",
       lastMessageSourceId: source?.id ?? null,

@@ -1,19 +1,7 @@
-/**
- * The HTTP half of the capability switches, and the model allowlist.
- *
- * Mounted once in app.ts as `app.use("/api/*", createEnterpriseGate(requireUser))`. A request that
- * matches none of the routes below passes straight through without a session lookup. One that
- * matches is authenticated by the same `requireUser` the route itself uses, checked, and refused with
- * a 403 carrying a sentence the person can act on. The route then runs its own guard as before.
- *
- * Fail closed: a capability that cannot be read refuses (503). Where the enterprise controls were
- * never installed (a unit test, a script) the gate passes everything, which is the product as it was.
- */
-import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
-import { agents } from "../db/schema";
+import { bots } from "../agents/bot-registry/directory";
 import { type Capability, capabilityRefusal } from "./capabilities";
 import { enterpriseControls } from "./controls";
 
@@ -226,12 +214,7 @@ async function governRun(
 
   let builtIn = false;
   try {
-    const [row] = await controls.deps.database
-      .select({ type: agents.type })
-      .from(agents)
-      .where(eq(agents.id, agentId))
-      .limit(1);
-    builtIn = row?.type === "built_in";
+    builtIn = (await bots().find(agentId))?.type === "built_in";
   } catch {
     builtIn = false;
   }

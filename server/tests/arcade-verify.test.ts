@@ -4,8 +4,8 @@
  *
  * ALMOST EVERY ASSERTION HERE IS "NOTHING WAS WRITTEN", which is the shape where a broken
  * implementation looks exactly like a passing one. So no case infers that from a status code:
- * each one QUERIES `brokered_connections` for a row belonging to this suite's app, and
- * `audit_events` for the `mcp.account_connected` entry the completion transaction files, and
+ * each one QUERIES `brokered_connections` for a row belonging to this suite's app, and the audit
+ * trail (in Intelligence) for the `mcp.account_connected` entry the completion transaction files, and
  * requires both to be empty. The app name is suite-scoped, so a count of zero is a fact about this
  * run.
  *
@@ -19,29 +19,42 @@
  * never mounted answers 404 in production while its own factory test passes — the failure every
  * Shared-app surface had before `shared-wiring.integration.test.ts` was written.
  */
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { getCookies } from "better-auth/cookies";
-import { and, asc, eq, inArray, like, sql } from "drizzle-orm";
+import { eq, type SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { createApp } from "../src/app";
 import { createAuditStore } from "../src/audit";
 import { createAuth } from "../src/auth/index";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  brokeredConnections,
-  mcpServers,
-  pendingAuthorizations,
-} from "../src/db/schema";
+import { pendingAuthorizations } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { AUTHORIZATION_REFUSALS } from "../src/plugins/routes";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 import { removePeople, seedPeople } from "./support/people";
+import {
+  changeServer,
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  useTestVault,
+} from "./support/vault";
 
 /*
  * SIX CONNECTIONS RATHER THAN THE SHARED `TEST_POOL` OF TWO, because the race below drives two
@@ -51,13 +64,18 @@ import { removePeople, seedPeople } from "./support/people";
  */
 const database = createDatabase(testDatabaseUrl(), { max: 6 });
 const suite = randomUUID().slice(0, 8);
-const APP = `arcade-verify-${suite}`;
 /**
- * ONE APP PER TEST, because `audit_events` is APPEND-ONLY and cannot be cleaned between them. A
+ * ONE APP PER TEST, because the audit trail is APPEND-ONLY and cannot be cleaned between them. A
  * fixed name would let a completion's event be counted by the next case's "nothing was written",
  * which is the exact assertion this suite is built on. The app is keyed on its toolkit, so a fresh
  * toolkit per test is a fresh everything.
+ *
+ * And a fresh app id per test, not one id removed and made again: apps live in Intelligence, and the
+ * removal of the last case's app reaches every listening replica as an announcement that removes the
+ * rows here naming it. Arriving late under load, it took the next case's attempt row with it.
  */
+let APP = "";
+const appsMade: string[] = [];
 let TOOLKIT = "";
 let apps = 0;
 const ACTOR = `verifier-${suite}`;
@@ -290,7 +308,7 @@ const refusedTo = (reason: string) =>
   `${APP_URL}/connections?authorized=${reason}`;
 
 /** Where a completion lands: the app's own page, built from the attempt row's `server_id`. */
-const LANDING = `${APP_URL}/connections/${APP}?action=${encodeURIComponent(ACTION)}`;
+let LANDING = "";
 
 /**
  * A refusal, named by its code and not merely by the fact that something redirected.
@@ -308,19 +326,13 @@ async function expectRefusal(response: Response, reason: string) {
 
 /** What the completion transaction would have left behind. Queried, never inferred from a status. */
 async function written() {
-  const connections = await database
-    .select()
-    .from(brokeredConnections)
-    .where(eq(brokeredConnections.app, TOOLKIT));
-  const events = await database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.targetId, TOOLKIT),
-        eq(auditEvents.eventType, "mcp.account_connected"),
-      ),
-    );
+  const connections = (await storedConnections()).brokered.filter(
+    (row) => row.app === TOOLKIT,
+  );
+  const events = await auditRows({
+    targetId: TOOLKIT,
+    eventType: "mcp.account_connected",
+  });
   return { connections, events };
 }
 
@@ -460,11 +472,15 @@ beforeEach(async () => {
   authProviderAnswer = async () => "google";
   apps += 1;
   TOOLKIT = `Gmail-${suite}-${apps}`;
+  APP = `arcade-verify-${suite}-${apps}`;
+  LANDING = `${APP_URL}/connections/${APP}?action=${encodeURIComponent(ACTION)}`;
   await database
     .delete(pendingAuthorizations)
     .where(eq(pendingAuthorizations.actorId, ACTOR));
-  await database.delete(mcpServers).where(eq(mcpServers.id, APP));
-  await database.insert(mcpServers).values({
+  // The last case's app goes now, under its own id, so its removal can only reach its own rows.
+  await removeServers(appsMade.splice(0));
+  appsMade.push(APP);
+  await seedServer({
     id: APP,
     title: "Gmail",
     vendor: "Arcade",
@@ -475,14 +491,19 @@ beforeEach(async () => {
   });
 });
 
+// Apps and brokered accounts live in Intelligence: the store reads them through this directory.
+beforeAll(async () => {
+  await useTestVault();
+});
+
 afterAll(async () => {
   await database
     .delete(pendingAuthorizations)
     .where(eq(pendingAuthorizations.actorId, ACTOR));
-  await database
-    .delete(brokeredConnections)
-    .where(like(brokeredConnections.app, `Gmail-${suite}-%`));
-  await database.delete(mcpServers).where(eq(mcpServers.id, APP));
+  await removeConnectionsWhere(
+    (row) => row.kind === "brokered" && row.app.startsWith(`Gmail-${suite}-`),
+  );
+  await removeServers(appsMade.splice(0));
   await removePeople(database, [ACTOR, STRANGER]);
   await database.$client.close();
 });
@@ -965,7 +986,7 @@ describe("what the authorization's own status decides", () => {
 describe("a consent whose account context has moved on", () => {
   /** The connection the CURRENT identity already holds, which this refusal must not touch. */
   async function giveCurrentAccountAConnection() {
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "arcade",
       app: TOOLKIT,
       holder: "deployment",
@@ -976,15 +997,15 @@ describe("a consent whose account context has moved on", () => {
   }
 
   async function switchToShared() {
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "shared", sharedVendorUserId: SHARED_IDENTITY })
-      .where(eq(mcpServers.id, APP));
+    await changeServer(APP, {
+      accountMode: "shared",
+      sharedVendorUserId: SHARED_IDENTITY,
+    });
   }
 
   /** A connection this identity holds for one app, as the row this deployment keeps for it. */
   async function hold(app: string, vendorUserId: string) {
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "arcade",
       app,
       holder: "person",
@@ -999,34 +1020,27 @@ describe("a consent whose account context has moved on", () => {
    * the retired one's, and never the account that is live now.
    */
   const rowsFor = async (names: string[], vendorUserId: string) =>
-    (
-      await database
-        .select({ app: brokeredConnections.app })
-        .from(brokeredConnections)
-        .where(
-          and(
-            inArray(brokeredConnections.app, names),
-            eq(brokeredConnections.vendorUserId, vendorUserId),
-          ),
-        )
-        .orderBy(asc(brokeredConnections.app))
-    ).map((row) => row.app);
-
-  /** What the trail says ended, by app, with the payload a reader would be answered with. */
-  const disconnectsFor = (names: string[]) =>
-    database
-      .select({
-        app: auditEvents.targetId,
-        payload: sql<Record<string, unknown>>`payload`,
-      })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "mcp.account_disconnected"),
-          inArray(auditEvents.targetId, names),
-        ),
+    (await storedConnections()).brokered
+      .filter(
+        (row) => names.includes(row.app) && row.vendorUserId === vendorUserId,
       )
-      .orderBy(asc(auditEvents.targetId));
+      .map((row) => row.app)
+      .sort();
+
+  /**
+   * What the trail says ended, by app, with the payload a reader would be answered with. One read per
+   * app name (the trail is asked for one target at a time), in app order.
+   */
+  const disconnectsFor = async (names: string[]) => {
+    const rows: { app: string | null; payload: Record<string, unknown> }[] = [];
+    for (const name of names)
+      for (const row of await auditRows({
+        eventType: "mcp.account_disconnected",
+        targetId: name,
+      }))
+        rows.push({ app: row.targetId, payload: row.payload });
+    return rows.sort((a, b) => ((a.app ?? "") < (b.app ?? "") ? -1 : 1));
+  };
 
   test("refuses, withdraws the RETIRED identity's grant and leaves the CURRENT account alone", async () => {
     await giveAttempt({ authId: MINTED, ageMinutes: 1 });
@@ -1373,13 +1387,13 @@ describe("a Shared-app consent finished by somebody who is no longer an administ
   const siblingApp = () => `${TOOLKIT}+calendar`;
 
   test("refuses without withdrawing the deployment's live account or clearing its rows", async () => {
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "shared", sharedVendorUserId: SHARED_IDENTITY })
-      .where(eq(mcpServers.id, APP));
+    await changeServer(APP, {
+      accountMode: "shared",
+      sharedVendorUserId: SHARED_IDENTITY,
+    });
     // The team's live connection for this app and for a sibling on the same auth provider.
     for (const app of [TOOLKIT, siblingApp()]) {
-      await database.insert(brokeredConnections).values({
+      await seedBrokered({
         provider: "arcade",
         app,
         holder: "deployment",
@@ -1415,17 +1429,15 @@ describe("a Shared-app consent finished by somebody who is no longer an administ
     await expectRefusal(response, "not-permitted");
 
     // The team's rows are exactly as they were, and no completion was written over them.
-    const live = await database
-      .select({ app: brokeredConnections.app })
-      .from(brokeredConnections)
-      .where(
-        and(
-          inArray(brokeredConnections.app, [TOOLKIT, siblingApp()]),
-          eq(brokeredConnections.vendorUserId, SHARED_IDENTITY),
-        ),
+    const live = (await storedConnections()).brokered
+      .filter(
+        (row) =>
+          [TOOLKIT, siblingApp()].includes(row.app) &&
+          row.vendorUserId === SHARED_IDENTITY,
       )
-      .orderBy(asc(brokeredConnections.app));
-    expect(live.map((row) => row.app)).toEqual([TOOLKIT, siblingApp()].sort());
+      .map((row) => row.app)
+      .sort();
+    expect(live).toEqual([TOOLKIT, siblingApp()].sort());
     expect((await written()).events.length).toBe(0);
 
     // CLOSED, AND NOT AS A WITHDRAWAL: nothing was withdrawn, and the consent is live at the vendor.
@@ -1460,10 +1472,10 @@ describe("a Shared-app consent finished by somebody who is no longer an administ
  */
 describe("an attempt whose holder and user id do not agree", () => {
   async function switchToShared() {
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "shared", sharedVendorUserId: SHARED_IDENTITY })
-      .where(eq(mcpServers.id, APP));
+    await changeServer(APP, {
+      accountMode: "shared",
+      sharedVendorUserId: SHARED_IDENTITY,
+    });
   }
 
   /** The pairs `(holder = 'person' AND user_id IS NOT NULL) OR (deployment AND user_id IS NULL)` excludes. */
@@ -1554,10 +1566,10 @@ describe("a return leg that completes", () => {
    * including the single `?`, because that is the only address any screen reads `?action=` off.
    */
   test("a consent the DEPLOYMENT holds lands on the same settings page, not on admin", async () => {
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "shared", sharedVendorUserId: SHARED_IDENTITY })
-      .where(eq(mcpServers.id, APP));
+    await changeServer(APP, {
+      accountMode: "shared",
+      sharedVendorUserId: SHARED_IDENTITY,
+    });
     await database.insert(pendingAuthorizations).values({
       actorId: ACTOR,
       serverId: APP,
@@ -1662,17 +1674,20 @@ describe("a return leg that completes", () => {
   });
 
   /**
-   * A FAILURE BETWEEN THE CONNECTION WRITE AND THE AUDIT WRITE PERSISTS NEITHER.
+   * A FAILURE BETWEEN THE ACCOUNT WRITE AND THE AUDIT WRITE SETTLES NOTHING, AND A RETRY COMPLETES IT.
    *
-   * Injected at the DATABASE HANDLE rather than at the store's `auditStore` option, because the
-   * audit write that has to be atomic with the connection write is the one bound to the
-   * transaction — the same reason `arcade-completion-transaction.integration.test.ts` gives. And it
-   * is driven through the route, so the route's own promise — no exit without a `Location` — is
-   * held to on the path where its own store throws.
+   * The account is Intelligence's and the attempt and its trail are ours, so no one transaction holds
+   * them: the account is written first, idempotently under its natural key, and the attempt's
+   * settlement and the audit row are one transaction after it — the same reason
+   * `arcade-completion-transaction.integration.test.ts` gives. Injected at the DATABASE HANDLE rather
+   * than at the store's `auditStore` option, because the audit write that settles the attempt is the
+   * one bound to that transaction. And it is driven through the route, so the route's own promise —
+   * no exit without a `Location` — is held to on the path where its own store throws.
    */
-  test("a failure between the two writes persists NEITHER, and still answers a Location", async () => {
+  test("a failure between the two writes settles nothing, still answers a Location, and a retry completes it once", async () => {
     await giveAttempt({ authId: MINTED, ageMinutes: 1 });
 
+    const dialect = new PgDialect();
     const brokenAuditDatabase = new Proxy(database, {
       get(target, property, receiver) {
         if (property !== "transaction") {
@@ -1684,11 +1699,15 @@ describe("a return leg that completes", () => {
             work(
               new Proxy(transaction, {
                 get(txTarget, txProperty, txReceiver) {
-                  if (txProperty === "insert") {
-                    return (table: unknown) => {
-                      if (table === auditEvents)
+                  if (txProperty === "execute") {
+                    return (query: unknown) => {
+                      if (
+                        /insert into audit_outbox/i.test(
+                          dialect.sqlToQuery(query as SQL).sql,
+                        )
+                      )
                         throw new Error("injected audit failure");
-                      return txTarget.insert(table as never);
+                      return txTarget.execute(query as never);
                     };
                   }
                   const value = Reflect.get(txTarget, txProperty, txReceiver);
@@ -1709,13 +1728,24 @@ describe("a return leg that completes", () => {
       "not-recorded",
     );
 
-    // BOTH TABLES, because "it answered" is not evidence that nothing was written.
-    await expectNothingWritten();
+    // No success on the trail, because "it answered" is not evidence that nothing was written.
+    expect((await written()).events.length).toBe(0);
 
-    // And the attempt is still claimable, because its UPDATE was in the same transaction.
+    // And the attempt is still claimable, because its UPDATE was in the audit's transaction.
     const row = await attemptRow();
     expect(row?.completedAt).toBeNull();
     expect(row?.outcome).toBeNull();
+
+    // So the return leg's retry completes it, over the account already written: one of each.
+    const retried = await verify(ACTOR, "?flow_id=flow-abc");
+    expect(retried.status).toBe(303);
+    expect(retried.headers.get("location")).toBe(LANDING);
+    const { connections, events } = await written();
+    expect({ connections: connections.length, events: events.length }).toEqual({
+      connections: 1,
+      events: 1,
+    });
+    expect((await attemptRow())?.outcome).toBe("completed");
   });
 
   /**
@@ -1854,15 +1884,10 @@ const lines = (said: unknown[][]): string[] =>
 describe("a cancel that lands between the confirmation and the completion", () => {
   const leftLiveEvents = async () =>
     (
-      await database
-        .select({ payload: sql<Record<string, unknown>>`payload` })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.targetId, TOOLKIT),
-            eq(auditEvents.eventType, "mcp.cancelled_grant_left_live"),
-          ),
-        )
+      await auditRows({
+        targetId: TOOLKIT,
+        eventType: "mcp.cancelled_grant_left_live",
+      })
     ).map((row) => row.payload);
 
   function cancelDuringTheReturnLeg() {
@@ -1906,7 +1931,7 @@ describe("a cancel that lands between the confirmation and the completion", () =
    */
   test("leaves a connection that predates the consent alone, and says so", async () => {
     await giveAttempt({ authId: MINTED, ageMinutes: 1 });
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "arcade",
       app: TOOLKIT,
       holder: "person",
@@ -1950,7 +1975,7 @@ describe("a cancel that lands between the confirmation and the completion", () =
   test("leaves a connection a sibling app shares alone, and says so", async () => {
     await giveAttempt({ authId: MINTED, ageMinutes: 1 });
     const sibling = `${TOOLKIT}+calendar`;
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "arcade",
       app: sibling,
       holder: "person",

@@ -1,10 +1,9 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { LearnedSkillsError } from "@copilotkit/runtime/v2";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import { learningPersonSpaces } from "../src/db/schema/learning";
 import {
   createLearningContainer,
   type KeyIntelligence,
@@ -16,17 +15,24 @@ import {
 } from "../src/learning/personal-space";
 import { skillSnapshot } from "./fixtures/learned-skills";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeLearningPeople,
+  testLearningIntelligence,
+} from "./support/learning";
 
 /*
- * Several OpenBot replicas making the same person's Learning space at once, against one database and one Intelligence.
- * Intelligence is faked as it behaves: a container id is unique per project, a second create answers 409
- * LEARNING_CONTAINER_ALREADY_EXISTS, and the runtime key's skills read says whether a container exists. Each replica
- * creates through the real service-token path in learning/ensure-container.ts.
+ * Several OpenBot replicas making the same person's Learning space at once, against one Intelligence. Which spaces were
+ * seen to exist is kept in the real test Intelligence's Learning assignments. Container creation, which needs a
+ * credential this suite does not hold, is faked as Intelligence behaves: a container id is unique per project, a second
+ * create answers 409 LEARNING_CONTAINER_ALREADY_EXISTS, and the runtime key's skills read says whether a container
+ * exists. Each replica creates through the real service-token path in learning/ensure-container.ts.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const person = `personal-space-${randomUUID()}`;
 const SPACE = personalLearningContainerId(person);
+const latePerson = `personal-space-late-${randomUUID()}`;
+const overlapPerson = `personal-space-overlap-${randomUUID()}`;
 const API = "https://intelligence.customer.example";
 
 const containers = new Map<string, string>();
@@ -71,25 +77,28 @@ const key: KeyIntelligence = {
   project: async () => undefined,
 };
 
-function replica() {
+/** The runtime key's skills read, which says whether a container exists: Intelligence as it answers. */
+const skillsRead = {
+  getLearnedSkillsSnapshot: async ({
+    containerId,
+  }: {
+    containerId: string;
+  }) => {
+    if (!containers.has(containerId))
+      throw new LearnedSkillsError("CONTAINER_NOT_FOUND", false);
+    return skillSnapshot();
+  },
+};
+
+function replica(snapshots: typeof skillsRead = skillsRead) {
   return createPersonalLearningSpaces({
     readSettings: async () => ({
       enabled: true,
       defaultTarget: null,
       agents: {},
     }),
-    snapshots: {
-      getLearnedSkillsSnapshot: async ({
-        containerId,
-      }: {
-        containerId: string;
-      }) => {
-        if (!containers.has(containerId))
-          throw new LearnedSkillsError("CONTAINER_NOT_FOUND", false);
-        return skillSnapshot();
-      },
-    } as never,
-    store: createPersonSpaceStore(database),
+    snapshots: snapshots as never,
+    store: createPersonSpaceStore(testLearningIntelligence()),
     create: (container) =>
       createLearningContainer({
         directory: process.cwd(),
@@ -106,13 +115,15 @@ function replica() {
 }
 
 beforeAll(async () => {
-  await database
-    .insert(users)
-    .values({ id: person, email: `${person}@example.test` });
+  await database.insert(users).values([
+    { id: person, email: `${person}@example.test` },
+    { id: latePerson, email: `${latePerson}@example.test` },
+  ]);
 });
 
 afterAll(async () => {
-  await database.delete(users).where(inArray(users.id, [person]));
+  await removeLearningPeople([person, latePerson, overlapPerson]);
+  await database.delete(users).where(inArray(users.id, [person, latePerson]));
   await database.$client.close();
 });
 
@@ -132,12 +143,12 @@ test("a person's space is created once across concurrent calls on several replic
   expect(posts.length).toBeGreaterThanOrEqual(1);
   expect(posts.length).toBeLessThanOrEqual(replicas.length);
   expect(posts.every((post) => post.id === SPACE)).toBe(true);
-  expect(
-    await database
-      .select({ containerId: learningPersonSpaces.containerId })
-      .from(learningPersonSpaces)
-      .where(eq(learningPersonSpaces.userId, person)),
-  ).toEqual([{ containerId: SPACE }]);
+  // Intelligence remembers the space as seen to exist (one record per person). A replica whose probe ran before the
+  // space was made forgets and confirms it again, as it deleted and re-inserted the row before, so the version can
+  // count those writes; what must hold is where it ends.
+  const space = await testLearningIntelligence().personalSpace(person);
+  expect(space.learningContainerId).toBe(SPACE);
+  expect(space.confirmedAt).not.toBeNull();
 });
 
 test("a replica that starts after the space exists never asks Intelligence to create it", async () => {
@@ -147,4 +158,65 @@ test("a replica that starts after the space exists never asks Intelligence to cr
     containerId: SPACE,
   });
   expect(posts.length).toBe(before);
+});
+
+test("a replica whose late reads still say missing confirms the space it just made, rather than making it again", async () => {
+  /*
+   * Reads that started before the space existed and answer after this replica made it, each later than the one
+   * before: what a slow Intelligence does to a replica's concurrent callers. Each of them forgets the space (it read
+   * as missing) and must leave it confirmed, without asking Intelligence to create it a second time.
+   */
+  const lateSpace = personalLearningContainerId(latePerson);
+  let misses = 0;
+  const spaces = replica({
+    getLearnedSkillsSnapshot: async ({ containerId }) => {
+      if (containers.has(containerId)) return skillSnapshot();
+      await new Promise((resolve) => setTimeout(resolve, 150 * misses++));
+      throw new LearnedSkillsError("CONTAINER_NOT_FOUND", false);
+    },
+  });
+
+  const answers = await Promise.all(
+    Array.from({ length: 4 }, () => spaces.state(latePerson)),
+  );
+
+  for (const answer of answers)
+    expect(answer).toEqual({ state: "assigned", containerId: lateSpace });
+  expect(posts.filter((post) => post.id === lateSpace)).toHaveLength(1);
+  const space = await testLearningIntelligence().personalSpace(latePerson);
+  expect(space.learningContainerId).toBe(lateSpace);
+  expect(space.confirmedAt).not.toBeNull();
+});
+
+test("a confirm that overlapped a forget does not stop the next confirm from writing", async () => {
+  /*
+   * A caller forgets the space (its read said missing) while another confirms it, and the forget lands in Intelligence
+   * last. The confirm that came back during the forget proves nothing about where Intelligence ended, so the forgetting
+   * caller's own confirm afterwards must write rather than be skipped as already done.
+   */
+  const intelligence = testLearningIntelligence();
+  const space = personalLearningContainerId(overlapPerson);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const store = createPersonSpaceStore({
+    personalSpace: (userId) => intelligence.personalSpace(userId),
+    confirmPersonalSpace: (userId, containerId) =>
+      intelligence.confirmPersonalSpace(userId, containerId),
+    forgetPersonalSpace: async (userId) => {
+      await held;
+      return intelligence.forgetPersonalSpace(userId);
+    },
+  });
+
+  const forgetting = store.forget(overlapPerson);
+  await store.confirm(overlapPerson, space);
+  release();
+  await forgetting;
+  await store.confirm(overlapPerson, space);
+
+  expect(
+    (await intelligence.personalSpace(overlapPerson)).learningContainerId,
+  ).toBe(space);
 });

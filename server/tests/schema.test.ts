@@ -386,13 +386,8 @@ describe("OpenBot database schema", () => {
         onDelete: "cascade",
         onUpdate: "no action",
       },
-      {
-        sourceColumns: ["agent_id"],
-        targetTable: "agents",
-        targetColumns: ["id"],
-        onDelete: "cascade",
-        onUpdate: "no action",
-      },
+      // No foreign key to `agents`: the Bot lives in Intelligence, and a purge removes these rows
+      // through agents/bot-registry/local-rows.ts.
     ]);
 
     expect(
@@ -481,5 +476,17 @@ describe("OpenBot database schema", () => {
     expect(normalizedMigration).toContain(
       `CREATE INDEX "agent_profiles_visibility_deleted_idx" ON "agent_profiles" USING btree ("visibility","deleted_at")`,
     );
+  });
+
+  test("drops the preference's foreign key to agents in the migration that moved Bots to Intelligence", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0076_bots_in_intelligence.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain(
+      `ALTER TABLE "agent_preferences" DROP CONSTRAINT "agent_preferences_agent_id_agents_id_fk";`,
+    );
+    // The legacy profile keeps its own: both tables are read only by the upgrade copy.
+    expect(migration).not.toContain("agent_profiles_agent_id_agents_id_fk");
   });
 });

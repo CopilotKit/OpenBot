@@ -1,15 +1,25 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomInt, randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull, like, or } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppVariables } from "../src/auth/guards";
-import { createCredentialStore, decryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { credentials, identityLinks } from "../src/db/schema";
 import { githubCallbackRoutes } from "../src/identity/github-callback";
 import { sealGithubState } from "../src/identity/github-oauth";
 import { createIdentityStore } from "../src/identity/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  purgeSecrets,
+  secretsNamedLike,
+  secretValue,
+  storedSecret,
+  useTestVault,
+} from "./support/vault";
+import {
+  purgeDirectoryPeople,
+  seedDirectoryPerson,
+  useTestPeople,
+} from "./support/directory";
 
 const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const OK = "https://app.test/connections/github?linked=github";
@@ -17,48 +27,43 @@ const FAILED = "https://app.test/connections/github?linked=failed";
 const TAKEN = "https://app.test/connections/github?linked=github-taken";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
-const vault = createCredentialStore(database);
-const identity = createIdentityStore(database, vault);
-const usedSubjects: string[] = [];
+let vault: ReturnType<typeof createCredentialStore>;
+let identity: ReturnType<typeof createIdentityStore>;
+// Links live in Intelligence's organization directory, and belong to people it holds.
+const directory = useTestPeople();
+const people: string[] = [];
 // Each connection stores its token under `${userId}:${githubId}:<uuid>`; tests track the prefix.
 const usedKeyPrefixes: string[] = [];
 
+beforeAll(async () => {
+  vault = createCredentialStore(await useTestVault());
+  identity = createIdentityStore(database, vault);
+});
+
 afterAll(async () => {
-  if (usedSubjects.length)
-    await database
-      .delete(identityLinks)
-      .where(
-        and(
-          eq(identityLinks.provider, "github"),
-          eq(identityLinks.realm, "github.com"),
-          inArray(identityLinks.subject, usedSubjects),
-        ),
-      );
-  if (usedKeyPrefixes.length)
-    await database
-      .delete(credentials)
-      .where(
-        or(
-          ...usedKeyPrefixes.map((prefix) =>
-            like(credentials.keyId, `${prefix}%`),
-          ),
-        ),
-      );
+  // Purging a person takes their links with them.
+  await purgeDirectoryPeople(people);
+  for (const prefix of usedKeyPrefixes)
+    await purgeSecrets((await credentialsUnder(prefix)).map((s) => s.id));
   await database.$client.close();
 });
 
-const person = () => `user-${randomUUID()}`;
+/** A person the directory holds, for a link to belong to. */
+async function person() {
+  const { id } = await seedDirectoryPerson();
+  people.push(id);
+  return id;
+}
 
 function githubAccount() {
   const id = randomInt(100_000_000, 1_000_000_000);
-  usedSubjects.push(String(id));
   return { id, login: `login-${id}` };
 }
 
 function harness(
   account: { id: number; login: string },
   token: string,
-  links: Pick<typeof identity, "linkVerified"> = identity,
+  links?: Pick<ReturnType<typeof createIdentityStore>, "linkVerified">,
 ) {
   const fetchCalls: string[] = [];
   const fetchImpl = (async (url: string | URL | Request) => {
@@ -82,7 +87,7 @@ function harness(
     encryptionKey,
     personIsActive: async () => true,
     credentials: vault,
-    identity: links,
+    identity: links ?? identity,
     fetchImpl,
   });
 
@@ -109,37 +114,29 @@ const keyId = (userId: string, account: { id: number }) => {
   return value;
 };
 
+/** Every token stored under a prefix, revoked ones included, as Intelligence holds them now. */
 const credentialsUnder = (prefix: string) =>
-  database
-    .select()
-    .from(credentials)
-    .where(like(credentials.keyId, `${prefix}%`));
+  secretsNamedLike({
+    kind: "connector",
+    provider: "github-user-token",
+    keyIdPrefix: prefix,
+  });
 
 const linkFor = async (account: { id: number }) => {
-  const [row] = await database
-    .select()
-    .from(identityLinks)
-    .where(
-      and(
-        eq(identityLinks.provider, "github"),
-        eq(identityLinks.realm, "github.com"),
-        eq(identityLinks.subject, String(account.id)),
-      ),
-    );
+  const [row] = await directory.client.listIdentities({
+    provider: "github",
+    realm: "github.com",
+    subject: String(account.id),
+  });
   return row;
 };
 
-const credentialById = async (id: string | null | undefined) => {
-  const [row] = await database
-    .select()
-    .from(credentials)
-    .where(eq(credentials.id, id ?? ""));
-  return row;
-};
+const credentialById = async (id: string | null | undefined) =>
+  (id ? await storedSecret(id) : null) ?? undefined;
 
 test("a first connection links the account and stores a live token", async () => {
   const account = githubAccount();
-  const user = person();
+  const user = await person();
   keyId(user, account);
   const { run } = harness(account, "gho_first");
 
@@ -162,15 +159,13 @@ test("a first connection links the account and stores a live token", async () =>
     provider: "github-user-token",
     revokedAt: null,
   });
-  const tokens = JSON.parse(
-    await decryptSecret(encryptionKey, stored?.encryptedValue ?? ""),
-  );
+  const tokens = JSON.parse(await secretValue(stored?.id ?? ""));
   expect(tokens.accessToken).toBe("gho_first");
 });
 
 test("connecting again replaces the credential and revokes the previous one", async () => {
   const account = githubAccount();
-  const user = person();
+  const user = await person();
   const prefix = keyId(user, account);
 
   const first = await harness(account, "gho_one").run(user, user);
@@ -185,23 +180,18 @@ test("connecting again replaces the credential and revokes the previous one", as
   expect(link?.credentialId).not.toBe(firstCredentialId);
   const current = await credentialById(link?.credentialId);
   expect(current?.revokedAt).toBeNull();
-  const tokens = JSON.parse(
-    await decryptSecret(encryptionKey, current?.encryptedValue ?? ""),
-  );
+  const tokens = JSON.parse(await secretValue(current?.id ?? ""));
   expect(tokens.accessToken).toBe("gho_two");
   expect((await credentialById(firstCredentialId))?.revokedAt).not.toBeNull();
-  const live = await database
-    .select({ id: credentials.id })
-    .from(credentials)
-    .where(
-      and(like(credentials.keyId, `${prefix}%`), isNull(credentials.revokedAt)),
-    );
+  const live = (await credentialsUnder(prefix))
+    .filter((secret) => secret.revokedAt === null)
+    .map((secret) => ({ id: secret.id }));
   expect(live).toEqual([{ id: link?.credentialId as string }]);
 });
 
 test("a reconnect whose link write fails leaves the existing link and its token as they were", async () => {
   const account = githubAccount();
-  const user = person();
+  const user = await person();
   const prefix = keyId(user, account);
 
   const first = await harness(account, "gho_kept").run(user, user);
@@ -224,9 +214,7 @@ test("a reconnect whose link write fails leaves the existing link and its token 
   });
   const kept = await credentialById(before?.credentialId);
   expect(kept?.revokedAt).toBeNull();
-  const tokens = JSON.parse(
-    await decryptSecret(encryptionKey, kept?.encryptedValue ?? ""),
-  );
+  const tokens = JSON.parse(await secretValue(kept?.id ?? ""));
   expect(tokens.accessToken).toBe("gho_kept");
   const live = (await credentialsUnder(prefix)).filter(
     (row) => row.revokedAt === null,
@@ -236,8 +224,8 @@ test("a reconnect whose link write fails leaves the existing link and its token 
 
 test("an account already linked to someone else says so and revokes the new token", async () => {
   const account = githubAccount();
-  const owner = person();
-  const intruder = person();
+  const owner = await person();
+  const intruder = await person();
   keyId(owner, account);
   const intruderKey = keyId(intruder, account);
 
@@ -265,8 +253,8 @@ test("an account already linked to someone else says so and revokes the new toke
 
 test("a state sealed for another person fails before GitHub is called", async () => {
   const account = githubAccount();
-  const starter = person();
-  const session = person();
+  const starter = await person();
+  const session = await person();
   const starterKey = keyId(starter, account);
   const sessionKey = keyId(session, account);
   const { run, fetchCalls } = harness(account, "gho_never");

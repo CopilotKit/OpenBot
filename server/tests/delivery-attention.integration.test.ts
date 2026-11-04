@@ -7,10 +7,11 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import {
   configureBotLifecycle,
+  configuredPauses,
   createBotLifecycleStore,
   resetBotLifecycleForTests,
 } from "../src/agents/lifecycle";
@@ -18,23 +19,12 @@ import {
   type BotLifecycleServices,
   createBotLifecycleRoutes,
 } from "../src/agents/lifecycle-routes";
+import { writeKey } from "../src/conversations/http";
 import { createDatabase } from "../src/db/client";
-import { agents, channels, users } from "../src/db/schema/core";
-import {
-  deliveryBindings,
-  deliveryInbox,
-  deliveryOutbox,
-} from "../src/db/schema/delivery";
-import {
-  botLifecycle,
-  updateRoutingPreferences,
-} from "../src/db/schema/lifecycle";
-import {
-  proactivePeople,
-  proactivePings,
-  proactiveSuggestions,
-} from "../src/db/schema/proactive";
+import { users } from "../src/db/schema/core";
+import { deliveryInbox, deliveryOutbox } from "../src/db/schema/delivery";
 import { workItems } from "../src/db/schema/work";
+import { bindingToWire } from "../src/delivery/directory";
 import { createExpoPushTransport } from "../src/delivery/push";
 import { createDeliveryRouter } from "../src/delivery/router";
 import { createDeliveryStore } from "../src/delivery/store";
@@ -49,7 +39,25 @@ import { createProactiveStore } from "../src/proactive/store";
 import type { ProactiveSetting } from "../src/proactive/types";
 import { createWorkQueue } from "../src/work/queue";
 import { notificationDestination } from "../../mobile/src/links";
+import {
+  clearPreferences,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
+import {
+  purgeConversations,
+  seedChannel,
+  useTestConversations,
+} from "./support/conversations";
+import {
+  freeSlot,
+  itemsOf,
+  purgeCheckInHistoryOf,
+  purgeSchedulesOf,
+} from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestSchedules } from "./support/schedules";
 
 /*
  * A ping's delivery through the real path: real Postgres, the real proactive store writing the ping
@@ -82,7 +90,7 @@ const threadOf = (channelId: string) => `${channelId}-thread`;
 
 const proactive = createProactiveStore(database);
 const deliveries = createDeliveryStore(database);
-const lifecycle = createBotLifecycleStore(database);
+const lifecycle = createBotLifecycleStore();
 
 /** The conversations the person can still reach. A test takes one out to revoke it. */
 const reachable = new Set<string>();
@@ -167,28 +175,25 @@ let sms: DeliveryBinding;
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000);
 
 beforeAll(async () => {
-  configureBotLifecycle({ database });
+  await useTestSchedules();
+  configureBotLifecycle({ pauses: configuredPauses });
+  await useTestConfiguration();
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
-  await database.insert(agents).values([
-    { id: inboxBot, name: "Inbox Bot", type: "built_in", configuration: {} },
-    {
-      id: calendarBot,
-      name: "Calendar Bot",
-      type: "built_in",
-      configuration: {},
-    },
-    {
-      id: researchBot,
-      name: "Research Bot",
-      type: "built_in",
-      configuration: {},
-    },
-  ]);
-  await database
-    .insert(channels)
-    .values(CHANNELS.map((id) => ({ id, name: id, description: "" })));
+  for (const [id, name] of [
+    [inboxBot, "Inbox Bot"],
+    [calendarBot, "Calendar Bot"],
+    [researchBot, "Research Bot"],
+  ] as const)
+    await seedBot({ id, name, type: "built_in" });
+  // The person's own conversation with each Bot, on its own thread.
+  for (const channelId of CHANNELS)
+    await seedChannel(owner, [botOf[channelId] as string], {
+      id: channelId,
+      name: channelId,
+      threadId: threadOf(channelId),
+    });
   inbox = await proactive.create(
     owner,
     { agentId: inboxBot, channelId: inboxChannel },
@@ -199,13 +204,21 @@ beforeAll(async () => {
     { agentId: calendarBot, channelId: calendarChannel },
     `calendar-check-ins-${suite}`,
   );
-  const bind = (
+  /*
+   * Connected in this order, three hours to an hour ago, kept as Intelligence holds a binding it
+   * was handed with when it was connected. The older Slack account is the one the person last wrote
+   * through (ten minutes ago, each test), so it is their most recently used one.
+   */
+  const { delivery } = await useTestConversations();
+  const binding = (
     transport: BindingTransport,
     channelId: string,
     realm: string,
     address: string,
+    connectedHoursAgo: number,
   ) =>
-    deliveries.bind({
+    bindingToWire({
+      id: randomUUID(),
       ownerUserId: owner,
       channelId,
       agentId: botOf[channelId] as string,
@@ -214,11 +227,34 @@ beforeAll(async () => {
       realm: `${suite}-${realm}`,
       identity: `${realm}-person`,
       address,
+      mentionId: null,
+      createdAt: hoursAgo(connectedHoursAgo),
     });
-  slackOld = await bind("slack", researchChannel, "T1", "D-research");
-  slackNew = await bind("slack", inboxChannel, "T2", "D-inbox");
-  teams = await bind("teams", calendarChannel, "tenant", "C-calendar");
-  sms = await bind("sms", inboxChannel, "sms", "+15550100");
+  const connected = [
+    binding("slack", researchChannel, "T1", "D-research", 3),
+    binding("teams", calendarChannel, "tenant", "C-calendar", 2.5),
+    binding("sms", inboxChannel, "sms", "+15550100", 2),
+    binding("slack", inboxChannel, "T2", "D-inbox", 1),
+  ];
+  const results = await delivery.client.importBindings(
+    connected,
+    writeKey("test.binding"),
+  );
+  expect(results.map((result) => result.status)).toEqual([
+    "created",
+    "created",
+    "created",
+    "created",
+  ]);
+  await delivery.resync();
+  const bound = async (id: string) => {
+    const found = await delivery.binding(id);
+    if (!found) throw new Error(`Intelligence has no binding ${id}`);
+    return found;
+  };
+  [slackOld, teams, sms, slackNew] = await Promise.all(
+    connected.map((wire) => bound(wire.id)),
+  );
   for (const id of [phone, tablet])
     await deliveries.registerDevice({
       id,
@@ -227,7 +263,7 @@ beforeAll(async () => {
       projectId: randomUUID(),
       platform: "ios",
     });
-});
+}, 60_000);
 
 /** Every send forgotten, every account back to how it was connected, and nothing waiting. */
 async function reset() {
@@ -255,46 +291,29 @@ async function reset() {
   await database
     .delete(deliveryInbox)
     .where(eq(deliveryInbox.ownerUserId, owner));
-  await database
-    .delete(proactiveSuggestions)
-    .where(eq(proactiveSuggestions.ownerUserId, owner));
-  await database
-    .delete(proactivePings)
-    .where(eq(proactivePings.ownerUserId, owner));
-  await database
-    .delete(proactivePeople)
-    .where(eq(proactivePeople.ownerUserId, owner));
-  await database
-    .delete(botLifecycle)
-    .where(eq(botLifecycle.ownerUserId, owner));
-  await database
-    .delete(updateRoutingPreferences)
-    .where(eq(updateRoutingPreferences.ownerUserId, owner));
-  /*
-   * Connected in this order, three hours to an hour ago. The older Slack account was the one the
-   * person last wrote through (ten minutes ago), so it is their most recently used one.
-   */
-  const connected: [DeliveryBinding, number][] = [
-    [slackOld, 3],
-    [teams, 2.5],
-    [sms, 2],
-    [slackNew, 1],
-  ];
-  for (const [binding, hours] of connected)
-    await database
-      .update(deliveryBindings)
-      .set({ createdAt: hoursAgo(hours), enabled: true })
-      .where(eq(deliveryBindings.id, binding.id));
+  await purgeCheckInHistoryOf(owner);
+  await clearPreferences([owner]);
+  // Every account connected again, as connecting it again does, keeping when it was first connected.
+  const { delivery } = await useTestConversations();
+  for (const binding of [slackOld, teams, sms, slackNew])
+    if (!(await delivery.binding(binding.id))?.enabled)
+      await delivery.changeBinding(binding.id, { enabled: true });
   await wroteThrough(slackOld, 10 / 60);
 }
 beforeEach(reset);
 
 afterAll(async () => {
   await reset();
+  await purgeSchedulesOf([owner]);
   resetBotLifecycleForTests();
   await database.delete(users).where(eq(users.id, owner));
-  await database.delete(agents).where(inArray(agents.id, BOTS));
-  await database.delete(channels).where(inArray(channels.id, CHANNELS));
+  // Bindings and phones are in Intelligence, not gone with the person: each Bot's bindings
+  // forgotten with it, and the phones signed out, as signing out does.
+  const { delivery } = await useTestConversations();
+  for (const bot of BOTS) await delivery.purgeAgent(bot);
+  for (const id of [phone, tablet]) await deliveries.removeDevice(owner, id);
+  await purgeConversations(CHANNELS);
+  await removeBots(BOTS);
   await database.$client.end({ timeout: 5 });
 });
 
@@ -333,10 +352,7 @@ const raise = (setting: ProactiveSetting, title: string, why: string) =>
 
 /** The ping the person's free slot lets through, as the ping pass writes it. */
 async function ping(): Promise<AttentionPing> {
-  await database
-    .update(proactivePeople)
-    .set({ lastPingedAt: null })
-    .where(eq(proactivePeople.ownerUserId, owner));
+  await freeSlot(owner);
   const written = await proactive.pings.take(owner);
   if (!written) throw new Error("Expected a ping.");
   return written;
@@ -500,10 +516,9 @@ describe("a ping", () => {
   });
 
   test("a person with no chat account connected gets the push alone", async () => {
-    await database
-      .update(deliveryBindings)
-      .set({ enabled: false })
-      .where(eq(deliveryBindings.ownerUserId, owner));
+    // Each account disconnected, as the person disconnecting it does.
+    for (const binding of await deliveries.listBindings(owner))
+      await deliveries.removeBinding(owner, binding.id);
     await router.notifyAttention(await twoBotPing());
     expect(placed(await outboxOf()).sort()).toEqual(
       [`push:${phone}`, `push:${tablet}`].sort(),
@@ -724,15 +739,7 @@ describe("a conversation the person lost", () => {
     await router.notifyAttention(await twoBotPing());
     expect(await outboxOf()).toEqual([]);
     expect(
-      await database
-        .select({ id: proactiveSuggestions.id })
-        .from(proactiveSuggestions)
-        .where(
-          and(
-            eq(proactiveSuggestions.ownerUserId, owner),
-            sql`${proactiveSuggestions.pingId} is not null`,
-          ),
-        ),
+      (await itemsOf(owner)).filter((item) => item.pingId !== null),
     ).toHaveLength(2);
   });
 });

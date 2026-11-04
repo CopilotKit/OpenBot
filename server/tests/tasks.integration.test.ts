@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
   type BaseEvent,
@@ -27,19 +27,7 @@ import type { AppVariables } from "../src/auth/guards";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  approvalRequests,
-  botTasks,
-  channelAgents,
-  channelMemberships,
-  channels,
-  proactiveSettings,
-  proactiveSuggestions,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { approvalRequests, users, workItems } from "../src/db/schema";
 import type { AttentionResponse } from "../src/proactive/contracts";
 import { createProactiveStore } from "../src/proactive/store";
 import type { ResponsibilityStore } from "../src/responsibilities/types";
@@ -49,7 +37,19 @@ import { PROACTIVE_TASK_KIND } from "../src/tasks/state";
 import { createTaskStore } from "../src/tasks/store";
 import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
-import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { removeBots, useTestBots } from "./support/bots";
+import { purgeSchedulesOf, settingWithItem } from "./support/check-ins";
+import {
+  conversationClient,
+  maybeConversation,
+  purgeConversations,
+  storedConversation,
+  storedTask,
+  storedTasks,
+} from "./support/conversations";
+import { testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
+import { useTestSchedules } from "./support/schedules";
 
 /**
  * Tasks through the paths a person's Start takes: the real stores, the real work queue, the real
@@ -58,7 +58,13 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * a connector fake at the tool boundary, behind the same approval gate a granted app's call meets.
  */
 
-const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+/*
+ * Four connections, not the suite's usual two. This file runs the work queue, the task runner and the
+ * approval tick on its own pool beside the routes it calls, and with two connections the "what needs
+ * the person" read starved waiting for one whenever its reads were scheduled a little differently:
+ * the previous release hangs the same way when its pause read is answered without the database.
+ */
+const database = createDatabase(testDatabaseUrl(), { max: 4 });
 const profileStore = createAgentProfileStore(
   database,
   new URL("https://managed.example.test/ag-ui"),
@@ -379,32 +385,20 @@ async function seed(
   });
   bots.push(bot.id);
   const own = await channelStore.direct(owner, bot.id);
-  const settingId = randomUUID();
-  await database.insert(proactiveSettings).values({
-    id: settingId,
+  const { item: raised } = await settingWithItem({
     ownerUserId: owner.id,
     agentId: bot.id,
     channelId: own.id,
     threadId: `${prefix}-check-ins-${randomUUID()}`,
+    runId: `${prefix}-run`,
+    title: item.title ?? "Reply to Sam about the spec",
+    detail:
+      item.detail ??
+      "Sam asked for the spec by Friday.\n\nA short reply with the date would do.",
+    sourceApp: "Gmail",
+    sourceRef: "gmail/search",
+    sourceLink: item.sourceLink ?? "https://mail.example.test/m/1",
   });
-  const [raised] = await database
-    .insert(proactiveSuggestions)
-    .values({
-      id: randomUUID(),
-      ownerUserId: owner.id,
-      agentId: bot.id,
-      settingId,
-      runId: `${prefix}-run`,
-      title: item.title ?? "Reply to Sam about the spec",
-      detail:
-        item.detail ??
-        "Sam asked for the spec by Friday.\n\nA short reply with the date would do.",
-      sourceApp: "Gmail",
-      sourceRef: "gmail/search",
-      sourceLink: item.sourceLink ?? "https://mail.example.test/m/1",
-    })
-    .returning();
-  if (!raised) throw new Error("No item.");
   return { owner, botId: bot.id, own, item: raised };
 }
 
@@ -414,20 +408,31 @@ async function start(owner: AgentActor, itemId: string) {
   return tasks.startFromItem({ ownerUserId: owner.id, item });
 }
 
-async function conversation(channelId: string) {
-  const [row] = await database
-    .select()
-    .from(channels)
-    .where(eq(channels.id, channelId));
-  return row;
+/** The conversation as Intelligence holds it now. */
+const conversation = (channelId: string) => maybeConversation(channelId);
+
+/** Every conversation these people are in, deleted ones too. */
+async function conversationsOf(userIds: readonly string[]): Promise<string[]> {
+  const client = await conversationClient();
+  const ids = new Set<string>();
+  for (const userId of userIds)
+    for (const found of await client.all({
+      memberUserId: userId,
+      includeDeleted: true,
+    }))
+      ids.add(found.id);
+  return [...ids];
 }
+
+beforeAll(async () => {
+  await useTestPolicy();
+  await useTestBots();
+  await useTestSchedules();
+});
 
 afterAll(async () => {
   await tasks.idle();
-  const theirs = await database
-    .select({ id: channelMemberships.channelId })
-    .from(channelMemberships)
-    .where(inArray(channelMemberships.userId, people));
+  await purgeSchedulesOf(people);
   const approvals = await database
     .select({ id: approvalRequests.id })
     .from(approvalRequests)
@@ -437,18 +442,10 @@ afterAll(async () => {
     .where(
       sql`${workItems.payload}->>'ownerUserId' in ${people} or (${workItems.kind} = 'approval.resume' and ${workItems.key} in ${approvals.length ? approvals.map((row) => row.id) : [""]})`,
     );
-  if (theirs.length)
-    await database.delete(channels).where(
-      inArray(
-        channels.id,
-        theirs.map((row) => row.id),
-      ),
-    );
+  // Their conversations, and the tasks that own them, in Intelligence.
+  await purgeConversations(await conversationsOf(people));
   await database.delete(users).where(inArray(users.id, people));
-  await database
-    .delete(agentProfiles)
-    .where(inArray(agentProfiles.agentId, bots));
-  await database.delete(agents).where(inArray(agents.id, bots));
+  await removeBots(bots);
   await database.$client.close();
 });
 
@@ -467,20 +464,17 @@ describe("Start on an item", () => {
 
     // A conversation of its own, with this Bot alone, and not the one the person chats in.
     expect(task.channelId).not.toBe(own.id);
-    const roster = await database
-      .select({ agentId: channelAgents.agentId })
-      .from(channelAgents)
-      .where(eq(channelAgents.channelId, task.channelId));
-    expect(roster).toEqual([{ agentId: botId }]);
-    const [row] = await database
-      .select()
-      .from(botTasks)
-      .where(eq(botTasks.id, task.id));
-    expect(row).toMatchObject({
-      ownerUserId: owner.id,
+    const opened = await storedConversation(task.channelId);
+    expect(opened.agents.map(({ agentId }) => ({ agentId }))).toEqual([
+      { agentId: botId },
+    ]);
+    // The conversation says which task it is for, written with the task.
+    expect(opened.taskId).toBe(task.id);
+    expect(await storedTask(task.id)).toMatchObject({
+      userId: owner.id,
       agentId: botId,
-      channelId: task.channelId,
-      suggestionId: item.id,
+      conversationId: task.channelId,
+      originRef: item.id,
       title: "Reply to Sam about the spec",
       why: "Sam asked for the spec by Friday.",
       sourceApp: "Gmail",
@@ -517,12 +511,7 @@ describe("Start on an item", () => {
       "already started or dismissed",
     );
     expect(asked.length - from).toBe(1);
-    expect(
-      await database
-        .select({ id: botTasks.id })
-        .from(botTasks)
-        .where(eq(botTasks.ownerUserId, owner.id)),
-    ).toHaveLength(1);
+    expect(await storedTasks(owner.id)).toHaveLength(1);
 
     // The person's own conversation with the Bot is still the one anything else finds, though the
     // task's is newer.
@@ -548,21 +537,14 @@ describe("Start on an item", () => {
     await tasks.idle();
 
     expect(second).toEqual(first);
-    const conversations = await database
-      .select({ id: channelAgents.channelId })
-      .from(channelAgents)
-      .innerJoin(
-        channelMemberships,
-        eq(channelMemberships.channelId, channelAgents.channelId),
-      )
-      .where(
-        and(
-          eq(channelAgents.agentId, botId),
-          eq(channelMemberships.userId, owner.id),
-        ),
-      );
-    // Their own conversation and the task's: the losing Start's conversation was rolled back.
+    const conversations = await (await conversationClient()).all({
+      memberUserId: owner.id,
+      agentId: botId,
+      includeDeleted: true,
+    });
+    // Their own conversation and the task's: the losing Start's conversation was never made.
     expect(conversations).toHaveLength(2);
+    expect(await storedTasks(owner.id)).toHaveLength(1);
     expect(asked.length - from).toBe(1);
   });
 });
@@ -1026,22 +1008,24 @@ describe("where a task stands", () => {
   test("a task whose turn never reached the queue reads failed after a minute, and Try again runs its ask", async () => {
     const { owner, botId, item } = await seed();
     await proactive.resolveSuggestion(owner.id, item.id, "started");
-    // The task committed, and the process stopped before its turn was queued.
-    const opened = await channelStore.create(owner, [botId]);
-    const id = randomUUID();
-    await database.insert(botTasks).values({
-      id,
-      ownerUserId: owner.id,
-      agentId: botId,
-      channelId: opened.id,
-      suggestionId: item.id,
-      title: item.title,
-      why: "Sam asked for the spec by Friday.",
-      sourceApp: "Gmail",
-      sourceLink: item.sourceLink,
-      origin: "check_in",
-      createdAt: new Date(Date.now() - 2 * 60_000),
-    });
+    // The task committed two minutes ago, with its conversation, and the process stopped before
+    // its turn was queued.
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60_000);
+    const { id } = await createTaskStore(database, {
+      now: () => twoMinutesAgo,
+    }).create(
+      {
+        ownerUserId: owner.id,
+        agentId: botId,
+        suggestionId: item.id,
+        title: item.title,
+        why: "Sam asked for the spec by Friday.",
+        sourceApp: "Gmail",
+        sourceLink: item.sourceLink,
+        origin: "check_in",
+      },
+      await channelStore.draft(owner, [botId]),
+    );
     expect(await taskStore.get(owner.id, id)).toMatchObject({
       status: "failed",
       failure: "it never started",
@@ -1176,7 +1160,7 @@ describe("what needs the person", () => {
       "/api/bots",
       createBotLifecycleRoutes(
         {
-          lifecycle: createBotLifecycleStore(database),
+          lifecycle: createBotLifecycleStore(),
           reset: {} as never,
           activity: createActivityStore(database),
           wakeUps: {} as never,

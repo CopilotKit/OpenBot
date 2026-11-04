@@ -5,8 +5,11 @@ import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema";
 import { createUserPreferencesStore } from "../src/user-preferences";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPeople } from "./support/directory";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// People live in Intelligence's organization directory; these rows are its projection.
+useTestPeople();
 const store = createUserPreferencesStore(database);
 const ids: string[] = [];
 async function person() {

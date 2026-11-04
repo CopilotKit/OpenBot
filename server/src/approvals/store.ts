@@ -1,16 +1,24 @@
+/**
+ * Approvals: the requests waiting on a person (here, in this deployment's database, with the work
+ * that resumes them), and the policy that decides when to ask (in Intelligence's organization policy,
+ * held in memory on every server by `policy/cache.ts`).
+ *
+ * The policy is read on every tool call that may need approval, so it is read from memory, never
+ * from Intelligence on the way. A write goes to Intelligence first and is held here from its answer,
+ * so this server reads its own change at once; every other server hears of it from Intelligence.
+ * No write to Intelligence is made while a transaction here is open.
+ */
+import { randomUUID } from "node:crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../audit";
+import { conversations } from "../conversations/directory";
 import type { Database } from "../db/client";
-import {
-  approvalPreferences,
-  approvalRequests,
-  approvalRules,
-  approvalTeamRules,
-  approvalTeamSettings,
-} from "../db/schema/approvals";
-import { intelligenceChannelMappings } from "../db/schema/core";
-import { botTasks } from "../db/schema/tasks";
+import { approvalRequests } from "../db/schema/approvals";
 import { workItems } from "../db/schema/work";
+import { PolicyAlreadyExistsError, policyFailure } from "../policy/client";
+import { policy } from "../policy/cache";
+import type { ApprovalRuleRecord } from "../policy/types";
+import { taskOrigin } from "../tasks/origin";
 import { currentEdition } from "../edition";
 import {
   type ApprovalAction,
@@ -19,25 +27,69 @@ import {
   type ApprovalPreferences,
   type ApprovalRecord,
   ApprovalRefusedError,
+  type ApprovalRule,
+  type ApprovalRuleInput,
   type ApprovalStore,
+  type ApprovalTeamRule,
   type ApprovalTeamSettings,
   offersStandingRule,
 } from "./types";
 
-const TEAM = "team";
-const DEFAULT_PREFERENCES: ApprovalPreferences = {
-  enabled: false,
-  autoReview: false,
-  hostCommands: "ask",
-};
+/** A personal rule as OpenBot's approval code reads it, from the record Intelligence holds. */
+export function personalRuleFrom(record: ApprovalRuleRecord): ApprovalRule {
+  return {
+    id: record.id,
+    ownerUserId: record.ownerUserId ?? "",
+    botId: record.agentId,
+    toolRef: record.tool,
+    effect: record.effect,
+    scope: record.scope,
+    behaviour: record.behaviour,
+    revokedAt: record.revokedAt ? new Date(record.revokedAt) : null,
+    createdAt: new Date(record.createdAt),
+  };
+}
+
+/** A team rule as OpenBot's approval code reads it. */
+export function teamRuleFrom(record: ApprovalRuleRecord): ApprovalTeamRule {
+  return {
+    id: record.id,
+    botId: record.agentId,
+    toolRef: record.tool,
+    effect: record.effect,
+    scope: record.scope,
+    behaviour: record.behaviour,
+    createdBy: record.createdBy,
+    revokedAt: record.revokedAt ? new Date(record.revokedAt) : null,
+    createdAt: new Date(record.createdAt),
+  };
+}
+
+const newestFirst = <T extends { createdAt: Date; id: string }>(
+  left: T,
+  right: T,
+) =>
+  right.createdAt.getTime() - left.createdAt.getTime() ||
+  right.id.localeCompare(left.id);
+
 /**
- * One person with no admin watching: a Bot asks before it acts until they say otherwise, and the
- * card's always-allow is how that trust is given, one action at a time.
+ * The "always allow" rule an approval's `allow_always` saved, at an id made from the approval, so the
+ * person's one decision is one rule however many times it is sent: by a retry, or by two servers.
  */
-const PERSONAL_PREFERENCES: ApprovalPreferences = {
-  ...DEFAULT_PREFERENCES,
-  enabled: true,
-};
+export function standingRuleId(approvalId: string): string {
+  return `approval:${approvalId}`;
+}
+
+/** Whether a rule is exactly the standing "allow" a person saved for this action. */
+const standsFor = (rule: ApprovalRuleRecord, action: ApprovalAction) =>
+  rule.ownerUserId === action.actorId &&
+  rule.agentId === action.botId &&
+  rule.tool === action.toolRef &&
+  rule.effect === action.effect &&
+  rule.scope === action.scope &&
+  rule.behaviour === "allow" &&
+  rule.revokedAt === null;
+/** The team's approval settings when nobody saved any, and what the personal edition always reads. */
 const DEFAULT_TEAM: ApprovalTeamSettings = {
   enforceAutoReview: false,
   customRulesEnabled: true,
@@ -47,16 +99,11 @@ const DEFAULT_TEAM: ApprovalTeamSettings = {
 export function createApprovalStore(database: Database): ApprovalStore {
   const owned = (owner: string, id: string) =>
     and(eq(approvalRequests.ownerUserId, owner), eq(approvalRequests.id, id));
-  const ruleScope = (action: ApprovalAction) =>
-    and(
-      eq(approvalRules.ownerUserId, action.actorId),
-      eq(approvalRules.botId, action.botId),
-      eq(approvalRules.toolRef, action.toolRef),
-      eq(approvalRules.effect, action.effect),
-      eq(approvalRules.scope, action.scope),
-      eq(approvalRules.behaviour, "allow"),
-      isNull(approvalRules.revokedAt),
-    );
+  /** From memory: the gate's path. */
+  const standingRule = (action: ApprovalAction) =>
+    policy()
+      .approvalRules({ ownerUserId: action.actorId })
+      .find((rule) => standsFor(rule, action));
   async function get(owner: string, id: string): Promise<ApprovalRecord> {
     const [row] = await database
       .select()
@@ -68,23 +115,10 @@ export function createApprovalStore(database: Database): ApprovalStore {
   }
   return {
     async enabled(owner) {
-      const [row] = await database
-        .select()
-        .from(approvalPreferences)
-        .where(eq(approvalPreferences.ownerUserId, owner))
-        .limit(1);
-      // The same default the policy decides with, so the switch shows what actually happens.
-      if (!row) return currentEdition() === "personal";
-      return row.enabled === true;
+      return policy().approvalPreferences(owner).enabled;
     },
     async setEnabled(owner, enabled) {
-      await database
-        .insert(approvalPreferences)
-        .values({ ownerUserId: owner, enabled })
-        .onConflictDoUpdate({
-          target: approvalPreferences.ownerUserId,
-          set: { enabled },
-        });
+      await policy().patchApprovalPreferences(owner, { enabled });
     },
     get,
     async list(owner) {
@@ -99,13 +133,7 @@ export function createApprovalStore(database: Database): ApprovalStore {
       return database.transaction(async (tx) => {
         // A request the policy gate opened was opened because something asked for the person; a
         // saved "always" rule was already weighed there and must not approve it behind that.
-        const [rule] = action.policy
-          ? []
-          : await tx
-              .select()
-              .from(approvalRules)
-              .where(ruleScope(action))
-              .limit(1);
+        const rule = action.policy ? undefined : standingRule(action);
         await tx
           .insert(approvalRequests)
           .values({
@@ -138,74 +166,95 @@ export function createApprovalStore(database: Database): ApprovalStore {
       });
     },
     async decide(owner, id, decision) {
-      return database.transaction(async (tx) => {
-        const [request] = await tx
-          .select()
-          .from(approvalRequests)
-          .where(owned(owner, id))
-          .for("update")
-          .limit(1);
-        if (!request) throw new ApprovalNotFoundError();
+      /*
+       * "Always allow" saves a standing rule in Intelligence, and the decision itself is a row here
+       * with the work that resumes it. They cannot share a transaction, so the rule is saved FIRST,
+       * at an id made from this approval: by the time the resume work can run, on any server, the rule
+       * it checks for is already in Intelligence. If the decision then does not go through (somebody
+       * decided first), the rule is taken back unless that other decision saved the same rule.
+       */
+      let saved: ApprovalRuleRecord | undefined;
+      if (decision === "allow_always") {
+        const request = await get(owner, id);
         if (request.status !== "pending")
           throw new ApprovalRefusedError("This request was already decided.");
-        const handOff = request.action.policy?.behaviour === "hand_off";
-        if (handOff && decision !== "handled" && decision !== "deny")
+        if (request.action.policy?.behaviour === "hand_off")
           throw new ApprovalRefusedError(
             "This action is handed to you. Do it yourself and mark it done, or decline it.",
           );
-        if (!handOff && decision === "handled")
-          throw new ApprovalRefusedError(
-            "Only an action handed to you can be marked done by you.",
-          );
-        if (decision === "allow_always" && !offersStandingRule(request.action))
+        if (!offersStandingRule(request.action))
           throw new ApprovalRefusedError(
             "Tasks started from a check-in ask before every change. Allow this once, or deny it.",
           );
-        if (decision === "allow_always")
-          await tx.insert(approvalRules).values({
-            id: crypto.randomUUID(),
-            ownerUserId: owner,
-            botId: request.action.botId,
-            toolRef: request.action.toolRef,
-            effect: request.action.effect,
-            scope: request.action.scope,
+        saved = await saveStandingRule(owner, id, request.action);
+      }
+      try {
+        return await database.transaction(async (tx) => {
+          const [request] = await tx
+            .select()
+            .from(approvalRequests)
+            .where(owned(owner, id))
+            .for("update")
+            .limit(1);
+          if (!request) throw new ApprovalNotFoundError();
+          if (request.status !== "pending")
+            throw new ApprovalRefusedError("This request was already decided.");
+          const handOff = request.action.policy?.behaviour === "hand_off";
+          if (handOff && decision !== "handled" && decision !== "deny")
+            throw new ApprovalRefusedError(
+              "This action is handed to you. Do it yourself and mark it done, or decline it.",
+            );
+          if (!handOff && decision === "handled")
+            throw new ApprovalRefusedError(
+              "Only an action handed to you can be marked done by you.",
+            );
+          if (
+            decision === "allow_always" &&
+            !offersStandingRule(request.action)
+          )
+            throw new ApprovalRefusedError(
+              "Tasks started from a check-in ask before every change. Allow this once, or deny it.",
+            );
+          const [updated] = await tx
+            .update(approvalRequests)
+            .set({
+              decision,
+              status: decision === "deny" ? "denied" : "approved",
+              decidedAt: sql`now()`,
+            })
+            .where(owned(owner, id))
+            .returning();
+          if (!updated) throw new ApprovalNotFoundError();
+          await recordAuditEvent(createAuditStore(tx as unknown as Database), {
+            eventType: "approval.person_decided",
+            targetType: "approval",
+            targetId: id,
+            actorUserId: owner,
+            payload: {
+              decidedBy: "person",
+              decision,
+              bot: request.action.botId,
+              tool: request.action.toolRef,
+              scope: request.action.scope,
+            },
           });
-        const [updated] = await tx
-          .update(approvalRequests)
-          .set({
-            decision,
-            status: decision === "deny" ? "denied" : "approved",
-            decidedAt: sql`now()`,
-          })
-          .where(owned(owner, id))
-          .returning();
-        if (!updated) throw new ApprovalNotFoundError();
-        await recordAuditEvent(createAuditStore(tx as unknown as Database), {
-          eventType: "approval.person_decided",
-          targetType: "approval",
-          targetId: id,
-          actorUserId: owner,
-          payload: {
-            decidedBy: "person",
-            decision,
-            bot: request.action.botId,
-            tool: request.action.toolRef,
-            scope: request.action.scope,
-          },
+          await tx
+            .insert(workItems)
+            .values({
+              kind: "approval.resume",
+              key: id,
+              payload: { ownerUserId: owner, approvalId: id },
+            })
+            .onConflictDoNothing();
+          await tx.execute(
+            sql`select pg_notify('openbot_work_offered', 'approval.resume')`,
+          );
+          return updated;
         });
-        await tx
-          .insert(workItems)
-          .values({
-            kind: "approval.resume",
-            key: id,
-            payload: { ownerUserId: owner, approvalId: id },
-          })
-          .onConflictDoNothing();
-        await tx.execute(
-          sql`select pg_notify('openbot_work_offered', 'approval.resume')`,
-        );
-        return updated;
-      });
+      } catch (error) {
+        if (saved) await withdrawStandingRule(owner, id, saved);
+        throw error;
+      }
     },
     async consume(owner, id, digest) {
       return database.transaction(async (tx) => {
@@ -219,15 +268,15 @@ export function createApprovalStore(database: Database): ApprovalStore {
         if (request.actionDigest !== digest)
           throw new ApprovalRefusedError("The approved action has changed.");
         if (request.status !== "approved") return false;
-        if (request.decision === "allow_always") {
-          const [rule] = await tx
-            .select()
-            .from(approvalRules)
-            .where(ruleScope(request.action))
-            .for("share")
-            .limit(1);
-          if (!rule) return false;
-        }
+        // Read from Intelligence, not memory: the rule may have been saved on another server a moment
+        // ago, and this is the resume path, never the gate's. Revoked since, and nothing runs.
+        if (
+          request.decision === "allow_always" &&
+          !(await policy().readApprovalRules(owner)).some((rule) =>
+            standsFor(rule, request.action),
+          )
+        )
+          return false;
         const rows = await tx
           .update(approvalRequests)
           .set({ status: "consumed", consumedAt: sql`now()` })
@@ -254,16 +303,10 @@ export function createApprovalStore(database: Database): ApprovalStore {
       if (!rows.length) throw new ApprovalNotFoundError();
     },
     async rules(owner) {
-      return database
-        .select()
-        .from(approvalRules)
-        .where(
-          and(
-            eq(approvalRules.ownerUserId, owner),
-            isNull(approvalRules.revokedAt),
-          ),
-        )
-        .orderBy(desc(approvalRules.createdAt));
+      return policy()
+        .approvalRules({ ownerUserId: owner })
+        .map(personalRuleFrom)
+        .sort(newestFirst);
     },
     policy: createPolicyStore(database),
     /*
@@ -273,88 +316,145 @@ export function createApprovalStore(database: Database): ApprovalStore {
      * but a read of their own connected app (see `gate` in approvals/service.ts).
      */
     async asksEveryChange(owner, threadId) {
-      const [row] = await database
-        .select({ id: botTasks.id })
-        .from(botTasks)
-        .innerJoin(
-          intelligenceChannelMappings,
-          and(
-            eq(intelligenceChannelMappings.channelId, botTasks.channelId),
-            eq(intelligenceChannelMappings.userId, owner),
-          ),
-        )
-        .where(
-          and(
-            eq(botTasks.ownerUserId, owner),
-            eq(botTasks.origin, "check_in"),
-            eq(intelligenceChannelMappings.threadId, threadId),
-          ),
-        )
-        .limit(1);
-      return Boolean(row);
+      // Read on every gated tool call: the thread's conversation and the task that owns it come from
+      // this instance's memory (conversations/directory.ts, tasks/origin.ts), not a round trip.
+      const found = await conversations().byThread(threadId);
+      if (
+        !found ||
+        found.thread.agentId !== null ||
+        found.thread.userId !== owner ||
+        !found.conversation.taskId
+      )
+        return false;
+      const task = await taskOrigin(found.conversation.taskId);
+      return task?.userId === owner && task.origin === "check_in";
     },
     async revoke(owner, id) {
-      const rows = await database
-        .update(approvalRules)
-        .set({ revokedAt: sql`now()` })
-        .where(
-          and(
-            eq(approvalRules.ownerUserId, owner),
-            eq(approvalRules.id, id),
-            isNull(approvalRules.revokedAt),
-          ),
-        )
-        .returning({ id: approvalRules.id });
-      if (!rows.length) throw new ApprovalNotFoundError();
+      const rule = await ownRule(owner, id);
+      await policy().revokeApprovalRule(rule.id);
     },
   };
+
+  /**
+   * Save the standing rule an "always allow" makes. Sent again, by a retry or a second server, it is
+   * the same rule: the id is made from the approval, so a second create finds it already there.
+   */
+  async function saveStandingRule(
+    owner: string,
+    approvalId: string,
+    action: ApprovalAction,
+  ): Promise<ApprovalRuleRecord> {
+    const draft = {
+      id: standingRuleId(approvalId),
+      ownerUserId: owner,
+      agentId: action.botId,
+      tool: action.toolRef,
+      effect: action.effect,
+      scope: action.scope,
+      behaviour: "allow" as const,
+      createdBy: owner,
+    };
+    try {
+      return await policy().createApprovalRule(
+        draft,
+        `openbot:approval-always:${approvalId}`,
+      );
+    } catch (error) {
+      if (!(error instanceof PolicyAlreadyExistsError)) throw error;
+      const existing = await policy().client.approvalRule(draft.id);
+      if (!existing) throw error;
+      return existing;
+    }
+  }
+
+  /**
+   * The decision did not go through: take back the rule saved for it, unless the decision that did go
+   * through was an "always allow" too, which saved this same rule.
+   */
+  async function withdrawStandingRule(
+    owner: string,
+    approvalId: string,
+    rule: ApprovalRuleRecord,
+  ): Promise<void> {
+    try {
+      const [row] = await database
+        .select({ decision: approvalRequests.decision })
+        .from(approvalRequests)
+        .where(owned(owner, approvalId))
+        .limit(1);
+      if (row?.decision === "allow_always") return;
+      await policy().revokeApprovalRule(rule.id);
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "approval-standing-rule-withdraw-failed",
+          approvalId,
+          ruleId: rule.id,
+          note: "The decision failed after its rule was saved; the rule stays until the person revokes it.",
+          error: policyFailure(error),
+        }),
+      );
+    }
+  }
+
+  /** One of this person's rules in force, from memory, read through on a miss. Another person's is not found. */
+  async function ownRule(
+    owner: string,
+    id: string,
+  ): Promise<ApprovalRuleRecord> {
+    const held =
+      policy().approvalRule(id) ??
+      (await policy().readApprovalRules(owner)).find((rule) => rule.id === id);
+    if (!held || held.ownerUserId !== owner || held.revokedAt !== null)
+      throw new ApprovalNotFoundError();
+    return held;
+  }
 }
 
 function createPolicyStore(database: Database): ApprovalPolicyStore {
   const audit = createAuditStore(database);
+  /** From memory: read on every tool call that may need approval. */
   const preferences = async (owner: string): Promise<ApprovalPreferences> => {
-    const [row] = await database
-      .select()
-      .from(approvalPreferences)
-      .where(eq(approvalPreferences.ownerUserId, owner))
-      .limit(1);
-    return row
-      ? {
-          enabled: row.enabled,
-          autoReview: row.autoReview,
-          hostCommands: row.hostCommands,
-        }
-      : currentEdition() === "personal"
-        ? { ...PERSONAL_PREFERENCES }
-        : { ...DEFAULT_PREFERENCES };
+    const held = policy().approvalPreferences(owner);
+    return {
+      enabled: held.enabled,
+      autoReview: held.autoReview,
+      hostCommands: held.hostCommands,
+    };
   };
-  const teamSettings = async (): Promise<ApprovalTeamSettings> => {
+  const teamSettings = async (): Promise<ApprovalTeamSettings> =>
     // No team, and no screen for these: a team deployment's values are not read.
-    if (currentEdition() === "personal") return { ...DEFAULT_TEAM };
-    const [row] = await database
-      .select()
-      .from(approvalTeamSettings)
-      .where(eq(approvalTeamSettings.id, TEAM))
-      .limit(1);
-    return row
-      ? {
-          enforceAutoReview: row.enforceAutoReview,
-          customRulesEnabled: row.customRulesEnabled,
-          hostCommandsCap: row.hostCommandsCap,
-        }
-      : { ...DEFAULT_TEAM };
+    currentEdition() === "personal"
+      ? { ...DEFAULT_TEAM }
+      : { ...policy().settings().approvals };
+  /** A team rule in force, from memory, read through on a miss. */
+  const teamRule = async (id: string): Promise<ApprovalRuleRecord> => {
+    const held =
+      policy().approvalRule(id) ?? (await policy().client.approvalRule(id));
+    if (!held || held.ownerUserId !== null || held.revokedAt !== null)
+      throw new ApprovalNotFoundError();
+    return held;
+  };
+  /** One of this person's rules in force, from memory, read through on a miss. */
+  const personalRule = async (
+    owner: string,
+    id: string,
+  ): Promise<ApprovalRuleRecord> => {
+    const held =
+      policy().approvalRule(id) ?? (await policy().client.approvalRule(id));
+    if (!held || held.ownerUserId !== owner || held.revokedAt !== null)
+      throw new ApprovalNotFoundError();
+    return held;
   };
   return {
     preferences,
     async setPreferences(owner, input) {
-      const next = { ...(await preferences(owner)), ...input };
-      await database
-        .insert(approvalPreferences)
-        .values({ ownerUserId: owner, ...next })
-        .onConflictDoUpdate({
-          target: approvalPreferences.ownerUserId,
-          set: next,
-        });
+      const saved = await policy().patchApprovalPreferences(owner, input);
+      const next: ApprovalPreferences = {
+        enabled: saved.enabled,
+        autoReview: saved.autoReview,
+        hostCommands: saved.hostCommands,
+      };
       // On the trail like team settings: turning "ask before making changes" off is a governance
       // change, and without a row nobody could say when or by whom it happened.
       await recordAuditEvent(audit, {
@@ -368,18 +468,15 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
     },
     teamSettings,
     async setTeamSettings(by, input) {
-      const next = { ...(await teamSettings()), ...input };
-      await database
-        .insert(approvalTeamSettings)
-        .values({ id: TEAM, ...next, updatedBy: by })
-        .onConflictDoUpdate({
-          target: approvalTeamSettings.id,
-          set: { ...next, updatedBy: by, updatedAt: sql`now()` },
-        });
+      const saved = await policy().patchSettings({
+        approvals: input,
+        updatedBy: by,
+      });
+      const next = { ...saved.approvals };
       await recordAuditEvent(audit, {
         eventType: "approval.settings_changed",
         targetType: "approval_settings",
-        targetId: TEAM,
+        targetId: "team",
         actorUserId: by,
         payload: { changed: input, settings: next },
       });
@@ -387,55 +484,54 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
     },
     async teamRules() {
       if (currentEdition() === "personal") return [];
-      return database
-        .select()
-        .from(approvalTeamRules)
-        .where(isNull(approvalTeamRules.revokedAt))
-        .orderBy(desc(approvalTeamRules.createdAt));
+      return policy()
+        .approvalRules({ ownerUserId: null })
+        .map(teamRuleFrom)
+        .sort(newestFirst);
     },
     async createRule(owner, input) {
-      const [row] = await database
-        .insert(approvalRules)
-        .values({ id: crypto.randomUUID(), ownerUserId: owner, ...input })
-        .returning();
-      if (!row) throw new ApprovalNotFoundError();
+      const record = await policy().createApprovalRule({
+        id: randomUUID(),
+        ownerUserId: owner,
+        agentId: input.botId,
+        tool: input.toolRef,
+        effect: input.effect,
+        scope: input.scope,
+        behaviour: input.behaviour,
+        createdBy: owner,
+      });
       await recordAuditEvent(audit, {
         eventType: "approval.rule_changed",
         targetType: "approval_rule",
-        targetId: row.id,
+        targetId: record.id,
         actorUserId: owner,
         payload: { change: "created", layer: "personal", rule: input },
       });
-      return row;
+      return personalRuleFrom(record);
     },
     async createTeamRule(by, input) {
-      const [row] = await database
-        .insert(approvalTeamRules)
-        .values({ id: crypto.randomUUID(), createdBy: by, ...input })
-        .returning();
-      if (!row) throw new ApprovalNotFoundError();
+      const record = await policy().createApprovalRule({
+        id: randomUUID(),
+        ownerUserId: null,
+        agentId: input.botId,
+        tool: input.toolRef,
+        effect: input.effect,
+        scope: input.scope,
+        behaviour: input.behaviour,
+        createdBy: by,
+      });
       await recordAuditEvent(audit, {
         eventType: "approval.rule_changed",
         targetType: "approval_rule",
-        targetId: row.id,
+        targetId: record.id,
         actorUserId: by,
         payload: { change: "created", layer: "team", rule: input },
       });
-      return row;
+      return teamRuleFrom(record);
     },
     async updateRule(owner, id, input) {
-      const [row] = await database
-        .update(approvalRules)
-        .set(input)
-        .where(
-          and(
-            eq(approvalRules.ownerUserId, owner),
-            eq(approvalRules.id, id),
-            isNull(approvalRules.revokedAt),
-          ),
-        )
-        .returning();
-      if (!row) throw new ApprovalNotFoundError();
+      await personalRule(owner, id);
+      const record = await policy().patchApprovalRule(id, rulePatch(input));
       await recordAuditEvent(audit, {
         eventType: "approval.rule_changed",
         targetType: "approval_rule",
@@ -443,20 +539,11 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         actorUserId: owner,
         payload: { change: "updated", layer: "personal", changed: input },
       });
-      return row;
+      return personalRuleFrom(record);
     },
     async updateTeamRule(by, id, input) {
-      const [row] = await database
-        .update(approvalTeamRules)
-        .set(input)
-        .where(
-          and(
-            eq(approvalTeamRules.id, id),
-            isNull(approvalTeamRules.revokedAt),
-          ),
-        )
-        .returning();
-      if (!row) throw new ApprovalNotFoundError();
+      await teamRule(id);
+      const record = await policy().patchApprovalRule(id, rulePatch(input));
       await recordAuditEvent(audit, {
         eventType: "approval.rule_changed",
         targetType: "approval_rule",
@@ -464,20 +551,11 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         actorUserId: by,
         payload: { change: "updated", layer: "team", changed: input },
       });
-      return row;
+      return teamRuleFrom(record);
     },
     async revokeTeamRule(by, id) {
-      const rows = await database
-        .update(approvalTeamRules)
-        .set({ revokedAt: sql`now()` })
-        .where(
-          and(
-            eq(approvalTeamRules.id, id),
-            isNull(approvalTeamRules.revokedAt),
-          ),
-        )
-        .returning({ id: approvalTeamRules.id });
-      if (!rows.length) throw new ApprovalNotFoundError();
+      await teamRule(id);
+      await policy().revokeApprovalRule(id);
       await recordAuditEvent(audit, {
         eventType: "approval.rule_changed",
         targetType: "approval_rule",
@@ -579,5 +657,16 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         },
       });
     },
+  };
+}
+
+/** OpenBot's names for a rule's action class, as Intelligence's. */
+function rulePatch(input: Partial<ApprovalRuleInput>) {
+  return {
+    ...(input.botId !== undefined ? { agentId: input.botId } : {}),
+    ...(input.toolRef !== undefined ? { tool: input.toolRef } : {}),
+    ...(input.effect !== undefined ? { effect: input.effect } : {}),
+    ...(input.scope !== undefined ? { scope: input.scope } : {}),
+    ...(input.behaviour !== undefined ? { behaviour: input.behaviour } : {}),
   };
 }

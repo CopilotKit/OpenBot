@@ -67,17 +67,12 @@ Use `bun run dev` only when you want the app and API server without starting the
 
 `start.sh` hands every selected Docker service to `docker compose up -d` on every run, so one whose configuration changed is recreated and an unchanged one is left as it is. It leaves an API server or app that already answers as OpenBot alone, restarts the API server when it refuses the worker's secret or has no routines route, and reports when a port is held by another process.
 
-**Nothing here sweeps staged attachments.** A file dropped into the composer is stored before the
-message is sent, and the only thing that reclaims the ones never sent is
-`bun scripts/cull-staged-attachments.ts` from `server/`, which the Helm chart runs hourly and which
-neither `docker-compose.yml` nor `start.sh` starts. It needs only `DATABASE_URL`, and takes a
-retention window in hours as its one optional argument, defaulting to 24. On a laptop that is
-usually nothing, because the rows are small and the database is yours. It stops being nothing at
-thirty-two: one person may hold that many unsent files across every channel at once, the refusal on
-the next one promises they are cleared within a day, and where nothing sweeps they are not, so a
-long-lived local deployment can reach a state where attaching anything is refused. Removing a file
-in the composer deletes it outright, so it takes abandoned drafts rather than ordinary use.
-[deployment.md](deployment.md) says the same for a real deployment.
+**Staged attachments expire.** A file dropped into the composer is stored in Intelligence's file
+store before the message is sent, with an expiry `OPENBOT_STAGED_ATTACHMENT_TTL_HOURS` from then (24
+by default; `off` keeps them). Intelligence deletes the ones never sent when that passes, so a local
+deployment needs nothing running for it. `bun scripts/cull-staged-attachments.ts` from `server/`
+sweeps the unsent rows left in the local `attachments` table from before attachments moved; it needs
+only `DATABASE_URL`. [deployment.md](deployment.md) says the same for a real deployment.
 
 ## Migrations
 
@@ -144,6 +139,16 @@ bun run build
 Integration tests expect a PostgreSQL database with pgvector. Point `TEST_DATABASE_URL` at a dedicated database such as `postgres://openbot:openbot@localhost:5432/openbot_test` before running them.
 
 They refuse to use the application `openbot` database. `DATABASE_URL` is still the application setting, and the database client removes it from the process environment after opening a connection to preserve the Windows Bun connection fix, so tests use `TEST_DATABASE_URL` as their immutable fixture address. Running them against a deployment you are using puts test Bots in its audit trail and its activity reports, so create a separate database and migrate that before running the integration suite.
+
+The tests that touch Bots, policy, the vault, files, memory, audit, schedules, conversations or people also need a real Intelligence, named by `TEST_INTELLIGENCE_API_URL`, `TEST_INTELLIGENCE_GATEWAY_WS_URL`, `TEST_INTELLIGENCE_API_KEY` and `TEST_INTELLIGENCE_API_KEY_2` (a second project), plus `TEST_INTELLIGENCE_DATABASE_URL` and `TEST_INTELLIGENCE_REDIS_URL` for the change-feed suite. Without them those tests fail and name what is missing. `scripts/test-intelligence.sh up` starts a throwaway, self-hosted one in Docker from the image CI pins, and prints those variables:
+
+```sh
+export $(scripts/test-intelligence.sh up)
+bun run test
+scripts/test-intelligence.sh down
+```
+
+Set `INTELLIGENCE_IMAGE` to run one built from an Intelligence checkout instead.
 
 CI uses `bun run test:ci` to verify the expected test count in addition to normal tests.
 

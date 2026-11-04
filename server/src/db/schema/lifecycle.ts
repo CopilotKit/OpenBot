@@ -10,17 +10,20 @@
  * on the same durable queue routines and responsibilities already run through.
  */
 import { pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
-import { agents, users } from "./core";
+import { users } from "./core";
 
+/**
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
+ */
 export const botLifecycle = pgTable(
   "bot_lifecycle",
   {
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     /** When this person paused the Bot, or null while it runs. Every dispatch point reads this. */
     pausedAt: timestamp("paused_at", { withTimezone: true }),
     /**
@@ -44,6 +47,10 @@ export const botLifecycle = pgTable(
  *
  * A missing row is the default (every transport the person has set up). An empty list means only
  * the web, which always shows everything.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const updateRoutingPreferences = pgTable(
   "update_routing_preferences",

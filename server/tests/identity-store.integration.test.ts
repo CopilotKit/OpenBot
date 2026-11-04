@@ -1,29 +1,40 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { credentials, identityLinks } from "../src/db/schema";
 import { createIdentityStore } from "../src/identity/store";
 import {
   type Identity,
   IdentityConflictError,
   IdentityInputError,
 } from "../src/identity/types";
+import { idempotencyKey } from "../src/people/directory/client";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  purgeDirectoryPeople,
+  seedDirectoryPerson,
+  useTestPeople,
+} from "./support/directory";
+import { purgeSecrets, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
-const vault = createCredentialStore(database);
-const store = createIdentityStore(database, vault);
+// Links live in Intelligence's organization directory, and belong to people it holds.
+const directory = useTestPeople();
+const people: string[] = [];
+let vault: ReturnType<typeof createCredentialStore>;
+let store: ReturnType<typeof createIdentityStore>;
 const realm = `test-${randomUUID()}`;
 const createdCredentials: string[] = [];
 
+beforeAll(async () => {
+  vault = createCredentialStore(await useTestVault());
+  store = createIdentityStore(database, vault);
+});
+
 afterAll(async () => {
-  await database.delete(identityLinks).where(eq(identityLinks.realm, realm));
-  if (createdCredentials.length)
-    await database
-      .delete(credentials)
-      .where(inArray(credentials.id, createdCredentials));
+  // Purging a person takes their links with them.
+  await purgeDirectoryPeople(people);
+  await purgeSecrets(createdCredentials.splice(0));
   await database.$client.close();
 });
 
@@ -32,7 +43,12 @@ const github = (subject = randomUUID()): Identity => ({
   realm,
   subject,
 });
-const user = () => `user-${randomUUID()}`;
+/** A person the directory holds, for a link to belong to. */
+async function user() {
+  const created = await seedDirectoryPerson();
+  people.push(created.id);
+  return created.id;
+}
 
 async function credential(
   kind: "connector" | "model" = "connector",
@@ -43,7 +59,7 @@ async function credential(
     provider,
     keyId: randomUUID(),
     metadata: {},
-    encryptedValue: "not-a-real-ciphertext",
+    plaintext: "not-a-real-token",
   });
   createdCredentials.push(id);
   return id;
@@ -54,7 +70,7 @@ test("an unlinked identity resolves to null", async () => {
 });
 
 test("linkVerified links, and linkedUser and identitiesFor read it back", async () => {
-  const person = user();
+  const person = await user();
   const identity = github();
   const link = await store.linkVerified(identity, person, {
     method: "oauth",
@@ -73,23 +89,23 @@ test("linkVerified links, and linkedUser and identitiesFor read it back", async 
 
 test("a method the provider does not declare is refused", async () => {
   await expect(
-    store.linkVerified(github(), user(), { method: "challenge" }),
+    store.linkVerified(github(), await user(), { method: "challenge" }),
   ).rejects.toThrow(IdentityInputError);
 });
 
 test("an identity linked to somebody else is refused", async () => {
   const identity = github();
-  await store.linkVerified(identity, user(), { method: "oauth" });
+  await store.linkVerified(identity, await user(), { method: "oauth" });
   await expect(
-    store.linkVerified(identity, user(), { method: "oauth" }),
+    store.linkVerified(identity, await user(), { method: "oauth" }),
   ).rejects.toThrow(IdentityConflictError);
 });
 
 test("concurrent links of one identity by two people: exactly one wins", async () => {
   const identity = github();
   const results = await Promise.allSettled([
-    store.linkVerified(identity, user(), { method: "oauth" }),
-    store.linkVerified(identity, user(), { method: "oauth" }),
+    store.linkVerified(identity, await user(), { method: "oauth" }),
+    store.linkVerified(identity, await user(), { method: "oauth" }),
   ]);
   expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
   const rejected = results.find((r) => r.status === "rejected");
@@ -99,7 +115,7 @@ test("concurrent links of one identity by two people: exactly one wins", async (
 });
 
 test("relinking the same identity updates handle and credential, revoking the old one", async () => {
-  const person = user();
+  const person = await user();
   const identity = github();
   const first = await credential();
   await store.linkVerified(identity, person, {
@@ -120,7 +136,7 @@ test("relinking the same identity updates handle and credential, revoking the ol
 });
 
 test("linkVerified replaces a person's older link in the same realm and revokes its credential", async () => {
-  const person = user();
+  const person = await user();
   const old = github();
   const oldCredential = await credential();
   await store.linkVerified(old, person, {
@@ -135,7 +151,7 @@ test("linkVerified replaces a person's older link in the same realm and revokes 
 });
 
 test("concurrent links by one person in one realm: the later replaces the earlier", async () => {
-  const person = user();
+  const person = await user();
   const [first, second] = [await credential(), await credential()] as [
     string,
     string,
@@ -158,7 +174,7 @@ test("concurrent links by one person in one realm: the later replaces the earlie
 });
 
 test("relinking without a credentialId keeps the stored token live and on the link", async () => {
-  const person = user();
+  const person = await user();
   const identity = github();
   const token = await credential();
   await store.linkVerified(identity, person, {
@@ -173,7 +189,7 @@ test("relinking without a credentialId keeps the stored token live and on the li
 });
 
 test("relinking with an explicit null handle clears it", async () => {
-  const person = user();
+  const person = await user();
   const identity = github();
   await store.linkVerified(identity, person, {
     method: "oauth",
@@ -188,29 +204,26 @@ test("relinking with an explicit null handle clears it", async () => {
 
 test("a credential already on another link is refused and stays live", async () => {
   const token = await credential();
-  const owner = await store.linkVerified(github(), user(), {
+  const owner = await store.linkVerified(github(), await user(), {
     method: "oauth",
     credentialId: token,
   });
   const identity = github();
   await expect(
-    store.linkVerified(identity, user(), {
+    store.linkVerified(identity, await user(), {
       method: "oauth",
       credentialId: token,
     }),
   ).rejects.toThrow(IdentityInputError);
   expect(await store.linkedUser(identity)).toBeNull();
   expect(await vault.isLive(token)).toBe(true);
-  const [still] = await database
-    .select({ credentialId: identityLinks.credentialId })
-    .from(identityLinks)
-    .where(eq(identityLinks.id, owner.id));
+  const still = await directory.client.getIdentity(owner.id);
   expect(still?.credentialId).toBe(token);
 });
 
 test("a credentialId that is not a UUID is refused before any query", async () => {
   const identity = github();
-  const attempt = store.linkVerified(identity, user(), {
+  const attempt = store.linkVerified(identity, await user(), {
     method: "oauth",
     credentialId: "not-a-uuid",
   });
@@ -220,7 +233,7 @@ test("a credentialId that is not a UUID is refused before any query", async () =
 });
 
 test("replacing a person's older link while moving its credential to the new one keeps it live", async () => {
-  const person = user();
+  const person = await user();
   const old = github();
   const token = await credential();
   await store.linkVerified(old, person, {
@@ -238,7 +251,7 @@ test("replacing a person's older link while moving its credential to the new one
 });
 
 test("markNeedsReconnect is visible to linkedUser; relinking makes it active again", async () => {
-  const person = user();
+  const person = await user();
   const identity = github();
   const link = await store.linkVerified(identity, person, { method: "oauth" });
   await store.markNeedsReconnect(link.id);
@@ -248,14 +261,14 @@ test("markNeedsReconnect is visible to linkedUser; relinking makes it active aga
 });
 
 test("unlink removes only the asker's own link and revokes its credential", async () => {
-  const person = user();
+  const person = await user();
   const identity = github();
   const token = await credential();
   const link = await store.linkVerified(identity, person, {
     method: "oauth",
     credentialId: token,
   });
-  expect(await store.unlink(user(), link.id)).toBeNull();
+  expect(await store.unlink(await user(), link.id)).toBeNull();
   expect(await store.linkedUser(identity)).not.toBeNull();
   expect(await store.unlink(person, link.id)).toEqual({
     provider: "github",
@@ -265,30 +278,37 @@ test("unlink removes only the asker's own link and revokes its credential", asyn
   expect(await store.unlink(person, link.id)).toBeNull();
 });
 
-test("a link outlives its user: nothing cascades from users", async () => {
+test("a link belongs to a person the directory holds, and goes when they are purged", async () => {
+  await expect(
+    store.linkVerified(github(), "user-that-never-existed", {
+      method: "oauth",
+    }),
+  ).rejects.toThrow(IdentityInputError);
+
+  const person = await user();
   const identity = github();
-  await store.linkVerified(identity, "user-that-never-existed", {
-    method: "oauth",
-  });
-  expect((await store.linkedUser(identity))?.userId).toBe(
-    "user-that-never-existed",
-  );
+  await store.linkVerified(identity, person, { method: "oauth" });
+  await directory.purge(person);
+  expect(await store.linkedUser(identity)).toBeNull();
 });
 
 test("identitiesFor skips a link whose provider the registry does not know", async () => {
-  const person = user();
+  const person = await user();
   const valid = await store.linkVerified(github(), person, {
     method: "oauth",
   });
-  await database.insert(identityLinks).values({
-    id: randomUUID(),
-    provider: "myspace",
-    realm,
-    subject: randomUUID(),
-    userId: person,
-    verifiedBy: "oauth",
-    status: "active",
-  });
+  // A link another build (or another application of the organization) wrote for a provider this one
+  // does not know.
+  await directory.client.linkIdentity(
+    {
+      userId: person,
+      provider: "myspace",
+      realm,
+      subject: randomUUID(),
+      verifiedBy: "oauth",
+    },
+    idempotencyKey("test-unknown-provider"),
+  );
   const links = await store.identitiesFor(person);
   expect(links.map((link) => link.id)).toEqual([valid.id]);
 });
@@ -296,7 +316,7 @@ test("identitiesFor skips a link whose provider the registry does not know", asy
 test("a credential that does not exist is refused and no link is written", async () => {
   const identity = github();
   await expect(
-    store.linkVerified(identity, user(), {
+    store.linkVerified(identity, await user(), {
       method: "oauth",
       credentialId: randomUUID(),
     }),
@@ -309,7 +329,7 @@ test("a revoked credential is refused and no link is written", async () => {
   const id = await credential();
   await vault.revoke(id);
   await expect(
-    store.linkVerified(identity, user(), {
+    store.linkVerified(identity, await user(), {
       method: "oauth",
       credentialId: id,
     }),
@@ -324,7 +344,7 @@ test("a challenge link refuses a credential", async () => {
     subject: randomUUID(),
   };
   await expect(
-    store.linkVerified(identity, user(), {
+    store.linkVerified(identity, await user(), {
       method: "challenge",
       credentialId: await credential(),
     }),
@@ -336,7 +356,7 @@ test("a live credential of another kind is refused and stays live", async () => 
   const identity = github();
   const operatorKey = await credential("model");
   await expect(
-    store.linkVerified(identity, user(), {
+    store.linkVerified(identity, await user(), {
       method: "oauth",
       credentialId: operatorKey,
     }),
@@ -347,7 +367,7 @@ test("a live credential of another kind is refused and stays live", async () => 
 
 test("a connector credential for another provider is refused and stays live", async () => {
   const identity = github();
-  const person = user();
+  const person = await user();
   const other = await credential("connector", "slack-bot-token");
   await expect(
     store.linkVerified(identity, person, {
@@ -374,7 +394,7 @@ test("a connector credential for another provider is refused and stays live", as
 });
 
 test("a linked handle is capped at 256 code points like a redeemed one", async () => {
-  const link = await store.linkVerified(github(), user(), {
+  const link = await store.linkVerified(github(), await user(), {
     method: "oauth",
     handle: `${"a".repeat(255)}\u{1F600}\u{1F600}`,
   });
@@ -382,14 +402,14 @@ test("a linked handle is capped at 256 code points like a redeemed one", async (
 });
 
 test("a blank linked handle is stored as none, and a non-string one is refused", async () => {
-  const blank = await store.linkVerified(github(), user(), {
+  const blank = await store.linkVerified(github(), await user(), {
     method: "oauth",
     handle: " ",
   });
   expect(blank.handle).toBeNull();
   const identity = github();
   await expect(
-    store.linkVerified(identity, user(), {
+    store.linkVerified(identity, await user(), {
       method: "oauth",
       handle: { name: "dana" } as unknown as string,
     }),
@@ -398,7 +418,7 @@ test("a blank linked handle is stored as none, and a non-string one is refused",
 });
 
 test("an uppercase credentialId is kept on relink, not revoked as a different token", async () => {
-  const person = user();
+  const person = await user();
   const identity = github();
   const token = await credential();
   await store.linkVerified(identity, person, {

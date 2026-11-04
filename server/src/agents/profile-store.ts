@@ -1,24 +1,38 @@
-import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
+/**
+ * Bots as people see them: a Bot from Intelligence's agent registry, filtered by who may see it and
+ * dressed with this person's own preferences (hidden, pinned).
+ *
+ * WHERE THINGS LIVE. The Bot (definition and profile) is in Intelligence and is read from this
+ * instance's Bot directory (`bot-registry/directory.ts`), which holds them all in memory. Who may see a
+ * Team Bot, and each person's hidden and pinned Bots, are this deployment's own tables. A write goes to
+ * Intelligence first and the directory updates from its answer, so the next read here sees it.
+ *
+ * NO TRANSACTION SPANS INTELLIGENCE. A write to the registry is never made while an OpenBot transaction
+ * is open. Where a Bot's key is involved, the vault write and the registry write are two steps in a
+ * fixed order, and the second failing undoes or reports the first; see `create` and `update`.
+ */
 import { capabilityRefusal } from "../admin/capabilities";
 import type { CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
+import { botConfiguration } from "../configuration/directory";
 import {
-  agentPreferences,
-  agentProfiles,
-  agents,
-  deploymentPackages,
-} from "../db/schema";
-import { teamBotPublications } from "../db/schema/team-bots";
-import {
-  assignedCondition,
-  assignedToActor,
-  teamBotAccess,
+  type AccessExecutor,
+  botAccessFor,
+  isAssignedTo,
 } from "../team-bots/access";
 import {
+  type AgentAuth,
   authFromConfiguration,
   retireReplacedKey,
   storeAgentAuth,
 } from "./auth-header";
+import {
+  BotDeletedError,
+  BotMissingError,
+  BotVersionConflictError,
+} from "./bot-registry/client";
+import { bots } from "./bot-registry/directory";
+import type { Bot, BotChanges } from "./bot-registry/types";
 import {
   hashCallbackToken,
   mintCallbackToken,
@@ -32,23 +46,20 @@ import type {
   CreateAgentInput,
 } from "./profile-types";
 
-type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-type DatabaseExecutor = Pick<Database, "select"> | Pick<Transaction, "select">;
-
-/** Something that can read profiles: the pool, or a caller's open transaction. */
-export type ProfileReadExecutor = DatabaseExecutor;
+/** Something that can read this deployment's own tables: the pool, or a caller's open transaction. */
+export type ProfileReadExecutor = AccessExecutor;
 
 export type AgentProfileStore = {
   list(actor: AgentActor, hidden?: boolean): Promise<AgentProfile[]>;
   get(actor: AgentActor, id: string): Promise<AgentProfile | null>;
   /**
-   * `get`, but on the caller's own transaction and holding the profile against deletion until that
-   * transaction ends.
+   * `get`, for a caller inside its own transaction.
    *
-   * A caller that writes rows referencing an agent has to validate it here rather than through
-   * `get`. `get` borrows a second pooled connection, which deadlocks the caller's transaction once
-   * every connection is held by one, and reads an unlocked snapshot, so a deletion committing
-   * between the check and the insert leaves rows pointing at an agent that no longer runs.
+   * Reads this person's preferences and Team Bot reach on the caller's transaction, so it borrows no
+   * second pooled connection (which deadlocks a caller holding the last one), and reads the Bot from
+   * memory only: a transaction must not wait on Intelligence. A caller should look the Bot up with
+   * `get` before it opens the transaction, which also brings a Bot made on another instance a moment
+   * ago into this one's memory.
    */
   getWithin(
     executor: ProfileReadExecutor,
@@ -155,8 +166,7 @@ export class IsolationRefusedError extends Error {
  * does. Asked only of a request that turns isolation ON: turning it off is always allowed, and an
  * absent field changes nothing.
  *
- * Before any transaction opens. The answer reads the switches on a pooled connection of its own, and
- * borrowing a second one while a transaction holds the first is how `getWithin`'s deadlock happens.
+ * Asked before anything is written, so a refusal leaves nothing behind.
  */
 async function requireMayIsolate(actor: AgentActor) {
   if (!(await mayIsolate(actor.id))) {
@@ -169,20 +179,11 @@ async function requireMayIsolate(actor: AgentActor) {
  *
  * The owner's switch is the one that decides at run time (`runsIsolated` in isolation.ts), so it is the one asked here:
  * asking the editor let an administrator tick Isolated on somebody's Bot whose owner lacks the switch, the save
- * succeeded, and the Bot never ran isolated. Read before the transaction, for the reason `requireMayIsolate` gives. An
- * unknown Bot, and one that belongs to nobody, are refused inside, each for its own reason.
+ * succeeded, and the Bot never ran isolated. Asked before anything is written. An unknown Bot, and one that belongs to
+ * nobody, are refused by the update itself, each for its own reason.
  */
-async function requireOwnerMayIsolate(
-  database: Database,
-  actor: AgentActor,
-  agentId: string,
-) {
-  const [row] = await database
-    .select({ ownerUserId: agentProfiles.ownerUserId })
-    .from(agentProfiles)
-    .where(eq(agentProfiles.agentId, agentId))
-    .limit(1);
-  const owner = row?.ownerUserId;
+async function requireOwnerMayIsolate(actor: AgentActor, agentId: string) {
+  const owner = (await bots().find(agentId))?.ownerUserId;
   if (!owner || (await mayIsolate(owner))) return;
   throw new IsolationRefusedError("capability", {
     forOwner: owner !== actor.id,
@@ -194,81 +195,6 @@ export class ManagedAgentUnavailableError extends Error {
     super("OpenBot has no managed Bot. Give this Bot its own AG-UI endpoint.");
     this.name = "ManagedAgentUnavailableError";
   }
-}
-
-const joinedProjection = {
-  id: agents.id,
-  name: agents.name,
-  title: agentProfiles.title,
-  roleDescription: agentProfiles.roleDescription,
-  avatarSeed: agentProfiles.avatarSeed,
-  visibility: agentProfiles.visibility,
-  ownerUserId: agentProfiles.ownerUserId,
-  packageId: deploymentPackages.id,
-  hiddenAt: agentPreferences.hiddenAt,
-  pinnedAt: agentPreferences.pinnedAt,
-  deletedAt: agentProfiles.deletedAt,
-  isolated: agentProfiles.isolated,
-  /* The hash, only so a surface can say whether one exists. It never leaves this module. */
-  callbackTokenHash: agentProfiles.callbackTokenHash,
-  configuration: agents.configuration,
-};
-
-function joinedProfiles(executor: DatabaseExecutor, actor: AgentActor) {
-  return executor
-    .select({
-      ...joinedProjection,
-      // A Team Bot an administrator put in this person's sidebar.
-      assignedToMe: sql<boolean>`${assignedToActor(actor.id, agents.id)}`,
-    })
-    .from(agents)
-    .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
-    .leftJoin(
-      agentPreferences,
-      and(
-        eq(agentPreferences.agentId, agents.id),
-        eq(agentPreferences.userId, actor.id),
-      ),
-    )
-    .leftJoin(deploymentPackages, eq(deploymentPackages.id, agents.packageId));
-}
-
-function accessFilter(actor: AgentActor) {
-  if (actor.role === "admin") return undefined;
-
-  return or(
-    eq(agentProfiles.visibility, "public"),
-    eq(agentProfiles.ownerUserId, actor.id),
-    // A private Bot its owner published to the team, to this person, or to a group they are in.
-    teamBotAccess(actor.id, agentProfiles.agentId),
-  );
-}
-
-function mapProfile(
-  row: Awaited<
-    ReturnType<ReturnType<typeof joinedProfiles>["execute"]>
-  >[number],
-): AgentProfile {
-  return {
-    id: row.id,
-    name: row.name,
-    title: row.title,
-    roleDescription: row.roleDescription,
-    avatarSeed: row.avatarSeed,
-    visibility: row.visibility,
-    ownerUserId: row.ownerUserId,
-    systemOwned: row.packageId !== null,
-    hasCallbackToken: row.callbackTokenHash !== null,
-    hidden: row.hiddenAt !== null,
-    pinned: row.pinnedAt !== null,
-    assignedToMe: Boolean(row.assignedToMe),
-    deletedAt: row.deletedAt,
-    isolated: row.isolated,
-    endpoint: endpointOf(row.configuration),
-    // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
-    // wipe one by saving an unrelated edit; showing the value would put a secret in a screenshot.
-    hasAuth: authFromConfiguration(row.configuration) !== null,
-  };
 }
 
 /**
@@ -381,45 +307,69 @@ export function runForDuplicate(
   return managed ? { type: "remote_ag_ui", configuration: managed } : null;
 }
 
-async function findAccessibleProfile(
-  executor: DatabaseExecutor,
-  actor: AgentActor,
-  id: string,
-): Promise<AgentProfile | null> {
-  const [row] = await joinedProfiles(executor, actor).where(
-    and(
-      eq(agents.id, id),
-      isNull(agentProfiles.deletedAt),
-      accessFilter(actor),
-    ),
-  );
-  return row ? mapProfile(row) : null;
-}
-
-async function lockProfileMutationRows(executor: DatabaseExecutor, id: string) {
-  await executor
-    .select({ id: agents.id })
-    .from(agents)
-    .where(eq(agents.id, id))
-    .for("update");
-  await executor
-    .select({ agentId: agentProfiles.agentId })
-    .from(agentProfiles)
-    .where(eq(agentProfiles.agentId, id))
-    .for("update");
-}
+type Preferences = { hiddenAt: Date | null; pinnedAt: Date | null };
 
 /**
- * Share-lock a profile so it stays readable to concurrent callers but cannot be deleted or renamed
- * until this transaction ends. `lockProfileMutationRows` takes the exclusive counterpart, so a
- * deletion racing a reference blocks here instead of committing underneath it.
+ * This person's hidden and pinned marks, for the Bots asked about or for all of them. Their
+ * preferences in Intelligence, from the copy this instance holds: the sidebar never waits on it.
  */
-async function lockProfileReadRow(executor: DatabaseExecutor, id: string) {
-  await executor
-    .select({ agentId: agentProfiles.agentId })
-    .from(agentProfiles)
-    .where(eq(agentProfiles.agentId, id))
-    .for("share");
+async function preferencesOf(
+  _executor: AccessExecutor,
+  actorId: string,
+  botIds?: readonly string[],
+): Promise<Map<string, Preferences>> {
+  if (botIds && botIds.length === 0) return new Map();
+  const wanted = botIds ? new Set(botIds) : null;
+  return new Map(
+    botConfiguration()
+      .preferencesOf(actorId)
+      .bots.filter((entry) => !wanted || wanted.has(entry.botId))
+      .map((entry) => [
+        entry.botId,
+        { hiddenAt: entry.hiddenAt, pinnedAt: entry.pinnedAt },
+      ]),
+  );
+}
+
+/** A Bot as a profile for this person. */
+export function profileOf(
+  bot: Bot,
+  preferences: Preferences | undefined,
+  assignedToMe: boolean,
+): AgentProfile {
+  return {
+    id: bot.id,
+    name: bot.name,
+    title: bot.title,
+    roleDescription: bot.roleDescription,
+    avatarSeed: bot.avatarSeed,
+    visibility: bot.visibility,
+    ownerUserId: bot.ownerUserId,
+    systemOwned: bot.packageId !== null,
+    hasCallbackToken: bot.callbackTokenHash !== null,
+    hidden: (preferences?.hiddenAt ?? null) !== null,
+    pinned: (preferences?.pinnedAt ?? null) !== null,
+    assignedToMe,
+    deletedAt: bot.deletedAt,
+    isolated: bot.isolated,
+    endpoint: endpointOf(bot.configuration),
+    // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
+    // wipe one by saving an unrelated edit; showing the value would put a secret in a screenshot.
+    hasAuth: authFromConfiguration(bot.configuration) !== null,
+  };
+}
+
+/** The profile of a live Bot this person may see, or null. */
+async function accessibleProfile(
+  executor: AccessExecutor,
+  actor: AgentActor,
+  bot: Bot | null | undefined,
+): Promise<AgentProfile | null> {
+  if (!bot || bot.deletedAt !== null) return null;
+  const access = await botAccessFor(executor, actor);
+  if (!access.canSee(bot)) return null;
+  const preferences = await preferencesOf(executor, actor.id, [bot.id]);
+  return profileOf(bot, preferences.get(bot.id), access.assignedToMe(bot));
 }
 
 function requireManageable(actor: AgentActor, profile: AgentProfile) {
@@ -433,36 +383,6 @@ function newAgentId() {
   return `agent_${crypto.randomUUID()}`;
 }
 
-/**
- * Which agent a token belongs to.
- *
- * Selected by hash and then compared in constant time. The lookup alone would be enough to identify
- * the row, and the comparison is what keeps a timing difference from confirming a partial guess
- * against an index.
- */
-async function findByTokenHash(
-  database: Database,
-  hash: string,
-): Promise<{ id: string } | null> {
-  const rows = await database
-    .select({
-      agentId: agentProfiles.agentId,
-      hash: agentProfiles.callbackTokenHash,
-    })
-    .from(agentProfiles)
-    .where(
-      and(
-        eq(agentProfiles.callbackTokenHash, hash),
-        isNull(agentProfiles.deletedAt),
-      ),
-    )
-    .limit(1);
-
-  const row = rows[0];
-  if (!row?.hash) return null;
-  return sameToken(row.hash, hash) ? { id: row.agentId } : null;
-}
-
 /** Hiding a Team Bot an administrator assigned to this person, which they cannot do. */
 export class AgentAssignedError extends Error {
   constructor(_id: string) {
@@ -471,6 +391,9 @@ export class AgentAssignedError extends Error {
   }
 }
 
+/** How many times an edit is redone on top of somebody else's that saved first. */
+const EDIT_ATTEMPTS = 3;
+
 export function createAgentProfileStore(
   database: Database,
   managedAgentAgUiUrl: URL | undefined,
@@ -478,447 +401,374 @@ export function createAgentProfileStore(
    * Where a customer agent's key is kept. Optional so a deployment without a vault still runs; an
    * agent with a key then simply cannot be created, which is better than storing it in the clear.
    */
-  vault?: { store: CredentialStore; encryptionKey: string },
+  vault?: { store: CredentialStore },
 ): AgentProfileStore {
   const managedConfiguration = managedAgentAgUiUrl
     ? { endpoint: managedAgentAgUiUrl.toString() }
     : undefined;
 
+  /**
+   * Change a Bot this person may manage, redoing the change on the latest copy when somebody else
+   * saved first. `change` sees the Bot as it is now and returns what to write; it may throw to refuse.
+   */
+  async function edit(
+    actor: AgentActor,
+    id: string,
+    change: (
+      bot: Bot,
+      profile: AgentProfile,
+    ) => Promise<BotChanges> | BotChanges,
+    options: { manage: boolean } = { manage: true },
+  ): Promise<Bot> {
+    let bot = await bots().find(id);
+    for (let attempt = 1; ; attempt++) {
+      const profile = await accessibleProfile(database, actor, bot);
+      if (!bot || !profile) throw new AgentNotFoundError(id);
+      if (options.manage) requireManageable(actor, profile);
+      const changes = await change(bot, profile);
+      try {
+        return await bots().update(id, bot.version, changes);
+      } catch (error) {
+        if (
+          error instanceof BotMissingError ||
+          error instanceof BotDeletedError
+        )
+          throw new AgentNotFoundError(id);
+        if (
+          !(error instanceof BotVersionConflictError) ||
+          attempt >= EDIT_ATTEMPTS
+        )
+          throw error;
+        bot = await bots().refresh(id);
+      }
+    }
+  }
+
+  async function profileAfterWrite(actor: AgentActor, bot: Bot) {
+    const profile = await accessibleProfile(database, actor, bot);
+    if (!profile) throw new AgentNotFoundError(bot.id);
+    return profile;
+  }
+
   return {
     async list(actor, hidden = false) {
-      const rows = await joinedProfiles(database, actor).where(
-        and(
-          isNull(agentProfiles.deletedAt),
-          accessFilter(actor),
-          hidden
-            ? isNotNull(agentPreferences.hiddenAt)
-            : isNull(agentPreferences.hiddenAt),
-        ),
-      );
-      return rows.map(mapProfile);
+      const access = await botAccessFor(database, actor);
+      const preferences = await preferencesOf(database, actor.id);
+      return bots()
+        .live()
+        .filter((bot) => access.canSee(bot))
+        .filter((bot) => {
+          const hiddenAt = preferences.get(bot.id)?.hiddenAt ?? null;
+          return hidden ? hiddenAt !== null : hiddenAt === null;
+        })
+        .map((bot) =>
+          profileOf(bot, preferences.get(bot.id), access.assignedToMe(bot)),
+        );
     },
 
-    get(actor, id) {
-      return findAccessibleProfile(database, actor, id);
+    async get(actor, id) {
+      return accessibleProfile(database, actor, await bots().find(id));
     },
 
     async getWithin(executor, actor, id) {
-      await lockProfileReadRow(executor, id);
-      return findAccessibleProfile(executor, actor, id);
+      return accessibleProfile(executor, actor, bots().peek(id));
     },
 
     async create(actor, input) {
       if (input.isolated === true) await requireMayIsolate(actor);
-      return database.transaction(async (transaction) => {
-        const id = newAgentId();
-        const endpoint = input.endpoint
-          ? { endpoint: input.endpoint }
-          : managedConfiguration;
-        const systemPrompt = input.systemPrompt?.trim();
-        if (endpoint) {
-          await transaction.insert(agents).values({
-            id,
-            name: input.name,
-            type: "remote_ag_ui",
-            // Their endpoint if they gave one, ours if they did not. Validated before it reaches
-            // here; see endpoint.ts for why a stored URL is a security decision and not a text
-            // field.
-            //
-            // The key, if there is one, goes to the vault and only its reference is stored here. See
-            // auth-header.ts for why a bearer token must not sit next to the endpoint.
-            configuration: {
-              ...endpoint,
-              ...(input.auth && vault
-                ? {
-                    auth: await storeAgentAuth({
-                      store: vault.store,
-                      encryptionKey: vault.encryptionKey,
-                      agentId: id,
-                      header: input.auth.header,
-                      value: input.auth.value,
-                      executor: transaction,
-                    }),
-                  }
-                : {}),
-            },
-          });
-        } else if (systemPrompt) {
-          /*
-           * Nowhere to send it, so it runs here.
-           *
-           * This is the shape General Assistant and Knowledge already have, and the shape
-           * `registeredAgentFromRow` reads: `built_in` plus a non-empty `configuration.systemPrompt`.
-           * A key is deliberately not written on this branch — a key authenticates to an address and
-           * this coworker has none, so storing one would leave a live credential in the vault that
-           * nothing can ever present.
-           */
-          await transaction.insert(agents).values({
-            id,
-            name: input.name,
-            type: "built_in",
-            configuration: { systemPrompt },
-          });
-        } else {
-          /*
-           * No address, no Bot in the box, and no instruction to run on. There is nothing to create:
-           * a `built_in` row with an empty prompt is a coworker `registeredAgentFromRow` drops on
-           * the floor, and the Bot would exist on every screen while answering nobody.
-           */
-          throw new ManagedAgentUnavailableError();
-        }
-        await transaction.insert(agentProfiles).values({
+      const id = newAgentId();
+      const endpoint = input.endpoint
+        ? { endpoint: input.endpoint }
+        : managedConfiguration;
+      const systemPrompt = input.systemPrompt?.trim();
+      /*
+       * No address, no Bot in the box, and no instruction to run on. There is nothing to create: a
+       * `built_in` Bot with an empty prompt is a coworker `registeredAgentFromRow` drops on the floor,
+       * and the Bot would exist on every screen while answering nobody.
+       */
+      if (!endpoint && !systemPrompt) throw new ManagedAgentUnavailableError();
+
+      /*
+       * The key, if there is one, goes to the vault and only its reference to Intelligence. See
+       * auth-header.ts for why a bearer token must not sit next to the endpoint. Stored first, so the
+       * Bot never exists in Intelligence naming a key that is not there; retired again if Intelligence
+       * then refuses the Bot.
+       *
+       * Not on the `built_in` branch: a key authenticates to an address and that coworker has none, so
+       * storing one would leave a live credential in the vault that nothing can ever present.
+       */
+      let auth: AgentAuth | undefined;
+      if (endpoint && input.auth && vault) {
+        auth = await storeAgentAuth({
+          store: vault.store,
           agentId: id,
-          ownerUserId: actor.id,
+          header: input.auth.header,
+          value: input.auth.value,
+        });
+      }
+      let bot: Bot;
+      try {
+        bot = await bots().create({
+          id,
+          name: input.name,
           title: input.title,
           roleDescription: input.roleDescription,
           avatarSeed: id,
           visibility: input.visibility,
+          ownerUserId: actor.id,
+          packageId: null,
           isolated: input.isolated === true,
+          // Their endpoint if they gave one, ours if they did not. Validated before it reaches here;
+          // see endpoint.ts for why a stored URL is a security decision and not a text field.
+          ...(endpoint
+            ? {
+                type: "remote_ag_ui" as const,
+                configuration: { ...endpoint, ...(auth ? { auth } : {}) },
+              }
+            : {
+                /*
+                 * Nowhere to send it, so it runs here: the shape General Assistant and Knowledge
+                 * already have, and the shape `registeredAgentFromRow` reads.
+                 */
+                type: "built_in" as const,
+                configuration: { systemPrompt },
+              }),
         });
-
-        const profile = await findAccessibleProfile(transaction, actor, id);
-        if (!profile) throw new AgentNotFoundError(id);
-        return profile;
-      });
+      } catch (error) {
+        if (auth && vault) await retireReplacedKey(vault.store, { auth }, {});
+        throw error;
+      }
+      return profileAfterWrite(actor, bot);
     },
 
     async update(actor, id, input) {
-      if (input.isolated === true)
-        await requireOwnerMayIsolate(database, actor, id);
-      return database.transaction(
-        async (transaction) => {
-          await lockProfileMutationRows(transaction, id);
-          const profile = await findAccessibleProfile(transaction, actor, id);
-          if (!profile) throw new AgentNotFoundError(id);
-          /*
-           * Before the manage check, so a tenant package's Bot is refused for what was asked of it
-           * rather than with the general "built in and can't be changed", and the trail can say so.
-           */
-          if (
-            input.isolated === true &&
-            (profile.systemOwned || profile.ownerUserId === null)
-          ) {
-            throw new IsolationRefusedError("unowned");
-          }
-          requireManageable(actor, profile);
-
-          const updatedAt = new Date();
-          /**
-           * The endpoint and the key change here too, not only at creation.
-           *
-           * The form sends both and the route validates both, so an edit that dropped them looked
-           * like it had worked: the screen reported success and the Bot kept answering at the old
-           * address, which is the worst way to move an endpoint. A key is replaced only when one is
-           * supplied, because the form cannot show what is stored and sending nothing means "leave
-           * it alone" rather than "remove it".
-           */
-          const [row] = await transaction
-            .select({ configuration: agents.configuration, type: agents.type })
-            .from(agents)
-            .where(eq(agents.id, id))
-            .limit(1);
-          const previous = (row?.configuration ?? {}) as Record<
-            string,
-            unknown
-          >;
-          /**
-           * A coworker that runs here runs on its role description, so editing one has to move both.
-           *
-           * `create` writes the role description into `configuration.systemPrompt` for a coworker
-           * with no address, and that prompt is the ONLY instruction such a coworker ever gets:
-           * `registeredAgentFromRow` gives a `built_in` agent its `systemPrompt` and no standing
-           * role message, so `agentProfiles.roleDescription` never reaches it. Left out of this
-           * merge, an edit wrote the new text to the profile every screen reads and left the Bot
-           * running on the original — permanently, with nothing anywhere to say so. That is the
-           * worst shape a failed edit can take, and it is the same one the endpoint comment above
-           * describes.
-           *
-           * Only for `built_in`, and that matters. A remote Bot has no `systemPrompt` and must not
-           * acquire one — its instruction travels as the standing role message instead — and the
-           * tenant package's Bots, whose `system_prompt` is deliberately not their
-           * `role_description`, cannot reach this code at all: `requireManageable` above throws
-           * `ProtectedAgentError` for anything the package owns.
-           */
-          const configuration = {
-            ...previous,
-            ...(row?.type === "built_in"
-              ? { systemPrompt: input.roleDescription }
-              : {}),
-            ...(input.endpoint ? { endpoint: input.endpoint } : {}),
-            ...(input.auth && vault
-              ? {
-                  auth: await storeAgentAuth({
-                    store: vault.store,
-                    encryptionKey: vault.encryptionKey,
-                    agentId: id,
-                    header: input.auth.header,
-                    value: input.auth.value,
-                    // An agent that already has a live key is being edited, not
-                    // first-created, so the vault rotates rather than inserting
-                    // a second live row for the same agent id.
-                    previousCredentialId: authFromConfiguration(
-                      row?.configuration,
-                    )?.credentialId,
-                    executor: transaction,
-                  }),
-                }
-              : {}),
-          };
-
-          /*
-           * The key this one replaces is already retired, by the rotation above.
-           *
-           * `storeAgentAuth` locks the previous credential, revokes it and inserts the replacement
-           * inside this transaction, so there is nothing left here to retire. A second revoke from
-           * outside the transaction would wait on the row lock this transaction is holding and never
-           * be released, because the transaction cannot commit until the call it is awaiting
-           * returns: editing a Bot's key would hang until the statement timed out, and the timeout
-           * would then be reported as a key that is still live.
-           */
-          await transaction
-            .update(agents)
-            .set({ name: input.name, configuration, updatedAt })
-            .where(eq(agents.id, id));
-          await transaction
-            .update(agentProfiles)
-            .set({
+      if (input.isolated === true) await requireOwnerMayIsolate(actor, id);
+      /*
+       * The key is stored once, before the first attempt, and named by every attempt after it. A key
+       * that is stored and then never named because every attempt failed is said loudly below; the
+       * next save of a key rotates it (see `storeAgentAuth`).
+       */
+      let auth: AgentAuth | undefined;
+      try {
+        // `manage: false` because this change makes the manage check itself, after the refusal below.
+        const updated = await edit(
+          actor,
+          id,
+          async (bot, profile) => {
+            /*
+             * Before the manage check, so a tenant package's Bot is refused for what was asked of it
+             * rather than with the general "built in and can't be changed", and the trail can say so.
+             */
+            if (
+              input.isolated === true &&
+              (profile.systemOwned || profile.ownerUserId === null)
+            ) {
+              throw new IsolationRefusedError("unowned");
+            }
+            requireManageable(actor, profile);
+            if (input.auth && vault && !auth) {
+              // An agent that already has a live key is being edited, not first-created, so the vault
+              // rotates rather than inserting a second live row for the same agent id.
+              auth = await storeAgentAuth({
+                store: vault.store,
+                agentId: id,
+                header: input.auth.header,
+                value: input.auth.value,
+                previousCredentialId: authFromConfiguration(bot.configuration)
+                  ?.credentialId,
+              });
+            }
+            /**
+             * The endpoint and the key change here too, not only at creation.
+             *
+             * The form sends both and the route validates both, so an edit that dropped them looked
+             * like it had worked: the screen reported success and the Bot kept answering at the old
+             * address, which is the worst way to move an endpoint. A key is replaced only when one is
+             * supplied, because the form cannot show what is stored and sending nothing means "leave
+             * it alone" rather than "remove it".
+             *
+             * A coworker that runs here runs on its role description, so editing one has to move both:
+             * `create` writes it into `configuration.systemPrompt` for a coworker with no address, and
+             * that prompt is the ONLY instruction such a coworker ever gets. Only for `built_in`: a
+             * remote Bot's instruction travels as the standing role message instead, and the tenant
+             * package's Bots, whose `system_prompt` is deliberately not their `role_description`,
+             * cannot reach this code at all: `requireManageable` refuses anything the package owns.
+             */
+            const configuration = {
+              ...bot.configuration,
+              ...(bot.type === "built_in"
+                ? { systemPrompt: input.roleDescription }
+                : {}),
+              ...(input.endpoint ? { endpoint: input.endpoint } : {}),
+              ...(auth ? { auth } : {}),
+            };
+            return {
+              name: input.name,
               title: input.title,
               roleDescription: input.roleDescription,
               visibility: input.visibility,
+              configuration,
               // Absent leaves it alone; see `CreateAgentInput.isolated`.
               ...(input.isolated === undefined
                 ? {}
                 : { isolated: input.isolated }),
-              updatedAt,
-            })
-            .where(eq(agentProfiles.agentId, id));
-
-          const updated = await findAccessibleProfile(transaction, actor, id);
-          if (!updated) throw new AgentNotFoundError(id);
-          return updated;
-        },
-        { isolationLevel: "read committed" },
-      );
+            };
+          },
+          { manage: false },
+        );
+        return profileAfterWrite(actor, updated);
+      } catch (error) {
+        if (auth) {
+          console.error(
+            JSON.stringify({
+              type: "agent-key-stored-not-named",
+              botId: id,
+              credentialId: auth.credentialId,
+              note: "A Bot's new key is in the vault but Intelligence did not record it, so the Bot still names the key it had. Saving the key again replaces both.",
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+        throw error;
+      }
     },
 
     async duplicate(actor, id) {
       /*
        * A copy is the duplicator's Bot, so it keeps a computer of its own only if they may give it
-       * one. Asked up front for the reason `requireMayIsolate` gives, and answered for every
-       * duplicate rather than only an isolated source's, because the source is read inside.
+       * one. Asked up front, and answered for every duplicate rather than only an isolated source's.
        */
       const mayKeepIsolated = await mayIsolate(actor.id);
-      return database.transaction(async (transaction) => {
-        const source = await findAccessibleProfile(transaction, actor, id);
-        if (!source) throw new AgentNotFoundError(id);
+      const stored = await bots().find(id);
+      const source = await accessibleProfile(database, actor, stored);
+      if (!stored || !source) throw new AgentNotFoundError(id);
 
-        /*
-         * The stored row, because a profile does not carry what a copy has to reproduce.
-         *
-         * `AgentProfile` projects `endpoint` out of the configuration and nothing else, which is all
-         * an edit form needs and half of what this needs: a `built_in` coworker has no endpoint and
-         * a prompt instead. Read here rather than widened into the profile, so the DTO every surface
-         * gets does not start carrying a Bot's instructions. Inside the transaction, and after the
-         * access check, so this cannot read a row the caller may not see.
-         */
-        const [stored] = await transaction
-          .select({ type: agents.type, configuration: agents.configuration })
-          .from(agents)
-          .where(eq(agents.id, id))
-          .limit(1);
-        if (!stored) throw new AgentNotFoundError(id);
-
-        // `auth` is a vault reference and is deliberately not carried: see `runForDuplicate`.
-        const run = runForDuplicate(stored, managedConfiguration);
-        // After the source read, so a source that brings its own endpoint or its own prompt needs no
-        // managed Bot to fall back to.
-        if (!run) {
-          throw new ManagedAgentUnavailableError();
-        }
-        const duplicateId = newAgentId();
-        await transaction.insert(agents).values({
-          id: duplicateId,
-          name: source.name,
-          type: run.type,
-          configuration: run.configuration,
-        });
-        await transaction.insert(agentProfiles).values({
-          agentId: duplicateId,
-          ownerUserId: actor.id,
-          title: source.title,
-          roleDescription: source.roleDescription,
-          avatarSeed: source.avatarSeed,
-          visibility: "private",
-          isolated: source.isolated && mayKeepIsolated,
-        });
-
-        const duplicate = await findAccessibleProfile(
-          transaction,
-          actor,
-          duplicateId,
-        );
-        if (!duplicate) throw new AgentNotFoundError(duplicateId);
-        return duplicate;
+      /*
+       * The stored Bot, because a profile does not carry what a copy has to reproduce: `AgentProfile`
+       * projects `endpoint` out of the configuration and nothing else, and a `built_in` coworker has
+       * no endpoint and a prompt instead. `auth` is a vault reference and is deliberately not carried:
+       * see `runForDuplicate`.
+       */
+      const run = runForDuplicate(stored, managedConfiguration);
+      // After the source read, so a source that brings its own endpoint or its own prompt needs no
+      // managed Bot to fall back to.
+      if (!run) {
+        throw new ManagedAgentUnavailableError();
+      }
+      const duplicate = await bots().create({
+        id: newAgentId(),
+        name: source.name,
+        type: run.type,
+        configuration: run.configuration,
+        title: source.title,
+        roleDescription: source.roleDescription,
+        avatarSeed: source.avatarSeed,
+        visibility: "private",
+        ownerUserId: actor.id,
+        packageId: null,
+        isolated: source.isolated && mayKeepIsolated,
       });
+      return profileAfterWrite(actor, duplicate);
     },
 
-    setHidden(actor, id, hidden) {
-      return database.transaction(async (transaction) => {
-        const profile = await findAccessibleProfile(transaction, actor, id);
-        if (!profile) throw new AgentNotFoundError(id);
-        // An administrator put this Team Bot in this person's sidebar; it stays there.
-        if (hidden) {
-          const [assigned] = await transaction
-            .select({ agentId: teamBotPublications.agentId })
-            .from(teamBotPublications)
-            .where(
-              and(
-                eq(teamBotPublications.agentId, id),
-                sql`${assignedCondition(actor.id)}`,
-              ),
-            )
-            .limit(1);
-          if (assigned) throw new AgentAssignedError(id);
-        }
-
-        await transaction
-          .insert(agentPreferences)
-          .values({
-            userId: actor.id,
-            agentId: id,
-            hiddenAt: hidden ? new Date() : null,
-          })
-          .onConflictDoUpdate({
-            target: [agentPreferences.userId, agentPreferences.agentId],
-            set: { hiddenAt: hidden ? new Date() : null },
-          });
-      });
+    async setHidden(actor, id, hidden) {
+      const bot = await bots().find(id);
+      const profile = await accessibleProfile(database, actor, bot);
+      if (!profile) throw new AgentNotFoundError(id);
+      // An administrator put this Team Bot in this person's sidebar; it stays there.
+      if (hidden && (await isAssignedTo(database, actor.id, id)))
+        throw new AgentAssignedError(id);
+      await botConfiguration().changePreferences(actor.id, [
+        { op: "setBot", botId: id, hiddenAt: hidden ? new Date() : null },
+      ]);
     },
 
     /*
-     * The same row as hiding, one column over, and the upsert sets only its own column: pinning a
-     * hidden coworker keeps it hidden, and it comes back pinned when it is unhidden. Two people, or
-     * two tabs, pinning at once meet on the (user, agent) primary key, so the second write updates
-     * the row the first one made instead of failing.
+     * The same entry as hiding, one field over, and the change sets only its own field: pinning a
+     * hidden coworker keeps it hidden, and it comes back pinned when it is unhidden. Two tabs pinning
+     * at once are two changes to the same entry in Intelligence, applied one after the other.
      */
-    setPinned(actor, id, pinned) {
-      return database.transaction(async (transaction) => {
-        const profile = await findAccessibleProfile(transaction, actor, id);
-        if (!profile) throw new AgentNotFoundError(id);
-
-        await transaction
-          .insert(agentPreferences)
-          .values({
-            userId: actor.id,
-            agentId: id,
-            pinnedAt: pinned ? new Date() : null,
-          })
-          .onConflictDoUpdate({
-            target: [agentPreferences.userId, agentPreferences.agentId],
-            set: { pinnedAt: pinned ? new Date() : null },
-          });
-      });
+    async setPinned(actor, id, pinned) {
+      const bot = await bots().find(id);
+      const profile = await accessibleProfile(database, actor, bot);
+      if (!profile) throw new AgentNotFoundError(id);
+      await botConfiguration().changePreferences(actor.id, [
+        { op: "setBot", botId: id, pinnedAt: pinned ? new Date() : null },
+      ]);
     },
 
-    softDelete(actor, id) {
-      return database.transaction(
-        async (transaction) => {
-          await lockProfileMutationRows(transaction, id);
-          const profile = await findAccessibleProfile(transaction, actor, id);
-          if (!profile) throw new AgentNotFoundError(id);
-          requireManageable(actor, profile);
+    async softDelete(actor, id) {
+      let bot = await bots().find(id);
+      for (let attempt = 1; ; attempt++) {
+        const profile = await accessibleProfile(database, actor, bot);
+        if (!bot || !profile) throw new AgentNotFoundError(id);
+        requireManageable(actor, profile);
+        try {
+          // At the version just checked, so a Bot that became protected meanwhile (a package took
+          // it over) is read again and refused rather than deleted.
+          await bots().remove(id, undefined, bot.version);
+          break;
+        } catch (error) {
+          if (error instanceof BotMissingError)
+            throw new AgentNotFoundError(id);
+          if (
+            !(error instanceof BotVersionConflictError) ||
+            attempt >= EDIT_ATTEMPTS
+          )
+            throw error;
+          bot = await bots().refresh(id);
+        }
+      }
 
-          const deletedAt = new Date();
-          await transaction
-            .update(agentProfiles)
-            .set({ deletedAt, updatedAt: deletedAt })
-            .where(eq(agentProfiles.agentId, id));
-
-          /*
-           * And its key stops working.
-           *
-           * A deleted Bot left its credential in the vault, decryptable and still valid, with
-           * nothing listing it and no screen able to reach it: deleting the Bot was the last chance
-           * anybody had to retire it. The profile is a soft delete, deliberately, but the key is not
-           * something to keep pending an undelete that would ask for a new one anyway.
-           */
-          if (vault) {
-            const [row] = await transaction
-              .select({ configuration: agents.configuration })
-              .from(agents)
-              .where(eq(agents.id, id))
-              .limit(1);
-            await retireReplacedKey(
-              vault.store,
-              (row?.configuration ?? {}) as Record<string, unknown>,
-              {},
-              // In this transaction, so the key is retired exactly when the deletion is. On its own
-              // connection the revoke would commit even where the delete rolled back, leaving a Bot
-              // that still exists and can no longer reach its endpoint.
-              transaction,
-            );
-          }
-        },
-        { isolationLevel: "read committed" },
-      );
+      /*
+       * And its key stops working.
+       *
+       * A deleted Bot left its credential in the vault, decryptable and still valid, with nothing
+       * listing it and no screen able to reach it: deleting the Bot was the last chance anybody had
+       * to retire it. The Bot is a soft delete, deliberately, but the key is not something to keep
+       * pending an undelete that would ask for a new one anyway. After Intelligence has deleted the
+       * Bot, so a refused delete leaves a Bot that still reaches its endpoint; `retireReplacedKey`
+       * never throws, and says so loudly if the vault refuses.
+       */
+      if (vault) {
+        await retireReplacedKey(vault.store, bot.configuration, {});
+      }
     },
 
-    issueCallbackToken(actor, id) {
-      return database.transaction(
-        async (transaction) => {
-          await lockProfileMutationRows(transaction, id);
-          const profile = await findAccessibleProfile(transaction, actor, id);
-          if (!profile) throw new AgentNotFoundError(id);
-          /*
-           * Whoever may change the agent may credential it.
-           *
-           * The same gate as renaming it or repointing its endpoint, and repointing the endpoint is
-           * the more dangerous of the two: it decides which process the token is for.
-           */
-          requireManageable(actor, profile);
-
-          const token = mintCallbackToken();
-          const issuedAt = new Date();
-          await transaction
-            .update(agentProfiles)
-            .set({
-              callbackTokenHash: hashCallbackToken(token),
-              callbackTokenIssuedAt: issuedAt,
-              updatedAt: issuedAt,
-            })
-            .where(eq(agentProfiles.agentId, id));
-
-          // The only time it is readable. Nothing here writes it to a log.
-          return token;
-        },
-        { isolationLevel: "read committed" },
-      );
+    async issueCallbackToken(actor, id) {
+      /*
+       * Whoever may change the agent may credential it.
+       *
+       * The same gate as renaming it or repointing its endpoint, and repointing the endpoint is
+       * the more dangerous of the two: it decides which process the token is for.
+       */
+      const token = mintCallbackToken();
+      const issuedAt = new Date();
+      await edit(actor, id, () => ({
+        callbackTokenHash: hashCallbackToken(token),
+        callbackTokenIssuedAt: issuedAt,
+      }));
+      // The only time it is readable. Nothing here writes it to a log.
+      return token;
     },
 
-    revokeCallbackToken(actor, id) {
-      return database.transaction(
-        async (transaction) => {
-          await lockProfileMutationRows(transaction, id);
-          const profile = await findAccessibleProfile(transaction, actor, id);
-          if (!profile) throw new AgentNotFoundError(id);
-          requireManageable(actor, profile);
-
-          const now = new Date();
-          await transaction
-            .update(agentProfiles)
-            .set({
-              callbackTokenHash: null,
-              callbackTokenIssuedAt: null,
-              updatedAt: now,
-            })
-            .where(eq(agentProfiles.agentId, id));
-        },
-        { isolationLevel: "read committed" },
-      );
+    async revokeCallbackToken(actor, id) {
+      await edit(actor, id, () => ({
+        callbackTokenHash: null,
+        callbackTokenIssuedAt: null,
+      }));
     },
 
-    agentForCallbackToken(hash) {
-      return findByTokenHash(database, hash);
+    /**
+     * Which agent a token belongs to.
+     *
+     * Found by hash and then compared in constant time. The lookup alone would be enough to identify
+     * the Bot, and the comparison is what keeps a timing difference from confirming a partial guess.
+     */
+    async agentForCallbackToken(hash) {
+      const bot = await bots().byCallbackTokenHash(hash);
+      if (!bot?.callbackTokenHash) return null;
+      return sameToken(bot.callbackTokenHash, hash) ? { id: bot.id } : null;
     },
   };
 }

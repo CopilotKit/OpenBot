@@ -20,7 +20,7 @@
 import type { BotTaskOrigin } from "../db/schema/tasks";
 
 /* ------------------------------------------------------------------------------------------------
- * The run ledger's words (`proactive_runs`).
+ * The run ledger's words (Intelligence's `check-in-runs`).
  * ---------------------------------------------------------------------------------------------- */
 
 /** What started a check-in: the sweep, or the person's Run now. */
@@ -276,7 +276,7 @@ export type AttentionItem = {
 
 /** One ping to one person: every item no ping had carried yet, across all their Bots. */
 export type AttentionPing = {
-  /** The `proactive_pings` row. Delivery builds its dedupe keys from it. */
+  /** The ping's id in Intelligence's `check-in-pings`. Delivery builds its dedupe keys from it. */
   pingId: string;
   ownerUserId: string;
   /** The folded message for Slack, Teams and SMS, naming each item's Bot. */

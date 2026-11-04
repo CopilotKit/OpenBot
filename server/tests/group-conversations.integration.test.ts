@@ -1,8 +1,15 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
-import { eq, inArray, like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import type { AuditEventInput } from "../src/audit";
@@ -18,17 +25,16 @@ import {
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  channels,
-  intelligenceChannelMappings,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { users, workItems } from "../src/db/schema";
+import { createDeliveryScopeAuthoriser } from "../src/delivery/authorise";
+import { createDeliveryRouter } from "../src/delivery/router";
+import { createDeliveryStore } from "../src/delivery/store";
+import type { DeliveryScope } from "../src/delivery/types";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { createWorkQueue } from "../src/work/queue";
+import { changeBot, removeBots, useTestBots } from "./support/bots";
+import { purgeConversations } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -45,21 +51,13 @@ const createdChannels: string[] = [];
 
 afterEach(async () => {
   await database.delete(workItems).where(like(workItems.key, `${prefix}%`));
-  for (const id of createdChannels.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, id));
-    await database.delete(channels).where(eq(channels.id, id));
-  }
-  if (createdAgents.length) {
-    const ids = createdAgents.splice(0);
-    await database
-      .delete(agentProfiles)
-      .where(inArray(agentProfiles.agentId, ids));
-    await database.delete(agents).where(inArray(agents.id, ids));
-  }
+  await purgeConversations(createdChannels.splice(0));
+  await removeBots(createdAgents.splice(0));
   for (const id of createdUsers.splice(0))
     await database.delete(users).where(eq(users.id, id));
+});
+beforeAll(async () => {
+  await useTestBots();
 });
 afterAll(async () => {
   await database.$client.close();
@@ -216,14 +214,14 @@ describe("group conversations in PostgreSQL", () => {
     // A group Bot's thread authorises its own coordination callbacks, and no one else's.
     const threadId = calls[0]?.threadId ?? "";
     expect(
-      await groupSourceForRun(database, {
+      await groupSourceForRun({
         threadId,
         actorId: owner.id,
         botId: ada,
       }),
     ).toEqual({ channelId: channel.id, botId: ada });
     expect(
-      await groupSourceForRun(database, {
+      await groupSourceForRun({
         threadId,
         actorId: owner.id,
         botId: grace,
@@ -274,7 +272,7 @@ describe("group conversations in PostgreSQL", () => {
     await drain(conversations);
     expect(calls.map((call) => call.agentId)).toEqual([ada]);
     expect(
-      await groupSourceForRun(database, {
+      await groupSourceForRun({
         threadId: calls[0]?.threadId,
         actorId: stranger.id,
         botId: ada,
@@ -584,6 +582,112 @@ describe("group conversations in PostgreSQL", () => {
       text: "From your notes: the launch slipped.",
     });
   });
+  /*
+   * FOUND IN THE BROWSER: a group of two people and two Bots. Once the second person joined, every
+   * Bot failed with "Conversation access has been revoked." The owner's permission to share is an
+   * approval, and opening one tells the owner on the thread the run is on, which in a group is the
+   * Bot's own thread. Delivery only allowed the conversation's thread, so it refused the notice and
+   * the turn failed with it.
+   */
+  test("with another person in the group, the owner is told of the share approval on the Bot's own thread", async () => {
+    const owner = await person();
+    const teammate = await person();
+    const ada = await bot(owner, "Ada");
+    const grace = await bot(owner, "Grace");
+    // The server's delivery rule (index.ts `deliveryScopeFor`), over the real channel and profile stores.
+    const scopeFor = async (
+      ownerUserId: string,
+      channelId: string,
+      agentId: string,
+    ): Promise<DeliveryScope | null> => {
+      const actor: AgentActor = { id: ownerUserId, role: "user" };
+      const [channel, profile] = await Promise.all([
+        channelStore.get(actor, channelId),
+        profileStore.get(actor, agentId),
+      ]);
+      return channel?.active && profile && channel.agentIds.includes(agentId)
+        ? { ownerUserId, channelId, agentId, threadId: channel.threadId }
+        : null;
+    };
+    const authorise = createDeliveryScopeAuthoriser(scopeFor);
+    const router = createDeliveryRouter({
+      store: createDeliveryStore(database),
+      queue: createWorkQueue(database),
+      owner: `${prefix}-delivery`,
+      authoriseScope: authorise,
+      scopeFor,
+      runTurn: async () => ({ replyText: "" }),
+      providers: {},
+    });
+    const told: DeliveryScope[] = [];
+    const privateShare = createPrivateShareCheck({
+      approvals: {
+        // What approvals/wiring.ts does on opening one: tell the owner, in the conversation the run is from.
+        open: async (action) => {
+          const source = await groupSourceForRun({
+            threadId: action.threadId,
+            actorId: action.actorId,
+            botId: action.botId,
+          });
+          if (!source || !action.threadId)
+            throw new Error("the run's conversation was not found");
+          const scope = {
+            ownerUserId: action.actorId,
+            channelId: source.channelId,
+            agentId: source.botId,
+            threadId: action.threadId,
+          };
+          await router.notify(scope, {
+            id: `${prefix}-share-notice`,
+            kind: "approval",
+            requestId: `${prefix}-share-notice`,
+            text: "Ada asks for approval to share with this group.",
+          });
+          told.push(scope);
+          return { id: `${prefix}-share-notice`, status: "pending" } as never;
+        },
+        list: async () => [],
+        rules: async () => [],
+      },
+    });
+    const { conversations } = service({
+      replies: { [ada]: () => "From your notes: the launch slipped." },
+      privateShare,
+    });
+    const channel = await conversations.create(owner.id, {
+      agentIds: [ada, grace],
+    });
+    const [row] = await database
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, teammate.id));
+    await conversations.addMember(owner.id, channel.id, { email: row?.email });
+    await conversations.send(owner.id, channel.id, {
+      id: `${prefix}-share-notice-send`,
+      text: "status for everyone?",
+      agentId: ada,
+    });
+    await drain(conversations);
+
+    // The reply waits for the owner, who was told; it did not fail.
+    const seen = await conversations.list(teammate.id, channel.id);
+    expect(seen.messages.at(-1)).toMatchObject({
+      agentId: ada,
+      status: "waiting",
+    });
+    expect(JSON.stringify(seen)).not.toContain("revoked");
+    expect(told).toHaveLength(1);
+    const [scope] = told;
+    if (!scope) throw new Error("Expected the owner to be told");
+    // The Bot's own thread, not the conversation's.
+    expect(scope.threadId).not.toBe(
+      (await channelStore.get(owner, channel.id))?.threadId,
+    );
+
+    // Only that owner, for that Bot, on that Bot's thread: the rule is no wider than it was.
+    expect(await authorise({ ...scope, ownerUserId: teammate.id })).toBe(false);
+    expect(await authorise({ ...scope, agentId: grace })).toBe(false);
+  });
   test("a reply held for the owner's permission still hands off to the Bot it names", async () => {
     const owner = await person();
     const teammate = await person();
@@ -694,10 +798,8 @@ describe("group conversations in PostgreSQL", () => {
     const ada = await bot(owner, "Ada");
     const grace = await bot(owner, "Grace");
     // Bots the teammate may use too, so the teammate can address them in the group.
-    await database
-      .update(agentProfiles)
-      .set({ visibility: "public" })
-      .where(inArray(agentProfiles.agentId, [ada, grace]));
+    for (const id of [ada, grace])
+      await changeBot(id, { visibility: "public" });
     const privateShare = createPrivateShareCheck({
       approvals: {
         open: async () =>
@@ -806,10 +908,7 @@ describe("group conversations in PostgreSQL", () => {
       connectedServers: async (userId) =>
         new Set(userId === teammate.id ? ["gmail"] : []),
     });
-    await database
-      .update(agentProfiles)
-      .set({ roleDescription: "Sends mail." })
-      .where(eq(agentProfiles.agentId, teamBot));
+    await changeBot(teamBot, { roleDescription: "Sends mail." });
     await teamBots.publish(owner, teamBot, {
       audience: "team",
       emails: [],

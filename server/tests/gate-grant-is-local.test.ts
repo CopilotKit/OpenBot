@@ -2,27 +2,33 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  agents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema";
+import { mcpTools } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestVault();
+});
 
 /* The pool this file opened, given back. `bun test` runs every file in one process and nothing
  * reaps an idle connection, so a pool held to the end of the run is two connections the rest of
@@ -99,7 +105,7 @@ function storeWith(grantIsLocal: boolean) {
 
 /** An app at its own url, with one action and NO connection row anywhere. */
 async function seed(app: string, mode: "shared" | "personal") {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: "Team GitHub",
     vendor: "Composio",
@@ -120,20 +126,18 @@ async function seed(app: string, mode: "shared" | "personal") {
 }
 
 async function clean() {
-  for (const app of [shared, personal]) {
-    await database
-      .delete(brokeredConnections)
-      .where(eq(brokeredConnections.app, app));
-    await database.delete(mcpServers).where(eq(mcpServers.id, app));
-  }
-  await database.delete(agents).where(eq(agents.id, bot));
+  const apps = [shared, personal];
+  await removeConnectionsWhere(
+    (connection) =>
+      connection.kind === "brokered" && apps.includes(connection.app),
+  );
+  await removeServers(apps);
+  await removeBots([bot]);
 }
 
 beforeEach(async () => {
   await clean();
-  await database
-    .insert(agents)
-    .values({ id: bot, name: "Helper", type: "built_in", configuration: {} });
+  await seedBot({ id: bot, name: "Helper", type: "built_in" });
 });
 afterEach(async () => {
   useComposioClient(null);

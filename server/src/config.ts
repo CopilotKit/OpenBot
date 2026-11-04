@@ -20,7 +20,7 @@ import {
   deploymentAddresses,
   isLoopbackHost,
 } from "@openbot/shared/this-machine";
-import { singleUserEnabled } from "./auth/dev-actor";
+import { singleUserEnabled, singleUserRequested } from "./auth/dev-actor";
 import { normalizeDomain } from "./auth/email-domain";
 import { organizationAuthority } from "./auth/organization";
 import type { ActionPolicy } from "./computer/policy";
@@ -122,6 +122,25 @@ export type GithubAppConfig = {
   clientSecret: string;
 };
 
+/**
+ * Sign-in through a CopilotKit organization, for a hosted OpenBot.
+ *
+ * The OpenBot serves exactly one CopilotKit organization (a Clerk organization). People sign in
+ * at CopilotKit, which hands them back with a one-time code; OpenBot redeems the code with CopilotKit
+ * server to server and admits only members of that organization. Their organization role decides
+ * their role here: `org:admin` is an admin, every other member is a user. See auth/copilotkit.ts.
+ */
+export type CopilotKitSignInConfig = {
+  /** The Clerk organization id this OpenBot serves, `org_...`. */
+  organizationId: string;
+  /** Where people sign in to CopilotKit: the CopilotKit dashboard origin. */
+  dashboardUrl: string;
+  /** Where OpenBot redeems sign-in codes: the CopilotKit Ops API origin. */
+  opsApiUrl: string;
+  /** OpenBot's own credential for redeeming them. */
+  opsApiToken: string;
+};
+
 export type AuthConfig = {
   baseUrl: string;
   secret: string;
@@ -153,6 +172,12 @@ export type AuthConfig = {
   microsoft?: MicrosoftAuthConfig;
   /** Okta is an OIDC provider rather than a named one, so it is identified by its issuer. */
   okta?: OAuthClient & { issuer: string };
+  /**
+   * Sign-in through a CopilotKit organization. Never alongside a provider above, an organization
+   * authority or INITIAL_ADMIN_EMAILS: roles come from the organization, so there is no second
+   * place that decides who is an admin.
+   */
+  copilotKit?: CopilotKitSignInConfig;
 };
 
 /**
@@ -959,11 +984,34 @@ function authConfig(
 ): AuthConfig | undefined {
   const microsoft = microsoftAuth(environment);
   const okta = oktaAuth(environment);
+  const copilotKit = copilotKitSignIn(environment);
 
   const secret = optional(environment, "BETTER_AUTH_SECRET");
   const baseUrl = url(environment, "BETTER_AUTH_URL");
 
-  if (!google && !microsoft && !okta) {
+  /*
+   * One way in. A CopilotKit organization decides who may sign in and who is an admin, so a
+   * provider, a directory or an admin list beside it would be a second answer to both questions.
+   */
+  if (copilotKit) {
+    if (google || microsoft || okta) {
+      throw new Error(
+        "COPILOTKIT_ORGANIZATION_ID signs people in through CopilotKit, so it cannot be combined with GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_*. Configure one way to sign in.",
+      );
+    }
+    if (commaSeparated(environment, "INITIAL_ADMIN_EMAILS").length > 0) {
+      throw new Error(
+        "COPILOTKIT_ORGANIZATION_ID makes the organization's admins in CopilotKit the admins here, so INITIAL_ADMIN_EMAILS must be unset.",
+      );
+    }
+    if (optional(environment, "SCIM_BEARER_TOKEN")) {
+      throw new Error(
+        "COPILOTKIT_ORGANIZATION_ID takes people from the CopilotKit organization, so SCIM_BEARER_TOKEN must be unset.",
+      );
+    }
+  }
+
+  if (!google && !microsoft && !okta && !copilotKit) {
     if (secret || baseUrl) {
       throw new Error(
         "BETTER_AUTH_SECRET or BETTER_AUTH_URL is set but no identity provider is. Configure GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_*, or unset both",
@@ -993,7 +1041,7 @@ function authConfig(
     environment,
     "INITIAL_ADMIN_EMAILS",
   );
-  if (initialAdminEmails.length === 0) {
+  if (initialAdminEmails.length === 0 && !copilotKit) {
     throw new Error(
       "Sign-in requires INITIAL_ADMIN_EMAILS naming at least one administrator. Nothing else grants the role, and no screen can promote somebody once the deployment is running",
     );
@@ -1077,7 +1125,86 @@ function authConfig(
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
     ...(okta ? { okta } : {}),
+    ...(copilotKit ? { copilotKit } : {}),
   };
+}
+
+/** The four settings that turn on sign-in through a CopilotKit organization, all or none. */
+const COPILOTKIT_SIGN_IN_SETTINGS = [
+  "COPILOTKIT_ORGANIZATION_ID",
+  "COPILOTKIT_DASHBOARD_URL",
+  "COPILOTKIT_OPS_API_URL",
+  "COPILOTKIT_OPS_API_TOKEN",
+] as const;
+
+/**
+ * Sign-in through a CopilotKit organization, when this OpenBot is hosted for one.
+ *
+ * All four or none, refused at start-up otherwise: three of them make a sign-in button that fails
+ * at somebody's first attempt. The organization id is Clerk's, so it is checked for that shape; an
+ * organization slug or name pasted here would match nobody and refuse everybody.
+ */
+function copilotKitSignIn(
+  environment: Environment,
+): CopilotKitSignInConfig | undefined {
+  const values = COPILOTKIT_SIGN_IN_SETTINGS.map((name) =>
+    optional(environment, name),
+  );
+  if (values.every((value) => value === undefined)) return undefined;
+  const missing = COPILOTKIT_SIGN_IN_SETTINGS.filter(
+    (_, index) => values[index] === undefined,
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `Signing in through CopilotKit needs ${COPILOTKIT_SIGN_IN_SETTINGS.join(", ")}. Missing: ${missing.join(", ")}.`,
+    );
+  }
+  const [organizationId, dashboardUrl, opsApiUrl, opsApiToken] =
+    values as string[];
+  if (!/^org_[A-Za-z0-9]+$/.test(organizationId as string)) {
+    throw new Error(
+      "COPILOTKIT_ORGANIZATION_ID must be the organization's id in CopilotKit, which starts with org_.",
+    );
+  }
+  return {
+    organizationId: organizationId as string,
+    dashboardUrl: copilotKitOrigin(
+      "COPILOTKIT_DASHBOARD_URL",
+      dashboardUrl as string,
+    ),
+    opsApiUrl: copilotKitOrigin("COPILOTKIT_OPS_API_URL", opsApiUrl as string),
+    opsApiToken: opsApiToken as string,
+  };
+}
+
+/**
+ * A CopilotKit address as a bare origin: HTTPS, or HTTP on loopback for local development.
+ *
+ * The sign-in code travels to one of these and OpenBot's credential to the other, so neither may be
+ * plain HTTP across a network.
+ */
+function copilotKitOrigin(name: string, value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} must be a URL, such as https://example.com`);
+  }
+  const loopback = reachOf(value) === "loopback";
+  if (
+    (parsed.protocol !== "https:" &&
+      !(parsed.protocol === "http:" && loopback)) ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    parsed.pathname !== "/"
+  ) {
+    throw new Error(
+      `${name} must be an HTTPS origin with no path (HTTP is allowed only on loopback).`,
+    );
+  }
+  return parsed.origin;
 }
 
 /**
@@ -1572,6 +1699,16 @@ export function loadConfig(
   const organizationAuthUrl = organizationAuthValue
     ? organizationAuthority(organizationAuthValue)
     : undefined;
+  if (auth?.copilotKit && organizationAuthUrl) {
+    throw new Error(
+      "COPILOTKIT_ORGANIZATION_ID and OPENBOT_ORGANIZATION_AUTH_URL are two different ways to sign in. Set one.",
+    );
+  }
+  if (auth?.copilotKit && singleUserRequested(environment)) {
+    throw new Error(
+      "OPENBOT_SINGLE_USER=true admits everybody without signing in, so it cannot be combined with COPILOTKIT_ORGANIZATION_ID. Remove it.",
+    );
+  }
   const managedAgent = managedAgentConfig(environment);
   const githubApp = githubAppConfig(environment);
   const publicUrl = (
@@ -1642,7 +1779,11 @@ export function loadConfig(
      */
     singleUser:
       !organizationAuthUrl &&
-      singleUserAllowed(environment, configuredAuthProviders(auth).length > 0),
+      singleUserAllowed(
+        environment,
+        configuredAuthProviders(auth).length > 0 ||
+          auth?.copilotKit !== undefined,
+      ),
     edition,
     accessibility: accessibilityEnabled(environment),
     generativeUi: generativeUiEnabled(environment),

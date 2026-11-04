@@ -689,8 +689,13 @@ test("puts the server beside the database and the Bots, and the worker beside th
 
   expect(services.server.networks).toEqual(["data", "default"]);
   expect(services.worker.networks).toEqual(["data"]);
+  // The routines live in Intelligence, so the worker holds the same Intelligence address and project
+  // key as the server, and nothing else of the deployment's.
   expect(Object.keys(services.worker.environment ?? {}).sort()).toEqual([
     "DATABASE_URL",
+    "INTELLIGENCE_API_KEY",
+    "INTELLIGENCE_API_URL",
+    "INTELLIGENCE_GATEWAY_WS_URL",
     "SERVER_INTERNAL_URL",
     "WORKER_SHARED_SECRET",
   ]);

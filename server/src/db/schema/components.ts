@@ -5,7 +5,6 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import { agents } from "./core";
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -25,6 +24,10 @@ const updatedAt = () =>
  * `name` is the primary key and a contract. It is the tool name the model calls, the key the
  * app maps to a renderer, and the thing a customer's fork keeps when it replaces the component. A
  * surrogate id would let two rows claim one name and would break that mapping silently.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const components = pgTable("components", {
   name: text("name").primaryKey(),
@@ -59,6 +62,10 @@ export const components = pgTable("components", {
  *
  * Open by default because a component is a way of answering, not a way of reaching anything. What a
  * component may READ is {@link componentFunctions}, which is strict: no row, no call.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const componentExclusions = pgTable(
   "component_exclusions",
@@ -66,9 +73,7 @@ export const componentExclusions = pgTable(
     componentName: text("component_name")
       .notNull()
       .references(() => components.name, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     /** An email. Who decided this Bot should not answer with this. */
     withheldBy: text("withheld_by"),
     withheldAt: createdAt(),
@@ -88,6 +93,10 @@ export const componentExclusions = pgTable(
  * holds it, so the Bot is already gated one level up; adding it here would be a second lock on the
  * same door and a second place for the two to disagree. Which Bot was on screen is recorded on every
  * call, because that is a fact about the call rather than about the permission.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const componentFunctions = pgTable(
   "component_functions",

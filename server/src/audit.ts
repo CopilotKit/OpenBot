@@ -1,19 +1,16 @@
 import { currentApprovalContext } from "@openbot/toolkit/continuation";
 import type { AuditInitiator } from "@openbot/toolkit/initiator";
 import {
-  and,
-  desc,
-  eq,
-  getTableColumns,
-  gt,
-  inArray,
-  lt,
-  or,
-  sql,
-} from "drizzle-orm";
-import type { PgColumn } from "drizzle-orm/pg-core";
+  AuditTrailClientError,
+  type StoredAuditEvent,
+} from "./audit-trail/client";
+import { writeOutbox } from "./audit-trail/outbox";
+import {
+  type AuditTrail,
+  auditTrail,
+  flushBeforeRead,
+} from "./audit-trail/trail";
 import type { Database } from "./db/client";
-import { auditEvents } from "./db/schema";
 import { parsePageLimit } from "./paging";
 
 const sensitiveKeys = new Set([
@@ -718,7 +715,7 @@ export function handoffInitiator(
  *
  * It no longer screens the `initiatorKind` filter. Screening there dropped an unrecognised kind
  * from the requested set, and a requested set left empty widened back into no filter at all; see
- * `matchesRequested`. An unrecognised kind is now simply a kind no row carries.
+ * `createAuditReader`. An unrecognised kind is now simply a kind no row carries.
  */
 export const auditInitiatorKinds = [
   "person",
@@ -772,6 +769,8 @@ export type AuditEventQuery = {
   actorUserId?: string;
   /** One kind, or several separated by commas, the way `eventType` takes several. */
   initiatorKind?: string;
+  /** Which routine, run or Bot started it: the initiator's id. Not offered on the admin URL. */
+  initiatorId?: string;
   targetType?: string;
   targetId?: string;
   from?: string;
@@ -783,11 +782,6 @@ export type AuditReader = {
     events: AuditEvent[];
     nextCursor?: string;
   }>;
-};
-
-type AuditCursor = {
-  createdAt: string;
-  id: string;
 };
 
 function normalizedKey(key: string) {
@@ -883,6 +877,42 @@ export function addAuditTap(tap: AuditTap): () => void {
   return () => auditTaps.delete(tap);
 }
 
+/**
+ * Which Bot acted, as Intelligence records it: the payload's `bot`, the field every row about a Bot
+ * already carries. Intelligence counts activity per agent from this (`botActivity`).
+ */
+function agentOf(payload: Record<string, unknown>): string | null {
+  return typeof payload.bot === "string" &&
+    payload.bot.length >= 1 &&
+    payload.bot.length <= 200
+    ? payload.bot
+    : null;
+}
+
+/**
+ * Which computer a `computer.*` row is about, as the culler groups them: the computer the row names,
+ * or for a row from before computers were per person, its Bot's own (`bot:<id>`).
+ */
+function computerOf(
+  eventType: string,
+  payload: Record<string, unknown>,
+): string | null {
+  if (!eventType.startsWith("computer.")) return null;
+  if (typeof payload.computer === "string") return payload.computer;
+  if (typeof payload.bot === "string") return `bot:${payload.bot}`;
+  return null;
+}
+
+/**
+ * Where every row of the trail is written: the outbox (`audit-trail/outbox.ts`), in the executor it is
+ * given, which is the caller's own transaction when it has one. Intelligence holds the trail; the
+ * drainer carries the row there and deletes it here once it is stored.
+ *
+ * A `computer.*` row also moves its computer's last-activity bookmark forward in the same statement,
+ * because the culler asks that question on every sweep and the answer must not be a network call.
+ *
+ * Taps hear the row once it is written, as they heard the old insert.
+ */
 export function createAuditStore(database: Database): AuditStore {
   return {
     insert: async ({ initiator, ...event }) => {
@@ -891,10 +921,22 @@ export function createAuditStore(database: Database): AuditStore {
         ...initiatorColumns(initiator),
         payload: redactAuditPayload(event.payload) as Record<string, unknown>,
       };
-      const [persisted] = await database
-        .insert(auditEvents)
-        .values(row)
-        .returning({ id: auditEvents.id, createdAt: auditEvents.createdAt });
+      // A blank id names nobody: Intelligence takes null for "none", and refuses a blank one.
+      const written = await writeOutbox(
+        database,
+        "event",
+        {
+          eventType: row.eventType,
+          actorUserId: row.actorUserId || null,
+          agentId: agentOf(row.payload),
+          initiator: { kind: row.initiatorKind, id: row.initiatorId || null },
+          target: { type: row.targetType, id: row.targetId || null },
+          payload: row.payload,
+        },
+        { computer: computerOf(row.eventType, row.payload) },
+      );
+      // What the taps are handed as the row's identity: the outbox row's, stable across deliveries.
+      const persisted = { id: written.id, createdAt: new Date() };
       for (const tap of auditTaps) {
         try {
           const run = currentApprovalContext();
@@ -917,10 +959,6 @@ export function createAuditStore(database: Database): AuditStore {
   };
 }
 
-function encodeCursor(cursor: AuditCursor) {
-  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
-}
-
 export class AuditQueryError extends Error {
   constructor(message: string) {
     super(message);
@@ -928,63 +966,29 @@ export class AuditQueryError extends Error {
   }
 }
 
-/**
- * The shape `audit_events.id` is, because that is what a cursor's id is compared against.
- *
- * Not a taste in ids: `lt(auditEvents.id, cursor.id)` is the DATABASE parsing this string, and
- * anything it cannot parse is `invalid input syntax for type uuid` raised from inside the reader.
- * Any version and any variant, because what the column accepts is what this must.
- */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CURSOR_REFUSAL = "cursor must be a valid audit page cursor";
 
 /**
- * A caller's page marker, read as the two values the query builder will actually bind.
+ * A caller's page marker, checked for the shape every page marker has before anything is asked.
  *
- * WHAT ARRIVES HERE IS A STRING SOMEBODY TYPED. The cast below used to say `AuditCursor` outright,
- * which was a promise nobody could keep: this is `JSON.parse` over base64 out of a query parameter,
- * so the fields hold whatever the caller put in them — a stale bookmark from another deployment's
- * trail, a hand-edited link, a cursor from a screen that has since changed shape. It says
- * `Partial<AuditCursor>` now so that the checks below are the only thing narrowing it, and it
- * admits `null` and `undefined` because `JSON.parse` answers both.
- *
- * THE ID IS CHECKED AS A UUID AND NOT MERELY AS PRESENT, which is the whole of this function's
- * history. It asked `!parsed.id`, so every truthy value passed: `"event-1"`, a number, an object.
- * All three reach `lt(auditEvents.id, cursor.id)` in {@link createAuditReader}, where PostgreSQL
- * answers `invalid input syntax for type uuid` — or, for the number, `operator does not exist: uuid
- * < integer`. That is a `DrizzleQueryError` rather than an {@link AuditQueryError}, so it goes
- * straight past the admin route's catch and leaves as a 500 with the statement and every bound
- * value in its message. The route's 400 exists for exactly this: a cursor the server cannot read is
- * the caller's to fix, the way a bad `from` or `to` already is. The only id a cursor can honestly
- * carry is one {@link encodeCursor} wrote off a row, and that is always a uuid.
- *
- * AND THE TIMESTAMP IS CHECKED AS A STRING BEFORE IT IS CHECKED AS A DATE, because `Date.parse`
- * stringifies whatever it is handed and the reader does not. A `createdAt` of `2020` parses as the
- * YEAR 2020 and passes; `new Date(2020)` in the query builder is 2020 MILLISECONDS after 1970. The
- * two readings of one field differ by fifty years, the endpoint answers 200, and the page comes
- * from the wrong end of the trail with nothing saying so. A silent wrong page on the record of
- * whose credential was spent on what is worse than a refusal, so the shape is settled here.
- *
- * WHAT IS RETURNED IS THE TWO FIELDS, rebuilt, so nothing else the caller packed into the cursor
- * travels on into the query.
+ * THE CURSOR IS INTELLIGENCE'S NOW, opaque to this server: base64url JSON naming the last row's
+ * moment to the microsecond and its id, bound to the filters that made it. Intelligence reads it and
+ * refuses one it cannot (a hand-edited id, a `createdAt` that is a number, one from other filters),
+ * and that refusal is a 400 here as well (see `createAuditReader`), never a 500 and never a page from
+ * the wrong end of the trail. What is checked here, before any round trip, is only what no cursor can
+ * be: not base64url, or not a JSON object inside it.
  */
-function decodeCursor(cursor: string): AuditCursor {
+function checkCursorShape(cursor: string): void {
   try {
+    if (!/^[A-Za-z0-9_-]+={0,2}$/.test(cursor))
+      throw new AuditQueryError(CURSOR_REFUSAL);
     const parsed = JSON.parse(
       Buffer.from(cursor, "base64url").toString("utf8"),
-    ) as Partial<AuditCursor> | null | undefined;
-
-    if (
-      typeof parsed?.id !== "string" ||
-      !UUID.test(parsed.id) ||
-      typeof parsed.createdAt !== "string" ||
-      Number.isNaN(Date.parse(parsed.createdAt))
-    ) {
-      throw new AuditQueryError("cursor must be a valid audit page cursor");
-    }
-    return { id: parsed.id, createdAt: parsed.createdAt };
-  } catch (error) {
-    if (error instanceof AuditQueryError) throw error;
-    throw new AuditQueryError("cursor must be a valid audit page cursor");
+    ) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      throw new AuditQueryError(CURSOR_REFUSAL);
+  } catch {
+    throw new AuditQueryError(CURSOR_REFUSAL);
   }
 }
 
@@ -992,122 +996,102 @@ function decodeCursor(cursor: string): AuditCursor {
  * A comma-separated filter, read as the set of values it names.
  *
  * `undefined` means the caller did not ask, and the column goes unconstrained. `[]` means the caller
- * did ask, and named nothing this trail could hold — a different answer, and the one the conditions
- * below have to keep telling apart.
+ * did ask, and named nothing this trail could hold — a different answer, and the one the reader has
+ * to keep telling apart.
  *
  * A blank value counts as not asking, the way a blank `?limit=` still reads as the default page.
  * Anything else the caller typed is an ask.
  */
 function requestedValues(raw: string | undefined) {
   if (raw === undefined || raw.trim() === "") return undefined;
-  return raw
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
+  return [
+    ...new Set(
+      raw
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+/** Intelligence's microseconds, as the millisecond ISO string this trail has always answered with. */
+function toMillisecondIso(timestamp: string): string {
+  return new Date(timestamp.replace(/\.(\d{3})\d*Z$/, ".$1Z")).toISOString();
+}
+
+function fromStored(stored: StoredAuditEvent): AuditEvent {
+  return {
+    id: stored.id,
+    actorUserId: stored.actorUserId,
+    initiatorKind: stored.initiator.kind,
+    initiatorId: stored.initiator.id,
+    eventType: stored.eventType,
+    targetType: stored.target.type,
+    targetId: stored.target.id,
+    payload: stored.payload,
+    createdAt: toMillisecondIso(stored.occurredAt),
+  };
 }
 
 /**
- * The condition a requested set puts on a column, including the condition that nothing satisfies.
+ * The trail, read from Intelligence, newest first, with the query semantics it always had.
  *
- * An asked-for set that came out empty must narrow to nothing. It used to widen instead: both
- * comma-separated filters collapsed an empty set into `undefined`, which `and(...)` drops, so
- * `?initiatorKind=nonsense` — where the unrecognised kind was screened out of the set — answered
- * the question "what did this initiator do" with every row in the trail, indistinguishable from a
- * real result. On the record of whose credential was spent on what, handing back everything is the
- * wrong direction to fail.
+ * AN ASKED-FOR SET THAT CAME OUT EMPTY NARROWS TO NOTHING. It used to widen instead: both
+ * comma-separated filters collapsed an empty set into "no filter", so `?initiatorKind=nonsense` —
+ * where the unrecognised kind was screened out of the set — answered the question "what did this
+ * initiator do" with every row in the trail, indistinguishable from a real result. On the record of
+ * whose credential was spent on what, handing back everything is the wrong direction to fail, so an
+ * empty set answers an empty page without asking.
  *
  * A value that matches nothing answers empty rather than 400, matching how every other value
- * parameter on this endpoint already behaves: `eventType`, `actorUserId`, `targetType` and
- * `targetId` all take a free-form string and answer with whatever it matches, and `eventType` names
- * a closed vocabulary just as `initiatorKind` does. What earns a 400 here is a value that cannot be
- * read at all — `from`, `to`, `cursor` — not one that reads fine and names no row. Rejecting an
- * unknown kind outright would also break `?initiatorKind=routine,nonsense`, which a caller unioning
- * kinds can still expect to answer for the kind it did name.
+ * parameter on this endpoint already behaves. What earns a 400 is a value that cannot be read at all —
+ * `from`, `to`, `cursor` — and Intelligence refusing the query is one of those: it is an
+ * {@link AuditQueryError}, so the admin route answers 400 with the sentence it always gave.
+ *
+ * WHAT THIS DEPLOYMENT JUST WROTE IS IN THE ANSWER. The outbox is flushed first, so a person who
+ * changes something and opens the trail sees the change.
  */
-function matchesRequested(column: PgColumn, values: string[] | undefined) {
-  if (!values) return undefined;
-  const [first, ...rest] = values;
-  if (first === undefined) return sql`false`;
-  if (rest.length === 0) return eq(column, first);
-  return inArray(column, [first, ...rest]);
-}
-
-export function createAuditReader(database: Database): AuditReader {
+export function createAuditReader(
+  _database: Database,
+  trail?: AuditTrail,
+): AuditReader {
   return {
     list: async (query) => {
-      const conditions = [
-        matchesRequested(
-          auditEvents.eventType,
-          requestedValues(query.eventType),
-        ),
-        query.actorUserId
-          ? eq(auditEvents.actorUserId, query.actorUserId)
-          : undefined,
-        matchesRequested(
-          auditEvents.initiatorKind,
-          requestedValues(query.initiatorKind),
-        ),
-        query.targetType
-          ? eq(auditEvents.targetType, query.targetType)
-          : undefined,
-        query.targetId ? eq(auditEvents.targetId, query.targetId) : undefined,
-        query.from
-          ? gt(auditEvents.createdAt, new Date(query.from))
-          : undefined,
-        query.to ? lt(auditEvents.createdAt, new Date(query.to)) : undefined,
-      ];
-      const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
-
-      if (cursor) {
-        // Bound as text and cast by PostgreSQL, not as a `Date`, which would drop the microseconds
-        // the cursor below carries.
-        const createdAt = sql`${cursor.createdAt}::timestamptz`;
-        conditions.push(
-          or(
-            lt(auditEvents.createdAt, createdAt),
-            and(
-              eq(auditEvents.createdAt, createdAt),
-              lt(auditEvents.id, cursor.id),
-            ),
-          ),
-        );
+      const eventType = requestedValues(query.eventType);
+      const initiatorKind = requestedValues(query.initiatorKind);
+      if (eventType?.length === 0 || initiatorKind?.length === 0) {
+        if (query.cursor) checkCursorShape(query.cursor);
+        return { events: [], nextCursor: undefined };
       }
-
-      const rows = await database
-        .select({
-          ...getTableColumns(auditEvents),
-          /*
-           * The row's own timestamp to the microsecond, for the cursor only.
-           *
-           * `created_at` keeps microseconds and a `Date` keeps milliseconds, so a cursor made from
-           * `createdAt` named a moment just before the row it came from. The rows the next page
-           * should have started with, written earlier in that same millisecond or at the same
-           * instant, then compared as newer than the cursor and were on no page at all.
-           */
-          cursorCreatedAt: sql<string>`to_char(${auditEvents.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
-        })
-        .from(auditEvents)
-        .where(and(...conditions))
-        .orderBy(desc(auditEvents.createdAt), desc(auditEvents.id))
-        .limit(query.limit + 1);
-      const hasNextPage = rows.length > query.limit;
-      const page = rows.slice(0, query.limit);
-      const last = page.at(-1);
-
-      return {
-        events: page.map(({ cursorCreatedAt: _cursorOnly, ...event }) => ({
-          ...event,
-          createdAt: event.createdAt.toISOString(),
-          payload: event.payload as Record<string, unknown>,
-        })),
-        nextCursor:
-          hasNextPage && last
-            ? encodeCursor({
-                id: last.id,
-                createdAt: last.cursorCreatedAt,
-              })
-            : undefined,
-      };
+      const connected = trail ?? auditTrail();
+      await flushBeforeRead(connected);
+      try {
+        const page = await connected.client.events({
+          limit: query.limit,
+          ...(query.cursor ? { cursor: query.cursor } : {}),
+          ...(eventType ? { eventType } : {}),
+          ...(query.actorUserId ? { actorUserId: query.actorUserId } : {}),
+          ...(initiatorKind ? { initiatorKind } : {}),
+          ...(query.initiatorId ? { initiatorId: query.initiatorId } : {}),
+          ...(query.targetType ? { targetType: query.targetType } : {}),
+          ...(query.targetId ? { targetId: query.targetId } : {}),
+          ...(query.from ? { from: new Date(query.from).toISOString() } : {}),
+          ...(query.to ? { to: new Date(query.to).toISOString() } : {}),
+        });
+        return {
+          events: page.events.map(fromStored),
+          nextCursor: page.nextCursor ?? undefined,
+        };
+      } catch (error) {
+        if (error instanceof AuditTrailClientError && error.refused) {
+          throw new AuditQueryError(
+            query.cursor
+              ? CURSOR_REFUSAL
+              : "This audit query could not be read. Check the filters.",
+          );
+        }
+        throw error;
+      }
     },
   };
 }
@@ -1136,14 +1120,13 @@ export function auditQueryFromUrl(url: URL): AuditEventQuery {
   }
 
   /*
-   * Fail fast on a stale or hand-edited bookmark. Without this the raw string travels into
-   * `createAuditReader.list`, where `decodeCursor` threw a generic `Error` that escaped the
-   * route's `AuditQueryError` catch as a 500. A corrupt cursor is a caller error, not a server
-   * failure, and answers 400 like a bad `from`/`to` already does.
+   * Fail fast on a cursor no page could have issued. A corrupt cursor is a caller error, not a
+   * server failure, and answers 400 like a bad `from`/`to` already does; one that is well formed
+   * but not Intelligence's to continue is refused by Intelligence, and that is a 400 as well.
    */
   const cursor = optional("cursor");
   if (cursor !== undefined) {
-    decodeCursor(cursor);
+    checkCursorShape(cursor);
   }
 
   return {

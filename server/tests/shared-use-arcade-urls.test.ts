@@ -1,20 +1,38 @@
 // server/tests/shared-use-arcade-urls.test.ts
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
-import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
-  mcpServers,
-  pluginGrants,
-  users,
-} from "../src/db/schema";
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { createDatabase } from "../src/db/client";
+import { users } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
+import {
+  grantBot,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
+
+// Shared app approvals and approval rules are Intelligence's organization policy.
+beforeAll(async () => {
+  await useTestPolicy();
+});
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 const suite = randomUUID().slice(0, 8);
 const id = (name: string) => `${name}-${suite}`;
 
@@ -30,10 +48,8 @@ const spec: Record<BrokerProvider, { toolkit: string; scheme: string }> = {
 };
 
 async function cleanup() {
-  await database.delete(agents).where(eq(agents.id, bot));
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [lowId, highId]));
+  await removeBots([bot]);
+  await removeServers([lowId, highId]);
   await database.delete(users).where(eq(users.id, owner));
 }
 
@@ -47,7 +63,7 @@ async function seed(provider: BrokerProvider) {
     groups: [],
   });
   for (const rowId of [lowId, highId])
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: rowId,
       title: `Team ${rowId}`,
       vendor: provider,
@@ -57,25 +73,25 @@ async function seed(provider: BrokerProvider) {
       accountMode: "shared",
       sharedVendorUserId: "openbot-deployment:x:R",
     });
-  await database
-    .insert(agents)
-    .values({ id: bot, name: "Triage", type: "built_in", configuration: {} });
-  await database.insert(agentProfiles).values({
-    agentId: bot,
+  await seedBot({
+    id: bot,
+    name: "Triage",
+    type: "built_in",
+    configuration: { systemPrompt: "" },
     ownerUserId: owner,
     visibility: "private",
     title: "Triage",
     roleDescription: "Triage",
     avatarSeed: "x",
   });
-  await database.insert(pluginGrants).values({
-    kind: "mcp",
-    ref: `${highId}/ACTION`,
-    agentId: bot,
+  await grantBot(bot, "mcp", `${highId}/ACTION`, {
     grantedBy: "admin@example.test",
   });
 }
 
+beforeAll(async () => {
+  await useTestVault();
+});
 beforeEach(cleanup);
 afterAll(cleanup);
 /* The pool this file opened, given back. `bun test` runs every file in one process and nothing

@@ -1,23 +1,48 @@
 // server/tests/arcade-sibling-collateral.test.ts
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  useTestVault,
+} from "./support/vault";
+import { useTestPolicy } from "./support/policy";
+
+// Shared app approvals and approval rules are Intelligence's organization policy.
+beforeAll(async () => {
+  await useTestPolicy();
+});
 
 /*
- * SCOPING. `audit_events` is append-only and `brokered_connections` is long-lived, so every
+ * SCOPING. `audit_events` is append-only and brokered accounts (in Intelligence) are long-lived, so every
  * assertion here is keyed on names THIS TEST ALONE writes: each test mints its own `run()` — a
  * fresh suffix on every app and every vendor identity it touches — and reads rows and the trail
  * only by those. A "did not happen" assertion is therefore one only this test could have falsified.
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+// Apps and brokered accounts live in Intelligence: the store reads them through this directory.
+beforeAll(async () => {
+  await useTestVault();
+});
 
 /* The pool this file opened, given back. `bun test` runs every file in one process and nothing
  * reaps an idle connection, so a pool held to the end of the run is two connections the rest of
@@ -96,7 +121,7 @@ async function server(
   mode: "personal" | "shared",
   authScheme = "OAUTH2",
 ) {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: app,
     vendor: "Arcade",
@@ -111,7 +136,7 @@ async function hold(
   vendorUserId: string,
   holder: "person" | "deployment" = "person",
 ) {
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "arcade",
     app,
     holder,
@@ -119,35 +144,30 @@ async function hold(
     vendorUserId,
   });
 }
+/** The apps of the brokered accounts Intelligence holds now under these names, sorted. */
 const rowsFor = async (names: string[]) =>
-  (
-    await database
-      .select({ app: brokeredConnections.app })
-      .from(brokeredConnections)
-      .where(inArray(brokeredConnections.app, names))
-      .orderBy(asc(brokeredConnections.app))
-  ).map((row) => row.app);
-const trailFor = (names: string[]) =>
-  database
-    .select({
-      app: auditEvents.targetId,
-      payload: sql<Record<string, unknown>>`payload`,
-    })
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.account_disconnected"),
-        inArray(auditEvents.targetId, names),
-      ),
-    )
-    .orderBy(asc(auditEvents.targetId));
+  (await storedConnections()).brokered
+    .filter((row) => names.includes(row.app))
+    .map((row) => row.app)
+    .sort();
+// One read per app name (the trail is asked for one target at a time), in app order.
+const trailFor = async (names: string[]) => {
+  const rows: { app: string | null; payload: Record<string, unknown> }[] = [];
+  for (const name of names)
+    for (const row of await auditRows({
+      eventType: "mcp.account_disconnected",
+      targetId: name,
+    }))
+      rows.push({ app: row.targetId, payload: row.payload });
+  return rows.sort((a, b) => ((a.app ?? "") < (b.app ?? "") ? -1 : 1));
+};
 
 afterEach(async () => {
   if (apps.length) {
-    await database
-      .delete(brokeredConnections)
-      .where(inArray(brokeredConnections.app, apps));
-    await database.delete(mcpServers).where(inArray(mcpServers.id, apps));
+    await removeConnectionsWhere(
+      (row) => row.kind === "brokered" && apps.includes(row.app),
+    );
+    await removeServers(apps);
   }
   apps.length = 0;
 });

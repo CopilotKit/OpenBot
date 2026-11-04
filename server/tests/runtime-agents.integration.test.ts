@@ -1,4 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
@@ -7,18 +14,19 @@ import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { standingRoleMessage } from "../src/copilot";
-import { type CredentialSecretReader, encryptSecret } from "../src/credentials";
-import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles,
-  agents,
-  channelAgents,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  users,
-} from "../src/db/schema";
+  type CredentialSecretReader,
+  createCredentialStore,
+} from "../src/credentials";
+import { createDatabase } from "../src/db/client";
+import { users } from "../src/db/schema";
+import { removeBots, useTestBots } from "./support/bots";
+import {
+  purgeConversations,
+  storedConversation,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { purgeSecrets, seedCredential, useTestVault } from "./support/vault";
 
 const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
@@ -31,7 +39,6 @@ const channelStore = createChannelStore(
   createThreadIdentity("test-deployment"),
 );
 const managedAgentToken = "managed-agent-token";
-const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const loadAgents = createRuntimeAgentLoader(database, undefined, {
   endpoint: managedEndpoint,
   token: managedAgentToken,
@@ -42,26 +49,22 @@ const testPrefix = `runtime-agents-${randomUUID()}`;
 const createdUserIds: string[] = [];
 const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
+const createdSecretIds: string[] = [];
 
 afterEach(async () => {
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
-  for (const agentId of createdAgentIds.splice(0)) {
-    await database
-      .delete(agentProfiles)
-      .where(eq(agentProfiles.agentId, agentId));
-    await database.delete(agents).where(eq(agents.id, agentId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
+  await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
 });
 
+beforeAll(async () => {
+  await useTestBots();
+});
+
 afterAll(async () => {
+  await purgeSecrets(createdSecretIds.splice(0));
   await database.$client.close();
 });
 
@@ -98,7 +101,31 @@ async function setAgentRun(
     configuration: Record<string, unknown>;
   },
 ) {
-  await database.update(agents).set(run).where(eq(agents.id, id));
+  // The type and the configuration for it change together, as an edit or a package sync does.
+  const directory = await useTestBots();
+  const current = await directory.registry.get(id);
+  if (!current) throw new Error(`Intelligence has no Bot ${id}`);
+  await directory.update(id, current.version, run);
+}
+
+/** When Intelligence says this Bot was deleted, or null while it is live. */
+async function deletedAtOf(id: string) {
+  return (await (await useTestBots()).registry.get(id))?.deletedAt ?? null;
+}
+
+/**
+ * A channel as Intelligence keeps it, one row per member and Bot: what joining `channels`,
+ * `channel_memberships` and `channel_agents` returned.
+ */
+async function retainedRows(channelId: string) {
+  const channel = await storedConversation(channelId);
+  return channel.members.flatMap((member) =>
+    channel.agents.map((agent) => ({
+      channelDeletedAt: channel.deletedAt,
+      memberUserId: member.userId,
+      agentId: agent.agentId,
+    })),
+  );
 }
 
 function idsOf(loaded: Awaited<ReturnType<typeof loadAgents>>) {
@@ -167,19 +194,21 @@ describe("runtime agent loading", () => {
     const owner = await createUser();
     const profile = await createCoworker(owner, { name: "Research Mastra" });
     const vaultReads: string[] = [];
-    const credentialId = `credential-${randomUUID()}`;
+    const key = await seedCredential({
+      kind: "agent",
+      provider: "ag-ui",
+      keyId: profile.id,
+      metadata: { header: "Authorization" },
+      plaintext: "Bearer mastra-secret",
+    });
+    createdSecretIds.push(key.id);
+    const credentialId = key.id;
+    const store = createCredentialStore(await useTestVault());
+    // The real store, recording which secrets the loader asked the vault for.
     const reader: CredentialSecretReader = {
-      readSecret: async (id) => {
+      reveal: async (id, accessor) => {
         vaultReads.push(id);
-        return id === credentialId
-          ? {
-              encryptedValue: await encryptSecret(
-                encryptionKey,
-                "Bearer mastra-secret",
-              ),
-              revokedAt: null,
-            }
-          : null;
+        return store.reveal(id, accessor);
       },
     };
     await setAgentRun(profile.id, {
@@ -193,10 +222,7 @@ describe("runtime agent loading", () => {
         },
       },
     });
-    const loadWithVault = createRuntimeAgentLoader(database, {
-      reader,
-      encryptionKey,
-    });
+    const loadWithVault = createRuntimeAgentLoader(database, { reader });
 
     const loaded = await loadWithVault(owner);
 
@@ -298,57 +324,29 @@ describe("runtime agent loading", () => {
     await channelStore.softDelete(owner, deletedOnlyChannel.id);
     await channelStore.softDelete(owner, deletedPreservedChannel.id);
 
-    const retainedDeletedOnlyRows = await database
-      .select({
-        channelDeletedAt: channels.deletedAt,
-        memberUserId: channelMemberships.userId,
-        agentId: channelAgents.agentId,
-        profileDeletedAt: agentProfiles.deletedAt,
-      })
-      .from(channels)
-      .innerJoin(
-        channelMemberships,
-        eq(channelMemberships.channelId, channels.id),
-      )
-      .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-      .innerJoin(
-        agentProfiles,
-        eq(agentProfiles.agentId, channelAgents.agentId),
-      )
-      .where(eq(channels.id, deletedOnlyChannel.id));
+    const retainedDeletedOnlyRows = await retainedRows(deletedOnlyChannel.id);
     expect(retainedDeletedOnlyRows).toHaveLength(1);
     expect(retainedDeletedOnlyRows[0]).toMatchObject({
       memberUserId: owner.id,
       agentId: deletedOnlyProfile.id,
     });
     expect(retainedDeletedOnlyRows[0]?.channelDeletedAt).toBeInstanceOf(Date);
-    expect(retainedDeletedOnlyRows[0]?.profileDeletedAt).toBeInstanceOf(Date);
+    expect(
+      (await deletedAtOf(deletedOnlyProfile.id)) ?? undefined,
+    ).toBeInstanceOf(Date);
 
-    const retainedLivePreservedRows = await database
-      .select({
-        channelDeletedAt: channels.deletedAt,
-        memberUserId: channelMemberships.userId,
-        agentId: channelAgents.agentId,
-        profileDeletedAt: agentProfiles.deletedAt,
-      })
-      .from(channels)
-      .innerJoin(
-        channelMemberships,
-        eq(channelMemberships.channelId, channels.id),
-      )
-      .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-      .innerJoin(
-        agentProfiles,
-        eq(agentProfiles.agentId, channelAgents.agentId),
-      )
-      .where(eq(channels.id, livePreservedChannel.id));
+    const retainedLivePreservedRows = await retainedRows(
+      livePreservedChannel.id,
+    );
     expect(retainedLivePreservedRows).toHaveLength(1);
     expect(retainedLivePreservedRows[0]).toMatchObject({
       channelDeletedAt: null,
       memberUserId: owner.id,
       agentId: preservedProfile.id,
     });
-    expect(retainedLivePreservedRows[0]?.profileDeletedAt).toBeInstanceOf(Date);
+    expect(
+      (await deletedAtOf(preservedProfile.id)) ?? undefined,
+    ).toBeInstanceOf(Date);
 
     const ownerRoster = await loadAgents(owner);
     expect(ownerRoster).not.toContainEqual(

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { eq, inArray, notInArray, sql } from "drizzle-orm";
 import { cullStagedAttachments } from "../scripts/cull-staged-attachments";
 import { createDatabase, type Database } from "../src/db/client";
-import { attachments, channels, users } from "../src/db/schema";
+import { attachments, users } from "../src/db/schema";
+import { purgeConversations, seedConversation } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -19,9 +20,7 @@ afterEach(async () => {
   for (const id of createdAttachmentIds.splice(0)) {
     await database.delete(attachments).where(eq(attachments.id, id));
   }
-  for (const id of createdChannelIds.splice(0)) {
-    await database.delete(channels).where(eq(channels.id, id));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   for (const id of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, id));
   }
@@ -31,7 +30,10 @@ afterAll(async () => {
   await database.$client.close();
 });
 
-/** A user and a channel to hang an attachment off of, nothing more. */
+/**
+ * A user and a channel to hang an attachment off of, nothing more: a conversation in Intelligence
+ * with nobody in it.
+ */
 async function seedChannel() {
   const userId = `${testPrefix}-user-${randomUUID()}`;
   await database.insert(users).values({
@@ -41,12 +43,12 @@ async function seedChannel() {
   createdUserIds.push(userId);
 
   const channelId = `${testPrefix}-channel-${randomUUID()}`;
-  await database.insert(channels).values({
+  createdChannelIds.push(channelId);
+  await seedConversation({
     id: channelId,
     name: "Attachment Sweeper Test Channel",
     description: "Sweep target channel.",
   });
-  createdChannelIds.push(channelId);
 
   return { userId, channelId };
 }

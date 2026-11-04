@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { capabilityRefusal } from "../src/admin/capabilities";
 import {
@@ -20,15 +20,17 @@ import {
   seatOf,
 } from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
+import { users } from "../src/db/schema";
+import { auditRows } from "./support/audit";
 import {
-  agentProfiles,
-  agents,
-  auditEvents,
-  capabilitySettings,
-  deploymentPackages,
-  users,
-} from "../src/db/schema";
+  recordTestPackage,
+  removeBots,
+  removeTestPackages,
+  seedBot,
+  useTestBots,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 /**
  * Isolated Bots, through the routes a person and an administrator use, against a real PostgreSQL.
@@ -69,12 +71,15 @@ let controls: EnterpriseControls;
 let packageId: string | undefined;
 
 async function cleanSwitch() {
-  await database
-    .delete(capabilitySettings)
-    .where(eq(capabilitySettings.capability, "isolatedComputers"));
+  const cache = await useTestPolicy();
+  for (const rule of cache.capabilityRules())
+    if (rule.capability === "isolatedComputers")
+      await cache.deleteCapabilityRule(rule);
 }
 
 beforeAll(async () => {
+  await useTestBots();
+  await useTestPolicy();
   await cleanSwitch();
   await database.insert(users).values([
     { id: admin.id, email: admin.email, name: "Admin" },
@@ -92,26 +97,14 @@ beforeAll(async () => {
 afterAll(async () => {
   await controls?.stop();
   await cleanSwitch();
-  const made = await database
-    .select({ id: agentProfiles.agentId })
-    .from(agentProfiles)
-    .where(
-      inArray(agentProfiles.ownerUserId, [admin.id, owner.id, colleague.id]),
-    );
-  if (made.length) {
-    await database.delete(agents).where(
-      inArray(
-        agents.id,
-        made.map((row) => row.id),
-      ),
-    );
-  }
-  await database.delete(agents).where(like(agents.id, `iso-pkg-${suite}%`));
-  if (packageId) {
-    await database
-      .delete(deploymentPackages)
-      .where(eq(deploymentPackages.id, packageId));
-  }
+  await removeTestPackages();
+  // Every Bot this file made, through the routes or by hand, deleted ones included.
+  const people: (string | null)[] = [admin.id, owner.id, colleague.id];
+  const made = (await useTestBots())
+    .cached()
+    .filter((bot) => people.includes(bot.ownerUserId))
+    .map((bot) => bot.id);
+  await removeBots([...made, `iso-pkg-${suite}`]);
   // Audit rows are append-only and stay, as every other suite's do.
   await database.delete(users).where(like(users.email, `%${suite}%`));
   await database.$client.end({ timeout: 5 });
@@ -194,24 +187,17 @@ async function createBot(
   };
 }
 
+/** Whether the Bot is isolated as Intelligence holds it, past this process's memory. */
 async function storedIsolated(agentId: string) {
-  const [row] = await database
-    .select({ isolated: agentProfiles.isolated })
-    .from(agentProfiles)
-    .where(eq(agentProfiles.agentId, agentId));
-  return row?.isolated;
+  return (await (await useTestBots()).registry.get(agentId))?.isolated;
 }
 
+/** The refusals one of this suite's people met, from the trail in Intelligence, newest first. */
 async function refusals(actorId: string) {
-  return database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "bot.isolation_refused"),
-        eq(auditEvents.actorUserId, actorId),
-      ),
-    );
+  return auditRows({
+    eventType: "bot.isolation_refused",
+    actorUserId: actorId,
+  });
 }
 
 describe("making an isolated Bot", () => {
@@ -226,15 +212,10 @@ describe("making an isolated Bot", () => {
       isolationOffReason: null,
     });
     expect(await storedIsolated(agent.id)).toBe(true);
-    const [created] = await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "bot.created"),
-          eq(auditEvents.targetId, agent.id),
-        ),
-      );
+    const [created] = await auditRows({
+      eventType: "bot.created",
+      targetId: agent.id,
+    });
     expect(created?.payload).toMatchObject({ isolated: true });
   });
 
@@ -254,9 +235,11 @@ describe("making an isolated Bot", () => {
         error: capabilityRefusal("isolatedComputers"),
         capability: "isolatedComputers",
       });
-      expect(
-        await database.select().from(agents).where(eq(agents.name, name)),
-      ).toEqual([]);
+      const { bots: owned } = await (await useTestBots()).registry.all({
+        ownerUserId: owner.id,
+        includeDeleted: true,
+      });
+      expect(owned.filter((made) => made.name === name)).toEqual([]);
       const [row] = await refusals(owner.id);
       expect(row?.targetId).toBeNull();
       expect(row?.payload).toMatchObject({
@@ -401,29 +384,18 @@ describe("changing it later", () => {
   });
 
   test("a Bot that belongs to no person is refused one, and the trail says why", async () => {
-    const [deploymentPackage] = await database
-      .insert(deploymentPackages)
-      .values({
-        tenantId: `iso-tenant-${suite}`,
-        sourcePath: "test/isolated-bots",
-        checksum: randomUUID(),
-      })
-      .returning();
-    packageId = deploymentPackage?.id;
+    const deploymentPackage = await recordTestPackage(`iso-tenant-${suite}`);
+    packageId = deploymentPackage.id;
     const agentId = `iso-pkg-${suite}`;
-    await database.insert(agents).values({
+    await seedBot({
       id: agentId,
       name: "General Assistant",
       type: "built_in",
       configuration: { systemPrompt: "Help." },
       packageId,
-    });
-    await database.insert(agentProfiles).values({
-      agentId,
       ownerUserId: null,
       title: "Assistant",
       roleDescription: "Helps.",
-      avatarSeed: agentId,
       visibility: "public",
     });
 
@@ -494,14 +466,10 @@ describe("whether it is in effect", () => {
       expect(await runsIsolated(database, agent.id)).toBe(true);
     } finally {
       await setSwitch(null);
-      await database
-        .delete(capabilitySettings)
-        .where(
-          and(
-            eq(capabilitySettings.scopeKind, "group"),
-            eq(capabilitySettings.scopeId, group),
-          ),
-        );
+      const cache = await useTestPolicy();
+      for (const rule of cache.capabilityRules())
+        if (rule.scopeKind === "group" && rule.scopeId === group)
+          await cache.deleteCapabilityRule(rule);
     }
   });
 

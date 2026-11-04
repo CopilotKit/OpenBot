@@ -7,10 +7,11 @@ import { computerGuidance } from "@openbot/shared/bot-prompt";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
+  ACTION_RECORD_RETENTION_DAYS,
   auditRoutineStore,
   enterpriseControls,
   guardDeliveryStore,
@@ -24,6 +25,16 @@ import {
   CoworkerUnavailableError,
   createActorAgentResolver,
 } from "./agents/agent-resolver";
+import { createAgentRegistryClient } from "./agents/bot-registry/client";
+import {
+  createBotDirectory,
+  installBotDirectory,
+} from "./agents/bot-registry/directory";
+import {
+  removeBotLocalRows,
+  sweepPurgedBotRows,
+} from "./agents/bot-registry/local-rows";
+import { copyLocalBotsToIntelligence } from "./agents/bot-registry/upgrade";
 import {
   mintRunAssertion,
   type RunAssertion,
@@ -39,6 +50,7 @@ import { startHandoffDelivery } from "./agents/handoff-wiring";
 import { runsIsolated } from "./agents/isolation";
 import {
   configureBotLifecycle,
+  configuredPauses,
   createBotLifecycleStore,
 } from "./agents/lifecycle";
 import { createBotReset } from "./agents/lifecycle-reset";
@@ -75,6 +87,11 @@ import {
   recordAuditEvent,
 } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
+import { createAuditTrailClient } from "./audit-trail/client";
+import { createAuditDrainer } from "./audit-trail/drainer";
+import { startAuditRetentionSync } from "./audit-trail/retention";
+import { installAuditTrail } from "./audit-trail/trail";
+import { startAuditHistoryCopy } from "./audit-trail/upgrade";
 import { createAuth, sessionLifetimeMs } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createEntra, withEntraBearer } from "./auth/entra";
@@ -83,6 +100,9 @@ import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import { createOrganizationAuth } from "./auth/organization";
 import { organizationUserStore } from "./auth/organization-store";
+import { roleForEmail } from "./auth/roles";
+import { registerScimConnection } from "./auth/scim";
+import { copySignInSecretsToVault } from "./auth/sign-in-secrets-upgrade";
 import { openbotAddress } from "./browser/address";
 import { botBrowserNetwork } from "./browser/bot-browser";
 import { personBrowserEgressPolicy } from "./browser/egress";
@@ -96,6 +116,7 @@ import {
 import {
   loadAttachmentForTurn,
   markAttachmentsSent,
+  stagedAttachmentTtlHours,
 } from "./channels/attachments";
 import {
   createChannelEventHub,
@@ -106,6 +127,7 @@ import {
   createGroupStore,
   groupSourceForRun,
 } from "./channels/group";
+import { deliverConversationChanges } from "./channels/live";
 import { type ChannelStore, createChannelStore } from "./channels/routes";
 import { createStallGuard } from "./channels/stall-guard";
 import {
@@ -140,6 +162,26 @@ import {
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
+import { createConfigurationClient } from "./configuration/client";
+import {
+  createBotConfiguration,
+  installBotConfiguration,
+} from "./configuration/directory";
+import {
+  sweepRemovedPeople,
+  sweepRemovedPeopleEvery,
+} from "./configuration/people-sweep";
+import { copyLocalConfigurationToIntelligence } from "./configuration/upgrade";
+import {
+  forgetPurgedBot,
+  sweepPurgedBotReferences,
+} from "./conversations/bot-purge";
+import { createConversationClient } from "./conversations/client";
+import {
+  createConversationDirectory,
+  installConversationDirectory,
+} from "./conversations/directory";
+import { copyLocalConversationsToIntelligence } from "./conversations/upgrade";
 import {
   chooseOpenAIApi,
   mountCopilotRuntime,
@@ -153,14 +195,13 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { mcpToolLists, users } from "./db/schema";
+import { createDeliveryScopeAuthoriser } from "./delivery/authorise";
 import {
-  brokeredConnections,
-  channelAgents,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  users,
-} from "./db/schema";
+  createDeliveryBindingsClient,
+  createDeliveryDirectory,
+  installDeliveryDirectory,
+} from "./delivery/directory";
 import { createDeliveryRouter, DELIVERY_WORK_KINDS } from "./delivery/router";
 import {
   configuredDeliveryProviders,
@@ -169,6 +210,12 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
+import { copyLocalDeliveryToIntelligence } from "./delivery/upgrade";
+import { createFilesClient, installFilesClient } from "./files/client";
+import {
+  copyLocalAttachmentsToIntelligence,
+  copyLocalPageFramesToIntelligence,
+} from "./files/upgrade";
 import { setEdition } from "./edition";
 import {
   createHostAccessBroker,
@@ -180,6 +227,7 @@ import { githubCallbackRoutes } from "./identity/github-callback";
 import { retireIdentityLinks, retireOwnedAccounts } from "./identity/retire";
 import { slackCodeRedeemer } from "./identity/slack-redeem";
 import { createIdentityStore } from "./identity/store";
+import { createProjectChangesClient } from "./intelligence/project-changes";
 import {
   createIntelligenceClient,
   observeIntelligenceAuthentication,
@@ -190,6 +238,7 @@ import {
   probeLearningContainer,
   withLearningAutoAssign,
 } from "./learning/auto-assign";
+import { createLearningChanges } from "./learning/changes";
 import {
   cliLoginPresent,
   createLearningContainer,
@@ -199,6 +248,7 @@ import {
   type LearningContainerCredentials,
   learningSetupInstructions,
 } from "./learning/ensure-container";
+import { createLearningIntelligence } from "./learning/intelligence";
 import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
@@ -209,17 +259,32 @@ import {
   createLearningSharingStore,
   createOpenSkillIndex,
 } from "./learning/sharing";
+import { copyLocalLearningToIntelligence } from "./learning/upgrade";
+import { createMemoryCache } from "./memory/cache";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { memoryTools } from "./memory/tools";
+import { copyLocalMemoryToIntelligence } from "./memory/upgrade";
 import { reportModelAvailability } from "./model-availability-check";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
+import { createDirectoryClient } from "./people/directory/client";
+import {
+  createPeopleDirectory,
+  installPeopleDirectory,
+} from "./people/directory/directory";
+import {
+  createScimReactions,
+  installScimReactions,
+  scimReactions,
+} from "./people/directory/scim-reactions";
+import { copyLocalPeopleToIntelligence } from "./people/directory/upgrade";
 import { createOnboardingStore } from "./people/onboarding";
 import { createProfileStore } from "./people/profile";
+import { createPersonPurgeCascade } from "./people/purge-cascade";
 import { createPeopleStore } from "./people/store";
 import { BROKERED_PROFILE } from "./plugins/access";
 import { createAccountModeSwitch } from "./plugins/account-mode";
@@ -232,6 +297,7 @@ import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
 import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
+import { allBrokered } from "./plugins/plugin-store/records";
 import {
   ensureAlwaysOnApp,
   personalDefaultsDeps,
@@ -254,6 +320,10 @@ import {
   REFUSAL_MARKER,
   vendorAnswer,
 } from "./plugins/tools";
+import { removeBotPolicy, sweepPurgedBotPolicy } from "./policy/bot-rows";
+import { createPolicyCache, installPolicyCache } from "./policy/cache";
+import { createOrgPolicyClient } from "./policy/client";
+import { copyLocalPolicyToIntelligence } from "./policy/upgrade";
 import { createProactiveEngine } from "./proactive/engine";
 import { checkInOfferTools } from "./proactive/offer-tool";
 import {
@@ -267,7 +337,9 @@ import {
 } from "./proactive/restriction";
 import { checkInToolsFor, createCheckInScope } from "./proactive/scope";
 import { createProactiveStore } from "./proactive/store";
+import { checkInCopySteps } from "./proactive/upgrade";
 import { createProviderOAuthProxy } from "./provider-oauth";
+import { createTrajectoryBindingStore } from "./recorder/trajectory-bindings";
 import { createRecorderExtension } from "./recorder/wiring";
 import { createRequestActor } from "./request-actor";
 import { createResponsibilityBindingStore } from "./responsibilities/bindings";
@@ -289,11 +361,19 @@ import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
 import type { Responsibility } from "./responsibilities/types";
+import { responsibilityCopySteps } from "./responsibilities/upgrade";
 import { createServerResponsibilityEngine } from "./responsibilities/wiring";
 import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
+import { routineCopySteps } from "./routines/upgrade";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
+import { createScheduleClient } from "./schedules/client";
+import {
+  createScheduleDirectory,
+  installScheduleDirectory,
+} from "./schedules/directory";
+import { copyLocalSchedulesToIntelligence } from "./schedules/upgrade";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createSetupSources, modelKeyOf } from "./setup/checklist";
 import { createComputerCheck } from "./setup/computer-check";
@@ -310,6 +390,16 @@ import {
 } from "./tenant-package";
 import { createUserInstructionsStore } from "./user-instructions";
 import { createUserPreferencesStore } from "./user-preferences";
+import { createVaultClient } from "./vault/client";
+import {
+  createConnectionsDirectory,
+  installConnectionsDirectory,
+} from "./vault/directory";
+import {
+  removeServerLocalRows,
+  sweepRemovedServerRows,
+} from "./vault/local-rows";
+import { copyLocalVaultToIntelligence } from "./vault/upgrade";
 import { createVoiceSessionStore } from "./voice/sessions";
 import { createVoiceSummarizer } from "./voice/summary";
 import { repeatAfterEach } from "./work/loop";
@@ -332,10 +422,28 @@ const productTelemetry = await createProductTelemetry({
 addAuditTap(productTelemetry.recordAudit);
 const prepareProductRunInput = productHeadlessBoundary(productTelemetry);
 const profileStore = createProfileStore(database);
-// Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
-configureBotLifecycle({ database });
+// Every dispatch point asks whether its person paused the Bot, from the preferences this instance
+// holds of Intelligence's. See agents/lifecycle.ts.
+configureBotLifecycle({ pauses: configuredPauses });
+/*
+ * Learning settings and pointers live in Intelligence's Learning assignments (learning/intelligence.ts): the Admin
+ * settings, each thread's container, each person's space and sharing choice, and whose each Recorder trajectory is. The
+ * settings and the open-Skill index are read on every run, so each instance holds them in memory, kept fresh by
+ * Intelligence's `learning_changes` announcements and a timer.
+ */
+const learningIntelligence = createLearningIntelligence({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
+const learningChanges = createLearningChanges({
+  client: createProjectChangesClient({
+    apiUrl: config.runtime.intelligence.apiUrl,
+    apiKey: config.runtime.intelligence.apiKey,
+  }),
+  gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+});
 const learningSettingsStore = createLearningSettingsStore(
-  database,
+  learningIntelligence,
   config.learning,
 );
 // Its own client, like the self-host banner's: the constructor opens nothing.
@@ -401,7 +509,7 @@ const learningAutoAssign = createLearningAutoAssign({
 const personalLearningSpaces = createPersonalLearningSpaces({
   readSettings: () => learningSettingsStore.read(),
   snapshots: learningProbeIntelligence,
-  store: createPersonSpaceStore(database),
+  store: createPersonSpaceStore(learningIntelligence, learningChanges),
   ...(learningCanCreate && learningApiOrigin
     ? {
         create: (container) =>
@@ -420,25 +528,330 @@ const personalLearningSpaces = createPersonalLearningSpaces({
         .limit(1)
     ).map((row) => row.name?.trim() || null)[0] ?? null,
 });
-const learningSharingStore = createLearningSharingStore(database);
+const learningSharingStore = createLearningSharingStore(learningIntelligence, {
+  // A change saved here is in this instance's index before the Settings route answers.
+  onSaved: (space) => openSkillIndex.apply(space),
+});
 /** What everyone opened to every Bot, in memory: runs read this, never each person's space or the table. */
 const openSkillIndex = createOpenSkillIndex({
   read: () => learningSharingStore.openSources(),
+  readOne: (userId) => learningIntelligence.personalSpace(userId),
 });
 const learningSettings = withLearningAutoAssign(
   learningSettingsStore,
   learningAutoAssign,
 );
+// An upgraded deployment's Learning settings and pointers, copied from the local tables once (learning/upgrade.ts).
+await copyLocalLearningToIntelligence(database, learningIntelligence);
+learningChanges.start();
+// Fatal when Intelligence cannot answer, as the Bot directory is: every run reads these settings.
+await learningSettingsStore.start(learningChanges);
+openSkillIndex.start(learningChanges);
 learningAutoAssign.start();
+/*
+ * Every person, from Intelligence's organization directory, projected into `users` and kept fresh by
+ * the directory's change announcements (people/directory/directory.ts). Started before anything signs
+ * anybody in or names a person, and fatal when Intelligence cannot answer.
+ */
+const peopleDirectory = installPeopleDirectory(
+  createPeopleDirectory({
+    client: createDirectoryClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    database,
+    defaultRole: (email) =>
+      roleForEmail(email, config.auth?.initialAdminEmails ?? []),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+    // What SCIM changes reach this deployment as (people/directory/scim-reactions.ts), once those exist.
+    onArrived: async (person) => {
+      await scimReactions()?.arrived(person);
+    },
+    onChange: (change) => {
+      if (change.kind !== "removal") return;
+      scimReactions()
+        ?.reconcile()
+        .catch((error: unknown) =>
+          console.warn(
+            JSON.stringify({
+              type: "scim-reconcile-failed",
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          ),
+        );
+    },
+  }),
+);
+await peopleDirectory.start();
+// An upgraded deployment's people, removals, linked accounts and identity providers, copied once
+// (people/directory/upgrade.ts).
+await copyLocalPeopleToIntelligence(database, peopleDirectory);
 await initializeDevActorUser(database, config.singleUser);
-// The vault, built before the agent store because a customer's agent may sit behind a key and that
-// key belongs here rather than on the agent row. See agents/auth-header.ts.
-const credentialStore = createCredentialStore(database);
+/*
+ * The audit trail, action records and model usage live in Intelligence. Every row is written to the
+ * local outbox in its writer's own transaction, as before; the drainer carries it to Intelligence and
+ * readers read it there (audit-trail/). Started here so anything written before it waits only until now.
+ */
+const auditTrailClient = createAuditTrailClient({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
+const { drainer: auditDrainer } = installAuditTrail({
+  client: auditTrailClient,
+  drainer: createAuditDrainer({ database, client: auditTrailClient }),
+});
+auditDrainer.start();
+// How long Intelligence keeps the trail is still this deployment's to say: AUDIT_RETENTION_DAYS, and
+// 90 days of Action Recording.
+const auditRetentionSync = startAuditRetentionSync(auditTrailClient, {
+  eventRetentionDays: config.auditRetentionDays ?? null,
+  actionRetentionDays: ACTION_RECORD_RETENTION_DAYS,
+});
+/*
+ * Every Bot, from Intelligence's agent registry, held in memory on this instance and kept fresh by
+ * Intelligence's change announcements (agents/bot-registry/directory.ts). Started before anything
+ * reads a Bot (nothing above does), and fatal when Intelligence cannot answer: a server with no Bots would show everybody
+ * an empty roster and say nothing about why.
+ */
+const botDirectory = installBotDirectory(
+  createBotDirectory({
+    registry: createAgentRegistryClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+// A Bot deleted for good takes this deployment's rows that named it, as the old foreign keys did.
+botDirectory.onPurged((botId) => removeBotLocalRows(database, [botId]));
+await botDirectory.start();
+// An upgraded deployment's Bots, copied from the local tables once (agents/bot-registry/upgrade.ts).
+await copyLocalBotsToIntelligence(database, botDirectory);
+/*
+ * Chat attachments and the screenshots browser turns keep live in Intelligence's file store
+ * (files/client.ts). Installed before anything serves or reads one, and an upgraded deployment's
+ * files copied in from the local tables once (files/upgrade.ts), loud when any is missing.
+ */
+installFilesClient(
+  createFilesClient({
+    apiUrl: config.runtime.intelligence.apiUrl,
+    apiKey: config.runtime.intelligence.apiKey,
+  }),
+);
+await copyLocalAttachmentsToIntelligence(database, {
+  stagedTtlHours: stagedAttachmentTtlHours(process.env),
+});
+await copyLocalPageFramesToIntelligence(database);
+// Rows naming a Bot purged while no instance was running to hear it. After the copy: before it, an
+// upgrading deployment's own Bots are not in Intelligence yet.
+await sweepPurgedBotRows(
+  database,
+  async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
+);
+/*
+ * Routines, check-ins and responsibilities, from Intelligence's agent schedules, held in memory on
+ * this instance and kept fresh by its change announcements (schedules/directory.ts). The sweeps that
+ * fire them read this, never Intelligence directly. Fatal when Intelligence cannot answer, like the
+ * Bots: a server with no routines would quietly stop firing everybody's.
+ */
+const scheduleDirectory = installScheduleDirectory(
+  createScheduleDirectory({
+    client: createScheduleClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+await scheduleDirectory.start();
+/*
+ * An upgraded deployment's routines, check-ins and responsibilities, copied from the local tables
+ * once, parents first (schedules/upgrade.ts), then read into the directory so the first sweep sees
+ * them.
+ */
+const copiedSchedules = await copyLocalSchedulesToIntelligence(
+  database,
+  scheduleDirectory.client,
+  [
+    ...routineCopySteps(database),
+    ...checkInCopySteps(database),
+    ...responsibilityCopySteps(database),
+  ],
+);
+if (copiedSchedules.some((step) => step.kind === "copied"))
+  await scheduleDirectory.resync();
+// An upgraded deployment's earlier audit trail, action records and model usage, copied into
+// Intelligence once, in the background: it can be millions of rows (audit-trail/upgrade.ts).
+const auditHistoryCopy = startAuditHistoryCopy(database, auditTrailClient);
+/*
+ * Everything Intelligence holds beside the Bots: each Bot's grants, publication and assignments, each
+ * person's preferences, the component catalogue and the skills, in memory on this instance and kept
+ * fresh by Intelligence's change announcements (configuration/directory.ts). Fatal when Intelligence
+ * cannot answer, as the Bots are: no grants would look like a deployment where nobody was ever given
+ * anything.
+ */
+const botConfigurationHub = installBotConfiguration(
+  createBotConfiguration({
+    client: createConfigurationClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    registry: botDirectory.registry,
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+// A Bot deleted for good takes what this instance holds about it, before Intelligence's announcements.
+botDirectory.onPurged((botId) => botConfigurationHub.botPurged(botId));
+await botConfigurationHub.start();
+// An upgraded deployment's configuration, copied from the local tables once (configuration/upgrade.ts).
+await copyLocalConfigurationToIntelligence(database, botConfigurationHub, () =>
+  botDirectory.cached(),
+);
+// What Intelligence holds about people this deployment no longer has, as the old cascades removed it.
+await sweepRemovedPeople(database, botConfigurationHub);
+sweepRemovedPeopleEvery(database, botConfigurationHub);
+
+/**
+ * The organization policy (capability switches, enterprise settings, network rules, the computer-action
+ * boundary, approval settings and rules, Shared app approvals), from Intelligence, held in memory on
+ * this instance and kept fresh by Intelligence's change announcements (policy/cache.ts). Fatal when
+ * Intelligence cannot answer: a server that read no policy would enforce none of it.
+ */
+const policyCache = installPolicyCache(
+  createPolicyCache({
+    client: createOrgPolicyClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+await policyCache.start();
+// An upgraded deployment's policy, copied from the local tables once (policy/upgrade.ts).
+await copyLocalPolicyToIntelligence(database, policyCache);
+// A Bot deleted for good takes its Shared app approvals with it, here and for any purged while down.
+const botStillGone = async (botId: string) =>
+  (await botDirectory.registry.get(botId)) === null;
+botDirectory.onPurged(async (botId) => {
+  await removeBotPolicy(policyCache, [botId], botStillGone);
+});
+await sweepPurgedBotPolicy(
+  policyCache,
+  async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
+  botStillGone,
+);
+/*
+ * Each person's memories and memory sources live in Intelligence (memory/intelligence.ts), on every plan.
+ * Every turn reads them, so each instance holds a person's memory once read, kept fresh by Intelligence's
+ * `memory_changes` announcements and a timer (memory/cache.ts). An upgraded deployment's memory is copied
+ * in from the local tables once (memory/upgrade.ts), after its Bots and after the rows of Bots purged
+ * meanwhile are swept, loud when any is missing.
+ */
+const memoryIntelligence = createIntelligenceMemory({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
+await copyLocalMemoryToIntelligence(database, memoryIntelligence);
+const memoryCache = createMemoryCache({
+  intelligence: memoryIntelligence,
+  changes: {
+    client: createProjectChangesClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  },
+});
+memoryCache.start();
+/*
+ * Conversations, with their members, Bots, threads, group transcripts, voice sessions and tasks, in
+ * Intelligence's conversations capability; and where people are reached outside OpenBot (delivery
+ * bindings and push devices) in its delivery bindings capability. Each instance holds the
+ * conversations it reads lately and every binding and device, kept fresh by Intelligence's change
+ * announcements (conversations/directory.ts, delivery/directory.ts).
+ */
+const intelligenceApi = {
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+};
+const conversationDirectory = installConversationDirectory(
+  createConversationDirectory({
+    client: createConversationClient(intelligenceApi),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+await conversationDirectory.start();
+const deliveryDirectory = installDeliveryDirectory(
+  createDeliveryDirectory({
+    client: createDeliveryBindingsClient(intelligenceApi),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+await deliveryDirectory.start();
+// An upgraded deployment's conversations and delivery bindings, copied from the local tables once.
+await copyLocalConversationsToIntelligence(
+  database,
+  conversationDirectory.client,
+);
+await copyLocalDeliveryToIntelligence(database, deliveryDirectory);
+// A Bot deleted for good is forgotten in the conversations and bindings that named it, as the old
+// foreign keys removed its `channel_agents`, `bot_tasks` and `delivery_bindings` rows.
+botDirectory.onPurged((botId) =>
+  forgetPurgedBot(conversationDirectory, deliveryDirectory, botId),
+);
+// And any purged while no instance was running to hear it.
+await sweepPurgedBotReferences(
+  conversationDirectory,
+  deliveryDirectory,
+  new Set(
+    (await botDirectory.registry.all({ includeDeleted: true })).bots.map(
+      (bot) => bot.id,
+    ),
+  ),
+);
+/**
+ * The vault, the apps and the connections, from Intelligence, held in memory on this instance and kept
+ * fresh by Intelligence's change announcements (vault/directory.ts). Built before the agent store
+ * because a customer's agent may sit behind a key and that key belongs in the vault rather than on the
+ * agent row (agents/auth-header.ts). Fatal when Intelligence cannot answer, as the Bot directory is.
+ */
+const vaultDirectory = installConnectionsDirectory(
+  createConnectionsDirectory({
+    client: createVaultClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+// An app removed for good takes this deployment's rows that named it, as the old cascade did.
+vaultDirectory.onServerRemoved((serverId) =>
+  removeServerLocalRows(database, [serverId]),
+);
+await vaultDirectory.start();
+// An upgraded deployment's secrets, apps and connections, copied from the local tables once
+// (vault/upgrade.ts), decrypted with the local key they were written under.
+await copyLocalVaultToIntelligence(
+  database,
+  vaultDirectory,
+  config.keyEncryptionKey,
+);
+// And the secrets Better Auth kept for signing people in: provider tokens, password hashes and the
+// identity providers' configurations (auth/sign-in-secrets-upgrade.ts).
+await copySignInSecretsToVault(
+  database,
+  vaultDirectory,
+  config.keyEncryptionKey,
+);
+await sweepRemovedServerRows(
+  database,
+  vaultDirectory.servers().map((server) => server.id),
+);
+const credentialStore = createCredentialStore(vaultDirectory);
 const identityStore = createIdentityStore(database, credentialStore);
 const agentVault = {
   store: credentialStore,
   reader: credentialStore,
-  encryptionKey: config.keyEncryptionKey,
 };
 const agentProfileStore = createAgentProfileStore(
   database,
@@ -469,6 +882,8 @@ const channelStore: ChannelStore = {
   },
 };
 const channelEvents = createChannelEventHub();
+// What Intelligence announces about conversations, to the browsers connected here (channels/live.ts).
+deliverConversationChanges(conversationDirectory, channelEvents);
 /**
  * Which components each Bot may answer with.
  *
@@ -632,7 +1047,7 @@ if (computerProvider?.warm) {
 // administrator can change it while running, and a restart returns to the configured one.
 const policyStore = createPolicyStore(
   config.computer?.policy ?? DEFAULT_ACTION_POLICY,
-  database,
+  policyCache,
 );
 // A boundary an administrator set is read back before the first action is decided, so a restart no
 // longer silently returns to the configured default.
@@ -644,10 +1059,7 @@ const policySource = await policyStore.load();
  * enforcing what it read at boot, so a new deny rule stops roughly one action in N while the screen
  * and the audit row both report success. See policy-listener.ts.
  */
-const policyListener = await startPolicyListener(
-  config.databaseUrl,
-  policyStore,
-);
+const policyListener = await startPolicyListener(policyCache, policyStore);
 
 /*
  * Record which boundary this process started with.
@@ -665,7 +1077,7 @@ const componentCatalog = headlessComponentCatalog({
   audit: auditSink(bootAuditStore),
 });
 // One store: the gateway writes through it, a route reads it, and the sweep below takes the old ones out.
-const pageFrameStore = createPageFrameStore(database);
+const pageFrameStore = createPageFrameStore();
 let deliveryNotifications: (
   scope: DeliveryScope,
   input: {
@@ -703,25 +1115,20 @@ const actorFor = async (ownerUserId: string): Promise<AgentActor> => {
 };
 const channelSourceForRun = async (run: RunAssertion) => {
   if (!run.threadId) return null;
-  const sources = await database
-    .select({ channelId: channels.id, botId: channelAgents.agentId })
-    .from(intelligenceChannelMappings)
-    .innerJoin(channels, eq(channels.id, intelligenceChannelMappings.channelId))
-    .innerJoin(
-      channelMemberships,
-      and(
-        eq(channelMemberships.channelId, channels.id),
-        eq(channelMemberships.userId, run.actorId),
-      ),
-    )
-    .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-    .where(
-      and(
-        eq(intelligenceChannelMappings.threadId, run.threadId),
-        eq(intelligenceChannelMappings.userId, run.actorId),
-        isNull(channels.deletedAt),
-      ),
-    );
+  // From this instance's memory (read through on a miss): asked on every coordination tool call.
+  const found = await conversationDirectory.byThread(run.threadId);
+  if (
+    !found ||
+    found.thread.agentId !== null ||
+    found.thread.userId !== run.actorId ||
+    found.conversation.deletedAt !== null ||
+    !found.conversation.members.some((member) => member.userId === run.actorId)
+  )
+    return null;
+  const sources = found.conversation.agents.map((agent) => ({
+    channelId: found.conversation.id,
+    botId: agent.agentId,
+  }));
   return (
     sources.find((source) => source.botId === run.botId) ??
     (run.handoff ? (sources[0] ?? null) : null)
@@ -733,7 +1140,7 @@ const channelSourceForRun = async (run: RunAssertion) => {
  * The group lookup applies the same live-membership and own-Bot checks. See channels/group.ts.
  */
 const sourceForCoordinationRun = async (run: RunAssertion) =>
-  (await channelSourceForRun(run)) ?? groupSourceForRun(database, run);
+  (await channelSourceForRun(run)) ?? groupSourceForRun(run);
 
 const authoriseQuestion = async (question: PersonQuestion) => {
   const source = await sourceForCoordinationRun({
@@ -780,11 +1187,11 @@ const chooseSkills = createModelCompleter({
   model: runtimeModel,
   resolveApiKey: () =>
     resolveModelApiKey({
-      encryptionKey: config.keyEncryptionKey,
       reader: credentialStore,
       provider: runtimeModel.provider,
       keyId: tenantPackage.model.credentialSecretRef,
       environment: process.env,
+      accessor: { purpose: "skill_selection" },
     }),
 });
 
@@ -847,14 +1254,11 @@ const approvalService = createServerApprovalService({
 });
 // Check-ins' settings, items, run ledger and pings. See proactive/store.ts.
 const proactiveStore = createProactiveStore(database);
-// Housekeeping on a schedule: audit rows when asked for, screenshots and the check-in ledger always,
-// one timer. See audit-retention.ts.
-const retentionSweeps = startRetentionSweeps(
-  config.databaseUrl,
-  config.auditRetentionDays,
-  pageFrameStore,
-  { proactive: proactiveStore },
-);
+// Housekeeping on a schedule: screenshots and the check-in ledger, one timer. See audit-retention.ts;
+// the audit trail's own retention is Intelligence's.
+const retentionSweeps = startRetentionSweeps(pageFrameStore, {
+  proactive: proactiveStore,
+});
 /**
  * Whose computer a Bot runs on: the person it acts for, unless the Bot is isolated and its owner
  * still holds the switch (`runsIsolated`, agents/isolation.ts). A provider that cannot make a
@@ -947,10 +1351,10 @@ const composio =
  * on keys: having both keys set is the expected state while the old provider's connections are ended.
  */
 if (wiredProvider) {
-  const [{ count: otherProviderRows }] = await database
-    .select({ count: sql<number>`count(*)::int` })
-    .from(brokeredConnections)
-    .where(ne(brokeredConnections.provider, wiredProvider));
+  // The connections are Intelligence's, held by this instance's vault directory (started above).
+  const otherProviderRows = allBrokered().filter(
+    (row) => row.provider !== wiredProvider,
+  ).length;
   assertActivatable(wiredProvider, otherProviderRows);
 }
 /*
@@ -975,7 +1379,6 @@ const signInService = computerGateway
           ownerUserId,
           "passwordManager",
         )) ?? true,
-      encryptionKey: config.keyEncryptionKey,
       auditStore: bootAuditStore,
       notify: createSignInNotifier({
         database,
@@ -1037,14 +1440,9 @@ const signInService = computerGateway
  * value, so the gate and the approvals it reads agree.
  */
 const providerConfiguration = providerDecision(config);
-const brokerProvider = storedProvider(
-  providerConfiguration,
-  (
-    await database
-      .selectDistinct({ provider: brokeredConnections.provider })
-      .from(brokeredConnections)
-  ).map((row) => row.provider),
-);
+const brokerProvider = storedProvider(providerConfiguration, [
+  ...new Set(allBrokered().map((row) => row.provider)),
+]);
 if (providerConfiguration.kind === "ambiguous") {
   /*
    * Said out loud, once, at startup: this deployment has two keys and no answer, so nothing is
@@ -1064,7 +1462,7 @@ const sharedUseStore = createSharedUseStore(database, brokerProvider);
  * this every one of them on the same broker key shared one set of grants. Connections recorded under
  * that shared name are retired here, never ended at the broker. See `ensureSingleUserIdentity`.
  */
-await ensureSingleUserIdentity(database, {
+await ensureSingleUserIdentity({
   singleUser: config.singleUser,
   provider: composio?.provider ?? null,
 });
@@ -1081,6 +1479,8 @@ const pluginStore = withPersonalDefaults(
     policy: () => policyStore.get(),
     approvalGate: approvalService.gate,
     sharedUse: createSharedUseGate(sharedUseStore, bootAuditStore),
+    removeSharedApprovals: (serverId) =>
+      sharedUseStore.deleteApprovalsAt([serverId]),
     // A connector send to other people asks the owner first. See plugins/share-target.ts.
     privateShareCheck: createPrivateShareCheck({
       approvals: approvalService.store,
@@ -1122,6 +1522,35 @@ const accountModes = createAccountModeSwitch({
   deploymentId: config.deploymentId ?? tenantPackage.tenantId,
   audit: bootAuditStore,
 });
+
+/*
+ * An app's tool list is this deployment's own cache of what the app's server last said (`mcp_tools`,
+ * `mcp_tool_lists`); the app itself is Intelligence's. A deployment whose cache is empty for an app
+ * it holds (a new database pointed at an existing Intelligence project, or a cache lost with it)
+ * lists it again in the background, once, rather than offering it with no tools until an
+ * administrator presses Refresh. A failure is said and changes nothing.
+ */
+void (async () => {
+  const listed = new Set(
+    (
+      await database
+        .selectDistinct({ serverId: mcpToolLists.serverId })
+        .from(mcpToolLists)
+    ).map((row) => row.serverId),
+  );
+  for (const server of vaultDirectory.servers()) {
+    if (listed.has(server.id)) continue;
+    await pluginStore.refreshTools(server.id).catch((error: unknown) =>
+      console.warn(
+        JSON.stringify({
+          type: "app-tool-list-rebuild-failed",
+          serverId: server.id,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+    );
+  }
+})();
 
 // Logo metadata is optional; a vendor outage must not prevent the API from starting.
 if (composio) {
@@ -1165,7 +1594,6 @@ const responsibilityStore = createResponsibilityStore(database, {
 const responsibilityBindings = createResponsibilityBindingStore(database, {
   store: credentialStore,
   reader: credentialStore,
-  encryptionKey: config.keyEncryptionKey,
 });
 const deliveryStore = createDeliveryStore(database);
 
@@ -1196,7 +1624,6 @@ const responsibilityTriggerStore = createTriggerStore(
   {
     store: credentialStore,
     reader: credentialStore,
-    encryptionKey: config.keyEncryptionKey,
   },
   { slackAccess },
 );
@@ -1274,13 +1701,13 @@ void recordAuditEvent(bootAuditStore, {
   payload: {
     ...policyStore.get(),
     source:
-      policySource === "the database"
-        ? "an administrator, saved in this deployment"
+      policySource === "intelligence"
+        ? "an administrator, saved in Intelligence"
         : config.computer?.policy
           ? "configuration"
           : "the built-in default",
     note:
-      policySource === "the database"
+      policySource === "intelligence"
         ? "Set while running and kept. A restart returns to this."
         : "The deployment default. Anything an administrator sets from here is kept.",
   },
@@ -1359,11 +1786,11 @@ const intentRouter = createIntentRouter({
     model: runtimeModel,
     resolveApiKey: () =>
       resolveModelApiKey({
-        encryptionKey: config.keyEncryptionKey,
         reader: credentialStore,
         provider: runtimeModel.provider,
         keyId: tenantPackage.model.credentialSecretRef,
         environment: process.env,
+        accessor: { purpose: "intent_routing" },
       }),
   }),
 });
@@ -1379,11 +1806,11 @@ const checkModelAvailability = () =>
     model: runtimeModel.defaultModel,
     apiKey: () =>
       resolveModelApiKey({
-        encryptionKey: config.keyEncryptionKey,
         reader: credentialStore,
         provider: runtimeModel.provider,
         keyId: tenantPackage.model.credentialSecretRef,
         environment: process.env,
+        accessor: { purpose: "model_availability_check" },
       }),
   });
 const modelCheckAtBoot = (async () => {
@@ -1399,14 +1826,25 @@ const modelCheckAtBoot = (async () => {
 
 // Named collaborators are bound once in actorAgentResolver for chat, hops, and headless turns.
 
-/** The deployment's model key, resolved per call so a credential rotated a moment ago is used next. */
-const resolveRuntimeModelApiKey = () =>
+/**
+ * The deployment's model key, resolved per call so a credential rotated a moment ago is used next. The
+ * vault records the read with the person and Bot it was for, when the caller knows them.
+ */
+const resolveRuntimeModelApiKey = (reader?: {
+  userId?: string;
+  botId?: string;
+  purpose?: string;
+}) =>
   resolveModelApiKey({
-    encryptionKey: config.keyEncryptionKey,
     reader: credentialStore,
     provider: runtimeModel.provider,
     keyId: tenantPackage.model.credentialSecretRef,
     environment: process.env,
+    accessor: {
+      purpose: reader?.purpose ?? "model_run",
+      userId: reader?.userId ?? null,
+      botId: reader?.botId ?? null,
+    },
   });
 
 const hostAccessBroker = createHostAccessBroker(Date.now, {
@@ -1418,14 +1856,29 @@ const hostAccessBroker = createHostAccessBroker(Date.now, {
 // grant, the policy and the audit row are exactly where they were. Host-folder tools are also
 // server-dispatched: the selected Bot and the signed-in owner are bound here, then the desktop worker
 // receives only opaque grant ids and relative paths.
-// Memory lives in CopilotKit Intelligence when this deployment is entitled to it, and in OpenBot's own
-// tables when it is not; see memory/store.ts. Its own client, like the thread reader's: the
-// constructor opens nothing.
+// Memory lives in CopilotKit Intelligence; see memory/store.ts.
 const personalMemoryStore = createMemoryStore(database, {
-  intelligence: createIntelligenceMemory({
-    client: createIntelligenceClient(config.runtime.intelligence),
-  }),
+  intelligence: memoryIntelligence,
+  cache: memoryCache,
 });
+// A Bot deleted for good takes the memory sources bound to it and the memories it formed, as the old
+// foreign keys did.
+botDirectory.onPurged((botId) => personalMemoryStore.forgetBot(botId));
+// And of a Bot purged while no instance was running to hear it.
+await personalMemoryStore.sweepPurgedBots(
+  async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
+);
+// A person deleted for good takes what Intelligence holds of them beyond the directory: their memory,
+// their Learning space and their schedules, as the old foreign keys to `users` did. Registered once
+// all three exist; a person purged earlier in boot is handed over now (people/purge-cascade.ts).
+await peopleDirectory.onPurged(
+  createPersonPurgeCascade({
+    memory: personalMemoryStore,
+    learning: learningIntelligence,
+    schedules: scheduleDirectory.client,
+    vault: vaultDirectory,
+  }),
+);
 const recorderExtension = createRecorderExtension({
   config,
   database,
@@ -1433,6 +1886,7 @@ const recorderExtension = createRecorderExtension({
   roleRepository,
   peopleStore,
   personalSpaces: personalLearningSpaces,
+  trajectoryBindings: createTrajectoryBindingStore(learningIntelligence),
   auditStore: bootAuditStore,
   ...(betterAuth
     ? { sessionLifetimeMs: await sessionLifetimeMs(betterAuth) }
@@ -1511,6 +1965,7 @@ const deliveryScopeFor: DeliveryScopeResolver = async (
 const memoryDefaults = createMemoryDefaults({
   database,
   ingestion: memoryIngestion,
+  memory: personalMemoryStore,
   sources: config.memoryDefaults.sources,
   research: config.memoryDefaults.research,
   channelBots: async (ownerUserId, channelId) =>
@@ -1539,20 +1994,6 @@ const memorySweep = repeatAfterEach(async () => {
         type: "memory-sweep-error",
         error: error instanceof Error ? error.name : "UnknownError",
         context: { operation: "syncDue" },
-        timestamp: new Date().toISOString(),
-      }),
-    );
-  }
-  // Mirror to Intelligence what is out of step: the backfill on the first passes after a deployment
-  // becomes entitled, and afterwards whatever an outage left behind. A no-op without Intelligence.
-  try {
-    await personalMemoryStore.mirrorPending();
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "memory-sweep-error",
-        error: error instanceof Error ? error.name : "UnknownError",
-        context: { operation: "mirrorPending" },
         timestamp: new Date().toISOString(),
       }),
     );
@@ -1617,7 +2058,7 @@ const loadToolsForActor =
   ];
 
 /** One person's standing instructions, for both the /api/settings routes and every run they start. */
-const userInstructionsStore = createUserInstructionsStore(database);
+const userInstructionsStore = createUserInstructionsStore();
 
 /*
  * What this person has told every built-in coworker they run.
@@ -2097,6 +2538,15 @@ const responsibilityAnswerTurn = ({
 };
 const responsibilitySweep = repeatAfterEach(async () => {
   try {
+    // Events accepted by a process that stopped before queueing their runs, and queued runs left
+    // without an item, before this pass dispatches (responsibilities/store.ts).
+    const recovered = await responsibilityStore.recover({
+      owner: workOwner("responsibility"),
+    });
+    if (recovered.ingests || recovered.requeued.length)
+      console.info(
+        JSON.stringify({ type: "responsibility-recovery", ...recovered }),
+      );
     const report = await responsibilityEngine.dispatch({
       owner: workOwner("responsibility"),
       limit: 1,
@@ -2260,9 +2710,8 @@ useSlackChannelMembership((input) =>
     ? deliveryProviders.slack.isMember(input)
     : Promise.resolve(false),
 );
-const authoriseDeliveryScope = async (scope: DeliveryScope) =>
-  (await deliveryScopeFor(scope.ownerUserId, scope.channelId, scope.agentId))
-    ?.threadId === scope.threadId;
+// The conversation's own thread, or the owner's Bot's own thread in a group. See delivery/authorise.ts.
+const authoriseDeliveryScope = createDeliveryScopeAuthoriser(deliveryScopeFor);
 const deliveryRouter = createDeliveryRouter({
   store: deliveryStore,
   queue: createWorkQueue(database),
@@ -2619,7 +3068,8 @@ const channelSummaries = {
   transcript: routineIntelligence,
   title: createChannelTitler({
     model: runtimeModel.defaultModel,
-    resolveApiKey: resolveRuntimeModelApiKey,
+    resolveApiKey: () =>
+      resolveRuntimeModelApiKey({ purpose: "conversation_title" }),
   }),
   owner: workOwner("summariser"),
 };
@@ -2672,6 +3122,42 @@ await installEnterpriseControls({
     signOut: signOutRecorders,
   },
 });
+/*
+ * SCIM, served by Intelligence's organization directory (auth/scim.ts): its connection accepts this
+ * deployment's tokens, by their hashes; and what a provisioning, deprovisioning or reprovisioning
+ * means here (the admin floor, ended sessions, retired connections, stopped computers, the trail)
+ * happens once, on one replica (people/directory/scim-reactions.ts). Fatal when Intelligence will not
+ * take the connection: a directory the customer set up would otherwise be refused with no word why.
+ */
+await registerScimConnection(peopleDirectory.client);
+const scimReactionsRunner = installScimReactions(
+  createScimReactions({
+    database,
+    client: peopleDirectory.client,
+    initialAdminEmails: config.auth?.initialAdminEmails ?? [],
+    endSessions: async (userId) => {
+      if (!betterAuth) return;
+      // Through Better Auth, so its session hooks end the person's Recorders as well.
+      await (await betterAuth.$context).internalAdapter.deleteUserSessions(
+        userId,
+      );
+    },
+    offboard: async (userId, by) => {
+      await enterpriseControls()?.offboard(userId, by);
+    },
+    auditStore: bootAuditStore,
+  }),
+);
+scimReactionsRunner.start();
+await scimReactionsRunner.reconcile().catch((error: unknown) =>
+  console.warn(
+    JSON.stringify({
+      type: "scim-reconcile-failed",
+      note: "Tried again on the next tick.",
+      error: error instanceof Error ? error.message : String(error),
+    }),
+  ),
+);
 guardDeliveryStore(
   deliveryStore,
   bootAuditStore,
@@ -2718,12 +3204,8 @@ const app = createApp(
   auth,
   roleRepository,
   createAuditReader(database),
-  createCredentialAdminService(
-    config.keyEncryptionKey,
-    credentialStore,
-    createAuditStore(database),
-  ),
-  createPackageStatusReader(database),
+  createCredentialAdminService(credentialStore, createAuditStore(database)),
+  createPackageStatusReader(),
   // The runtime call: the model, per-actor agent loading, and the two identity
   // functions are how a run is attributed to a person.
   copilotRuntime.handler,
@@ -2822,10 +3304,11 @@ const app = createApp(
     : undefined,
   createUserPreferencesStore(database),
   {
-    store: createVoiceSessionStore(database, channelStore),
+    store: createVoiceSessionStore(channelStore),
     summarize: createVoiceSummarizer({
       model: runtimeModel,
-      resolveApiKey: resolveRuntimeModelApiKey,
+      resolveApiKey: () =>
+        resolveRuntimeModelApiKey({ purpose: "voice_summary" }),
     }),
     channels: channelStore,
   },
@@ -2833,6 +3316,7 @@ const app = createApp(
     store: learningSettings,
     autoAssign: learningAutoAssign,
     status: copilotRuntime.learning?.status,
+    problems: copilotRuntime.learning?.problems,
     inspect: copilotRuntime.learning?.inspect,
   },
   {
@@ -2949,11 +3433,12 @@ const app = createApp(
     groups: groupConversations,
     teamBots,
     lifecycle: {
-      lifecycle: createBotLifecycleStore(database),
+      lifecycle: createBotLifecycleStore(),
       reset: createBotReset({
         database,
         softDeleteChannel: (actor, channelId) =>
           channelStore.softDelete(actor, channelId),
+        memory: personalMemoryStore,
       }),
       activity: createActivityStore(database),
       wakeUps: wakeUpStore,
@@ -3022,10 +3507,19 @@ if (config.singleUser) {
 // so a watch-mode restart does not leave two behind on every reload.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    botDirectory.stop();
+    policyCache.stop();
+    conversationDirectory.stop();
+    deliveryDirectory.stop();
+    peopleDirectory.stop();
+    scimReactionsRunner.stop();
+    auditRetentionSync.stop();
+    auditHistoryCopy.stop();
     responsibilitySweep.stop();
     wakeUpSweep.stop();
     wakeUpReaper.stop();
     memorySweep.stop();
+    memoryCache.stop();
     proactiveSweep.stop();
     taskSweep.stop();
     approvalSweep.stop();
@@ -3040,6 +3534,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       // Started only where handing work between Bots is switched on, so it is often not there.
       workOfferedListener?.stop() ?? Promise.resolve(),
       Promise.resolve(retentionSweeps.stop()),
+      // What is written but not yet sent stays in the outbox for the next start; this ends the pass.
+      auditDrainer.stop(),
     ]).finally(() => process.exit(0));
   });
 }

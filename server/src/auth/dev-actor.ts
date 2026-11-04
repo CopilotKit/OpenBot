@@ -1,8 +1,11 @@
 import type { MiddlewareHandler } from "hono";
 import type { SingleUserAccess } from "../config";
-import type { Database } from "../db/client";
+import {
+  idempotencyKey,
+  PersonAlreadyExistsError,
+} from "../people/directory/client";
+import { type PeopleDirectory, people } from "../people/directory/directory";
 import { callerOf, singleUserRefusal } from "../request-trust";
-import { users } from "../db/schema";
 import type { AppVariables, AuthenticatedActor } from "./guards";
 
 /**
@@ -29,32 +32,55 @@ export const DEV_ACTOR: AuthenticatedActor = {
   role: "admin",
 };
 
-type UserWriter = Pick<Database, "insert">;
-
+/**
+ * Make sure the single-user administrator is a person in Intelligence's directory (people/directory),
+ * and so has a row here for everything that names them. Their id never changes.
+ */
 export async function initializeDevActorUser(
-  database: UserWriter,
+  _database: unknown,
   enabled: boolean,
+  /** The deployment's people directory; the process's own unless a test runs several deployments. */
+  directory?: PeopleDirectory,
 ): Promise<boolean> {
   if (!enabled) return false;
 
   const name = DEV_ACTOR.name ?? DEV_ACTOR.email;
-  await database
-    .insert(users)
-    .values({
-      id: DEV_ACTOR.id,
-      email: DEV_ACTOR.email,
-      name,
-      emailVerified: false,
-    })
-    .onConflictDoUpdate({
-      target: users.id,
-      set: {
-        email: DEV_ACTOR.email,
-        updatedAt: new Date(),
-      },
-    });
+  directory ??= people();
+  const held = await directory.client.getPerson(DEV_ACTOR.id);
+  if (!held) {
+    try {
+      await directory.create(
+        {
+          id: DEV_ACTOR.id,
+          email: DEV_ACTOR.email,
+          name,
+          image: null,
+          emailVerified: false,
+          role: "admin",
+        },
+        // Replicas starting at once each try; all but one are told the person already exists.
+        idempotencyKey("dev-actor"),
+      );
+      return true;
+    } catch (error) {
+      if (!(error instanceof PersonAlreadyExistsError)) throw error;
+    }
+  }
+  await directory.update(DEV_ACTOR.id, (current) =>
+    current.email === DEV_ACTOR.email ? null : { email: DEV_ACTOR.email },
+  );
 
   return true;
+}
+
+export function singleUserRequested(
+  environment: Record<string, string | undefined>,
+): boolean {
+  return (
+    environment.OPENBOT_SINGLE_USER?.trim() === "true" ||
+    // The name this had before. Still honoured so an existing .env keeps working.
+    environment.OPENBOT_DEV_NO_AUTH?.trim() === "true"
+  );
 }
 
 /**
@@ -74,11 +100,7 @@ export function singleUserEnabled(
   // Said explicitly, which is the only way to run with no sign-in at all. Not a default, and not
   // inferred from anything: every signal that could stand in for "this is only my laptop" is absent
   // by default on a server too, which is what made the previous NODE_ENV check useless.
-  const asked =
-    environment.OPENBOT_SINGLE_USER?.trim() === "true" ||
-    // The name this had before. Still honoured so an existing .env keeps working.
-    environment.OPENBOT_DEV_NO_AUTH?.trim() === "true";
-  if (asked) return true;
+  if (singleUserRequested(environment)) return true;
 
   throw new Error(
     "No identity provider is configured. Set GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_* with BETTER_AUTH_SECRET and BETTER_AUTH_URL, or set OPENBOT_SINGLE_USER=true to run with one administrator and no sign-in. Refusing to start rather than serving a deployment where every visitor is an administrator.",

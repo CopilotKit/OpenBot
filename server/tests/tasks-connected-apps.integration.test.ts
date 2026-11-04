@@ -26,24 +26,9 @@ import { createAuditStore, PERSON_INITIATOR } from "../src/audit";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import type { RegisteredAgent } from "../src/copilot";
-import { createCredentialStore, encryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  approvalRequests,
-  channelMemberships,
-  channels,
-  credentials,
-  mcpServers,
-  mcpTools,
-  mcpUserCredentials,
-  pluginGrants,
-  proactiveSettings,
-  proactiveSuggestions,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { approvalRequests, mcpTools, users, workItems } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import {
   grantedTools,
@@ -60,7 +45,28 @@ import { createTaskRunner } from "../src/tasks/runner";
 import { createTaskStore } from "../src/tasks/store";
 import { createTaskTurn } from "../src/tasks/turn";
 import { createWorkQueue } from "../src/work/queue";
+import { changeAccess, removeBots, useTestBots } from "./support/bots";
+import {
+  conversationClient,
+  purgeConversations,
+} from "./support/conversations";
+import { purgeSchedulesOf, settingWithItem } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  purgeSecrets,
+  removeConnectionsWhere,
+  removeServers,
+  type SeedCredential,
+  type SeedServer,
+  seedCredential,
+  seedGrant,
+  seedServer,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
+import { useTestPolicy } from "./support/policy";
+import { useTestSchedules } from "./support/schedules";
 
 /*
  * A task started from a check-in, working with the apps the person connected: it reads their own
@@ -80,7 +86,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
-/** 32 zero bytes in base64: a real AES-256 key, because the vault is opened for Notion's grant. */
+/** 32 zero bytes in base64: a real AES-256 key, as the store is configured with one. */
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const NOTION = "notion";
 const EXA = "exa";
@@ -269,6 +275,9 @@ const realFetch = globalThis.fetch;
 let environmentBefore: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
+  await useTestPolicy();
+  await useTestBots();
+  await useTestSchedules();
   llm.on({ predicate: () => true }, (request) => script(request));
   const model = await llm.start();
   relay = Bun.serve({
@@ -355,13 +364,11 @@ const fixtures = (() => {
   const createdCredentials: string[] = [];
   let notionClientBefore: string | null | undefined;
 
-  async function server(row: typeof mcpServers.$inferInsert) {
-    const inserted = await database
-      .insert(mcpServers)
-      .values(row)
-      .onConflictDoNothing()
-      .returning({ id: mcpServers.id });
-    if (inserted.length) createdServers.push(row.id);
+  /** Add an app unless Intelligence has one under this id already: the old `DO NOTHING`. */
+  async function server(row: SeedServer) {
+    if (await storedServer(row.id)) return;
+    await seedServer(row);
+    createdServers.push(row.id);
   }
   async function tool(row: typeof mcpTools.$inferInsert) {
     const inserted = await database
@@ -372,15 +379,8 @@ const fixtures = (() => {
     if (inserted.length)
       createdTools.push({ serverId: row.serverId, name: row.name });
   }
-  async function secret(
-    row: Omit<typeof credentials.$inferInsert, "encryptedValue">,
-    value: string,
-  ) {
-    const [stored] = await database
-      .insert(credentials)
-      .values({ ...row, encryptedValue: await encryptSecret(KEY, value) })
-      .returning({ id: credentials.id });
-    if (!stored) throw new Error("credential was not stored");
+  async function secret(row: Omit<SeedCredential, "plaintext">, value: string) {
+    const stored = await seedCredential({ ...row, plaintext: value });
     createdCredentials.push(stored.id);
     return stored.id;
   }
@@ -400,11 +400,7 @@ const fixtures = (() => {
         url: "https://mcp.exa.ai/mcp",
         provenance: "first-party",
       });
-      const [notion] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, NOTION));
-      notionClientBefore = notion?.credentialId ?? null;
+      notionClientBefore = (await storedServer(NOTION))?.credentialId ?? null;
       const client = await secret(
         {
           kind: "mcp_oauth_client",
@@ -414,10 +410,7 @@ const fixtures = (() => {
         },
         JSON.stringify({ clientId: `client-${suite}`, clientSecret: "" }),
       );
-      await database
-        .update(mcpServers)
-        .set({ credentialId: client })
-        .where(eq(mcpServers.id, NOTION));
+      await changeServer(NOTION, { credentialId: client });
       // As a refresh records them from the server's own labels.
       await tool({ serverId: NOTION, name: GET_REQUEST, declaredRead: true });
       await tool({ serverId: NOTION, name: FETCH, declaredRead: true });
@@ -440,34 +433,37 @@ const fixtures = (() => {
         },
         refreshToken,
       );
-      await database.insert(mcpUserCredentials).values({
+      await seedGrant({
         serverId: NOTION,
         userId: owner,
         credentialId: grantToken,
         scope: "",
       });
-      await database.insert(pluginGrants).values(
+      await changeAccess(
         [
           ref(NOTION, GET_REQUEST),
           ref(NOTION, FETCH),
           ref(NOTION, COMMENT),
           ref(EXA, SEARCH),
         ].map((granted) => ({
+          op: "grant" as const,
+          botId,
           kind: "mcp" as const,
           ref: granted,
-          agentId: botId,
+          grantedBy: null,
+          grantedAs: "admin" as const,
+          ifGranted: "replace" as const,
         })),
       );
     },
     async remove() {
-      await database
-        .delete(mcpUserCredentials)
-        .where(inArray(mcpUserCredentials.userId, people));
-      if (notionClientBefore !== undefined)
-        await database
-          .update(mcpServers)
-          .set({ credentialId: notionClientBefore })
-          .where(eq(mcpServers.id, NOTION));
+      await removeConnectionsWhere(
+        (connection) =>
+          connection.kind === "grant" && people.includes(connection.userId),
+      );
+      // The client pointer back before its credential goes, so the app never names a gone secret.
+      if (notionClientBefore !== undefined && !createdServers.includes(NOTION))
+        await changeServer(NOTION, { credentialId: notionClientBefore });
       for (const created of createdTools)
         await database
           .delete(mcpTools)
@@ -477,14 +473,8 @@ const fixtures = (() => {
               eq(mcpTools.name, created.name),
             ),
           );
-      if (createdServers.length)
-        await database
-          .delete(mcpServers)
-          .where(inArray(mcpServers.id, createdServers));
-      if (createdCredentials.length)
-        await database
-          .delete(credentials)
-          .where(inArray(credentials.id, createdCredentials));
+      await removeServers(createdServers);
+      await purgeSecrets(createdCredentials);
     },
   };
 })();
@@ -493,11 +483,14 @@ const fixtures = (() => {
  * One deployment, wired the way `server/src/index.ts` wires it.
  * ---------------------------------------------------------------------------------------------- */
 
+// Apps, connections and credentials live in Intelligence: the process's vault directory, before
+// the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: KEY,
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   approvalGate: approvalService.gate,
@@ -631,30 +624,18 @@ async function seed(title = "Reply to Sam about the spec") {
   });
   await fixtures.connect(id, bot.id);
   const own = await channelStore.direct(owner, bot.id);
-  const settingId = randomUUID();
-  await database.insert(proactiveSettings).values({
-    id: settingId,
+  const { item } = await settingWithItem({
     ownerUserId: id,
     agentId: bot.id,
     channelId: own.id,
     threadId: `tasks-apps-${suite}-check-ins-${randomUUID()}`,
+    runId: `tasks-apps-${suite}-run`,
+    title,
+    detail: "Sam asked for the spec by Friday.",
+    sourceApp: "Notion",
+    sourceRef: ref(NOTION, GET_REQUEST),
+    sourceLink: "https://www.notion.so/r-1",
   });
-  const [item] = await database
-    .insert(proactiveSuggestions)
-    .values({
-      id: randomUUID(),
-      ownerUserId: id,
-      agentId: bot.id,
-      settingId,
-      runId: `tasks-apps-${suite}-run`,
-      title,
-      detail: "Sam asked for the spec by Friday.",
-      sourceApp: "Notion",
-      sourceRef: ref(NOTION, GET_REQUEST),
-      sourceLink: "https://www.notion.so/r-1",
-    })
-    .returning();
-  if (!item) throw new Error("No item.");
   return { owner, botId: bot.id, own, item };
 }
 
@@ -695,6 +676,7 @@ beforeEach(() => {
 
 afterAll(async () => {
   await tasks.idle();
+  await purgeSchedulesOf(people);
   try {
     await llm.stop();
     relay?.stop(true);
@@ -706,10 +688,6 @@ afterAll(async () => {
       else process.env[name] = value;
     }
   }
-  const theirs = await database
-    .select({ id: channelMemberships.channelId })
-    .from(channelMemberships)
-    .where(inArray(channelMemberships.userId, people));
   const approvals = await database
     .select({ id: approvalRequests.id })
     .from(approvalRequests)
@@ -719,22 +697,19 @@ afterAll(async () => {
     .where(
       sql`${workItems.payload}->>'ownerUserId' in ${people} or (${workItems.kind} = 'approval.resume' and ${workItems.key} in ${approvals.length ? approvals.map((row) => row.id) : [""]})`,
     );
-  if (theirs.length)
-    await database.delete(channels).where(
-      inArray(
-        channels.id,
-        theirs.map((row) => row.id),
-      ),
-    );
-  await database
-    .delete(pluginGrants)
-    .where(inArray(pluginGrants.agentId, bots));
+  // Their conversations, and the tasks that own them, in Intelligence.
+  const client = await conversationClient();
+  const theirs = new Set<string>();
+  for (const userId of people)
+    for (const found of await client.all({
+      memberUserId: userId,
+      includeDeleted: true,
+    }))
+      theirs.add(found.id);
+  await purgeConversations([...theirs]);
   await fixtures.remove();
   await database.delete(users).where(inArray(users.id, people));
-  await database
-    .delete(agentProfiles)
-    .where(inArray(agentProfiles.agentId, bots));
-  await database.delete(agents).where(inArray(agents.id, bots));
+  await removeBots(bots);
   await database.$client.close();
 });
 

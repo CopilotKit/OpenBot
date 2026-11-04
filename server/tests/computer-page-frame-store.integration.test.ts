@@ -1,9 +1,7 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, test } from "bun:test";
 import { createPageFrameStore } from "../src/computer/page-frames";
-import { createDatabase } from "../src/db/client";
-import { computerPageFrame } from "../src/db/schema";
-import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { filesClient } from "../src/files/client";
+import { useTestFiles } from "./support/files";
 
 /**
  * A conversation is a record, and a record must not change its mind.
@@ -14,13 +12,20 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * page instead let a second visit to one address rewrite an earlier turn's picture, which is the
  * same mutability wearing a different hat.
  *
- * Driven against the database rather than a fake, because the properties under test are the
- * database's: which rows collide, and what happens when they do.
+ * Driven against a real Intelligence rather than a fake, because the properties under test are the
+ * file store's: which frames collide, and what happens when they do.
  */
 
-const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestFiles();
+const store = createPageFrameStore();
 
-const store = createPageFrameStore(database);
+/**
+ * A frame as the computer hands one over: base64 of the image bytes. A label stands in for the
+ * image, encoded the way a real screenshot is, so what is read back is exactly what was saved.
+ */
+function shot(label: string): string {
+  return Buffer.from(label).toString("base64");
+}
 const computers: string[] = [];
 
 function computerId(): string {
@@ -31,9 +36,7 @@ function computerId(): string {
 
 afterEach(async () => {
   for (const id of computers.splice(0)) {
-    await database
-      .delete(computerPageFrame)
-      .where(eq(computerPageFrame.computerId, id));
+    await filesClient().purge({ purpose: "page_frame", collection: id });
   }
 });
 
@@ -45,11 +48,11 @@ describe("kept page frames", () => {
       toolCallId: "call-1",
       url: "https://example.com/one",
       title: "One",
-      frame: "AAAA",
+      frame: shot("AAAA"),
     });
 
     const stored = await store.load(id, "call-1");
-    expect(stored?.frame).toBe("AAAA");
+    expect(stored?.frame).toBe(shot("AAAA"));
     expect(stored?.title).toBe("One");
     expect(stored?.url).toBe("https://example.com/one");
   });
@@ -64,17 +67,17 @@ describe("kept page frames", () => {
       computerId: id,
       toolCallId: "call-a",
       url: "https://a.example",
-      frame: "A",
+      frame: shot("A"),
     });
     await store.save({
       computerId: id,
       toolCallId: "call-b",
       url: "https://b.example",
-      frame: "B",
+      frame: shot("B"),
     });
 
-    expect((await store.load(id, "call-a"))?.frame).toBe("A");
-    expect((await store.load(id, "call-b"))?.frame).toBe("B");
+    expect((await store.load(id, "call-a"))?.frame).toBe(shot("A"));
+    expect((await store.load(id, "call-b"))?.frame).toBe(shot("B"));
   });
 
   /*
@@ -89,18 +92,18 @@ describe("kept page frames", () => {
       toolCallId: "call-first",
       url: "https://news.example",
       title: "Before",
-      frame: "OLD",
+      frame: shot("OLD"),
     });
     await store.save({
       computerId: id,
       toolCallId: "call-second",
       url: "https://news.example",
       title: "After",
-      frame: "NEW",
+      frame: shot("NEW"),
     });
 
-    expect((await store.load(id, "call-first"))?.frame).toBe("OLD");
-    expect((await store.load(id, "call-second"))?.frame).toBe("NEW");
+    expect((await store.load(id, "call-first"))?.frame).toBe(shot("OLD"));
+    expect((await store.load(id, "call-second"))?.frame).toBe(shot("NEW"));
   });
 
   /* A turn happens once. A second write for it is a retry or a mistake, and neither may change it. */
@@ -110,16 +113,16 @@ describe("kept page frames", () => {
       computerId: id,
       toolCallId: "call-1",
       url: "https://example.com",
-      frame: "FIRST",
+      frame: shot("FIRST"),
     });
     await store.save({
       computerId: id,
       toolCallId: "call-1",
       url: "https://example.com",
-      frame: "SECOND",
+      frame: shot("SECOND"),
     });
 
-    expect((await store.load(id, "call-1"))?.frame).toBe("FIRST");
+    expect((await store.load(id, "call-1"))?.frame).toBe(shot("FIRST"));
   });
 
   /*
@@ -133,7 +136,7 @@ describe("kept page frames", () => {
       computerId: theirs,
       toolCallId: "call-1",
       url: "https://payroll.example",
-      frame: "SECRET",
+      frame: shot("SECRET"),
     });
 
     expect(await store.load(mine, "call-1")).toBe(null);
@@ -150,19 +153,19 @@ describe("kept page frames", () => {
       computerId: mine,
       toolCallId: "call-1",
       url: "https://inbox.example",
-      frame: "MINE",
+      frame: shot("MINE"),
     });
     await store.save({
       computerId: theirs,
       toolCallId: "call-1",
       url: "https://inbox.example",
-      frame: "THEIRS",
+      frame: shot("THEIRS"),
     });
 
     expect(await store.clear(mine)).toBe(1);
     expect(await store.load(mine, "call-1")).toBe(null);
     // And nobody else's.
-    expect((await store.load(theirs, "call-1"))?.frame).toBe("THEIRS");
+    expect((await store.load(theirs, "call-1"))?.frame).toBe(shot("THEIRS"));
   });
 
   /* A page is a row, so a Bot that browses grows this table for as long as it runs. */
@@ -172,7 +175,7 @@ describe("kept page frames", () => {
       computerId: id,
       toolCallId: "call-1",
       url: "https://example.com",
-      frame: "AAAA",
+      frame: shot("AAAA"),
     });
 
     expect(await store.purge(60_000)).toBe(0);
@@ -202,13 +205,9 @@ describe("kept page frames", () => {
       computerId: id,
       toolCallId: "",
       url: "https://example.com",
-      frame: "AAAA",
+      frame: shot("AAAA"),
     });
 
     expect(await store.load(id, "")).toBe(null);
   });
-});
-
-afterAll(async () => {
-  await database.$client.close();
 });

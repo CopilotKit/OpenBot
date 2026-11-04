@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +7,7 @@ import type { RunAgentInput } from "@ag-ui/client";
 import { Hono } from "hono";
 import { runtimeModelForEnvironment } from "../src/copilot";
 import {
-  encryptSecret,
+  createCredentialStore,
   type ModelCredentialSecretReader,
   resolveModelApiKey,
 } from "../src/credentials";
@@ -16,30 +17,42 @@ import {
   mountProviderOAuthProxy,
 } from "../src/provider-oauth";
 import { createVoiceSummarizer } from "../src/voice/summary";
+import { purgeSecrets, useTestVault } from "./support/vault";
 
 const transcript = [
   { id: "turn-1", role: "user", text: "Plan the launch." },
 ] as const;
 const answer = "Discussed launch planning. Next steps remain open.";
 const packageModel = { provider: "openai", defaultModel: "gpt-test" } as const;
-const encryptionKey = Buffer.alloc(32, 7).toString("base64");
+// Model keys this file stores in the test vault, purged when it is done.
+const storedKeys: string[] = [];
+afterAll(async () => {
+  await purgeSecrets(storedKeys.splice(0));
+});
 
-function summarizer(
+/**
+ * A summarizer resolving its key the way the server does: from the vault under `keyId`, then the
+ * environment. The reader is the real credential store unless a test hands it another one; a fresh
+ * name holds no stored key.
+ */
+async function summarizer(
   environment: Record<string, string | undefined>,
-  reader: ModelCredentialSecretReader = { readModelSecret: async () => null },
+  options: { reader?: ModelCredentialSecretReader; keyId?: string } = {},
 ) {
   const model = runtimeModelForEnvironment(packageModel, environment);
+  const reader = options.reader ?? createCredentialStore(await useTestVault());
+  const keyId = options.keyId ?? `primary-model-${randomUUID()}`;
   return createVoiceSummarizer({
     model,
     environment,
     timeoutMs: 1000,
     resolveApiKey: () =>
       resolveModelApiKey({
-        encryptionKey,
         reader,
         provider: model.provider,
-        keyId: "primary-model",
+        keyId,
         environment,
+        accessor: { purpose: "voice_summary" },
       }),
   });
 }
@@ -86,15 +99,26 @@ test.each(["openai", "anthropic"] as const)(
           : { OPENAI_API_KEY: "environment-key" }),
         VOICE_API_KEY: "must-not-be-used",
       };
-      let encryptedValue: string | undefined;
-      const summarize = summarizer(environment, {
-        readModelSecret: async (input) => {
-          expect(input).toEqual({ provider, keyId: "primary-model" });
-          return encryptedValue ? { encryptedValue } : null;
+      const store = createCredentialStore(await useTestVault());
+      const keyId = `primary-model-${randomUUID()}`;
+      const summarize = await summarizer(environment, {
+        keyId,
+        reader: {
+          revealModelSecret: async (input, accessor) => {
+            expect(input).toEqual({ provider, keyId });
+            return store.revealModelSecret(input, accessor);
+          },
         },
       });
       expect(await summarize(transcript)).toBe(answer);
-      encryptedValue = await encryptSecret(encryptionKey, "rotated-stored-key");
+      const stored = await store.create({
+        kind: "model",
+        provider,
+        keyId,
+        metadata: {},
+        plaintext: "rotated-stored-key",
+      });
+      storedKeys.push(stored.id);
       expect(await summarize(transcript)).toBe(answer);
       expect(seen).toHaveLength(2);
       for (const [index, request] of seen.entries()) {
@@ -156,7 +180,7 @@ test.each(["claude", "chatgpt"] as const)(
       },
     });
     try {
-      const summarize = summarizer(
+      const summarize = await summarizer(
         {
           ...(provider === "claude"
             ? { CLAUDE_CODE_OAUTH_TOKEN: "synthetic-plan-token" }
@@ -169,8 +193,10 @@ test.each(["claude", "chatgpt"] as const)(
           MANAGED_AGENT_TOKEN: "owned-harness-token",
         },
         {
-          readModelSecret: async () => {
-            throw new Error("Plan summaries must not look for an API key");
+          reader: {
+            revealModelSecret: async () => {
+              throw new Error("Plan summaries must not look for an API key");
+            },
           },
         },
       );
@@ -257,7 +283,7 @@ test.each(["google", "xai"] as const)(
         OPENAI_API_KEY: record.proxyToken,
         OPENBOT_MODEL_OAUTH_FILE: file,
       };
-      expect(await summarizer(environment)(transcript)).toBe(answer);
+      expect(await (await summarizer(environment))(transcript)).toBe(answer);
       expect(received).toHaveLength(1);
       expect(received[0]?.authorization).toBe(`Bearer ${record.accessToken}`);
       expect(new URL(received[0]?.url ?? "").pathname).toBe(
@@ -271,9 +297,12 @@ test.each(["google", "xai"] as const)(
         record.proxyToken,
       );
       await expect(
-        summarizer({ ...environment, OPENAI_API_KEY: "wrong-proxy-token" })(
-          transcript,
-        ),
+        (
+          await summarizer({
+            ...environment,
+            OPENAI_API_KEY: "wrong-proxy-token",
+          })
+        )(transcript),
       ).rejects.toThrow("401");
       expect(received).toHaveLength(1);
     } finally {
@@ -332,7 +361,7 @@ test.each(["claude", "chatgpt"] as const)(
       },
     });
     try {
-      const summarize = summarizer({
+      const summarize = await summarizer({
         ...(provider === "claude"
           ? { CLAUDE_CODE_OAUTH_TOKEN: "synthetic-plan-token" }
           : { CHATGPT_AUTH_FILE: "/synthetic/auth.json" }),

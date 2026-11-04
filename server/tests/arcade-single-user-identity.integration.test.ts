@@ -11,35 +11,48 @@ import {
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { readConnectPrompt } from "@openbot/shared/connect-prompt";
-import { eq } from "drizzle-orm";
+import { isNull, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import postgres from "postgres";
 import { createAuditStore } from "../src/audit";
+import { createAuditDrainer } from "../src/audit-trail/drainer";
 import {
   createDevRequireUser,
   DEV_ACTOR,
   initializeDevActorUser,
 } from "../src/auth/dev-actor";
 import type { AppVariables } from "../src/auth/guards";
+import { createCredentialStore } from "../src/credentials";
 import { applyMigrations } from "../src/db/apply-migrations";
 import { createDatabase, type Database } from "../src/db/client";
-import {
-  agents,
-  auditEvents,
-  brokeredConnections,
-  brokeredIdentities,
-  mcpServers,
-  mcpTools,
-  pendingAuthorizations,
-} from "../src/db/schema";
+import { auditOutbox, mcpTools, pendingAuthorizations } from "../src/db/schema";
 import { useArcadeClient } from "../src/plugins/arcade";
 import { createArcadeClient } from "../src/plugins/arcade-adapter";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { ensureSingleUserIdentity } from "../src/plugins/single-user-identity";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
+import type { BrokeredConnection, BrokeredIdentity } from "../src/vault/client";
+import {
+  type ConnectionsDirectory,
+  installConnectionsDirectory,
+} from "../src/vault/directory";
+import { brokeredId } from "../src/vault/ids";
 import fixture from "./fixtures/arcade-catalogue.json";
+import { auditRows, useTestAuditTrail } from "./support/audit";
+import {
+  removeBots,
+  seedBot,
+  type TestIntelligence,
+  testIntelligence,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { directoryFor } from "./support/directory";
 import { seedPeople } from "./support/people";
+import {
+  deploymentDirectory,
+  secondTestProject,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * EVERY SINGLE-USER OPENBOT ON ONE ARCADE KEY WAS ONE ARCADE USER, AND ITS GRANTS WERE NOWHERE HERE.
@@ -67,7 +80,12 @@ import { seedPeople } from "./support/people";
  * name before an upgrade gave the deployment its own is refused when it comes back, and nothing held
  * at Arcade under `dev-local-user`, which other installs share, is confirmed or withdrawn.
  *
- * REAL DATABASES, REAL ROUTES, THE REAL SINGLE-USER GUARD, THE REAL STORE, THE REAL ADAPTER AND THE
+ * A DEPLOYMENT IS A DATABASE AND AN INTELLIGENCE PROJECT. Its apps, its accounts and its name at
+ * Arcade are its project's (they live in Intelligence's connections), so two deployments here are two
+ * databases on two projects, and a deployment's start is a directory of its own on its project. A
+ * new deployment's project starts with none of what this file writes there.
+ *
+ * REAL DATABASES, A REAL INTELLIGENCE, REAL ROUTES, THE REAL SINGLE-USER GUARD, THE REAL STORE, THE REAL ADAPTER AND THE
  * REAL SDK. Arcade is faked at its HTTP boundary only, through `ARCADE_BASE_URL`, as
  * `arcade-confirm-engine.test.ts` does: `@arcadeai/arcadejs` builds and parses every request
  * itself. The engine answers in the shapes the live API does, with the page envelope and tool
@@ -84,7 +102,12 @@ const migrations = join(import.meta.dir, "..", "drizzle");
 const created: string[] = [];
 const opened: Database[] = [];
 
-const BOT = "helper";
+/*
+ * One Bot for every deployment this file boots. Each deployment has a database of its own, but Bots
+ * live in Intelligence, and the tests share one project there: so the Bot is made once, under an id
+ * no other file or run uses, and every deployment grants to it.
+ */
+const BOT = `helper-${suite}`;
 const TOOLKIT = "Gmail";
 const ROW = `arcade-${TOOLKIT}`;
 const READ = `${TOOLKIT}.ListEmails`;
@@ -119,6 +142,55 @@ async function freshDatabase(): Promise<string> {
     await client.end({ timeout: 5 });
   }
   return url.href;
+}
+
+/**
+ * A deployment's own place: a fresh database, and an Intelligence project holding none of what this
+ * file writes there. The first deployment a test makes is on the test project, the second on the
+ * second project; no test here runs three side by side.
+ */
+type Install = { url: string; project: TestIntelligence };
+
+let installsThisTest = 0;
+const inspectors = new Map<string, ConnectionsDirectory>();
+const usedProjects = new Map<string, TestIntelligence>();
+
+/** A directory that only reads and clears a project for this file: never a deployment's own. */
+async function inspector(project: TestIntelligence) {
+  let held = inspectors.get(project.apiKey);
+  if (!held) {
+    usedProjects.set(project.apiKey, project);
+    held = await deploymentDirectory(project);
+    inspectors.set(project.apiKey, held);
+  }
+  return held;
+}
+
+/** This file's people: the single-user person, and the suite's signed-in ones. */
+const ours = (userId: string | null) =>
+  userId === DEV_ACTOR.id || Boolean(userId?.endsWith(`-${suite}`));
+
+/** Every record this file writes in a project: its accounts, its names at Arcade and its app. */
+async function clearProject(project: TestIntelligence) {
+  const directory = await inspector(project);
+  const { connections } = await directory.client.connections.all();
+  for (const connection of connections) {
+    if (connection.kind === "grant") continue;
+    if (connection.provider === "arcade" && ours(connection.userId))
+      await directory.removeConnection(connection.id);
+  }
+  if (await directory.client.toolServers.get(ROW))
+    await directory.removeServer(ROW);
+}
+
+async function freshInstall(): Promise<Install> {
+  installsThisTest += 1;
+  if (installsThisTest > 2)
+    throw new Error("This file runs at most two deployments in one test.");
+  const project =
+    installsThisTest === 1 ? testIntelligence() : secondTestProject();
+  await clearProject(project);
+  return { url: await freshDatabase(), project };
 }
 
 function open(url: string): Database {
@@ -531,8 +603,13 @@ beforeAll(() => {
   useArcadeClient(client.actions);
 });
 
+beforeAll(async () => {
+  await seedBot({ id: BOT, name: "Helper", type: "built_in" });
+});
+
 beforeEach(() => {
   project = arcadeProject();
+  installsThisTest = 0;
 });
 
 /*
@@ -540,11 +617,18 @@ beforeEach(() => {
  * Two connections a deployment, held to the end, ran a full CI run's Postgres out of clients.
  */
 afterEach(async () => {
+  for (const directory of running.splice(0)) directory.stop();
   for (const database of opened.splice(0)) await database.$client.close();
+  // The process's own directory back, so a file after this one in the same run reads a live one.
+  installConnectionsDirectory(await useTestVault());
 });
 
 // Every database this file created is dropped here, and there are a few dozen of them.
 afterAll(async () => {
+  await removeBots([BOT]);
+  for (const project of usedProjects.values()) await clearProject(project);
+  for (const directory of inspectors.values()) directory.stop();
+  installConnectionsDirectory(await useTestVault());
   useArcadeClient(null);
   engine?.stop(true);
   if (wasBaseURL === undefined) delete process.env.ARCADE_BASE_URL;
@@ -577,37 +661,65 @@ const signedInAs =
  * `settled` IS WHAT `ensureSingleUserIdentity` ANSWERED, and `identity` the name calls go out
  * under, which is the person's own id where nothing was settled.
  */
+/** Every deployment directory started in this test, stopped when it ends. */
+const running: ConnectionsDirectory[] = [];
+
 async function boot(
-  url: string,
+  install: Install,
   signedIn?: string,
   /** False for a deployment as it ran before it could be given a name of its own. */
   { named = true }: { named?: boolean } = {},
 ) {
-  const database = open(url);
-  await initializeDevActorUser(database, signedIn === undefined);
+  const database = open(install.url);
+  /*
+   * THIS DEPLOYMENT'S PROCESS. Its apps and accounts are read through the one directory a server
+   * installs, so it is installed whenever this deployment acts: every request, call and store method
+   * below goes through `acting`, and the tests drive one deployment at a time.
+   */
+  const directory = await deploymentDirectory(install.project, database);
+  running.push(directory);
+  const acting = <T>(work: () => T): T => {
+    installConnectionsDirectory(directory);
+    return work();
+  };
+  await initializeDevActorUser(
+    database,
+    signedIn === undefined,
+    directoryFor(database),
+  );
   if (signedIn) await seedPeople(database, [signedIn]);
   const actor = signedIn ?? DEV_ACTOR.id;
   const settled = named
-    ? await ensureSingleUserIdentity(database, {
-        singleUser: signedIn === undefined,
-        provider: "arcade",
-      })
+    ? await acting(() =>
+        ensureSingleUserIdentity({
+          singleUser: signedIn === undefined,
+          provider: "arcade",
+        }),
+      )
     : null;
   const identity = settled ?? actor;
-  const store = createPluginStore({
+  const built = createPluginStore({
     brokerProvider: "arcade",
     database,
     auditStore: createAuditStore(database),
-    credentials: {} as never,
+    credentials: createCredentialStore(directory),
     encryptionKey: "x".repeat(44),
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     broker: client.broker,
     deploymentId: "single-user",
   });
-  const app = new Hono().route(
+  const store = new Proxy(built, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function"
+        ? (...args: unknown[]) => acting(() => value.apply(target, args))
+        : value;
+    },
+  });
+  const routes = new Hono().route(
     "/api/plugins",
     createPluginRoutes(
-      store,
+      built,
       signedIn ? signedInAs(signedIn) : createDevRequireUser(),
       async () => true,
       {
@@ -619,6 +731,10 @@ async function boot(
       { broker: client.broker, provider: "arcade" },
     ),
   );
+  const app = {
+    request: (...args: Parameters<typeof routes.request>) =>
+      acting(() => routes.request(...args)),
+  };
   /** What a Bot granted Gmail does for the person. */
   const call = (tool: string) =>
     store.callTool({
@@ -627,21 +743,37 @@ async function boot(
       botId: BOT,
       actorId: actor,
     });
-  return { database, actor, settled, identity, store, app, call };
+  return {
+    install,
+    directory,
+    database,
+    actor,
+    settled,
+    identity,
+    store,
+    app,
+    call,
+  };
 }
 
 type Deployment = Awaited<ReturnType<typeof boot>>;
 
 /** Gmail turned on as a Personal app with two actions, and a Bot given both. */
-async function enableGmail({ database, store }: Deployment) {
-  await database.insert(mcpServers).values({
+async function enableGmail({ database, store, directory }: Deployment) {
+  await directory.createServer({
     id: ROW,
     title: "Gmail",
+    logo: null,
     vendor: "Arcade",
     url: `arcade://${TOOLKIT}`,
     provenance: "arcade",
     authScheme: "OAUTH2",
+    credentialId: null,
     accountMode: "personal",
+    sharedVendorUserId: null,
+    ownerGrants: null,
+    entraScope: null,
+    addedBy: null,
   });
   await database.insert(mcpTools).values([
     {
@@ -660,16 +792,13 @@ async function enableGmail({ database, store }: Deployment) {
       destructive: false,
     },
   ]);
-  await database
-    .insert(agents)
-    .values({ id: BOT, name: "Helper", type: "built_in", configuration: {} });
   for (const name of ["ListEmails", "SendEmail"]) {
     await store.grant("mcp", `${ROW}/${name}`, BOT, DEV_ACTOR.email);
   }
 }
 
 async function newDeployment(signedIn?: string) {
-  const deployment = await boot(await freshDatabase(), signedIn);
+  const deployment = await boot(await freshInstall(), signedIn);
   await enableGmail(deployment);
   return deployment;
 }
@@ -689,15 +818,83 @@ const listed = async (deployment: Deployment) =>
     ).json()) as { connections: { serverId: string }[] }
   ).connections.map((connection) => connection.serverId);
 
-const rowsIn = (database: Database) =>
-  database
+/** The Arcade accounts this deployment's project holds now, for this file's people. */
+async function accountsIn(
+  deployment: Deployment,
+): Promise<BrokeredConnection[]> {
+  const { connections } = await (
+    await inspector(deployment.install.project)
+  ).client.connections.all();
+  return connections.filter(
+    (row): row is BrokeredConnection =>
+      row.kind === "brokered" && row.provider === "arcade" && ours(row.userId),
+  );
+}
+
+const rowsIn = async (deployment: Deployment) =>
+  (await accountsIn(deployment)).map((row) => ({
+    provider: row.provider,
+    app: row.app,
+    userId: row.userId,
+    vendorUserId: row.vendorUserId,
+  }));
+
+const connectedAtIn = async (deployment: Deployment) =>
+  (await accountsIn(deployment)).map((row) => ({
+    connectedAt: row.connectedAt,
+  }));
+
+/** The names at Arcade this deployment's project files this file's people under. */
+async function identitiesIn(deployment: Deployment) {
+  const { connections } = await (
+    await inspector(deployment.install.project)
+  ).client.connections.all();
+  return connections
+    .filter(
+      (row): row is BrokeredIdentity =>
+        row.kind === "identity" &&
+        row.provider === "arcade" &&
+        ours(row.userId),
+    )
+    .map((row) => ({ vendorUserId: row.vendorUserId }));
+}
+
+/** The ids of every record a deployment's outbox has carried to Intelligence, and the first moment. */
+const carried = new WeakMap<Database, { ids: Set<string>; since: number }>();
+
+/**
+ * One deployment's own trail for one event type, OLDEST FIRST, as Intelligence holds it.
+ *
+ * Each deployment here has a database of its own, and so an outbox of its own, which the test trail
+ * (`support/audit.ts`, over the shared test database) never drains. So it is carried here by the
+ * server's own drainer over that database, and read back from Intelligence by the ids it carried.
+ * The ids are what make the rows this deployment's: Intelligence's trail is shared by every run and
+ * every file, and an app named Gmail, a `dev-local-user` and this file's Bot are in every run of it.
+ */
+async function trailOf(database: Database, eventType: string) {
+  const sent = carried.get(database) ?? { ids: new Set(), since: Date.now() };
+  carried.set(database, sent);
+  const waiting = await database
     .select({
-      provider: brokeredConnections.provider,
-      app: brokeredConnections.app,
-      userId: brokeredConnections.userId,
-      vendorUserId: brokeredConnections.vendorUserId,
+      id: sql<string>`${auditOutbox.id}::text`,
+      occurredAt: auditOutbox.occurredAt,
     })
-    .from(brokeredConnections);
+    .from(auditOutbox)
+    .where(isNull(auditOutbox.refusedAt));
+  for (const row of waiting) {
+    sent.ids.add(row.id);
+    sent.since = Math.min(sent.since, row.occurredAt.getTime());
+  }
+  const drained = await createAuditDrainer({
+    database,
+    client: useTestAuditTrail().client,
+  }).flush({ waitMs: 15_000, budgetMs: 60_000 });
+  if (drained.busy) throw new Error("the deployment's outbox stayed busy");
+  return (await auditRows({ eventType, from: new Date(sent.since - 1_000) }))
+    .filter((row) => sent.ids.has(row.id))
+    .reverse()
+    .map((row) => ({ payload: row.payload }));
+}
 
 /** The browser coming back from Arcade to the verifier, and where it is sent on to. */
 async function returnFrom(
@@ -768,7 +965,7 @@ async function connectGmail(deployment: Deployment, mailbox: string) {
   expect(await returnFrom(deployment, authorizationUrl, mailbox)).toBe(
     `${APP_URL}/connections/${ROW}`,
   );
-  expect(await rowsIn(deployment.database)).toEqual([
+  expect(await rowsIn(deployment)).toEqual([
     {
       provider: "arcade",
       app: TOOLKIT,
@@ -790,7 +987,7 @@ describe("two single-user deployments on one Arcade key", () => {
 
     // A approves reading mail, one action, and the verifier records it under A's name.
     await authorizeAction(a, READ, "a@example.test");
-    expect(await rowsIn(a.database)).toEqual([
+    expect(await rowsIn(a)).toEqual([
       {
         provider: "arcade",
         app: TOOLKIT,
@@ -803,7 +1000,7 @@ describe("two single-user deployments on one Arcade key", () => {
     // B's page does not list A's Gmail, and asking Arcade from B finds nothing of A's.
     expect(await listed(b)).not.toContain(ROW);
     expect(await confirm(b)).toEqual({ connected: false });
-    expect(await rowsIn(b.database)).toEqual([]);
+    expect(await rowsIn(b)).toEqual([]);
 
     // A Bot on B cannot read A's mail: it is told to connect, and nothing runs at Arcade.
     await expect(b.call(READ)).rejects.toThrow(
@@ -846,7 +1043,7 @@ describe("two single-user deployments on one Arcade key", () => {
     expect(ended.status).toBe(200);
     expect(await ended.json()).toEqual({ vendorRevocationRequested: true });
     expect(project.connections.map((row) => row.user_id)).toEqual([a.identity]);
-    expect(await rowsIn(b.database)).toEqual([]);
+    expect(await rowsIn(b)).toEqual([]);
     await expect(b.call(SEND)).rejects.toThrow(
       "You have not connected your Gmail account.",
     );
@@ -861,20 +1058,22 @@ describe("two single-user deployments on one Arcade key", () => {
 describe("a single-user deployment that already holds Arcade grants under dev-local-user", () => {
   /** Gmail approved the way every single-user OpenBot approved it before its own name existed. */
   async function approvedBeforeTheUpgrade() {
-    const url = await freshDatabase();
-    const before = open(url);
-    await before.insert(brokeredConnections).values({
+    const install = await freshInstall();
+    await (await inspector(install.project)).createConnection({
+      kind: "brokered",
+      id: brokeredId("arcade", TOOLKIT, "person", DEV_ACTOR.id),
       provider: "arcade",
       app: TOOLKIT,
       holder: "person",
       userId: DEV_ACTOR.id,
       vendorUserId: DEV_ACTOR.id,
+      connectedBy: null,
       verified: true,
       verifiedAt: new Date(),
+      probeAction: null,
     });
-    await close(before);
     project.grant(DEV_ACTOR.id, SCOPES[READ] ?? [], "me@example.test");
-    return url;
+    return install;
   }
 
   test("gets its own name at once, stops using the shared grant without ending it, and one Connect puts Gmail back", async () => {
@@ -885,15 +1084,13 @@ describe("a single-user deployment that already holds Arcade grants under dev-lo
 
     // Its own name, written down, at the first start.
     expect(deployment.settled).toStartWith(`${DEV_ACTOR.id}:`);
-    expect(
-      await deployment.database
-        .select({ vendorUserId: brokeredIdentities.vendorUserId })
-        .from(brokeredIdentities),
-    ).toEqual([{ vendorUserId: deployment.identity }]);
+    expect(await identitiesIn(deployment)).toEqual([
+      { vendorUserId: deployment.identity },
+    ]);
 
     // The record under the shared name is retired here, so Gmail reads as not connected and a Bot
     // is told to connect it. Nothing runs at Arcade as `dev-local-user`.
-    expect(await rowsIn(deployment.database)).toEqual([]);
+    expect(await rowsIn(deployment)).toEqual([]);
     expect(await listed(deployment)).not.toContain(ROW);
     await expect(deployment.call(READ)).rejects.toThrow(
       "You have not connected your Gmail account.",
@@ -917,7 +1114,7 @@ describe("a single-user deployment that already holds Arcade grants under dev-lo
     await close(deployment.database);
     const restarted = await boot(url);
     expect(restarted.settled).toBe(deployment.settled);
-    expect(await rowsIn(restarted.database)).toEqual([
+    expect(await rowsIn(restarted)).toEqual([
       {
         provider: "arcade",
         app: TOOLKIT,
@@ -935,8 +1132,8 @@ describe("a single-user deployment that already holds Arcade grants under dev-lo
      * B's own. That record is the one an earlier revision of this change read as "B already holds
      * grants", and kept B on the shared name with A's mailbox for good.
      */
-    const urlA = await freshDatabase();
-    const urlB = await freshDatabase();
+    const urlA = await freshInstall();
+    const urlB = await freshInstall();
     const a = await boot(urlA, undefined, { named: false });
     await enableGmail(a);
     await connectGmail(a, "a@example.test");
@@ -977,7 +1174,7 @@ describe("a single-user deployment that already holds Arcade grants under dev-lo
 
 describe("a single-user deployment's Arcade name", () => {
   test("is the same after a restart, and the grant made under it is still the one used", async () => {
-    const url = await freshDatabase();
+    const url = await freshInstall();
     const first = await boot(url);
     await enableGmail(first);
     expect(first.settled).toStartWith(`${DEV_ACTOR.id}:`);
@@ -1017,7 +1214,7 @@ describe("Connect on an app Arcade already holds for this deployment's name", ()
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ connected: true });
-    expect(await rowsIn(deployment.database)).toEqual([
+    expect(await rowsIn(deployment)).toEqual([
       {
         provider: "arcade",
         app: TOOLKIT,
@@ -1062,11 +1259,7 @@ describe("Connect on an Arcade app", () => {
     expect(
       await returnFrom(deployment, authorizationUrl, "me@example.test"),
     ).toBe(`${APP_URL}/connections/${ROW}`);
-    const filed = await deployment.database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(eq(auditEvents.eventType, "mcp.account_connected"))
-      .orderBy(auditEvents.createdAt);
+    const filed = await trailOf(deployment.database, "mcp.account_connected");
     expect(filed).toMatchObject([
       { payload: { server: TOOLKIT, action: READ, holder: "person" } },
       {
@@ -1151,7 +1344,7 @@ describe("a deployment that signs people in", () => {
     // Bob opens Gmail under Connections. Nothing is asked of him and nothing is minted.
     expect(await confirm(deployment)).toEqual({ connected: true });
     expect(project.minted).toEqual([]);
-    expect(await rowsIn(deployment.database)).toEqual([
+    expect(await rowsIn(deployment)).toEqual([
       { provider: "arcade", app: TOOLKIT, userId: bob, vendorUserId: bob },
     ]);
     expect((await deployment.call(READ)).text).toContain("bob@example.test");
@@ -1163,9 +1356,7 @@ describe("a deployment that signs people in", () => {
     const deployment = await newDeployment(alice);
 
     expect(deployment.settled).toBeNull();
-    expect(await deployment.database.select().from(brokeredIdentities)).toEqual(
-      [],
-    );
+    expect(await identitiesIn(deployment)).toEqual([]);
 
     await connectGmail(deployment, "alice@example.test");
     expect(deployment.identity).toBe(alice);
@@ -1192,7 +1383,7 @@ describe("a Bot's call on an action Arcade was never asked to allow", () => {
     const deployment = await newDeployment();
     // Reading mail approved, one action at a time. Sending was never asked for.
     await authorizeAction(deployment, READ, "me@example.test");
-    const approved = await rowsIn(deployment.database);
+    const approved = await rowsIn(deployment);
 
     // The Bot sends: Arcade refuses that one action. The card is the Reconnect card, and says so.
     expect(await refusalOf(deployment.call(SEND))).toEqual({
@@ -1204,7 +1395,7 @@ describe("a Bot's call on an action Arcade was never asked to allow", () => {
         "Your Gmail account doesn't allow this yet, so this wasn't done. Reconnect it and ask again.",
     });
     // The record stands, and the action that was approved still runs.
-    expect(await rowsIn(deployment.database)).toEqual(approved);
+    expect(await rowsIn(deployment)).toEqual(approved);
     expect(await listed(deployment)).toContain(ROW);
     expect((await deployment.call(READ)).text).toContain("me@example.test");
 
@@ -1215,7 +1406,7 @@ describe("a Bot's call on an action Arcade was never asked to allow", () => {
       message:
         "Your Gmail account is no longer connected, so this wasn't done. Reconnect it and ask again.",
     });
-    expect(await rowsIn(deployment.database)).toEqual([]);
+    expect(await rowsIn(deployment)).toEqual([]);
     expect(project.unexpected).toEqual([]);
   });
 
@@ -1230,9 +1421,7 @@ describe("a Bot's call on an action Arcade was never asked to allow", () => {
     expect((await deployment.call(READ)).text).toContain("me@example.test");
 
     // Connected again since the refusal, which is how the card stops offering Reconnect.
-    const [row] = await deployment.database
-      .select({ connectedAt: brokeredConnections.connectedAt })
-      .from(brokeredConnections);
+    const [row] = await connectedAtIn(deployment);
     expect(row?.connectedAt.getTime()).toBeGreaterThan(
       Date.parse(refusal?.at ?? ""),
     );
@@ -1267,9 +1456,7 @@ describe("Reconnect where Arcade already holds everything the app asks for", () 
     expect(await response.json()).toEqual({ connected: true });
 
     // Connected since the refusal, which is what the card reads as the reconnection.
-    const [row] = await deployment.database
-      .select({ connectedAt: brokeredConnections.connectedAt })
-      .from(brokeredConnections);
+    const [row] = await connectedAtIn(deployment);
     expect(row?.connectedAt.getTime()).toBeGreaterThan(
       Date.parse(refusal?.at ?? ""),
     );
@@ -1288,14 +1475,10 @@ describe("Reconnect where Arcade already holds everything the app asks for", () 
   test("leaves the connection date alone when a page only confirms on load", async () => {
     const deployment = await newDeployment();
     await connectGmail(deployment, "me@example.test");
-    const [before] = await deployment.database
-      .select({ connectedAt: brokeredConnections.connectedAt })
-      .from(brokeredConnections);
+    const [before] = await connectedAtIn(deployment);
 
     expect(await confirm(deployment)).toEqual({ connected: true });
-    const [after] = await deployment.database
-      .select({ connectedAt: brokeredConnections.connectedAt })
-      .from(brokeredConnections);
+    const [after] = await connectedAtIn(deployment);
     expect(after?.connectedAt).toEqual(before?.connectedAt);
   });
 });
@@ -1304,7 +1487,7 @@ describe("a Bot's call Arcade refuses while its connection listing does not answ
   test("still shows the Reconnect card inside the vendor deadline, and keeps the record", async () => {
     const deployment = await newDeployment();
     await authorizeAction(deployment, READ, "me@example.test");
-    const approved = await rowsIn(deployment.database);
+    const approved = await rowsIn(deployment);
 
     // Asked whether the account still holds anything for Gmail, Arcade never answers.
     project.stall("GET /v1/admin/user_connections");
@@ -1325,7 +1508,7 @@ describe("a Bot's call Arcade refuses while its connection listing does not answ
         "Your Gmail account doesn't allow this yet, so this wasn't done. Reconnect it and ask again.",
     });
     // An answer that could not be had keeps the record, so the approved action still runs.
-    expect(await rowsIn(deployment.database)).toEqual(approved);
+    expect(await rowsIn(deployment)).toEqual(approved);
     expect((await deployment.call(READ)).text).toContain("me@example.test");
     expect(project.unexpected).toEqual([]);
   }, 30_000);
@@ -1354,11 +1537,8 @@ describe("a Bot's call on an Arcade grant that is gone", () => {
         "Your Gmail account is no longer connected, so this wasn't done. Reconnect it and ask again.",
     });
     // The row went with it, so every screen says not connected, and the trail says why.
-    expect(await rowsIn(deployment.database)).toEqual([]);
-    const failed = await deployment.database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(eq(auditEvents.eventType, "mcp.call_failed"));
+    expect(await rowsIn(deployment)).toEqual([]);
+    const failed = await trailOf(deployment.database, "mcp.call_failed");
     expect(failed).toMatchObject([
       {
         payload: {
@@ -1377,7 +1557,7 @@ describe("a Bot's call on an Arcade grant that is gone", () => {
 
 describe("a consent begun before the upgrade gave a deployment its own Arcade name", () => {
   test("is refused when it comes back, and nothing held at Arcade under dev-local-user is confirmed or withdrawn", async () => {
-    const url = await freshDatabase();
+    const url = await freshInstall();
     // Before the upgrade: no name of its own, so Connect went out as `dev-local-user`.
     const before = await boot(url, undefined, { named: false });
     await enableGmail(before);
@@ -1419,7 +1599,7 @@ describe("a consent begun before the upgrade gave a deployment its own Arcade na
     expect(project.deleted).toEqual([]);
     expect(project.connections).toEqual(theirs);
     // Nothing recorded here, and the attempt is cleared so Connect works again at once.
-    expect(await rowsIn(after.database)).toEqual([]);
+    expect(await rowsIn(after)).toEqual([]);
     expect(await after.database.select().from(pendingAuthorizations)).toEqual(
       [],
     );

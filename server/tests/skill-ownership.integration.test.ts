@@ -3,11 +3,14 @@ import { randomUUID } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { agentProfiles, agents, skills, users } from "../src/db/schema";
+import { users } from "../src/db/schema";
 import { createPluginRoutes } from "../src/plugins/routes";
-import { createPluginStore } from "../src/plugins/store";
+import { createPluginStore, type PluginStore } from "../src/plugins/store";
+import { removeBots, seedBot, useTestConfiguration } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestVault } from "./support/vault";
 
 /**
  * Whose skill is whose, and which Bots a person may put one on.
@@ -22,14 +25,7 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: { readSecret: async () => null },
-  encryptionKey: "x".repeat(44),
-  policy: () => policy,
-});
+let store: PluginStore;
 
 const suite = randomUUID().slice(0, 8);
 const alice = `user_alice_${suite}`;
@@ -41,6 +37,14 @@ const bobSkill = `bob-skill-${suite}`;
 const deploymentSkill = `deployment-skill-${suite}`;
 
 beforeAll(async () => {
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => policy,
+  });
   for (const [id, email] of [
     [alice, `alice-${suite}@example.test`],
     [bob, `bob-${suite}@example.test`],
@@ -55,21 +59,15 @@ beforeAll(async () => {
     // Unowned Bots are deployment-published Bots visible to every user.
     [sharedBot, null],
   ] as const) {
-    await database
-      .insert(agents)
-      .values({ id, name: id, type: "remote_ag_ui", configuration: {} })
-      .onConflictDoNothing();
-    await database
-      .insert(agentProfiles)
-      .values({
-        agentId: id,
-        ownerUserId: owner,
-        title: id,
-        roleDescription: "For a test.",
-        avatarSeed: id,
-        visibility: "private",
-      })
-      .onConflictDoNothing();
+    await seedBot({
+      id,
+      name: id,
+      ownerUserId: owner,
+      title: id,
+      roleDescription: "For a test.",
+      avatarSeed: id,
+      visibility: "private",
+    });
   }
 
   const write = (slug: string, ownerUserId: string | null) =>
@@ -87,20 +85,18 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database
-    .delete(skills)
-    .where(
-      inArray(skills.slug, [
-        aliceSkill,
-        bobSkill,
-        deploymentSkill,
-        `written-${suite}`,
-        `catalogue-${suite}`,
-      ]),
-    );
-  await database
-    .delete(agents)
-    .where(inArray(agents.id, [aliceBot, sharedBot]));
+  const configuration = await useTestConfiguration();
+  for (const slug of [
+    aliceSkill,
+    bobSkill,
+    deploymentSkill,
+    `written-${suite}`,
+    `catalogue-${suite}`,
+  ]) {
+    await configuration.client.skills.remove(slug, `test:${randomUUID()}`);
+    configuration.skills.forget(slug);
+  }
+  await removeBots([aliceBot, sharedBot]);
   await database.delete(users).where(inArray(users.id, [alice, bob]));
 });
 
@@ -173,16 +169,22 @@ describe("editing keeps ownership", () => {
    */
   test("saving over a catalogue skill makes it the deployment's own", async () => {
     const slug = `catalogue-${suite}`;
-    await database.insert(skills).values({
-      id: slug,
-      slug,
-      ownerUserId: null,
-      title: "Shipped",
-      summary: "",
-      instructions: "As shipped.",
-      origin: "catalogue",
-      installedBy: null,
-    });
+    const configuration = await useTestConfiguration();
+    configuration.skills.apply(
+      await configuration.client.skills.create(
+        slug,
+        {
+          ownerUserId: null,
+          title: "Shipped",
+          summary: "",
+          instructions: "As shipped.",
+          origin: "catalogue",
+          installedBy: null,
+          tools: [],
+        },
+        `test:${randomUUID()}`,
+      ),
+    );
 
     await store.installSkill({
       slug,
@@ -193,10 +195,7 @@ describe("editing keeps ownership", () => {
       by: "admin@example.test",
     });
 
-    const [row] = await database
-      .select({ origin: skills.origin, installedBy: skills.installedBy })
-      .from(skills)
-      .where(inArray(skills.slug, [slug]));
+    const row = await configuration.client.skills.get(slug);
     expect(row?.origin).toBe("yours");
     // Who first installed it is a first-write fact, and a re-save does not rewrite it.
     expect(row?.installedBy).toBeNull();

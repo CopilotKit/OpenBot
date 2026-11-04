@@ -1,6 +1,4 @@
-import { eq } from "drizzle-orm";
-import type { Database } from "./db/client";
-import { userInstructions } from "./db/schema";
+import { botConfiguration } from "./configuration/directory";
 
 /**
  * One person's standing instructions: the thing every coworker they run is told, in every channel.
@@ -57,18 +55,15 @@ export class InstructionsTooLongError extends Error {
   }
 }
 
-export function createUserInstructionsStore(
-  database: Database,
-): UserInstructionsStore {
+export function createUserInstructionsStore(): UserInstructionsStore {
   return {
+    /*
+     * From the Bot configuration this instance holds (configuration/directory.ts): every built-in
+     * turn reads this, so it never waits on Intelligence. A save on another replica arrives with its
+     * announcement.
+     */
     async read(userId) {
-      const [row] = await database
-        .select({ instructions: userInstructions.instructions })
-        .from(userInstructions)
-        .where(eq(userInstructions.userId, userId))
-        .limit(1);
-
-      return row?.instructions ?? null;
+      return botConfiguration().preferencesOf(userId).instructions;
     },
 
     async write(userId, text) {
@@ -79,28 +74,19 @@ export function createUserInstructionsStore(
       }
 
       /*
-       * Emptying the box is deleting the row, not storing "".
+       * Emptying the box is clearing them, not storing "".
        *
        * The two would read identically to a person and differently to everything else: the prompt
        * seam would have to know that an empty string means no block, the store would answer "" where
-       * it had promised null, and "has this person written any" would stop being a row count. One
+       * it had promised null, and "has this person written any" would stop being a yes or no. One
        * representation of none, and it is absence.
        */
-      if (instructions.length === 0) {
-        await database
-          .delete(userInstructions)
-          .where(eq(userInstructions.userId, userId));
-        return "";
-      }
-
-      await database
-        .insert(userInstructions)
-        .values({ userId, instructions })
-        .onConflictDoUpdate({
-          target: userInstructions.userId,
-          set: { instructions, updatedAt: new Date() },
-        });
-
+      await botConfiguration().changePreferences(userId, [
+        {
+          op: "setInstructions",
+          instructions: instructions.length === 0 ? null : instructions,
+        },
+      ]);
       return instructions;
     },
   };

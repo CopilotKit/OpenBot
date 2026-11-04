@@ -1,6 +1,13 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { computerAccessCheck } from "../src/agents/computer-access";
 import { runsIsolated } from "../src/agents/isolation";
 import {
@@ -15,19 +22,15 @@ import {
   createComputerSeatResolver,
 } from "../src/computer/computer-key";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  channels,
-  intelligenceChannelMappings,
-  users,
-} from "../src/db/schema";
+import { users } from "../src/db/schema";
 import { PluginRefusedError } from "../src/plugins/store";
 import {
   createTeamBots,
   TEAM_BOT_CONSENT_MARKER,
   TeamBotRefusedError,
 } from "../src/team-bots/team-bots";
+import { changeBot, removeBots, useTestBots } from "./support/bots";
+import { purgeConversations } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -52,22 +55,17 @@ const teamBots = createTeamBots({
 });
 
 afterEach(async () => {
-  for (const id of createdChannels.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, id));
-    await database.delete(channels).where(eq(channels.id, id));
-  }
+  await purgeConversations(createdChannels.splice(0));
   const ids = createdAgents.splice(0);
   if (ids.length) {
-    await database
-      .delete(agentProfiles)
-      .where(inArray(agentProfiles.agentId, ids));
-    await database.delete(agents).where(inArray(agents.id, ids));
+    await removeBots(ids);
   }
   for (const id of createdUsers.splice(0))
     await database.delete(users).where(eq(users.id, id));
   connected.clear();
+});
+beforeAll(async () => {
+  await useTestBots();
 });
 afterAll(async () => {
   await database.$client.close();
@@ -318,23 +316,14 @@ describe("Team Bots in PostgreSQL", () => {
     // A published Bot whose description was later emptied, or that still has a placeholder name,
     // is invisible to teammates and says so to its owner.
     expect(await profiles.get(teammate, first)).not.toBeNull();
-    await database
-      .update(agentProfiles)
-      .set({ roleDescription: "" })
-      .where(eq(agentProfiles.agentId, first));
+    await changeBot(first, { roleDescription: "" });
     expect(await profiles.get(teammate, first)).toBeNull();
-    await database
-      .update(agents)
-      .set({ name: "New Bot" })
-      .where(eq(agents.id, second));
+    await changeBot(second, { name: "New Bot" });
     expect(await profiles.get(teammate, second)).toBeNull();
     const own = await teamBots.list(owner);
     expect(own.find((row) => row.id === first)?.visibleToTeam).toBe(false);
     const placeholder = await privateBot(owner);
-    await database
-      .update(agents)
-      .set({ name: "Untitled" })
-      .where(eq(agents.id, placeholder));
+    await changeBot(placeholder, { name: "Untitled" });
     await expect(
       teamBots.publish(owner, placeholder, {
         audience: "team",

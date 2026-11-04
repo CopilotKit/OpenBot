@@ -54,9 +54,11 @@ import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { startHttpServer } from "../src/http-server";
 import { createRecorderConnectionStore } from "../src/recorder/connections";
+import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
+import { testLearningIntelligence } from "./support/learning";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const connections = createRecorderConnectionStore(database);
@@ -482,6 +484,7 @@ const recorder = createRecorderExtension({
   organizationAuth: undefined,
   roleRepository,
   peopleStore: { isRevoked: async () => false },
+  trajectoryBindings: createTrajectoryBindingStore(testLearningIntelligence()),
   personalSpaces: {
     containerFor: (userId: string) => `space-of-${userId}`,
     state: async () => ({ state: "unassigned" as const, containerId: null }),

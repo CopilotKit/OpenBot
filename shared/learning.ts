@@ -17,6 +17,18 @@ export type LearningDeliveryStatus = {
   error?: { code: string; message: string; retryable: boolean };
 };
 
+/**
+ * A container the saved settings name that Intelligence will not use, for the Admin page. Conversations that would use it
+ * go on without Learning.
+ *
+ * - `missing`: this Intelligence project has no container with that ID.
+ * - `learning_off`: Learning is not on for this Intelligence project, so no container can be used.
+ */
+export type LearningTargetProblem = {
+  containerId: string;
+  problem: "missing" | "learning_off";
+};
+
 /** A small projection of Inspector: evidence and credentials stay in Intelligence. */
 export type LearningOverview = {
   configuration:

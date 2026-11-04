@@ -2,6 +2,7 @@ import type { UserPreferences } from "@openbot/shared/user-preferences";
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   customType,
   index,
   integer,
@@ -91,6 +92,29 @@ export const users = pgTable("users", {
     withTimezone: true,
   }),
   lastSignedInAt: timestamp("last_signed_in_at", { withTimezone: true }),
+  /**
+   * The person's role here, as Intelligence's directory holds it. Read by the request guard on every
+   * request, so it is kept on this row rather than asked of Intelligence. `user_roles` held it before
+   * and is no longer written.
+   */
+  role: role("role"),
+  /**
+   * The version of this person in Intelligence's organization directory that this row last
+   * reflected; null when Intelligence has never had them.
+   *
+   * THIS TABLE IS A PROJECTION. People live in Intelligence (people/directory); this row is this
+   * deployment's copy, kept because about 56 tables name a person by a foreign key to it and because
+   * the session and the guard read it on every request.
+   */
+  directoryVersion: integer("directory_version"),
+  /**
+   * The row holds a change Intelligence has not acknowledged yet: Better Auth wrote it (a first
+   * sign-in, a name the identity provider changed), and the directory pushes it after the write
+   * commits. A pending row is never overwritten from Intelligence. One that Intelligence once had
+   * (it has a version) and no longer does was deleted there for good, and its push removes it here
+   * rather than making the person again.
+   */
+  directoryPending: boolean("directory_pending").notNull().default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -194,6 +218,11 @@ export const userRoles = pgTable(
  * prompt seam then has to recognise and skip anyway — so there is one representation of "none", and
  * it is having no row.
  */
+/**
+ * A person's standing instructions, as OpenBot kept them before they moved into the person's
+ * preferences in Intelligence. Read once, by the upgrade copy, written by nothing, dropped a release
+ * later.
+ */
 export const userInstructions = pgTable("user_instructions", {
   userId: text("user_id")
     .primaryKey()
@@ -240,6 +269,41 @@ export const ssoProviders = pgTable("sso_providers", {
 });
 
 /**
+ * Which Intelligence project this database's people belong to, written once, the first time the
+ * people directory starts. A deployment pointed at another project refuses to start rather than
+ * taking every person here for one deleted there (people/directory/directory.ts).
+ */
+export const directoryBinding = pgTable(
+  "directory_binding",
+  {
+    singleton: boolean("singleton").primaryKey().default(true),
+    organizationId: text("organization_id").notNull(),
+    projectId: text("project_id").notNull(),
+    boundAt: timestamp("bound_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [check("directory_binding_singleton", sql`${table.singleton}`)],
+);
+
+/**
+ * The SCIM deprovisions this deployment has acted on: their sessions ended, what they connected
+ * retired, their computers stopped (people/directory/scim-reactions.ts). Operational: a ledger so
+ * each removal Intelligence's directory records is acted on once, by one replica, however many
+ * times it is heard. Losing it re-runs actions that are already done.
+ */
+export const directoryRemovalReactions = pgTable(
+  "directory_removal_reactions",
+  {
+    email: text("email").primaryKey(),
+    removedAt: timestamp("removed_at", { withTimezone: true }).notNull(),
+    actedAt: timestamp("acted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
+
+/**
  * People an administrator has removed, by email address.
  *
  * Keyed on the address rather than the user id, because deleting the user row is not removal: the
@@ -258,6 +322,13 @@ export const revokedAccess = pgTable("revoked_access", {
   revokedBy: text("revoked_by").notNull(),
 });
 
+/**
+ * The tenant package this deployment applied, as OpenBot recorded it before the record moved into
+ * Intelligence (its agent packages, beside the Bots each package manages).
+ *
+ * Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by nothing. Kept for one
+ * release so a deployment that upgrades still has the row to copy, then dropped.
+ */
 export const deploymentPackages = pgTable("deployment_packages", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: text("tenant_id").notNull().unique(),
@@ -268,6 +339,14 @@ export const deploymentPackages = pgTable("deployment_packages", {
     .defaultNow(),
 });
 
+/**
+ * A Bot's definition, as OpenBot kept it before Bots moved into Intelligence's agent registry.
+ *
+ * Read once, by the upgrade copy (`agents/bot-registry/upgrade.ts`), and written by nothing: every Bot
+ * is created, read, changed and deleted through Intelligence now. Kept for one release so a deployment
+ * that upgrades still has the rows to copy, then dropped. Other tables name a Bot by id without a
+ * foreign key, for the same reason.
+ */
 export const agents = pgTable("agents", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -281,6 +360,13 @@ export const agents = pgTable("agents", {
   updatedAt: updatedAt(),
 });
 
+/**
+ * A conversation. MOVED TO INTELLIGENCE, with `channel_memberships`, `channel_agents` and
+ * `intelligence_channel_mappings` below: conversations are created, read and changed through its
+ * conversations capability (conversations/). These tables are kept for one release, receiving no
+ * writes, so a deployment that upgrades still has the rows to copy (conversations/upgrade.ts); then
+ * dropped. Tables that stay here name a conversation by id with no foreign key.
+ */
 export const channels = pgTable(
   "channels",
   {
@@ -299,9 +385,12 @@ export const channels = pgTable(
      * from the identity provider before this one can decide anything.
      */
     allowedGroups: text("allowed_groups").array().notNull().default([]),
-    packageId: uuid("package_id").references(() => deploymentPackages.id, {
-      onDelete: "set null",
-    }),
+    /**
+     * The tenant package that declared this channel: the package's id in Intelligence, which records
+     * every package beside the Bots it manages. No foreign key: the local `deployment_packages` table
+     * is written by nothing now.
+     */
+    packageId: uuid("package_id"),
     override: jsonb("override"),
     /** A few words about the conversation. Channel grain like `last_message`; null is ordinary. */
     summary: text("summary"),
@@ -322,12 +411,7 @@ export const channels = pgTable(
     lastMessageSourceId: text("last_message_source_id"),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     /** Which agent spoke, so a channel with several can show the right one. Null for a person. */
-    lastMessageAgentId: text("last_message_agent_id").references(
-      () => agents.id,
-      {
-        onDelete: "set null",
-      },
-    ),
+    lastMessageAgentId: text("last_message_agent_id"),
     /**
      * When this channel was deleted, or null. Soft: the row, the transcript, and the Intelligence
      * thread stay intact, and every read path filters on this instead. Channel grain, because
@@ -397,9 +481,7 @@ export const channelAgents = pgTable(
     channelId: text("channel_id")
       .notNull()
       .references(() => channels.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     createdAt: createdAt(),
   },
   (table) => [primaryKey({ columns: [table.channelId, table.agentId] })],
@@ -427,6 +509,28 @@ export const credentials = pgTable(
       .where(sql`${table.revokedAt} IS NULL`),
   ],
 );
+
+/**
+ * Who is spending a vault secret right now, across every replica of this deployment.
+ *
+ * OPERATIONAL, and disposable: losing a row loses nothing but a moment's exclusion. The vault is
+ * Intelligence's, so the row lock `connectionTokenFor` used to take on the credential while it traded
+ * a refresh token with the vendor cannot be taken any more, and no transaction here may be held open
+ * across a call to Intelligence. A vendor that rotates refresh tokens refuses the second of two
+ * replicas presenting the same one, so the trade is still one at a time: a replica takes the lease
+ * (an insert, or an update of an expired one), trades, writes the new token to the vault, records the
+ * vault version it wrote, and lets go. `version` is how the next holder knows whether the value it
+ * holds in memory is still the current one without asking the vault.
+ */
+export const secretLeases = pgTable("secret_leases", {
+  key: text("key").primaryKey(),
+  holder: text("holder"),
+  expiresAt: timestamp("expires_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  /** The last vault version a holder wrote for the secret, or null when none has been written. */
+  version: integer("version"),
+});
 
 export const auditEvents = pgTable(
   "audit_events",
@@ -519,9 +623,8 @@ export const attachments = pgTable(
   "attachments",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    channelId: text("channel_id")
-      .notNull()
-      .references(() => channels.id, { onDelete: "cascade" }),
+    /** The conversation, in Intelligence: named by id, with no foreign key. */
+    channelId: text("channel_id").notNull(),
     uploadedBy: text("uploaded_by")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),

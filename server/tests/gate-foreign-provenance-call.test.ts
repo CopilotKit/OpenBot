@@ -2,25 +2,27 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  agents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema";
+import { mcpTools } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 /*
  * THE EXEMPTION BELONGS TO THE BROKER THAT HOLDS THE GRANT, NOT TO WHICHEVER ONE IS CONFIGURED.
@@ -34,6 +36,9 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
+beforeAll(async () => {
+  await useTestVault();
+});
 afterAll(async () => {
   await database.$client.close();
 });
@@ -89,18 +94,17 @@ function recordingTransport(sentAs: string[]) {
 }
 
 async function clean() {
-  await database
-    .delete(brokeredConnections)
-    .where(eq(brokeredConnections.app, foreign));
-  await database.delete(mcpServers).where(eq(mcpServers.id, foreign));
-  await database.delete(agents).where(eq(agents.id, bot));
+  await removeConnectionsWhere(
+    (connection) =>
+      connection.kind === "brokered" && connection.app === foreign,
+  );
+  await removeServers([foreign]);
+  await removeBots([bot]);
 }
 
 beforeEach(async () => {
   await clean();
-  await database
-    .insert(agents)
-    .values({ id: bot, name: "Helper", type: "built_in", configuration: {} });
+  await seedBot({ id: bot, name: "Helper", type: "built_in" });
 });
 afterEach(async () => {
   useComposioClient(null);
@@ -113,7 +117,7 @@ describe("a brokered row minted at the other broker", () => {
     recordingTransport(sentAs);
     // A row left behind by a deployment that used to broker through Composio. Nothing here can
     // connect it, check it or end it: this deployment's broker is Arcade.
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: foreign,
       title: "Left-over GitHub",
       vendor: "Composio",

@@ -1,29 +1,42 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
-import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
-import { agentProfiles } from "../src/db/schema/coworker";
-import { defaultOptOuts } from "../src/db/schema/defaults";
-import { memorySources } from "../src/db/schema/memory";
 import {
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema/plugins";
-import { proactiveSettings } from "../src/db/schema/proactive";
+  createBotConfiguration,
+  installBotConfiguration,
+} from "../src/configuration/directory";
+import { createDatabase } from "../src/db/client";
+import { users } from "../src/db/schema/core";
+import { mcpTools } from "../src/db/schema/plugins";
 import {
   createMemoryDefaults,
   DEFAULT_RESEARCH_INTERVAL_MINUTES,
   lockDefaults,
+  withResearchDefaultsLock,
 } from "../src/memory/defaults";
 import { createMemoryIngestion } from "../src/memory/ingestion";
-import { createMemoryStore } from "../src/memory/store";
 import { createPluginStore } from "../src/plugins/store";
 import { createProactiveStore } from "../src/proactive/store";
+import { removeTestMemory, testMemory } from "./support/memory";
+import {
+  clearPreferences,
+  removeBots,
+  seedBot,
+  storedPreferences,
+  useTestConfiguration,
+} from "./support/bots";
+import { purgeSchedulesOf, settingsOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
+import { useTestSchedules } from "./support/schedules";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -33,10 +46,12 @@ const bot = `defaults-bot-${suite}`;
 const secondBot = `defaults-second-${suite}`;
 const app = `linear-${suite}`;
 const unconnected = `notes-${suite}`;
+// Apps, connections and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   database,
   auditStore: createAuditStore(database),
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: Buffer.alloc(32, 7).toString("base64"),
   // This suite's apps are `composio://` rows with `provenance: "composio"`, and the store has no
   // default for this: it dispatches the toolkit read on it, so the fixtures name their own broker.
@@ -44,7 +59,7 @@ const plugins = createPluginStore({
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async () => ({ text: "[]", isError: false }),
 });
-const memory = createMemoryStore(database);
+const { store: memory, intelligence, cache } = testMemory(database);
 const ingestion = createMemoryIngestion({ store: memory, plugins });
 const proactive = createProactiveStore(database);
 const synced: string[] = [];
@@ -54,6 +69,7 @@ function defaults(
 ) {
   return createMemoryDefaults({
     database,
+    memory,
     // The vendor read is the ingestion's own business; here only that it was asked for.
     ingestion: {
       defaultSourceCandidates: ingestion.defaultSourceCandidates,
@@ -73,81 +89,54 @@ function defaults(
   });
 }
 
+/** The person's sources for a Bot, as Intelligence holds them. */
 const sourcesOf = (person: string, agentId: string) =>
-  database
-    .select()
-    .from(memorySources)
-    .where(
-      and(
-        eq(memorySources.ownerUserId, person),
-        eq(memorySources.agentId, agentId),
-      ),
-    );
-const researchOf = (person: string, agentId: string) =>
-  database
-    .select()
-    .from(proactiveSettings)
-    .where(
-      and(
-        eq(proactiveSettings.ownerUserId, person),
-        eq(proactiveSettings.agentId, agentId),
-      ),
-    );
+  memory.sourcesFor(person, agentId);
+/** The person's check-in settings with this Bot, as Intelligence holds them. */
+const researchOf = async (person: string, agentId: string) =>
+  (await settingsOf(person)).filter((setting) => setting.agentId === agentId);
 async function reset() {
-  await database
-    .delete(memorySources)
-    .where(inArray(memorySources.ownerUserId, [owner, other]));
-  await database
-    .delete(proactiveSettings)
-    .where(inArray(proactiveSettings.ownerUserId, [owner, other]));
-  await database
-    .delete(defaultOptOuts)
-    .where(inArray(defaultOptOuts.ownerUserId, [owner, other]));
+  for (const person of [owner, other])
+    await intelligence.purgeSources({ userId: person });
+  cache.forget();
+  await purgeSchedulesOf([owner, other]);
+  await clearPreferences([owner, other]);
 }
 
 beforeAll(async () => {
+  await useTestConfiguration();
+  await useTestSchedules();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
   ]);
-  await database.insert(agents).values(
-    [bot, secondBot].map((id) => ({
+  for (const id of [bot, secondBot])
+    await seedBot({
       id,
       name: id,
-      type: "built_in" as const,
-      configuration: {},
-    })),
-  );
-  await database.insert(agentProfiles).values(
-    [bot, secondBot].map((agentId) => ({
-      agentId,
+      type: "built_in",
       ownerUserId: owner,
-      title: agentId,
+      title: id,
       roleDescription: "Assist",
-      avatarSeed: agentId,
-      visibility: "private" as const,
-    })),
-  );
-  await database.insert(mcpServers).values([
-    {
-      id: app,
-      title: "Linear",
-      vendor: "Composio",
-      url: `composio://${app}`,
-      provenance: "composio",
-      authScheme: "OAUTH2",
-      accountMode: "personal",
-    },
-    {
-      id: unconnected,
-      title: "Notes",
-      vendor: "Composio",
-      url: `composio://${unconnected}`,
-      provenance: "composio",
-      authScheme: "OAUTH2",
-      accountMode: "personal",
-    },
-  ]);
+    });
+  await seedServer({
+    id: app,
+    title: "Linear",
+    vendor: "Composio",
+    url: `composio://${app}`,
+    provenance: "composio",
+    authScheme: "OAUTH2",
+    accountMode: "personal",
+  });
+  await seedServer({
+    id: unconnected,
+    title: "Notes",
+    vendor: "Composio",
+    url: `composio://${unconnected}`,
+    provenance: "composio",
+    authScheme: "OAUTH2",
+    accountMode: "personal",
+  });
   await database.insert(mcpTools).values([
     // A lookup that needs an argument, the app's own bookkeeping, a write, and the person's records.
     {
@@ -196,7 +185,7 @@ beforeAll(async () => {
     ])
       await plugins.grant("mcp", ref, agentId, owner);
   // The owner connected Linear in their own account; nobody connected Notes.
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app,
     holder: "person",
@@ -205,11 +194,14 @@ beforeAll(async () => {
   });
 });
 afterAll(async () => {
+  await removeTestMemory([owner, other]);
+  await purgeSchedulesOf([owner, other]);
   await database.delete(users).where(inArray(users.id, [owner, other]));
-  await database.delete(agents).where(inArray(agents.id, [bot, secondBot]));
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [app, unconnected]));
+  await removeBots([bot, secondBot]);
+  await removeServers([app, unconnected]);
+  await removeConnectionsWhere(
+    (connection) => connection.userId === owner || connection.userId === other,
+  );
   await database.$client.close();
 });
 
@@ -244,10 +236,14 @@ describe("memory sources, on by default", () => {
       await removal.transaction(async (transaction) => {
         await lockDefaults(transaction, owner, bot);
         expect(await defaults().adoptSources(owner, bot)).toEqual([]);
+      });
+      // Research is made in Intelligence, so its removal holds a lease rather than a transaction.
+      await withResearchDefaultsLock(removal, owner, bot, async () => {
         expect(
           await defaults().adoptResearch(owner, bot, `channel-${suite}`),
         ).toBe(false);
       });
+      expect(await researchOf(owner, bot)).toEqual([]);
     } finally {
       await removal.$client.close();
     }
@@ -280,16 +276,77 @@ describe("memory sources, on by default", () => {
     expect(await defaults().adoptSources(owner, bot)).toEqual([]);
     expect(await sourcesOf(owner, bot)).toEqual([]);
     expect(
-      await database
-        .select({
-          feature: defaultOptOuts.feature,
-          scope: defaultOptOuts.scope,
-        })
-        .from(defaultOptOuts)
-        .where(eq(defaultOptOuts.ownerUserId, owner)),
+      (await storedPreferences(owner)).optOuts.map((optOut) => ({
+        feature: optOut.feature,
+        scope: optOut.scope,
+      })),
     ).toEqual([{ feature: "memory_source", scope: app }]);
     // The person's other Bot is a separate choice.
     expect(await defaults().adoptSources(owner, secondBot)).toHaveLength(1);
+  });
+
+  /*
+   * The opt-out is in Intelligence and each replica holds a copy. A removal on one replica writes the
+   * opt-out there before it deletes the row; another replica that has not heard of it yet would
+   * adopt the app straight back from its stale copy. So an adoption that created something asks
+   * Intelligence afresh and takes back what an opt-out now covers.
+   */
+  test("an opt-out another replica wrote a moment ago wins, though this replica has not heard of it", async () => {
+    await reset();
+    const heard = await useTestConfiguration();
+    // A replica whose copy predates the opt-out: no announcements reach it, no timer re-reads it.
+    const deaf = createBotConfiguration({
+      client: heard.client,
+      registry: {
+        subscribe: async () => {
+          throw new Error("This replica hears nothing.");
+        },
+      },
+      resyncIntervalMs: 3_600_000,
+    });
+    await deaf.start();
+    await heard.client.preferences.change(
+      owner,
+      [{ op: "optOut", botId: bot, feature: "memory_source", scope: app }],
+      `test:${randomUUID()}`,
+    );
+    installBotConfiguration(deaf);
+    try {
+      expect(await defaults().adoptSources(owner, bot)).toEqual([]);
+      expect(await sourcesOf(owner, bot)).toEqual([]);
+    } finally {
+      deaf.stop();
+      installBotConfiguration(heard);
+    }
+  });
+
+  test("a removal racing an adoption still lands: the app is not added back", async () => {
+    for (let round = 0; round < 5; round++) {
+      await reset();
+      const [id] = await defaults().adoptSources(owner, bot);
+      // The removal records the turn-down before it deletes the source in Intelligence, and adoption
+      // reads the sources before the turn-downs, so however these interleave the app stays removed.
+      await Promise.all([
+        memory.removeSource(owner, id as string),
+        defaults().adoptSources(owner, bot),
+        defaults().adoptSources(owner, bot),
+      ]);
+      expect(await sourcesOf(owner, bot)).toEqual([]);
+      expect(await defaults().adoptSources(owner, bot)).toEqual([]);
+    }
+  });
+
+  test("two instances adopting the same default at once make one source", async () => {
+    await reset();
+    // Each with its own cache, as two replicas are.
+    const replica = testMemory(database).store;
+    const [first, second] = await Promise.all([
+      defaults().adoptSources(owner, bot),
+      defaults({ memory: replica }).adoptSources(owner, bot),
+    ]);
+    const sources = await sourcesOf(owner, bot);
+    expect(sources).toHaveLength(1);
+    expect([...(first ?? []), ...(second ?? [])]).toContain(sources[0]?.id);
   });
 
   test("a source made by hand on the app counts as the person's choice", async () => {

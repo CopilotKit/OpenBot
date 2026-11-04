@@ -1,6 +1,7 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { users } from "../db/schema";
+import { people } from "./directory/directory";
 
 /**
  * Where one person is in first-run onboarding.
@@ -44,23 +45,21 @@ export function createOnboardingStore(database: Database): OnboardingStore {
       };
     },
 
+    // Written to the person in Intelligence's directory, and from there to their row here.
     async setStep(userId, step) {
-      await database
-        .update(users)
-        .set({ onboardingStep: step, updatedAt: new Date() })
-        .where(eq(users.id, userId));
+      await people().update(userId, (current) =>
+        current.onboardingStep === step ? null : { onboardingStep: step },
+      );
     },
 
     async complete(userId) {
-      await database
-        .update(users)
-        .set({
-          // Idempotent: finishing again keeps the first timestamp, so "when did they onboard"
-          // stays one answer.
-          onboardingCompletedAt: sql`coalesce(${users.onboardingCompletedAt}, now())`,
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, userId));
+      await people().update(userId, (current) =>
+        // Idempotent: finishing again keeps the first timestamp, so "when did they onboard"
+        // stays one answer.
+        current.onboardingCompletedAt
+          ? null
+          : { onboardingCompletedAt: new Date() },
+      );
     },
   };
 }

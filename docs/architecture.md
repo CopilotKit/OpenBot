@@ -20,8 +20,8 @@ Regenerate it with `bun run diagram` after changing anything it shows.
 | `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                                                                        |
 | `agent-harness`          | 4202                       | The Bot framework harness chosen during setup, one of the `agent-<framework>` images, behind the `harness` compose profile.                 |
 | `supervisor`             | 4500 host / 4300 container | Creates, stops, resets, and lists per-Bot computer containers.                                                                              |
-| PostgreSQL with pgvector | 5432                       | Product data, audit rows, credentials, policy, grants, channels, and components.                                           |
-| CopilotKit Intelligence  | external                   | Durable threads, memory, and realtime gateway.                                                                                              |
+| PostgreSQL with pgvector | 5432                       | Product data, audit rows, credentials, grants, channels, and components.                                                                    |
+| CopilotKit Intelligence  | external                   | Durable threads, memory, Bots, organization policy, and realtime gateway.                                                                   |
 
 `scripts/start.sh` starts PostgreSQL, `agent-computer`, `agent-langgraph`, `agent-bot` (skipped when `BOT_PROVIDER=anthropic`, since that sample only takes OpenAI keys) and the supervisor (unless `OPENBOT_ONE_COMPUTER_EACH=false`) through Docker Compose, and runs `migrate`. It then starts `server`, the routines worker (`bun worker/src/index.ts`, the local stand-in for the routines CronJob) and `app` on the host.
 
@@ -71,6 +71,13 @@ allow rule does not permit. OpenBot's shipped startup default is explicit:
 `deny: []` and `allow: ["true"]`, unless `AGENT_COMPUTER_POLICY` or a saved
 administrator policy replaces it. A malformed configured policy stops server
 startup.
+
+An administrator's policy lives in CopilotKit Intelligence's organization policy: the saved
+action boundary, the capability switches, the enterprise settings, the network rules, approval
+preferences and rules, and the approvals for a Bot to use a Shared app. Every server holds all of
+it in memory, because it is read on every action and every tool call that may need approval, and
+refreshes it from Intelligence's change announcements and a full read every minute
+(`server/src/policy`). A change saved on one server reaches every other within a moment.
 
 ## Computers
 
@@ -164,21 +171,33 @@ Activity is held in the browser for the open conversation and is gone on reload.
 
 A coworker is a durable Bot profile:
 
-- `agents` stores runtime identity and endpoint/key reference.
-- `agent_profiles` stores name, title, role, owner, visibility, and deletion state.
+- Intelligence's agent registry holds the Bot: its type, endpoint or prompt and key reference,
+  name, title, role, owner, visibility, and deletion state. Each server holds every Bot in memory
+  and refreshes it from Intelligence's change announcements (`server/src/agents/bot-registry`).
 - `agent_preferences` stores per-user roster state.
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
+
+Channels are held in Intelligence's conversations capability: the conversation, its members (with
+their pins and read markers), its Bots, and a pointer to the thread each member's turns run in. A
+group's shared transcript, voice sessions and tasks are there too, and so are delivery bindings
+and push devices, in its delivery bindings capability. Each server holds the conversations it read
+lately, and every binding and device, in memory, refreshed by Intelligence's change announcements
+(`server/src/conversations`, `server/src/delivery/directory.ts`); those announcements also carry a
+conversation's new last message, summary, pin or deletion to every open browser. Busy and "waiting
+on" signals come from this deployment's own work queue and stay on its Postgres notification
+channel, as do the delivery queues and pairing codes, which are operational state beside the work
+queue that runs them.
 
 For a message with no named Bot, the intent router chooses from the person's roster. If it cannot
 choose confidently, a unique app holder may receive the message instead of the default Bot. When
 different named apps point to different unique holders, that fallback is ambiguous and the default
 stays selected; roster order does not decide which Bot owns the conversation.
 
-A group conversation holds several Bots. An Intelligence thread admits exactly one agent, so each Bot gets a thread of its own in the group (`group_bot_threads`), and what the people in it read is a shared transcript (`group_messages`) with every reply attributed to its speaker. A Bot that names a peer as `@Name` hands the conversation to it under the same grant, caps and audit rows as any other hop.
+A group conversation holds several Bots. An Intelligence thread admits exactly one agent, so each Bot gets a thread of its own in the group (a Bot thread pointer of the conversation), and what the people in it read is a shared transcript (the conversation's messages) with every reply attributed to its speaker. A Bot that names a peer as `@Name` hands the conversation to it under the same grant, caps and audit rows as any other hop.
 
-Who may reach one is decided by membership: every channel route resolves the caller in
-`channel_memberships` and refuses without a row. `channels.allowed_groups` is declared in the
+Who may reach one is decided by membership: every channel route resolves the caller among the
+conversation's members and refuses when they are not one. `channels.allowed_groups` is declared in the
 tenant package and stored, and is not part of that decision — `users.groups` is never populated by
 any sign-in path, so a group-based rule has nothing to evaluate. Treat it as a declaration waiting
 on group membership from the identity provider, not as a control that is running.

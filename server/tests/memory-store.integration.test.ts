@@ -1,20 +1,22 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
-import { and, eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createBotReset } from "../src/agents/lifecycle-reset";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
-import { agentProfiles } from "../src/db/schema/coworker";
-import { memorySources, personalMemories } from "../src/db/schema/memory";
-import { mcpServers, mcpTools } from "../src/db/schema/plugins";
+import { users } from "../src/db/schema/core";
+import { mcpTools } from "../src/db/schema/plugins";
 import { createMemoryIngestion } from "../src/memory/ingestion";
-import { createMemoryStore } from "../src/memory/store";
 import { MemoryNotFoundError, MemoryRefusedError } from "../src/memory/types";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { removeTestMemory, testMemory } from "./support/memory";
+import { useTestPolicy } from "./support/policy";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
+import { useTestSchedules } from "./support/schedules";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `memory-${randomUUID()}`;
@@ -30,11 +32,13 @@ let vendorError = false;
 /** Thrown by the vendor instead of answering, when set: how a refused call reaches a sync. */
 let vendorThrows: Error | null = null;
 const calls: { actorId?: string; botId?: string }[] = [];
+// Apps and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: Buffer.alloc(32, 7).toString("base64"),
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async (connection) => {
@@ -43,41 +47,37 @@ const plugins = createPluginStore({
     return { text: vendorText, isError: vendorError };
   },
 });
-const store = createMemoryStore(database);
+const { store, cache, intelligence } = testMemory(database);
 const ingestion = createMemoryIngestion({ store, plugins });
+/** Everything Intelligence holds for the owner, forgotten tombstones included. */
+const held = (userId = owner) =>
+  intelligence.allMemories(userId, { includeInvalidated: true });
 beforeAll(async () => {
+  // Sign-in and Bot reset read the organization policy (support/policy.ts).
+  await useTestPolicy();
+  // A Bot reset reaches the person's check-ins, which live in Intelligence.
+  await useTestSchedules();
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
   ]);
-  await database.insert(agents).values([
-    { id: bot, name: "Memory Bot", type: "built_in", configuration: {} },
-    {
-      id: otherBot,
-      name: "Other memory Bot",
-      type: "remote_ag_ui",
-      configuration: {},
-    },
-  ]);
-  await database.insert(agentProfiles).values([
-    {
-      agentId: bot,
-      ownerUserId: owner,
-      title: "Memory Bot",
-      roleDescription: "Assist",
-      avatarSeed: bot,
-      visibility: "private",
-    },
-    {
-      agentId: otherBot,
-      ownerUserId: other,
-      title: "Other Bot",
-      roleDescription: "Assist",
-      avatarSeed: otherBot,
-      visibility: "private",
-    },
-  ]);
-  await database.insert(mcpServers).values({
+  await seedBot({
+    id: bot,
+    name: "Memory Bot",
+    type: "built_in",
+    ownerUserId: owner,
+    title: "Memory Bot",
+    roleDescription: "Assist",
+  });
+  await seedBot({
+    id: otherBot,
+    name: "Other memory Bot",
+    type: "remote_ag_ui",
+    ownerUserId: other,
+    title: "Other Bot",
+    roleDescription: "Assist",
+  });
+  await seedServer({
     id: server,
     title: "Memory connector",
     vendor: "Fixture",
@@ -104,9 +104,10 @@ beforeAll(async () => {
   await plugins.grant("mcp", `${server}/write_document`, bot, owner);
 });
 afterAll(async () => {
+  await removeTestMemory([owner, other]);
   await database.delete(users).where(inArray(users.id, [owner, other]));
-  await database.delete(agents).where(inArray(agents.id, [bot, otherBot]));
-  await database.delete(mcpServers).where(eq(mcpServers.id, server));
+  await removeBots([bot, otherBot]);
+  await removeServers([server]);
   await database.$client.close();
 });
 async function source() {
@@ -142,6 +143,20 @@ test("manual edit and disable change the next selected context", async () => {
   expect(await ingestion.contextFor(owner, bot)).not.toContain(
     "Rare revised fact",
   );
+});
+test("an id a person's edit replaced still reaches the memory it became", async () => {
+  const fact = await store.create(owner, { content: "Prefers aisle seats" });
+  const edited = await store.update(owner, fact.id, {
+    content: "Prefers window seats",
+  });
+  expect(edited.id).not.toBe(fact.id);
+  // A Bot that recalled the old id, or a tab not yet refreshed, still changes and forgets it.
+  const paused = await store.update(owner, fact.id, { enabled: false });
+  expect(paused).toMatchObject({ id: edited.id, enabled: false });
+  await store.remove(owner, fact.id);
+  expect(
+    (await store.list(owner)).some((row) => row.content.includes("seats")),
+  ).toBe(false);
 });
 test("forget removes manual facts immediately", async () => {
   const fact = await store.create(owner, { content: "Forgotten unique fact" });
@@ -205,12 +220,19 @@ test("a person's edit survives later connector changes", async () => {
     (row) => row.sourceId === value.id,
   );
   if (!fact) throw new Error("Expected imported memory.");
-  await store.update(owner, fact.id, { content: "My corrected roadmap" });
+  // An edit of the words is kept as a new memory of the same record (Intelligence supersedes it), so
+  // it is found by its source, not its old id.
+  const edited = await store.update(owner, fact.id, {
+    content: "My corrected roadmap",
+  });
   vendorText = '[{"id":"doc1","text":"Vendor changed roadmap"}]';
   await ingestion.sync(owner, value.id);
-  expect(
-    (await store.list(owner)).find((row) => row.id === fact.id)?.content,
-  ).toBe("My corrected roadmap");
+  const rows = (await store.list(owner)).filter(
+    (row) => row.sourceId === value.id,
+  );
+  expect(rows.map((row) => row.content)).toEqual(["My corrected roadmap"]);
+  expect(rows[0]?.id).toBe(edited.id);
+  expect(rows[0]?.reviewState).toBe("edited");
 });
 test("write tools and another person's Bot cannot become ambient sources", async () => {
   await expect(
@@ -293,17 +315,12 @@ test("source leases prevent competing connector calls", async () => {
 });
 test("removing a source deletes its imported records", async () => {
   const value = await source();
+  expect((await held()).some((memory) => memory.sourceId === value.id)).toBe(
+    true,
+  );
   await store.removeSource(owner, value.id);
   expect(
-    await database
-      .select()
-      .from(personalMemories)
-      .where(
-        and(
-          eq(personalMemories.ownerUserId, owner),
-          eq(personalMemories.sourceId, value.id),
-        ),
-      ),
+    (await held()).filter((memory) => memory.sourceId === value.id),
   ).toHaveLength(0);
 });
 test("a resync of a healthy source keeps its facts in recall while it runs", async () => {
@@ -316,10 +333,14 @@ test("a resync of a healthy source keeps its facts in recall while it runs", asy
   ).toBe(true);
   // A source whose last sync failed stays hidden while it retries, as above.
   await store.failSync(owner, value.id, "Vendor unavailable");
-  await database
-    .update(memorySources)
-    .set({ nextSyncAt: new Date(0) })
-    .where(eq(memorySources.id, value.id));
+  const failed = await intelligence.getSource(value.id);
+  expect(
+    await intelligence.updateSource(
+      value.id,
+      { nextSyncAt: new Date(0).toISOString() },
+      failed?.version ?? 0,
+    ),
+  ).toMatchObject({ id: value.id });
   expect(await store.claimSync(owner, value.id)).not.toBeNull();
   expect(
     (await ingestion.recall(owner, bot)).some(
@@ -329,41 +350,43 @@ test("a resync of a healthy source keeps its facts in recall while it runs", asy
   await store.failSync(owner, value.id, "Test lease released");
 });
 test("recall reaches this Bot's memories however many other Bots' are newer", async () => {
-  const mine = randomUUID();
-  await database.insert(personalMemories).values({
-    id: mine,
-    ownerUserId: owner,
-    content: "The quarterly review is in the Lisbon office",
-    provenance: "Read from Docs",
-    formedBy: "bot",
-    formedByAgentId: bot,
-  });
+  const mine = (
+    await intelligence.createMemory(owner, {
+      content: "The quarterly review is in the Lisbon office",
+      provenance: "Read from Docs",
+      formedBy: "agent",
+      agentId: bot,
+      reviewState: "unreviewed",
+    })
+  ).id;
   // Six hundred newer memories formed by another Bot for the same person.
-  await database.insert(personalMemories).values(
-    Array.from({ length: 600 }, (_, index) => ({
-      id: randomUUID(),
-      ownerUserId: owner,
-      content: `Other Bot fact ${index}`,
-      provenance: "Read elsewhere",
-      formedBy: "bot" as const,
-      formedByAgentId: otherBot,
-      updatedAt: new Date(Date.now() + 60_000 + index),
-    })),
-  );
+  const others: string[] = [];
+  for (let batch = 0; batch < 600; batch += 50)
+    others.push(
+      ...(
+        await Promise.all(
+          Array.from({ length: 50 }, (_, index) =>
+            intelligence.createMemory(owner, {
+              content: `Other Bot fact ${batch + index}`,
+              provenance: "Read elsewhere",
+              formedBy: "agent",
+              agentId: otherBot,
+              reviewState: "unreviewed",
+            }),
+          ),
+        )
+      ).map((memory) => memory.id),
+    );
+  cache.forget(owner);
   try {
     const found = await ingestion.recall(owner, bot, "lisbon");
     expect(found.map((row) => row.id)).toEqual([mine]);
   } finally {
-    await database
-      .delete(personalMemories)
-      .where(
-        and(
-          eq(personalMemories.ownerUserId, owner),
-          inArray(personalMemories.formedByAgentId, [bot, otherBot]),
-        ),
-      );
+    for (const id of [mine, ...others])
+      await intelligence.forgetMemory(owner, id, { purge: true });
+    cache.forget(owner);
   }
-});
+}, 120_000);
 test("the same fact formed at once by two runs is stored once", async () => {
   const content = `Concurrent fact ${randomUUID()}`;
   const results = await Promise.all(
@@ -376,15 +399,7 @@ test("the same fact formed at once by two runs is stored once", async () => {
       }),
     ),
   );
-  const rows = await database
-    .select({ id: personalMemories.id })
-    .from(personalMemories)
-    .where(
-      and(
-        eq(personalMemories.ownerUserId, owner),
-        eq(personalMemories.content, content),
-      ),
-    );
+  const rows = (await held()).filter((memory) => memory.content === content);
   expect(rows).toHaveLength(1);
   expect(new Set(results.map((result) => result.id)).size).toBe(1);
   expect(results.filter((result) => !result.duplicate)).toHaveLength(1);
@@ -422,9 +437,10 @@ test("the same fact formed by two Bots is kept for each, and each recalls only i
       (await ingestion.recall(owner, otherBot, term)).map((row) => row.id),
     ).toEqual([second.id]);
   } finally {
-    await database
-      .delete(personalMemories)
-      .where(eq(personalMemories.content, content));
+    for (const memory of await held())
+      if (memory.content === content)
+        await intelligence.forgetMemory(owner, memory.id, { purge: true });
+    cache.forget(owner);
   }
 });
 
@@ -459,16 +475,20 @@ test("a fact the person forgot from one Bot is not formed again by another", asy
       forgotten: true,
     });
   } finally {
-    // A forgotten row keeps no content, so it is found by id.
-    await database
-      .delete(personalMemories)
-      .where(inArray(personalMemories.id, formed));
+    // A forgotten memory keeps no content, so it is found by id.
+    for (const id of new Set(formed))
+      await intelligence.forgetMemory(owner, id, { purge: true });
+    cache.forget(owner);
   }
 });
 
 test("resetting one Bot leaves another Bot's copy of the same fact", async () => {
   const content = `Reset fact ${randomUUID()}`;
-  const reset = createBotReset({ database, softDeleteChannel: async () => {} });
+  const reset = createBotReset({
+    database,
+    softDeleteChannel: async () => {},
+    memory: store,
+  });
   try {
     await store.formMemory(owner, { agentId: bot, content, sourceApp: "Docs" });
     const kept = await store.formMemory(owner, {
@@ -477,17 +497,14 @@ test("resetting one Bot leaves another Bot's copy of the same fact", async () =>
       sourceApp: "Docs",
     });
     await reset.execute({ id: owner, role: "user" }, bot);
-    const rows = await database
-      .select({
-        id: personalMemories.id,
-        agentId: personalMemories.formedByAgentId,
-      })
-      .from(personalMemories)
-      .where(eq(personalMemories.content, content));
-    expect(rows).toEqual([{ id: kept.id, agentId: otherBot }]);
+    const rows = (await held())
+      .filter((memory) => memory.content === content)
+      .map((memory) => ({ id: memory.id, formedBy: memory.formedByAgentId }));
+    expect(rows).toEqual([{ id: kept.id, formedBy: otherBot }]);
   } finally {
-    await database
-      .delete(personalMemories)
-      .where(eq(personalMemories.content, content));
+    for (const memory of await held())
+      if (memory.content === content)
+        await intelligence.forgetMemory(owner, memory.id, { purge: true });
+    cache.forget(owner);
   }
 });

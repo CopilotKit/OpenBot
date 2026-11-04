@@ -12,8 +12,11 @@ import { users } from "../src/db/schema/core";
 import { recorderConnections } from "../src/db/schema/recorder";
 import { personalLearningContainerId } from "../src/learning/personal-space";
 import { RECORDER_BEARER } from "../src/recorder/guard";
+import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testLearningIntelligence } from "./support/learning";
+import { directoryFor } from "./support/directory";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const other = `recorder-single-${randomUUID()}-other`;
@@ -36,6 +39,7 @@ const recorder = createRecorderExtension({
   organizationAuth: undefined,
   roleRepository,
   peopleStore: { isRevoked: async () => false },
+  trajectoryBindings: createTrajectoryBindingStore(testLearningIntelligence()),
   personalSpaces: {
     containerFor: personalLearningContainerId,
     state: async (userId) => ({
@@ -73,7 +77,7 @@ const call = (path: string, init: RequestInit & { json?: unknown } = {}) => {
 
 beforeAll(async () => {
   expect(config.singleUser).toBe(true);
-  await initializeDevActorUser(database, true);
+  await initializeDevActorUser(database, true, directoryFor(database));
   await database
     .insert(users)
     .values({ id: other, email: `${other}@example.test`, name: "Other" });

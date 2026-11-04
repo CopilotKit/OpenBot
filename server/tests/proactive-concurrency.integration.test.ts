@@ -2,11 +2,13 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
-import { proactiveRuns } from "../src/db/schema/proactive";
+import { users } from "../src/db/schema/core";
 import { createProactiveStore } from "../src/proactive/store";
+import { purgeSchedulesOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testScheduleClient, useTestSchedules } from "./support/schedules";
 
+// Check-in settings and their runs are Intelligence's (support/schedules.ts); the people stay here.
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const store = createProactiveStore(database);
 const prefix = `check-in-concurrency-${randomUUID()}`;
@@ -16,21 +18,14 @@ const bot = `${prefix}-bot`;
 const secondBot = `${prefix}-second`;
 
 beforeAll(async () => {
+  await useTestSchedules();
   await database
     .insert(users)
     .values([owner, other].map((id) => ({ id, email: `${id}@example.test` })));
-  await database.insert(agents).values(
-    [bot, secondBot].map((id) => ({
-      id,
-      name: id,
-      type: "built_in" as const,
-      configuration: {},
-    })),
-  );
 });
 afterAll(async () => {
+  await purgeSchedulesOf([owner, other]);
   await database.delete(users).where(inArray(users.id, [owner, other]));
-  await database.delete(agents).where(inArray(agents.id, [bot, secondBot]));
   await database.$client.close();
 });
 
@@ -82,34 +77,33 @@ test("daily counts combine a Bot's settings, exclude skipped/old runs and isolat
   const second = await setting("Count two");
   const anotherBot = await setting("Other Bot", secondBot);
   const anotherOwner = await setting("Other owner", bot, other);
-  await database.insert(proactiveRuns).values(
-    [
-      { setting: first, outcome: "quiet" as const },
-      { setting: second, outcome: "failed" as const },
-      { setting: second, outcome: "skipped" as const },
-      { setting: anotherBot, outcome: "quiet" as const },
-      { setting: anotherOwner, outcome: "quiet" as const },
-    ].map(({ setting: row, outcome }) => ({
+  const client = testScheduleClient();
+  const run = async (
+    row: { id: string; ownerUserId: string; agentId: string },
+    outcome: "quiet" | "failed" | "skipped",
+    startedAt = new Date(),
+  ) =>
+    client.create("check-in-runs", {
       id: randomUUID(),
       settingId: row.id,
       ownerUserId: row.ownerUserId,
       agentId: row.agentId,
-      trigger: "schedule" as const,
+      threadId: null,
+      trigger: "schedule",
       outcome,
+      skipReason: outcome === "skipped" ? "capped" : null,
+      itemsRaised: 0,
+      reads: 0,
+      error: null,
+      startedAt,
       finishedAt: new Date(),
-      skipReason: outcome === "skipped" ? ("capped" as const) : null,
-    })),
-  );
-  await database.insert(proactiveRuns).values({
-    id: randomUUID(),
-    settingId: first.id,
-    ownerUserId: owner,
-    agentId: bot,
-    trigger: "schedule",
-    outcome: "quiet",
-    finishedAt: new Date(),
-    startedAt: new Date(Date.now() - 25 * 60 * 60_000),
-  });
+    });
+  await run(first, "quiet");
+  await run(second, "failed");
+  await run(second, "skipped");
+  await run(anotherBot, "quiet");
+  await run(anotherOwner, "quiet");
+  await run(first, "quiet", new Date(Date.now() - 25 * 60 * 60_000));
   expect(await store.runsToday(owner, bot)).toBe(2);
   expect(await store.runsToday(owner, secondBot)).toBe(1);
   expect(await store.runsToday(other, bot)).toBe(1);

@@ -6,6 +6,7 @@ import { HANDOFF_KIND } from "../src/agents/handoff";
 import {
   BotPausedError,
   configureBotLifecycle,
+  configuredPauses,
   createBotLifecycleStore,
   guardBotTurn,
   isBotPaused,
@@ -21,25 +22,32 @@ import {
   wakeUpTools,
 } from "../src/agents/wake-up";
 import { createDatabase } from "../src/db/client";
-import { approvalRequests, approvalRules } from "../src/db/schema/approvals";
-import {
-  agents,
-  channelAgents,
-  channelMemberships,
-  channels,
-  users,
-} from "../src/db/schema/core";
-import { agentProfiles, routines } from "../src/db/schema/coworker";
-import { defaultOptOuts } from "../src/db/schema/defaults";
-import { memorySources, personalMemories } from "../src/db/schema/memory";
-import {
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../src/db/schema/proactive";
-import { responsibilities } from "../src/db/schema/responsibilities";
+import { approvalRequests } from "../src/db/schema/approvals";
+import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
 import { createRoutineRunner } from "../src/routines/runner";
+import {
+  removeBots,
+  seedBot,
+  storedPreferences,
+  useTestConfiguration,
+} from "./support/bots";
+import { itemsOf, purgeSchedulesOf } from "./support/check-ins";
+import {
+  deleteConversation,
+  purgeConversations,
+  seedConversation,
+  storedConversation,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { removeTestMemory, testMemory } from "./support/memory";
+import { useTestPolicy } from "./support/policy";
+import {
+  seedResponsibility,
+  seedRoutine,
+  testScheduleClient,
+  useTestSchedules,
+} from "./support/schedules";
 
 /**
  * Pause, reset, Activity, attention, follow-ups and update routing against a real PostgreSQL.
@@ -52,64 +60,87 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `lifecycle-${randomUUID()}`;
 const owner = `${prefix}-owner`;
 const other = `${prefix}-other`;
+/** Memory lives in Intelligence; these name what the tests seed there. */
+const memory = testMemory(createDatabase(testDatabaseUrl(), TEST_POOL));
+const ownMemoryId = new Map<string, string>();
+const formedMemoryId = new Map<string, string>();
 const bot = `${prefix}-bot`;
 const helper = `${prefix}-helper`;
 const direct = `${prefix}-direct`;
 const shared = `${prefix}-shared`;
 const othersDirect = `${prefix}-others-direct`;
 
+/** A check-in setting as a person turning check-ins on makes one, in Intelligence. */
+async function checkInSetting(input: {
+  id: string;
+  ownerUserId: string;
+  channelId: string;
+  threadId: string;
+  enabled?: boolean;
+}) {
+  return (await useTestSchedules()).create("check-in-settings", {
+    agentId: bot,
+    focus: "",
+    subject: "",
+    sourceLink: null,
+    enabled: true,
+    intervalMinutes: 60,
+    nextRunAt: new Date(Date.now() + 3_600_000),
+    lastRunAt: null,
+    lastStatus: "idle",
+    lastError: null,
+    ...input,
+  });
+}
+
 beforeAll(async () => {
-  configureBotLifecycle({ database });
+  await useTestSchedules();
+  await useTestPolicy();
+  await useTestConfiguration();
+  configureBotLifecycle({ pauses: configuredPauses });
   await database.insert(users).values([
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
   ]);
-  await database.insert(agents).values([
-    { id: bot, name: "Lifecycle Bot", type: "built_in", configuration: {} },
-    { id: helper, name: "Helper Bot", type: "built_in", configuration: {} },
-  ]);
-  await database.insert(agentProfiles).values(
-    [bot, helper].map((agentId) => ({
-      agentId,
+  for (const [id, name] of [
+    [bot, "Lifecycle Bot"],
+    [helper, "Helper Bot"],
+  ] as const)
+    await seedBot({
+      id,
+      name,
+      type: "built_in",
       ownerUserId: owner,
-      title: agentId,
+      title: id,
       roleDescription: "Test",
-      avatarSeed: agentId,
-      visibility: "public" as const,
-    })),
-  );
-  await database.insert(channels).values(
-    [direct, shared, othersDirect].map((id) => ({
+      visibility: "public",
+    });
+  // Conversations live in Intelligence: each with the Bot in it, its last word the Bot's, unread.
+  for (const [id, members] of [
+    [direct, [owner]],
+    [shared, [owner, other]],
+    [othersDirect, [other]],
+  ] as const)
+    await seedConversation({
       id,
       name: id,
       description: "",
       lastMessage: "hello",
       lastMessageAt: new Date(),
       lastMessageAgentId: bot,
-    })),
-  );
-  await database.insert(channelMemberships).values([
-    { channelId: direct, userId: owner },
-    { channelId: shared, userId: owner },
-    { channelId: shared, userId: other },
-    { channelId: othersDirect, userId: other },
-  ]);
-  await database.insert(channelAgents).values([
-    { channelId: direct, agentId: bot },
-    { channelId: shared, agentId: bot },
-    { channelId: othersDirect, agentId: bot },
-  ]);
+      agentIds: [bot],
+      members: members.map((userId) => ({ userId, threadId: null })),
+    });
   for (const person of [owner, other]) {
-    await database.insert(routines).values({
+    await seedRoutine({
       id: `${prefix}-routine-${person}`,
       ownerUserId: person,
       agentId: bot,
       channelId: person === owner ? direct : othersDirect,
       instruction: "Summarise the day",
-      cron: "0 9 * * *",
       nextRunAt: new Date(Date.now() + 3_600_000),
     });
-    await database.insert(responsibilities).values({
+    await seedResponsibility({
       id: `${prefix}-goal-${person}`,
       ownerUserId: person,
       agentId: bot,
@@ -119,29 +150,29 @@ beforeAll(async () => {
       instruction: "Watch CI",
       successCriteria: "Green",
     });
-    await database.insert(memorySources).values({
-      id: `${prefix}-source-${person}`,
-      ownerUserId: person,
+    await memory.intelligence.createSource({
+      id: `source-${randomUUID()}-${person === owner ? "owner" : "other"}`,
+      userId: person,
       agentId: bot,
-      toolRef: "docs/read",
+      connectorRef: "docs/read",
       title: "Docs",
     });
-    await database.insert(personalMemories).values([
+    const [source] = await memory.intelligence.sources({ userId: person });
+    await memory.intelligence.importRecords(person, source?.id as string, [
       {
-        id: `${prefix}-memory-${person}-1`,
-        ownerUserId: person,
-        sourceId: `${prefix}-source-${person}`,
+        externalId: "1",
         content: "Launch is Tuesday",
+        contentDigest: "launch",
         provenance: "Docs",
       },
-      // A memory of the person's own, from no source: not this Bot's, so a reset keeps it.
-      {
-        id: `${prefix}-memory-${person}-own`,
-        ownerUserId: person,
-        content: "Prefers mornings",
-        provenance: "You",
-      },
     ]);
+    // A memory of the person's own, from no source: not this Bot's, so a reset keeps it.
+    const own = await memory.intelligence.createMemory(person, {
+      content: "Prefers mornings",
+      provenance: "You",
+      formedBy: "person",
+    });
+    ownMemoryId.set(person, own.id);
   }
   await database.insert(workItems).values([
     {
@@ -222,17 +253,15 @@ afterAll(async () => {
   await database
     .delete(approvalRequests)
     .where(eq(approvalRequests.ownerUserId, owner));
-  await database
-    .delete(channels)
-    .where(inArray(channels.id, [direct, shared, othersDirect]));
-  await database.delete(agents).where(inArray(agents.id, [bot, helper]));
+  await purgeConversations([direct, shared, othersDirect]);
+  await removeBots([bot, helper]);
   await database
     .delete(users)
     .where(inArray(users.id, [owner, other, `${prefix}-chooser`]));
 });
 
 describe("pause", () => {
-  const lifecycle = createBotLifecycleStore(database);
+  const lifecycle = createBotLifecycleStore();
 
   test("pausing is one person's, and a headless turn refuses to start", async () => {
     await lifecycle.pause(owner, bot);
@@ -329,6 +358,58 @@ describe("Activity and attention", () => {
     ).toBe(true);
   });
 
+  test("a responsibility is standing work, and its run says what woke it", async () => {
+    const client = testScheduleClient();
+    const eventId = `${prefix}-event`;
+    await client.create("responsibility-events", {
+      id: eventId,
+      ownerUserId: owner,
+      source: "github",
+      externalId: `${prefix}-push`,
+      type: "push",
+      payload: {},
+    });
+    const runId = `${prefix}-goal-run`;
+    await client.create("responsibility-runs", {
+      id: runId,
+      responsibilityId: `${prefix}-goal-${owner}`,
+      eventId,
+      status: "queued",
+      replyText: null,
+      error: null,
+      waiting: null,
+      continuation: null,
+      startedAt: null,
+      finishedAt: null,
+    });
+    try {
+      const result = await activity.forBot(owner, bot);
+      expect(result.scheduled).toContainEqual(
+        expect.objectContaining({
+          id: `responsibility:${prefix}-goal-${owner}`,
+          kind: "responsibility",
+          status: "active",
+          channelId: direct,
+        }),
+      );
+      expect(result.scheduled).toContainEqual(
+        expect.objectContaining({
+          id: `responsibility-run:${runId}`,
+          status: "queued",
+          detail: "github/push",
+        }),
+      );
+      expect(
+        [...result.scheduled, ...result.inProgress, ...result.completed].some(
+          (item) => item.id === `responsibility:${prefix}-goal-${other}`,
+        ),
+      ).toBe(false);
+    } finally {
+      await client.purge("responsibility-runs", runId);
+      await client.purge("responsibility-events", eventId);
+    }
+  });
+
   test("attention counts what waits on this person", async () => {
     const [row] = (await activity.attention(owner)).filter(
       (entry) => entry.agentId === bot,
@@ -409,7 +490,7 @@ describe("follow-ups", () => {
 });
 
 describe("update routing", () => {
-  const lifecycle = createBotLifecycleStore(database);
+  const lifecycle = createBotLifecycleStore();
 
   test("per-Bot notify and per-kind transports decide what leaves the web", async () => {
     let route = await resolveUpdateRoute({
@@ -477,12 +558,10 @@ describe("reset", () => {
   const softDeleted: string[] = [];
   const reset = createBotReset({
     database,
+    memory: memory.store,
     softDeleteChannel: async (_actor, channelId) => {
       softDeleted.push(channelId);
-      await database
-        .update(channels)
-        .set({ deletedAt: new Date() })
-        .where(eq(channels.id, channelId));
+      await deleteConversation(channelId);
     },
   });
 
@@ -516,21 +595,12 @@ describe("reset", () => {
       routines: 1,
       responsibilities: 1,
     });
-    const kept = await database
-      .select({ id: personalMemories.id })
-      .from(personalMemories)
-      .where(
-        and(
-          eq(personalMemories.ownerUserId, owner),
-          eq(personalMemories.id, `${prefix}-memory-${owner}-own`),
-        ),
-      );
-    expect(kept).toHaveLength(1);
-    const [sharedRow] = await database
-      .select({ deletedAt: channels.deletedAt })
-      .from(channels)
-      .where(eq(channels.id, shared));
-    expect(sharedRow?.deletedAt).toBeNull();
+    const kept = await memory.intelligence.getMemory(
+      owner,
+      ownMemoryId.get(owner) as string,
+    );
+    expect(kept?.invalidatedAt).toBeNull();
+    expect((await storedConversation(shared)).deletedAt).toBeNull();
     const remaining = await database
       .select({ key: workItems.key })
       .from(workItems)
@@ -546,22 +616,21 @@ describe("reset", () => {
 
   test("a reset also takes what the Bot formed, its research and the permissions it was given", async () => {
     for (const person of [owner, other]) {
-      await database.insert(personalMemories).values({
-        id: `${prefix}-formed-${person}`,
-        ownerUserId: person,
+      const formed = await memory.intelligence.createMemory(person, {
         content: "Owns the billing service",
         provenance: "Read from GitHub",
-        formedBy: "bot",
-        formedByAgentId: bot,
+        formedBy: "agent",
+        agentId: bot,
+        reviewState: "unreviewed",
       });
-      await database.insert(proactiveSettings).values({
+      formedMemoryId.set(person, formed.id);
+      await checkInSetting({
         id: `${prefix}-research-${person}`,
         ownerUserId: person,
-        agentId: bot,
         channelId: person === owner ? direct : othersDirect,
         threadId: `${prefix}-research-thread-${person}`,
       });
-      await database.insert(proactiveSuggestions).values({
+      await testScheduleClient().create("check-in-suggestions", {
         id: `${prefix}-suggestion-${person}`,
         ownerUserId: person,
         agentId: bot,
@@ -569,28 +638,35 @@ describe("reset", () => {
         runId: "run-1",
         title: "Review the PR",
         detail: "It waits on you",
+        sourceApp: null,
+        sourceRef: null,
+        sourceLink: null,
+        status: "open",
+        dedupeKey: null,
+        pingId: null,
+        deliveredAt: null,
+        resolvedAt: null,
       });
-      await database.insert(approvalRules).values([
-        {
-          id: `${prefix}-allow-${person}`,
-          ownerUserId: person,
-          botId: bot,
-          toolRef: "mail/send",
-          effect: "send",
-          scope: "*",
-          behaviour: "allow",
-        },
-        // A rule that makes the Bot ask first protects the person, so a reset leaves it.
-        {
-          id: `${prefix}-ask-${person}`,
-          ownerUserId: person,
-          botId: bot,
-          toolRef: "files/delete",
-          effect: "delete",
-          scope: "*",
-          behaviour: "ask",
-        },
-      ]);
+      const rules = await useTestPolicy();
+      await rules.createApprovalRule({
+        id: `${prefix}-allow-${person}`,
+        ownerUserId: person,
+        agentId: bot,
+        tool: "mail/send",
+        effect: "send",
+        scope: "*",
+        behaviour: "allow",
+      });
+      // A rule that makes the Bot ask first protects the person, so a reset leaves it.
+      await rules.createApprovalRule({
+        id: `${prefix}-ask-${person}`,
+        ownerUserId: person,
+        agentId: bot,
+        tool: "files/delete",
+        effect: "delete",
+        scope: "*",
+        behaviour: "ask",
+      });
     }
 
     const plan = await reset.plan(owner, bot);
@@ -611,24 +687,15 @@ describe("reset", () => {
       person: string,
     ) =>
       table === "memory"
-        ? database
-            .select({ id: personalMemories.id })
-            .from(personalMemories)
-            .where(eq(personalMemories.id, `${prefix}-formed-${person}`))
+        ? memory.intelligence
+            .getMemory(person, formedMemoryId.get(person) as string)
+            .then((found) => (found ? [found] : []))
         : table === "research"
-          ? database
-              .select({ id: proactiveSuggestions.id })
-              .from(proactiveSuggestions)
-              .where(eq(proactiveSuggestions.ownerUserId, person))
-          : database
-              .select({ id: approvalRules.id })
-              .from(approvalRules)
-              .where(
-                and(
-                  eq(approvalRules.ownerUserId, person),
-                  sql`${approvalRules.revokedAt} is null`,
-                ),
-              );
+          ? itemsOf(person)
+          : // As Intelligence holds them now, past this process's memory.
+            (await useTestPolicy()).client
+              .approvalRules({ ownerUserId: person })
+              .then(({ items }) => items.map((rule) => ({ id: rule.id })));
     expect(await left("memory", owner)).toHaveLength(0);
     expect(await left("research", owner)).toHaveLength(0);
     expect((await left("rules", owner)).map((row) => row.id)).toEqual([
@@ -652,27 +719,22 @@ describe("reset", () => {
     await database
       .insert(users)
       .values({ id: person, email: `${person}@example.test` });
-    await database.insert(memorySources).values([
-      {
-        id: `${prefix}-off-source`,
-        ownerUserId: person,
-        agentId: bot,
-        toolRef: "mail/search",
-        title: "Mail",
-        enabled: false,
-      },
-      {
-        id: `${prefix}-on-source`,
-        ownerUserId: person,
-        agentId: bot,
-        toolRef: "calendar/list",
-        title: "Calendar",
-      },
-    ]);
-    await database.insert(proactiveSettings).values({
+    await memory.intelligence.createSource({
+      userId: person,
+      agentId: bot,
+      connectorRef: "mail/search",
+      title: "Mail",
+      enabled: false,
+    });
+    await memory.intelligence.createSource({
+      userId: person,
+      agentId: bot,
+      connectorRef: "calendar/list",
+      title: "Calendar",
+    });
+    await checkInSetting({
       id: `${prefix}-off-research`,
       ownerUserId: person,
-      agentId: bot,
       channelId: direct,
       threadId: `${prefix}-off-research-thread`,
       enabled: false,
@@ -680,33 +742,21 @@ describe("reset", () => {
 
     await reset.execute({ id: person, role: "user" }, bot);
 
-    const declined = await database
-      .select({
-        feature: defaultOptOuts.feature,
-        scope: defaultOptOuts.scope,
-      })
-      .from(defaultOptOuts)
-      .where(
-        and(
-          eq(defaultOptOuts.ownerUserId, person),
-          eq(defaultOptOuts.agentId, bot),
-        ),
-      );
+    const declined = (await storedPreferences(person)).optOuts
+      .filter((optOut) => optOut.botId === bot)
+      .map((optOut) => ({ feature: optOut.feature, scope: optOut.scope }));
     expect(declined.sort((a, b) => a.feature.localeCompare(b.feature))).toEqual(
       [
         { feature: "memory_source", scope: "mail" },
         { feature: "proactive_research", scope: "" },
       ],
     );
-    expect(
-      await database
-        .select({ id: memorySources.id })
-        .from(memorySources)
-        .where(eq(memorySources.ownerUserId, person)),
-    ).toEqual([]);
+    expect(await memory.intelligence.sources({ userId: person })).toEqual([]);
   });
 });
 
 afterAll(async () => {
+  await removeTestMemory([owner, other, `${prefix}-chooser`]);
+  await purgeSchedulesOf([owner, other, `${prefix}-chooser`]);
   await database.$client.close();
 });

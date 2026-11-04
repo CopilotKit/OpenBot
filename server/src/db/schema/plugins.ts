@@ -11,7 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { agents, credentials, users } from "./core";
+import { credentials, users } from "./core";
 import { jsonb } from "./json";
 
 const createdAt = () =>
@@ -196,9 +196,9 @@ export const mcpServers = pgTable(
 export const mcpTools = pgTable(
   "mcp_tools",
   {
-    serverId: text("server_id")
-      .notNull()
-      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    // An app (tool server) id in Intelligence. No foreign key: apps are not in this database; removing
+    // one removes these rows explicitly (vault/local-rows.ts).
+    serverId: text("server_id").notNull(),
     name: text("name").notNull(),
     /**
      * THE VENDOR'S OWN SPELLING OF THIS ACTION, which is not always a name a model may be offered.
@@ -307,6 +307,21 @@ export const mcpTools = pgTable(
  * the previous build wrote the row without one. The one way a query reads that column, so a null
  * never reaches a vendor or fails a comparison. See {@link mcpTools.vendorName}.
  */
+/**
+ * How an app's tool list last refreshed: when, what went wrong, which tools were left out.
+ *
+ * OPERATIONAL, beside {@link mcpTools}, which it describes: both are this deployment's cache of what
+ * the app's server last said, and a refresh rebuilds both. These three facts were columns of
+ * `mcp_servers`, which is no longer written now that apps live in Intelligence.
+ */
+export const mcpToolLists = pgTable("mcp_tool_lists", {
+  serverId: text("server_id").primaryKey(),
+  refreshedAt: timestamp("refreshed_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  skippedTools: text("skipped_tools").array(),
+  updatedAt: updatedAt(),
+});
+
 export const vendorNameOf = () =>
   sql<string>`coalesce(${mcpTools.vendorName}, ${mcpTools.name})`;
 
@@ -625,9 +640,9 @@ export const pendingAuthorizations = pgTable(
     actorId: text("actor_id")
       .primaryKey()
       .references(() => users.id, { onDelete: "cascade" }),
-    serverId: text("server_id")
-      .notNull()
-      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    // An app (tool server) id in Intelligence. No foreign key: apps are not in this database; removing
+    // one removes these rows explicitly (vault/local-rows.ts).
+    serverId: text("server_id").notNull(),
     /**
      * The one action Authorize was pressed for, or `null` for Connect, which asks the broker for
      * everything the app's actions need. Null rather than the app's own name, because the verifier
@@ -784,6 +799,10 @@ export const mcpUserCredentials = pgTable(
  * already granted, and every one of those calls is still decided, policy-checked and audited. The
  * firewall is at the tool call, not at the prose, which is why anybody may write a skill while
  * adding an MCP server stays an administrator's decision.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const skills = pgTable(
   "skills",
@@ -845,6 +864,10 @@ export const skills = pgTable(
  * parsing the other's format. The cost is a ref that can outlive the tool it names, which is the
  * price grants already pay, and is why a missing tool must read as "load nothing" rather than as an
  * error at run time.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const skillTools = pgTable(
   "skill_tools",
@@ -876,15 +899,17 @@ export const skillTools = pgTable(
  * One table for both kinds. `kind` says which, and `ref` names it: `<serverId>/<toolName>` for an
  * MCP tool, the slug for a skill. A second table would mean two code paths asking the same question
  * and two chances for them to disagree.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const pluginGrants = pgTable(
   "plugin_grants",
   {
     kind: text("kind").notNull(),
     ref: text("ref").notNull(),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     grantedBy: text("granted_by"),
     /**
      * Whether an administrator made this grant (`admin`, or null on every row from before this
@@ -925,6 +950,10 @@ export const pluginGrants = pgTable(
  *
  * The two share the grant surface and the publish gate, because an operator deciding what a Bot may
  * answer with should not have to know which of the two they are looking at.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const sandboxedComponents = pgTable("sandboxed_components", {
   /** The tool name the model calls. Namespaced on save so it can never collide with a compiled one. */
@@ -1008,9 +1037,7 @@ export const appAccessRequests = pgTable(
     requestedBy: text("requested_by")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id").references(() => agents.id, {
-      onDelete: "cascade",
-    }),
+    agentId: text("agent_id"),
     appKey: text("app_key").notNull(),
     appTitle: text("app_title").notNull(),
     kind: text("kind").$type<"enable" | "grant" | "connect_shared">().notNull(),

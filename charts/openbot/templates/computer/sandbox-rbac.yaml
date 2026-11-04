@@ -1,5 +1,5 @@
 {{- if eq .Values.computers.mode "sandbox" }}
-{{- $ns := default .Release.Namespace .Values.computers.sandbox.namespace -}}
+{{- $ns := include "openbot.computersNamespace" . -}}
 {{/*
 What the API may do to computers, and nothing else.
 

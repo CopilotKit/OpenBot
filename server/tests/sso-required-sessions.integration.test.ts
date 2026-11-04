@@ -4,9 +4,9 @@ import { eq, inArray } from "drizzle-orm";
 import { createEnterpriseStore } from "../src/admin/settings-store";
 import { revokeSessionsWithoutSso } from "../src/auth/sso-required";
 import { createDatabase } from "../src/db/client";
-import { enterpriseSettings } from "../src/db/schema/admin";
 import { accounts, sessions, ssoProviders, users } from "../src/db/schema/core";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 
 const db = createDatabase(testDatabaseUrl(), TEST_POOL);
 const store = createEnterpriseStore(db);
@@ -21,6 +21,7 @@ const session = (userId: string) => ({
   expiresAt: new Date(Date.now() + 86_400_000),
 });
 beforeAll(async () => {
+  await useTestPolicy();
   await db.insert(users).values([
     { id: member, email: `${member}@example.test` },
     { id: admin, email: adminEmail },
@@ -28,9 +29,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await db.delete(users).where(inArray(users.id, [member, admin]));
-  await db
-    .delete(enterpriseSettings)
-    .where(eq(enterpriseSettings.key, "sso_required"));
+  await (await useTestPolicy()).patchSettings({ ssoRequired: false });
   await db.$client.end({ timeout: 5 });
 });
 

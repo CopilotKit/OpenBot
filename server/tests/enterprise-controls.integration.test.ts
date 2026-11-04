@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { AbstractAgent } from "@ag-ui/client";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { Hono } from "hono";
 import { EMPTY } from "rxjs";
 import {
@@ -17,37 +17,44 @@ import { createEnterpriseAdminRoutes } from "../src/admin/routes";
 import { createHandoffDelivery } from "../src/agents/handoff-delivery";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { addAuditTap, createAuditStore, recordAuditEvent } from "../src/audit";
-import { createAuth } from "../src/auth";
 import type { AppVariables } from "../src/auth/guards";
 import { computerKeyText } from "../src/computer/computer-key";
 import type { ComputerProvider } from "../src/computer/provider";
-import type { DeploymentConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import {
-  actionRecords,
-  agentProfiles,
-  agents,
-  auditEvents,
-  capabilitySettings,
-  enterpriseSettings,
-  modelUsage,
-  networkPolicies,
-  revokedAccess,
-  scimGroups,
-  sessions,
-  ssoProviders,
-  teamBotPublications,
-  users,
-} from "../src/db/schema";
+import { scimGroups, sessions, ssoProviders, users } from "../src/db/schema";
 import { createTeamBots } from "../src/team-bots/team-bots";
+import {
+  actionRows,
+  auditRows,
+  modelUsageRows,
+  useTestAuditTrail,
+} from "./support/audit";
+import {
+  changeAccess,
+  removeBots,
+  seedBot,
+  storedAccess,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { resetTestPolicy, useTestPolicy } from "./support/policy";
 
 /**
- * The enterprise controls against a real PostgreSQL, through the same seams production uses: the
- * stores, the LISTEN/NOTIFY snapshot, the HTTP gate, the in-place store guards, and SCIM through
- * Better Auth's own handler. Needs a database at the current TS schema (TEST_DATABASE_URL).
+ * The enterprise controls against a real PostgreSQL and a real Intelligence, through the same seams
+ * production uses: the stores, the snapshot Intelligence's announcements keep current, the HTTP gate
+ * and the in-place store guards. SCIM, which
+ * Intelligence's directory serves now, is scim-directory.integration.test.ts. Needs a database at the
+ * current TS schema (TEST_DATABASE_URL).
+ *
+ * The audit trail, action records and model usage are Intelligence's: the controls write them to the
+ * outbox, and the admin routes (and these tests) read them back from Intelligence after a flush.
  */
+useTestAuditTrail();
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 const auditStore = createAuditStore(database);
 const suite = randomUUID().slice(0, 8);
 const admin = {
@@ -82,16 +89,10 @@ const provider: ComputerProvider = {
 
 let controls: EnterpriseControls;
 
+// Action records and model usage are in Intelligence, append-only and read by this suite's own Bot,
+// so there is nothing of theirs to clean.
 async function clean() {
-  await database.delete(capabilitySettings);
-  await database.delete(enterpriseSettings);
-  await database.delete(networkPolicies);
-  await database
-    .delete(actionRecords)
-    .where(like(actionRecords.botId, `ent-bot-${suite}%`));
-  await database
-    .delete(modelUsage)
-    .where(like(modelUsage.agentId, `ent-%${suite}%`));
+  await resetTestPolicy();
 }
 
 /** A Bot a person is recording in the browser of, as far as the controls are told (browser/bot-browser.ts). */
@@ -103,24 +104,20 @@ const RECORDER_RULE = {
 };
 
 beforeAll(async () => {
+  await useTestPolicy();
   await clean();
   await database.insert(users).values([
     { ...admin, name: "Admin" },
     { ...member, name: "Member", groups: ["sales"] },
   ]);
-  await database.insert(agents).values({
+  await seedBot({
     id: bot,
     name: "Enterprise test Bot",
     type: "built_in",
-    configuration: {},
-  });
-  await database.insert(agentProfiles).values({
-    agentId: bot,
     ownerUserId: member.id,
     title: "Test",
     roleDescription: "Test",
     avatarSeed: "x",
-    visibility: "private",
   });
   controls = await installEnterpriseControls({
     database,
@@ -139,10 +136,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await controls?.stop();
   await clean();
-  await database.delete(agents).where(eq(agents.id, bot));
-  await database
-    .delete(revokedAccess)
-    .where(like(revokedAccess.email, `%${suite}%`));
+  await removeBots([bot]);
   await database
     .delete(scimGroups)
     .where(like(scimGroups.displayName, `%${suite}%`));
@@ -208,15 +202,10 @@ describe("capability switches", () => {
       allowed: false,
     });
     expect(saved.status).toBe(200);
-    const rows = await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "capability.changed"),
-          eq(auditEvents.actorUserId, admin.id),
-        ),
-      );
+    const rows = await auditRows({
+      eventType: "capability.changed",
+      actorUserId: admin.id,
+    });
     expect(rows.length).toBeGreaterThan(0);
   });
 
@@ -287,7 +276,7 @@ describe("capability switches", () => {
     expect(bound).toEqual(["+1555"]);
   });
 
-  test("the snapshot follows NOTIFY, so the computer boundary sees a change at once", async () => {
+  test("the snapshot follows a change at once, so the computer boundary sees it", async () => {
     await put(asAdmin, "/api/admin/enterprise/capabilities", {
       scopeKind: "organization",
       capability: "cloudBrowser",
@@ -323,10 +312,7 @@ describe("models", () => {
       body: JSON.stringify({ threadId: "t", runId: "r2" }),
     });
     expect(ran.status).toBe(200);
-    const usage = await database
-      .select()
-      .from(modelUsage)
-      .where(eq(modelUsage.agentId, bot));
+    const usage = await modelUsageRows(bot);
     expect(usage.map((row) => [row.model, row.allowed]).sort()).toEqual([
       ["openai/gpt-test", false],
       ["openai/gpt-test", true],
@@ -601,15 +587,9 @@ describe("Team Bots switch", () => {
           groups: [],
         }),
       ).rejects.toThrow(/Team Bots/);
-      const rows = await database
-        .select()
-        .from(teamBotPublications)
-        .where(eq(teamBotPublications.agentId, bot));
-      expect(rows).toEqual([]);
+      expect((await storedAccess(bot)).publication).toBeNull();
     } finally {
-      await database
-        .delete(teamBotPublications)
-        .where(eq(teamBotPublications.agentId, bot));
+      await changeAccess([{ op: "unpublish", botId: bot }]);
       await put(asAdmin, "/api/admin/enterprise/capabilities", {
         scopeKind: "organization",
         capability: "teamBots",
@@ -661,15 +641,10 @@ describe("SSO required", () => {
           .from(sessions)
           .where(eq(sessions.id, signedIn.id)),
       ).toEqual([]);
-      const [revoked] = await database
-        .select({ payload: auditEvents.payload })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.eventType, "auth.sessions_revoked"),
-            eq(auditEvents.actorUserId, admin.id),
-          ),
-        );
+      const [revoked] = await auditRows({
+        eventType: "auth.sessions_revoked",
+        actorUserId: admin.id,
+      });
       expect(revoked?.payload).toMatchObject({ reason: "sso_required" });
     } finally {
       await database.delete(sessions).where(eq(sessions.id, signedIn.id));
@@ -738,15 +713,10 @@ describe("offboarding", () => {
       `bot:${bot}`,
     ]);
     expect(stopped).toEqual([`person:${member.id}`, `bot:${bot}`]);
-    const [row] = await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "computer.terminated"),
-          eq(auditEvents.targetId, member.id),
-        ),
-      );
+    const [row] = await auditRows({
+      eventType: "computer.terminated",
+      targetId: member.id,
+    });
     expect(row?.actorUserId).toBe(admin.id);
   });
 
@@ -778,18 +748,13 @@ describe("Skill sharing", () => {
     );
     expect(saved.status).toBe(200);
     expect(await skillSharingAllowed()).toBe(true);
-    // The saving replica refreshes its snapshot before answering; the others on the NOTIFY.
+    // The saving replica refreshes its snapshot before answering; the others on Intelligence's announcement.
     expect(skillSharingInSnapshot()).toBe(true);
-    const [row] = await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "enterprise.setting_changed"),
-          eq(auditEvents.targetId, "skillSharing"),
-          eq(auditEvents.actorUserId, admin.id),
-        ),
-      );
+    const [row] = await auditRows({
+      eventType: "enterprise.setting_changed",
+      targetId: "skillSharing",
+      actorUserId: admin.id,
+    });
     expect(row?.payload).toMatchObject({
       setting: "skillSharing",
       before: false,
@@ -827,10 +792,7 @@ describe("action recording", () => {
     });
     await write("curl -H 'Authorization: Bearer s3cr3t' https://x.test");
     await Bun.sleep(100);
-    const rows = await database
-      .select()
-      .from(actionRecords)
-      .where(inArray(actionRecords.botId, [bot]));
+    const rows = await actionRows(bot);
     expect(rows.map((row) => row.command)).toEqual([
       "curl -H 'Authorization: Bearer [REDACTED]' https://x.test",
     ]);
@@ -869,101 +831,5 @@ describe("OpenTelemetry export", () => {
     expect(received[0]).toContain("/v1/logs");
     expect(received.join("")).toContain("openbot.surface");
     expect(received.join("")).toContain("computer.action_refused");
-  });
-});
-
-describe("SCIM 2.0 through Better Auth", () => {
-  const token = `scim-${suite}-${randomUUID()}`;
-  let auth: ReturnType<typeof createAuth>;
-  const scimEmail = `ent-scim-${suite}@acme.test`;
-
-  beforeAll(() => {
-    process.env.SCIM_BEARER_TOKEN = token;
-    auth = createAuth(
-      {
-        auth: {
-          baseUrl: "http://127.0.0.1:3000",
-          secret: "x".repeat(40),
-          trustedOrigins: [],
-          initialAdminEmails: [],
-          allowedEmailDomains: [],
-          google: { clientId: "id", clientSecret: "secret" },
-        },
-        keyEncryptionKey: Buffer.alloc(32, 7).toString("base64"),
-      } as unknown as DeploymentConfig,
-      database,
-      async () => false,
-      auditStore,
-    );
-  });
-  afterAll(() => {
-    delete process.env.SCIM_BEARER_TOKEN;
-  });
-
-  const scim = (method: string, path: string, body?: unknown, bearer = token) =>
-    auth.handler(
-      new Request(`http://127.0.0.1:3000/api/auth/scim/v2${path}`, {
-        method,
-        headers: {
-          authorization: `Bearer ${bearer}`,
-          "content-type": "application/scim+json",
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      }),
-    );
-
-  test("a wrong token is refused", async () => {
-    expect((await scim("GET", "/Users", undefined, "wrong")).status).toBe(401);
-  });
-
-  test("provision, group, deprovision, reprovision", async () => {
-    const created = await scim("POST", "/Users", {
-      schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
-      userName: scimEmail,
-      externalId: `ext-${suite}`,
-      name: { givenName: "Scim", familyName: "Person" },
-      emails: [{ value: scimEmail, primary: true, type: "work" }],
-      active: true,
-    });
-    const createdBody = await created.json();
-    expect(created.status, JSON.stringify(createdBody)).toBe(201);
-    const [person] = await database
-      .select()
-      .from(users)
-      .where(eq(users.email, scimEmail));
-    expect(person).toBeDefined();
-
-    const group = await scim("POST", "/Groups", {
-      schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
-      displayName: `engineering-${suite}`,
-      members: [{ value: createdBody.id }],
-    });
-    expect(group.status, await group.clone().text()).toBe(201);
-    const [grouped] = await database
-      .select()
-      .from(users)
-      .where(eq(users.email, scimEmail));
-    expect(grouped?.groups).toEqual([`engineering-${suite}`]);
-
-    const deactivated = await scim("PATCH", `/Users/${createdBody.id}`, {
-      schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-      Operations: [{ op: "replace", path: "active", value: false }],
-    });
-    expect(deactivated.status, await deactivated.clone().text()).toBe(200);
-    const [denied] = await database
-      .select()
-      .from(revokedAccess)
-      .where(eq(revokedAccess.email, scimEmail));
-    expect(denied?.revokedBy).toBe("scim:directory");
-
-    await scim("PATCH", `/Users/${createdBody.id}`, {
-      schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-      Operations: [{ op: "replace", path: "active", value: true }],
-    });
-    const after = await database
-      .select()
-      .from(revokedAccess)
-      .where(eq(revokedAccess.email, scimEmail));
-    expect(after).toEqual([]);
   });
 });

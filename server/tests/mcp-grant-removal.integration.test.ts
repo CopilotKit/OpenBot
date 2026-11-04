@@ -1,13 +1,23 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { agents, mcpServers, mcpTools, pluginGrants } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
-import { createPluginStore } from "../src/plugins/store";
+import { createPluginStore, type PluginStore } from "../src/plugins/store";
+import {
+  changeAccess,
+  removeBots,
+  seedBot,
+  storedAccess,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  purgeSecrets,
+  recordingCredentialStore,
+  removeServers,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
@@ -54,26 +64,11 @@ const auditStore = {
   },
 };
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore,
-  credentials: {
-    readSecret: async () => null,
-    create: async () => {
-      throw new Error("the removal path asked the vault to create a secret");
-    },
-    updateSecret: async () => {
-      throw new Error("the removal path asked the vault to write a secret");
-    },
-    revoke: async () => {
-      throw new Error("the removal path asked the vault to revoke a secret");
-    },
-  },
-  encryptionKey: "x".repeat(44),
-  policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
-  broker,
-});
+// The real vault, recording what the removal path asked of it: it must ask nothing, since an app
+// connected by consent holds no secret here to create, write or revoke.
+const vaultCalls: string[] = [];
+const vaultCreated: string[] = [];
+let store: PluginStore;
 
 function listing(name: string) {
   return {
@@ -96,23 +91,31 @@ function listing(name: string) {
 
 afterAll(async () => {
   useComposioClient(null);
-  await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
-  await database
-    .delete(mcpTools)
-    .where(inArray(mcpTools.serverId, [serverId, keptServerId]));
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [serverId, keptServerId]));
-  await database.delete(agents).where(eq(agents.id, botId));
+  await removeServers([serverId, keptServerId]);
+  await purgeSecrets(vaultCreated);
+  await removeBots([botId]);
+});
+
+// The Bot both tests grant to, made once so either test runs on its own.
+beforeAll(async () => {
+  await useTestVault();
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore,
+    credentials: await recordingCredentialStore({
+      calls: vaultCalls,
+      created: vaultCreated,
+    }),
+    encryptionKey: "x".repeat(44),
+    policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
+    broker,
+  });
+  await seedBot({ id: botId, name: botId, type: "built_in" });
 });
 
 test("removing an app takes its grants with it, and adding it back grants nothing", async () => {
   useComposioClient(listing(actionName));
-
-  await database
-    .insert(agents)
-    .values({ id: botId, name: botId, type: "built_in", configuration: {} })
-    .onConflictDoNothing();
 
   await store.addBrokeredApp({
     slug,
@@ -138,10 +141,9 @@ test("removing an app takes its grants with it, and adding it back grants nothin
   useComposioClient(listing(actionName));
   await store.removeServer(serverId, "admin@openbot.test");
 
-  const left = await database
-    .select({ ref: pluginGrants.ref })
-    .from(pluginGrants)
-    .where(and(eq(pluginGrants.ref, ref), eq(pluginGrants.agentId, botId)));
+  // The Bot's access as Intelligence holds it, past this process's copy.
+  const held = (await storedAccess(botId)).grants;
+  const left = held.filter((grant) => grant.ref === ref);
   expect(left).toEqual([]);
 
   const removal = events.find(
@@ -150,10 +152,7 @@ test("removing an app takes its grants with it, and adding it back grants nothin
   expect(removal?.payload.releasedGrants).toEqual([ref]);
   expect(removal?.payload.bots).toEqual([botId]);
 
-  const kept = await database
-    .select({ ref: pluginGrants.ref })
-    .from(pluginGrants)
-    .where(and(eq(pluginGrants.ref, keptRef), eq(pluginGrants.agentId, botId)));
+  const kept = held.filter((grant) => grant.ref === keptRef);
   expect(kept).toHaveLength(1);
 
   await store.addBrokeredApp({
@@ -167,6 +166,7 @@ test("removing an app takes its grants with it, and adding it back grants nothin
   expect(
     (await store.listForAgent(botId)).tools.map((tool) => tool.ref),
   ).not.toContain(ref);
+  expect(vaultCalls).toEqual([]);
 });
 
 test("a re-added app a Bot was never granted again refuses the call", async () => {
@@ -176,11 +176,6 @@ test("a re-added app a Bot was never granted again refuses the call", async () =
   const noAuthRef = `${noAuthServerId}/${noAuthAction}`;
 
   useComposioClient(listing(noAuthAction));
-
-  await database
-    .insert(agents)
-    .values({ id: botId, name: botId, type: "built_in", configuration: {} })
-    .onConflictDoNothing();
 
   try {
     await store.addBrokeredApp({
@@ -215,19 +210,12 @@ test("a re-added app a Bot was never granted again refuses the call", async () =
         actorId: "user_someone",
       }),
     ).rejects.toThrow(noAuthRef);
+    expect(vaultCalls).toEqual([]);
   } finally {
-    await database
-      .delete(pluginGrants)
-      .where(eq(pluginGrants.agentId, botId))
-      .catch(() => undefined);
-    await database
-      .delete(mcpTools)
-      .where(eq(mcpTools.serverId, noAuthServerId))
-      .catch(() => undefined);
-    await database
-      .delete(mcpServers)
-      .where(eq(mcpServers.id, noAuthServerId))
-      .catch(() => undefined);
+    await changeAccess([
+      { op: "revokeMatching", kind: "mcp", botIds: [botId] },
+    ]).catch(() => undefined);
+    await removeServers([noAuthServerId]);
   }
 });
 

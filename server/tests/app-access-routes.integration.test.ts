@@ -9,31 +9,18 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  appAccessRequests,
-  brokeredConnections,
-  credentials,
-  mcpServers,
-  mcpTools,
-  mcpUserCredentials,
-  pluginGrants,
-  sharedUseApprovals,
-  teamBotConsents,
-  teamBotPublications,
-  users,
-} from "../src/db/schema";
+import { appAccessRequests, mcpTools, users } from "../src/db/schema";
 import type { AppAccess } from "../src/plugins/app-access";
 import type { BrokerApp } from "../src/plugins/broker";
 import type { AppAccessRequestRecord } from "../src/plugins/plugin-store/app-access";
 import { MAX_PENDING_REQUESTS } from "../src/plugins/route-groups/app-access";
 import { createPluginRoutes } from "../src/plugins/routes";
+import { policy } from "../src/policy/cache";
 import { exposureOf } from "../src/plugins/shared-use";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import {
@@ -41,12 +28,53 @@ import {
   type PluginStore,
   type ServerRecord,
 } from "../src/plugins/store";
+import {
+  changeAccess,
+  changePreferences,
+  clearPreferences,
+  removeBots,
+  seedBot,
+  storedAccess,
+  useTestConfiguration,
+} from "./support/bots";
+
+/** Give a Bot one tool, as the old tests' bare `plugin_grants` row did: no granter, an administrator's. */
+async function grantTool(agentId: string, ref: string) {
+  await changeAccess([
+    {
+      op: "grant",
+      botId: agentId,
+      kind: "mcp",
+      ref,
+      grantedBy: null,
+      grantedAs: "admin",
+      ifGranted: "replace",
+    },
+  ]);
+}
+
+/** Every ref one Bot holds, as Intelligence holds them now. */
+async function heldRefs(agentId: string) {
+  return (await storedAccess(agentId)).grants.map((grant) => grant.ref);
+}
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { storedConnectionApprovals, useTestPolicy } from "./support/policy";
 import { stubBroker } from "./support/stub-broker";
+import {
+  purgeSecrets,
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedCredential,
+  seedGrant,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * What a work app is for one person on one Bot, the requests they file when only an administrator
- * can change it, and what approving one does — against the real tables, through the real routes.
+ * can change it, and what approving one does — against the real tables and the real apps and
+ * connections in Intelligence, through the real routes.
  *
  * The vendor is the one thing faked. `addBrokeredApp` refreshes an app's tools from Composio
  * itself, which no test can reach, so the store's enable is replaced with one that writes the row
@@ -174,7 +202,7 @@ function storeFor(db = database): PluginStore {
     },
     async addBrokeredApp(input) {
       enabled.push(input.slug);
-      await database.insert(mcpServers).values({
+      await seedServer({
         id: `composio-${input.slug}`,
         title: input.title,
         vendor: "Composio",
@@ -252,7 +280,7 @@ async function seedApp(input: {
   destructive?: string[];
   grant?: boolean;
 }) {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: input.key,
     title: input.title,
     vendor: "Composio",
@@ -274,14 +302,16 @@ async function seedApp(input: {
       destructive: input.destructive?.includes(tool) ?? false,
     });
   if (input.grant !== false)
-    await database.insert(pluginGrants).values({
-      kind: "mcp",
-      ref: `${input.key}/${(input.tools ?? ["READ"])[0]}`,
-      agentId: bot,
-    });
+    await grantTool(bot, `${input.key}/${(input.tools ?? ["READ"])[0]}`);
 }
 
-const ourServers = like(mcpServers.id, `%${suite}%`);
+/** Every app this file added: each one's id carries the suite. */
+async function removeOurServers() {
+  const { servers } = await (await useTestVault()).client.toolServers.all();
+  await removeServers(
+    servers.map((server) => server.id).filter((id) => id.includes(suite)),
+  );
+}
 
 /** An administrator's approval of the suite Bot's audience for a Shared app, as granting writes. */
 async function approveAudience(serverId: string) {
@@ -295,7 +325,7 @@ async function approveAudience(serverId: string) {
 }
 
 async function connectTeamAccount(name: string) {
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: slug(name),
     holder: "deployment",
@@ -305,35 +335,42 @@ async function connectTeamAccount(name: string) {
 }
 
 async function clearApps() {
-  await database
-    .delete(teamBotPublications)
-    .where(inArray(teamBotPublications.agentId, [bot, hidden]));
-  await database
-    .delete(teamBotConsents)
-    .where(inArray(teamBotConsents.userId, [person, other, admin]));
+  await changeAccess([
+    { op: "unpublish", botId: bot },
+    { op: "unpublish", botId: hidden },
+  ]);
+  await clearPreferences([person, other, admin]);
   await database
     .delete(appAccessRequests)
     .where(inArray(appAccessRequests.requestedBy, [person, other, admin]));
-  await database
-    .delete(pluginGrants)
-    .where(inArray(pluginGrants.agentId, [bot, hidden]));
-  await database
-    .delete(brokeredConnections)
-    .where(like(brokeredConnections.app, `%${suite}%`));
-  await database
-    .delete(sharedUseApprovals)
-    .where(eq(sharedUseApprovals.agentId, bot));
-  await database.delete(mcpServers).where(ourServers);
-  await database
-    .delete(mcpUserCredentials)
-    .where(eq(mcpUserCredentials.serverId, "google-drive"));
-  await database.delete(mcpServers).where(eq(mcpServers.id, "google-drive"));
-  await database
-    .delete(credentials)
-    .where(eq(credentials.provider, `google-drive-${suite}`));
+  await changeAccess(
+    (["mcp", "skill", "bot"] as const).map((kind) => ({
+      op: "revokeMatching" as const,
+      kind,
+      botIds: [bot, hidden],
+    })),
+  );
+  await removeConnectionsWhere(
+    (connection) =>
+      connection.kind === "brokered" && connection.app.includes(suite),
+  );
+  for (const approval of await storedConnectionApprovals({ agentId: bot }))
+    await policy().deleteConnectionApproval(approval);
+  await removeOurServers();
+  // The catalogue app is named by the catalogue, not by this suite; removing it takes its people's
+  // grants with it in Intelligence.
+  await removeServers(["google-drive"]);
+  const { secrets } = await (await useTestVault()).client.secrets.all({
+    provider: `google-drive-${suite}`,
+    includeRevoked: true,
+  });
+  await purgeSecrets(secrets.map((secret) => secret.id));
 }
 
 beforeAll(async () => {
+  await useTestVault();
+  await useTestConfiguration();
+  await useTestPolicy();
   for (const user of [person, other, admin, maker])
     await database.insert(users).values({
       id: user,
@@ -342,14 +379,10 @@ beforeAll(async () => {
       emailVerified: true,
     });
   for (const agent of [bot, hidden]) {
-    await database.insert(agents).values({
+    await seedBot({
       id: agent,
       name: `Bot ${agent}`,
       type: "built_in",
-      configuration: {},
-    });
-    await database.insert(agentProfiles).values({
-      agentId: agent,
       ownerUserId: maker,
       // Public, so the people asking below are in the audience a Shared app's approval covers.
       visibility: agent === bot ? "public" : "private",
@@ -369,7 +402,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await clearApps();
-  await database.delete(agents).where(inArray(agents.id, [bot, hidden]));
+  await removeBots([bot, hidden]);
   await database
     .delete(users)
     .where(inArray(users.id, [person, other, admin, maker]));
@@ -388,11 +421,9 @@ describe("what each app a Bot holds is, for the person asking", () => {
     });
     await seedApp({ key: CALENDAR, title: "Google Calendar", grant: false });
     // A grant whose app is gone: still something this Bot was given.
-    await database
-      .insert(pluginGrants)
-      .values({ kind: "mcp", ref: `${GONE}/SEND`, agentId: bot });
+    await grantTool(bot, `${GONE}/SEND`);
     // Linear connected, and its key refused by the vendor at the last check.
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app: slug("linear"),
       holder: "person",
@@ -447,7 +478,7 @@ describe("what each app a Bot holds is, for the person asking", () => {
 
   test("a usable connection is ready, and somebody else's is not mine", async () => {
     await seedApp({ key: GMAIL, title: "Gmail" });
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app: slug("gmail"),
       holder: "person",
@@ -473,7 +504,7 @@ describe("what each app a Bot holds is, for the person asking", () => {
   test("a Shared app with its team account connected and its audience approved is ready", async () => {
     await seedApp({ key: SLACK, title: "Slack", accountMode: "shared" });
     await approveAudience(SLACK);
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app: slug("slack"),
       holder: "deployment",
@@ -507,40 +538,29 @@ describe("what each app a Bot holds is, for the person asking", () => {
   });
 
   test("a per-person catalogue app reads its credential, withdrawn or not", async () => {
-    const [client] = await database
-      .insert(credentials)
-      .values({
-        kind: "mcp_oauth_client",
-        provider: `google-drive-${suite}`,
-        keyId: "oauth-client",
-        metadata: {},
-        encryptedValue: "sealed",
-      })
-      .returning({ id: credentials.id });
-    await database.insert(mcpServers).values({
+    const client = await seedCredential({
+      kind: "mcp_oauth_client",
+      provider: `google-drive-${suite}`,
+      keyId: "oauth-client",
+      plaintext: "sealed",
+    });
+    await seedServer({
       id: "google-drive",
       title: "Google Drive",
       vendor: "Google",
       url: "https://www.googleapis.com/drive/v3",
       provenance: "first-party",
-      credentialId: client?.id ?? null,
+      credentialId: client.id,
     });
-    await database
-      .insert(pluginGrants)
-      .values({ kind: "mcp", ref: "google-drive/search", agentId: bot });
-    const [credential] = await database
-      .insert(credentials)
-      .values({
-        kind: "mcp_user_token",
-        provider: `google-drive-${suite}`,
-        keyId: person,
-        metadata: {},
-        encryptedValue: "sealed",
-        revokedAt: new Date(),
-      })
-      .returning({ id: credentials.id });
-    if (!credential) throw new Error("credential not stored");
-    await database.insert(mcpUserCredentials).values({
+    await grantTool(bot, "google-drive/search");
+    const credential = await seedCredential({
+      kind: "mcp_user_token",
+      provider: `google-drive-${suite}`,
+      keyId: person,
+      plaintext: "sealed",
+      revoked: true,
+    });
+    await seedGrant({
       serverId: "google-drive",
       userId: person,
       credentialId: credential.id,
@@ -837,16 +857,9 @@ describe("answering a request", () => {
       enabled: false,
       granted: [`${SLACK}/LIST`],
     });
-    const grants = await database
-      .select({ ref: pluginGrants.ref })
-      .from(pluginGrants)
-      .where(eq(pluginGrants.agentId, bot));
-    expect(grants.map((grant) => grant.ref).sort()).toEqual([`${SLACK}/LIST`]);
-    const [approval] = await database
-      .select()
-      .from(sharedUseApprovals)
-      .where(eq(sharedUseApprovals.agentId, bot));
-    expect(approval?.serverId).toBe(SLACK);
+    expect((await heldRefs(bot)).sort()).toEqual([`${SLACK}/LIST`]);
+    const [approval] = await storedConnectionApprovals({ agentId: bot });
+    expect(approval?.connectionId).toBe(SLACK);
     expect(eventsOf("app_access.approved")[0]?.payload).toMatchObject({
       request: request.id,
       kind: "grant",
@@ -966,7 +979,7 @@ describe("answering a request", () => {
       { method: "POST" },
     );
     expect(early.status).toBe(409);
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app: slug("slack"),
       holder: "deployment",
@@ -1146,7 +1159,7 @@ describe("on an Arcade deployment", () => {
   }
 
   async function seedArcadeApp() {
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: ARC_MAIL,
       title: "Arc Mail",
       vendor: "Arcade",
@@ -1161,9 +1174,7 @@ describe("on an Arcade deployment", () => {
       description: "READ",
       inputSchema: {},
     });
-    await database
-      .insert(pluginGrants)
-      .values({ kind: "mcp", ref: `${ARC_MAIL}/READ`, agentId: bot });
+    await grantTool(bot, `${ARC_MAIL}/READ`);
   }
 
   const forBot = (composioConfigured = true) =>
@@ -1186,26 +1197,24 @@ describe("on an Arcade deployment", () => {
       },
     ]);
     // Somebody else's connection, and a Composio one at the same app name, are not this person's.
-    await database.insert(brokeredConnections).values([
-      {
-        provider: "arcade",
-        app: toolkit,
-        holder: "person",
-        userId: other,
-        vendorUserId: `vendor-${other}`,
-        verified: true,
-      },
-      {
-        provider: "composio",
-        app: toolkit,
-        holder: "person",
-        userId: person,
-        vendorUserId: `vendor-${person}`,
-        verified: true,
-      },
-    ]);
+    await seedBrokered({
+      provider: "arcade",
+      app: toolkit,
+      holder: "person",
+      userId: other,
+      vendorUserId: `vendor-${other}`,
+      verified: true,
+    });
+    await seedBrokered({
+      provider: "composio",
+      app: toolkit,
+      holder: "person",
+      userId: person,
+      vendorUserId: `vendor-${person}`,
+      verified: true,
+    });
     expect((await forBot())[0]?.state).toBe("not_connected");
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "arcade",
       app: toolkit,
       holder: "person",
@@ -1316,11 +1325,7 @@ describe("what approving grants, and when it can be answered", () => {
     expect((await json<{ granted: string[] }>(response)).granted).toEqual([
       `${GMAIL}/READ_MAIL`,
     ]);
-    const grants = await database
-      .select({ ref: pluginGrants.ref })
-      .from(pluginGrants)
-      .where(eq(pluginGrants.agentId, bot));
-    expect(grants.map((grant) => grant.ref)).toEqual([`${GMAIL}/READ_MAIL`]);
+    expect(await heldRefs(bot)).toEqual([`${GMAIL}/READ_MAIL`]);
   });
 
   test("an app with no read-only action is refused with where to choose, and stays pending", async () => {
@@ -1341,12 +1346,7 @@ describe("what approving grants, and when it can be answered", () => {
       "read-only",
     );
     expect(await statusOf(request.id)).toBe("pending");
-    expect(
-      await database
-        .select()
-        .from(pluginGrants)
-        .where(eq(pluginGrants.agentId, bot)),
-    ).toEqual([]);
+    expect((await storedAccess(bot)).grants).toEqual([]);
     // Naming the actions is how an administrator grants more than the reads.
     const chosen = await appAs(admin, "admin").request(
       `/api/plugins/access-requests/${request.id}/approve`,
@@ -1488,9 +1488,7 @@ describe("what a request may carry", () => {
   });
 
   test("a grant that outlived its app can still be asked about", async () => {
-    await database
-      .insert(pluginGrants)
-      .values({ kind: "mcp", ref: `${GONE}/SEND`, agentId: bot });
+    await grantTool(bot, `${GONE}/SEND`);
     const response = await appAs(person, "user", { composio: false }).request(
       "/api/plugins/access-requests",
       post({ agentId: bot, app: GONE }),
@@ -1597,16 +1595,22 @@ describe("why an app is off, and a Shared app's audience", () => {
 
 describe("a teammate on somebody else's Team Bot", () => {
   beforeEach(async () => {
-    await database
-      .insert(teamBotPublications)
-      .values({ agentId: bot, publishedBy: maker, audience: "team" });
+    await changeAccess([
+      {
+        op: "publish",
+        botId: bot,
+        audience: "team",
+        members: [],
+        publishedBy: maker,
+      },
+    ]);
     await seedApp({ key: GMAIL, title: "Gmail" });
   });
   const connect = (
     userId: string,
     over: { verified?: boolean; probeAction?: string } = {},
   ) =>
-    database.insert(brokeredConnections).values({
+    seedBrokered({
       provider: "composio",
       app: slug("gmail"),
       holder: "person",
@@ -1652,12 +1656,9 @@ describe("a teammate on somebody else's Team Bot", () => {
       accountHolder: "you",
       asksFirst: true,
     });
-    await database.insert(teamBotConsents).values({
-      userId: other,
-      agentId: bot,
-      serverId: GMAIL,
-      decision: "always",
-    });
+    await changePreferences(other, [
+      { op: "setConsent", botId: bot, serverId: GMAIL, decision: "always" },
+    ]);
     expect((await asTeammate()).asksFirst).toBe(false);
   });
 

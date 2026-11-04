@@ -56,20 +56,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import Arcade from "@arcadeai/arcadejs";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { createAuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import {
-  agents,
-  auditEvents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-  pendingAuthorizations,
-  pluginGrants,
-} from "../src/db/schema";
+import { mcpTools, pendingAuthorizations } from "../src/db/schema";
 import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import { useArcadeClient } from "../src/plugins/arcade";
 import { createArcadeClient } from "../src/plugins/arcade-adapter";
@@ -77,18 +69,37 @@ import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
+import { auditRows } from "./support/audit";
+import {
+  grantBot,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 import { testEnvironment } from "./support/environment";
 import { removePeople, seedPeople } from "./support/people";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  storedConnections,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 
 const suite = randomUUID().slice(0, 8);
 /**
  * Two toolkits whose CAPITALS CARRY MEANING. `GoogleCalendar-…` is the name a lowercasing step
  * anywhere between the picker and the transport would destroy, and the suite suffix is what makes
- * `audit_events` — which is append-only and cannot be cleaned between tests — answer about this run
- * and no other.
+ * the audit trail (Intelligence's, shared by every run, append-only and never cleaned between
+ * tests) answer about this run and no other.
  */
 const MAIL = `Gmail-${suite}`;
 const DIARY = `GoogleCalendar-${suite}`;
@@ -519,12 +530,9 @@ const send = (method: string, path: string, body: unknown) =>
 
 /* -------------------------------------------------------------------------------- what persisted */
 
+/** The app as Intelligence holds it now, or null. */
 async function serverRow(id: string) {
-  const [row] = await database
-    .select()
-    .from(mcpServers)
-    .where(eq(mcpServers.id, id));
-  return row ?? null;
+  return await storedServer(id);
 }
 
 async function toolRows(serverId: string) {
@@ -543,37 +551,29 @@ async function toolRows(serverId: string) {
   ).sort((left, right) => (left.name < right.name ? -1 : 1));
 }
 
+/** The brokered accounts Intelligence holds now for this app. */
 async function connectionsOf(app: string) {
-  return await database
-    .select()
-    .from(brokeredConnections)
-    .where(eq(brokeredConnections.app, app));
+  return (await storedConnections()).brokered.filter((row) => row.app === app);
 }
 
 /**
  * The trail for one app and one event type, OLDEST FIRST — and the order is asked for rather than
  * inherited.
  *
- * `.at(-1)` below means "the disconnect this test just caused", which a `SELECT` with no `ORDER BY`
- * does not answer: PostgreSQL may return the rows of an unordered read in any order it likes, and
- * what it actually returns is roughly heap order. Insertion order and time order agree on a table
- * only ever appended to by one test, which is why this read passed locally and failed on CI — there
- * the last row back was the PERSONAL disconnect from the describe above, so a Shared app's audit
- * entry was read as a person ending their own account, and the assertion reported a defect in the
- * product that the product had not committed.
+ * `.at(-1)` below means "the disconnect this test just caused", which a read in no stated order
+ * does not answer: when this was a `SELECT` with no `ORDER BY`, PostgreSQL returned roughly heap
+ * order, which agreed with time order only on a table appended to by one test. That is why the read
+ * once passed locally and failed on CI: there the last row back was the PERSONAL disconnect from the
+ * describe above, so a Shared app's audit entry was read as a person ending their own account, and
+ * the assertion reported a defect in the product that the product had not committed.
  *
- * `createdAt` is the only key that can carry this: `id` is a random UUID, so it sorts arbitrarily.
- * The disconnects it separates arrive on their own requests and so in their own transactions, which
- * is what makes their `now()` values distinct.
+ * The moment each row was written is the only key that can carry this: `id` is a random UUID, so it
+ * sorts arbitrarily. The trail answers newest first by that moment, so this reverses it. The
+ * disconnects it separates arrive on their own requests and so in their own transactions, which is
+ * what makes their moments distinct.
  */
 async function eventsOn(app: string, eventType: string) {
-  return await database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(eq(auditEvents.targetId, app), eq(auditEvents.eventType, eventType)),
-    )
-    .orderBy(auditEvents.createdAt);
+  return (await auditRows({ targetId: app, eventType })).reverse();
 }
 
 async function attemptRow() {
@@ -607,19 +607,17 @@ async function consent(serverRowId: string, actionName: string) {
 }
 
 beforeAll(async () => {
+  await useTestPolicy();
   // The administrator walking this journey is a real `users` row, because the attempt rows minted
   // along the way key to one on `actor_id` (with `user_id` held equal to it) and cascade from it.
   await seedPeople(database, [ADMIN]);
+  // Apps and brokered accounts live in Intelligence: the store reads them through this directory.
+  await useTestVault();
   installVendor();
   const client = createArcadeClient("never-dialled");
   broker = client.broker;
   useArcadeClient(client.actions);
-  await database.insert(agents).values({
-    id: BOT,
-    name: "Helper",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: BOT, name: "Helper", type: "built_in" });
 });
 
 afterAll(async () => {
@@ -628,13 +626,11 @@ afterAll(async () => {
   await database
     .delete(pendingAuthorizations)
     .where(eq(pendingAuthorizations.actorId, ADMIN));
-  await database
-    .delete(brokeredConnections)
-    .where(inArray(brokeredConnections.app, [MAIL, DIARY]));
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [MAIL_ROW, DIARY_ROW]));
-  await database.delete(agents).where(eq(agents.id, BOT));
+  await removeConnectionsWhere(
+    (row) => row.kind === "brokered" && [MAIL, DIARY].includes(row.app),
+  );
+  await removeServers([MAIL_ROW, DIARY_ROW]);
+  await removeBots([BOT]);
   await removePeople(database, [ADMIN]);
   await database.$client.close();
 });
@@ -910,12 +906,7 @@ describe("an Arcade deployment, from the picker to the disconnect", () => {
   });
 
   test("a call goes out as the identity this deployment resolved", async () => {
-    await database.insert(pluginGrants).values({
-      kind: "mcp",
-      ref: `${MAIL_ROW}/${SEND}`,
-      agentId: BOT,
-      grantedBy: ADMIN,
-    });
+    await grantBot(BOT, "mcp", `${MAIL_ROW}/${SEND}`, { grantedBy: ADMIN });
 
     const response = await send("POST", "/call", {
       ref: `${MAIL_ROW}/${SEND}`,

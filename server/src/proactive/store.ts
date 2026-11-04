@@ -1,17 +1,44 @@
+/**
+ * Check-ins' settings, items, run ledger and pings, as Intelligence's agent schedules hold them.
+ *
+ * WHERE EACH THING LIVES. A setting is a `check-in-settings` record, held in memory on every instance
+ * by the schedule directory (`schedules/directory.ts`) and read from there; a write goes through the
+ * directory, so this instance reads its own write at once and every other one hears of it. The run
+ * ledger (`check-in-runs`), the items (`check-in-suggestions`) and the pings (`check-in-pings`) are
+ * history, read from Intelligence when something asks. The person's switch for all their Bots is on
+ * their row here (`users`); whether they paused a Bot is their preferences in Intelligence, held in
+ * memory (`agents/lifecycle.ts`); their tasks are Intelligence's conversations; the work queue is here.
+ *
+ * NO TRANSACTION HELD ACROSS INTELLIGENCE. What used to be a row lock or an advisory lock is now a
+ * named lease (`work/local-lock.ts`) for a read-decide-write across several records, a version match
+ * (If-Match) for a change to one record, and Intelligence's unique rules for the races they guarded
+ * before: one setting per person and Bot, one running check-in per setting, one open item per title.
+ */
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { configuredPauses, lifecyclePairs } from "../agents/lifecycle";
+import { createAuditReader } from "../audit";
+import { conversations } from "../conversations/directory";
 import type { Database } from "../db/client";
-import { auditEvents, users } from "../db/schema/core";
-import { botLifecycle } from "../db/schema/lifecycle";
-import {
-  proactivePings,
-  proactiveRuns,
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../db/schema/proactive";
-import { botTasks } from "../db/schema/tasks";
+import { users } from "../db/schema/core";
 import { workItems } from "../db/schema/work";
-import { lockDefaults, recordOptOut } from "../memory/defaults";
+import { recordOptOut, withResearchDefaultsLock } from "../memory/defaults";
+import {
+  ScheduleAlreadyExistsError,
+  ScheduleConflictError,
+  ScheduleDeletedError,
+  ScheduleNotFoundError,
+  type SchedulePage,
+  ScheduleVersionConflictError,
+} from "../schedules/client";
+import { schedules } from "../schedules/directory";
+import type {
+  CheckInRunRecord,
+  CheckInSettingRecord,
+  CheckInSuggestionRecord,
+  ScheduleChanges,
+} from "../schedules/types";
+import { withLocalLock } from "../work/local-lock";
 import type {
   ProactiveRunOutcome,
   ProactiveRunTrigger,
@@ -72,7 +99,7 @@ export type PriorItems = {
 
 /**
  * How many of the person's open items, tasks and hidden items the repeat check reads, across all
- * their Bots. Far more than anybody keeps open; the index on open titles backs it per Bot.
+ * their Bots. Far more than anybody keeps open.
  */
 const PRIOR_LIMIT = 200;
 
@@ -107,18 +134,14 @@ export function unreachedApps(error: string | null): string[] | null {
   }
 }
 
-/** A setting's run as the ledger keeps it. */
 /**
  * How long the run ledger and old pings are kept: the admin's longest window of numbers, and as long
  * as Hide holds. Nothing reads further back: the daily cap reads a day and the window reads the last
  * check-in, which after a month away is the last day anyway.
  */
 export const PROACTIVE_LEDGER_DAYS = 30;
-/** How many rows one prune statement removes, so a deployment that never pruned stays writable. */
-const PRUNE_BATCH = 5_000;
-/** How many batches one prune runs before leaving the rest for the next. */
-const PRUNE_BATCHES = 20;
 
+/** A setting's run as the ledger keeps it. */
 export type ProactiveRunRow = {
   id: string;
   settingId: string;
@@ -133,29 +156,311 @@ export type ProactiveRunRow = {
   finishedAt: Date | null;
 };
 
-/** Whether `error` is a Postgres unique_violation on `constraint`. Bun's driver; drizzle wraps it as `cause`. */
-function violates(error: unknown, constraint: string): boolean {
-  type Driver = { errno?: unknown; constraint?: unknown };
-  return [
-    error as Driver | null | undefined,
-    (error as { cause?: Driver } | null | undefined)?.cause,
-  ].some(
-    (candidate) =>
-      candidate?.errno === "23505" && candidate.constraint === constraint,
-  );
+/**
+ * How many times a change to one record is tried when another writer changed it first. Each try reads
+ * the record again, so this is only ever reached by a record changing faster than it can be read.
+ */
+const VERSION_TRIES = 5;
+
+/** The name of the lease that serializes what changes which items a person has open. */
+const itemsLock = (owner: string) => `proactive-items:${owner}`;
+
+/** A setting as the rest of OpenBot reads it: Intelligence's version and deletion are its own. */
+export function settingOf(record: CheckInSettingRecord): ProactiveSetting {
+  return {
+    id: record.id,
+    ownerUserId: record.ownerUserId,
+    agentId: record.agentId,
+    channelId: record.channelId,
+    threadId: record.threadId,
+    focus: record.focus,
+    subject: record.subject,
+    sourceLink: record.sourceLink,
+    enabled: record.enabled,
+    intervalMinutes: record.intervalMinutes,
+    nextRunAt: record.nextRunAt,
+    lastRunAt: record.lastRunAt,
+    lastStatus: record.lastStatus,
+    lastError: record.lastError,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+/** An item as the rest of OpenBot reads it. */
+export function suggestionOf(
+  record: CheckInSuggestionRecord,
+): ProactiveSuggestion {
+  return {
+    id: record.id,
+    ownerUserId: record.ownerUserId,
+    agentId: record.agentId,
+    settingId: record.settingId,
+    runId: record.runId,
+    title: record.title,
+    detail: record.detail,
+    sourceApp: record.sourceApp,
+    sourceRef: record.sourceRef,
+    sourceLink: record.sourceLink,
+    status: record.status,
+    dedupeKey: record.dedupeKey,
+    pingId: record.pingId,
+    deliveredAt: record.deliveredAt,
+    resolvedAt: record.resolvedAt,
+    createdAt: record.createdAt,
+  };
+}
+
+function runOf(record: CheckInRunRecord): ProactiveRunRow {
+  return {
+    id: record.id,
+    settingId: record.settingId,
+    outcome: record.outcome,
+    skipReason: record.skipReason,
+    trigger: record.trigger,
+    threadId: record.threadId,
+    itemsRaised: record.itemsRaised,
+    reads: record.reads,
+    error: record.error,
+    startedAt: record.startedAt,
+    finishedAt: record.finishedAt,
+  };
+}
+
+/** The live setting, from this instance's memory, reading through on a miss. */
+async function liveSetting(id: string): Promise<CheckInSettingRecord | null> {
+  const record = await schedules().find("check-in-settings", id);
+  return record && record.deletedAt === null ? record : null;
+}
+
+type History = {
+  "check-in-runs": CheckInRunRecord;
+  "check-in-suggestions": CheckInSuggestionRecord;
+};
+
+/**
+ * Change one setting, reading it again and redoing the change whenever another writer changed it
+ * first (the sweep moving its clock, a check-in recording how it went, the person on another tab).
+ * `change` answers the fields to write from the setting as it stands, or null to write nothing. Null
+ * when the setting is gone.
+ */
+async function changeSetting(
+  id: string,
+  change: (
+    current: CheckInSettingRecord,
+  ) => ScheduleChanges<"check-in-settings"> | null,
+): Promise<CheckInSettingRecord | null> {
+  for (let attempt = 0; attempt < VERSION_TRIES; attempt += 1) {
+    const current =
+      attempt === 0
+        ? await liveSetting(id)
+        : await schedules().refresh("check-in-settings", id);
+    if (!current || current.deletedAt !== null) return null;
+    const changes = change(current);
+    if (!changes) return current;
+    try {
+      return await schedules().update(
+        "check-in-settings",
+        id,
+        current.version,
+        changes,
+      );
+    } catch (error) {
+      if (error instanceof ScheduleVersionConflictError) continue;
+      if (
+        error instanceof ScheduleNotFoundError ||
+        error instanceof ScheduleDeletedError
+      )
+        return null;
+      throw error;
+    }
+  }
+  throw new ScheduleVersionConflictError("check-in-settings", id);
 }
 
 /**
- * A setting the sweep may claim: on, and its person has not turned check-ins off for all their Bots
- * or paused this Bot. The run checks both again before the model (a switch flipped after the claim,
- * or a Run now), where it records why it stopped; here they keep a turned-off person's settings from
- * being claimed, and so from costing even a ledger row, every hour.
+ * Change one record of the history the same way: read it from Intelligence, decide, write under its
+ * version, and again when it moved in between. Null when it is gone or `change` declines.
  */
-const claimable = and(
-  eq(proactiveSettings.enabled, true),
-  sql`not exists (select 1 from ${users} where ${users.id} = ${proactiveSettings.ownerUserId} and ${users.preferences}->>'proactive' = 'off')`,
-  sql`not exists (select 1 from ${botLifecycle} where ${botLifecycle.ownerUserId} = ${proactiveSettings.ownerUserId} and ${botLifecycle.agentId} = ${proactiveSettings.agentId} and ${botLifecycle.pausedAt} is not null)`,
-);
+async function changeRecord<C extends keyof History>(
+  collection: C,
+  id: string,
+  change: (current: History[C]) => ScheduleChanges<C> | null,
+): Promise<History[C] | null> {
+  const { client } = schedules();
+  for (let attempt = 0; attempt < VERSION_TRIES; attempt += 1) {
+    const current = (await client.get(collection, id)) as History[C] | null;
+    if (!current) return null;
+    const changes = change(current);
+    if (!changes) return null;
+    try {
+      return (await client.update(
+        collection,
+        id,
+        current.version,
+        changes,
+      )) as History[C];
+    } catch (error) {
+      if (error instanceof ScheduleVersionConflictError) continue;
+      if (error instanceof ScheduleNotFoundError) return null;
+      throw error;
+    }
+  }
+  throw new ScheduleVersionConflictError(collection, id);
+}
+
+/** The newest first of a list, by when each was resolved. */
+const byResolvedDesc = (items: CheckInSuggestionRecord[]) =>
+  [...items].sort(
+    (left, right) =>
+      (right.resolvedAt?.getTime() ?? 0) - (left.resolvedAt?.getTime() ?? 0),
+  );
+
+/**
+ * Open a new item. Its normalized title goes in `dedupeKey`, so when two check-ins race to open the
+ * same thing for one person and Bot, Intelligence's unique rule on open titles lets one in and the
+ * other is refused here as the repeat it is.
+ */
+async function insertSuggestion(
+  input: NewSuggestion,
+): Promise<ProactiveSuggestion> {
+  try {
+    return suggestionOf(
+      await schedules().client.create("check-in-suggestions", {
+        id: randomUUID(),
+        ...input,
+        status: "open",
+        dedupeKey: titleKey(input.title),
+        pingId: null,
+        deliveredAt: null,
+        resolvedAt: null,
+      }),
+    );
+  } catch (error) {
+    if (error instanceof ScheduleConflictError)
+      throw new ProactiveRefusedError(
+        "This is already raised and still open. Do not raise it again.",
+      );
+    throw error;
+  }
+}
+
+/** The person's open items from every one of their Bots, newest first. */
+async function openItemsOf(owner: string): Promise<PriorItems["open"]> {
+  const { items } = await schedules().client.page(
+    "check-in-suggestions",
+    { ownerUserId: owner, status: "open" },
+    null,
+    PRIOR_LIMIT,
+  );
+  return items.map(({ id, agentId, title, sourceLink }) => ({
+    id,
+    agentId,
+    title,
+    sourceLink,
+  }));
+}
+
+/**
+ * The person's unfinished tasks, newest first. Tasks live in Intelligence's conversations.
+ */
+async function openTasksOf(owner: string): Promise<PriorItems["tasks"]> {
+  const tasks = await conversations().client.tasks.upTo(
+    { userId: owner, open: true },
+    PRIOR_LIMIT,
+  );
+  return tasks.map((task) => ({
+    agentId: task.agentId,
+    title: task.title,
+    sourceLink: task.sourceLink,
+  }));
+}
+
+/**
+ * What this person had (see {@link PriorItems}). Read fresh from Intelligence for each item a
+ * check-in raises, under the person's lease when it is about to write, so an item any of their Bots
+ * opened a moment ago counts too.
+ */
+async function priorItemsOf(
+  owner: string,
+  agentId: string,
+): Promise<PriorItems> {
+  const since = new Date(Date.now() - HIDDEN_DAYS * 86_400_000);
+  const { client } = schedules();
+  const [open, hidden, started, tasks] = await Promise.all([
+    openItemsOf(owner),
+    client.all("check-in-suggestions", {
+      ownerUserId: owner,
+      status: "dismissed",
+      resolvedAfter: since,
+    }),
+    client.all("check-in-suggestions", {
+      ownerUserId: owner,
+      agentId,
+      status: "started",
+      resolvedAfter: since,
+    }),
+    openTasksOf(owner),
+  ]);
+  return {
+    open,
+    tasks,
+    hidden: byResolvedDesc(hidden.items)
+      .slice(0, PRIOR_LIMIT)
+      .map(({ agentId, title, sourceLink, sourceApp }) => ({
+        agentId,
+        title,
+        sourceLink,
+        sourceApp,
+      })),
+    started: byResolvedDesc(started.items)
+      .slice(0, 20)
+      .map(({ title }) => ({ title })),
+  };
+}
+
+/**
+ * The settings, of those asked about, whose person turned check-ins off for all their Bots or paused
+ * this one: the switch on their row here, and the pauses this instance holds of their preferences in
+ * Intelligence, joined in code.
+ */
+async function switchedOff(
+  database: Database,
+  settings: readonly Pick<
+    CheckInSettingRecord,
+    "id" | "ownerUserId" | "agentId"
+  >[],
+): Promise<Set<string>> {
+  if (settings.length === 0) return new Set();
+  const owners = [...new Set(settings.map((setting) => setting.ownerUserId))];
+  const off = new Set(
+    (
+      await database
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(
+            inArray(users.id, owners),
+            sql`${users.preferences}->>'proactive' = 'off'`,
+          ),
+        )
+    ).map((row) => row.id),
+  );
+  const paused = new Set(
+    lifecyclePairs((entry) => entry.pausedAt !== null).map(
+      (pair) => `${pair.ownerUserId}\u001f${pair.agentId}`,
+    ),
+  );
+  return new Set(
+    settings
+      .filter(
+        (setting) =>
+          off.has(setting.ownerUserId) ||
+          paused.has(`${setting.ownerUserId}\u001f${setting.agentId}`),
+      )
+      .map((setting) => setting.id),
+  );
+}
 
 /** A new item as a check-in raises it. Its id, status and normalized title are the store's. */
 export type NewSuggestion = Omit<
@@ -169,188 +474,72 @@ export type NewSuggestion = Omit<
   | "createdAt"
 >;
 
-/** The database, or a transaction on it. */
-type Executor = Pick<Database, "select" | "insert" | "update" | "execute">;
-
-/**
- * Serialize what changes which items a person has open, across every replica: raising one, and
- * putting one back after a Start that failed. Transaction-scoped, so it is let go at commit.
- */
-async function lockItems(executor: Executor, owner: string) {
-  await executor.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`proactive-items\u001f${owner}`}, 0))`,
-  );
-}
-
-/**
- * Open a new item. Its normalized title goes in `dedupe_key`, so when two check-ins race to open
- * the same thing for one person and Bot, the partial unique index lets one in and the other is
- * refused here as the repeat it is.
- */
-async function insertSuggestion(
-  executor: Executor,
-  input: NewSuggestion,
-): Promise<ProactiveSuggestion> {
-  try {
-    const [row] = await executor
-      .insert(proactiveSuggestions)
-      .values({
-        id: randomUUID(),
-        ...input,
-        dedupeKey: titleKey(input.title),
-      })
-      .returning();
-    if (!row) throw new Error("Suggestion insert returned no row.");
-    return row;
-  } catch (error) {
-    if (violates(error, "proactive_suggestions_open_dedupe_idx"))
-      throw new ProactiveRefusedError(
-        "This is already raised and still open. Do not raise it again.",
-      );
-    throw error;
-  }
-}
-
-/**
- * What this person had (see {@link PriorItems}). Read fresh for each item a check-in raises, under
- * the person's lock when it is about to write, so an item any of their Bots opened a moment ago
- * counts too.
- */
-async function priorItemsOf(
-  executor: Executor,
-  owner: string,
-  agentId: string,
-): Promise<PriorItems> {
-  const since = new Date(Date.now() - HIDDEN_DAYS * 86_400_000);
-  const theirs = eq(proactiveSuggestions.ownerUserId, owner);
-  const columns = {
-    id: proactiveSuggestions.id,
-    agentId: proactiveSuggestions.agentId,
-    title: proactiveSuggestions.title,
-    sourceLink: proactiveSuggestions.sourceLink,
-    sourceApp: proactiveSuggestions.sourceApp,
-  };
-  /*
-   * One after another: inside a transaction they share its one connection, and a driver is free to
-   * refuse a second statement on it while the first is in flight.
-   */
-  const open = await executor
-    .select(columns)
-    .from(proactiveSuggestions)
-    .where(and(theirs, eq(proactiveSuggestions.status, "open")))
-    .orderBy(desc(proactiveSuggestions.createdAt))
-    .limit(PRIOR_LIMIT);
-  const hidden = await executor
-    .select(columns)
-    .from(proactiveSuggestions)
-    .where(
-      and(
-        theirs,
-        eq(proactiveSuggestions.status, "dismissed"),
-        gte(proactiveSuggestions.resolvedAt, since),
-      ),
-    )
-    .orderBy(desc(proactiveSuggestions.resolvedAt))
-    .limit(PRIOR_LIMIT);
-  const started = await executor
-    .select(columns)
-    .from(proactiveSuggestions)
-    .where(
-      and(
-        theirs,
-        eq(proactiveSuggestions.agentId, agentId),
-        eq(proactiveSuggestions.status, "started"),
-        gte(proactiveSuggestions.resolvedAt, since),
-      ),
-    )
-    .orderBy(desc(proactiveSuggestions.resolvedAt))
-    .limit(20);
-  const tasks = await executor
-    .select({
-      agentId: botTasks.agentId,
-      title: botTasks.title,
-      sourceLink: botTasks.sourceLink,
-    })
-    .from(botTasks)
-    .where(and(eq(botTasks.ownerUserId, owner), isNull(botTasks.resolvedAt)))
-    .orderBy(desc(botTasks.createdAt))
-    .limit(PRIOR_LIMIT);
-  return {
-    open: open.map(({ id, agentId, title, sourceLink }) => ({
-      id,
-      agentId,
-      title,
-      sourceLink,
-    })),
-    tasks,
-    hidden: hidden.map(({ agentId, title, sourceLink, sourceApp }) => ({
-      agentId,
-      title,
-      sourceLink,
-      sourceApp,
-    })),
-    started: started.map(({ title }) => ({ title })),
-  };
-}
-
 export function createProactiveStore(database: Database) {
-  const owned = (owner: string, id: string) =>
-    and(eq(proactiveSettings.ownerUserId, owner), eq(proactiveSettings.id, id));
-  async function get(owner: string, id: string): Promise<ProactiveSetting> {
-    const [row] = await database
-      .select()
-      .from(proactiveSettings)
-      .where(owned(owner, id))
-      .limit(1);
-    if (!row) throw new ProactiveNotFoundError();
-    return row;
+  const trail = createAuditReader(database);
+  /**
+   * One run's audit rows of one type from the last day, up to 200, read from the trail in
+   * Intelligence: the run is the initiator its calls were recorded under.
+   */
+  async function runEvents(runId: string, eventType: string) {
+    const rows: Awaited<ReturnType<typeof trail.list>>["events"] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await trail.list({
+        limit: 100,
+        eventType,
+        initiatorId: `${PROACTIVE_INITIATOR_PREFIX}${runId}`,
+        from: new Date(Date.now() - 86_400_000).toISOString(),
+        ...(cursor ? { cursor } : {}),
+      });
+      rows.push(...page.events);
+      cursor = page.nextCursor;
+    } while (cursor && rows.length < 200);
+    return rows.slice(0, 200);
   }
-  async function update(
-    owner: string,
-    id: string,
-    input: unknown,
-    executor: Pick<Database, "update"> = database,
-  ) {
+  async function get(owner: string, id: string): Promise<ProactiveSetting> {
+    const record = await liveSetting(id);
+    if (!record || record.ownerUserId !== owner)
+      throw new ProactiveNotFoundError();
+    return settingOf(record);
+  }
+  /** Intelligence itself, for the history, which no instance holds in memory. */
+  const client = () => schedules().client;
+  /**
+   * Change a person's check-in. Turning one on that was off starts its clock an interval from now;
+   * a shorter interval brings the next run no later than one interval out.
+   */
+  async function update(owner: string, id: string, input: unknown) {
     const patch = parseWith(proactiveSettingPatchSchema, input);
-    const minutes =
-      patch.intervalMinutes ?? sql`${proactiveSettings.intervalMinutes}`;
-    const oneIntervalOut = sql`now() + make_interval(mins => ${minutes}::int)`;
-    const kept =
-      patch.intervalMinutes === undefined
-        ? sql`${proactiveSettings.nextRunAt}`
-        : sql`least(${proactiveSettings.nextRunAt}, ${oneIntervalOut})`;
-    const [row] = await executor
-      .update(proactiveSettings)
-      .set({
+    const known = await liveSetting(id);
+    if (!known || known.ownerUserId !== owner)
+      throw new ProactiveNotFoundError();
+    const changed = await changeSetting(id, (current) => {
+      const minutes = patch.intervalMinutes ?? current.intervalMinutes;
+      const oneIntervalOut = new Date(Date.now() + minutes * 60_000);
+      const kept =
+        patch.intervalMinutes === undefined ||
+        current.nextRunAt <= oneIntervalOut
+          ? current.nextRunAt
+          : oneIntervalOut;
+      return {
         ...patch,
         nextRunAt:
-          patch.enabled === true
-            ? sql`case when ${proactiveSettings.enabled} then ${kept} else ${oneIntervalOut} end`
-            : kept,
-        updatedAt: new Date(),
-      })
-      .where(owned(owner, id))
-      .returning();
-    if (!row) throw new ProactiveNotFoundError();
-    return row;
+          patch.enabled === true && !current.enabled ? oneIntervalOut : kept,
+      };
+    });
+    if (!changed) throw new ProactiveNotFoundError();
+    return settingOf(changed);
   }
-  async function runsToday(
-    ownerUserId: string,
-    agentId: string,
-    executor: Pick<Database, "select"> = database,
-  ): Promise<number> {
-    const [row] = await executor
-      .select({ count: sql<number>`count(*)::int` })
-      .from(proactiveRuns)
-      .where(
-        and(
-          eq(proactiveRuns.ownerUserId, ownerUserId),
-          eq(proactiveRuns.agentId, agentId),
-          ne(proactiveRuns.outcome, "skipped"),
-          gte(proactiveRuns.startedAt, sql`now() - interval '24 hours'`),
-        ),
-      );
-    return row?.count ?? 0;
+  /** Every check-in this person's Bot ran in the last day, whichever it watches. Skipped ones cost nothing. */
+  async function runsToday(ownerUserId: string, agentId: string) {
+    return (
+      await client().all("check-in-runs", {
+        ownerUserId,
+        agentId,
+        outcome: ["running", "quiet", "raised", "failed"],
+        startedAfter: new Date(Date.now() - 86_400_000),
+      })
+    ).items.length;
   }
   return {
     get,
@@ -361,32 +550,29 @@ export function createProactiveStore(database: Database) {
       owner: string,
       agentId: string,
     ): Promise<ProactiveSetting | null> {
-      const [row] = await database
-        .select()
-        .from(proactiveSettings)
-        .where(
-          and(
-            eq(proactiveSettings.ownerUserId, owner),
-            eq(proactiveSettings.agentId, agentId),
-          ),
-        )
-        .limit(1);
-      return row ?? null;
+      const record = schedules()
+        .live("check-in-settings")
+        .find(
+          (setting) =>
+            setting.ownerUserId === owner && setting.agentId === agentId,
+        );
+      return record ? settingOf(record) : null;
     },
+    /** The setting as Intelligence has it now, not as this instance last heard: a check-in is about to run on it. */
     async byId(id: string): Promise<ProactiveSetting | null> {
-      const [row] = await database
-        .select()
-        .from(proactiveSettings)
-        .where(eq(proactiveSettings.id, id))
-        .limit(1);
-      return row ?? null;
+      const record = await schedules().refresh("check-in-settings", id);
+      return record && record.deletedAt === null ? settingOf(record) : null;
     },
     async list(owner: string): Promise<ProactiveSetting[]> {
-      return database
-        .select()
-        .from(proactiveSettings)
-        .where(eq(proactiveSettings.ownerUserId, owner))
-        .orderBy(desc(proactiveSettings.createdAt));
+      return schedules()
+        .live("check-in-settings")
+        .filter((setting) => setting.ownerUserId === owner)
+        .sort(
+          (left, right) =>
+            right.createdAt.getTime() - left.createdAt.getTime() ||
+            (right.id < left.id ? -1 : 1),
+        )
+        .map(settingOf);
     },
     /**
      * A check-in on one thing for a Bot. The first one runs an interval from now: turning it on is
@@ -403,106 +589,114 @@ export function createProactiveStore(database: Database) {
     ): Promise<ProactiveSetting> {
       const parsed = parseWith(proactiveSettingInputSchema, input);
       const sourceLink = parsed.sourceLink ?? null;
-      return database.transaction(async (transaction) => {
-        await lockDefaults(transaction, owner, parsed.agentId);
-        const same = (
-          await transaction
-            .select()
-            .from(proactiveSettings)
-            .where(
-              and(
-                eq(proactiveSettings.ownerUserId, owner),
-                eq(proactiveSettings.agentId, parsed.agentId),
-              ),
-            )
-        ).find((row) =>
-          sourceLink
-            ? row.sourceLink === sourceLink
-            : !row.sourceLink &&
-              row.subject.toLowerCase() === parsed.subject.toLowerCase(),
-        );
-        if (same)
-          return update(
-            owner,
-            same.id,
-            {
+      // Under the lease adoption and removal take, and read fresh from Intelligence: a Bot can hold
+      // several check-ins now, and nothing else stops a second one on the same thing.
+      return withResearchDefaultsLock(
+        database,
+        owner,
+        parsed.agentId,
+        async () => {
+          const same = (
+            await client().all("check-in-settings", {
+              ownerUserId: owner,
+              agentId: parsed.agentId,
+            })
+          ).items.find(
+            (record) =>
+              record.deletedAt === null &&
+              (sourceLink
+                ? record.sourceLink === sourceLink
+                : !record.sourceLink &&
+                  record.subject.toLowerCase() ===
+                    parsed.subject.toLowerCase()),
+          );
+          if (same)
+            return update(owner, same.id, {
               enabled: true,
               intervalMinutes: parsed.intervalMinutes,
               ...(parsed.focus ? { focus: parsed.focus } : {}),
-            },
-            transaction,
+            });
+          return settingOf(
+            await schedules().create("check-in-settings", {
+              id: randomUUID(),
+              ownerUserId: owner,
+              threadId,
+              ...parsed,
+              sourceLink,
+              nextRunAt: new Date(Date.now() + parsed.intervalMinutes * 60_000),
+              lastRunAt: null,
+              lastStatus: "idle",
+              lastError: null,
+            }),
           );
-        const [row] = await transaction
-          .insert(proactiveSettings)
-          .values({
-            id: randomUUID(),
-            ownerUserId: owner,
-            threadId,
-            ...parsed,
-            sourceLink,
-            nextRunAt: sql`now() + make_interval(mins => ${parsed.intervalMinutes}::int)`,
-          })
-          .returning();
-        if (!row)
-          throw new ProactiveRefusedError("Couldn't set up that check-in.");
-        return row;
-      });
+        },
+      );
     },
     /**
      * Change only what was sent. Off stays off until the person turns it on, whatever else they
      * change, and nothing here starts a check-in: Run now does that, behind its own gap.
      *
-     * When the next check-in is due follows from the change, decided in the statement against the
-     * row as it stands: turned on from off, one interval out (the interval sent, or the one it has);
-     * a new interval while on, no later than one new interval out, so going from daily to hourly is
-     * felt within the hour; anything else, as it was.
+     * When the next check-in is due follows from the change, decided against the setting as it
+     * stands and written under its version: turned on from off, one interval out (the interval sent,
+     * or the one it has); a new interval while on, no later than one new interval out, so going from
+     * daily to hourly is felt within the hour; anything else, as it was.
      */
     update,
-
-    /** Removing research is turning it down for this Bot: OpenBot never switches it back on. */
+    /**
+     * Removing research is turning it down for this Bot: OpenBot never switches it back on. The
+     * setting goes for good, its run ledger and its items with it, as the row and its cascade did.
+     * Under the lease adoption takes (`memory/defaults.ts`), and the "no" is written first, so a
+     * removal and an adoption arriving together never leave the setting made again.
+     */
     async remove(owner: string, id: string) {
       const { agentId } = await get(owner, id);
-      await database.transaction(async (transaction) => {
-        await lockDefaults(transaction, owner, agentId);
-        const rows = await transaction
-          .delete(proactiveSettings)
-          .where(owned(owner, id))
-          .returning({ id: proactiveSettings.id });
-        if (!rows.length) throw new ProactiveNotFoundError();
-        await recordOptOut(transaction, {
+      await withResearchDefaultsLock(database, owner, agentId, async () => {
+        const current = await schedules().refresh("check-in-settings", id);
+        if (
+          !current ||
+          current.deletedAt !== null ||
+          current.ownerUserId !== owner
+        )
+          throw new ProactiveNotFoundError();
+        await recordOptOut({
           ownerUserId: owner,
           agentId,
           feature: "proactive_research",
         });
+        await schedules().purge("check-in-settings", id);
       });
     },
     /**
-     * Take the due settings and move each one's next run forward in the same statement, so two
-     * sweeps can never both take one and the interval holds even when a run then fails.
+     * Take the due settings and move each one's next run forward, one interval from now. The move is
+     * Intelligence's compare-and-set on the clock this instance read, so two sweeps on two replicas
+     * can never both take one, and the interval holds even when a run then fails. A clock another
+     * replica already moved answers null, and the directory reads that setting again.
+     *
+     * Due is read from memory, then narrowed by this deployment's own switches: a person who turned
+     * check-ins off for all their Bots or paused this one is not claimed, and so costs not even a
+     * ledger record, every hour. The run checks both again before the model.
      */
     async claimDue(limit = 5): Promise<ProactiveSetting[]> {
-      const due = await database
-        .select({ id: proactiveSettings.id })
-        .from(proactiveSettings)
-        .where(and(claimable, lte(proactiveSettings.nextRunAt, new Date())))
-        .limit(Math.min(limit, 10));
+      const at = new Date();
+      const due = schedules()
+        .live("check-in-settings")
+        .filter((setting) => setting.enabled && setting.nextRunAt <= at)
+        .sort(
+          (left, right) => left.nextRunAt.getTime() - right.nextRunAt.getTime(),
+        );
+      if (due.length === 0) return [];
+      const off = await switchedOff(database, due);
       const claimed: ProactiveSetting[] = [];
-      for (const { id } of due) {
-        const [row] = await database
-          .update(proactiveSettings)
-          .set({
-            nextRunAt: sql`now() + make_interval(mins => ${proactiveSettings.intervalMinutes})`,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(proactiveSettings.id, id),
-              eq(proactiveSettings.enabled, true),
-              lte(proactiveSettings.nextRunAt, new Date()),
-            ),
-          )
-          .returning();
-        if (row) claimed.push(row);
+      for (const setting of due
+        .filter((candidate) => !off.has(candidate.id))
+        .slice(0, Math.min(limit, 10))) {
+        const moved = await schedules().advance(
+          "check-in-settings",
+          setting.id,
+          setting.nextRunAt,
+          new Date(Date.now() + setting.intervalMinutes * 60_000),
+        );
+        if (moved) claimed.push(settingOf(moved));
       }
       return claimed;
     },
@@ -511,34 +705,19 @@ export function createProactiveStore(database: Database) {
       status: ProactiveRunStatus,
       error: string | null = null,
     ) {
-      await database
-        .update(proactiveSettings)
-        .set({
-          lastStatus: status,
-          lastError: error?.slice(0, 500) ?? null,
-          ...(status === "running" ? { lastRunAt: new Date() } : {}),
-          updatedAt: new Date(),
-        })
-        .where(eq(proactiveSettings.id, id));
+      await changeSetting(id, () => ({
+        lastStatus: status,
+        lastError: error?.slice(0, 500) ?? null,
+        ...(status === "running" ? { lastRunAt: new Date() } : {}),
+      }));
     },
     /** Successful connector reads this proactive run made, from the audit trail. */
     async readsFor(runId: string): Promise<ProactiveRead[]> {
-      const rows = await database
-        .select({ ref: auditEvents.targetId, at: auditEvents.createdAt })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(
-              auditEvents.initiatorId,
-              `${PROACTIVE_INITIATOR_PREFIX}${runId}`,
-            ),
-            eq(auditEvents.eventType, "mcp.call_succeeded"),
-            gte(auditEvents.createdAt, new Date(Date.now() - 86_400_000)),
-          ),
-        )
-        .limit(200);
+      const rows = await runEvents(runId, "mcp.call_succeeded");
       return rows.flatMap((row) =>
-        row.ref ? [{ ref: row.ref, at: row.at }] : [],
+        row.targetId
+          ? [{ ref: row.targetId, at: new Date(row.createdAt) }]
+          : [],
       );
     },
     /**
@@ -547,62 +726,47 @@ export function createProactiveStore(database: Database) {
      * deployment refused before it left (a write a check-in may not make) is not one of them.
      */
     async failedReadsFor(runId: string): Promise<string[]> {
-      const rows = await database
-        .selectDistinct({ ref: auditEvents.targetId })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(
-              auditEvents.initiatorId,
-              `${PROACTIVE_INITIATOR_PREFIX}${runId}`,
-            ),
-            eq(auditEvents.eventType, "mcp.call_failed"),
-            gte(auditEvents.createdAt, new Date(Date.now() - 86_400_000)),
-          ),
-        )
-        .limit(200);
-      return rows.flatMap((row) => (row.ref ? [row.ref] : []));
+      const rows = await runEvents(runId, "mcp.call_failed");
+      return [
+        ...new Set(rows.flatMap((row) => (row.targetId ? [row.targetId] : []))),
+      ];
     },
     async countSuggestions(runId: string) {
-      const [row] = await database
-        .select({ count: sql<number>`count(*)::int` })
-        .from(proactiveSuggestions)
-        .where(eq(proactiveSuggestions.runId, runId));
-      return row?.count ?? 0;
+      return (await client().all("check-in-suggestions", { runId })).items
+        .length;
     },
     /**
-     * Open a new item as it is, with only the index's check (see {@link insertSuggestion}). A
-     * check-in raises through `raise`, which refuses a repeat from any of the person's Bots first.
+     * Open a new item as it is, with only Intelligence's unique rule (see {@link insertSuggestion}).
+     * A check-in raises through `raise`, which refuses a repeat from any of the person's Bots first.
      */
     async addSuggestion(input: NewSuggestion): Promise<ProactiveSuggestion> {
-      return insertSuggestion(database, input);
+      return insertSuggestion(input);
     },
     /**
      * What this person had: items still open, unfinished tasks and what they hid in the last thirty
      * days, from every one of their Bots, and what they started from this Bot. Newest first.
      */
     priorItems: (owner: string, agentId: string) =>
-      priorItemsOf(database, owner, agentId),
+      priorItemsOf(owner, agentId),
     /**
      * Open a new item a check-in raised, unless `refuse` finds it repeats something the person
      * already has (it gets what {@link priorItemsOf} reads, and answers why, or null).
      *
-     * The read and the insert run under one lock per person. Their Bots check in on their own
+     * The read and the write run under one lease per person. Their Bots check in on their own
      * schedules, on any replica, and two of them often find the same request at once; without the
-     * lock both would read before either wrote, and the person would be told twice. The index on
-     * open titles is per Bot, so for a second Bot this lock is the only thing that holds.
+     * lease both would read before either wrote, and the person would be told twice. Intelligence's
+     * rule on open titles is per Bot, so for a second Bot this lease is the only thing that holds.
      */
     async raise(
       input: NewSuggestion,
       refuse: (prior: PriorItems) => string | null,
     ): Promise<ProactiveSuggestion> {
-      return database.transaction(async (transaction) => {
-        await lockItems(transaction, input.ownerUserId);
+      return withLocalLock(database, itemsLock(input.ownerUserId), async () => {
         const repeat = refuse(
-          await priorItemsOf(transaction, input.ownerUserId, input.agentId),
+          await priorItemsOf(input.ownerUserId, input.agentId),
         );
         if (repeat) throw new ProactiveRefusedError(repeat);
-        return insertSuggestion(transaction, input);
+        return insertSuggestion(input);
       });
     },
     /**
@@ -613,18 +777,12 @@ export function createProactiveStore(database: Database) {
       settingId: string,
       id: string,
     ): Promise<ProactiveSuggestion | null> {
-      const [row] = await database
-        .update(proactiveSuggestions)
-        .set({ status: "superseded", resolvedAt: new Date() })
-        .where(
-          and(
-            eq(proactiveSuggestions.settingId, settingId),
-            eq(proactiveSuggestions.id, id),
-            eq(proactiveSuggestions.status, "open"),
-          ),
-        )
-        .returning();
-      return row ?? null;
+      const cleared = await changeRecord("check-in-suggestions", id, (item) =>
+        item.settingId === settingId && item.status === "open"
+          ? { status: "superseded" as const, resolvedAt: new Date() }
+          : null,
+      );
+      return cleared ? suggestionOf(cleared) : null;
     },
     /** Whether this person turned check-ins off for all their Bots. */
     async personOff(owner: string): Promise<boolean> {
@@ -639,47 +797,45 @@ export function createProactiveStore(database: Database) {
     },
     /** Whether this person paused this Bot. */
     async paused(owner: string, agentId: string): Promise<boolean> {
-      const [row] = await database
-        .select({ pausedAt: botLifecycle.pausedAt })
-        .from(botLifecycle)
-        .where(
-          and(
-            eq(botLifecycle.ownerUserId, owner),
-            eq(botLifecycle.agentId, agentId),
-          ),
-        )
-        .limit(1);
-      return Boolean(row?.pausedAt);
+      // Unknown counts as paused, as every dispatch's check does.
+      const pausedAt = configuredPauses.pausedAt(owner, agentId);
+      return pausedAt === undefined || pausedAt !== null;
     },
 
     /* --------------------------------------------------------------------------------------------
-     * The run ledger (`proactive_runs`).
+     * The run ledger (`check-in-runs` in Intelligence).
      * ------------------------------------------------------------------------------------------ */
 
     /**
      * Close check-ins left running past their lease as failed: the replica running them stopped. A
-     * turn is cut off at three minutes, so a row still running at ten belongs to nobody, and the one
-     * running row a setting may have must not block it for ever.
+     * turn is cut off at three minutes, so a record still running at ten belongs to nobody, and the
+     * one running record a setting may have must not block it for ever. Each is closed under the
+     * version it was read at, so one its own replica finished meanwhile keeps how it finished.
      */
     async closeStaleRuns(leaseMs: number): Promise<number> {
-      const closed = await database
-        .update(proactiveRuns)
-        .set({
-          outcome: "failed",
-          error: STOPPED_BEFORE_FINISHING,
-          finishedAt: sql`now()`,
-        })
-        .where(
-          and(
-            eq(proactiveRuns.outcome, "running"),
-            lte(
-              proactiveRuns.startedAt,
-              sql`now() - make_interval(secs => ${leaseMs / 1000})`,
-            ),
-          ),
-        )
-        .returning({ id: proactiveRuns.id });
-      return closed.length;
+      const { items } = await client().all("check-in-runs", {
+        outcome: "running",
+        startedBefore: new Date(Date.now() - leaseMs),
+      });
+      let closed = 0;
+      for (const run of items) {
+        try {
+          await client().update("check-in-runs", run.id, run.version, {
+            outcome: "failed",
+            error: STOPPED_BEFORE_FINISHING,
+            finishedAt: new Date(),
+          });
+          closed += 1;
+        } catch (error) {
+          if (
+            error instanceof ScheduleVersionConflictError ||
+            error instanceof ScheduleNotFoundError
+          )
+            continue;
+          throw error;
+        }
+      }
+      return closed;
     },
     /** A check-in a gate stopped before the model, and why. */
     async skipRun(input: {
@@ -688,21 +844,36 @@ export function createProactiveStore(database: Database) {
       trigger: ProactiveRunTrigger;
       reason: ProactiveSkipReason;
     }) {
-      await database.insert(proactiveRuns).values({
-        id: input.id,
-        settingId: input.setting.id,
-        ownerUserId: input.setting.ownerUserId,
-        agentId: input.setting.agentId,
-        trigger: input.trigger,
-        outcome: "skipped",
-        skipReason: input.reason,
-        finishedAt: sql`now()`,
-      });
+      const at = new Date();
+      try {
+        await client().create(
+          "check-in-runs",
+          {
+            id: input.id,
+            settingId: input.setting.id,
+            ownerUserId: input.setting.ownerUserId,
+            agentId: input.setting.agentId,
+            threadId: null,
+            trigger: input.trigger,
+            outcome: "skipped",
+            skipReason: input.reason,
+            itemsRaised: 0,
+            reads: 0,
+            error: null,
+            startedAt: at,
+            finishedAt: at,
+          },
+          `openbot:check-in-run:skip:${input.id}`,
+        );
+      } catch (error) {
+        // Already recorded under this id: this is that skip, sent again.
+        if (!(error instanceof ScheduleAlreadyExistsError)) throw error;
+      }
     },
     /**
-     * Reserve a daily slot and start a check-in atomically for this person and Bot.
-     * `capped` when their shared daily allowance is exhausted. False when another is running for this setting,
-     * on any replica, which the partial unique index decides.
+     * Reserve a daily slot and start a check-in for this person and Bot: its `running` record.
+     * `capped` when their shared daily allowance is spent. False when another is already running
+     * for this setting, on any replica, which Intelligence's one-running rule decides.
      */
     async beginRun(input: {
       id: string;
@@ -712,38 +883,51 @@ export function createProactiveStore(database: Database) {
       dailyLimit: number;
     }): Promise<boolean | "capped"> {
       try {
-        return await database.transaction(async (transaction) => {
-          await lockDefaults(
-            transaction,
-            input.setting.ownerUserId,
-            input.setting.agentId,
-          );
-          if (
-            (await runsToday(
-              input.setting.ownerUserId,
-              input.setting.agentId,
-              transaction,
-            )) >= input.dailyLimit
-          )
-            return "capped";
-          await transaction.insert(proactiveRuns).values({
-            id: input.id,
-            settingId: input.setting.id,
-            ownerUserId: input.setting.ownerUserId,
-            agentId: input.setting.agentId,
-            trigger: input.trigger,
-            threadId: input.threadId,
-          });
-          return true;
-        });
+        return await withResearchDefaultsLock(
+          database,
+          input.setting.ownerUserId,
+          input.setting.agentId,
+          async () => {
+            if (
+              (await runsToday(
+                input.setting.ownerUserId,
+                input.setting.agentId,
+              )) >= input.dailyLimit
+            )
+              return "capped" as const;
+            await client().create(
+              "check-in-runs",
+              {
+                id: input.id,
+                settingId: input.setting.id,
+                ownerUserId: input.setting.ownerUserId,
+                agentId: input.setting.agentId,
+                threadId: input.threadId,
+                trigger: input.trigger,
+                outcome: "running",
+                skipReason: null,
+                itemsRaised: 0,
+                reads: 0,
+                error: null,
+                startedAt: new Date(),
+                finishedAt: null,
+              },
+              `openbot:check-in-run:begin:${input.id}`,
+            );
+            return true;
+          },
+        );
       } catch (error) {
-        if (violates(error, "proactive_runs_one_running_idx")) return false;
+        if (error instanceof ScheduleConflictError) return false;
+        // This run's own record, from a try whose answer was lost: run ids are new for every run.
+        if (error instanceof ScheduleAlreadyExistsError) return true;
         throw error;
       }
     },
     /**
-     * End a running check-in. A row the lease sweep already closed stays as it was closed. `error`
-     * on a raised one says an app couldn't be read (`unreachedError`); a quiet one never has one.
+     * End a running check-in, once. A record the lease sweep already closed stays as it was closed.
+     * `error` on a raised one says an app couldn't be read (`unreachedError`); a quiet one never has
+     * one.
      */
     async finishRun(
       id: string,
@@ -754,18 +938,17 @@ export function createProactiveStore(database: Database) {
         error?: string | null;
       },
     ) {
-      await database
-        .update(proactiveRuns)
-        .set({
-          outcome: result.outcome,
-          itemsRaised: result.itemsRaised,
-          reads: result.reads,
-          error: result.error?.slice(0, 500) ?? null,
-          finishedAt: sql`now()`,
-        })
-        .where(
-          and(eq(proactiveRuns.id, id), eq(proactiveRuns.outcome, "running")),
-        );
+      await changeRecord("check-in-runs", id, (run) =>
+        run.outcome === "running"
+          ? {
+              outcome: result.outcome,
+              itemsRaised: result.itemsRaised,
+              reads: result.reads,
+              error: result.error?.slice(0, 500) ?? null,
+              finishedAt: new Date(),
+            }
+          : null,
+      );
     },
     /**
      * Where the setting's next check-in's window opens: the start of its last check-in that read
@@ -774,59 +957,68 @@ export function createProactiveStore(database: Database) {
      * was down, or a run broke off, is read by the next one that can. Null when there is none.
      */
     async windowStart(settingId: string): Promise<Date | null> {
-      const [row] = await database
-        .select({ startedAt: proactiveRuns.startedAt })
-        .from(proactiveRuns)
-        .where(
-          and(
-            eq(proactiveRuns.settingId, settingId),
-            inArray(proactiveRuns.outcome, ["quiet", "raised"]),
-            isNull(proactiveRuns.error),
-          ),
-        )
-        .orderBy(desc(proactiveRuns.startedAt))
-        .limit(1);
-      return row?.startedAt ?? null;
+      let cursor: string | null = null;
+      do {
+        const page: SchedulePage<"check-in-runs"> = await client().page(
+          "check-in-runs",
+          { settingId, outcome: ["quiet", "raised"] },
+          cursor,
+          50,
+        );
+        const read = page.items.find((run) => run.error === null);
+        if (read) return read.startedAt;
+        cursor = page.nextCursor;
+      } while (cursor);
+      return null;
     },
     /** The setting's last check-in that reached the model and ended, for Run now's ten minutes. */
     async lastCheckIn(settingId: string): Promise<LastCheckIn | null> {
-      const [row] = await database
-        .select({
-          outcome: proactiveRuns.outcome,
-          startedAt: proactiveRuns.startedAt,
-        })
-        .from(proactiveRuns)
-        .where(
-          and(
-            eq(proactiveRuns.settingId, settingId),
-            inArray(proactiveRuns.outcome, ["quiet", "raised", "failed"]),
-          ),
+      const [run] = (
+        await client().page(
+          "check-in-runs",
+          { settingId, outcome: ["quiet", "raised", "failed"] },
+          null,
+          1,
         )
-        .orderBy(desc(proactiveRuns.startedAt))
-        .limit(1);
-      return row ? (row as LastCheckIn) : null;
+      ).items;
+      return run
+        ? {
+            outcome: run.outcome as LastCheckIn["outcome"],
+            startedAt: run.startedAt,
+          }
+        : null;
     },
     /** The setting's newest check-in of any outcome, skipped and running ones included. */
     async latestRun(settingId: string): Promise<ProactiveRunRow | null> {
-      const [row] = await database
-        .select()
-        .from(proactiveRuns)
-        .where(eq(proactiveRuns.settingId, settingId))
-        .orderBy(desc(proactiveRuns.startedAt))
-        .limit(1);
-      return row ?? null;
+      const [run] = (
+        await client().page("check-in-runs", { settingId }, null, 1)
+      ).items;
+      return run ? runOf(run) : null;
     },
     /**
      * Each of this person's settings' newest check-in, by setting: what their Bots' check-ins say
      * happened last, a skip and its reason included.
      */
     async latestRuns(owner: string): Promise<Map<string, ProactiveRunRow>> {
-      const rows = await database
-        .selectDistinctOn([proactiveRuns.settingId])
-        .from(proactiveRuns)
-        .where(eq(proactiveRuns.ownerUserId, owner))
-        .orderBy(proactiveRuns.settingId, desc(proactiveRuns.startedAt));
-      return new Map(rows.map((row) => [row.settingId, row]));
+      const settings = schedules()
+        .live("check-in-settings")
+        .filter((setting) => setting.ownerUserId === owner);
+      const newest = await Promise.all(
+        settings.map(
+          async (setting) =>
+            (
+              await client().page(
+                "check-in-runs",
+                { settingId: setting.id },
+                null,
+                1,
+              )
+            ).items[0],
+        ),
+      );
+      return new Map(
+        newest.flatMap((run) => (run ? [[run.settingId, runOf(run)]] : [])),
+      );
     },
     /** Whether a check-in for this setting is on the queue and has not been run yet. */
     async runQueued(settingId: string): Promise<boolean> {
@@ -843,163 +1035,143 @@ export function createProactiveStore(database: Database) {
         .limit(1);
       return Boolean(row);
     },
-    /** All non-skipped check-ins for this person and Bot in the last day. */
+    /** Every non-skipped check-in for this person and Bot in the last day. */
     runsToday,
 
     /**
-     * Drop what the ledger no longer needs, older than `days`, in batches: finished check-ins, and
-     * pings no open item still names. An open item's ping is what keeps it from being pinged again,
-     * so that ping stays as long as the item does, and so does each person's newest ping, which the
-     * app notifies on. Returns how many of each went.
+     * Drop what the ledger no longer needs, older than `days`: finished check-ins, and pings no open
+     * item still names. An open item's ping is what keeps it from being pinged again, so that ping
+     * stays as long as the item does, and so does each person's newest ping, which the app notifies
+     * on. Intelligence removes them in bounded batches. Returns how many of each went.
      */
     async prune(
       days = PROACTIVE_LEDGER_DAYS,
     ): Promise<{ runs: number; pings: number }> {
-      const cutoff = sql`now() - make_interval(days => ${days})`;
-      const batches = async (remove: () => Promise<{ id: string }[]>) => {
-        let removed = 0;
-        for (let batch = 0; batch < PRUNE_BATCHES; batch += 1) {
-          const rows = await remove();
-          removed += rows.length;
-          if (rows.length < PRUNE_BATCH) break;
-        }
-        return removed;
-      };
-      const runs = await batches(() =>
-        database
-          .delete(proactiveRuns)
-          .where(
-            inArray(
-              proactiveRuns.id,
-              database
-                .select({ id: proactiveRuns.id })
-                .from(proactiveRuns)
-                .where(
-                  and(
-                    ne(proactiveRuns.outcome, "running"),
-                    lte(proactiveRuns.startedAt, cutoff),
-                  ),
-                )
-                .limit(PRUNE_BATCH),
-            ),
-          )
-          .returning({ id: proactiveRuns.id }),
-      );
-      const pings = await batches(() =>
-        database
-          .delete(proactivePings)
-          .where(
-            inArray(
-              proactivePings.id,
-              database
-                .select({ id: proactivePings.id })
-                .from(proactivePings)
-                .where(
-                  and(
-                    lte(proactivePings.createdAt, cutoff),
-                    sql`not exists (select 1 from ${proactiveSuggestions} where ${proactiveSuggestions.pingId} = ${proactivePings.id} and ${proactiveSuggestions.status} = 'open')`,
-                    sql`exists (select 1 from ${proactivePings} as newer where newer.owner_user_id = ${proactivePings.ownerUserId} and newer.created_at > ${proactivePings.createdAt})`,
-                  ),
-                )
-                .limit(PRUNE_BATCH),
-            ),
-          )
-          .returning({ id: proactivePings.id }),
-      );
+      const cutoff = new Date(Date.now() - days * 86_400_000);
+      const runs = await client().prune("check-in-runs", cutoff);
+      const pings = await client().prune("check-in-pings", cutoff);
       return { runs, pings };
     },
     /** A setting's recent check-ins, newest first, skipped ones included. */
     async runs(settingId: string): Promise<ProactiveRunRow[]> {
-      return database
-        .select()
-        .from(proactiveRuns)
-        .where(eq(proactiveRuns.settingId, settingId))
-        .orderBy(desc(proactiveRuns.startedAt))
-        .limit(50);
+      return (
+        await client().page("check-in-runs", { settingId }, null, 50)
+      ).items.map(runOf);
     },
     async suggestions(owner: string): Promise<ProactiveSuggestion[]> {
-      return database
-        .select()
-        .from(proactiveSuggestions)
-        .where(
-          and(
-            eq(proactiveSuggestions.ownerUserId, owner),
-            eq(proactiveSuggestions.status, "open"),
-          ),
+      return (
+        await client().page(
+          "check-in-suggestions",
+          { ownerUserId: owner, status: "open" },
+          null,
+          100,
         )
-        .orderBy(desc(proactiveSuggestions.createdAt))
-        .limit(100);
+      ).items.map(suggestionOf);
     },
     async suggestion(owner: string, id: string): Promise<ProactiveSuggestion> {
-      const [row] = await database
-        .select()
-        .from(proactiveSuggestions)
-        .where(
-          and(
-            eq(proactiveSuggestions.ownerUserId, owner),
-            eq(proactiveSuggestions.id, id),
-          ),
-        )
-        .limit(1);
-      if (!row) throw new ProactiveNotFoundError();
-      return row;
+      const item = await client().get("check-in-suggestions", id);
+      if (!item || item.ownerUserId !== owner)
+        throw new ProactiveNotFoundError();
+      return suggestionOf(item);
     },
-    /** Open to dismissed or started, once. A second click is refused rather than run twice. */
+    /**
+     * Open to dismissed or started, once. A second click is refused rather than run twice: the
+     * change is written under the version it was read at, so of two at once only one lands.
+     */
     async resolveSuggestion(
       owner: string,
       id: string,
       status: "dismissed" | "started",
     ): Promise<ProactiveSuggestion> {
-      const [row] = await database
-        .update(proactiveSuggestions)
-        .set({ status, resolvedAt: new Date() })
-        .where(
-          and(
-            eq(proactiveSuggestions.ownerUserId, owner),
-            eq(proactiveSuggestions.id, id),
-            eq(proactiveSuggestions.status, "open"),
-          ),
-        )
-        .returning();
-      if (!row)
+      const resolved = await changeRecord("check-in-suggestions", id, (item) =>
+        item.ownerUserId === owner && item.status === "open"
+          ? { status, resolvedAt: new Date() }
+          : null,
+      );
+      if (!resolved)
         throw new ProactiveRefusedError(
           "This suggestion was already started or dismissed.",
         );
-      return row;
+      return suggestionOf(resolved);
     },
     /**
      * Back to open, after a Start whose task could not be opened, so the person can press it again.
      * Left started when any of their Bots raised the same thing again meanwhile: that new item is
-     * the open one. Under the person's lock, so a check-in raising it now waits and finds this one.
+     * the open one. Under the person's lease, so a check-in raising it now waits and finds this one.
      */
     async reopenSuggestion(owner: string, id: string) {
-      try {
-        await database.transaction(async (transaction) => {
-          await lockItems(transaction, owner);
-          const [item] = await transaction
-            .select()
-            .from(proactiveSuggestions)
-            .where(
-              and(
-                eq(proactiveSuggestions.ownerUserId, owner),
-                eq(proactiveSuggestions.id, id),
-                eq(proactiveSuggestions.status, "started"),
-              ),
-            )
-            .limit(1);
-          if (!item) return;
-          const { open } = await priorItemsOf(transaction, owner, item.agentId);
-          if (open.some((other) => sameThing(other, item))) return;
-          await transaction
-            .update(proactiveSuggestions)
-            .set({ status: "open", resolvedAt: null })
-            .where(eq(proactiveSuggestions.id, item.id));
-        });
-      } catch (error) {
-        if (!violates(error, "proactive_suggestions_open_dedupe_idx"))
-          throw error;
-      }
+      await withLocalLock(database, itemsLock(owner), async () => {
+        const open = await openItemsOf(owner);
+        try {
+          await changeRecord("check-in-suggestions", id, (item) =>
+            item.ownerUserId === owner &&
+            item.status === "started" &&
+            !open.some((other) => sameThing(other, item))
+              ? { status: "open" as const, resolvedAt: null }
+              : null,
+          );
+        } catch (error) {
+          // Opened again meanwhile under the same title for this Bot: that one is the open one.
+          if (!(error instanceof ScheduleConflictError)) throw error;
+        }
+      });
     },
   };
 }
 export type ProactiveStore = ReturnType<typeof createProactiveStore>;
+
+/**
+ * Reset a person's check-ins with one Bot (`agents/lifecycle-reset.ts`): the settings go for good,
+ * their runs and items with them, and any check-in already queued for one is cancelled. One they had
+ * turned off is recorded as turned down first, so starting fresh never switches it back on. Under the
+ * lease adoption takes. Returns how many settings went.
+ */
+export async function resetCheckInsOf(
+  database: Database,
+  ownerUserId: string,
+  agentId: string,
+): Promise<number> {
+  return withResearchDefaultsLock(database, ownerUserId, agentId, async () => {
+    const { items: settings } = await schedules().client.all(
+      "check-in-settings",
+      { ownerUserId, agentId },
+    );
+    if (settings.length === 0) return 0;
+    if (settings.some((setting) => !setting.enabled))
+      await recordOptOut({
+        ownerUserId,
+        agentId,
+        feature: "proactive_research",
+      });
+    const ids = settings.map((setting) => setting.id);
+    // A run already queued for the setting would find it gone; cancel it rather than fail it.
+    await database
+      .update(workItems)
+      .set({
+        finishedAt: sql`now()`,
+        claimedBy: null,
+        leaseUntil: null,
+        lastError: "Cancelled by reset",
+        updatedAt: sql`now()`,
+      })
+      .where(
+        and(
+          eq(workItems.kind, PROACTIVE_RUN_KIND),
+          isNull(workItems.finishedAt),
+          inArray(sql<string>`${workItems.payload}->>'settingId'`, ids),
+        ),
+      );
+    for (const id of ids) await schedules().purge("check-in-settings", id);
+    return ids.length;
+  });
+}
+
+/** How many check-in settings this person has with this Bot, from memory: what a reset would remove. */
+export function checkInsOf(ownerUserId: string, agentId: string): number {
+  return schedules()
+    .live("check-in-settings")
+    .filter(
+      (setting) =>
+        setting.ownerUserId === ownerUserId && setting.agentId === agentId,
+    ).length;
+}

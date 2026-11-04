@@ -72,6 +72,22 @@ function fakeStore(
     async insertRun() {
       return { runId: "routine_run-1" };
     },
+    async openRunFor() {
+      return { runId: "routine_run-1", finished: false };
+    },
+    async openRunsIn() {
+      return [];
+    },
+    async startManualRun() {
+      throw new Error("startManualRun is not part of this test");
+    },
+    async listRuns() {
+      return [];
+    },
+    async reapAbandonedRuns() {
+      return 0;
+    },
+    async markUnschedulable() {},
     async runContext() {
       return null;
     },

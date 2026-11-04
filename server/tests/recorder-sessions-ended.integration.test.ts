@@ -13,7 +13,6 @@ import type { AuditEventInput, AuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import { enterpriseSettings } from "../src/db/schema/admin";
 import {
   accounts,
   revokedAccess,
@@ -24,9 +23,12 @@ import {
 import { recorderConnections } from "../src/db/schema/recorder";
 import { retireOwnedAccounts } from "../src/identity/retire";
 import { createPeopleStore } from "../src/people/store";
+import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
+import { testLearningIntelligence } from "./support/learning";
 
 /*
  * The two ways OpenBot itself ends people's sessions, outside Better Auth's own routes, end their Recorders too:
@@ -68,6 +70,9 @@ function recorderWith(auditFor?: () => AuditStore) {
     organizationAuth: undefined,
     roleRepository,
     peopleStore: { isRevoked: async () => false },
+    trajectoryBindings: createTrajectoryBindingStore(
+      testLearningIntelligence(),
+    ),
     personalSpaces: {
       containerFor: (userId) => `space-of-${userId}`,
       state: async () => ({ state: "unassigned", containerId: null }),
@@ -139,6 +144,7 @@ enterprise.route(
 let controls: EnterpriseControls;
 
 beforeAll(async () => {
+  await useTestPolicy();
   await database.insert(users).values([admin, leaving, viaSso]);
   await database.insert(ssoProviders).values({
     id: providerId,
@@ -171,9 +177,7 @@ beforeEach(() => {
 });
 afterAll(async () => {
   await controls?.stop();
-  await database
-    .delete(enterpriseSettings)
-    .where(eq(enterpriseSettings.key, "sso_required"));
+  await (await useTestPolicy()).patchSettings({ ssoRequired: false });
   await database
     .delete(revokedAccess)
     .where(eq(revokedAccess.email, leaving.email));

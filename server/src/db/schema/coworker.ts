@@ -7,11 +7,13 @@
 import {
   boolean,
   index,
+  integer,
   pgEnum,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  uuid,
 } from "drizzle-orm/pg-core";
 import { agents, users } from "./core";
 import { jsonb } from "./json";
@@ -26,6 +28,10 @@ export const agentVisibility = pgEnum("agent_visibility", [
   "private",
 ]);
 
+/**
+ * A Bot's profile, as OpenBot kept it before Bots moved into Intelligence. Read only by the upgrade
+ * copy and dropped a release later; see `agents` in core.ts.
+ */
 export const agentProfiles = pgTable(
   "agent_profiles",
   {
@@ -75,15 +81,18 @@ export const agentProfiles = pgTable(
   ],
 );
 
+/**
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
+ */
 export const agentPreferences = pgTable(
   "agent_preferences",
   {
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     hiddenAt: timestamp("hidden_at", { withTimezone: true }),
     pinnedAt: timestamp("pinned_at", { withTimezone: true }),
   },
@@ -110,9 +119,7 @@ export const routines = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     /**
      * Not a foreign key. Channels soft-delete (`channels.deletedAt`), and a routine pointing at a
      * deleted channel must survive to be shown as broken rather than vanish in a cascade.
@@ -184,3 +191,41 @@ export const routineRuns = pgTable(
     index("routine_runs_by_routine_idx").on(table.routineId, table.startedAt),
   ],
 );
+
+/**
+ * One row per copy of local data into Intelligence that has finished, so it runs once.
+ *
+ * The Bot copy (`agents/bot-registry/upgrade.ts`) runs at boot until it has copied and verified every
+ * local Bot, then records itself here. Without the record a Bot deleted for good in Intelligence would
+ * come back on the next boot, copied again from the local row this release keeps.
+ */
+export const intelligenceCopies = pgTable("intelligence_copies", {
+  name: text("name").primaryKey(),
+  /** How many rows the copy found in Intelligence when it verified, for the record. */
+  copied: integer("copied").notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * Where a long copy into Intelligence has got to, so a restart resumes it rather than starting over.
+ *
+ * The audit trail copy (`audit-trail/upgrade.ts`) can be millions of rows. It walks each table in
+ * `(created_at, id)` order and moves this forward after every batch Intelligence stored, with the
+ * running count of ids Intelligence reported stored. Operational: when the copy finishes it is recorded
+ * in `intelligence_copies` and this row no longer matters.
+ */
+export const intelligenceCopyProgress = pgTable("intelligence_copy_progress", {
+  name: text("name").primaryKey(),
+  /** The last copied row's `created_at`, to the microsecond. Null before the first batch. */
+  afterCreatedAt: timestamp("after_created_at", {
+    withTimezone: true,
+    mode: "string",
+  }),
+  afterId: uuid("after_id"),
+  copied: integer("copied").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

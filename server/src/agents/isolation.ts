@@ -13,12 +13,11 @@
  *   owner's Bots run on their shared computer from the next run, and giving the switch back restores
  *   them, which is why the flag and the verdict are two different facts.
  */
-import { eq } from "drizzle-orm";
 import { DEFAULT_CAPABILITIES } from "../admin/capabilities";
 import { enterpriseControls } from "../admin/controls";
 import type { ComputerConfig } from "../config";
 import type { Database } from "../db/client";
-import { agentProfiles } from "../db/schema";
+import { bots } from "./bot-registry/directory";
 
 /** Whether this deployment's computers can give one Bot a computer of its own. */
 export function deploymentCanIsolate(
@@ -101,18 +100,10 @@ export function isolationState(
  * not isolated.
  */
 export async function runsIsolated(
-  database: Pick<Database, "select">,
+  _database: Pick<Database, "select">,
   botId: string,
 ): Promise<boolean> {
-  const [row] = await database
-    .select({
-      isolated: agentProfiles.isolated,
-      ownerUserId: agentProfiles.ownerUserId,
-      deletedAt: agentProfiles.deletedAt,
-    })
-    .from(agentProfiles)
-    .where(eq(agentProfiles.agentId, botId))
-    .limit(1);
+  const row = await bots().find(botId);
   if (!row || row.deletedAt || !row.isolated || !row.ownerUserId) return false;
   return mayIsolate(row.ownerUserId);
 }

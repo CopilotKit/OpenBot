@@ -1191,12 +1191,14 @@ for (const root of ROOTS) {
   });
 }
 
+// Parses every test file in the repository, so it outgrew bun's five-second default as the suite
+// grew: given room, not changed.
 test("the allow-list holds no offence the fix cycle has already cleared", () => {
   const found = ROOTS.flatMap((root) => scanTree(join(REPO, root), REPO));
   const stale = unmatched(ALLOW, found);
   // A fixed offence must leave the list with its fix, or the list stops meaning anything.
   expect(stale.map((entry) => `${key(entry)}  ${entry.finding}`)).toEqual([]);
-});
+}, 30_000);
 
 test("allowances survive comments, line shifts and expression wrapping", () => {
   const before = offencesIn(

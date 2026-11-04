@@ -24,23 +24,12 @@ import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { modelUsage } from "../src/db/schema/admin";
-import { agents, channels, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import { deliveryOutbox } from "../src/db/schema/delivery";
-import { botLifecycle } from "../src/db/schema/lifecycle";
-import { mcpServers, mcpTools } from "../src/db/schema/plugins";
-import {
-  proactivePeople,
-  proactivePings,
-  proactiveRuns,
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../src/db/schema/proactive";
-import { botTasks } from "../src/db/schema/tasks";
+import { mcpTools } from "../src/db/schema/plugins";
 import { workItems } from "../src/db/schema/work";
 import { createDeliveryRouter } from "../src/delivery/router";
 import { createDeliveryStore } from "../src/delivery/store";
-import { createMemoryStore } from "../src/memory/store";
 import { createPluginStore } from "../src/plugins/store";
 import type { ProactiveAdmin, TaskService } from "../src/proactive/contracts";
 import {
@@ -61,14 +50,49 @@ import {
 } from "../src/proactive/types";
 import { CHECK_IN_OPENING } from "../src/proactive/window";
 import { createWorkQueue } from "../src/work/queue";
+import { modelUsageRows, useTestAuditTrail } from "./support/audit";
+import {
+  clearPreferences,
+  removeBots,
+  seedBot,
+  setBotPreference,
+  useTestConfiguration,
+} from "./support/bots";
+import {
+  purgeConversations,
+  seedChannel,
+  seedTask,
+  storedTasks,
+} from "./support/conversations";
+import {
+  changeCheckIn,
+  changeHistory,
+  makeDue,
+  pingedAt,
+  purgeCheckInHistoryOf,
+  purgeSchedulesOf,
+  rewritePing,
+  rewriteRun,
+  runsOf as ledgerOf,
+  seedHistory,
+} from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testScheduleClient, useTestSchedules } from "./support/schedules";
+import { useTestPolicy } from "./support/policy";
+import { testMemory } from "./support/memory";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 /*
  * Check-ins and pings through the real path: real Postgres, the real proactive and delivery stores,
  * the real work queue and the real headless turn runner. The model is the only fake: a scripted
  * AG-UI agent that reads (the audit row a successful connector read writes) and calls the
  * check-in's tools as a model would.
+ *
+ * That audit row, and the model usage a check-in leaves, live in Intelligence: the engine reads a
+ * run's reads from the trail there, and the usage case below reads its rows back from it.
  */
+
+useTestAuditTrail();
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -90,17 +114,19 @@ const taskChannel = `check-in-task-channel-${suite}`;
 const device = `check-in-device-${suite}`;
 
 const auditStore = createAuditStore(database);
+// Apps and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore,
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: Buffer.alloc(32, 7).toString("base64"),
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async () => ({ text: "[]", isError: false }),
 });
 const store = createProactiveStore(database);
-const memory = createMemoryStore(database);
+const memory = testMemory(database).store;
 const queue = createWorkQueue(database);
 const deliveries = createDeliveryStore(database);
 const router = createDeliveryRouter({
@@ -124,41 +150,31 @@ let calendar: ProactiveSetting;
 const FAR = new Date("2100-01-01T00:00:00Z");
 
 beforeAll(async () => {
+  await useTestSchedules();
+  await useTestConfiguration();
+  await useTestPolicy();
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
-  await database.insert(agents).values([
-    { id: inboxBot, name: "Inbox Bot", type: "built_in", configuration: {} },
-    {
-      id: calendarBot,
-      name: "Calendar Bot",
-      type: "built_in",
-      configuration: {},
-    },
-  ]);
-  await database.insert(channels).values(
-    [inboxChannel, calendarChannel, taskChannel].map((id) => ({
-      id,
-      name: id,
-      description: "",
-    })),
-  );
-  await database.insert(mcpServers).values([
-    {
-      id: mail,
-      title: "Mail",
-      vendor: "Fixture",
-      url: "https://mail.example.test/mcp",
-      provenance: "custom",
-    },
-    {
-      id: diary,
-      title: "Calendar",
-      vendor: "Fixture",
-      url: "https://calendar.example.test/mcp",
-      provenance: "custom",
-    },
-  ]);
+  await seedBot({ id: inboxBot, name: "Inbox Bot", type: "built_in" });
+  await seedBot({ id: calendarBot, name: "Calendar Bot", type: "built_in" });
+  // The person's own conversation with each Bot, where its check-ins live.
+  await seedChannel(owner, [inboxBot], { id: inboxChannel });
+  await seedChannel(owner, [calendarBot], { id: calendarChannel });
+  await seedServer({
+    id: mail,
+    title: "Mail",
+    vendor: "Fixture",
+    url: "https://mail.example.test/mcp",
+    provenance: "custom",
+  });
+  await seedServer({
+    id: diary,
+    title: "Calendar",
+    vendor: "Fixture",
+    url: "https://calendar.example.test/mcp",
+    provenance: "custom",
+  });
   await database.insert(mcpTools).values([
     {
       serverId: mail,
@@ -222,29 +238,18 @@ async function reset() {
         inArray(sql<string>`${workItems.payload}->>'settingId'`, settings),
       ),
     );
-  await database.delete(botTasks).where(eq(botTasks.ownerUserId, owner));
-  await database
-    .delete(proactiveSuggestions)
-    .where(eq(proactiveSuggestions.ownerUserId, owner));
-  await database
-    .delete(proactivePings)
-    .where(eq(proactivePings.ownerUserId, owner));
-  await database
-    .delete(proactivePeople)
-    .where(eq(proactivePeople.ownerUserId, owner));
-  await database
-    .delete(proactiveRuns)
-    .where(eq(proactiveRuns.ownerUserId, owner));
-  await database
-    .delete(botLifecycle)
-    .where(eq(botLifecycle.ownerUserId, owner));
+  // A task goes with its conversation, in Intelligence.
+  await purgeConversations(
+    (await storedTasks(owner)).map((task) => task.conversationId),
+  );
+  await purgeCheckInHistoryOf(owner);
+  await clearPreferences([owner]);
   await database
     .update(users)
     .set({ preferences: sql`${users.preferences} - 'proactive'` })
     .where(eq(users.id, owner));
-  await database
-    .update(proactiveSettings)
-    .set({
+  for (const id of settings)
+    await changeCheckIn(id, {
       enabled: true,
       intervalMinutes: 60,
       focus: "",
@@ -252,23 +257,19 @@ async function reset() {
       lastRunAt: null,
       lastStatus: "idle",
       lastError: null,
-    })
-    .where(inArray(proactiveSettings.id, settings));
+    });
 }
 beforeEach(reset);
 
 afterAll(async () => {
   await reset();
+  await purgeSchedulesOf([owner]);
+  // The phone is in Intelligence, not gone with the person: signed out, as signing out does.
+  await deliveries.removeDevice(owner, device);
   await database.delete(users).where(eq(users.id, owner));
-  await database
-    .delete(agents)
-    .where(inArray(agents.id, [inboxBot, calendarBot]));
-  await database
-    .delete(channels)
-    .where(inArray(channels.id, [inboxChannel, calendarChannel, taskChannel]));
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [mail, diary]));
+  await purgeConversations([inboxChannel, calendarChannel, taskChannel]);
+  await removeBots([inboxBot, calendarBot]);
+  await removeServers([mail, diary]);
   await database.$client.close();
 });
 
@@ -489,52 +490,38 @@ function replica(
  * Reading what happened.
  * ---------------------------------------------------------------------------------------------- */
 
-const due = (setting: ProactiveSetting) =>
-  database
-    .update(proactiveSettings)
-    .set({ nextRunAt: new Date(Date.now() - 1_000) })
-    .where(eq(proactiveSettings.id, setting.id));
+const due = (setting: ProactiveSetting) => makeDue(setting.id);
 const runsOf = (setting: ProactiveSetting) => store.runs(setting.id);
-const itemsOf = () =>
-  database
-    .select()
-    .from(proactiveSuggestions)
-    .where(eq(proactiveSuggestions.ownerUserId, owner))
-    .orderBy(proactiveSuggestions.createdAt);
-const pingsOf = () =>
-  database
-    .select()
-    .from(proactivePings)
-    .where(eq(proactivePings.ownerUserId, owner))
-    .orderBy(proactivePings.createdAt);
+/** The owner's items, oldest first, as Intelligence holds them. */
+const itemsOf = async () =>
+  (
+    await testScheduleClient().all("check-in-suggestions", {
+      ownerUserId: owner,
+      order: "asc",
+    })
+  ).items;
+/** The owner's pings, oldest first. */
+const pingsOf = async () =>
+  (await testScheduleClient().all("check-in-pings", { ownerUserId: owner }))
+    .items;
+/** The setting as Intelligence holds it now. */
+const settingNow = (setting: ProactiveSetting) =>
+  testScheduleClient().get("check-in-settings", setting.id);
 const outboxOf = () =>
   database
     .select()
     .from(deliveryOutbox)
     .where(eq(deliveryOutbox.ownerUserId, owner));
-const slotOf = async () =>
-  (
-    await database
-      .select()
-      .from(proactivePeople)
-      .where(eq(proactivePeople.ownerUserId, owner))
-  )[0] ?? null;
+const slotOf = () => testScheduleClient().get("check-in-people", owner);
 /** The person's slot, taken `minutesAgo` minutes ago. */
 async function pingedMinutesAgo(minutesAgo: number) {
-  const at = new Date(Date.now() - minutesAgo * 60_000);
-  await database
-    .insert(proactivePeople)
-    .values({ ownerUserId: owner, lastPingedAt: at })
-    .onConflictDoUpdate({
-      target: proactivePeople.ownerUserId,
-      set: { lastPingedAt: at },
-    });
+  await pingedAt(owner, new Date(Date.now() - minutesAgo * 60_000));
 }
 /** An open item as an earlier check-in left it. */
 async function openItem(
   setting: ProactiveSetting,
   title: string,
-  extra: Partial<typeof proactiveSuggestions.$inferInsert> = {},
+  extra: { sourceLink?: string | null } = {},
 ) {
   return store.addSuggestion({
     ownerUserId: owner,
@@ -556,13 +543,10 @@ async function hiddenDaysAgo(
   days: number,
 ) {
   const item = await openItem(setting, title);
-  await database
-    .update(proactiveSuggestions)
-    .set({
-      status: "dismissed",
-      resolvedAt: new Date(Date.now() - days * 86_400_000),
-    })
-    .where(eq(proactiveSuggestions.id, item.id));
+  await changeHistory("check-in-suggestions", item.id, {
+    status: "dismissed",
+    resolvedAt: new Date(Date.now() - days * 86_400_000),
+  });
   return item;
 }
 async function seedRuns(
@@ -573,7 +557,8 @@ async function seedRuns(
   }[],
 ) {
   if (!runs.length) return;
-  await database.insert(proactiveRuns).values(
+  await seedHistory(
+    "check-in-runs",
     runs.map((run) => {
       const startedAt = new Date(Date.now() - run.hoursAgo * 3_600_000);
       return {
@@ -581,11 +566,16 @@ async function seedRuns(
         settingId: setting.id,
         ownerUserId: owner,
         agentId: setting.agentId,
+        threadId: null,
         trigger: "schedule" as const,
         outcome: run.outcome,
         skipReason: run.outcome === "skipped" ? ("busy" as const) : null,
+        itemsRaised: 0,
+        reads: 0,
+        error: null,
         startedAt,
         finishedAt: new Date(startedAt.getTime() + 30_000),
+        createdAt: startedAt,
       };
     }),
   );
@@ -596,11 +586,21 @@ async function seedRuns(
  */
 async function ranHoursAgo(run: { id: string } | undefined, hoursAgo: number) {
   const startedAt = new Date(Date.now() - hoursAgo * 3_600_000);
-  await database
-    .update(proactiveRuns)
-    .set({ startedAt, finishedAt: new Date(startedAt.getTime() + 30_000) })
-    .where(eq(proactiveRuns.id, run?.id as string));
+  await rewriteRun(run?.id as string, {
+    startedAt,
+    finishedAt: new Date(startedAt.getTime() + 30_000),
+  });
   return Math.floor(startedAt.getTime() / 1000);
+}
+/** Every check-in of the setting moved eleven minutes back, past Run now's ten. */
+async function elevenMinutesAgo(setting: ProactiveSetting) {
+  for (const run of await ledgerOf(setting.id))
+    await rewriteRun(run.id, {
+      startedAt: new Date(Date.now() - 11 * 60_000),
+      ...(run.finishedAt
+        ? { finishedAt: new Date(Date.now() - 10 * 60_000) }
+        : {}),
+    });
 }
 const afterOf = (instruction: string | undefined) =>
   Number(instruction?.match(/\(Unix time (\d+)\)/)?.[1] ?? Number.NaN);
@@ -666,10 +666,7 @@ describe("a check-in", () => {
     expect(await outboxOf()).toEqual([]);
     expect(await slotOf()).toBeNull();
     // Due again an interval later, not sooner.
-    const [after] = await database
-      .select()
-      .from(proactiveSettings)
-      .where(eq(proactiveSettings.id, inbox.id));
+    const after = await settingNow(inbox);
     expect(after?.nextRunAt.getTime()).toBeGreaterThan(
       Date.now() + 55 * 60_000,
     );
@@ -801,9 +798,7 @@ describe("the gates, before any model call", () => {
   });
 
   test("a Bot the person paused is never claimed, and a Run now is skipped as paused", async () => {
-    await database
-      .insert(botLifecycle)
-      .values({ ownerUserId: owner, agentId: inboxBot, pausedAt: new Date() });
+    await setBotPreference(owner, inboxBot, { pausedAt: new Date() });
     await due(inbox);
     const { engine, requests } = replica();
     await engine.sweep();
@@ -904,12 +899,20 @@ describe("the gates, before any model call", () => {
 
   test("a check-in already running is skipped as busy, and one a stopped replica left running is closed after its lease", async () => {
     const stuck = randomUUID();
-    await database.insert(proactiveRuns).values({
+    await testScheduleClient().create("check-in-runs", {
       id: stuck,
       settingId: inbox.id,
       ownerUserId: owner,
       agentId: inboxBot,
+      threadId: null,
       trigger: "schedule",
+      outcome: "running",
+      skipReason: null,
+      itemsRaised: 0,
+      reads: 0,
+      error: null,
+      startedAt: new Date(),
+      finishedAt: null,
     });
     await due(inbox);
     const busy = replica();
@@ -920,10 +923,7 @@ describe("the gates, before any model call", () => {
     ).toContainEqual(["skipped", "busy"]);
 
     // Eleven minutes on, the replica that started it is plainly gone.
-    await database
-      .update(proactiveRuns)
-      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
-      .where(eq(proactiveRuns.id, stuck));
+    await rewriteRun(stuck, { startedAt: new Date(Date.now() - 11 * 60_000) });
     await due(inbox);
     const next = replica();
     await next.engine.sweep();
@@ -963,16 +963,9 @@ describe("the gates, before any model call", () => {
         outcome: "failed",
         error: STOPPED_BEFORE_FINISHING,
       });
-      const [setting] = await database
-        .select()
-        .from(proactiveSettings)
-        .where(eq(proactiveSettings.id, inbox.id));
-      expect(setting?.lastStatus).toBe("error");
+      expect((await settingNow(inbox))?.lastStatus).toBe("error");
       // Not "This Bot is checking in now": Run now is free to ask for the next one.
-      await database
-        .update(proactiveRuns)
-        .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
-        .where(eq(proactiveRuns.settingId, inbox.id));
+      await elevenMinutesAgo(inbox);
       expect(await broken.engine.runNow(owner, inbox.id)).toEqual({
         queued: true,
       });
@@ -1271,13 +1264,12 @@ describe("what a check-in may raise", () => {
     await openItem(inbox, "Answer the supplier", {
       sourceLink: "https://Mail.example.test/m/7/",
     });
-    await database.insert(botTasks).values({
-      id: randomUUID(),
-      ownerUserId: owner,
+    await seedChannel(owner, [inboxBot], { id: taskChannel });
+    await seedTask({
+      userId: owner,
       agentId: inboxBot,
-      channelId: taskChannel,
+      conversationId: taskChannel,
       title: "Book the kiln technician",
-      origin: "check_in",
     });
     await hiddenDaysAgo(inbox, "Renew the market stall", 29);
     await hiddenDaysAgo(inbox, "Order more clay", 31);
@@ -1558,10 +1550,7 @@ describe("the ping", () => {
       ),
     };
     const model: Model = async (input, afterTools) => {
-      const [run] = await database
-        .select({ agentId: proactiveRuns.agentId })
-        .from(proactiveRuns)
-        .where(eq(proactiveRuns.id, input.runId));
+      const run = await testScheduleClient().get("check-in-runs", input.runId);
       return (byBot[run?.agentId ?? ""] ?? quiet)(input, afterTools);
     };
     const first = replica({ model });
@@ -1638,10 +1627,9 @@ describe("the ping", () => {
     await replica().engine.sweep();
     expect(await outboxOf()).toEqual([]);
 
-    await database
-      .update(proactivePings)
-      .set({ createdAt: new Date(Date.now() - 2 * 60_000) })
-      .where(eq(proactivePings.id, ping?.pingId as string));
+    await rewritePing(ping?.pingId as string, {
+      createdAt: new Date(Date.now() - 2 * 60_000),
+    });
     await replica().engine.sweep();
     expect(await outboxOf()).toHaveLength(1);
     expect((await pingsOf())[0]?.offeredAt).toBeInstanceOf(Date);
@@ -1649,10 +1637,9 @@ describe("the ping", () => {
     expect(await outboxOf()).toHaveLength(1);
 
     // Offered again all the same (a replica that stopped after delivery, before marking it): still one send.
-    await database
-      .update(proactivePings)
-      .set({ offeredAt: null })
-      .where(eq(proactivePings.id, ping?.pingId as string));
+    await changeHistory("check-in-pings", ping?.pingId as string, {
+      offeredAt: null,
+    });
     await replica().engine.sweep();
     expect(await outboxOf()).toHaveLength(1);
     expect(await pingsOf()).toHaveLength(1);
@@ -1683,9 +1670,7 @@ describe("the ping", () => {
   });
 
   test("a Bot set to notify nothing never holds the slot: its items stay listed and are never pinged", async () => {
-    await database
-      .insert(botLifecycle)
-      .values({ ownerUserId: owner, agentId: inboxBot, notify: "none" });
+    await setBotPreference(owner, inboxBot, { notify: "none" });
     await openItem(inbox, "Reply to Dana");
     await replica().engine.sweep();
     expect(await pingsOf()).toEqual([]);
@@ -1941,12 +1926,7 @@ describe("changing a Bot's check-ins", () => {
 
   test("turning check-ins on for a Bot schedules its first check-in an interval out", async () => {
     const third = `check-in-third-${suite}`;
-    await database.insert(agents).values({
-      id: third,
-      name: "Third Bot",
-      type: "built_in",
-      configuration: {},
-    });
+    await seedBot({ id: third, name: "Third Bot", type: "built_in" });
     try {
       const created = await app().request("http://t/api/proactive/settings", {
         method: "POST",
@@ -1966,7 +1946,7 @@ describe("changing a Bot's check-ins", () => {
       expect(out).toBeGreaterThan(239);
       expect(out).toBeLessThanOrEqual(240);
     } finally {
-      await database.delete(agents).where(eq(agents.id, third));
+      await removeBots([third]);
     }
   });
 });
@@ -2112,10 +2092,7 @@ describe("what a check-in costs and how it is asked", () => {
     expect(asked).toContain("You can only read in this run.");
     expect(asked).toContain("naming the tool you read the evidence with");
 
-    await database
-      .update(proactiveRuns)
-      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
-      .where(eq(proactiveRuns.settingId, inbox.id));
+    await elevenMinutesAgo(inbox);
     const pressed = replica();
     await pressed.engine.runNow(owner, inbox.id);
     await pressed.engine.sweep();
@@ -2132,8 +2109,12 @@ describe("what a check-in costs and how it is asked", () => {
       builtInModel: "openai/gpt-check-in",
       env: {},
     });
-    const usage = () =>
-      database.select().from(modelUsage).where(eq(modelUsage.userId, owner));
+    // The owner's usage, across the Bots this suite made for them. Model usage lives in Intelligence,
+    // shared by every run and append-only, so it is read by this suite's own Bots and never deleted.
+    const usage = async () =>
+      (await Promise.all([inboxBot, calendarBot].map(modelUsageRows)))
+        .flat()
+        .filter((row) => row.userId === owner);
     try {
       await due(inbox);
       const nothing = replica({ readableApps: async () => [] });
@@ -2157,7 +2138,6 @@ describe("what a check-in costs and how it is asked", () => {
         },
       ]);
     } finally {
-      await database.delete(modelUsage).where(eq(modelUsage.userId, owner));
       await controls.stop();
     }
   });

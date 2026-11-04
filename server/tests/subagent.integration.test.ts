@@ -30,19 +30,13 @@ import { createAuditStore, PERSON_INITIATOR } from "../src/audit";
 import { type RegisteredAgent, registeredAgentFromRow } from "../src/copilot";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  agents,
-  approvalPreferences,
-  approvalRequests,
-  mcpServers,
-  mcpTools,
-  pluginGrants,
-  users,
-  workItems,
-} from "../src/db/schema";
+import { approvalRequests, mcpTools, users, workItems } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
+import { changeAccess, removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPolicy } from "./support/policy";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 /*
  * A Bot giving part of its work to a subagent, through the real path a person's chat turn takes: real
@@ -201,11 +195,13 @@ let environmentBefore: Record<string, string | undefined> = {};
 
 const approvalStore = createApprovalStore(database);
 const approvalService = createApprovalService(approvalStore);
+// Apps and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   approvalGate: approvalService.gate,
@@ -360,6 +356,7 @@ function saying(body: AgUiRequest, words: string) {
  * ---------------------------------------------------------------------------------------------- */
 
 beforeAll(async () => {
+  await useTestPolicy();
   llm.on({ predicate: () => true }, async (request) => {
     requests.push(request);
     return script(request);
@@ -466,10 +463,13 @@ beforeAll(async () => {
   await database
     .insert(users)
     .values({ id: person, email: `${person}@example.test`, name: "Dana" });
-  await database
-    .insert(agents)
-    .values({ id: botId, name: "Notes", type: "built_in", configuration: {} });
-  await database.insert(mcpServers).values({
+  await seedBot({
+    id: botId,
+    name: "Notes",
+    type: "built_in",
+    configuration: { systemPrompt: ROLE },
+  });
+  await seedServer({
     id: SERVER,
     title: "Notes",
     vendor: "Notes",
@@ -513,11 +513,15 @@ beforeAll(async () => {
       destructive: true,
     },
   ]);
-  await database.insert(pluginGrants).values(
+  await changeAccess(
     [SEARCH, POST].map((tool) => ({
+      op: "grant" as const,
+      botId,
       kind: "mcp" as const,
       ref: `${SERVER}/${tool}`,
-      agentId: botId,
+      grantedBy: null,
+      grantedAs: "admin" as const,
+      ifGranted: "replace" as const,
     })),
   );
   roster.set(botId, {
@@ -548,9 +552,12 @@ beforeEach(async () => {
   searching.most = 0;
   searching.until = 1;
   script = () => ({ content: "Done." });
-  await database
-    .delete(approvalPreferences)
-    .where(eq(approvalPreferences.ownerUserId, person));
+  // This person's approval preferences back to the defaults, as never having saved any.
+  await (await useTestPolicy()).client.deleteApprovalPreferences(
+    person,
+    `test-reset:${randomUUID()}`,
+  );
+  await (await useTestPolicy()).resync();
 });
 
 afterAll(async () => {
@@ -580,10 +587,10 @@ afterAll(async () => {
         ),
       ),
     );
-  await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
+  // The Bot's grants go with it below: purging a Bot takes its access with it, in Intelligence.
   await database.delete(mcpTools).where(eq(mcpTools.serverId, SERVER));
-  await database.delete(mcpServers).where(eq(mcpServers.id, SERVER));
-  await database.delete(agents).where(eq(agents.id, botId));
+  await removeServers([SERVER]);
+  await removeBots([botId]);
   await database.delete(users).where(eq(users.id, person));
   await database.$client.close();
 });

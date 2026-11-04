@@ -3,21 +3,15 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  channelAgents,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  routines,
-  users,
-} from "../src/db/schema";
+import { users } from "../src/db/schema";
 import {
   createRoutineStore,
   RoutineNotFoundError,
   RoutineRefusedError,
 } from "../src/routines/store";
+import { removeBots, seedBot } from "./support/bots";
+import { purgeConversations, seedConversation } from "./support/conversations";
+import { purgeRoutinesOwnedBy } from "./support/schedules";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const databaseUrl = testDatabaseUrl();
@@ -33,23 +27,14 @@ const createdChannelIds: string[] = [];
 const DAILY = "0 9 * * *";
 
 afterEach(async () => {
-  // Routines cascade from both the owner and the agent, but they are cleared first so a failure
-  // part-way through cleanup leaves nothing pointing at rows this file is about to delete.
+  // Routines go with their owner (a cascade) and with their Bot when it is purged, but they are
+  // cleared first so a failure part-way through cleanup leaves nothing pointing at rows this file
+  // is about to delete.
   for (const userId of createdUserIds) {
-    await database.delete(routines).where(eq(routines.ownerUserId, userId));
+    await purgeRoutinesOwnedBy(userId);
   }
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
-  for (const agentId of createdAgentIds.splice(0)) {
-    await database
-      .delete(agentProfiles)
-      .where(eq(agentProfiles.agentId, agentId));
-    await database.delete(agents).where(eq(agents.id, agentId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
+  await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
@@ -70,28 +55,30 @@ async function createUser(): Promise<AgentActor> {
   return { id, role: "user" };
 }
 
-// Seeded directly: the Bot and channel stores read tables other lanes are still migrating, and
-// this suite only needs the rows the routine store's own channel check joins on.
-async function createAgent(_owner: AgentActor) {
+// The channel is seeded directly: this suite only needs what the routine store's own channel check
+// reads, a live conversation with the owner as a member and the Bot in it.
+async function createAgent(owner: AgentActor) {
   const id = `${testPrefix}-agent-${randomUUID()}`;
-  await database
-    .insert(agents)
-    .values({ id, name: "Run Now Bot", type: "built_in", configuration: {} });
   createdAgentIds.push(id);
+  await seedBot({
+    id,
+    name: "Run Now Bot",
+    type: "built_in",
+    ownerUserId: owner.id,
+  });
   return id;
 }
 
 async function createChannel(owner: AgentActor, agentIds: string[]) {
   const id = `${testPrefix}-channel-${randomUUID()}`;
-  await database
-    .insert(channels)
-    .values({ id, name: "Run now", description: "" });
-  await database
-    .insert(channelMemberships)
-    .values({ channelId: id, userId: owner.id });
-  for (const agentId of agentIds)
-    await database.insert(channelAgents).values({ channelId: id, agentId });
   createdChannelIds.push(id);
+  await seedConversation({
+    id,
+    name: "Run now",
+    description: "",
+    agentIds,
+    members: [{ userId: owner.id, threadId: null }],
+  });
   return { id };
 }
 

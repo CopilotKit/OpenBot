@@ -2,10 +2,9 @@ import { createHash } from "node:crypto";
 import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type { LearningSettings } from "@openbot/shared/learning";
 import type { LearningSpaceState } from "@openbot/shared/recorder-api";
-import { eq } from "drizzle-orm";
-import type { Database } from "../db/client";
-import { learningPersonSpaces } from "../db/schema/learning";
+import type { LearningChanges } from "./changes";
 import type { LearningContainerSpec } from "./ensure-container";
+import type { LearningIntelligence } from "./intelligence";
 
 /**
  * A person's own Learning space: one Intelligence Learning container per OpenBot person, which every recording they make
@@ -58,28 +57,65 @@ function errorCode(error: unknown): string {
   return typeof code === "string" ? code : "";
 }
 
-/** The rows that remember which people's spaces OpenBot has seen exist. */
-export function createPersonSpaceStore(database: Database) {
+/**
+ * Which people's spaces OpenBot has seen exist: Intelligence's confirm record for each (it holds the space's container
+ * and its sharing choice, learning/intelligence.ts), and, in front of it, the people this instance already confirmed or
+ * read as confirmed, so a space seen once is not confirmed again on every capture pass and popup. An announcement that
+ * a person's space changed on another instance drops them from that memory, and the next question reads Intelligence.
+ */
+export function createPersonSpaceStore(
+  intelligence: Pick<
+    LearningIntelligence,
+    "personalSpace" | "confirmPersonalSpace" | "forgetPersonalSpace"
+  >,
+  changes?: LearningChanges,
+) {
+  const seen = new Set<string>();
+  /*
+   * Forgets started per person and how many are still out. A read or confirm that ran while a forget was out proves
+   * nothing about where Intelligence ended (the forget may land after it), so it is not remembered as seen, and the
+   * next confirm writes.
+   */
+  const forgets = new Map<string, { started: number; out: number }>();
+  const settledSince = (userId: string) => {
+    const now = forgets.get(userId);
+    const started = now?.started ?? 0;
+    const clear = (now?.out ?? 0) === 0;
+    return () => clear && (forgets.get(userId)?.started ?? 0) === started;
+  };
+  changes?.listen({
+    onChange: (change) => {
+      if (change.entity === "personal_space") seen.delete(change.appUserId);
+    },
+    onJoined: () => seen.clear(),
+  });
   return {
     async confirmed(userId: string): Promise<boolean> {
-      const [row] = await database
-        .select({ userId: learningPersonSpaces.userId })
-        .from(learningPersonSpaces)
-        .where(eq(learningPersonSpaces.userId, userId))
-        .limit(1);
-      return row !== undefined;
+      if (seen.has(userId)) return true;
+      const settled = settledSince(userId);
+      const space = await intelligence.personalSpace(userId);
+      if (space.learningContainerId === null) return false;
+      if (settled()) seen.add(userId);
+      return true;
     },
     /** Idempotent, so replicas confirming the same space at once all succeed. */
     async confirm(userId: string, containerId: string): Promise<void> {
-      await database
-        .insert(learningPersonSpaces)
-        .values({ userId, containerId })
-        .onConflictDoNothing();
+      if (seen.has(userId)) return;
+      const settled = settledSince(userId);
+      await intelligence.confirmPersonalSpace(userId, containerId);
+      if (settled()) seen.add(userId);
     },
     async forget(userId: string): Promise<void> {
-      await database
-        .delete(learningPersonSpaces)
-        .where(eq(learningPersonSpaces.userId, userId));
+      const forget = forgets.get(userId) ?? { started: 0, out: 0 };
+      forgets.set(userId, forget);
+      forget.started += 1;
+      forget.out += 1;
+      seen.delete(userId);
+      try {
+        await intelligence.forgetPersonalSpace(userId);
+      } finally {
+        forget.out -= 1;
+      }
     },
   };
 }
@@ -156,6 +192,8 @@ export function createPersonalLearningSpaces(deps: {
   >();
   const creating = new Map<string, Promise<boolean>>();
   const retryAt = new Map<string, number>();
+  /** When a space made on this replica stops being taken as made without asking: the probe cache's lifetime. */
+  const madeUntil = new Map<string, number>();
 
   const probe = async (
     containerId: string,
@@ -190,6 +228,23 @@ export function createPersonalLearningSpaces(deps: {
   const create = (userId: string, containerId: string): Promise<boolean> => {
     const running = creating.get(userId);
     if (running) return running;
+    /*
+     * Made on this replica a moment ago. A caller whose read started before then still saw it missing and has just
+     * forgotten it, so it is confirmed again, not made twice: with the record in Intelligence that forget is a round
+     * trip, long enough for the attempt it raced to finish.
+     */
+    if ((madeUntil.get(userId) ?? 0) > now()) {
+      return deps.store.confirm(userId, containerId).then(
+        () => {
+          probes.set(containerId, {
+            expiresAt: now() + CACHE_MS,
+            state: "assigned",
+          });
+          return true;
+        },
+        () => false,
+      );
+    }
     const create = deps.create;
     if (!create || (retryAt.get(userId) ?? 0) > now()) {
       return Promise.resolve(false);
@@ -213,6 +268,7 @@ export function createPersonalLearningSpaces(deps: {
           expiresAt: now() + CACHE_MS,
           state: "assigned",
         });
+        madeUntil.set(userId, now() + CACHE_MS);
         retryAt.delete(userId);
         log({
           type: "learning-personal-space",
@@ -289,4 +345,21 @@ export function createPersonalLearningSpaces(deps: {
       void state(userId).catch(() => {});
     },
   };
+}
+
+/**
+ * Remove a person's Learning records in Intelligence when OpenBot removes the person for good: their space record and
+ * sharing choice (the old tables' foreign keys took these with the person) and the containers their threads were given.
+ * The containers and Skills stay in Learning, and their Recorder trajectories stay theirs: Intelligence's capture data,
+ * which no other person may record into.
+ */
+export async function removePersonLearning(
+  intelligence: Pick<
+    LearningIntelligence,
+    "purgePersonalSpace" | "deleteThreadAssignments"
+  >,
+  userId: string,
+): Promise<void> {
+  await intelligence.purgePersonalSpace(userId);
+  await intelligence.deleteThreadAssignments(userId);
 }

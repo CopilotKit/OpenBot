@@ -1,32 +1,27 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  pluginGrants,
-  skills,
-  users,
-} from "../src/db/schema";
+import { users } from "../src/db/schema";
 import { createPluginRoutes } from "../src/plugins/routes";
-import { createPluginStore } from "../src/plugins/store";
+import { createPluginStore, type PluginStore } from "../src/plugins/store";
+import {
+  removeBots,
+  seedBot,
+  storedAccess,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: { readSecret: async () => null },
-  encryptionKey: "x".repeat(44),
-  policy: () => policy,
-});
+let store: PluginStore;
 
 const suite = randomUUID().slice(0, 8);
 const alice = `user_alice_${suite}`;
@@ -41,6 +36,14 @@ const botlessSlug = `botless-${suite}`;
 const missingBot = `agent_missing_${suite}`;
 
 beforeAll(async () => {
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => policy,
+  });
   for (const id of [alice, bob]) {
     await database
       .insert(users)
@@ -51,39 +54,31 @@ beforeAll(async () => {
     [aliceBot, alice],
     [sharedBot, null],
   ] as const) {
-    await database
-      .insert(agents)
-      .values({ id, name: id, type: "remote_ag_ui", configuration: {} })
-      .onConflictDoNothing();
-    await database
-      .insert(agentProfiles)
-      .values({
-        agentId: id,
-        ownerUserId: owner,
-        title: id,
-        roleDescription: "For a test.",
-        avatarSeed: id,
-        visibility: "private",
-      })
-      .onConflictDoNothing();
+    await seedBot({
+      id,
+      name: id,
+      ownerUserId: owner,
+      title: id,
+      roleDescription: "For a test.",
+      avatarSeed: id,
+      visibility: "private",
+    });
   }
 });
 
 afterAll(async () => {
-  await database
-    .delete(skills)
-    .where(
-      inArray(skills.slug, [
-        personalSlug,
-        keptSlug,
-        deploymentSlug,
-        unwrittenSlug,
-        botlessSlug,
-      ]),
-    );
-  await database
-    .delete(agents)
-    .where(inArray(agents.id, [aliceBot, sharedBot]));
+  const configuration = await useTestConfiguration();
+  for (const slug of [
+    personalSlug,
+    keptSlug,
+    deploymentSlug,
+    unwrittenSlug,
+    botlessSlug,
+  ]) {
+    await configuration.client.skills.remove(slug, `test:${randomUUID()}`);
+    configuration.skills.forget(slug);
+  }
+  await removeBots([aliceBot, sharedBot]);
   await database.delete(users).where(inArray(users.id, [alice, bob]));
 });
 
@@ -208,9 +203,9 @@ describe("a skill name written again after the skill was uninstalled", () => {
 
   /*
    * The other half of a grant that could never do anything: the skill is there and the Bot is not.
-   * `plugin_grants.agent_id` is a foreign key, so an administrator's grant for a mistyped Bot id used
-   * to fail at the insert and answer 500 with no body. It is a refusal with a sentence now, and
-   * nothing is stored.
+   * `plugin_grants.agent_id` names a Bot by id alone, since Bots live in Intelligence, so nothing in
+   * the database stops a grant for a mistyped Bot id: the route asks Intelligence whether the Bot
+   * exists, refuses with a sentence when it does not, and stores nothing.
    */
   test("a skill cannot be granted to a Bot nobody has", async () => {
     expect(
@@ -222,24 +217,15 @@ describe("a skill name written again after the skill was uninstalled", () => {
 
     expect(refused.status).toBe(403);
     expect(await refused.json()).toEqual({ error: "There is no such Bot." });
-    expect(
-      await database
-        .select({ ref: pluginGrants.ref })
-        .from(pluginGrants)
-        .where(eq(pluginGrants.agentId, missingBot)),
-    ).toEqual([]);
+    // Nothing stored for it in Intelligence either.
+    expect((await storedAccess(missingBot)).grants).toEqual([]);
   });
 
   test("uninstalling removes that skill's grants and no other", async () => {
-    const held = await database
-      .select({ ref: pluginGrants.ref, agentId: pluginGrants.agentId })
-      .from(pluginGrants)
-      .where(
-        and(
-          eq(pluginGrants.kind, "skill"),
-          inArray(pluginGrants.agentId, [aliceBot, sharedBot]),
-        ),
-      );
+    const held = [];
+    for (const agentId of [aliceBot, sharedBot])
+      for (const grant of (await storedAccess(agentId)).grants)
+        if (grant.kind === "skill") held.push({ ref: grant.ref, agentId });
 
     expect(held).toEqual([{ ref: keptSlug, agentId: aliceBot }]);
   });

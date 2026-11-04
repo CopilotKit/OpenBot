@@ -9,7 +9,6 @@ import {
 } from "@ag-ui/client";
 import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
-import { inArray } from "drizzle-orm";
 import { Observable } from "rxjs";
 import { GALLERY } from "../../app/src/components/gallery/charts";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
@@ -23,7 +22,7 @@ import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
-import { agents, componentExclusions, components } from "../src/db/schema";
+import { removeBots, removeTestComponents, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -50,11 +49,7 @@ const chartArgs = {
 };
 
 beforeAll(async () => {
-  for (const id of [allowedBot, deniedBot])
-    await database
-      .insert(agents)
-      .values({ id, name: id, type: "remote_ag_ui", configuration: {} })
-      .onConflictDoNothing();
+  for (const id of [allowedBot, deniedBot]) await seedBot({ id, name: id });
   // What the browser announces on first load, so the rows are the build's own declarations.
   ({ added: addedComponents } = await store.syncCatalogue(
     GALLERY.map(({ name, title, kind, description }) => ({
@@ -73,16 +68,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database
-    .delete(componentExclusions)
-    .where(inArray(componentExclusions.agentId, [allowedBot, deniedBot]));
-  if (addedComponents.length > 0)
-    await database
-      .delete(components)
-      .where(inArray(components.name, addedComponents));
-  await database
-    .delete(agents)
-    .where(inArray(agents.id, [allowedBot, deniedBot]));
+  // Purging the Bots takes their withholdings with them, in Intelligence.
+  await removeBots([allowedBot, deniedBot]);
+  if (addedComponents.length > 0) await removeTestComponents(addedComponents);
 });
 
 function lifecycle(input: RunAgentInput, body: BaseEvent[]): BaseEvent[] {

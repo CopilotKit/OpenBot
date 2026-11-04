@@ -5,16 +5,19 @@ import { createOrganizationAuth } from "../src/auth/organization";
 import { organizationUserStore } from "../src/auth/organization-store";
 import { setRole } from "../src/auth/roles";
 import { createDatabase } from "../src/db/client";
+import { userRoles, users } from "../src/db/schema";
 import {
-  channelMemberships,
-  channels,
-  userInstructions,
-  userRoles,
-  users,
-} from "../src/db/schema";
+  purgeConversations,
+  seedConversation,
+  storedConversation,
+} from "./support/conversations";
+import { changePreferences, storedPreferences } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPeople } from "./support/directory";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// People live in Intelligence's organization directory; these rows are its projection.
+const directory = useTestPeople();
 afterAll(async () => {
   await database.$client.close();
 });
@@ -47,18 +50,17 @@ test("verified employee keeps the same-email local account and history identity 
       onboardingCompletedAt: new Date(),
     });
     await setRole(database, localId, "admin");
-    await database
-      .insert(userInstructions)
-      .values({ userId: localId, instructions: history });
-    await database.insert(channels).values({
+    await changePreferences(localId, [
+      { op: "setInstructions", instructions: history },
+    ]);
+    // The person's history: a conversation in Intelligence, held under their local id.
+    await seedConversation({
       id: channelId,
       name: "Existing conversation",
       description: "Preserved",
       lastMessage: "Existing graphical Bot result",
+      members: [{ userId: localId, threadId: null }],
     });
-    await database
-      .insert(channelMemberships)
-      .values({ channelId, userId: localId });
     const auth = createOrganizationAuth({
       authorityUrl: authority.url.origin,
       materializeUser: organizationUserStore(database),
@@ -81,45 +83,33 @@ test("verified employee keeps the same-email local account and history identity 
     expect(
       await database.select().from(users).where(eq(users.id, authorityId)),
     ).toHaveLength(0);
-    const [instructions] = await database
-      .select()
-      .from(userInstructions)
-      .where(eq(userInstructions.userId, localId));
-    expect(instructions?.instructions).toBe(history);
+    expect((await storedPreferences(localId)).instructions).toBe(history);
     const [saved] = await database
       .select()
       .from(users)
       .where(eq(users.id, localId));
-    expect(
-      (
-        await database
-          .select()
-          .from(channelMemberships)
-          .where(eq(channelMemberships.channelId, channelId))
-      )[0]?.userId,
-    ).toBe(localId);
-    expect(
-      (
-        await database.select().from(channels).where(eq(channels.id, channelId))
-      )[0]?.lastMessage,
-    ).toBe("Existing graphical Bot result");
+    const conversation = await storedConversation(channelId);
+    expect(conversation.members[0]?.userId).toBe(localId);
+    expect(conversation.lastMessage).toBe("Existing graphical Bot result");
     expect(saved?.onboardingStep).toBe(4);
     expect(saved?.onboardingCompletedAt).not.toBeNull();
+    // The authority's current role, held by Intelligence's directory and on the row the guard reads;
+    // nothing in the old role set.
+    expect(saved?.role).toBe("user");
+    expect((await directory.client.getPerson(localId))?.role).toBe("user");
     expect(
-      (
-        await database
-          .select()
-          .from(userRoles)
-          .where(eq(userRoles.userId, localId))
-      ).map((row) => row.role),
-    ).toEqual(["user"]);
+      await database
+        .select()
+        .from(userRoles)
+        .where(eq(userRoles.userId, localId)),
+    ).toEqual([]);
     expect(
       (await auth.api.getSession({ headers: new Headers({ cookie }) }))?.user
         .id,
     ).toBe(localId);
   } finally {
     authority.stop(true);
-    await database.delete(channels).where(eq(channels.id, channelId));
+    await purgeConversations([channelId]);
     await database.delete(users).where(eq(users.id, localId));
     await database.delete(users).where(eq(users.id, authorityId));
   }

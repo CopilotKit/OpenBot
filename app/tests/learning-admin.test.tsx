@@ -168,6 +168,56 @@ test.each([
   },
 );
 
+/*
+ * FOUND IN THE BROWSER: a saved container the Intelligence project didn't have, or Learning off in Intelligence, failed
+ * every person's chat. Chat now goes on without Learning, so this page is where the admin hears about it.
+ */
+test.each([
+  [
+    [{ containerId: "team-shared", problem: "missing" }],
+    'This Intelligence project has no "team-shared" Learning container.',
+  ],
+  [
+    [{ containerId: "team-shared", problem: "learning_off" }],
+    "Learning isn't on for this Intelligence project",
+  ],
+] as const)(
+  "the admin is told when Intelligence won't use the saved container (%#)",
+  async (problems, expected) => {
+    serve({
+      settings: {
+        enabled: true,
+        defaultTarget: { containerId: "team-shared" },
+        agents: {},
+      },
+      automatic: { state: "saved" },
+      problems,
+    });
+    const view = page();
+    const alert = await view.findByText(expected, { exact: false });
+    expect(alert.getAttribute("role")).toBe("alert");
+  },
+);
+
+test("a saved container Intelligence uses shows no problem", async () => {
+  serve({
+    settings: {
+      enabled: true,
+      defaultTarget: { containerId: "support" },
+      agents: {},
+    },
+    automatic: { state: "saved" },
+    problems: [],
+  });
+  const view = page();
+  await view.findByLabelText("Default container ID");
+  await waitFor(() =>
+    expect(view.queryByText("Loading Learning settings…")).toBeNull(),
+  );
+  expect(view.queryByText("Learning container.", { exact: false })).toBeNull();
+  expect(view.queryByText("Learning isn't on", { exact: false })).toBeNull();
+});
+
 test("a deployment that chose its own container hears nothing about automatic assignment", async () => {
   serve({
     settings: {

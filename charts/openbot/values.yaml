@@ -480,6 +480,14 @@ computers:
     # the first browser action. Turn it off only where the CRD arrives after this chart does, such as
     # a GitOps run that applies both together.
     requireController: true
+    # Where this release's computers are created. Empty means the release's own namespace.
+    #
+    # ONE RELEASE PER NAMESPACE. The server lists every Sandbox in it and the culler suspends the
+    # ones its own database has no recent use for, so a release sharing a namespace with another
+    # would suspend the other one's computers; the chart refuses a namespace another release holds.
+    # Several organizations in one cluster give each release its own, such as `<org>-computers`.
+    # Create the namespace before installing: the chart writes into it and never creates or deletes
+    # it, because deleting it would delete every computer in it.
     namespace: ""
     # Pre-warmed sandboxes, so a Bot's first action after lunch does not wait for Chromium to boot.
     #
@@ -719,6 +727,18 @@ networkPolicy:
   # It already reaches HTTP and HTTPS everywhere outside the cluster's private ranges, because that
   # is where Intelligence, sign-in and the Bots are. This is for anything on the private side.
   extraEgress: []
+  # Who may open the API's port: NetworkPolicy peers, such as the namespace your ingress controller
+  # runs in. Empty means any pod in the cluster and any address, which is how this policy has always
+  # behaved. Set it when several organizations share a cluster, or one organization's pods can reach
+  # another's API directly rather than through its address:
+  #
+  #   ingressFrom:
+  #     - namespaceSelector:
+  #         matchLabels:
+  #           kubernetes.io/metadata.name: ingress-nginx
+  #
+  # The routines sweep, which calls the API from inside the release, is let in beside these.
+  ingressFrom: []
   extraIngress: []
   # `computers.mode: sandbox` only. The service range the Kubernetes API server answers on, so the
   # rule that lets the API ask for a Bot's computer can name it.

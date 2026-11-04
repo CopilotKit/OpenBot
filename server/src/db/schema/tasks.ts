@@ -7,12 +7,16 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { agents, channels, users } from "./core";
-import { proactiveSuggestions } from "./proactive";
+import { channels, users } from "./core";
 
 /** How a task began. Only from a check-in's item for now, so the check keeps it to that. */
 export type BotTaskOrigin = "check_in";
 
+/**
+ * MOVED TO INTELLIGENCE: tasks are agent tasks in its conversations capability (tasks/store.ts),
+ * made in one write with their own conversation. Kept for one release with no writes, for the
+ * upgrade copy; then dropped.
+ */
 /**
  * Work a Bot does for a person in a conversation of its own. Written when the person starts an item a
  * check-in raised (`tasks.startFromItem`), read by the task list and the "Needs you" counts.
@@ -23,8 +27,9 @@ export type BotTaskOrigin = "check_in";
  * without it. Only the person's own "done" is stored, as `resolved_at`.
  *
  * `channel_id` is the task's own conversation, made with it, one task per conversation. Starting an
- * item opens one task: the unique index on `suggestion_id` makes a second Start find the first. An
- * item deleted later leaves its task, unlinked.
+ * item opens one task: the unique index on `suggestion_id` makes a second Start find the first. The
+ * item lives in Intelligence, so nothing here follows it: one purged later leaves its task naming an
+ * item that no longer exists, which nothing reads back.
  */
 export const botTasks = pgTable(
   "bot_tasks",
@@ -33,16 +38,12 @@ export const botTasks = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     channelId: text("channel_id")
       .notNull()
       .references(() => channels.id, { onDelete: "cascade" }),
-    suggestionId: text("suggestion_id").references(
-      () => proactiveSuggestions.id,
-      { onDelete: "set null" },
-    ),
+    /** The check-in item it was started from, in Intelligence's check-in suggestions. */
+    suggestionId: text("suggestion_id"),
     title: text("title").notNull(),
     why: text("why"),
     sourceApp: text("source_app"),

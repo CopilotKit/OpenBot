@@ -1,3 +1,8 @@
+import {
+  COPILOTKIT_SIGN_IN_START_PATH,
+  type CopilotKitSignInError,
+  isCopilotKitSignInError,
+} from "@openbot/shared/copilotkit-sign-in";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
@@ -41,8 +46,16 @@ export const Route = createFileRoute("/sign")({
    * gives for `?connected=`: present-but-undefined makes `search` a required prop on every Link to
    * this route, which is a lot of ripple for a parameter only the verifier sets.
    */
-  validateSearch: (search: Record<string, unknown>): { flow_id?: string } =>
-    searchTextEntry("flow_id", search.flow_id),
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { flow_id?: string; error?: CopilotKitSignInError } => ({
+    ...searchTextEntry("flow_id", search.flow_id),
+    /*
+     * Why a sign-in through CopilotKit came back here unfinished. Only a code this screen knows is
+     * kept, and it is shown as this screen's own sentence, so a link cannot put words on the page.
+     */
+    ...(isCopilotKitSignInError(search.error) ? { error: search.error } : {}),
+  }),
   beforeLoad: async ({ context, search }) => {
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
@@ -73,12 +86,29 @@ export const Route = createFileRoute("/sign")({
   component: SignScreen,
 });
 
+/** What each CopilotKit sign-in refusal tells the person, and what they can do next. */
+const COPILOTKIT_SIGN_IN_MESSAGES: Record<CopilotKitSignInError, string> = {
+  copilotkit_other_organization:
+    "This OpenBot belongs to a different CopilotKit organization. Sign in with an account in that organization, or ask its admin to invite you.",
+  copilotkit_not_member:
+    "You're no longer a member of this OpenBot's CopilotKit organization. Ask its admin to invite you again.",
+  copilotkit_expired: "That sign-in didn't finish in time. Sign in again.",
+  copilotkit_removed: "Your access to OpenBot has been removed.",
+  copilotkit_unavailable: "Couldn't reach CopilotKit. Try again in a moment.",
+  copilotkit_failed:
+    "Couldn't sign you in with CopilotKit. Try again, or ask an admin if it keeps happening.",
+};
+
 function SignScreen() {
-  const { flow_id: flowId } = Route.useSearch();
+  const { flow_id: flowId, error: copilotKitError } = Route.useSearch();
   // Which provider is being opened, rather than whether one is: with three buttons, a single
   // boolean would put "Opening…" on all of them.
-  const [opening, setOpening] = useState<AuthProviderId | "sso" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [opening, setOpening] = useState<
+    AuthProviderId | "sso" | "copilotkit" | null
+  >(null);
+  const [error, setError] = useState<string | null>(
+    copilotKitError ? COPILOTKIT_SIGN_IN_MESSAGES[copilotKitError] : null,
+  );
   const { data: options } = useQuery(authProvidersQueryOptions());
   const providers = options?.providers ?? [];
   const [email, setEmail] = useState("");
@@ -129,6 +159,30 @@ function SignScreen() {
       setOpening(null);
     }
   }
+
+  /*
+   * A document navigation, not a fetch: the server answers with a redirect to CopilotKit, which
+   * signs the person in there and sends them back to OpenBot's callback.
+   */
+  function handleCopilotKitSignIn() {
+    setError(null);
+    setOpening("copilotkit");
+    window.location.assign(COPILOTKIT_SIGN_IN_START_PATH);
+  }
+
+  const copilotKitButton = (
+    <Button
+      className="h-10 w-full tracking-tight"
+      disabled={opening !== null}
+      onClick={handleCopilotKitSignIn}
+      size="lg"
+      variant="outline"
+    >
+      {opening === "copilotkit"
+        ? "Opening CopilotKit…"
+        : "Continue with CopilotKit"}
+    </Button>
+  );
 
   const providerButtons = (
     <div className="flex flex-col gap-2">
@@ -203,13 +257,15 @@ function SignScreen() {
           transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
           variants={{ hidden, shown }}
         >
-          {options?.ssoRequired ? (
+          {options?.ssoRequired && !options.copilotKit ? (
             <p className="mb-3 text-center text-sm text-muted-foreground">
               Your organization requires you to sign in with your company
               account.
             </p>
           ) : null}
-          {providers.length > 0 && !options?.ssoRequired ? (
+          {options?.copilotKit ? (
+            copilotKitButton
+          ) : providers.length > 0 && !options?.ssoRequired ? (
             providerButtons
           ) : options?.sso || options?.ssoRequired ? null : (
             <p className="text-center text-sm text-muted-foreground">
@@ -222,7 +278,7 @@ function SignScreen() {
            * Below the buttons, because a deployment with both has more people arriving through the
            * buttons: the registered providers are for the companies whose IdP was added by hand.
            */}
-          {options?.sso ? (
+          {options?.sso && !options.copilotKit ? (
             <form className="mt-3" onSubmit={handleDomainSignIn}>
               {providers.length > 0 ? (
                 <div className="mb-3 flex items-center gap-3">

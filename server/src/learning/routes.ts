@@ -3,6 +3,7 @@ import type {
   LearningAutoAssignState,
   LearningDeliveryStatus,
   LearningOverview,
+  LearningTargetProblem,
 } from "@openbot/shared/learning";
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -21,6 +22,8 @@ export type LearningAdminDependencies = {
   store: LearningSettingsStore;
   autoAssign?: LearningAutoAssign;
   status?: (agentId: string) => Promise<LearningDeliveryStatus>;
+  /** The saved containers Intelligence will not use (learning/runtime.ts `problems`). */
+  problems?: () => Promise<LearningTargetProblem[]>;
   inspect?: (input: {
     agentId?: string;
     runtimeContainerId?: string;
@@ -84,9 +87,21 @@ export function createLearningRoutes(
         }),
       ]).finally(() => clearTimeout(timer));
     }
+    // The containers saved here that Intelligence will not use, under the same bound. Left out when it could not say.
+    let problems: LearningTargetProblem[] | undefined;
+    if (dependencies.problems) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      problems = await Promise.race([
+        dependencies.problems().catch(() => undefined),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), AUTO_ASSIGN_WAIT_MS);
+        }),
+      ]).finally(() => clearTimeout(timer));
+    }
     return context.json({
       settings: await dependencies.store.read(),
       ...(automatic ? { automatic } : {}),
+      ...(problems ? { problems } : {}),
     });
   });
   /** JSON excludes form CSRF; browser requests must also match an explicitly trusted origin. */

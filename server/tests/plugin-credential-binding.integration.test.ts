@@ -7,26 +7,33 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray, like } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
-import { encryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { credentials, mcpServers, mcpTools } from "../src/db/schema";
 import {
   CustomServerRefusedError,
   createPluginStore,
+  type PluginStore,
 } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  purgeSecrets,
+  removeServers,
+  seedCredential,
+  storedSecret,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * Which address a stored credential may be spent against, and whose it has to be.
  *
  * Pointing a server at a credential is the one place this deployment accepts a *reference* to a
  * secret rather than the secret itself. Everywhere else that a stored value is spent, the value was
- * typed into the same request that stores it: `storeAgentAuth` mints its own row from the key an
+ * typed into the same request that stores it: `storeAgentAuth` mints its own secret from the key an
  * administrator pasted and hands back an id nobody chose. So this is the field where "which secret"
  * and "which address" can be made to disagree, and the add is what settles the disagreement, because
- * the refresh runs before it returns and sends what it decrypts to the URL from that same request.
+ * the refresh runs before it returns and sends what it reveals to the URL from that same request.
  *
  * Two rules, and the second is the one that matters. Naming another server's token was accepted, so
  * a credential could be spent by a server it was never given to. And re-adding a server with a
@@ -48,39 +55,12 @@ const OTHER_TOKEN = `sk-other-${tag}`;
 const LEGITIMATE_URL = "https://legit.vendor.example/mcp";
 const CHOSEN_URL = "https://collector.attacker.example/mcp";
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: {
-    readSecret: async (id: string) => {
-      const [row] = await database
-        .select({
-          encryptedValue: credentials.encryptedValue,
-          revokedAt: credentials.revokedAt,
-        })
-        .from(credentials)
-        .where(eq(credentials.id, id));
-      return row ?? null;
-    },
-    create: async () => {
-      throw new Error("this suite does not write credentials");
-    },
-    /**
-     * A real revoke, unlike the other suites here, because the chain below turns on whether removing
-     * a server actually retires its token. Stubbing this to throw would make the test prove nothing
-     * about the case it exists for.
-     */
-    revoke: async (id: string) => {
-      await database
-        .update(credentials)
-        .set({ revokedAt: new Date() })
-        .where(eq(credentials.id, id));
-    },
-  } as never,
-  encryptionKey: KEY,
-  policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
-});
+/**
+ * The real vault, revoke included, because the chain below turns on whether removing a server
+ * actually retires its token. A stand-in would make the test prove nothing about the case it exists
+ * for.
+ */
+let store: PluginStore;
 
 /**
  * What left the deployment, so a refusal can be shown to have stopped the send rather than reported
@@ -91,6 +71,18 @@ let sent: { url: string; authorization: string | null }[] = [];
 const realFetch = globalThis.fetch;
 
 beforeAll(async () => {
+  // Made before `fetch` is replaced below: the vault client keeps the transport it was made with, so
+  // what this suite captures is what left for a vendor, never a call to Intelligence.
+  const directory = await useTestVault();
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(directory),
+    encryptionKey: KEY,
+    policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
+  });
+
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const request =
       input instanceof Request ? input : new Request(input as string, init);
@@ -101,26 +93,21 @@ beforeAll(async () => {
     return new Response("{}", { status: 500 });
   }) as typeof fetch;
 
-  const encrypted = async (value: string) => encryptSecret(KEY, value);
-  await database.insert(credentials).values([
-    {
-      id: ownCredentialId,
-      kind: "mcp",
-      // How `storeMcpToken` records whose token this is: the server it was minted for.
-      provider: serverId,
-      keyId: `mcp-${serverId}`,
-      encryptedValue: await encrypted(OWN_TOKEN),
-      metadata: {},
-    },
-    {
-      id: otherCredentialId,
-      kind: "mcp",
-      provider: otherServerId,
-      keyId: `mcp-${otherServerId}`,
-      encryptedValue: await encrypted(OTHER_TOKEN),
-      metadata: {},
-    },
-  ]);
+  await seedCredential({
+    id: ownCredentialId,
+    kind: "mcp",
+    // How `storeMcpToken` records whose token this is: the server it was minted for.
+    provider: serverId,
+    keyId: `mcp-${serverId}`,
+    plaintext: OWN_TOKEN,
+  });
+  await seedCredential({
+    id: otherCredentialId,
+    kind: "mcp",
+    provider: otherServerId,
+    keyId: `mcp-${otherServerId}`,
+    plaintext: OTHER_TOKEN,
+  });
 });
 
 afterEach(() => {
@@ -129,19 +116,12 @@ afterEach(() => {
 
 afterAll(async () => {
   globalThis.fetch = realFetch;
-  await database.delete(mcpTools).where(like(mcpTools.serverId, `binding-%`));
-  await database.delete(mcpServers).where(like(mcpServers.id, `binding-%`));
-  await database
-    .delete(credentials)
-    .where(inArray(credentials.id, [ownCredentialId, otherCredentialId]));
+  await removeServers([serverId, otherServerId, `binding-open-${tag}`]);
+  await purgeSecrets([ownCredentialId, otherCredentialId]);
 });
 
 async function storedUrl(id: string) {
-  const [row] = await database
-    .select({ url: mcpServers.url })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, id));
-  return row?.url ?? null;
+  return (await storedServer(id))?.url ?? null;
 }
 
 describe("a credential is spent only by the server it belongs to", () => {
@@ -241,8 +221,8 @@ describe("a credential is spent only at the address it was given", () => {
  *
  * Three ordinary administrative acts in a row, none of them suspicious on its own. This is the shape
  * that makes "a credential belongs to its server" and "a server keeps its address" both true and
- * still not enough: the address rule only fires when a row is already here, so anything that gets
- * the row out of the way while the token stays live reopens the same door.
+ * still not enough: the address rule only fires when the app is already here, so anything that gets
+ * the app out of the way while the token stays live reopens the same door.
  */
 describe("a token does not outlive the server it was given to", () => {
   const holderId = `binding-holder-${tag}`;
@@ -250,24 +230,18 @@ describe("a token does not outlive the server it was given to", () => {
   const HOLDER_TOKEN = `sk-holder-${tag}`;
 
   beforeAll(async () => {
-    await database.insert(credentials).values({
+    await seedCredential({
       id: holderCredentialId,
       kind: "mcp",
       provider: holderId,
       keyId: `mcp-${holderId}`,
-      encryptedValue: await encryptSecret(KEY, HOLDER_TOKEN),
-      metadata: {},
+      plaintext: HOLDER_TOKEN,
     });
   });
 
   afterAll(async () => {
-    // The server row first: it holds a foreign key onto the credential, so the other order is
-    // refused by the database rather than by anything this suite is testing.
-    await database.delete(mcpTools).where(eq(mcpTools.serverId, holderId));
-    await database.delete(mcpServers).where(eq(mcpServers.id, holderId));
-    await database
-      .delete(credentials)
-      .where(eq(credentials.id, holderCredentialId));
+    await removeServers([holderId]);
+    await purgeSecrets([holderCredentialId]);
   });
 
   test("re-adding without a token keeps the one the server already holds", async () => {
@@ -288,21 +262,15 @@ describe("a token does not outlive the server it was given to", () => {
       by: "admin@example.com",
     });
 
-    const [row] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, holderId));
-    expect(row?.credentialId).toBe(holderCredentialId);
+    expect((await storedServer(holderId))?.credentialId).toBe(
+      holderCredentialId,
+    );
   });
 
   test("removing the server retires its token", async () => {
     await store.removeServer(holderId, "admin@example.com");
 
-    const [row] = await database
-      .select({ revokedAt: credentials.revokedAt })
-      .from(credentials)
-      .where(eq(credentials.id, holderCredentialId));
-    expect(row?.revokedAt).not.toBeNull();
+    expect((await storedSecret(holderCredentialId))?.revokedAt).not.toBeNull();
   });
 
   test("a retired token cannot be attached to a server again", async () => {

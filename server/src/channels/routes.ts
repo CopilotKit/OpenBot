@@ -1,18 +1,8 @@
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  exists,
-  inArray,
-  isNull,
-  lt,
-  ne,
-  or,
-  sql,
-} from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { bots } from "../agents/bot-registry/directory";
+import type { Bot } from "../agents/bot-registry/types";
 import {
   AgentNotFoundError,
   type AgentProfileStore,
@@ -20,15 +10,20 @@ import {
 import type { AgentActor, AgentProfile } from "../agents/profile-types";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
-import type { Database } from "../db/client";
 import {
-  agentProfiles,
-  botTasks,
-  channelAgents,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-} from "../db/schema";
+  ConversationAgentMissingError,
+  ConversationMissingError,
+  ConversationVersionConflictError,
+} from "../conversations/client";
+import { conversations } from "../conversations/directory";
+import { IntelligenceApiError, writeKey } from "../conversations/http";
+import {
+  type Conversation,
+  type ConversationDraft,
+  isMember,
+  ownThread,
+} from "../conversations/types";
+import type { Database } from "../db/client";
 import { parsePageLimit } from "../paging";
 import {
   CHANNEL_ACTIVITY_TOPIC,
@@ -105,87 +100,15 @@ const DEFAULT_CHANNEL_PAGE = 50;
 /** The most a caller may ask for, so the endpoint cannot be talked back into reading everything. */
 const MAX_CHANNEL_PAGE = 200;
 
-/**
- * Where a page stopped: every part of the sort, in sort order.
- *
- * `pinned` leads, because the ordering does: a keyset cursor has to name the whole sort key or the
- * next page is selected by a different rule than the page it follows, which serves some channels
- * twice and others never. `recency` and `id` are both here for the same reason — two channels can
- * share a timestamp.
- */
-type ChannelCursor = { pinned: boolean; recency: string; id: string };
-
-/** The shape the encoder writes: UTC, to the millisecond (older cursors) or the microsecond. */
-const CURSOR_RECENCY = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
-
-export function encodeChannelCursor(cursor: ChannelCursor): string {
-  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
-}
-
-/**
- * A malformed cursor reads as the first page, which is the honest answer to a stale link.
- *
- * A cursor minted before `pinned` existed is malformed by this definition, and deliberately: it
- * describes a position in an ordering this query no longer has.
- *
- * `recency` has to be the timestamp the encoder writes, not merely a string: it is cast with
- * `::timestamptz` in the page query, so any other string used to reach PostgreSQL and answer 500.
- */
-export function decodeChannelCursor(
-  value: string | undefined,
-): ChannelCursor | undefined {
-  if (!value) return undefined;
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(value, "base64url").toString("utf8"),
-    ) as ChannelCursor;
-    return typeof parsed?.id === "string" &&
-      typeof parsed?.recency === "string" &&
-      CURSOR_RECENCY.test(parsed.recency) &&
-      !Number.isNaN(Date.parse(parsed.recency)) &&
-      typeof parsed?.pinned === "boolean"
-      ? parsed
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * The roster's sort key, as SQL, in the order it sorts.
- *
- * Every part descends, which is what lets the cursor be one row comparison rather than a nest of
- * ORs: a pin is 1 and no pin is 0, so `desc` puts pinned channels first, and both remaining parts
- * already wanted `desc`. Starting a conversation counts as activity — a channel somebody just made
- * has nothing said in it yet and is the one they are about to type in, so ordering on the message
- * alone would bury it under every channel that has one.
- *
- * The browser repeats the recency half when the socket patches a row, and lifts pinned rows at
- * render; both must agree with this, or the list reorders itself on the next event. See `byRecency`
- * in use-channel-events.ts and `pinnedFirst` in app-sidebar.tsx.
- */
-const PINNED_RANK = sql`case when ${channelMemberships.pinnedAt} is not null then 1 else 0 end`;
-const RECENCY = sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt})`;
-const ROSTER_ORDER = [
-  sql`${PINNED_RANK} desc`,
-  sql`${RECENCY} desc`,
-  desc(channels.id),
-];
-
-/** The transaction `create` and `direct` share, as the driver hands it to a callback. */
-type ChannelTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-
 export type ChannelStore = {
+  /** A new conversation with these Bots, the caller its only member. */
+  create(actor: AgentActor, agentIds: string[]): Promise<AgentChannel>;
   /**
-   * A new conversation. On `transaction` when one is given, so a record that names the conversation
-   * (a task's, tasks/runner.ts) commits with it or not at all: the conversation is never visible
-   * without the record that says what it is for.
+   * What `create` would make, without making it: checked against the person's Bots and named. For a
+   * record that must be made in the same write as its conversation (a task's, tasks/runner.ts), so
+   * the conversation is never visible without the record that says what it is for.
    */
-  create(
-    actor: AgentActor,
-    agentIds: string[],
-    transaction?: ChannelTransaction,
-  ): Promise<AgentChannel>;
+  draft(actor: AgentActor, agentIds: string[]): Promise<ConversationDraft>;
   /**
    * The one conversation this person has with this Bot alone, made if they have not had one yet.
    *
@@ -210,11 +133,11 @@ export type ChannelStore = {
   /** Stamp the caller's own membership as read now. Throws ChannelNotFoundError for a non-member. */
   markRead(actor: AgentActor, channelId: string): Promise<void>;
   /**
-   * Hide the channel for every member. Soft: the row and the thread survive, every read filters.
-   * Throws ChannelNotFoundError for a non-member and ChannelPackageOwnedError for a channel the
-   * tenant package defines, which configuration owns rather than any member.
-   */
-  /**
+   * Hide the channel for every member. Soft: the conversation and its threads survive in
+   * Intelligence, and every read filters. Throws ChannelNotFoundError for a non-member and
+   * ChannelPackageOwnedError for a channel the tenant package defines, which configuration owns
+   * rather than any member.
+   *
    * True when this call deleted the channel; false when it was already deleted. A repeat is a
    * no-op, so it announces nothing and its route records nothing.
    */
@@ -285,42 +208,68 @@ function channelName(names: string[]) {
   return `${codePoints.slice(0, MAX_CHANNEL_NAME_CODE_POINTS - 1).join("")}…`;
 }
 
+/**
+ * The conversation as this person's channel: live, theirs, with their own thread in it, and the Bots
+ * Intelligence still has, in id order. Null when any of that is missing, which is the same answer a
+ * channel that does not exist gets.
+ *
+ * A Bot purged for good is left out, as the cascade that removed its `channel_agents` row did; a
+ * channel left with no Bot at all is no channel anybody can open.
+ */
+export function channelOf(
+  conversation: Conversation,
+  actorId: string,
+  known: ReadonlyMap<string, Bot>,
+): AgentChannel | null {
+  if (conversation.deletedAt !== null) return null;
+  if (!isMember(conversation, actorId)) return null;
+  const thread = ownThread(conversation, actorId);
+  if (!thread) return null;
+  const agentIds = conversation.agents
+    .map((agent) => agent.agentId)
+    .filter((agentId) => known.has(agentId))
+    .sort();
+  if (agentIds.length === 0) return null;
+  return {
+    id: conversation.id,
+    name: conversation.name,
+    agentIds,
+    threadId: thread.threadId,
+    active: agentIds.every(
+      (agentId) => (known.get(agentId)?.deletedAt ?? null) === null,
+    ),
+    lastMessageAt: conversation.lastMessageAt,
+  };
+}
+
+/** The Bots these conversations name, read from the Bot directory. */
+async function botsOf(list: readonly Conversation[]) {
+  return bots().findMany(
+    list.flatMap((conversation) =>
+      conversation.agents.map((agent) => agent.agentId),
+    ),
+  );
+}
+
 export function createChannelStore(
   database: Database,
   profileStore: AgentProfileStore,
   threadIdentity: ThreadIdentity,
 ): ChannelStore {
   /**
-   * Making a channel, on a transaction the caller already holds.
-   *
-   * Extracted so `direct` can find-or-create inside ONE transaction. Two of those arriving together
-   * for the same person and Bot each found nothing and each made a conversation, so that person had
-   * two Knowledge channels holding two threads, with their answers split between them. Reproduced
-   * against a real PostgreSQL: it needs no cluster, only two hops delivered at once, which is what a
-   * Bot asking for several things in one turn produces.
+   * The conversation a new channel would be: checked against the person's Bots, named from them in
+   * the caller's order, and given the caller's own thread.
    */
-  const makeChannel = async (
-    transaction: ChannelTransaction,
+  const draftFor = async (
     actor: AgentActor,
     agentIds: string[],
-  ): Promise<AgentChannel> => {
-    // Validated on this transaction, not through `profileStore.get`: the read has to share
-    // the connection this transaction already holds, and has to hold the profile so an agent
-    // cannot be deleted between passing the check and being linked to the new channel.
-    //
-    // Locks are taken in agent-ID order. Two channels selecting the same pair of agents in
-    // opposite orders would otherwise be able to deadlock against each other.
+  ): Promise<ConversationDraft> => {
     const profilesById = new Map<string, AgentProfile>();
     for (const agentId of [...agentIds].sort()) {
-      const profile = await profileStore.getWithin(transaction, actor, agentId);
+      const profile = await profileStore.get(actor, agentId);
       if (!profile) throw new AgentNotFoundError(agentId);
       profilesById.set(agentId, profile);
     }
-
-    const id = `channel_${crypto.randomUUID()}`;
-    // Minted rather than a bare random id, so the thread says which deployment it belongs to
-    // in a project that may hold more than one. See thread-identity.ts.
-    const threadId = threadIdentity.mint();
     // Named from the caller's ordering, which is the order the channel presents its agents in.
     const name = channelName(
       agentIds.map((agentId) => {
@@ -329,35 +278,35 @@ export function createChannelStore(
         return profile.name;
       }),
     );
-
-    await transaction.insert(channels).values({
-      id,
+    return {
+      id: `channel_${crypto.randomUUID()}`,
       name,
       description: PRIVATE_AGENT_CHANNEL_DESCRIPTION,
-    });
-    await transaction.insert(channelMemberships).values({
-      channelId: id,
-      userId: actor.id,
-    });
-    await transaction
-      .insert(channelAgents)
-      .values(agentIds.map((agentId) => ({ channelId: id, agentId })));
-    await transaction.insert(intelligenceChannelMappings).values({
-      userId: actor.id,
-      channelId: id,
-      threadId,
-    });
-
-    return { id, name, agentIds, threadId, active: true, lastMessageAt: null };
+      agents: agentIds.map((agentId) => ({ agentId })),
+      // Minted rather than a bare random id, so the thread says which deployment it belongs to
+      // in a project that may hold more than one. See thread-identity.ts.
+      members: [{ userId: actor.id, threadId: threadIdentity.mint() }],
+    };
   };
+
+  /** The channel a conversation this person may use is, or null. */
+  const channelFor = async (
+    conversation: Conversation | null,
+    actorId: string,
+  ): Promise<AgentChannel | null> =>
+    conversation
+      ? channelOf(conversation, actorId, await botsOf([conversation]))
+      : null;
 
   /**
    * Tell a channel's members what it is waiting on, and whether a turn just started or ended.
    *
-   * No table write: busy is a moment, and the rows the work list is read from stay the source of
-   * truth. Just the announcement, carrying the members the same way recordActivity does. The list
-   * rides on every one of these so a client never merges a delta into what it holds: the newest
-   * event is the whole answer, and the same answer a reload gets.
+   * No write anywhere: busy is a moment, and the rows the work list is read from (this deployment's
+   * own work queue) stay the source of truth. So this stays on this deployment's own notification
+   * channel, like the queue's wake-ups, rather than going through Intelligence: there is nothing
+   * stored to announce a change of. The list rides on every one of these so a client never merges
+   * a delta into what it holds: the newest event is the whole answer, and the same answer a reload
+   * gets.
    *
    * THE LIST GOES ONLY TO THE PERSON WHOSE THREAD IT IS. Each member has a thread of their own in
    * a channel, and what that thread waits on names the Bots its owner asked. The other members
@@ -368,15 +317,13 @@ export function createChannelStore(
    * list with the latest `workAt` rather than the one that happened to arrive last.
    */
   const announceWork = async (
-    channelId: string,
+    conversation: Conversation,
     thread: { threadId: string; userId: string } | null,
     busy?: boolean,
   ): Promise<void> => {
-    const members = await database
-      .select({ userId: channelMemberships.userId })
-      .from(channelMemberships)
-      .where(eq(channelMemberships.channelId, channelId));
+    const members = conversation.members.map((member) => member.userId);
     if (members.length === 0) return;
+    const channelId = conversation.id;
 
     const notify = (event: ChannelActivityEvent) =>
       database.execute(
@@ -390,13 +337,8 @@ export function createChannelStore(
       ...(busy === undefined ? {} : { busy }),
     };
 
-    const owner =
-      thread && members.some((member) => member.userId === thread.userId)
-        ? thread
-        : null;
-    const others = members
-      .map((member) => member.userId)
-      .filter((userId) => userId !== owner?.userId);
+    const owner = thread && members.includes(thread.userId) ? thread : null;
+    const others = members.filter((userId) => userId !== owner?.userId);
 
     if (owner) {
       // Fixed-width UTC to the microsecond, so two stamps compare as strings.
@@ -421,127 +363,64 @@ export function createChannelStore(
       await notify({ ...base, memberIds: others });
   };
 
+  /** A person's own thread in a live conversation: what a turn's busy signal is keyed by. */
+  const ownThreadNamed = async (threadId: string) => {
+    const found = await conversations().byThread(threadId);
+    // A scratch thread maps to nothing, and a Bot's thread in a group is not a channel's thread, so
+    // a hop running in either signals nowhere.
+    if (!found || found.thread.agentId !== null) return null;
+    return found;
+  };
+
   const store: ChannelStore = {
-    create(actor, agentIds, transaction) {
-      if (transaction) return makeChannel(transaction, actor, agentIds);
-      return database.transaction(
-        async (transaction) => makeChannel(transaction, actor, agentIds),
-        { isolationLevel: "read committed" },
+    async create(actor, agentIds) {
+      const draft = await draftFor(actor, agentIds);
+      const conversation = await conversations().create(
+        draft,
+        writeKey("channel.create"),
       );
+      const channel = await channelFor(conversation, actor.id);
+      if (!channel) throw new ChannelNotFoundError(conversation.id);
+      return channel;
     },
 
+    draft: draftFor,
+
     async direct(actor, agentId) {
-      const found = await database.transaction(
-        async (transaction) => {
-          /*
-           * ONE AT A TIME PER PERSON AND BOT, across every replica.
-           *
-           * Looking and then making is not find-or-create: two hops delivered at the same moment
-           * each saw nothing and each made a conversation, and that person ended up with two
-           * Knowledge channels holding two threads, with the answers split between them. A Bot
-           * asking for several things in one turn produces exactly that, so it needs no cluster and
-           * no unusual timing.
-           *
-           * An advisory lock rather than a unique constraint, because what has to be unique is not a
-           * column: it is "this person's channel whose whole roster is this one Bot", which is a
-           * count over another table. The lock is held for the transaction and taken on the pair, so
-           * nothing else on the channel table waits behind it.
-           */
-          await transaction.execute(
-            sql`select pg_advisory_xact_lock(hashtext(${`channel:direct:${actor.id}:${agentId}`}))`,
-          );
-          const [existing] = await transaction
-            .select({ id: channels.id })
-            .from(channels)
-            .innerJoin(
-              channelMemberships,
-              and(
-                eq(channelMemberships.channelId, channels.id),
-                eq(channelMemberships.userId, actor.id),
-              ),
-            )
-            .innerJoin(
-              channelAgents,
-              and(
-                eq(channelAgents.channelId, channels.id),
-                eq(channelAgents.agentId, agentId),
-              ),
-            )
-            /*
-             * A channel of this person's whose whole roster is this one Bot. The count is what makes
-             * it "alone": a channel holding this Bot and another one would match an agent test on
-             * its own, and delivering into it would put the answer in front of a Bot nobody asked.
-             */
-            .where(
-              and(
-                isNull(channels.deletedAt),
-                sql`(select count(*) from ${channelAgents} where ${channelAgents.channelId} = ${channels.id}) = 1`,
-                // A task's conversation is made with its task row in one transaction, so a
-                // conversation without one is never a task's caught halfway.
-                sql`not exists (select 1 from ${botTasks} where ${botTasks.channelId} = ${channels.id})`,
-              ),
-            )
-            .orderBy(...ROSTER_ORDER)
-            .limit(1);
-
-          return existing
-            ? existing.id
-            : await makeChannel(transaction, actor, [agentId]);
+      const draft = await draftFor(actor, [agentId]);
+      const threadId = draft.members?.[0]?.threadId;
+      if (!threadId) throw new Error("A new channel needs its owner's thread.");
+      /*
+       * ONE AT A TIME PER PERSON AND BOT, across every replica: Intelligence finds and makes under a
+       * lock on the pair. Looking and then making here would not be find-or-create: two hops
+       * delivered at the same moment each saw nothing and each made a conversation, and that person
+       * ended up with two Knowledge channels holding two threads, with the answers split between
+       * them. A Bot asking for several things in one turn produces exactly that.
+       */
+      const { conversation } = await conversations().client.direct(
+        {
+          userId: actor.id,
+          agentId,
+          create: {
+            id: draft.id,
+            name: draft.name,
+            description: draft.description ?? PRIVATE_AGENT_CHANNEL_DESCRIPTION,
+            threadId,
+          },
         },
-        { isolationLevel: "read committed" },
+        writeKey("channel.direct"),
       );
-
-      if (typeof found !== "string") return found;
-      const channel = await store.get(actor, found);
-      // Null only if it was deleted between the two reads, which is a reason to make a new one
+      const channel = await channelFor(
+        conversations().apply(conversation),
+        actor.id,
+      );
+      // Null only if it was deleted between the two steps, which is a reason to make a new one
       // rather than to fail: the caller asked for a conversation, not for that row.
       return channel ?? store.create(actor, [agentId]);
     },
 
     async get(actor, channelId) {
-      const rows = await database
-        .select({
-          id: channels.id,
-          name: channels.name,
-          agentId: channelAgents.agentId,
-          threadId: intelligenceChannelMappings.threadId,
-          lastMessageAt: channels.lastMessageAt,
-          deletedAt: agentProfiles.deletedAt,
-        })
-        .from(channels)
-        .innerJoin(
-          channelMemberships,
-          and(
-            eq(channelMemberships.channelId, channels.id),
-            eq(channelMemberships.userId, actor.id),
-          ),
-        )
-        .innerJoin(
-          intelligenceChannelMappings,
-          and(
-            eq(intelligenceChannelMappings.channelId, channels.id),
-            eq(intelligenceChannelMappings.userId, actor.id),
-          ),
-        )
-        .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-        .innerJoin(
-          agentProfiles,
-          eq(agentProfiles.agentId, channelAgents.agentId),
-        )
-        .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
-        .orderBy(asc(channelAgents.agentId));
-
-      const first = rows[0];
-      if (!first) return null;
-
-      return {
-        id: first.id,
-        name: first.name,
-        agentIds: rows.map((row) => row.agentId),
-        threadId: first.threadId,
-        active: rows.every((row) => row.deletedAt === null),
-        lastMessageAt: first.lastMessageAt,
-      };
+      return channelFor(await conversations().get(channelId), actor.id);
     },
 
     async list(actor, query = {}) {
@@ -549,468 +428,190 @@ export function createChannelStore(
         Math.max(query.limit ?? DEFAULT_CHANNEL_PAGE, 1),
         MAX_CHANNEL_PAGE,
       );
-      const cursor = decodeChannelCursor(query.cursor);
-
-      /*
-       * The page of channels is chosen first, and the agents are joined to that page.
-       *
-       * The row set below is one row per channel-agent pair, so a limit on rows would cut a channel
-       * in half: its second Bot would arrive on the next page as a separate entry with the same id.
-       * Limiting the channels and then joining keeps a channel whole whatever it holds.
-       */
-      const page = await database
-        .select({
-          id: channels.id,
-          /*
-           * To the microsecond, as text, for the cursor only: the audit reader's fix, for the same
-           * fault. The column keeps microseconds and a `Date` keeps milliseconds, so a cursor made
-           * from a `Date` named a moment just before its own row, and any channel later in that
-           * millisecond compared as newer than the cursor and was on no page at all.
-           */
-          recency: sql<string>`to_char(${RECENCY} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
-          pinned: sql<boolean>`${channelMemberships.pinnedAt} is not null`,
-        })
-        .from(channels)
-        .innerJoin(
-          channelMemberships,
-          and(
-            eq(channelMemberships.channelId, channels.id),
-            eq(channelMemberships.userId, actor.id),
-          ),
+      const filter = { memberUserId: actor.id, order: "recent" as const };
+      const directory = conversations();
+      let page: Awaited<ReturnType<typeof directory.client.page>>;
+      try {
+        page = await directory.client.page(filter, query.cursor ?? null, limit);
+      } catch (error) {
+        // A malformed or stale cursor reads as the first page, which is the honest answer to a
+        // stale link.
+        if (
+          query.cursor &&
+          error instanceof IntelligenceApiError &&
+          error.status === 400
         )
-        .where(
-          and(
-            isNull(channels.deletedAt),
-            // One row comparison over the whole sort key, which only reads as "everything after the
-            // cursor" because every part of that key descends. See ROSTER_ORDER.
-            cursor
-              ? sql`(${PINNED_RANK}, ${RECENCY}, ${channels.id}) < (${cursor.pinned ? 1 : 0}::int, ${cursor.recency}::timestamptz, ${cursor.id})`
-              : undefined,
-          ),
-        )
-        .orderBy(...ROSTER_ORDER)
-        // One more than asked for, so "is there another page" needs no second count query.
-        .limit(limit + 1);
-
-      const wanted = page.slice(0, limit);
-      const last = wanted.at(-1);
-      const nextCursor =
-        page.length > limit && last
-          ? encodeChannelCursor({
-              pinned: last.pinned,
-              recency: last.recency,
-              id: last.id,
-            })
-          : null;
-
-      if (wanted.length === 0) return { channels: [], nextCursor: null };
-
-      const rows = await database
-        .select({
-          id: channels.id,
-          name: channels.name,
-          agentId: channelAgents.agentId,
-          threadId: intelligenceChannelMappings.threadId,
-          deletedAt: agentProfiles.deletedAt,
-          channelSummary: channels.summary,
-          lastMessage: channels.lastMessage,
-          lastMessageAt: channels.lastMessageAt,
-          lastMessageAgentId: channels.lastMessageAgentId,
-          createdAt: channels.createdAt,
-          pinnedAt: channelMemberships.pinnedAt,
-          lastReadAt: channelMemberships.lastReadAt,
-          task: sql<boolean>`exists (select 1 from ${botTasks} where ${botTasks.channelId} = ${channels.id})`,
-        })
-        .from(channels)
-        .innerJoin(
-          channelMemberships,
-          and(
-            eq(channelMemberships.channelId, channels.id),
-            eq(channelMemberships.userId, actor.id),
-          ),
-        )
-        .innerJoin(
-          intelligenceChannelMappings,
-          and(
-            eq(intelligenceChannelMappings.channelId, channels.id),
-            eq(intelligenceChannelMappings.userId, actor.id),
-          ),
-        )
-        .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-        .innerJoin(
-          agentProfiles,
-          eq(agentProfiles.agentId, channelAgents.agentId),
-        )
-        .where(
-          and(
-            inArray(
-              channels.id,
-              wanted.map((row) => row.id),
-            ),
-            // Repeated, not inherited from the query that chose the page: these are two statements
-            // on two snapshots, so a delete that commits between them would otherwise hand back a
-            // channel this person can no longer see.
-            isNull(channels.deletedAt),
-          ),
-        )
-        // The same order the page was chosen in, since the rows below are read in order.
-        .orderBy(...ROSTER_ORDER, asc(channelAgents.agentId));
-
-      // One row per channel-agent pair; the ordering above keeps each channel's rows together and
-      // its agents in the same lexicographic order `get` returns.
-      const summaries = new Map<string, ChannelSummary>();
-      for (const row of rows) {
-        const summary = summaries.get(row.id);
-        if (summary) {
-          summary.agentIds.push(row.agentId);
-          summary.active &&= row.deletedAt === null;
-          continue;
-        }
-        summaries.set(row.id, {
-          id: row.id,
-          name: row.name,
-          agentIds: [row.agentId],
-          threadId: row.threadId,
-          active: row.deletedAt === null,
-          summary: row.channelSummary,
-          lastMessage: row.lastMessage,
-          lastMessageAt: row.lastMessageAt,
-          lastMessageAgentId: row.lastMessageAgentId,
-          createdAt: row.createdAt,
-          pinned: row.pinnedAt !== null,
-          lastReadAt: row.lastReadAt,
-          task: row.task,
+          page = await directory.client.page(filter, null, limit);
+        else throw error;
+      }
+      const held = page.conversations.map((conversation) =>
+        directory.apply(conversation),
+      );
+      const known = await botsOf(held);
+      const channels: ChannelSummary[] = [];
+      for (const conversation of page.conversations) {
+        const channel = channelOf(conversation, actor.id, known);
+        if (!channel) continue;
+        const member = conversation.members.find(
+          (candidate) => candidate.userId === actor.id,
+        );
+        channels.push({
+          ...channel,
+          summary: conversation.summary,
+          lastMessage: conversation.lastMessage,
+          lastMessageAgentId: conversation.lastMessageAgentId,
+          createdAt: conversation.createdAt,
+          pinned: (member?.pinnedAt ?? null) !== null,
+          lastReadAt: member?.lastReadAt ?? null,
+          task: conversation.taskId !== null,
         });
       }
-      return { channels: [...summaries.values()], nextCursor };
+      return { channels, nextCursor: page.nextCursor };
     },
 
     async setPinned(actor, channelId, pinned) {
-      await database.transaction(
-        async (transaction) => {
-          const updated = await transaction
-            .update(channelMemberships)
-            .set({ pinnedAt: pinned ? new Date() : null })
-            .where(
-              and(
-                eq(channelMemberships.channelId, channelId),
-                eq(channelMemberships.userId, actor.id),
-                // A deleted channel is not there to pin. Without this, pinning one succeeds and
-                // announces, and the announcement sends this person's tabs to refetch a roster that
-                // cannot show the row. `get` and `list` filter the same way.
-                exists(
-                  transaction
-                    .select({ one: sql`1` })
-                    .from(channels)
-                    .where(
-                      and(
-                        eq(channels.id, channelId),
-                        isNull(channels.deletedAt),
-                      ),
-                    ),
-                ),
-              ),
-            )
-            .returning({ channelId: channelMemberships.channelId });
-          // Not a member, no such channel, or a deleted one: the same answer every way, matching
-          // recordActivity and `get`.
-          if (updated.length === 0) throw new ChannelNotFoundError(channelId);
-
-          /*
-           * Announced to this member alone.
-           *
-           * A pin is a fact about one membership row, so `memberIds` holds the person who made it
-           * and nobody else. The hub delivers by that list, which is what carries the pin across
-           * this person's own tabs and replicas without putting it on anybody else's roster.
-           */
-          const event: ChannelActivityEvent = {
+      try {
+        // Announced to this member alone, by Intelligence's change event (`member`), which carries
+        // the pin across this person's own tabs and replicas without putting it on anybody else's
+        // roster. A deleted channel is not there to pin.
+        conversations().apply(
+          await conversations().client.changeMember(
             channelId,
-            memberIds: [actor.id],
-            lastMessage: null,
-            lastMessageAt: null,
-            lastMessageAgentId: null,
-            pinned,
-          };
-          await transaction.execute(
-            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
-          );
-        },
-        { isolationLevel: "read committed" },
-      );
+            actor.id,
+            { pinned },
+            writeKey("channel.pin"),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof ConversationMissingError)
+          throw new ChannelNotFoundError(channelId);
+        throw error;
+      }
     },
 
     async markRead(actor, channelId) {
-      const updated = await database
-        .update(channelMemberships)
-        .set({
-          /*
-           * The later of this clock and the channel's own last-message stamp. last_message_at is
-           * written from the reporting browser's clock and is not bounded; a marker stamped
-           * plainly "now" by a server running behind it would leave the row reading as unseen for
-           * every member, re-lighting the dot on each refetch until wall clock catches up.
-           */
-          lastReadAt: sql`greatest(now(), coalesce((select ${channels.lastMessageAt} from ${channels} where ${channels.id} = ${channelMemberships.channelId}), now()))`,
-        })
-        .where(
-          and(
-            eq(channelMemberships.channelId, channelId),
-            eq(channelMemberships.userId, actor.id),
-            // A deleted channel is not there to read. The same guard `setPinned` carries, for the
-            // same reason: the row is gone from every roster, so nothing about it is markable.
-            exists(
-              database
-                .select({ one: sql`1` })
-                .from(channels)
-                .where(
-                  and(eq(channels.id, channelId), isNull(channels.deletedAt)),
-                ),
-            ),
-          ),
-        )
-        .returning({ channelId: channelMemberships.channelId });
-      // Not a member, or no such channel: the same answer either way, matching setPinned.
-      if (updated.length === 0) throw new ChannelNotFoundError(channelId);
+      try {
+        // The later of now and the channel's own last-message stamp, worked out by Intelligence:
+        // last_message_at is written from the reporting browser's clock and is not bounded.
+        await conversations().client.changeMember(
+          channelId,
+          actor.id,
+          { read: true },
+          writeKey("channel.read"),
+        );
+      } catch (error) {
+        // Not a member, no such channel, or a deleted one: the same answer every way.
+        if (error instanceof ConversationMissingError)
+          throw new ChannelNotFoundError(channelId);
+        throw error;
+      }
     },
 
     async softDelete(actor, channelId) {
-      return await database.transaction(
-        async (transaction) => {
-          const [row] = await transaction
-            .select({ packageId: channels.packageId })
-            .from(channels)
-            .innerJoin(
-              channelMemberships,
-              and(
-                eq(channelMemberships.channelId, channels.id),
-                eq(channelMemberships.userId, actor.id),
-              ),
-            )
-            .where(eq(channels.id, channelId));
-          // Not a member, or no such channel: the same answer either way.
-          if (!row) throw new ChannelNotFoundError(channelId);
-          // Package channels are configuration; the sync that wrote them owns them.
-          if (row.packageId !== null) {
-            throw new ChannelPackageOwnedError(channelId);
-          }
-          // The guard on deletedAt is what makes a repeat call a no-op rather than a new stamp.
-          const stamped = await transaction
-            .update(channels)
-            .set({ deletedAt: new Date(), updatedAt: new Date() })
-            .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
-            .returning({ id: channels.id });
-          /*
-           * And the rest of the no-op: a repeat changed nothing, so nothing is announced. Without
-           * this, every repeat told every member again, and the route wrote another
-           * `channel.deleted` row to an append-only trail for a deletion that had not happened.
-           */
-          if (stamped.length === 0) return false;
-
-          // Read on this transaction, so the members told are the ones the channel had when it was
-          // hidden. Soft leaves the membership rows in place, so this reads the same list a repeat
-          // call would.
-          const members = await transaction
-            .select({ userId: channelMemberships.userId })
-            .from(channelMemberships)
-            .where(eq(channelMemberships.channelId, channelId));
-
-          /*
-           * Announced inside the transaction, so it is delivered on commit and a refused delete —
-           * a channel the package owns, or one the caller is not in — announces nothing at all.
-           *
-           * Every member is told, because the deletion hides the channel for all of them: without
-           * this, a second tab and a second replica keep rendering a row whose channel no longer
-           * resolves until something else makes them refetch.
-           */
-          const event: ChannelActivityEvent = {
+      const directory = conversations();
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const current = await directory.refresh(channelId);
+        // Not a member, or no such channel: the same answer either way.
+        if (!current || !isMember(current, actor.id))
+          throw new ChannelNotFoundError(channelId);
+        // Package channels are configuration; the sync that wrote them owns them.
+        if (current.managedBy !== null)
+          throw new ChannelPackageOwnedError(channelId);
+        // A repeat changes nothing and announces nothing, and its route records nothing.
+        if (current.deletedAt !== null) return false;
+        try {
+          const deleted = await directory.client.remove(
             channelId,
-            memberIds: members.map((member) => member.userId),
-            lastMessage: null,
-            lastMessageAt: null,
-            lastMessageAgentId: null,
-            deleted: true,
-          };
-          await transaction.execute(
-            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+            writeKey("channel.delete"),
+            current.version,
           );
-          return true;
-        },
-        { isolationLevel: "read committed" },
+          directory.apply(deleted);
+          /*
+           * Every member is told by Intelligence's change event (`deleted`), delivered to each
+           * replica's open browsers, because the deletion hides the channel for all of them.
+           */
+          return deleted.version > current.version;
+        } catch (error) {
+          // Somebody else changed it between the read and the delete: read it again.
+          if (error instanceof ConversationVersionConflictError) continue;
+          throw error;
+        }
+      }
+      throw new Error(
+        `Channel ${channelId} kept changing while it was deleted.`,
       );
     },
 
-    recordActivity(actor, channelId, activity, source) {
-      return database.transaction(
-        async (transaction) => {
-          const [membership] = await transaction
-            .select({ channelId: channelMemberships.channelId })
-            .from(channelMemberships)
-            // Joined rather than checked on the membership alone, so a deleted channel is refused
-            // too. `get` and `list` filter on `deleted_at`, so without this a client holding a stale
-            // roster row can bump `last_message` on a channel nobody can see and announce it to
-            // every member, each of whom refetches their roster for an invisible row.
-            .innerJoin(
-              channels,
-              and(
-                eq(channels.id, channelMemberships.channelId),
-                isNull(channels.deletedAt),
-              ),
-            )
-            .where(
-              and(
-                eq(channelMemberships.channelId, channelId),
-                eq(channelMemberships.userId, actor.id),
-              ),
-            );
-          // Not a member, no such channel, or a deleted one: the same answer every way, so belonging
-          // to a channel is not something an outsider can probe for.
-          if (!membership) throw new ChannelNotFoundError(channelId);
-
-          if (activity.agentId !== null) {
-            const [linked] = await transaction
-              .select({ agentId: channelAgents.agentId })
-              .from(channelAgents)
-              .where(
-                and(
-                  eq(channelAgents.channelId, channelId),
-                  eq(channelAgents.agentId, activity.agentId),
-                ),
-              );
-            if (!linked) throw new AgentNotFoundError(activity.agentId);
-          }
-
-          // A person's message and the agent's reply are reported separately, so they can arrive out
-          // of order. Only move forwards, except to enrich the same source's placeholder.
-          // The source, timestamp and text comparison is atomic across server replicas.
-          const lastMessage = previewOf(activity.text);
-          const applied = await transaction
-            .update(channels)
-            .set({
-              lastMessage,
-              lastMessageSourceId: source?.id ?? null,
-              lastMessageAt: activity.at,
-              lastMessageAgentId: activity.agentId,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(channels.id, channelId),
-                or(
-                  isNull(channels.lastMessageAt),
-                  lt(channels.lastMessageAt, activity.at),
-                  source?.enrichFrom !== undefined
-                    ? and(
-                        eq(channels.lastMessageAt, activity.at),
-                        eq(channels.lastMessageSourceId, source.id),
-                        eq(channels.lastMessage, previewOf(source.enrichFrom)),
-                        ne(channels.lastMessage, lastMessage),
-                        activity.agentId === null
-                          ? isNull(channels.lastMessageAgentId)
-                          : eq(channels.lastMessageAgentId, activity.agentId),
-                      )
-                    : undefined,
-                ),
-              ),
-            )
-            .returning({ id: channels.id });
-          // Nothing changed, so there is nothing to announce: a stale report is not news.
-          if (applied.length === 0) return;
-
-          const members = await transaction
-            .select({ userId: channelMemberships.userId })
-            .from(channelMemberships)
-            .where(eq(channelMemberships.channelId, channelId));
-
-          // Announced inside the transaction, so it is delivered on commit and a write that rolls
-          // back is never announced. The payload carries the members because the writer has already
-          // resolved them; NOTIFY caps at 8000 bytes, which a 200-character preview leaves room in.
-          const event: ChannelActivityEvent = {
-            channelId,
-            memberIds: members.map((member) => member.userId),
-            lastMessage,
-            lastMessageAt: activity.at.toISOString(),
-            lastMessageAgentId: activity.agentId,
-          };
-          await transaction.execute(
-            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
-          );
-        },
-        { isolationLevel: "read committed" },
-      );
+    async recordActivity(actor, channelId, activity, source) {
+      try {
+        // A person's message and the agent's reply are reported separately, so they can arrive out
+        // of order. Intelligence only moves forwards, except to enrich the same source's
+        // placeholder, and compares and writes in one step, so reports from every replica agree.
+        // Announced to every member by its change event (`activity`), never when nothing changed.
+        const { conversation } = await conversations().client.activity(
+          channelId,
+          {
+            userId: actor.id,
+            text: previewOf(activity.text),
+            at: activity.at,
+            agentId: activity.agentId,
+            sourceId: source?.id ?? null,
+            enrichFrom:
+              source?.enrichFrom !== undefined
+                ? previewOf(source.enrichFrom)
+                : null,
+          },
+          writeKey("channel.activity"),
+        );
+        conversations().apply(conversation);
+      } catch (error) {
+        // Not a member, no such channel, or a deleted one: the same answer every way, so belonging
+        // to a channel is not something an outsider can probe for.
+        if (error instanceof ConversationMissingError)
+          throw new ChannelNotFoundError(channelId);
+        if (
+          error instanceof ConversationAgentMissingError &&
+          activity.agentId !== null
+        )
+          throw new AgentNotFoundError(activity.agentId);
+        throw error;
+      }
     },
 
     async signalBusy(threadId, busy) {
-      // The channel this thread is shown in, if any. A scratch thread maps to nothing, so a hop
-      // running there signals nowhere and the branch below returns without announcing.
-      const [mapped] = await database
-        .select({
-          channelId: intelligenceChannelMappings.channelId,
-          userId: intelligenceChannelMappings.userId,
-        })
-        .from(intelligenceChannelMappings)
-        .where(eq(intelligenceChannelMappings.threadId, threadId))
-        .limit(1);
-      if (!mapped) return;
+      const found = await ownThreadNamed(threadId);
+      if (!found) return;
       await announceWork(
-        mapped.channelId,
-        { threadId, userId: mapped.userId },
+        found.conversation,
+        { threadId, userId: found.thread.userId },
         busy,
       );
     },
 
     async signalWork(threadId) {
-      const [mapped] = await database
-        .select({
-          channelId: intelligenceChannelMappings.channelId,
-          userId: intelligenceChannelMappings.userId,
-        })
-        .from(intelligenceChannelMappings)
-        .where(eq(intelligenceChannelMappings.threadId, threadId))
-        .limit(1);
-      if (!mapped) return;
-      await announceWork(mapped.channelId, { threadId, userId: mapped.userId });
+      const found = await ownThreadNamed(threadId);
+      if (!found) return;
+      await announceWork(found.conversation, {
+        threadId,
+        userId: found.thread.userId,
+      });
     },
 
     async signalChannelBusy(actor, channelId, busy) {
-      const [membership] = await database
-        .select({
-          userId: channelMemberships.userId,
-          threadId: intelligenceChannelMappings.threadId,
-        })
-        .from(channelMemberships)
-        .innerJoin(
-          channels,
-          and(
-            eq(channels.id, channelMemberships.channelId),
-            isNull(channels.deletedAt),
-          ),
-        )
-        // The caller's own thread for the channel, which is the one their hops are offered from.
-        .leftJoin(
-          intelligenceChannelMappings,
-          and(
-            eq(
-              intelligenceChannelMappings.channelId,
-              channelMemberships.channelId,
-            ),
-            eq(intelligenceChannelMappings.userId, channelMemberships.userId),
-          ),
-        )
-        .where(
-          and(
-            eq(channelMemberships.channelId, channelId),
-            eq(channelMemberships.userId, actor.id),
-          ),
-        )
-        .limit(1);
+      const conversation = await conversations().get(channelId);
       // Not a member, no such channel, or a deleted one: the same refusal every way, so belonging
       // to a channel is not something an outsider can probe for.
-      if (!membership) throw new ChannelNotFoundError(channelId);
-
+      if (
+        !conversation ||
+        conversation.deletedAt !== null ||
+        !isMember(conversation, actor.id)
+      )
+        throw new ChannelNotFoundError(channelId);
+      // The caller's own thread for the channel, which is the one their hops are offered from.
+      const thread = ownThread(conversation, actor.id);
       await announceWork(
-        channelId,
-        membership.threadId
-          ? { threadId: membership.threadId, userId: membership.userId }
-          : null,
+        conversation,
+        thread ? { threadId: thread.threadId, userId: actor.id } : null,
         busy,
       );
     },

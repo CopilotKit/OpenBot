@@ -13,8 +13,10 @@ import type {
   LearningDeliveryStatus,
   LearningSettings,
   LearningTarget,
+  LearningTargetProblem,
 } from "@openbot/shared/learning";
 import { z } from "zod";
+import { LearningAssignmentsChangedError } from "./intelligence";
 import type { LearningSettingsStore } from "./settings";
 import type { OpenSkillSource } from "./sharing";
 
@@ -157,6 +159,25 @@ export function selectLearningTarget(
   );
 }
 
+/**
+ * Why Intelligence will not deliver a container's Skills, when the reason is that the container is not there or Learning
+ * is not on for the project, and not a decision about the Skills themselves. A project with Learning off answers the
+ * Skills read with a body the SDK does not recognise (`UNSUPPORTED_SERVER`); a plan without it, `ENTITLEMENT_REQUIRED`.
+ * Undefined for everything else, a revoked revision or paused delivery among them, which keep failing the run.
+ */
+export function learningUnavailable(
+  error: unknown,
+): LearningTargetProblem["problem"] | undefined {
+  const code =
+    error !== null && typeof error === "object" && "code" in error
+      ? (error as { code: unknown }).code
+      : undefined;
+  if (code === "CONTAINER_NOT_FOUND") return "missing";
+  if (code === "ENTITLEMENT_REQUIRED" || code === "UNSUPPORTED_SERVER")
+    return "learning_off";
+  return undefined;
+}
+
 /** Cancel this invocation's wait without cancelling another invocation's shared refresh. */
 function waitForSnapshot<T>(
   promise: Promise<T>,
@@ -208,6 +229,8 @@ const PERSONAL_WAIT_MS = 2_000;
 const PERSONAL_READ_MS = 5_000;
 /** A space that refused (missing, revoked, not entitled, unreadable) is not asked again by runs for this long. */
 const PERSONAL_RETRY_MS = 60_000;
+/** A thread's container decided again after a refusal for stale settings, at most this many times in all. */
+const DECIDE_ATTEMPTS = 3;
 
 export function createLearningRuntime(options: {
   store: LearningSettingsStore;
@@ -245,6 +268,21 @@ export function createLearningRuntime(options: {
   const refusedUntil = new Map<string, number>();
   /** One log line per container per refusal window, so a missing space does not write a line per run. */
   const warned = new Map<string, number>();
+  const warnUnavailable = (
+    containerId: string,
+    problem: LearningTargetProblem["problem"],
+  ) => {
+    const key = `bot:${containerId}`;
+    if ((warned.get(key) ?? 0) > now()) return;
+    warned.set(key, now() + PERSONAL_RETRY_MS);
+    console.warn(
+      JSON.stringify({
+        type: "learning-bot-skills-unavailable",
+        containerId,
+        problem,
+      }),
+    );
+  };
 
   /**
    * A person's or an opened space's snapshot, or undefined. FAILS SOFT: whatever goes wrong (the space is missing,
@@ -327,10 +365,23 @@ export function createLearningRuntime(options: {
         ? personalSnapshots(userId, signal)
         : Promise.resolve({ opened: [] as OpenedSkills[] });
     if (!target && !(userId && people)) return undefined;
-    // The Bot's own read fails the run exactly as it did before; the personal reads never throw.
+    /*
+     * The Bot's own read fails the run as it did before, except when its container is not there or Learning is not on
+     * for the project: then the run goes on without the Bot's Skills, and the admin sees why on the Learning page
+     * (`problems`). The personal reads never throw.
+     */
     const [bot, extra] = await Promise.all([
       target
-        ? waitForSnapshot(registryFor(target).acquireSnapshot(), signal)
+        ? waitForSnapshot(registryFor(target).acquireSnapshot(), signal).catch(
+            (error: unknown) => {
+              const problem = signal?.aborted
+                ? undefined
+                : learningUnavailable(error);
+              if (!problem) throw error;
+              warnUnavailable(target.containerId, problem);
+              return undefined;
+            },
+          )
         : undefined,
       personal,
     ]);
@@ -358,6 +409,36 @@ export function createLearningRuntime(options: {
 
   return {
     acquire,
+    /**
+     * The containers the saved settings name that Intelligence will not use, for the Admin page, read the way a run
+     * reads them. Empty while Learning is off here. Never throws: a container that could not be read for another
+     * reason is not listed.
+     */
+    async problems(): Promise<LearningTargetProblem[]> {
+      const settings = await store.read();
+      if (!settings.enabled) return [];
+      const targets = new Map<string, LearningTarget>();
+      for (const target of [
+        settings.defaultTarget,
+        ...Object.values(settings.agents),
+      ])
+        if (target && !targets.has(target.containerId))
+          targets.set(target.containerId, target);
+      const found = await Promise.all(
+        [...targets.values()].map(async (target) => {
+          try {
+            await registryFor(target).acquireSnapshot();
+            return undefined;
+          } catch (error) {
+            const problem = learningUnavailable(error);
+            return problem
+              ? { containerId: target.containerId, problem }
+              : undefined;
+          }
+        }),
+      );
+      return found.filter((entry) => entry !== undefined);
+    },
     /**
      * The Skills published in this person's own Learning space, read the way a run reads them (the same registry and
      * Intelligence call), for Settings, Learning. `off` when Automatic Learning is off here; `unavailable` when
@@ -399,14 +480,22 @@ export function createLearningRuntime(options: {
     /**
      * Bind once, before thread creation. The SDK calls this selector before its ownership check,
      * so the verified user scopes the durable decision. Existing Threads are never backfilled.
+     *
+     * Decided from this instance's copy of the settings and written with the version it came from. When another
+     * instance changed the settings and this one has not heard yet, Intelligence refuses the write; the settings are
+     * read again and the thread decided again, so it never joins a container the settings no longer name. A thread
+     * this instance has seen bound already is answered from memory: a binding never changes.
      */
     async containerForThread(
       input: LearningThread,
     ): Promise<string | undefined> {
       if (!input.userId.trim())
         throw new Error("Learning Thread assignment requires a verified user.");
-      const target = selectLearningTarget(await store.read(), input.agentId);
+      let { settings, version } = await store.snapshot();
+      let target = selectLearningTarget(settings, input.agentId);
       if (!target) return undefined;
+      const known = store.boundThread(input.userId, input.threadId);
+      if (known !== undefined) return known ?? undefined;
       let exists = false;
       try {
         await client.getThread({
@@ -425,13 +514,28 @@ export function createLearningRuntime(options: {
         )
           throw error;
       }
-      const containerId = await store.bindThread({
-        userId: input.userId,
-        threadId: input.threadId,
-        agentId: input.agentId,
-        containerId: exists ? null : (target?.containerId ?? null),
-      });
-      return containerId ?? undefined;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const containerId = await store.bindThread({
+            userId: input.userId,
+            threadId: input.threadId,
+            agentId: input.agentId,
+            containerId: exists ? null : target.containerId,
+            assignmentsVersion: version,
+          });
+          return containerId ?? undefined;
+        } catch (error) {
+          if (
+            !(error instanceof LearningAssignmentsChangedError) ||
+            attempt >= DECIDE_ATTEMPTS
+          )
+            throw error;
+          await store.refresh();
+          ({ settings, version } = await store.snapshot());
+          target = selectLearningTarget(settings, input.agentId);
+          if (!target) return undefined;
+        }
+      }
     },
     async status(agentId: string): Promise<LearningDeliveryStatus> {
       const target = selectLearningTarget(await store.read(), agentId);

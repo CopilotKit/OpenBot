@@ -1,4 +1,12 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
   attachmentUrl,
@@ -6,7 +14,7 @@ import {
   MAX_FILE_BYTES,
   MAX_IMAGE_BYTES,
 } from "@openbot/shared/attachments";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { createApp, UPLOAD_BODY_LIMIT_BYTES } from "../src/app";
@@ -19,40 +27,69 @@ import {
   loadAttachmentForTurn,
   MAX_STAGED_ATTACHMENTS_PER_UPLOADER,
   markAttachmentsSent,
+  stagedAttachmentTtlHours,
 } from "../src/channels/attachments";
 import { loadConfig } from "../src/config";
+import { writeKey } from "../src/conversations/http";
 import type { Database } from "../src/db/client";
 import { createDatabase } from "../src/db/client";
+import { users } from "../src/db/schema";
 import {
-  attachments,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  users,
-} from "../src/db/schema";
+  type FilesClient,
+  filesClient,
+  installFilesClient,
+  PendingLimitError,
+} from "../src/files/client";
+import {
+  deleteConversation,
+  purgeConversations,
+  restoreTestConversations,
+  seedConversation,
+  unreachableConversations,
+  useTestConversations,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
+import {
+  clearChannelAttachments,
+  restoreTestFiles,
+  seedAttachment,
+  unreachableFiles,
+  useTestFiles,
+} from "./support/files";
 
 const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
+// Attachments live in Intelligence's file store: every test here reads and writes real ones.
+useTestFiles();
 
 const testPrefix = `attachment-routes-${randomUUID()}`;
 const createdChannelIds: string[] = [];
 const createdUserIds: string[] = [];
 
 afterEach(async () => {
-  // Cascades attachments and memberships tied to the channel.
-  for (const id of createdChannelIds.splice(0)) {
-    await database.delete(channels).where(eq(channels.id, id));
-  }
+  // A test that put another file store or conversation directory in place (one that is down, or
+  // one that records) gets the real one back before the next test runs.
+  restoreTestFiles();
+  await restoreTestConversations();
+  // The channel's files are Intelligence's, so they are removed there, and the channel is a
+  // conversation in Intelligence too, removed with its members and threads by purge.
+  const channelIds = createdChannelIds.splice(0);
+  for (const id of channelIds) await clearChannelAttachments(id);
+  await purgeConversations(channelIds);
   for (const id of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, id));
   }
 });
 
+beforeAll(async () => {
+  // Every route and loader here asks the conversation directory whether a channel is live and who
+  // is in it, so the process needs the real one, against the test Intelligence.
+  await useTestConversations();
+});
+
 afterAll(async () => {
   await database.$client.close();
-  await unreachableDatabase.$client.close();
 });
 
 function actorMiddleware(
@@ -79,22 +116,13 @@ async function harness() {
   createdUserIds.push(memberId, strangerId);
 
   const channelId = `${testPrefix}-channel-${randomUUID()}`;
-  await database.insert(channels).values({
-    id: channelId,
-    name: "Attachment Route Test Channel",
-    description: "A channel to upload files into.",
-  });
   createdChannelIds.push(channelId);
-
-  await database
-    .insert(channelMemberships)
-    .values({ channelId, userId: memberId });
 
   /*
    * The thread this channel's conversation runs in, because in production a channel never exists
-   * without one: `makeChannel` writes the membership row and the mapping row in a single
-   * transaction, so membership and mapping are 1:1 and a member with no mapping cannot even see the
-   * channel (`get` and `list` inner-join it).
+   * without one: creating a channel makes the conversation with its creator as a member holding a
+   * thread of their own, in one write, so membership and own thread are 1:1 and a member with no
+   * thread cannot even see the channel (`get` and `list` require it).
    *
    * It is here rather than in the two tests that care because the turn path is now scoped to the
    * conversation as well as to the actor, and a fixture with no mapping would put every test in
@@ -102,9 +130,12 @@ async function harness() {
    * not for a channel. Tests would then agree with each other and with nothing that ships.
    */
   const threadId = `${testPrefix}-thread-${randomUUID()}`;
-  await database
-    .insert(intelligenceChannelMappings)
-    .values({ channelId, userId: memberId, threadId });
+  await seedConversation({
+    id: channelId,
+    name: "Attachment Route Test Channel",
+    description: "A channel to upload files into.",
+    members: [{ userId: memberId, threadId }],
+  });
 
   const member = actorMiddleware(memberId);
   const stranger = actorMiddleware(strangerId);
@@ -122,6 +153,35 @@ async function harness() {
     strangerId,
     threadId,
   };
+}
+
+/**
+ * Put a second person in a channel, as a membership on its own (no thread of their own), the way
+ * the `channel_memberships` insert these tests used to make did. Kept in this process's directory
+ * too, so the next membership check sees them at once.
+ */
+async function joinChannel(channelId: string, userId: string) {
+  const { conversations } = await useTestConversations();
+  conversations.apply(
+    await conversations.client.addMember(
+      channelId,
+      userId,
+      {},
+      writeKey("test.member"),
+    ),
+  );
+}
+
+/** Take a person out of a channel in Intelligence, as removing them from a group does. */
+async function leaveChannel(channelId: string, userId: string) {
+  const { conversations } = await useTestConversations();
+  conversations.apply(
+    await conversations.client.removeMember(
+      channelId,
+      userId,
+      writeKey("test.member.remove"),
+    ),
+  );
 }
 
 function upload(
@@ -152,116 +212,74 @@ function attachmentApp(
 }
 
 /**
- * A database at an address nothing is listening on.
+ * Puts a file store in front of the real one for the rest of the test: every call goes through to
+ * Intelligence, and `around` sees it first. `afterEach` puts the real one back.
  *
- * The failures these routes have to answer for — a connection lost during a rollout, a pool with
- * nothing left in it, a `statement_timeout` — are all "the driver could not answer this query", and
- * a closed port produces exactly that, from the real driver, without a mock standing in for it.
- * Bun's SQL connects lazily, so building this costs nothing and no connection is ever held; the
- * query rejects in about 2ms.
+ * THIS IS HOW A RACE IS PARKED NOW. The attachment's row lives in Intelligence, so the moments these
+ * tests need — between the upload's membership check and its write, between the load and the send,
+ * between the withdrawal's read and its delete — are the moments the server calls Intelligence, and
+ * running the other party's action right there puts it in that gap deterministically rather than by
+ * hoping two requests interleave.
  */
-const unreachableDatabase = createDatabase(
-  "postgres://openbot:openbot@127.0.0.1:1/openbot",
-  { max: 1 },
-);
-
-/**
- * The same database, except that opening a transaction fails.
- *
- * The unreachable database above cannot reach the transaction at all: the upload route's membership
- * check is the first thing to fail, so the deeper guard is never exercised. This one lets every
- * real statement through and fails only where the insert happens, which is the line the finding is
- * about — a pool exhausted, a lock timeout or a full disk, once the request is already inside.
- */
-function databaseWhoseTransactionFails(db: Database): Database {
-  return new Proxy(db, {
-    get(target, property) {
-      if (property === "transaction") {
-        return () => Promise.reject(new Error("could not open a transaction"));
-      }
-      const value = Reflect.get(target, property) as unknown;
-      return typeof value === "function" ? value.bind(target) : value;
+function interceptFiles(
+  around: Partial<{
+    create: (
+      forward: () => ReturnType<FilesClient["create"]>,
+    ) => ReturnType<FilesClient["create"]>;
+    commit: (
+      forward: () => ReturnType<FilesClient["commit"]>,
+    ) => ReturnType<FilesClient["commit"]>;
+    delete: (
+      forward: () => ReturnType<FilesClient["delete"]>,
+    ) => ReturnType<FilesClient["delete"]>;
+    get: (id: string) => void;
+    content: (id: string) => void;
+  }>,
+): FilesClient {
+  const real = useTestFiles();
+  return installFilesClient({
+    ...real,
+    create: (file, content, key) =>
+      around.create
+        ? around.create(() => real.create(file, content, key))
+        : real.create(file, content, key),
+    commit: (input, key) =>
+      around.commit
+        ? around.commit(() => real.commit(input, key))
+        : real.commit(input, key),
+    delete: (id, key, version) =>
+      around.delete
+        ? around.delete(() => real.delete(id, key, version))
+        : real.delete(id, key, version),
+    get: (id) => {
+      around.get?.(id);
+      return real.get(id);
     },
-  }) as Database;
+    content: (id) => {
+      around.content?.(id);
+      return real.content(id);
+    },
+  });
 }
 
 /**
- * The same database, except that a withdrawal lands the moment the upload's own statement has run.
- *
- * THE RACE THIS PARKS CANNOT BE PARKED WITH A LOCK. The upload holds a `pg_advisory_xact_lock` on
- * its uploader, which serialises other UPLOADS and nothing else — a
- * `DELETE /api/attachments/:id` takes no such lock and commits straight away. So the only way to
- * put a withdrawal exactly between the statement that refuses and any statement that might explain
- * the refusal is to hang it off the statements themselves, which is what this does: the first
- * `execute` in the transaction is the advisory lock, the second is the upload's own statement, and
- * `withdraw` runs the instant that second one comes back.
- *
- * Under READ COMMITTED every later statement in the same transaction takes a FRESH snapshot, so
- * anything the handler asks after this point sees the withdrawn row as gone. That is precisely the
- * fault: the count that explains a refusal must come from the statement that refused.
- */
-function databaseWithdrawingAfterTheInsert(
-  db: Database,
-  withdraw: () => Promise<void>,
-): Database {
-  let statements = 0;
-  const watch = (transaction: object) =>
-    new Proxy(transaction, {
-      get(target, property) {
-        const value = Reflect.get(target, property) as unknown;
-        if (typeof value !== "function") return value;
-        if (property !== "execute") return value.bind(target);
-        return async (...args: unknown[]) => {
-          const result = await (
-            value as (...called: unknown[]) => Promise<unknown>
-          ).apply(target, args);
-          statements += 1;
-          if (statements === 2) await withdraw();
-          return result;
-        };
-      },
-    });
-
-  return new Proxy(db, {
-    get(target, property) {
-      const value = Reflect.get(target, property) as unknown;
-      if (typeof value !== "function") return value;
-      if (property !== "transaction") return value.bind(target);
-      return (callback: (transaction: object) => unknown, ...rest: unknown[]) =>
-        (value as (...called: unknown[]) => unknown).call(
-          target,
-          (transaction: object) => callback(watch(transaction)),
-          ...rest,
-        );
-    },
-  }) as Database;
-}
-
-/**
- * The same database, remembering which columns each `select` asked for.
+ * The same database, and a file store that remembers what each read asked Intelligence for.
  *
  * "The probe does not read the file" is not visible in a HEAD response — the body is empty either
  * way, and the only other evidence is a stopwatch, which is a guess about how fast this machine is.
- * The column list is the fact itself: `bytes` is either in the statement or it is not.
+ * The calls are the fact itself: the file's `bytes` are either asked for or they are not. A metadata
+ * read is recorded as the fields it carries, a content read as `bytes`.
  */
-function databaseRecordingSelections(
-  db: Database,
-  selections: string[][],
-): Database {
-  return new Proxy(db, {
-    get(target, property) {
-      const value = Reflect.get(target, property) as unknown;
-      if (typeof value !== "function") return value;
-      if (property !== "select") return value.bind(target);
-      return (fields?: Record<string, unknown>) => {
-        selections.push(Object.keys(fields ?? {}));
-        return (value as (...called: unknown[]) => unknown).call(
-          target,
-          fields,
-        );
-      };
+function recordingFileReads(db: Database, selections: string[][]): Database {
+  interceptFiles({
+    get: () => {
+      selections.push(["name", "mimeType", "sizeBytes", "committedAt"]);
     },
-  }) as Database;
+    content: () => {
+      selections.push(["bytes"]);
+    },
+  });
+  return db;
 }
 
 /**
@@ -289,9 +307,9 @@ async function withCapturedErrorLog<T>(
   }
 }
 
-/** Inserts a staged (or sent, if `attachedAt` is given) attachment row directly, bypassing upload. */
+/** Makes a staged (or sent, if `attachedAt` is given) attachment directly in Intelligence, bypassing upload. */
 async function uploadBytes(
-  db: Database,
+  _db: Database,
   options: {
     channelId: string;
     uploadedBy: string;
@@ -301,19 +319,14 @@ async function uploadBytes(
     attachedAt?: Date;
   },
 ): Promise<string> {
-  const [inserted] = await db
-    .insert(attachments)
-    .values({
-      channelId: options.channelId,
-      uploadedBy: options.uploadedBy,
-      name: options.name,
-      mimeType: options.mimeType,
-      sizeBytes: options.bytes.byteLength,
-      bytes: Buffer.from(options.bytes),
-      attachedAt: options.attachedAt ?? null,
-    })
-    .returning({ id: attachments.id });
-  return inserted.id;
+  return seedAttachment({
+    channelId: options.channelId,
+    uploadedBy: options.uploadedBy,
+    name: options.name,
+    mimeType: options.mimeType,
+    bytes: options.bytes,
+    attachedAt: options.attachedAt ?? null,
+  });
 }
 
 /** Same as `uploadBytes`, for a text body, defaulting to `text/plain`. */
@@ -339,159 +352,75 @@ function uploadText(
 }
 
 /**
- * The `attachedAt` a row currently carries, `null` when it is staged, or `undefined` when there is
- * no such row at all.
+ * Staged (or sent) attachments made directly in Intelligence, many at once: the precondition a cap
+ * test needs, without a round trip through the multipart route for each one.
+ */
+async function insertAttachments(
+  rows: {
+    channelId: string;
+    uploadedBy: string;
+    uploadGroup?: string | null;
+    name: string;
+    mimeType: string;
+    bytes: Uint8Array;
+    sizeBytes?: number;
+    attachedAt?: Date | null;
+  }[],
+): Promise<string[]> {
+  return Promise.all(
+    rows.map((row) =>
+      seedAttachment({
+        channelId: row.channelId,
+        uploadedBy: row.uploadedBy,
+        uploadGroup: row.uploadGroup ?? null,
+        name: row.name,
+        mimeType: row.mimeType,
+        bytes: row.bytes,
+        attachedAt: row.attachedAt ?? null,
+      }),
+    ),
+  );
+}
+
+/** The attachments Intelligence holds in a channel, optionally in one upload group. */
+async function attachmentRowsIn(
+  channelId: string,
+  uploadGroup?: string,
+): Promise<{ id: string }[]> {
+  return (
+    await filesClient().list({
+      purpose: "chat_attachment",
+      collection: channelId,
+      ...(uploadGroup !== undefined ? { batch: uploadGroup } : {}),
+    })
+  ).map((file) => ({ id: file.id }));
+}
+
+/** Whether Intelligence still holds this attachment, as the rows the old table would have returned. */
+async function attachmentRow(id: string): Promise<{ id: string }[]> {
+  return (await filesClient().get(id)) ? [{ id }] : [];
+}
+
+/**
+ * When the attachment was sent, `null` when it is staged, or `undefined` when there is no such
+ * attachment at all.
  *
  * THREE-VALUED ON PURPOSE, AND THAT IS A TRAP FOR THE CALLER. `expect(...).not.toBeNull()` is
- * satisfied by the `undefined` — so a test meaning "the row is still here and stamped" passes just
- * as happily when the row was deleted out from under it, which is the failure some of these tests
+ * satisfied by the `undefined` — so a test meaning "the file is still here and sent" passes just as
+ * happily when the file was deleted out from under it, which is the failure some of these tests
  * exist to catch. Assert `toBeInstanceOf(Date)` for that, never `not.toBeNull()`.
  */
 async function attachedAtOf(
-  db: Database,
+  _db: Database,
   id: string,
 ): Promise<Date | null | undefined> {
-  const [row] = await db
-    .select({ attachedAt: attachments.attachedAt })
-    .from(attachments)
-    .where(eq(attachments.id, id));
-  return row?.attachedAt;
+  const file = await filesClient().get(id);
+  return file ? file.committedAt : undefined;
 }
 
-function deferred() {
-  let resolve!: () => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, reject, resolve };
-}
-
-/**
- * How long {@link waitForBlockedSession} waits before saying so itself.
- *
- * IT HAS TO BE COMFORTABLY UNDER THE TEST'S OWN TIMEOUT, and it used to be exactly equal to it: the
- * deadline was 5s and Bun's default per-test timeout is also 5s, with no override anywhere, so the
- * test was always killed by the runner a moment before the helper could raise. The message below —
- * the one thing that says WHICH session never blocked — was unreachable, and every failure of these
- * races read as a bare "timed out after 5000ms".
- *
- * So the deadline is a third of the timeout the two callers now declare, which leaves the helper's
- * own diagnostic the thing that fires.
- */
-const BLOCKED_SESSION_TIMEOUT_MS = 20_000;
-const BLOCKED_SESSION_DEADLINE_MS = BLOCKED_SESSION_TIMEOUT_MS / 3;
-
-/**
- * Waits until the named session is actually waiting on somebody else's lock.
- *
- * A sleep would make the race below a guess about how fast this machine is; `pg_blocking_pids` is
- * Postgres saying so itself. `settled` is the other way out: a request that answered without ever
- * blocking has nothing left to wait for, and returning false lets the test say which of the two
- * happened rather than time out on a question already answered.
- *
- * The poll has a pause in it, which it did not before. Without one this loop asks
- * `pg_stat_activity` as fast as the connection will answer — a view Postgres builds by walking
- * every backend — on the one connection the racing request may itself be waiting for, on a database
- * other agents' suites are using at the same time. 10ms is far below the window being observed and
- * turns thousands of round trips into a handful.
- */
-async function waitForBlockedSession(
-  applicationName: string,
-  settled: () => boolean,
-): Promise<boolean> {
-  const deadline = Date.now() + BLOCKED_SESSION_DEADLINE_MS;
-  while (Date.now() < deadline) {
-    const blocked = await database.execute(sql`
-      SELECT pid
-      FROM pg_stat_activity
-      WHERE application_name = ${applicationName}
-        AND cardinality(pg_blocking_pids(pid)) > 0
-      LIMIT 1
-    `);
-    if (blocked.length > 0) return true;
-    if (settled()) return false;
-    await Bun.sleep(10);
-  }
-  throw new Error(`Timed out observing blocked session ${applicationName}.`);
-}
-
-/** The transaction handle drizzle hands a `db.transaction` callback, named so a helper can pass it on. */
-type HeldTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-
-/**
- * Runs `markAttachmentsSent` into a row another transaction is already holding, and lets the caller
- * decide what happens to that row while the stamp is stuck waiting for it.
- *
- * THIS IS THE GAP BETWEEN THE LOAD AND THE STAMP, MADE OBSERVABLE. `inlineAttachments` reads an
- * attachment's bytes, then walks the rest of the history, and only then records the send — so
- * anything that can take the row commits inside a window that is as long as the history is. A
- * `SELECT … FOR UPDATE` holds the row without changing it, which is what puts the stamp in that
- * window on purpose rather than hoping the two land in the right order; `pg_blocking_pids` is
- * Postgres confirming the stamp really is waiting, so the interleaving is observed rather than
- * assumed. Then `whileBlocked` runs in the holding transaction and it commits, and what the stamp
- * does when it wakes is the whole of each test below.
- *
- * A CONNECTION OF ITS OWN, `{ max: 1 }` and named, for the reasons the upload and delete races give
- * at length: `pg_blocking_pids` needs a session it can point at, every pool this suite opens is held
- * for the whole run, and the stamp issues its statements one after another anyway.
- *
- * Hands back whatever `markAttachmentsSent` rejected with, or null when it resolved. Returned rather
- * than rethrown so the caller can assert on either outcome, and captured in the handler rather than
- * left on a floating promise so a rejection is never momentarily unhandled.
- */
-async function stampWhileTheRowIsHeld(
-  db: Database,
-  turn: { actorId: string; threadId: string },
-  id: string,
-  whileBlocked: (held: HeldTransaction) => Promise<void>,
-): Promise<unknown> {
-  const applicationName = `attachment_stamp_race_${randomUUID()}`;
-  const namedUrl = new URL(databaseUrl);
-  namedUrl.searchParams.set("application_name", applicationName);
-  const namedDatabase = createDatabase(namedUrl.toString(), { max: 1 });
-
-  const rowHeld = deferred();
-  const release = deferred();
-  const holder = db.transaction(async (transaction) => {
-    await transaction
-      .select({ id: attachments.id })
-      .from(attachments)
-      .where(eq(attachments.id, id))
-      .for("update");
-    rowHeld.resolve();
-    await release.promise;
-    await whileBlocked(transaction);
-  });
-  void holder.catch(rowHeld.reject);
-
-  try {
-    await rowHeld.promise;
-    let settled = false;
-    let outcome: unknown = null;
-    const stamping = markAttachmentsSent(namedDatabase, turn, [id]).then(
-      () => {
-        settled = true;
-      },
-      (reason: unknown) => {
-        settled = true;
-        outcome = reason;
-      },
-    );
-
-    expect(await waitForBlockedSession(applicationName, () => settled)).toBe(
-      true,
-    );
-    release.resolve();
-    await holder;
-    await stamping;
-    return outcome;
-  } finally {
-    release.resolve();
-    await holder.catch(() => undefined);
-    await namedDatabase.$client.close();
-  }
+/** Withdraws a staged attachment the way the withdrawal route's delete does: directly, by id. */
+async function deleteAttachment(id: string): Promise<void> {
+  await filesClient().delete(id, `test:${randomUUID()}`);
 }
 
 /**
@@ -558,17 +487,14 @@ describe("POST /:channelId/attachments", () => {
   });
 
   test("a text file over the size limit is refused and writes no row", async () => {
-    const { app, database: db, channelId } = await harness();
+    const { app, channelId } = await harness();
     const oversized = new Uint8Array(MAX_FILE_BYTES + 1).fill(0x61);
     const file = new File([oversized], "notes.txt", { type: "text/plain" });
 
     const response = await upload(app, channelId, file);
 
     expect(response.status).toBe(413);
-    const rows = await db
-      .select({ id: attachments.id })
-      .from(attachments)
-      .where(eq(attachments.channelId, channelId));
+    const rows = await attachmentRowsIn(channelId);
     expect(rows.length).toBe(0);
   });
 
@@ -601,8 +527,8 @@ describe("POST /:channelId/attachments", () => {
   });
 
   test("the ninth staged attachment in one upload group is refused", async () => {
-    const { app, database: db, channelId, memberId } = await harness();
-    await db.insert(attachments).values(
+    const { app, channelId, memberId } = await harness();
+    await insertAttachments(
       Array.from({ length: MAX_ATTACHMENTS_PER_MESSAGE }, (_, index) => ({
         channelId,
         uploadedBy: memberId,
@@ -641,8 +567,8 @@ describe("POST /:channelId/attachments", () => {
    * still the sweeper's to reclaim; what they must not do is spend somebody else's cap.
    */
   test("an orphan from another upload group does not spend a new group's cap", async () => {
-    const { app, database: db, channelId, memberId } = await harness();
-    await db.insert(attachments).values(
+    const { app, channelId, memberId } = await harness();
+    await insertAttachments(
       Array.from({ length: MAX_ATTACHMENTS_PER_MESSAGE }, (_, index) => ({
         channelId,
         uploadedBy: memberId,
@@ -726,7 +652,7 @@ describe("POST /:channelId/attachments", () => {
      * the sentence is rephrased and only stops holding if a duration comes back into it.
      */
     expect(lastError).not.toMatch(/within a (day|week|hour)|\d+\s*hours?/i);
-  });
+  }, 30_000);
 
   /*
    * THE BACKSTOP IS NOT PER CHANNEL, because `POST /api/channels` is open to any authenticated user.
@@ -738,20 +664,18 @@ describe("POST /:channelId/attachments", () => {
    * for this test to be about something else. The upload that decides it is a real one.
    */
   test("staged rows in another channel still count against the backstop", async () => {
-    const { app, database: db, channelId, memberId } = await harness();
+    const { app, channelId, memberId } = await harness();
 
     const elsewhere = `${testPrefix}-channel-${randomUUID()}`;
-    await db.insert(channels).values({
+    createdChannelIds.push(elsewhere);
+    await seedConversation({
       id: elsewhere,
       name: "Another Channel Entirely",
       description: "Where this person has already staged their limit.",
+      members: [{ userId: memberId, threadId: null }],
     });
-    createdChannelIds.push(elsewhere);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId: elsewhere, userId: memberId });
 
-    await db.insert(attachments).values(
+    await insertAttachments(
       Array.from({ length: MAX_STAGED_ATTACHMENTS_PER_UPLOADER }, (_, i) => ({
         channelId: elsewhere,
         uploadedBy: memberId,
@@ -772,7 +696,7 @@ describe("POST /:channelId/attachments", () => {
     expect(response.status).toBe(409);
     const { error } = (await response.json()) as { error: string };
     expect(error).toContain("waiting to send");
-  });
+  }, 30_000);
 
   /*
    * THE BACKSTOP UNDER THE SAME RACE THE CAP HAD TO BE FIXED FOR.
@@ -788,9 +712,9 @@ describe("POST /:channelId/attachments", () => {
    * of the same person: exactly one may be accepted.
    */
   test("two uploads racing at the backstop in different groups leave only one accepted", async () => {
-    const { app, database: db, channelId, memberId } = await harness();
+    const { app, channelId, memberId } = await harness();
 
-    await db.insert(attachments).values(
+    await insertAttachments(
       Array.from(
         { length: MAX_STAGED_ATTACHMENTS_PER_UPLOADER - 1 },
         (_, i) => ({
@@ -821,7 +745,7 @@ describe("POST /:channelId/attachments", () => {
 
     expect(statuses.filter((status) => status === 201)).toHaveLength(1);
     expect(statuses.filter((status) => status === 409)).toHaveLength(1);
-  });
+  }, 30_000);
 
   /*
    * THE TRADE THE GROUPING BOUGHT, STILL BOUGHT. The backstop sits four messages above the cap
@@ -831,9 +755,9 @@ describe("POST /:channelId/attachments", () => {
    * and it stays closed.
    */
   test("a second composer session still gets its own eight under the backstop", async () => {
-    const { app, database: db, channelId, memberId } = await harness();
+    const { app, channelId, memberId } = await harness();
 
-    await db.insert(attachments).values(
+    await insertAttachments(
       Array.from({ length: MAX_ATTACHMENTS_PER_MESSAGE }, (_, index) => ({
         channelId,
         uploadedBy: memberId,
@@ -857,7 +781,7 @@ describe("POST /:channelId/attachments", () => {
     }
 
     expect(statuses.every((status) => status === 201)).toBe(true);
-  });
+  }, 30_000);
 
   /**
    * THE CAP UNDER THE LOAD IT IS ACTUALLY MET WITH.
@@ -894,109 +818,39 @@ describe("POST /:channelId/attachments", () => {
     );
   });
   /*
-   * THE MEMBERSHIP CHECK AND THE INSERT ARE ONE STATEMENT, for the same reason the count and the
-   * insert are.
+   * A REMOVAL LANDING MID-UPLOAD LEAVES NO FILE IN THE CHANNEL.
    *
-   * The route read membership at the top of the handler and then inserted on the strength of what
-   * it had read — with the whole of `await file.arrayBuffer()`, the sniff and the classification in
+   * The route read membership at the top of the handler and then stored on the strength of what it
+   * had read — with the whole of `await file.arrayBuffer()`, the sniff and the classification in
    * between. A removal landing in that gap put a file into a channel its uploader had already been
    * taken out of, and the gap is as wide as reading an upload off the wire.
    *
-   * Parked deterministically rather than hoped for. The upload's first act inside its transaction
-   * is to take its uploader's advisory lock, so holding that exact lock first stops the request
-   * precisely between its check and its insert. The removal commits, the lock is released, and what
-   * the insert does when it finally runs is the whole test.
-   *
-   * The key is the uploader alone, and was (channel, uploader, group) until the staging backstop
-   * needed a count no group could move. A group still goes into this upload because the route reads
-   * one; it just no longer names the lock.
+   * Parked deterministically rather than hoped for: the removal is made the moment the route sends
+   * the file to Intelligence, which is after the first check and before the file exists. What the
+   * route does about the file it then gets back is the whole test.
    */
-  test(
-    "a membership revoked mid-upload leaves no file in the channel",
-    async () => {
-      const { database: db, channelId, memberId, member } = await harness();
-      const uploadGroup = randomUUID();
+  test("a membership revoked mid-upload leaves no file in the channel", async () => {
+    const { app, channelId, memberId } = await harness();
 
-      /*
-       * A named connection of its own, so `pg_blocking_pids` can point at the request's session, and
-       * `{ max: 1 }` rather than `TEST_POOL` for the reason the delete race gives below: every pool
-       * this suite opens is held for the whole run, and the request issues its statements one after
-       * another anyway.
-       */
-      const applicationName = `attachment_upload_race_${randomUUID()}`;
-      const namedUrl = new URL(databaseUrl);
-      namedUrl.searchParams.set("application_name", applicationName);
-      const namedDatabase = createDatabase(namedUrl.toString(), { max: 1 });
+    interceptFiles({
+      create: async (forward) => {
+        await leaveChannel(channelId, memberId);
+        return forward();
+      },
+    });
+    const file = new File(
+      [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+      "photo.png",
+      { type: "image/png" },
+    );
+    const status = (await upload(app, channelId, file, randomUUID())).status;
 
-      const lockHeld = deferred();
-      const releaseLock = deferred();
-      const holder = db.transaction(async (transaction) => {
-        await transaction.execute(
-          sql`select pg_advisory_xact_lock(hashtext(${`attachment-cap-${memberId}`}))`,
-        );
-        lockHeld.resolve();
-        await releaseLock.promise;
-      });
-      void holder.catch(lockHeld.reject);
-
-      let status: number | undefined;
-      try {
-        await lockHeld.promise;
-        const app = new Hono<{ Variables: AppVariables }>();
-        app.route("/", createChannelAttachmentRoutes(namedDatabase, member));
-        const file = new File(
-          [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
-          "photo.png",
-          { type: "image/png" },
-        );
-
-        let settled = false;
-        const request = upload(app, channelId, file, uploadGroup).then(
-          (value) => {
-            settled = true;
-            return value;
-          },
-          (reason: unknown) => {
-            settled = true;
-            throw reason;
-          },
-        );
-
-        expect(
-          await waitForBlockedSession(applicationName, () => settled),
-        ).toBe(true);
-
-        await db
-          .delete(channelMemberships)
-          .where(
-            and(
-              eq(channelMemberships.channelId, channelId),
-              eq(channelMemberships.userId, memberId),
-            ),
-          );
-
-        releaseLock.resolve();
-        await holder;
-        status = (await request).status;
-      } finally {
-        releaseLock.resolve();
-        await holder.catch(() => undefined);
-        await namedDatabase.$client.close();
-      }
-
-      expect(status).toBe(403);
-      // The row, because a 403 answered over a file that had already landed would be the same failure
-      // wearing the right status code.
-      const rows = await db
-        .select({ id: attachments.id })
-        .from(attachments)
-        .where(eq(attachments.channelId, channelId));
-      expect(rows.length).toBe(0);
-      // Declared, so the helper's own "which session never blocked" diagnostic is what fires
-      // when this race does not happen. See BLOCKED_SESSION_TIMEOUT_MS.
-    },
-    BLOCKED_SESSION_TIMEOUT_MS,
-  );
+    expect(status).toBe(403);
+    // The file, because a 403 answered over a file that had already landed would be the same failure
+    // wearing the right status code.
+    const rows = await attachmentRowsIn(channelId);
+    expect(rows.length).toBe(0);
+  });
   /*
    * A GROUP THIS SERVER CANNOT STORE IS A GROUP IT DOES WITHOUT.
    *
@@ -1050,7 +904,7 @@ describe("POST /:channelId/attachments", () => {
     expect(eighth.status).toBe(201);
     // ...and stored in the group-less bucket, which the ninth then finds full.
     expect(ninth.status).toBe(409);
-  });
+  }, 30_000);
 
   /*
    * A NUL is not a length problem and would survive a length check. Postgres refuses U+0000 in a
@@ -1065,7 +919,7 @@ describe("POST /:channelId/attachments", () => {
    * nothing wrong with the FILE should not be refused over a cosmetic grouping hint.
    */
   test("an upload group carrying a NUL is stored as a group-less upload", async () => {
-    const { app, channelId, database: db } = await harness();
+    const { app, channelId } = await harness();
 
     const response = await upload(
       app,
@@ -1090,11 +944,7 @@ describe("POST /:channelId/attachments", () => {
     // fallback's spelling, so the test pins the behaviour and not the constant.
     const groupOf = async (response: Response) => {
       const { id } = (await response.json()) as { id: string };
-      const [row] = await db
-        .select({ uploadGroup: attachments.uploadGroup })
-        .from(attachments)
-        .where(eq(attachments.id, id));
-      return row.uploadGroup;
+      return (await filesClient().get(id))?.batch;
     };
     expect(await groupOf(response)).toBe(await groupOf(groupless));
   });
@@ -1105,14 +955,18 @@ describe("POST /:channelId/attachments", () => {
    * `app/src/components/channels/composer/attachments.ts` reads `{ error }` off every failed upload
    * and falls back to a generic `Could not upload "<name>"` when the body will not parse as JSON.
    * There is no `app.onError` behind this router — the `formData()` guard above says so, and relies
-   * on it — so an unguarded database call meant a lost connection, a pool with nothing left, a
-   * `statement_timeout`, a full disk and a lock timeout were all Hono's plain-text
-   * `Internal Server Error`, and none of them were written down on this side either.
+   * on it — so an unguarded call meant a lost connection, a timeout or a store with nothing left
+   * were all Hono's plain-text `Internal Server Error`, and none of them were written down on this
+   * side either.
+   *
+   * The membership check is the first read, and it is Intelligence's conversation directory now
+   * (channels and their members live there), so that is the store that is down here.
    */
-  test("a database that cannot be reached refuses the upload as JSON, and says so in the log", async () => {
+  test("a membership check that cannot be made refuses the upload as JSON, and says so in the log", async () => {
     const { channelId, memberId, member } = await harness();
     const app = new Hono<{ Variables: AppVariables }>();
-    app.route("/", createChannelAttachmentRoutes(unreachableDatabase, member));
+    app.route("/", createChannelAttachmentRoutes(database, member));
+    unreachableConversations();
 
     const { result: response, logged } = await withCapturedErrorLog(() =>
       upload(
@@ -1139,18 +993,14 @@ describe("POST /:channelId/attachments", () => {
   });
 
   /*
-   * The same guarantee one statement deeper. The unreachable database above never gets past the
-   * membership check, so this one lets every real statement through and fails only where the file
-   * is actually written — which is the line a pool exhaustion, a lock timeout on
-   * `pg_advisory_xact_lock` or a `53100` full disk would land on.
+   * The same guarantee one step deeper. The unreachable directory above never gets past the
+   * membership check, so this one lets the check through and fails only where the file is actually
+   * written — Intelligence, which is where a lost connection during a rollout, a timeout or a store
+   * that refused the bytes would land.
    */
-  test("a transaction that cannot be opened refuses the upload as JSON, naming the size", async () => {
-    const { channelId, member, database: db } = await harness();
-    const app = new Hono<{ Variables: AppVariables }>();
-    app.route(
-      "/",
-      createChannelAttachmentRoutes(databaseWhoseTransactionFails(db), member),
-    );
+  test("a file store that cannot be reached refuses the upload as JSON, naming the size", async () => {
+    const { app, channelId } = await harness();
+    unreachableFiles();
 
     const { result: response, logged } = await withCapturedErrorLog(() =>
       upload(
@@ -1167,7 +1017,7 @@ describe("POST /:channelId/attachments", () => {
     expect(((await response.json()) as { error: string }).error).toContain(
       "Try again",
     );
-    // The sniffed type and the size are in the line because "the disk is full" and "one 8 MiB
+    // The sniffed type and the size are in the line because "the store is down" and "one 8 MiB
     // upload is being retried in a loop" look identical without them.
     expect(logged.some((line) => line.includes("text/plain"))).toBe(true);
     expect(logged.some((line) => line.includes("5 bytes"))).toBe(true);
@@ -1205,26 +1055,28 @@ describe("POST /:channelId/attachments", () => {
       staged.push(((await response.json()) as { id: string }).id);
     }
 
-    // A real withdrawal through the real route, on its own connection, committing while the ninth
-    // upload is between its statements.
+    // A real withdrawal through the real route, committing the moment Intelligence has refused the
+    // ninth upload and before the route has said why.
     const withdrawer = attachmentApp(db, member);
-    const racing = new Hono<{ Variables: AppVariables }>();
-    racing.route(
-      "/",
-      createChannelAttachmentRoutes(
-        databaseWithdrawingAfterTheInsert(db, async () => {
-          const withdrawn = await withdrawer.request(
-            `http://test/${staged[0]}`,
-            { method: "DELETE" },
-          );
-          expect(withdrawn.status).toBe(204);
-        }),
-        member,
-      ),
-    );
+    interceptFiles({
+      create: async (forward) => {
+        try {
+          return await forward();
+        } catch (error) {
+          if (error instanceof PendingLimitError) {
+            const withdrawn = await withdrawer.request(
+              `http://test/${staged[0]}`,
+              { method: "DELETE" },
+            );
+            expect(withdrawn.status).toBe(204);
+          }
+          throw error;
+        }
+      },
+    });
 
     const ninth = await upload(
-      racing,
+      app,
       channelId,
       new File([new TextEncoder().encode("abc")], "ninth.txt", {
         type: "text/plain",
@@ -1239,19 +1091,11 @@ describe("POST /:channelId/attachments", () => {
     expect(
       counts.filter((count) => count < MAX_ATTACHMENTS_PER_MESSAGE),
     ).toEqual([]);
-    // The withdrawal really did land, so the refusal above was explained against a table that had
-    // already moved on: seven rows are left where the count says eight.
-    const remaining = await db
-      .select({ id: attachments.id })
-      .from(attachments)
-      .where(
-        and(
-          eq(attachments.channelId, channelId),
-          eq(attachments.uploadGroup, uploadGroup),
-        ),
-      );
+    // The withdrawal really did land, so the refusal above was explained against a store that had
+    // already moved on: seven files are left where the count says eight.
+    const remaining = await attachmentRowsIn(channelId, uploadGroup);
     expect(remaining).toHaveLength(MAX_ATTACHMENTS_PER_MESSAGE - 1);
-  });
+  }, 30_000);
   /*
    * A NAME THAT CANNOT BE PUT IN A HEADER IS A FILE NOBODY CAN FETCH.
    *
@@ -1435,9 +1279,7 @@ describe("GET /:id", () => {
       .insert(users)
       .values({ id: colleagueId, email: `${colleagueId}@example.test` });
     createdUserIds.push(colleagueId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: colleagueId });
+    await joinChannel(channelId, colleagueId);
     const id = await uploadText(db, {
       channelId,
       uploadedBy: memberId,
@@ -1469,9 +1311,7 @@ describe("GET /:id", () => {
       .insert(users)
       .values({ id: colleagueId, email: `${colleagueId}@example.test` });
     createdUserIds.push(colleagueId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: colleagueId });
+    await joinChannel(channelId, colleagueId);
     const id = await uploadText(db, {
       channelId,
       uploadedBy: memberId,
@@ -1524,10 +1364,7 @@ describe("GET /:id", () => {
     // Fetchable first, so the 404 below is the deletion and not a broken fixture.
     expect((await app.request(`http://test/${id}`)).status).toBe(200);
 
-    await db
-      .update(channels)
-      .set({ deletedAt: new Date() })
-      .where(eq(channels.id, channelId));
+    await deleteConversation(channelId);
 
     const response = await app.request(`http://test/${id}`);
 
@@ -1617,7 +1454,7 @@ describe("GET /:id", () => {
     expect(await fresh.text()).toBe("");
     expect(fresh.headers.get("Cache-Control")).toBe("private, no-cache");
 
-    await db.delete(attachments).where(eq(attachments.id, id));
+    await deleteAttachment(id);
 
     expect((await revalidate()).status).toBe(404);
   });
@@ -1650,7 +1487,7 @@ describe("GET /:id", () => {
 
     const revalidated: string[][] = [];
     const revalidating = attachmentApp(
-      databaseRecordingSelections(db, revalidated),
+      recordingFileReads(db, revalidated),
       member,
     );
     const notModified = await revalidating.request(`http://test/${id}`, {
@@ -1664,10 +1501,7 @@ describe("GET /:id", () => {
     // And the same request without the header does read them, so the assertion above is about this
     // handler rather than about how the recorder happens to see drizzle.
     const fetched: string[][] = [];
-    const fetcher = attachmentApp(
-      databaseRecordingSelections(db, fetched),
-      member,
-    );
+    const fetcher = attachmentApp(recordingFileReads(db, fetched), member);
     expect((await fetcher.request(`http://test/${id}`)).status).toBe(200);
     expect(fetched.flat()).toContain("bytes");
   });
@@ -1719,10 +1553,7 @@ describe("GET /:id", () => {
 
     // And once the channel is gone the member's own revalidation goes the same way, which is the
     // other half of what the join is there for.
-    await db
-      .update(channels)
-      .set({ deletedAt: new Date() })
-      .where(eq(channels.id, channelId));
+    await deleteConversation(channelId);
     expect(
       (
         await attachmentApp(db, member).request(
@@ -1860,10 +1691,7 @@ describe("GET /:id", () => {
     });
 
     const probed: string[][] = [];
-    const probe = attachmentApp(
-      databaseRecordingSelections(db, probed),
-      member,
-    );
+    const probe = attachmentApp(recordingFileReads(db, probed), member);
     const head = await probe.request(`http://test/${id}`, { method: "HEAD" });
 
     expect(head.status).toBe(200);
@@ -1875,10 +1703,7 @@ describe("GET /:id", () => {
     // And the fetch of the same row does read them, so the assertion above is about this handler
     // rather than about how the recorder happens to see drizzle.
     const fetched: string[][] = [];
-    const fetcher = attachmentApp(
-      databaseRecordingSelections(db, fetched),
-      member,
-    );
+    const fetcher = attachmentApp(recordingFileReads(db, fetched), member);
     expect((await fetcher.request(`http://test/${id}`)).status).toBe(200);
     expect(fetched.flat()).toContain("bytes");
   });
@@ -1904,9 +1729,7 @@ describe("GET /:id", () => {
       .insert(users)
       .values({ id: colleagueId, email: `${colleagueId}@example.test` });
     createdUserIds.push(colleagueId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: colleagueId });
+    await joinChannel(channelId, colleagueId);
 
     const sent = await uploadText(db, {
       channelId,
@@ -1980,7 +1803,7 @@ describe("GET /:id", () => {
   });
 
   /*
-   * The refusal the loop above cannot reach, because it needs a database that is not there.
+   * The refusal the loop above cannot reach, because it needs a membership check that cannot be made.
    *
    * A 503 is the one answer on this route that is about this side rather than about the asker, and
    * it was the one the probe spelled differently: `context.body(null, 503)` against the fetch's
@@ -1988,10 +1811,20 @@ describe("GET /:id", () => {
    * drift — and the log line is asserted too, because a fault nobody can see from outside is half of
    * what the 503 exists to report.
    */
-  test("a HEAD and a GET refuse an unreachable database in the same shape", async () => {
-    const memberId = `${testPrefix}-member-${randomUUID()}`;
-    const app = attachmentApp(unreachableDatabase, actorMiddleware(memberId));
-    const id = randomUUID();
+  test("a HEAD and a GET refuse an unreachable conversation directory in the same shape", async () => {
+    // A real attachment, so the file store answers and the membership check is the read that
+    // cannot be made: Intelligence's conversation directory, which holds the channel and its
+    // members, is the store that is down here.
+    const { database: db, channelId, memberId } = await harness();
+    const id = await uploadText(db, {
+      channelId,
+      uploadedBy: memberId,
+      name: "notes.txt",
+      text: "hello",
+      attachedAt: new Date(),
+    });
+    const app = attachmentApp(db, actorMiddleware(memberId));
+    unreachableConversations();
 
     const { result, logged } = await withCapturedErrorLog(async () => ({
       fetched: await app.request(`http://test/${id}`),
@@ -2015,6 +1848,30 @@ describe("GET /:id", () => {
     // to act on either.
     expect(logged.filter((line) => line.includes(id))).toHaveLength(2);
     expect(logged.every((line) => line.includes(memberId))).toBe(true);
+  });
+
+  test("a HEAD and a GET refuse an unreachable file store in the same shape", async () => {
+    const { database: db, memberId } = await harness();
+    const app = attachmentApp(db, actorMiddleware(memberId));
+    const id = randomUUID();
+    unreachableFiles();
+
+    const { result, logged } = await withCapturedErrorLog(async () => ({
+      fetched: await app.request(`http://test/${id}`),
+      probed: await app.request(`http://test/${id}`, { method: "HEAD" }),
+    }));
+
+    // Not a 404: the transcript paints "this attachment is gone" on one of those, and Intelligence
+    // being out of reach is not a withdrawal.
+    expect(result.fetched.status).toBe(503);
+    expect(result.probed.status).toBe(503);
+    expect(result.probed.headers.get("Content-Type")).toBe(
+      result.fetched.headers.get("Content-Type"),
+    );
+    expect((await result.fetched.json()) as { error: string }).toEqual({
+      error: "Couldn't open that attachment. Try again.",
+    });
+    expect(logged.filter((line) => line.includes(id))).toHaveLength(2);
   });
 
   /*
@@ -2068,7 +1925,7 @@ describe("GET /:id", () => {
     });
     expect(held.status).toBe(304);
 
-    await db.delete(attachments).where(eq(attachments.id, id));
+    await deleteAttachment(id);
 
     const gone = await app.request(`http://test/${id}`, {
       method: "HEAD",
@@ -2117,7 +1974,10 @@ describe("DELETE /:id", () => {
   });
 
   /*
-   * THE QUERY THAT EXPLAINS THE REFUSAL ASKS ONLY WHETHER THERE IS A ROW.
+   * THE READ THAT EXPLAINS THE REFUSAL ASKS ONLY ABOUT THE FILE, NEVER FOR ITS BYTES.
+   *
+   * What follows is the history of the statement this replaced, kept because the property it argues
+   * for is the one still pinned: a refusal decides from what it needs and reads nothing else.
    *
    * It used to select `attachedAt` and never read it: the 409 below it is unconditional. A column
    * fetched and dropped is cheap, but a column fetched and dropped in a query that decides between a
@@ -2140,16 +2000,14 @@ describe("DELETE /:id", () => {
     });
 
     const selected: string[][] = [];
-    const app = attachmentApp(
-      databaseRecordingSelections(db, selected),
-      member,
-    );
+    const app = attachmentApp(recordingFileReads(db, selected), member);
     const response = await app.request(`http://test/${id}`, {
       method: "DELETE",
     });
 
     expect(response.status).toBe(409);
-    expect(selected.flat()).not.toContain("attachedAt");
+    // Deciding between a 404 and a 409 is a question about the file, never about its contents.
+    expect(selected.flat()).not.toContain("bytes");
     // The 409 is still the one it was, said the one way it is said.
     expect((await response.json()) as { error: string }).toEqual({
       error: "This attachment is already part of a sent message.",
@@ -2171,84 +2029,48 @@ describe("DELETE /:id", () => {
    * Postgres re-checks the delete's WHERE against the row as it now stands, so a WHERE that carries
    * `attached_at IS NULL` matches nothing and a WHERE that does not still removes the file.
    */
-  test(
-    "a send landing mid-request cannot have its file deleted out from under it",
-    async () => {
-      const { database: db, channelId, memberId, member } = await harness();
-      const id = await uploadText(db, {
-        channelId,
-        uploadedBy: memberId,
-        name: "draft.txt",
-        text: "about to be sent",
-      });
+  test("a send landing mid-request cannot have its file deleted out from under it", async () => {
+    const {
+      database: db,
+      channelId,
+      memberId,
+      member,
+      threadId,
+    } = await harness();
+    const id = await uploadText(db, {
+      channelId,
+      uploadedBy: memberId,
+      name: "draft.txt",
+      text: "about to be sent",
+    });
 
-      /*
-       * One more connection, named, so `pg_blocking_pids` can point at the request's own session
-       * rather than at whatever else is talking to this database.
-       *
-       * `{ max: 1 }` rather than `TEST_POOL`, and the difference is not tidiness. Every file that
-       * opens a pool holds it for the whole run, the suite already sits within sight of PostgreSQL's
-       * hundred, and a second one here took it over: the failure is `53300 sorry, too many clients
-       * already` in whichever unrelated file happened to connect next. The request below issues its
-       * statements one after another, so one connection is all it can use anyway. The blocking
-       * transaction and the `pg_blocking_pids` poll take the shared pool's two.
-       */
-      const applicationName = `attachment_delete_race_${randomUUID()}`;
-      const namedUrl = new URL(databaseUrl);
-      namedUrl.searchParams.set("application_name", applicationName);
-      const namedDatabase = createDatabase(namedUrl.toString(), { max: 1 });
+    /*
+     * The send lands between the withdrawal's read and its delete: the route has read the file as
+     * staged and decided to withdraw it, and the uploader's own turn commits it just before the
+     * delete reaches Intelligence. The delete carries the version that was read, so it must take
+     * nothing, and the route must say why.
+     */
+    let sentMidRequest = false;
+    interceptFiles({
+      delete: async (forward) => {
+        if (!sentMidRequest) {
+          sentMidRequest = true;
+          await markAttachmentsSent(db, { actorId: memberId, threadId }, [id]);
+        }
+        return forward();
+      },
+    });
+    const app = attachmentApp(db, member);
+    const status = (
+      await app.request(`http://test/${id}`, { method: "DELETE" })
+    ).status;
 
-      const stampWritten = deferred();
-      const releaseSend = deferred();
-      const send = db.transaction(async (transaction) => {
-        await transaction
-          .update(attachments)
-          .set({ attachedAt: new Date() })
-          .where(eq(attachments.id, id));
-        stampWritten.resolve();
-        await releaseSend.promise;
-      });
-      void send.catch(stampWritten.reject);
-
-      let status: number | undefined;
-      try {
-        await stampWritten.promise;
-        const app = attachmentApp(namedDatabase, member);
-        let settled = false;
-        const withdrawal = app
-          .request(`http://test/${id}`, { method: "DELETE" })
-          .then(
-            (value) => {
-              settled = true;
-              return value;
-            },
-            (reason: unknown) => {
-              settled = true;
-              throw reason;
-            },
-          );
-
-        expect(
-          await waitForBlockedSession(applicationName, () => settled),
-        ).toBe(true);
-        releaseSend.resolve();
-        await send;
-        status = (await withdrawal).status;
-      } finally {
-        releaseSend.resolve();
-        await send.catch(() => undefined);
-        await namedDatabase.$client.close();
-      }
-
-      expect(status).toBe(409);
-      // The row itself, because a 409 that answered after the file was already gone would be the same
-      // failure wearing the right status code.
-      expect(await attachedAtOf(db, id)).toBeInstanceOf(Date);
-      // As above: the runner's default 5s timeout used to kill this before the helper could say which
-      // session it had been watching. See BLOCKED_SESSION_TIMEOUT_MS.
-    },
-    BLOCKED_SESSION_TIMEOUT_MS,
-  );
+    expect(sentMidRequest).toBe(true);
+    expect(status).toBe(409);
+    // The file itself, because a 409 that answered after the file was already gone would be the same
+    // failure wearing the right status code.
+    expect(await attachedAtOf(db, id)).toBeInstanceOf(Date);
+  });
 
   test("a second channel member cannot delete another member's staged draft", async () => {
     const { database: db, channelId, memberId } = await harness();
@@ -2258,9 +2080,7 @@ describe("DELETE /:id", () => {
       email: `${otherMemberId}@example.test`,
     });
     createdUserIds.push(otherMemberId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: otherMemberId });
+    await joinChannel(channelId, otherMemberId);
     const otherMember = actorMiddleware(otherMemberId);
 
     const id = await uploadText(db, {
@@ -2276,10 +2096,7 @@ describe("DELETE /:id", () => {
     });
 
     expect(response.status).toBe(404);
-    const rows = await db
-      .select({ id: attachments.id })
-      .from(attachments)
-      .where(eq(attachments.id, id));
+    const rows = await attachmentRow(id);
     expect(rows.length).toBe(1);
   });
 
@@ -2304,14 +2121,7 @@ describe("DELETE /:id", () => {
       text: "not sent yet",
     });
 
-    await db
-      .delete(channelMemberships)
-      .where(
-        and(
-          eq(channelMemberships.channelId, channelId),
-          eq(channelMemberships.userId, memberId),
-        ),
-      );
+    await leaveChannel(channelId, memberId);
 
     const app = attachmentApp(db, member);
     const response = await app.request(`http://test/${id}`, {
@@ -2319,10 +2129,7 @@ describe("DELETE /:id", () => {
     });
 
     expect(response.status).toBe(404);
-    const rows = await db
-      .select({ id: attachments.id })
-      .from(attachments)
-      .where(eq(attachments.id, id));
+    const rows = await attachmentRow(id);
     expect(rows.length).toBe(1);
   });
 
@@ -2340,10 +2147,7 @@ describe("DELETE /:id", () => {
       name: "draft.txt",
       text: "not sent yet",
     });
-    await db
-      .update(channels)
-      .set({ deletedAt: new Date() })
-      .where(eq(channels.id, channelId));
+    await deleteConversation(channelId);
     const app = attachmentApp(db, member);
 
     const response = await app.request(`http://test/${id}`, {
@@ -2351,10 +2155,7 @@ describe("DELETE /:id", () => {
     });
 
     expect(response.status).toBe(404);
-    const rows = await db
-      .select({ id: attachments.id })
-      .from(attachments)
-      .where(eq(attachments.id, id));
+    const rows = await attachmentRow(id);
     expect(rows.length).toBe(1);
   });
 
@@ -2564,10 +2365,7 @@ describe("the upload route's body limit", () => {
     expect(body.error).toContain("8MB");
     // Scoped to this test's own channel: a global row count would collide with the sweeper test,
     // which deletes across the whole shared database.
-    const rows = await db
-      .select({ id: attachments.id })
-      .from(attachments)
-      .where(eq(attachments.channelId, channelId));
+    const rows = await attachmentRowsIn(channelId);
     expect(rows.length).toBe(0);
   });
 
@@ -2592,28 +2390,24 @@ describe("the upload route's body limit", () => {
 /**
  * A SECOND channel belonging to the same person, with its own conversation.
  *
- * This is the production shape, not a contrivance: `makeChannel` gives every channel exactly one
- * membership row and exactly one mapping row, both for its creator, so one person with two channels
- * has two threads and is a member of both. That is all it takes to reach the cross-channel case —
+ * This is the production shape, not a contrivance: creating a channel gives it exactly one member
+ * holding exactly one thread of their own, both the creator's, so one person with two channels has
+ * two threads and is a member of both. That is all it takes to reach the cross-channel case —
  * no second person and no shared channel, which is why it survived three rounds of review looking
  * like somebody else's problem.
  */
 async function secondChannelFor(
-  db: Database,
   memberId: string,
 ): Promise<{ channelId: string; threadId: string }> {
   const channelId = `${testPrefix}-channel-${randomUUID()}`;
-  await db.insert(channels).values({
+  createdChannelIds.push(channelId);
+  const threadId = `${testPrefix}-thread-${randomUUID()}`;
+  await seedConversation({
     id: channelId,
     name: "The Other Channel",
     description: "A second conversation the same person is in.",
+    members: [{ userId: memberId, threadId }],
   });
-  createdChannelIds.push(channelId);
-  await db.insert(channelMemberships).values({ channelId, userId: memberId });
-  const threadId = `${testPrefix}-thread-${randomUUID()}`;
-  await db
-    .insert(intelligenceChannelMappings)
-    .values({ channelId, userId: memberId, threadId });
   return { channelId, threadId };
 }
 
@@ -2635,7 +2429,7 @@ describe("loadAttachmentForTurn", () => {
    */
   test("a file from another channel of the same person's is not loaded into this turn", async () => {
     const { database: db, channelId, memberId, threadId } = await harness();
-    const other = await secondChannelFor(db, memberId);
+    const other = await secondChannelFor(memberId);
 
     const id = await uploadText(db, {
       channelId,
@@ -2793,11 +2587,7 @@ describe("loadAttachmentForTurn", () => {
 
     // And a refused load stamps nothing: the row is still staged as far as the sweeper is
     // concerned, because nobody entitled to it has been shown it.
-    const [row] = await db
-      .select({ attachedAt: attachments.attachedAt })
-      .from(attachments)
-      .where(eq(attachments.id, id));
-    expect(row?.attachedAt).toBeNull();
+    expect(await attachedAtOf(db, id)).toBeNull();
   });
 
   /*
@@ -2849,9 +2639,7 @@ describe("loadAttachmentForTurn", () => {
       email: `${otherMemberId}@example.test`,
     });
     createdUserIds.push(otherMemberId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: otherMemberId });
+    await joinChannel(channelId, otherMemberId);
 
     const id = await uploadText(db, {
       channelId,
@@ -2936,10 +2724,7 @@ describe("loadAttachmentForTurn", () => {
       await loadAttachmentForTurn(db, { actorId: memberId, threadId }, id),
     ).not.toBeNull();
 
-    await db
-      .update(channels)
-      .set({ deletedAt: new Date() })
-      .where(eq(channels.id, channelId));
+    await deleteConversation(channelId);
 
     expect(
       await loadAttachmentForTurn(db, { actorId: memberId, threadId }, id),
@@ -3020,7 +2805,7 @@ describe("markAttachmentsSent", () => {
    */
   test("a send in another channel does not stamp a row that lives in this one", async () => {
     const { database: db, channelId, memberId, threadId } = await harness();
-    const other = await secondChannelFor(db, memberId);
+    const other = await secondChannelFor(memberId);
 
     const id = await uploadText(db, {
       channelId,
@@ -3153,21 +2938,23 @@ describe("markAttachmentsSent", () => {
    * `attachedAt` stayed null. The culler reclaims exactly those rows, so a day later the message was
    * still displaying an attachment that no longer existed. Nobody was told at either end.
    *
-   * Through the real driver rather than a stub that returns a rejected promise: the failures this
-   * has to answer for are a lost connection, an exhausted pool and a `statement_timeout`, all of
-   * which arrive as "the driver could not answer this query", which is what a closed port produces.
+   * Through the real client rather than a stub that returns a rejected promise: the failures this
+   * has to answer for are a lost connection, a timeout and a 5xx, all of which arrive as "the request
+   * could not be answered", which is what a closed port produces.
    *
-   * The unstamped row is asserted on the REAL database, because "it raised" and "it raised and left
-   * the row alone" are different claims and only the second one makes the retry safe.
+   * The unstamped file is asserted in the REAL Intelligence, because "it raised" and "it raised and
+   * left the file alone" are different claims and only the second one makes the retry safe.
    */
-  test("a write the database refuses is raised rather than reported as a send", async () => {
+  test("a write the file store refuses is raised rather than reported as a send", async () => {
     const { database: db, channelId, memberId, threadId } = await harness();
     const id = await uploadText(db, {
       channelId,
       uploadedBy: memberId,
       name: "receipt.txt",
-      text: "sent into a database that cannot be reached",
+      text: "sent into a file store that cannot be reached",
     });
+    // The stamp is Intelligence's commit now, so Intelligence's file store is the one that is down.
+    unreachableFiles();
 
     // Collected into a local rather than read off the spy, because `mockRestore` clears the recorded
     // calls and the assertion below would then be made against an empty log whatever happened.
@@ -3179,11 +2966,9 @@ describe("markAttachmentsSent", () => {
     );
     let raised: unknown;
     try {
-      raised = await markAttachmentsSent(
-        unreachableDatabase,
-        { actorId: memberId, threadId },
-        [id],
-      ).then(
+      raised = await markAttachmentsSent(db, { actorId: memberId, threadId }, [
+        id,
+      ]).then(
         () => null,
         (reason: unknown) => reason,
       );
@@ -3202,6 +2987,7 @@ describe("markAttachmentsSent", () => {
     expect(logged.join(" ")).toContain(memberId);
     expect(logged.join(" ")).toContain(id);
     // Still staged: still withdrawable, still countable against the cap, still stampable by a retry.
+    restoreTestFiles();
     expect(await attachedAtOf(db, id)).toBeNull();
   });
 
@@ -3225,96 +3011,105 @@ describe("markAttachmentsSent", () => {
    * from under it" above: stamp first, and the withdrawal's `attached_at is null` no longer holds so
    * it takes nothing and answers 409. Between the two, neither can win twice.
    */
-  test(
-    "a withdrawal landing between the load and the stamp refuses the send",
-    async () => {
-      const { database: db, channelId, memberId, threadId } = await harness();
-      const id = await uploadText(db, {
-        channelId,
-        uploadedBy: memberId,
-        name: "draft.txt",
-        text: "withdrawn while the turn was being prepared",
-      });
+  test("a withdrawal landing between the load and the stamp refuses the send", async () => {
+    const {
+      database: db,
+      channelId,
+      memberId,
+      member,
+      threadId,
+    } = await harness();
+    const id = await uploadText(db, {
+      channelId,
+      uploadedBy: memberId,
+      name: "draft.txt",
+      text: "withdrawn while the turn was being prepared",
+    });
 
-      // The bytes really were readable when the turn started, which is what makes this a race rather
-      // than a send naming a file that was never there.
-      expect(
-        await loadAttachmentForTurn(db, { actorId: memberId, threadId }, id),
-      ).not.toBeNull();
+    // The bytes really were readable when the turn started, which is what makes this a race rather
+    // than a send naming a file that was never there.
+    expect(
+      await loadAttachmentForTurn(db, { actorId: memberId, threadId }, id),
+    ).not.toBeNull();
 
-      const consoleError = spyOn(console, "error").mockImplementation(() => {});
-      let refusal: unknown;
-      try {
-        refusal = await stampWhileTheRowIsHeld(
-          db,
-          { actorId: memberId, threadId },
-          id,
-          async (held) => {
-            await held
-              .delete(attachments)
-              .where(
-                and(
-                  eq(attachments.id, id),
-                  eq(attachments.uploadedBy, memberId),
-                  isNull(attachments.attachedAt),
-                ),
-              );
-          },
+    // The withdrawal route's own request, landing just before the send reaches Intelligence.
+    interceptFiles({
+      commit: async (forward) => {
+        const withdrawn = await attachmentApp(db, member).request(
+          `http://test/${id}`,
+          { method: "DELETE" },
         );
-      } finally {
-        consoleError.mockRestore();
-      }
+        expect(withdrawn.status).toBe(204);
+        return forward();
+      },
+    });
 
-      expect(refusal).toBeInstanceOf(Error);
-      expect((refusal as Error).message).toContain(id);
-      // `toBeUndefined` rather than `not.toBeNull`, which the three-valued helper would satisfy with
-      // the very absence being asserted. The withdrawal won; the point is that the send says so.
-      expect(await attachedAtOf(db, id)).toBeUndefined();
-    },
-    BLOCKED_SESSION_TIMEOUT_MS,
-  );
+    const consoleError = spyOn(console, "error").mockImplementation(() => {});
+    let refusal: unknown;
+    try {
+      refusal = await markAttachmentsSent(db, { actorId: memberId, threadId }, [
+        id,
+      ]).then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(refusal).toBeInstanceOf(Error);
+    expect((refusal as Error).message).toContain(id);
+    // `toBeUndefined` rather than `not.toBeNull`, which the three-valued helper would satisfy with
+    // the very absence being asserted. The withdrawal won; the point is that the send says so.
+    expect(await attachedAtOf(db, id)).toBeUndefined();
+  });
 
   /*
-   * AND THE STAMP ANOTHER RUN ALREADY LANDED IS A RECORDED SEND, NOT A LOST RACE.
+   * AND THE SEND ANOTHER RUN ALREADY RECORDED IS A RECORDED SEND, NOT A LOST RACE.
    *
    * This is the over-correction the check above has to avoid, and it is the reason the verification
-   * is a SECOND STATEMENT rather than a CTE reading beside the UPDATE. A data-modifying CTE and the
-   * query next to it share one snapshot, taken when the statement began, so a row a neighbour
-   * stamped a moment ago would be invisible to the read while the UPDATE's own re-check correctly
-   * declined to stamp it twice — and two runs of the same message would refuse each other. Under
-   * READ COMMITTED a separate statement takes a fresh snapshot and sees the commit.
+   * is a SECOND STATEMENT rather than a CTE reading beside the UPDATE — in Intelligence's commit now,
+   * as it was here. A data-modifying CTE and the query next to it share one snapshot, so a file a
+   * neighbour committed a moment ago would be invisible to the read while the UPDATE's own re-check
+   * correctly declined to commit it twice — and two runs of the same message would refuse each
+   * other. Under READ COMMITTED a separate statement takes a fresh snapshot and sees the commit.
    *
    * Reachable without anybody doing anything strange: a stopped run retried, or a second tab. Same
-   * race as the test above, with the holding transaction stamping instead of withdrawing.
+   * race as the test above, with the other run sending instead of withdrawing.
    */
-  test(
-    "a stamp another run landed first is a recorded send rather than a refusal",
-    async () => {
-      const { database: db, channelId, memberId, threadId } = await harness();
-      const id = await uploadText(db, {
-        channelId,
-        uploadedBy: memberId,
-        name: "retried.txt",
-        text: "sent twice at once",
-      });
+  test("a stamp another run landed first is a recorded send rather than a refusal", async () => {
+    const { database: db, channelId, memberId, threadId } = await harness();
+    const id = await uploadText(db, {
+      channelId,
+      uploadedBy: memberId,
+      name: "retried.txt",
+      text: "sent twice at once",
+    });
 
-      const outcome = await stampWhileTheRowIsHeld(
-        db,
-        { actorId: memberId, threadId },
-        id,
-        async (held) => {
-          await held
-            .update(attachments)
-            .set({ attachedAt: new Date() })
-            .where(and(eq(attachments.id, id), isNull(attachments.attachedAt)));
-        },
-      );
+    const real = useTestFiles();
+    interceptFiles({
+      commit: async (forward) => {
+        // The other run's send, committed straight to Intelligence just before this one's.
+        await real.commit(
+          { ids: [id], purpose: "chat_attachment", ownerUserId: memberId },
+          `test:${randomUUID()}`,
+        );
+        return forward();
+      },
+    });
 
-      expect(outcome).toBeNull();
-      expect(await attachedAtOf(db, id)).toBeInstanceOf(Date);
-    },
-    BLOCKED_SESSION_TIMEOUT_MS,
-  );
+    const outcome = await markAttachmentsSent(
+      db,
+      { actorId: memberId, threadId },
+      [id],
+    ).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(outcome).toBeNull();
+    expect(await attachedAtOf(db, id)).toBeInstanceOf(Date);
+  });
 
   /*
    * THE OTHER WAY A ROW COUNT LIES: A SENT FILE THIS PERSON DID NOT UPLOAD.
@@ -3336,9 +3131,7 @@ describe("markAttachmentsSent", () => {
       email: `${colleagueId}@example.test`,
     });
     createdUserIds.push(colleagueId);
-    await db
-      .insert(channelMemberships)
-      .values({ channelId, userId: colleagueId });
+    await joinChannel(channelId, colleagueId);
 
     const theirs = await uploadText(db, {
       channelId,
@@ -3422,6 +3215,130 @@ describe("markAttachmentsSent", () => {
  * after the response had already begun, with no `app.onError` behind the router to turn it into
  * anything but a 500 on every fetch of the attachment.
  */
+/*
+ * THE STAGED SWEEP'S WINDOW, NOW EACH STAGED FILE'S OWN EXPIRY.
+ *
+ * A staged attachment used to sit in this deployment's table until the culler CronJob deleted the
+ * ones older than `attachments.culler.olderThanHours`. It is a pending file in Intelligence now, which
+ * removes a file the moment its expiry passes, so the operator's window is stamped on each upload,
+ * and switching the sweep off still keeps staged files until they are sent or withdrawn.
+ */
+describe("the staged window", () => {
+  /** The upload route with a window of the test's choosing, as the member. */
+  async function windowed(stagedTtlHours: number | null) {
+    const fixture = await harness();
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route(
+      "/",
+      createChannelAttachmentRoutes(fixture.database, fixture.member, {
+        stagedTtlHours,
+      }),
+    );
+    return { ...fixture, app };
+  }
+
+  const textFile = (name: string) =>
+    new File([new TextEncoder().encode("abc")], name, { type: "text/plain" });
+
+  test("a staged upload expires after the configured window, and its send clears that", async () => {
+    const {
+      app,
+      database: db,
+      channelId,
+      memberId,
+      threadId,
+    } = await windowed(2);
+    const before = Date.now();
+    const response = await upload(app, channelId, textFile("draft.txt"));
+    expect(response.status).toBe(201);
+    const { id } = (await response.json()) as { id: string };
+
+    const staged = await filesClient().get(id);
+    const expiresAt = staged?.expiresAt?.getTime() ?? 0;
+    expect(expiresAt).toBeGreaterThanOrEqual(
+      before + 2 * 60 * 60 * 1000 - 5_000,
+    );
+    expect(expiresAt).toBeLessThanOrEqual(
+      Date.now() + 2 * 60 * 60 * 1000 + 5_000,
+    );
+
+    await markAttachmentsSent(db, { actorId: memberId, threadId }, [id]);
+    const sent = await filesClient().get(id);
+    expect(sent?.committedAt).toBeInstanceOf(Date);
+    // A sent file is part of a message's record and is never swept.
+    expect(sent?.expiresAt).toBeNull();
+  });
+
+  test("with the sweep switched off, a staged upload never expires", async () => {
+    const { app, channelId } = await windowed(null);
+    const response = await upload(app, channelId, textFile("kept.txt"));
+    expect(response.status).toBe(201);
+    const { id } = (await response.json()) as { id: string };
+
+    const staged = await filesClient().get(id);
+    expect(staged?.committedAt).toBeNull();
+    expect(staged?.expiresAt).toBeNull();
+  });
+
+  test("a staged file past its window is gone: unfetchable, and no longer holding a slot", async () => {
+    const {
+      app,
+      channelId,
+      memberId,
+      member,
+      database: db,
+    } = await windowed(24);
+    const uploadGroup = randomUUID();
+    // Uploaded a day and a minute ago, the way the window leaves them.
+    const expired = await Promise.all(
+      Array.from({ length: MAX_ATTACHMENTS_PER_MESSAGE }, (_, index) =>
+        seedAttachment({
+          channelId,
+          uploadedBy: memberId,
+          uploadGroup,
+          name: `left-${index}.txt`,
+          createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000 - 60_000),
+          expiresAt: new Date(Date.now() - 60_000),
+        }),
+      ),
+    );
+
+    const fetched = await attachmentApp(db, member).request(
+      `http://test/${expired[0]}`,
+    );
+    expect(fetched.status).toBe(404);
+    // Eight expired files in this composer's group are eight files nobody holds any more.
+    const next = await upload(
+      app,
+      channelId,
+      textFile("next.txt"),
+      uploadGroup,
+    );
+    expect(next.status).toBe(201);
+  });
+
+  test("the window is read from the environment the chart writes", () => {
+    expect(stagedAttachmentTtlHours({})).toBe(24);
+    expect(
+      stagedAttachmentTtlHours({ OPENBOT_STAGED_ATTACHMENT_TTL_HOURS: "72" }),
+    ).toBe(72);
+    // A fraction is a fraction of an hour, as it was for the sweep.
+    expect(
+      stagedAttachmentTtlHours({ OPENBOT_STAGED_ATTACHMENT_TTL_HOURS: "0.5" }),
+    ).toBe(0.5);
+    expect(
+      stagedAttachmentTtlHours({ OPENBOT_STAGED_ATTACHMENT_TTL_HOURS: "off" }),
+    ).toBeNull();
+    for (const refused of ["0", "-1", "soon", "Infinity"]) {
+      expect(() =>
+        stagedAttachmentTtlHours({
+          OPENBOT_STAGED_ATTACHMENT_TTL_HOURS: refused,
+        }),
+      ).toThrow("OPENBOT_STAGED_ATTACHMENT_TTL_HOURS");
+    }
+  });
+});
+
 describe("contentDispositionFilename", () => {
   test("a NUL in the filename never reaches the header value", () => {
     const value = `attachment; ${contentDispositionFilename("a\u0000b.txt")}`;

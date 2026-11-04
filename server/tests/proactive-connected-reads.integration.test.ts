@@ -7,12 +7,12 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
+import type { ChatCompletionRequest } from "@copilotkit/aimock";
 import { LLMock } from "@copilotkit/aimock";
 import {
   COMPONENT_GUIDANCE,
   PROVENANCE_GUIDANCE,
 } from "@openbot/shared/bot-prompt";
-import type { ChatCompletionRequest } from "@copilotkit/aimock";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Observable } from "rxjs";
@@ -22,26 +22,11 @@ import type { ApprovalCandidate } from "../src/approvals/types";
 import { type AuditInitiator, createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { type RegisteredAgent, registeredAgentFromRow } from "../src/copilot";
-import { createCredentialStore, encryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
-import { agents, channels, credentials, users } from "../src/db/schema/core";
-import {
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-  mcpUserCredentials,
-  pluginGrants,
-} from "../src/db/schema/plugins";
-import {
-  proactivePeople,
-  proactivePings,
-  proactiveRuns,
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../src/db/schema/proactive";
+import { users } from "../src/db/schema/core";
+import { mcpTools } from "../src/db/schema/plugins";
 import { workItems } from "../src/db/schema/work";
-import { createMemoryStore } from "../src/memory/store";
 import {
   CustomServerRefusedError,
   createPluginStore,
@@ -59,7 +44,38 @@ import { createProactiveStore } from "../src/proactive/store";
 import { type ProactiveSetting, SKIPPED_BECAUSE } from "../src/proactive/types";
 import { UNTRUSTED_GUIDANCE } from "../src/untrusted-content";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows, useTestAuditTrail } from "./support/audit";
+import {
+  changeAccess,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
+import { purgeConversations, seedChannel } from "./support/conversations";
+import {
+  changeCheckIn,
+  makeDue,
+  purgeCheckInHistoryOf,
+  purgeSchedulesOf,
+  settingsOf,
+} from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  purgeSecrets,
+  removeConnectionsWhere,
+  removeServers,
+  type SeedCredential,
+  type SeedServer,
+  seedBrokered,
+  seedCredential,
+  seedGrant,
+  seedServer,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
+import { testMemory } from "./support/memory";
+import { testScheduleClient, useTestSchedules } from "./support/schedules";
 
 /*
  * A check-in reads what the person connected with their own account, through the tools that say
@@ -69,11 +85,20 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * agent resolver building the real built-in Bot, the real turn runner and the real check-in engine.
  * The model is the only fake: `@copilotkit/aimock`, answering the built-in Bot's own requests the
  * way a model would, and recording what it was offered.
+ *
+ * What a check-in read, and what the dispatcher refused, is on the audit trail in Intelligence: the
+ * engine reads a run's reads from it, and so does one case below.
  */
 
+useTestAuditTrail();
+
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 const suite = randomUUID().slice(0, 8);
-/** 32 zero bytes in base64: a real AES-256 key, because the vault is opened for Notion's grant. */
+/** 32 zero bytes in base64: a real AES-256 key, as the store is configured with one. */
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const allowEverything = (): ActionPolicy => ({
   mode: "enforce",
@@ -112,8 +137,11 @@ const ref = (server: string, tool: string) => `${server}/${tool}`;
 
 const auditStore = createAuditStore(database);
 const store = createProactiveStore(database);
-const memory = createMemoryStore(database);
+const memory = testMemory(database).store;
 const queue = createWorkQueue(database);
+// Apps, connections and credentials live in Intelligence: the process's vault directory, before
+// any store.
+const directory = await useTestVault();
 
 /** What reached a vendor, and what the approval gate was asked, in order. */
 const vendorCalls: { url: string; token?: string; tool: string }[] = [];
@@ -126,7 +154,7 @@ function pluginStoreFor(brokerProvider: "composio" | "arcade") {
     brokerProvider,
     database,
     auditStore,
-    credentials: createCredentialStore(database),
+    credentials: createCredentialStore(directory),
     encryptionKey: KEY,
     policy: allowEverything,
     approvalGate: async (candidate: ApprovalCandidate) => {
@@ -173,6 +201,7 @@ const textOf = (content: unknown) =>
 let environmentBefore: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
+  await useTestSchedules();
   environmentBefore = {
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
@@ -210,27 +239,18 @@ beforeAll(async () => {
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test` });
-  await database.insert(agents).values([
-    { id: desk, name: "Desk Bot", type: "built_in", configuration: {} },
-    {
-      id: harness,
-      name: "Harness Bot",
-      type: "remote_ag_ui",
-      configuration: {},
-    },
-    {
-      id: unconnected,
-      name: "Lookout Bot",
-      type: "built_in",
-      configuration: {},
-    },
-    { id: tasker, name: "Task Bot", type: "built_in", configuration: {} },
-  ]);
-  await database
-    .insert(channels)
-    .values(
-      botIds.map((bot) => ({ id: channelOf(bot), name: bot, description: "" })),
-    );
+  await seedBot({ id: desk, name: "Desk Bot", type: "built_in" });
+  await seedBot({
+    id: harness,
+    name: "Harness Bot",
+    type: "remote_ag_ui",
+    configuration: { endpoint: "http://127.0.0.1:7495/ag-ui" },
+  });
+  await seedBot({ id: unconnected, name: "Lookout Bot", type: "built_in" });
+  await seedBot({ id: tasker, name: "Task Bot", type: "built_in" });
+  // The person's own conversation with each Bot, where its check-ins live.
+  for (const bot of botIds)
+    await seedChannel(owner, [bot], { id: channelOf(bot), name: bot });
   await fixtures.install();
 });
 
@@ -240,22 +260,13 @@ beforeEach(async () => {
   vendorCalls.length = 0;
   gateAsked.length = 0;
   endpointDials.length = 0;
-  await database
-    .delete(proactiveSuggestions)
-    .where(eq(proactiveSuggestions.ownerUserId, owner));
-  await database
-    .delete(proactivePings)
-    .where(eq(proactivePings.ownerUserId, owner));
-  await database
-    .delete(proactivePeople)
-    .where(eq(proactivePeople.ownerUserId, owner));
-  await database
-    .delete(proactiveRuns)
-    .where(eq(proactiveRuns.ownerUserId, owner));
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: FAR, lastRunAt: null, lastStatus: "idle" })
-    .where(eq(proactiveSettings.ownerUserId, owner));
+  await purgeCheckInHistoryOf(owner);
+  for (const setting of await settingsOf(owner))
+    await changeCheckIn(setting.id, {
+      nextRunAt: FAR,
+      lastRunAt: null,
+      lastStatus: "idle",
+    });
 });
 
 afterAll(async () => {
@@ -267,10 +278,7 @@ afterAll(async () => {
       else process.env[name] = value;
     }
   }
-  const settings = await database
-    .select({ id: proactiveSettings.id })
-    .from(proactiveSettings)
-    .where(eq(proactiveSettings.ownerUserId, owner));
+  const settings = await settingsOf(owner);
   if (settings.length)
     await database.delete(workItems).where(
       and(
@@ -282,11 +290,10 @@ afterAll(async () => {
       ),
     );
   await fixtures.remove();
+  await purgeSchedulesOf([owner]);
   await database.delete(users).where(eq(users.id, owner));
-  await database.delete(agents).where(inArray(agents.id, botIds));
-  await database
-    .delete(channels)
-    .where(inArray(channels.id, botIds.map(channelOf)));
+  await purgeConversations(botIds.map(channelOf));
+  await removeBots(botIds);
   await database.$client.close();
 });
 
@@ -297,19 +304,17 @@ afterAll(async () => {
 const FAR = new Date("2100-01-01T00:00:00Z");
 
 const fixtures = (() => {
-  /** Rows this suite found already there, so it puts back exactly what it borrowed. */
+  /** Apps and rows this suite found already there, so it puts back exactly what it borrowed. */
   const createdServers: string[] = [];
   const createdTools: { serverId: string; name: string }[] = [];
   const createdCredentials: string[] = [];
   let notionClientBefore: string | null = null;
 
-  async function server(row: typeof mcpServers.$inferInsert) {
-    const inserted = await database
-      .insert(mcpServers)
-      .values(row)
-      .onConflictDoNothing()
-      .returning({ id: mcpServers.id });
-    if (inserted.length) createdServers.push(row.id);
+  /** Add an app unless Intelligence has one under this id already: the old `DO NOTHING`. */
+  async function server(row: SeedServer) {
+    if (await storedServer(row.id)) return;
+    await seedServer(row);
+    createdServers.push(row.id);
   }
   async function tool(row: typeof mcpTools.$inferInsert) {
     const inserted = await database
@@ -320,23 +325,23 @@ const fixtures = (() => {
     if (inserted.length)
       createdTools.push({ serverId: row.serverId, name: row.name });
   }
-  async function secret(
-    row: Omit<typeof credentials.$inferInsert, "encryptedValue">,
-    value: string,
-  ) {
-    const [stored] = await database
-      .insert(credentials)
-      .values({ ...row, encryptedValue: await encryptSecret(KEY, value) })
-      .returning({ id: credentials.id });
-    if (!stored) throw new Error("credential was not stored");
+  async function secret(row: Omit<SeedCredential, "plaintext">, value: string) {
+    const stored = await seedCredential({ ...row, plaintext: value });
     createdCredentials.push(stored.id);
     return stored.id;
   }
   const grant = (agentId: string, refs: string[]) =>
-    database
-      .insert(pluginGrants)
-      .values(refs.map((granted) => ({ kind: "mcp", ref: granted, agentId })))
-      .onConflictDoNothing();
+    changeAccess(
+      refs.map((granted) => ({
+        op: "grant" as const,
+        botId: agentId,
+        kind: "mcp" as const,
+        ref: granted,
+        grantedBy: null,
+        grantedAs: "admin" as const,
+        ifGranted: "keep" as const,
+      })),
+    );
 
   return {
     async install() {
@@ -348,11 +353,7 @@ const fixtures = (() => {
         url: "https://mcp.notion.com/mcp",
         provenance: "first-party",
       });
-      const [notion] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, NOTION));
-      notionClientBefore = notion?.credentialId ?? null;
+      notionClientBefore = (await storedServer(NOTION))?.credentialId ?? null;
       const client = await secret(
         {
           kind: "mcp_oauth_client",
@@ -362,10 +363,7 @@ const fixtures = (() => {
         },
         JSON.stringify({ clientId: `client-${suite}`, clientSecret: "" }),
       );
-      await database
-        .update(mcpServers)
-        .set({ credentialId: client })
-        .where(eq(mcpServers.id, NOTION));
+      await changeServer(NOTION, { credentialId: client });
       const grantToken = await secret(
         {
           kind: "mcp_user_token",
@@ -375,7 +373,7 @@ const fixtures = (() => {
         },
         `refresh-${suite}`,
       );
-      await database.insert(mcpUserCredentials).values({
+      await seedGrant({
         serverId: NOTION,
         userId: owner,
         credentialId: grantToken,
@@ -413,7 +411,7 @@ const fixtures = (() => {
       });
       await tool({ serverId: MAIL, name: "MAIL_FETCH_EMAILS", effect: "read" });
       await tool({ serverId: MAIL, name: "MAIL_SEND_EMAIL", effect: "write" });
-      await database.insert(brokeredConnections).values({
+      await seedBrokered({
         provider: "composio",
         app: MAIL_APP,
         holder: "person",
@@ -433,7 +431,7 @@ const fixtures = (() => {
       });
       await tool({ serverId: TASKS, name: "ListTasks", effect: "read" });
       await tool({ serverId: TASKS, name: "CreateTask", effect: "write" });
-      await database.insert(brokeredConnections).values({
+      await seedBrokered({
         provider: "arcade",
         app: TASKS_APP,
         holder: "person",
@@ -489,20 +487,17 @@ const fixtures = (() => {
     },
 
     async remove() {
-      await database
-        .delete(pluginGrants)
-        .where(inArray(pluginGrants.agentId, botIds));
-      await database
-        .delete(brokeredConnections)
-        .where(eq(brokeredConnections.userId, owner));
-      await database
-        .delete(mcpUserCredentials)
-        .where(eq(mcpUserCredentials.userId, owner));
-      // The client pointer back before its credential goes: the column is a foreign key.
-      await database
-        .update(mcpServers)
-        .set({ credentialId: notionClientBefore })
-        .where(eq(mcpServers.id, NOTION));
+      await changeAccess(
+        botIds.map((botId) => ({
+          op: "revokeMatching" as const,
+          kind: "mcp" as const,
+          botIds: [botId],
+        })),
+      );
+      await removeConnectionsWhere((connection) => connection.userId === owner);
+      // The client pointer back before its credential goes, so the app never names a gone secret.
+      if (!createdServers.includes(NOTION))
+        await changeServer(NOTION, { credentialId: notionClientBefore });
       for (const created of createdTools)
         await database
           .delete(mcpTools)
@@ -512,14 +507,8 @@ const fixtures = (() => {
               eq(mcpTools.name, created.name),
             ),
           );
-      if (createdServers.length)
-        await database
-          .delete(mcpServers)
-          .where(inArray(mcpServers.id, createdServers));
-      if (createdCredentials.length)
-        await database
-          .delete(credentials)
-          .where(inArray(credentials.id, createdCredentials));
+      await removeServers(createdServers);
+      await purgeSecrets(createdCredentials);
     },
   };
 })();
@@ -668,23 +657,17 @@ async function checkIn(
   at: ReturnType<typeof deployment> = composio,
 ) {
   const setting = await settingFor(bot);
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: new Date(Date.now() - 1_000) })
-    .where(eq(proactiveSettings.id, setting.id));
+  await makeDue(setting.id);
   await at.engine.sweep();
   return setting;
 }
-const itemsOf = (bot: string) =>
-  database
-    .select()
-    .from(proactiveSuggestions)
-    .where(
-      and(
-        eq(proactiveSuggestions.ownerUserId, owner),
-        eq(proactiveSuggestions.agentId, bot),
-      ),
-    );
+const itemsOf = async (bot: string) =>
+  (
+    await testScheduleClient().all("check-in-suggestions", {
+      ownerUserId: owner,
+      agentId: bot,
+    })
+  ).items;
 /** The check-in's message as the model received it. */
 const instructionIn = (request: ChatCompletionRequest | undefined) =>
   (request?.messages ?? [])
@@ -814,16 +797,15 @@ describe("a check-in reads what the person connected, through the tools that say
       }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
     expect(vendorCalls).toEqual([]);
-    const [refusal] = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "mcp.call_rejected"),
-          eq(auditEvents.targetId, ref(NOTES, notionDigest)),
-          sql`${auditEvents.payload} ->> 'bot' = ${unconnected}`,
-        ),
-      );
+    // Oldest first, as the rows were written; the trail answers newest first.
+    const [refusal] = (
+      await auditRows({
+        eventType: "mcp.call_rejected",
+        targetId: ref(NOTES, notionDigest),
+      })
+    )
+      .reverse()
+      .filter((row) => row.payload.bot === unconnected);
     expect(refusal?.payload).toMatchObject({ refusal: "check_in_not_a_read" });
   });
 

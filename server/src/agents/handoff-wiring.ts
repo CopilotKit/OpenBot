@@ -3,15 +3,14 @@ import type { ProductTelemetry } from "../telemetry/product";
 import { randomUUID } from "node:crypto";
 import { IntelligenceAgentRunner } from "@copilotkit/runtime/v2";
 import { workOwner } from "@openbot/shared/work-owner";
-import { eq } from "drizzle-orm";
 import { type AuditStore, handoffInitiator } from "../audit";
 import type { GroupConversations } from "../channels/group";
 import type { ChannelStore } from "../channels/routes";
 import type { ThreadIdentity } from "../channels/thread-identity";
 import type { DeploymentConfig } from "../config";
+import { channelOfThread } from "../conversations/directory";
 import type { mountCopilotRuntime } from "../copilot";
 import type { Database } from "../db/client";
-import { intelligenceChannelMappings } from "../db/schema";
 import { repeatAfterEach } from "../work/loop";
 import {
   createWorkQueue,
@@ -115,19 +114,15 @@ export async function startHandoffDelivery(deps: {
        * announces nowhere, which is the point of a scratch thread.
        */
       announce: async (input) => {
-        const [mapped] = await database
-          .select({ channelId: intelligenceChannelMappings.channelId })
-          .from(intelligenceChannelMappings)
-          .where(eq(intelligenceChannelMappings.threadId, input.threadId))
-          .limit(1);
+        const channelId = await channelOfThread(input.threadId);
         // A Bot's group thread maps to no channel; its answer goes to the shared transcript.
-        if (!mapped) {
+        if (!channelId) {
           await groupConversations.announceHandoff(input);
           return;
         }
         const actor = await actorFor(input.actorId).catch(() => null);
         if (!actor) return;
-        await channelStore.recordActivity(actor, mapped.channelId, {
+        await channelStore.recordActivity(actor, channelId, {
           text: input.text,
           agentId: input.agentId,
           at: new Date(),

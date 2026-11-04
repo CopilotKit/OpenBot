@@ -22,7 +22,7 @@ import { createHash } from "node:crypto";
 import type { Message } from "@ag-ui/client";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
-import { and, asc, desc, eq, isNull, min, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { HandoffCaps } from "../agents/handoff";
@@ -35,21 +35,57 @@ import {
   recordAuditEvent,
 } from "../audit";
 import type { AppVariables } from "../auth/guards";
+import { conversations } from "../conversations/directory";
+import { writeKey } from "../conversations/http";
+import type { ConversationMessage } from "../conversations/types";
+import { isMember } from "../conversations/types";
 import type { Database } from "../db/client";
-import {
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  users,
-} from "../db/schema/core";
-import { groupBotThreads, groupMessages } from "../db/schema/group";
+import { users } from "../db/schema/core";
 import { workItems } from "../db/schema/work";
 import type { CheckPrivateShare } from "../proactive/private-share";
 import type { WorkQueue } from "../work/queue";
 
 export const GROUP_TURN_KIND = "group.turn";
 
-export type GroupMessage = typeof groupMessages.$inferSelect;
+/**
+ * A line of the shared transcript, as the group code reads it: the conversation message
+ * Intelligence holds, under the names `group_messages` used.
+ */
+export type GroupMessage = {
+  id: string;
+  channelId: string;
+  ownerUserId: string;
+  agentId: string | null;
+  threadId: string | null;
+  text: string;
+  status: "queued" | "running" | "waiting" | "completed" | "failed";
+  details: Record<string, unknown>;
+  createdAt: Date;
+};
+
+function groupMessageOf(message: ConversationMessage): GroupMessage {
+  return {
+    id: message.id,
+    channelId: message.conversationId,
+    ownerUserId: message.userId,
+    agentId: message.agentId,
+    threadId: message.threadId,
+    text: message.text,
+    status: message.status,
+    details: message.details,
+    createdAt: message.createdAt,
+  };
+}
+
+/** What a waiting line waits on, so the approval that decides it finds it. */
+function awaitingOf(
+  status: GroupMessage["status"],
+  details: Record<string, unknown>,
+): string | null {
+  return status === "waiting" && typeof details.approvalId === "string"
+    ? details.approvalId
+    : null;
+}
 export type GroupBot = { id: string; name: string };
 
 /**
@@ -156,214 +192,206 @@ export function createGroupStore(
   database: Database,
   mintThread: () => string,
 ): GroupStore {
+  const client = () => conversations().client;
   return {
     async list(channelId) {
-      const rows = await database
-        .select()
-        .from(groupMessages)
-        .where(eq(groupMessages.channelId, channelId))
-        .orderBy(desc(groupMessages.createdAt), desc(groupMessages.id))
-        .limit(200);
-      return rows.reverse();
+      const { messages } = await client().messages.latest(channelId, 200);
+      return messages.map(groupMessageOf).reverse();
     },
     async thread(ownerUserId, channelId, agentId) {
-      const scope = and(
-        eq(groupBotThreads.ownerUserId, ownerUserId),
-        eq(groupBotThreads.channelId, channelId),
-        eq(groupBotThreads.agentId, agentId),
-      );
-      await database
-        .insert(groupBotThreads)
-        .values({ ownerUserId, channelId, agentId, threadId: mintThread() })
-        .onConflictDoNothing();
-      const [row] = await database
-        .select()
-        .from(groupBotThreads)
-        .where(scope)
-        .limit(1);
-      if (!row)
-        throw new Error("The Bot's group conversation could not be created.");
-      return row.threadId;
+      try {
+        const { thread } = await client().thread(
+          channelId,
+          { userId: ownerUserId, agentId, threadId: mintThread() },
+          writeKey("group.thread"),
+        );
+        // The copy held here does not list the new pointer yet.
+        conversations().invalidate(channelId);
+        return thread.threadId;
+      } catch (error) {
+        throw new Error("The Bot's group conversation could not be created.", {
+          cause: error,
+        });
+      }
     },
     async submit(turn) {
-      await database.transaction(async (tx) => {
-        await tx.execute(
-          sql`select pg_advisory_xact_lock(hashtext(${`group:${turn.messageId}`}))`,
-        );
-        const [existing] = await tx
-          .select()
-          .from(groupMessages)
-          .where(eq(groupMessages.id, turn.messageId))
-          .limit(1);
-        // The same send twice (a retry after a dropped response) is one message. A different send
-        // reusing its id is refused rather than merged.
-        if (existing) {
-          if (
-            existing.ownerUserId !== turn.ownerUserId ||
-            existing.channelId !== turn.channelId ||
-            existing.text !== turn.text ||
-            JSON.stringify(existing.details.agentIds) !==
-              JSON.stringify(turn.agentIds)
-          )
-            throw new GroupRefusedError(
-              "This group message belongs to a different request.",
-            );
-          return;
-        }
-        await tx.insert(groupMessages).values({
+      /*
+       * The line first, in Intelligence, then the turn on this deployment's queue. Not one
+       * transaction any more: the line lives in Intelligence and the queue here. The same send
+       * again (a retry after a dropped response, or after the queue write failed) finds its line
+       * and offers the turn again, which the queue keeps once by its key.
+       */
+      const { message, created } = await client().messages.create(
+        {
           id: turn.messageId,
-          ownerUserId: turn.ownerUserId,
-          channelId: turn.channelId,
+          conversationId: turn.channelId,
+          userId: turn.ownerUserId,
           text: turn.text,
+          status: "completed",
           details: { agentIds: turn.agentIds },
-        });
-        await tx
-          .insert(workItems)
-          .values({ kind: GROUP_TURN_KIND, key: turn.messageId, payload: turn })
-          .onConflictDoNothing();
-        await tx.execute(
-          sql`select pg_notify('openbot_work_offered', ${GROUP_TURN_KIND})`,
+        },
+        writeKey("group.submit"),
+      );
+      // A different send reusing its id is refused rather than merged.
+      if (
+        !created &&
+        (message.userId !== turn.ownerUserId ||
+          message.conversationId !== turn.channelId ||
+          message.text !== turn.text ||
+          JSON.stringify(message.details.agentIds) !==
+            JSON.stringify(turn.agentIds))
+      )
+        throw new GroupRefusedError(
+          "This group message belongs to a different request.",
         );
-      });
+      await database
+        .insert(workItems)
+        .values({ kind: GROUP_TURN_KIND, key: turn.messageId, payload: turn })
+        .onConflictDoNothing();
+      await database.execute(
+        sql`select pg_notify('openbot_work_offered', ${GROUP_TURN_KIND})`,
+      );
     },
     async start(turn, agentId, threadId) {
       const id = `${turn.messageId}:${agentId}`;
-      const [created] = await database
-        .insert(groupMessages)
-        .values({
+      const { message, created } = await client().messages.create(
+        {
           id,
-          channelId: turn.channelId,
-          ownerUserId: turn.ownerUserId,
+          conversationId: turn.channelId,
+          userId: turn.ownerUserId,
           agentId,
           threadId,
           text: "",
           status: "running",
-        })
-        .onConflictDoNothing()
-        .returning({ id: groupMessages.id });
+        },
+        writeKey("group.start"),
+      );
       if (created) return "run";
-      const [row] = await database
-        .select()
-        .from(groupMessages)
-        .where(eq(groupMessages.id, id))
-        .limit(1);
-      return row?.status === "running" ? "unknown" : "done";
+      return message.status === "running" ? "unknown" : "done";
     },
     async finish(id, text, status, details = {}) {
-      await database
-        .update(groupMessages)
-        .set({ text, status, details })
-        .where(eq(groupMessages.id, id));
+      await client().messages.change(
+        id,
+        { text, status, details, awaitingRef: awaitingOf(status, details) },
+        writeKey("group.finish"),
+      );
     },
     async progress(id, text) {
-      await database
-        .update(groupMessages)
-        .set({ text })
-        .where(
-          and(eq(groupMessages.id, id), eq(groupMessages.status, "running")),
-        );
+      // A finished row is never overwritten: only a line still running takes the reply so far.
+      await client().messages.change(
+        id,
+        { text, expectStatus: "running" },
+        writeKey("group.progress"),
+      );
     },
     async seedOrder(ownerUserId, channelId, agentIds) {
-      // Explicit timestamps a millisecond apart, so the order survives rows written in one instant.
+      // Explicit timestamps a millisecond apart, so the order survives pointers written in one instant.
       const base = Date.now();
       for (const [index, agentId] of agentIds.entries())
-        await database
-          .insert(groupBotThreads)
-          .values({
-            ownerUserId,
-            channelId,
+        await client().thread(
+          channelId,
+          {
+            userId: ownerUserId,
             agentId,
             threadId: mintThread(),
             createdAt: new Date(base + index),
-          })
-          .onConflictDoNothing();
+          },
+          writeKey("group.seed"),
+        );
+      conversations().invalidate(channelId);
     },
     async order(channelId) {
-      const rows = await database
-        .select({
-          agentId: groupBotThreads.agentId,
-          first: min(groupBotThreads.createdAt),
-        })
-        .from(groupBotThreads)
-        .where(eq(groupBotThreads.channelId, channelId))
-        .groupBy(groupBotThreads.agentId)
-        .orderBy(
-          asc(min(groupBotThreads.createdAt)),
-          asc(groupBotThreads.agentId),
-        );
-      return rows.map((row) => row.agentId);
+      const conversation = await conversations().get(channelId);
+      const first = new Map<string, number>();
+      for (const thread of conversation?.threads ?? []) {
+        if (thread.agentId === null) continue;
+        const at = thread.createdAt.getTime();
+        const held = first.get(thread.agentId);
+        if (held === undefined || at < held) first.set(thread.agentId, at);
+      }
+      return [...first.entries()]
+        .sort(
+          ([leftId, leftAt], [rightId, rightAt]) =>
+            leftAt - rightAt || leftId.localeCompare(rightId),
+        )
+        .map(([agentId]) => agentId);
     },
     async waitingFor(approvalId) {
-      const [row] = await database
-        .select()
-        .from(groupMessages)
-        .where(
-          and(
-            eq(groupMessages.status, "waiting"),
-            sql`${groupMessages.details}->>'approvalId' = ${approvalId}`,
-          ),
-        )
-        .limit(1);
-      return row ?? null;
+      const [message] = await client().messages.awaiting(approvalId);
+      return message ? groupMessageOf(message) : null;
     },
     async threadRow(threadId) {
-      const [row] = await database
-        .select({
-          ownerUserId: groupBotThreads.ownerUserId,
-          channelId: groupBotThreads.channelId,
-          agentId: groupBotThreads.agentId,
-        })
-        .from(groupBotThreads)
-        .where(eq(groupBotThreads.threadId, threadId))
-        .limit(1);
-      return row ?? null;
+      const found = await conversations().byThread(threadId);
+      // Only a Bot's own thread in a group; a person's thread in a channel is not one.
+      if (!found || found.thread.agentId === null) return null;
+      return {
+        ownerUserId: found.thread.userId,
+        channelId: found.conversation.id,
+        agentId: found.thread.agentId,
+      };
     },
     async append(row) {
-      const created = await database
-        .insert(groupMessages)
-        .values({ status: "completed", ...row })
-        .onConflictDoNothing()
-        .returning({ id: groupMessages.id });
-      return created.length > 0;
+      const status = row.status ?? "completed";
+      const { created } = await client().messages.create(
+        {
+          id: row.id,
+          conversationId: row.channelId,
+          userId: row.ownerUserId,
+          agentId: row.agentId,
+          threadId: row.threadId,
+          text: row.text,
+          status,
+          details: row.details,
+          awaitingRef: awaitingOf(status, row.details),
+        },
+        writeKey("group.append"),
+      );
+      return created;
     },
     async members(channelId) {
-      const rows = await database
-        .select({ userId: channelMemberships.userId })
-        .from(channelMemberships)
-        .where(eq(channelMemberships.channelId, channelId));
-      return rows.map((row) => row.userId);
+      const conversation = await conversations().get(channelId);
+      return conversation?.members.map((member) => member.userId) ?? [];
     },
     async people(channelId) {
-      return database
-        .select({
-          userId: channelMemberships.userId,
-          email: users.email,
-          name: users.name,
+      const conversation = await conversations().get(channelId);
+      const members = conversation?.members ?? [];
+      if (members.length === 0) return [];
+      const rows = await database
+        .select({ id: users.id, email: users.email, name: users.name })
+        .from(users)
+        .where(
+          inArray(
+            users.id,
+            members.map((member) => member.userId),
+          ),
+        );
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      return members
+        .flatMap((member) => {
+          const person = byId.get(member.userId);
+          return person
+            ? [
+                {
+                  userId: member.userId,
+                  email: person.email,
+                  name: person.name,
+                  joinedAt: member.joinedAt.getTime(),
+                },
+              ]
+            : [];
         })
-        .from(channelMemberships)
-        .innerJoin(users, eq(users.id, channelMemberships.userId))
-        .where(eq(channelMemberships.channelId, channelId))
-        .orderBy(asc(channelMemberships.createdAt), asc(users.email));
+        .sort(
+          (left, right) =>
+            left.joinedAt - right.joinedAt ||
+            left.email.localeCompare(right.email),
+        )
+        .map(({ joinedAt: _joinedAt, ...person }) => person);
     },
     async removeMember(channelId, userId) {
-      await database.transaction(async (tx) => {
-        await tx
-          .delete(channelMemberships)
-          .where(
-            and(
-              eq(channelMemberships.channelId, channelId),
-              eq(channelMemberships.userId, userId),
-            ),
-          );
-        await tx
-          .delete(intelligenceChannelMappings)
-          .where(
-            and(
-              eq(intelligenceChannelMappings.channelId, channelId),
-              eq(intelligenceChannelMappings.userId, userId),
-            ),
-          );
-      });
+      // Their membership and their own thread in it; their Bot threads stay with the transcript.
+      conversations().apply(
+        await client().removeMember(channelId, userId, writeKey("group.leave")),
+      );
     },
     async addMember(channelId, email) {
       const [person] = await database
@@ -375,17 +403,15 @@ export function createGroupStore(
         throw new GroupRefusedError(
           "Nobody with that email has signed in to this deployment yet.",
         );
-      await database.transaction(async (tx) => {
-        await tx
-          .insert(channelMemberships)
-          .values({ channelId, userId: person.id })
-          .onConflictDoNothing();
-        // The channel store reads a member's channel through their own mapping row.
-        await tx
-          .insert(intelligenceChannelMappings)
-          .values({ userId: person.id, channelId, threadId: mintThread() })
-          .onConflictDoNothing();
-      });
+      // The channel store reads a member's channel through their own thread in it.
+      conversations().apply(
+        await client().addMember(
+          channelId,
+          person.id,
+          { threadId: mintThread() },
+          writeKey("group.join"),
+        ),
+      );
       return { userId: person.id };
     },
   };
@@ -395,38 +421,27 @@ export function createGroupStore(
  * Which group a Bot's group thread belongs to, for a run that thread is carrying.
  *
  * The coordination callbacks (`message_bot`, `ask_person`) authorise a run by its source thread, and a
- * group thread is in `group_bot_threads` rather than `intelligence_channel_mappings`. Resolved with the
+ * group thread is a Bot's pointer in the conversation rather than a person's own. Resolved with the
  * same checks: the run's actor still a member of a live channel, and the thread that Bot's own, unless
  * the run is a signed delegation whose claim proves a different Bot's authority.
  */
-export async function groupSourceForRun(
-  database: Database,
-  run: { threadId?: string; actorId: string; botId: string; handoff?: unknown },
-): Promise<{ channelId: string; botId: string } | null> {
+export async function groupSourceForRun(run: {
+  threadId?: string;
+  actorId: string;
+  botId: string;
+  handoff?: unknown;
+}): Promise<{ channelId: string; botId: string } | null> {
   if (!run.threadId) return null;
-  const [row] = await database
-    .select({
-      channelId: groupBotThreads.channelId,
-      botId: groupBotThreads.agentId,
-    })
-    .from(groupBotThreads)
-    .innerJoin(channels, eq(channels.id, groupBotThreads.channelId))
-    .innerJoin(
-      channelMemberships,
-      and(
-        eq(channelMemberships.channelId, groupBotThreads.channelId),
-        eq(channelMemberships.userId, run.actorId),
-      ),
-    )
-    .where(
-      and(
-        eq(groupBotThreads.threadId, run.threadId),
-        eq(groupBotThreads.ownerUserId, run.actorId),
-        isNull(channels.deletedAt),
-      ),
-    )
-    .limit(1);
-  if (!row) return null;
+  const found = await conversations().byThread(run.threadId);
+  if (
+    !found ||
+    found.thread.agentId === null ||
+    found.thread.userId !== run.actorId ||
+    found.conversation.deletedAt !== null ||
+    !isMember(found.conversation, run.actorId)
+  )
+    return null;
+  const row = { channelId: found.conversation.id, botId: found.thread.agentId };
   return row.botId === run.botId || run.handoff ? row : null;
 }
 

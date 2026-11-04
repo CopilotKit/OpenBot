@@ -1,13 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { eq, sql } from "drizzle-orm";
+import { afterEach, describe, expect, test } from "bun:test";
 import { startRetentionSweeps } from "../src/audit-retention";
 import {
   createPageFrameStore,
   FRAME_RETENTION_MS,
 } from "../src/computer/page-frames";
-import { createDatabase } from "../src/db/client";
-import { computerPageFrame } from "../src/db/schema";
-import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { filesClient } from "../src/files/client";
+import { useTestFiles } from "./support/files";
 
 /**
  * The screenshots have to be able to stop growing, in every deployment rather than in one.
@@ -17,12 +15,12 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * that mode. Compose, the all-in-one image and the chart's own default of `computers.mode: shared`
  * therefore wrote a row per navigation and removed none, ever.
  *
- * Against a real database because the interval arithmetic and the batching are both SQL.
+ * Against a real Intelligence because the frames live in its file store, and the retention is both
+ * each frame's own expiry there and the sweep's delete by age.
  */
 
-const databaseUrl = testDatabaseUrl();
-const database = createDatabase(databaseUrl, TEST_POOL);
-const store = createPageFrameStore(database);
+useTestFiles();
+const store = createPageFrameStore();
 
 const COMPUTER = `frame-retention-${crypto.randomUUID().slice(0, 8)}`;
 
@@ -33,23 +31,30 @@ async function frame(daysAgo: number, index: number): Promise<void> {
     url: `https://example.com/${index}`,
     title: `page ${index}`,
     frame: "iVBORw0KGgo=",
+    capturedAt: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000),
   });
-  await database
-    .update(computerPageFrame)
-    .set({ capturedAt: sql`now() - make_interval(days => ${daysAgo})` })
-    .where(eq(computerPageFrame.toolCallId, `turn-${index}`));
 }
 
-const kept = () =>
-  database
-    .select({ toolCallId: computerPageFrame.toolCallId })
-    .from(computerPageFrame)
-    .where(eq(computerPageFrame.computerId, COMPUTER));
+/**
+ * Many old frames, written a few at a time: each is an upload to Intelligence, and one at a time
+ * four hundred of them outlast a test's default timeout.
+ */
+async function frames(daysAgo: number, count: number): Promise<void> {
+  const indexes = Array.from({ length: count }, (_, index) => index + 1);
+  for (let start = 0; start < indexes.length; start += 20) {
+    await Promise.all(
+      indexes.slice(start, start + 20).map((index) => frame(daysAgo, index)),
+    );
+  }
+}
+
+const kept = async () =>
+  (
+    await filesClient().list({ purpose: "page_frame", collection: COMPUTER })
+  ).map((file) => ({ toolCallId: file.key }));
 
 afterEach(async () => {
-  await database
-    .delete(computerPageFrame)
-    .where(eq(computerPageFrame.computerId, COMPUTER));
+  await filesClient().purge({ purpose: "page_frame", collection: COMPUTER });
 });
 
 describe("page frame retention", () => {
@@ -63,7 +68,7 @@ describe("page frame retention", () => {
      * `AUDIT_RETENTION_DAYS` has, and the sweeper used to return before starting a timer at all,
      * which is how the frames went unswept everywhere the culler does not run.
      */
-    const sweeps = startRetentionSweeps(databaseUrl, undefined, store, {
+    const sweeps = startRetentionSweeps(store, {
       firstRunMs: 10,
       intervalMs: 3_600_000,
     });
@@ -88,11 +93,11 @@ describe("page frame retention", () => {
   });
 
   test("purge past its batch size removes every eligible row", async () => {
-    for (let index = 1; index <= 205; index += 1) await frame(45, index);
+    await frames(45, 205);
 
     await store.purge(FRAME_RETENTION_MS);
     expect(await kept()).toHaveLength(0);
-  });
+  }, 60_000);
 
   test("purge leaves a frame inside the window alone", async () => {
     await frame(1, 1);
@@ -110,7 +115,7 @@ describe("page frame retention", () => {
    * not to have is double-counting or deadlocking on the same `ctid`s.
    */
   test("two sweeps at once remove each row once and neither stalls", async () => {
-    for (let index = 1; index <= 400; index += 1) await frame(45, index);
+    await frames(45, 400);
 
     await Promise.all([
       store.purge(FRAME_RETENTION_MS),
@@ -118,9 +123,5 @@ describe("page frame retention", () => {
     ]);
 
     expect(await kept()).toHaveLength(0);
-  });
-});
-
-afterAll(async () => {
-  await database.$client.close();
+  }, 60_000);
 });

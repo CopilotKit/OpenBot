@@ -1,5 +1,13 @@
 // server/tests/composio-single-user-identity.integration.test.ts
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -14,15 +22,10 @@ import {
   DEV_ACTOR,
   initializeDevActorUser,
 } from "../src/auth/dev-actor";
+import { createCredentialStore } from "../src/credentials";
 import { applyMigrations } from "../src/db/apply-migrations";
 import { createDatabase, type Database } from "../src/db/client";
-import {
-  agents,
-  brokeredConnections,
-  brokeredIdentities,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema";
+import { mcpTools } from "../src/db/schema";
 import { useComposioClient } from "../src/plugins/composio";
 import {
   buildComposioClient,
@@ -31,8 +34,26 @@ import {
 import { createPluginRoutes } from "../src/plugins/routes";
 import { ensureSingleUserIdentity } from "../src/plugins/single-user-identity";
 import { createPluginStore } from "../src/plugins/store";
+import type { BrokeredConnection, BrokeredIdentity } from "../src/vault/client";
+import {
+  type ConnectionsDirectory,
+  installConnectionsDirectory,
+} from "../src/vault/directory";
+import { brokeredId } from "../src/vault/ids";
 import fixture from "./fixtures/composio-file-actions.json";
+import {
+  removeBots,
+  seedBot,
+  type TestIntelligence,
+  testIntelligence,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  deploymentDirectory,
+  secondTestProject,
+  useTestVault,
+} from "./support/vault";
+import { directoryFor } from "./support/directory";
 
 /**
  * EVERY SINGLE-USER OPENBOT ON ONE COMPOSIO KEY WAS ONE COMPOSIO USER.
@@ -49,10 +70,12 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * name retired here and nothing at Composio touched, and the name is the same after a restart and
  * on every replica.
  *
- * REAL DATABASES, REAL ROUTES, THE REAL SINGLE-USER GUARD, THE REAL STORE AND THE REAL COMPOSIO
- * ADAPTER. Each deployment is a database created here and migrated with this repository's own
- * migrations, because the property is about two databases and a schema inside one would share the
- * very rows that tell deployments apart. Only Composio is a double, at the vendor client: its
+ * REAL DATABASES, REAL PROJECTS, REAL ROUTES, THE REAL SINGLE-USER GUARD, THE REAL STORE AND THE
+ * REAL COMPOSIO ADAPTER. Each deployment is a database created here and migrated with this
+ * repository's own migrations, and an Intelligence project of its own: a deployment's apps, its
+ * accounts and its name at Composio are its project's (Intelligence's connections), so two
+ * deployments are two databases on two projects, and one sharing a project with another would share
+ * the very records that tell deployments apart. Only Composio is a double, at the vendor client: its
  * `link` refuses exactly as `@composio/core` 0.18.1 does (the double in
  * `composio-connect-adopts-held-account.test.ts`, which this one follows), its listings honour the
  * query they are given, and the action resolves from the rows Composio published
@@ -68,7 +91,12 @@ const migrations = join(import.meta.dir, "..", "drizzle");
 const created: string[] = [];
 const opened: Database[] = [];
 
-const BOT = "helper";
+/*
+ * One Bot for every deployment this file boots. Each deployment has a database of its own, but Bots
+ * live in Intelligence, and the tests share one project there: so the Bot is made once, under an id
+ * no other file or run uses, and every deployment grants to it.
+ */
+const BOT = `helper-${suite}`;
 const ACTION = "GMAIL_FETCH_EMAILS";
 const REF = `gmail/${ACTION}`;
 
@@ -104,16 +132,110 @@ async function close(database: Database) {
   await database.$client.close();
 }
 
+/**
+ * A deployment's own place: a fresh database, and an Intelligence project holding none of what this
+ * file writes there. The first deployment a test makes is on the test project, the second on the
+ * second project (`TEST_INTELLIGENCE_API_KEY_2`); no test here runs three side by side.
+ */
+type Install = { url: string; project: TestIntelligence };
+
+let installsThisTest = 0;
+const inspectors = new Map<string, ConnectionsDirectory>();
+const usedProjects = new Map<string, TestIntelligence>();
+/** Every deployment directory started in this test, stopped when it ends. */
+const running: ConnectionsDirectory[] = [];
+
+/** A directory that only reads and clears a project for this file: never a deployment's own. */
+async function inspector(project: TestIntelligence) {
+  let held = inspectors.get(project.apiKey);
+  if (!held) {
+    usedProjects.set(project.apiKey, project);
+    held = await deploymentDirectory(project);
+    inspectors.set(project.apiKey, held);
+  }
+  return held;
+}
+
+/** Every record this file writes in a project: the person's Gmail accounts, their name at Composio, and Gmail. */
+async function clearProject(project: TestIntelligence) {
+  const directory = await inspector(project);
+  const { connections } = await directory.client.connections.all();
+  for (const connection of connections) {
+    if (connection.kind === "grant") continue;
+    if (
+      connection.provider === "composio" &&
+      connection.userId === DEV_ACTOR.id &&
+      (connection.kind === "identity" || connection.app === "gmail")
+    )
+      await directory.removeConnection(connection.id);
+  }
+  if (await directory.client.toolServers.get("gmail"))
+    await directory.removeServer("gmail");
+}
+
+async function freshInstall(): Promise<Install> {
+  installsThisTest += 1;
+  if (installsThisTest > 2)
+    throw new Error("This file runs at most two deployments in one test.");
+  const project =
+    installsThisTest === 1 ? testIntelligence() : secondTestProject();
+  await clearProject(project);
+  return { url: await freshDatabase(), project };
+}
+
+/** The Composio Gmail accounts a project holds now for the single-user person, from Intelligence. */
+async function accountsIn(project: TestIntelligence) {
+  const { connections } = await (
+    await inspector(project)
+  ).client.connections.all();
+  return connections.filter(
+    (connection): connection is BrokeredConnection =>
+      connection.kind === "brokered" &&
+      connection.provider === "composio" &&
+      connection.app === "gmail",
+  );
+}
+
+/** The person's names at Composio a project holds now, from Intelligence. */
+async function namesIn(project: TestIntelligence) {
+  const { connections } = await (
+    await inspector(project)
+  ).client.connections.all();
+  return connections
+    .filter(
+      (connection): connection is BrokeredIdentity =>
+        connection.kind === "identity" &&
+        connection.provider === "composio" &&
+        connection.userId === DEV_ACTOR.id,
+    )
+    .map((connection) => ({ vendorUserId: connection.vendorUserId }));
+}
+
 /*
  * Each test's databases are closed when it ends, so their pools do not pile up across the file.
  * Two connections a deployment, held to the end, ran a full CI run's Postgres out of clients.
  */
+beforeAll(async () => {
+  await seedBot({ id: BOT, name: "Helper", type: "built_in" });
+});
+
+beforeEach(() => {
+  installsThisTest = 0;
+});
+
 afterEach(async () => {
+  for (const directory of running.splice(0)) directory.stop();
   for (const database of opened.splice(0)) await database.$client.close();
+  // The process's own vault back, for whatever runs after this file in the same process.
+  installConnectionsDirectory(await useTestVault());
 });
 
 // Every database this file created is dropped here, and there are a few dozen of them.
 afterAll(async () => {
+  await removeBots([BOT]);
+  for (const project of usedProjects.values()) await clearProject(project);
+  for (const directory of inspectors.values()) directory.stop();
+  installConnectionsDirectory(await useTestVault());
   useComposioClient(null);
   for (const database of opened) await database.$client.close();
   const admin = postgres(administrative.href, { max: 1, onnotice: () => {} });
@@ -320,18 +442,31 @@ type Project = ReturnType<typeof composioProject>;
  * store and routes built over its own database, behind the real single-user guard.
  */
 async function boot(
-  url: string,
+  install: Install,
   project: Project,
   /** False for a deployment as it ran before it could be given a name of its own. */
   { named = true }: { named?: boolean } = {},
 ) {
-  const database = open(url);
-  await initializeDevActorUser(database, true);
+  const database = open(install.url);
+  /*
+   * THIS DEPLOYMENT'S PROCESS. Its apps, accounts and name are read through the one directory a
+   * server installs, so it is installed whenever this deployment acts: every request, call and store
+   * method below goes through `acting`, and the tests drive one deployment at a time.
+   */
+  const directory = await deploymentDirectory(install.project, database);
+  running.push(directory);
+  const acting = <T>(work: () => T): T => {
+    installConnectionsDirectory(directory);
+    return work();
+  };
+  await initializeDevActorUser(database, true, directoryFor(database));
   const identity = named
-    ? await ensureSingleUserIdentity(database, {
-        singleUser: true,
-        provider: "composio",
-      })
+    ? await acting(() =>
+        ensureSingleUserIdentity({
+          singleUser: true,
+          provider: "composio",
+        }),
+      )
     : DEV_ACTOR.id;
   if (identity === null) {
     throw new Error("A single-user deployment on Composio was given no name.");
@@ -340,13 +475,13 @@ async function boot(
     brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
-    credentials: {} as never,
+    credentials: createCredentialStore(directory),
     encryptionKey: "x".repeat(44),
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     broker: project.client.broker,
     deploymentId: "single-user",
   });
-  const app = new Hono().route(
+  const routes = new Hono().route(
     "/api/plugins",
     createPluginRoutes(
       store,
@@ -361,29 +496,56 @@ async function boot(
       { broker: project.client.broker, provider: "composio" },
     ),
   );
+  const app = {
+    request: async (path: string, init?: RequestInit) =>
+      acting(() => routes.request(path, init)),
+  };
   /** What a Bot granted Gmail reads when it fetches mail for the person. */
   const readMail = () =>
-    store.callTool({
-      ref: REF,
-      args: {},
-      botId: BOT,
-      actorId: DEV_ACTOR.id,
-    });
-  return { database, identity, store, app, readMail };
+    acting(() =>
+      store.callTool({
+        ref: REF,
+        args: {},
+        botId: BOT,
+        actorId: DEV_ACTOR.id,
+      }),
+    );
+  /** The server stopping: its database and its directory let go. */
+  const stop = async () => {
+    directory.stop();
+    await close(database);
+  };
+  return {
+    database,
+    directory,
+    install,
+    identity,
+    store,
+    app,
+    readMail,
+    acting,
+    stop,
+  };
 }
 
 type Deployment = Awaited<ReturnType<typeof boot>>;
 
 /** Gmail enabled as a Personal app with one action, and a Bot granted it. */
-async function enableGmail({ database, store }: Deployment) {
-  await database.insert(mcpServers).values({
+async function enableGmail({ database, directory, store, acting }: Deployment) {
+  await directory.createServer({
     id: "gmail",
     title: "Gmail",
+    logo: null,
     vendor: "Composio",
     url: "composio://gmail",
     provenance: "composio",
     authScheme: "OAUTH2",
+    credentialId: null,
     accountMode: "personal",
+    sharedVendorUserId: null,
+    ownerGrants: null,
+    entraScope: null,
+    addedBy: null,
   });
   await database.insert(mcpTools).values({
     serverId: "gmail",
@@ -393,15 +555,12 @@ async function enableGmail({ database, store }: Deployment) {
     effect: "read",
     version: fetchEmails.version,
   });
-  await database
-    .insert(agents)
-    .values({ id: BOT, name: "Helper", type: "built_in", configuration: {} });
-  await store.grant("mcp", REF, BOT, DEV_ACTOR.email);
+  await acting(() => store.grant("mcp", REF, BOT, DEV_ACTOR.email));
 }
 
 /** A deployment that has never connected anything, up and with Gmail enabled. */
 async function newDeployment(project: Project) {
-  const deployment = await boot(await freshDatabase(), project);
+  const deployment = await boot(await freshInstall(), project);
   await enableGmail(deployment);
   return deployment;
 }
@@ -449,13 +608,12 @@ const listed = async (deployment: Deployment) =>
     }
   ).connections.map((connection) => connection.serverId);
 
-const rowsIn = (database: Database) =>
-  database
-    .select({
-      userId: brokeredConnections.userId,
-      vendorUserId: brokeredConnections.vendorUserId,
-    })
-    .from(brokeredConnections);
+/** The Gmail accounts this deployment holds, as its project in Intelligence holds them now. */
+const rowsIn = async (deployment: Deployment) =>
+  (await accountsIn(deployment.install.project)).map((connection) => ({
+    userId: connection.userId,
+    vendorUserId: connection.vendorUserId,
+  }));
 
 describe("two single-user deployments on one Composio key", () => {
   test("each is its own Composio user, and one's Gmail is not listed, adopted or called in the other", async () => {
@@ -470,14 +628,14 @@ describe("two single-user deployments on one Composio key", () => {
     expect(a.identity).not.toBe(b.identity);
 
     await connectGmail(a, project, "a@example.test");
-    expect(await rowsIn(a.database)).toEqual([
+    expect(await rowsIn(a)).toEqual([
       { userId: DEV_ACTOR.id, vendorUserId: a.identity },
     ]);
 
     // B's page does not list A's Gmail, and asking Composio from B finds nothing of A's.
     expect(await listed(b)).not.toContain("gmail");
     expect(await confirm(b)).toEqual({ connected: false });
-    expect(await rowsIn(b.database)).toEqual([]);
+    expect(await rowsIn(b)).toEqual([]);
 
     // A Bot on B cannot read A's mail: it is told to connect, and nothing runs at Composio.
     await expect(b.readMail()).rejects.toThrow(
@@ -493,7 +651,7 @@ describe("two single-user deployments on one Composio key", () => {
         .authorizationUrl,
     ).toStartWith(`https://connect.composio.test/link/${b.identity}?`);
     expect(project.minted).toEqual([a.identity, b.identity]);
-    expect(await rowsIn(b.database)).toEqual([]);
+    expect(await rowsIn(b)).toEqual([]);
 
     // A's Bot reads A's mail.
     const read = await a.readMail();
@@ -529,7 +687,7 @@ describe("two single-user deployments on one Composio key", () => {
     expect(project.accounts.map((account) => account.mailbox)).toEqual([
       "a@example.test",
     ]);
-    expect(await rowsIn(b.database)).toEqual([]);
+    expect(await rowsIn(b)).toEqual([]);
 
     // A is still connected, and its Bot still reads its mail.
     expect(await confirm(a)).toEqual({ connected: true });
@@ -540,41 +698,41 @@ describe("two single-user deployments on one Composio key", () => {
 describe("a single-user deployment that already holds Composio accounts under dev-local-user", () => {
   /** Gmail connected the way every single-user OpenBot connected it before its own name existed. */
   async function connectedBeforeTheUpgrade(project: Project) {
-    const url = await freshDatabase();
-    const before = open(url);
-    await before.insert(brokeredConnections).values({
+    const install = await freshInstall();
+    await (await inspector(install.project)).createConnection({
+      kind: "brokered",
+      id: brokeredId("composio", "gmail", "person", DEV_ACTOR.id),
       provider: "composio",
       app: "gmail",
       holder: "person",
       userId: DEV_ACTOR.id,
       vendorUserId: DEV_ACTOR.id,
+      connectedBy: null,
       verified: true,
       verifiedAt: new Date(),
+      probeAction: null,
     });
-    await close(before);
     project.consented(DEV_ACTOR.id, "me@example.test");
-    return url;
+    return install;
   }
 
   test("gets its own name at once, stops using the shared account without ending it, and one Connect puts Gmail back", async () => {
     const project = composioProject();
     useComposioClient(project.client.actions);
-    const url = await connectedBeforeTheUpgrade(project);
+    const install = await connectedBeforeTheUpgrade(project);
     const shared = structuredClone(project.accounts);
-    const deployment = await boot(url, project);
+    const deployment = await boot(install, project);
     await enableGmail(deployment);
 
     // Its own name, written down, at the first start.
     expect(deployment.identity).toStartWith(`${DEV_ACTOR.id}:`);
-    expect(
-      await deployment.database
-        .select({ vendorUserId: brokeredIdentities.vendorUserId })
-        .from(brokeredIdentities),
-    ).toEqual([{ vendorUserId: deployment.identity }]);
+    expect(await namesIn(install.project)).toEqual([
+      { vendorUserId: deployment.identity },
+    ]);
 
     // The record under the shared name is retired here: Gmail reads as not connected, a Bot is told
     // to connect it, and nothing runs at Composio as `dev-local-user`.
-    expect(await rowsIn(deployment.database)).toEqual([]);
+    expect(await rowsIn(deployment)).toEqual([]);
     expect(await listed(deployment)).not.toContain("gmail");
     await expect(deployment.readMail()).rejects.toThrow(
       "You have not connected your Gmail account.",
@@ -586,7 +744,7 @@ describe("a single-user deployment that already holds Composio accounts under de
 
     // One Connect files Gmail under the deployment's own name.
     await connectGmail(deployment, project, "me@example.test");
-    expect(await rowsIn(deployment.database)).toEqual([
+    expect(await rowsIn(deployment)).toEqual([
       { userId: DEV_ACTOR.id, vendorUserId: deployment.identity },
     ]);
     expect((await deployment.readMail()).text).toContain("me@example.test");
@@ -604,20 +762,20 @@ describe("a single-user deployment that already holds Composio accounts under de
      */
     const project = composioProject();
     useComposioClient(project.client.actions);
-    const a = await boot(await freshDatabase(), project, { named: false });
+    const a = await boot(await freshInstall(), project, { named: false });
     await enableGmail(a);
     await connectGmail(a, project, "a@example.test");
-    const urlB = await freshDatabase();
-    const b = await boot(urlB, project, { named: false });
+    const installB = await freshInstall();
+    const b = await boot(installB, project, { named: false });
     await enableGmail(b);
     expect(await confirm(b)).toEqual({ connected: true });
     expect((await b.readMail()).text).toContain("a@example.test");
     const aAccount = structuredClone(project.accounts);
     project.ran.splice(0);
-    await close(b.database);
+    await b.stop();
 
     // B upgrades. A has not, and still uses `dev-local-user`.
-    const upgraded = await boot(urlB, project);
+    const upgraded = await boot(installB, project);
     expect(upgraded.identity).toStartWith(`${DEV_ACTOR.id}:`);
 
     // B no longer lists, confirms or calls A's Gmail.
@@ -645,13 +803,13 @@ describe("a single-user deployment's Composio name", () => {
   test("is the same after a restart, and the Gmail connected under it is still connected", async () => {
     const project = composioProject();
     useComposioClient(project.client.actions);
-    const url = await freshDatabase();
-    const first = await boot(url, project);
+    const install = await freshInstall();
+    const first = await boot(install, project);
     await enableGmail(first);
     await connectGmail(first, project, "me@example.test");
-    await close(first.database);
+    await first.stop();
 
-    const restarted = await boot(url, project);
+    const restarted = await boot(install, project);
     expect(restarted.identity).toBe(first.identity);
     expect(await confirm(restarted)).toEqual({ connected: true });
     expect((await restarted.readMail()).text).toContain("me@example.test");
@@ -661,42 +819,41 @@ describe("a single-user deployment's Composio name", () => {
   });
 
   test("is one name when two replicas start together", async () => {
-    const url = await freshDatabase();
-    const [one, two] = [open(url), open(url)];
+    const install = await freshInstall();
     const provider = "composio" as const;
+    /*
+     * Both starts race at Intelligence, which holds one name per person and broker under one id:
+     * each misses, each files its own name, and the one filed second is refused and reads back the
+     * first. The two run in this one process through one directory, because a process has one
+     * installed; what decides the race is Intelligence's rule, not either process's memory.
+     */
+    installConnectionsDirectory(await inspector(install.project));
     const settled = await Promise.all([
-      ensureSingleUserIdentity(
-        one,
-        { singleUser: true, provider },
-        () => "one",
-      ),
-      ensureSingleUserIdentity(
-        two,
-        { singleUser: true, provider },
-        () => "two",
-      ),
+      ensureSingleUserIdentity({ singleUser: true, provider }, () => "one"),
+      ensureSingleUserIdentity({ singleUser: true, provider }, () => "two"),
     ]);
     expect(settled[0]).toBe(settled[1] as string);
     expect([`${DEV_ACTOR.id}:one`, `${DEV_ACTOR.id}:two`]).toContain(
       settled[0] as string,
     );
-    expect(await one.select().from(brokeredIdentities)).toHaveLength(1);
+    expect(await namesIn(install.project)).toHaveLength(1);
   });
 
   test("is not given to a deployment that signs people in, or has no broker", async () => {
-    const database = open(await freshDatabase());
+    const install = await freshInstall();
+    installConnectionsDirectory(await inspector(install.project));
     expect(
-      await ensureSingleUserIdentity(database, {
+      await ensureSingleUserIdentity({
         singleUser: false,
         provider: "composio",
       }),
     ).toBeNull();
     expect(
-      await ensureSingleUserIdentity(database, {
+      await ensureSingleUserIdentity({
         singleUser: true,
         provider: null,
       }),
     ).toBeNull();
-    expect(await database.select().from(brokeredIdentities)).toEqual([]);
+    expect(await namesIn(install.project)).toEqual([]);
   });
 });

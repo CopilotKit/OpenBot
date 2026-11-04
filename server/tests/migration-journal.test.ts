@@ -143,7 +143,10 @@ const declared = (tail: string): { type: string; notNull: boolean } => ({
       " ",
     )
     .trim()
-    .replace(/\s+/g, " "),
+    .replace(/\s+/g, " ")
+    // `generate` quotes an enum's name (`"role"`) where the snapshot records it bare (`role`): the
+    // same type in two spellings.
+    .replace(/"([^"]+)"/g, "$1"),
   notNull: /\bNOT NULL\b/i.test(tail),
 });
 

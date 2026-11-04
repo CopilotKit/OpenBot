@@ -4,17 +4,12 @@ import type {
   VoiceSessionRecord,
   VoiceTranscriptEntry,
 } from "@openbot/shared/voice-session";
-import { and, asc, eq, gt, isNull, or } from "drizzle-orm";
 import type { AgentActor } from "../agents/profile-types";
 import type { ChannelStore } from "../channels/routes";
-import type { Database } from "../db/client";
-import {
-  agentProfiles,
-  channelAgents,
-  channelMemberships,
-  channels,
-  voiceSessions,
-} from "../db/schema";
+import { ConversationMissingError } from "../conversations/client";
+import { conversations } from "../conversations/directory";
+import { IntelligenceApiError, writeKey } from "../conversations/http";
+import type { VoiceSessionRow } from "../conversations/types";
 
 export class VoiceSessionError extends Error {
   constructor(
@@ -116,15 +111,16 @@ export type VoiceSessionStore = {
   ): Promise<VoiceSessionRecord>;
 };
 
-function record(row: typeof voiceSessions.$inferSelect): VoiceSessionRecord {
+function record(row: VoiceSessionRow): VoiceSessionRecord {
   return {
     id: row.id,
-    channelId: row.channelId,
+    channelId: row.conversationId,
     anchorMessageId: row.anchorMessageId,
-    startedAt: row.startedAt.toISOString(),
-    endedAt: row.endedAt.toISOString(),
+    // To the millisecond, as the browser sent them and as they always came back.
+    startedAt: new Date(row.startedAt).toISOString(),
+    endedAt: new Date(row.endedAt).toISOString(),
     durationSeconds: row.durationSeconds,
-    transcript: row.transcript.entries,
+    transcript: row.transcript,
     summary: row.summary,
     summaryStatus: row.summaryStatus,
   };
@@ -140,42 +136,15 @@ function sameInput(row: VoiceSessionRecord, input: SaveVoiceSessionInput) {
   );
 }
 
+/**
+ * A person's spoken conversations, in Intelligence (voice sessions, under the conversation they were
+ * held in). Intelligence checks, as it writes one, that the person is still in that conversation and
+ * it is not deleted; whether its Bots are all still there is OpenBot's to check, from the Bots it
+ * holds, before it writes.
+ */
 export function createVoiceSessionStore(
-  database: Database,
   channelStore: Pick<ChannelStore, "get">,
 ): VoiceSessionStore {
-  type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-  async function requireWriteAccess(
-    transaction: Transaction,
-    actor: AgentActor,
-    channelId: string,
-  ) {
-    // Hold membership, channel and profiles against revocation/deletion through the write.
-    const rows = await transaction
-      .select({ deletedAt: agentProfiles.deletedAt })
-      .from(channels)
-      .innerJoin(
-        channelMemberships,
-        eq(channelMemberships.channelId, channels.id),
-      )
-      .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-      .innerJoin(
-        agentProfiles,
-        eq(agentProfiles.agentId, channelAgents.agentId),
-      )
-      .where(
-        and(
-          eq(channels.id, channelId),
-          eq(channelMemberships.userId, actor.id),
-          isNull(channels.deletedAt),
-        ),
-      )
-      .for("share");
-    if (rows.length === 0)
-      throw new VoiceSessionError("Couldn't find that conversation.", 404);
-    if (rows.some((row) => row.deletedAt !== null))
-      throw new VoiceSessionError("This channel is no longer active.", 409);
-  }
   async function requireChannel(
     actor: AgentActor,
     channelId: string,
@@ -192,140 +161,74 @@ export function createVoiceSessionStore(
     async save(actor, unvalidated) {
       const input = parseVoiceSessionInput(unvalidated);
       await requireChannel(actor, input.channelId, true);
-      return database.transaction(async (transaction) => {
-        await requireWriteAccess(transaction, actor, input.channelId);
-        await transaction
-          .insert(voiceSessions)
-          .values({
+      let saved: VoiceSessionRow;
+      try {
+        ({ session: saved } = await conversations().client.voice.create(
+          {
             id: input.id,
-            channelId: input.channelId,
+            conversationId: input.channelId,
             userId: actor.id,
             anchorMessageId: input.anchorMessageId,
-            startedAt: new Date(input.startedAt),
-            endedAt: new Date(input.endedAt),
+            startedAt: input.startedAt,
+            endedAt: input.endedAt,
             durationSeconds: Math.round(
               (Date.parse(input.endedAt) - Date.parse(input.startedAt)) / 1000,
             ),
-            transcript: { entries: input.transcript },
-          })
-          .onConflictDoNothing();
-        const [row] = await transaction
-          .select()
-          .from(voiceSessions)
-          .where(eq(voiceSessions.id, input.id));
-        if (!row || row.userId !== actor.id || !sameInput(record(row), input))
-          throw new VoiceSessionError(
-            "This voice session ID is already in use.",
-            409,
-          );
-        return record(row);
-      });
+            transcript: input.transcript,
+            // A session is saved before it is summarised: the summary arrives with `summarize`.
+            summary: null,
+            summaryStatus: "failed",
+          },
+          writeKey("voice.save"),
+        ));
+      } catch (error) {
+        // Left the conversation, or it was deleted, since the check above.
+        if (error instanceof ConversationMissingError)
+          throw new VoiceSessionError("Couldn't find that conversation.", 404);
+        throw error;
+      }
+      // The same save again returns the session it made; a different one under its id is refused.
+      if (saved.userId !== actor.id || !sameInput(record(saved), input))
+        throw new VoiceSessionError(
+          "This voice session ID is already in use.",
+          409,
+        );
+      return record(saved);
     },
     async list(actor, channelId, cursor) {
       await requireChannel(actor, channelId);
-      let after: { at: Date; id: string } | undefined;
-      if (cursor) {
-        try {
-          const value: unknown = JSON.parse(
-            Buffer.from(cursor, "base64url").toString(),
-          );
-          if (
-            !value ||
-            typeof value !== "object" ||
-            !("at" in value) ||
-            typeof value.at !== "string" ||
-            !("id" in value) ||
-            !identifier(value.id) ||
-            !Number.isFinite(Date.parse(value.at))
-          )
-            throw new Error("cursor");
-          after = { at: new Date(value.at), id: value.id };
-        } catch {
+      try {
+        const page = await conversations().client.voice.page(
+          channelId,
+          cursor ?? null,
+          50,
+        );
+        return {
+          sessions: page.sessions.map(record),
+          nextCursor: page.nextCursor,
+        };
+      } catch (error) {
+        if (error instanceof IntelligenceApiError && error.status === 400)
           throw new VoiceSessionError("Invalid voice history cursor.", 400);
-        }
+        throw error;
       }
-      const rows = await database
-        .select({ session: voiceSessions })
-        .from(voiceSessions)
-        .innerJoin(
-          channels,
-          and(
-            eq(channels.id, voiceSessions.channelId),
-            isNull(channels.deletedAt),
-          ),
-        )
-        .innerJoin(
-          channelMemberships,
-          and(
-            eq(channelMemberships.channelId, channels.id),
-            eq(channelMemberships.userId, actor.id),
-          ),
-        )
-        .where(
-          and(
-            eq(voiceSessions.channelId, channelId),
-            after
-              ? or(
-                  gt(voiceSessions.startedAt, after.at),
-                  and(
-                    eq(voiceSessions.startedAt, after.at),
-                    gt(voiceSessions.id, after.id),
-                  ),
-                )
-              : undefined,
-          ),
-        )
-        .orderBy(asc(voiceSessions.startedAt), asc(voiceSessions.id))
-        .limit(51);
-      const sessions = rows.slice(0, 50).map(({ session }) => record(session));
-      const last = sessions.at(-1);
-      return {
-        sessions,
-        nextCursor:
-          rows.length > 50 && last
-            ? Buffer.from(
-                JSON.stringify({ at: last.startedAt, id: last.id }),
-              ).toString("base64url")
-            : null,
-      };
     },
     async summarize(actor, id, summary) {
       if (!summary.trim() || summary.length > 4000)
         throw new VoiceSessionError("Invalid voice summary.", 400);
-      const [existing] = await database
-        .select()
-        .from(voiceSessions)
-        .where(
-          and(eq(voiceSessions.id, id), eq(voiceSessions.userId, actor.id)),
-        );
-      if (!existing)
+      const existing = await conversations().client.voice.get(id);
+      if (!existing || existing.userId !== actor.id)
         throw new VoiceSessionError("Voice session not found.", 404);
-      return database.transaction(async (transaction) => {
-        await requireWriteAccess(transaction, actor, existing.channelId);
-        const [updated] = await transaction
-          .update(voiceSessions)
-          .set({ summary: summary.trim(), summaryStatus: "ready" })
-          .where(
-            and(
-              eq(voiceSessions.id, id),
-              eq(voiceSessions.userId, actor.id),
-              eq(voiceSessions.summaryStatus, "failed"),
-            ),
-          )
-          .returning();
-        if (updated) return record(updated);
-        // A competing replica may have finished first. Return its durable summary so both
-        // callers publish the same preview, and later retries never replace a ready summary.
-        const [ready] = await transaction
-          .select()
-          .from(voiceSessions)
-          .where(
-            and(eq(voiceSessions.id, id), eq(voiceSessions.userId, actor.id)),
-          );
-        if (!ready)
-          throw new VoiceSessionError("Voice session not found.", 404);
-        return record(ready);
-      });
+      await requireChannel(actor, existing.conversationId, true);
+      // A competing replica may have finished first: Intelligence never replaces a ready summary
+      // and returns it, so both callers publish the same preview.
+      return record(
+        await conversations().client.voice.summarise(
+          id,
+          summary.trim(),
+          writeKey("voice.summary"),
+        ),
+      );
     },
   };
 }

@@ -8,7 +8,7 @@
  * that failed, because its turn broke off or an app could not be reached, never moves the window on:
  * the next one reads from where the last good one started, so nothing that arrived meanwhile is
  * missed, and the repeat check keeps what was already raised from coming back. "Since" comes from
- * the run ledger (`proactive_runs`, see `windowStart` in `store.ts`), never from the setting's
+ * the run ledger (`check-in-runs`, see `windowStart` in `store.ts`), never from the setting's
  * `last_run_at`, which a Run now overwrites whether or not that run got anywhere.
  *
  * WHAT THE PAST LOOKS LIKE TO IT. Each check-in runs in a fresh thread, so it carries no earlier run

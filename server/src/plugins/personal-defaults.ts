@@ -1,8 +1,10 @@
-import { and, eq, isNull, like } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { bots } from "../agents/bot-registry/directory";
+import { botConfiguration } from "../configuration/directory";
 import type { Database } from "../db/client";
-import { agentProfiles } from "../db/schema/coworker";
-import { mcpServers, mcpTools, pluginGrants } from "../db/schema/plugins";
+import { mcpTools } from "../db/schema/plugins";
 import { currentEdition } from "../edition";
+import { vault } from "../vault/directory";
 
 type ListedTool = { ref: string };
 
@@ -162,7 +164,10 @@ export function withPersonalDefaults<S extends Store>(
   return store;
 }
 
-/** The reads above, from the database. */
+/**
+ * The reads above. An app's tool list is this deployment's own cache (`mcp_tools`); the Bots, what
+ * each holds and the apps themselves are Intelligence's, read from this instance's directories.
+ */
 export function personalDefaultsDeps(database: Database): PersonalDefaultsDeps {
   return {
     async tools(serverId) {
@@ -173,30 +178,25 @@ export function personalDefaultsDeps(database: Database): PersonalDefaultsDeps {
       return rows.map((row) => ({ ref: `${serverId}/${row.name}` }));
     },
     async bots() {
-      const rows = await database
-        .select({ id: agentProfiles.agentId })
-        .from(agentProfiles)
-        .where(isNull(agentProfiles.deletedAt));
-      return rows.map((row) => row.id);
+      return bots()
+        .live()
+        .map((bot) => bot.id);
     },
     async granted(agentId, serverId) {
-      const rows = await database
-        .select({ ref: pluginGrants.ref })
-        .from(pluginGrants)
-        .where(
-          and(
-            eq(pluginGrants.kind, "mcp"),
-            eq(pluginGrants.agentId, agentId),
-            like(pluginGrants.ref, `${serverId}/%`),
-          ),
-        );
-      return new Set(rows.map((row) => row.ref));
+      return new Set(
+        botConfiguration()
+          .accessOf(agentId)
+          .grants.filter(
+            (grant) =>
+              grant.kind === "mcp" && grant.ref.startsWith(`${serverId}/`),
+          )
+          .map((grant) => grant.ref),
+      );
     },
     async servers() {
-      const rows = await database
-        .select({ id: mcpServers.id })
-        .from(mcpServers);
-      return rows.map((row) => row.id);
+      return vault()
+        .servers()
+        .map((server) => server.id);
     },
   };
 }

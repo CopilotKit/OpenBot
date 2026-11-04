@@ -1,15 +1,26 @@
 // server/tests/arcade-siblings.test.ts
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { brokeredConnections } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createComposioClient } from "../src/plugins/composio-adapter";
 import { mintDeploymentVendorUserId } from "../src/plugins/shared-accounts";
 import { connectionSiblings, createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  seedBrokered,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
@@ -67,20 +78,23 @@ const broker: ConnectedAppBroker = {
   accountName: async () => "acme",
 };
 
-const store = createPluginStore({
-  brokerProvider: "arcade",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: {} as never,
-  encryptionKey: "x".repeat(44),
-  policy: () => ({ mode: "enforce" as const, deny: [], allow: ["true"] }),
-  broker,
+let store: ReturnType<typeof createPluginStore>;
+beforeAll(async () => {
+  store = createPluginStore({
+    brokerProvider: "arcade",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => ({ mode: "enforce" as const, deny: [], allow: ["true"] }),
+    broker,
+  });
 });
 
 const seeded: string[] = [];
 async function holdShared(app: string, vendorUserId: string) {
   seeded.push(app);
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "arcade",
     app,
     holder: "deployment",
@@ -89,7 +103,7 @@ async function holdShared(app: string, vendorUserId: string) {
 }
 async function holdPersonal(app: string, userId: string) {
   seeded.push(app);
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "arcade",
     app,
     holder: "person",
@@ -100,9 +114,10 @@ async function holdPersonal(app: string, userId: string) {
 
 afterEach(async () => {
   if (seeded.length)
-    await database
-      .delete(brokeredConnections)
-      .where(inArray(brokeredConnections.app, seeded));
+    await removeConnectionsWhere(
+      (connection) =>
+        connection.kind === "brokered" && seeded.includes(connection.app),
+    );
   seeded.length = 0;
   asked.length = 0;
 });
@@ -227,21 +242,24 @@ describe("revocation siblings are keyed on (vendor identity, auth provider)", ()
  * on the broker, because the empty list is what a disconnect screen will render.
  */
 describe("siblingApps under Composio", () => {
-  const composioStore = createPluginStore({
-    brokerProvider: "composio",
-    database,
-    auditStore: createAuditStore(database),
-    credentials: {} as never,
-    encryptionKey: "x".repeat(44),
-    policy: () => ({ mode: "enforce" as const, deny: [], allow: ["true"] }),
-    broker: createComposioClient("never-dialled").broker,
+  let composioStore: ReturnType<typeof createPluginStore>;
+  beforeAll(async () => {
+    composioStore = createPluginStore({
+      brokerProvider: "composio",
+      database,
+      auditStore: createAuditStore(database),
+      credentials: createCredentialStore(await useTestVault()),
+      encryptionKey: "x".repeat(44),
+      policy: () => ({ mode: "enforce" as const, deny: [], allow: ["true"] }),
+      broker: createComposioClient("never-dialled").broker,
+    });
   });
 
   test("an identity holding several apps has no siblings at any of them", async () => {
     const userId = `composio-${suite}`;
     for (const app of [gmail, calendar, slack]) {
       seeded.push(app);
-      await database.insert(brokeredConnections).values({
+      await seedBrokered({
         provider: "composio",
         app,
         holder: "person",

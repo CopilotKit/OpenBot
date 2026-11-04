@@ -212,7 +212,7 @@ export function createHandoffDesk(options: {
       /*
        * An id is exact and a name is not, so an id wins outright.
        *
-       * `agents.name` has no unique constraint and duplicating a Bot deliberately makes a second one
+       * A Bot's name is not unique and duplicating a Bot deliberately makes a second one
        * with the same name, so a person can be looking at two Bots called Knowledge. Taking whichever
        * sorted first would send the work to a Bot nobody meant — and the grant check runs after this,
        * so with only the other twin granted a perfectly legitimate hop is refused as "not granted".

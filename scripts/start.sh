@@ -493,6 +493,9 @@ if ! running "bun worker/src/index.ts"; then
     DATABASE_URL="$WORKER_DATABASE_URL" \
     SERVER_INTERNAL_URL="http://localhost:$SERVER_PORT" \
     WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
+    INTELLIGENCE_API_URL="$(setting INTELLIGENCE_API_URL "")" \
+    INTELLIGENCE_GATEWAY_WS_URL="$(setting INTELLIGENCE_GATEWAY_WS_URL "")" \
+    INTELLIGENCE_API_KEY="$(setting INTELLIGENCE_API_KEY "")" \
     bun worker/src/index.ts >"$LOGS/worker.log" 2>&1 &)
   info "  worker: started (routine sweep loop)"
   sleep 1

@@ -1,27 +1,61 @@
 // server/tests/shared-use-store.integration.test.ts
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  mcpServers,
-  pluginGrants,
-  responsibilities,
-  sharedUseRequests,
-  teamBotAudience,
-  teamBotAssignments,
-  teamBotPublications,
-  users,
-} from "../src/db/schema";
+import { sharedUseApprovals, sharedUseRequests, users } from "../src/db/schema";
 import {
   createSharedUseGate,
   createSharedUseStore,
 } from "../src/plugins/shared-use-store";
 import { expectOnlyRefusal } from "./helpers/refusals";
+import {
+  changeAccess,
+  changeBot,
+  grantBot,
+  removeBots,
+  seedBot,
+} from "./support/bots";
+
+/** Publish a Bot to named people and groups, as its owner's publish does. */
+async function publishTo(
+  botId: string,
+  publishedBy: string,
+  members: { kind: "user" | "group"; value: string }[],
+) {
+  await changeAccess([
+    { op: "publish", botId, audience: "people", members, publishedBy },
+  ]);
+}
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  createTestPolicyCache,
+  storedConnectionApprovals,
+  useTestPolicy,
+} from "./support/policy";
+
+// Shared app approvals and approval rules are Intelligence's organization policy.
+beforeAll(async () => {
+  await useTestPolicy();
+});
+import {
+  changeServer,
+  removeServers,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
+import {
+  purgeResponsibilitiesOwnedBy,
+  seedResponsibility,
+} from "./support/schedules";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -42,12 +76,19 @@ async function seedUser(name: string, groups: string[] = []) {
   });
 }
 
+beforeAll(async () => {
+  await useTestVault();
+});
+
 beforeEach(async () => {
   await database
     .delete(sharedUseRequests)
     .where(eq(sharedUseRequests.agentId, bot));
-  await database.delete(agents).where(eq(agents.id, bot));
-  await database.delete(mcpServers).where(eq(mcpServers.id, app));
+  await purgeResponsibilitiesOwnedBy(id("owner"));
+  await purgeResponsibilitiesOwnedBy(id("owner"));
+  await removeBots([bot]);
+  // Takes the app's approvals, requests and grants here with it, as the cascade from mcp_servers did.
+  await removeServers([app]);
   await database
     .delete(users)
     .where(
@@ -60,7 +101,7 @@ beforeEach(async () => {
   await seedUser("named");
   await seedUser("newhire", ["platform"]);
   await seedUser("stranger");
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: "Team GitHub",
     vendor: "Composio",
@@ -70,28 +111,25 @@ beforeEach(async () => {
     accountMode: "shared",
     sharedVendorUserId: "openbot-deployment:x:R",
   });
-  await database
-    .insert(agents)
-    .values({ id: bot, name: "Triage", type: "built_in", configuration: {} });
-  await database.insert(agentProfiles).values({
-    agentId: bot,
+  await seedBot({
+    id: bot,
+    name: "Triage",
+    type: "built_in",
     ownerUserId: id("owner"),
     visibility: "private",
     title: "Triage",
     roleDescription: "Triage",
     avatarSeed: "x",
   });
-  await database.insert(pluginGrants).values({
-    kind: "mcp",
-    ref: `${app}/GITHUB_LIST_ISSUES`,
-    agentId: bot,
+  await grantBot(bot, "mcp", `${app}/GITHUB_LIST_ISSUES`, {
     grantedBy: "admin@example.test",
   });
 });
 
 afterAll(async () => {
-  await database.delete(agents).where(eq(agents.id, bot));
-  await database.delete(mcpServers).where(eq(mcpServers.id, app));
+  await removeBots([bot]);
+  // Takes the app's approvals, requests and grants here with it, as the cascade from mcp_servers did.
+  await removeServers([app]);
   await database
     .delete(users)
     .where(
@@ -158,12 +196,9 @@ describe("the shared-use gate", () => {
     });
     expect((await call("named")).allowed).toBe(true);
     expect((await call("newhire")).allowed).toBe(true);
-    await database
-      .insert(teamBotPublications)
-      .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
-    await database
-      .insert(teamBotAudience)
-      .values({ agentId: bot, kind: "user", value: id("stranger") });
+    await publishTo(bot, id("owner"), [
+      { kind: "user", value: id("stranger") },
+    ]);
     expect((await call("stranger")).allowed).toBe(false);
   });
 
@@ -174,23 +209,20 @@ describe("the shared-use gate", () => {
       by: id("owner"),
       approval: { audience: "team", outsideInput: false, members: [] },
     });
-    const [goal] = await database
-      .insert(responsibilities)
-      .values({
-        id: id("goal"),
-        ownerUserId: id("owner"),
-        agentId: bot,
-        title: "Watch mail",
-        instruction: "x",
-        channelId: id("ch"),
-        threadId: id("th"),
-        successCriteria: "x",
-        subscriptions: [{ source: "email", eventType: "*" }],
-      })
-      .returning({ id: responsibilities.id });
+    const goal = await seedResponsibility({
+      id: id("goal"),
+      ownerUserId: id("owner"),
+      agentId: bot,
+      title: "Watch mail",
+      instruction: "x",
+      channelId: id("ch"),
+      threadId: id("th"),
+      successCriteria: "x",
+      subscriptions: [{ source: "email", eventType: "*" }],
+    });
     const answer = await call("owner", {
       kind: "responsibility",
-      id: goal!.id,
+      id: goal.id,
     });
     expect(answer.allowed).toBe(false);
     expect(await store.pendingFor(bot)).toEqual([
@@ -208,7 +240,7 @@ describe("the shared-use gate", () => {
       by: id("owner"),
       approval: { audience: "team", outsideInput: false, members: [] },
     });
-    await database.insert(responsibilities).values({
+    await seedResponsibility({
       id: id("mailgoal"),
       ownerUserId: id("owner"),
       agentId: bot,
@@ -307,15 +339,15 @@ describe("approval members", () => {
   });
 
   test("an audience also assigned to the Bot can be approved", async () => {
-    await database
-      .insert(teamBotPublications)
-      .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
-    await database
-      .insert(teamBotAudience)
-      .values({ agentId: bot, kind: "group", value: "platform" });
-    await database
-      .insert(teamBotAssignments)
-      .values({ agentId: bot, groupName: "platform", assignedBy: id("owner") });
+    await publishTo(bot, id("owner"), [{ kind: "group", value: "platform" }]);
+    await changeAccess([
+      {
+        op: "assign",
+        botId: bot,
+        group: "platform",
+        assignedBy: id("owner"),
+      },
+    ]);
     await call("newhire");
     const [pending] = await store.pendingFor(bot);
     expect(pending?.proposed.members).toEqual([
@@ -335,7 +367,12 @@ describe("approval members", () => {
 });
 
 describe("decision durability", () => {
-  test("a direct approval and an administrator decision complete without a lock-order deadlock", async () => {
+  test("a direct approval made while a decision waits on its request stands, and both complete", async () => {
+    /*
+     * The decision and a direct approval used to be serialized by an advisory lock, and the one that
+     * came later won. There is no lock now: the decision is written over the approval stored when it
+     * began, so an administrator's approval stored while it waits is never replaced by it.
+     */
     await call("stranger");
     const [pending] = await store.pendingFor(bot);
     const blocker = createDatabase(testDatabaseUrl(), { max: 1 });
@@ -401,6 +438,9 @@ describe("decision durability", () => {
         "fulfilled",
       ]);
       expect((await store.approvalFor(bot, app))?.audience).toBe("team");
+      expect(
+        (await storedConnectionApprovals({ agentId: bot }))[0]?.audience,
+      ).toBe("team");
       expect(await store.pendingFor(bot)).toHaveLength(0);
     } finally {
       release.resolve();
@@ -413,65 +453,69 @@ describe("decision durability", () => {
     }
   }, 15000);
 
-  test.each(["shared_use_approvals", "shared_use_approval_members"] as const)(
-    "a failed %s write leaves an approval request pending and retryable",
-    async (table) => {
-      await database
-        .insert(teamBotPublications)
-        .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
-      await database
-        .insert(teamBotAudience)
-        .values({ agentId: bot, kind: "group", value: "platform" });
-      await call("newhire");
-      const [pending] = await store.pendingFor(bot);
-      const fault = `approval_fault_${suite}`;
-      await database.execute(
-        sql.raw(
-          `CREATE FUNCTION ${fault}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic approval write fault'; END $$`,
-        ),
-      );
-      await database.execute(
-        sql.raw(
-          `CREATE TRIGGER ${fault} BEFORE INSERT ON ${table} FOR EACH ROW EXECUTE FUNCTION ${fault}()`,
-        ),
-      );
-      try {
-        await expect(
-          store.decide({
-            id: pending!.id,
-            by: id("admin"),
-            decision: "approve",
-          }),
-        ).rejects.toThrow();
-        const [row] = await database
-          .select()
-          .from(sharedUseRequests)
-          .where(eq(sharedUseRequests.id, pending!.id));
-        expect(row?.status).toBe("pending");
-        expect(row?.decidedAt).toBeNull();
-        expect(await store.approvalFor(bot, app)).toBeNull();
-      } finally {
-        await database.execute(sql.raw(`DROP TRIGGER ${fault} ON ${table}`));
-        await database.execute(sql.raw(`DROP FUNCTION ${fault}()`));
-      }
-      await store.decide({
+  test("an approval Intelligence refuses leaves the request pending and retryable", async () => {
+    await publishTo(bot, id("owner"), [{ kind: "group", value: "platform" }]);
+    await call("newhire");
+    const [pending] = await store.pendingFor(bot);
+    // A group name longer than Intelligence keeps, so the approval write is refused after the claim.
+    await database
+      .update(sharedUseRequests)
+      .set({ proposedMembers: [{ kind: "group", value: "x".repeat(501) }] })
+      .where(eq(sharedUseRequests.id, pending!.id));
+    await expect(
+      store.decide({
         id: pending!.id,
         by: id("admin"),
         decision: "approve",
-      });
-      expect(await store.pendingFor(bot)).toHaveLength(0);
-      expect((await store.approvalFor(bot, app))?.members).toEqual([
-        { kind: "group", value: "platform" },
-      ]);
-      expect((await call("newhire")).allowed).toBe(true);
-      expect((await call("stranger")).allowed).toBe(false);
-    },
-  );
+      }),
+    ).rejects.toThrow();
+    const [row] = await database
+      .select()
+      .from(sharedUseRequests)
+      .where(eq(sharedUseRequests.id, pending!.id));
+    expect(row?.status).toBe("pending");
+    expect(row?.decidedAt).toBeNull();
+    expect(await store.approvalFor(bot, app)).toBeNull();
+    expect(await storedConnectionApprovals({ agentId: bot })).toHaveLength(0);
+
+    await database
+      .update(sharedUseRequests)
+      .set({ proposedMembers: [{ kind: "group", value: "platform" }] })
+      .where(eq(sharedUseRequests.id, pending!.id));
+    await store.decide({
+      id: pending!.id,
+      by: id("admin"),
+      decision: "approve",
+    });
+    expect(await store.pendingFor(bot)).toHaveLength(0);
+    expect((await store.approvalFor(bot, app))?.members).toEqual([
+      { kind: "group", value: "platform" },
+    ]);
+    expect((await call("newhire")).allowed).toBe(true);
+    expect((await call("stranger")).allowed).toBe(false);
+  });
+
+  test("approving writes Intelligence and never this deployment's own tables", async () => {
+    await call("stranger");
+    const [pending] = await store.pendingFor(bot);
+    await store.decide({
+      id: pending!.id,
+      by: id("admin"),
+      decision: "approve",
+    });
+    expect(await storedConnectionApprovals({ agentId: bot })).toHaveLength(1);
+    expect(
+      await database
+        .select()
+        .from(sharedUseApprovals)
+        .where(eq(sharedUseApprovals.agentId, bot)),
+    ).toHaveLength(0);
+  });
 });
 
 describe("owner approvals", () => {
   test.each(["owner", "people"] as const)(
-    "a concurrent owner grant cannot replace an administrator's %s approval",
+    "an owner's grant on a server that has not heard of an administrator's %s approval cannot replace it",
     async (audience) => {
       const approval = {
         audience,
@@ -481,93 +525,39 @@ describe("owner approvals", () => {
             ? [{ kind: "user" as const, value: id("named") }]
             : [],
       };
-      await database
-        .update(mcpServers)
-        .set({ ownerGrants: "any" })
-        .where(eq(mcpServers.id, app));
-      await database
-        .update(agentProfiles)
-        .set({ visibility: "public" })
-        .where(eq(agentProfiles.agentId, bot));
-      const request = await store.fileRequest({
-        botId: bot,
-        serverId: app,
-        reason: "grant",
-        requestedBy: id("owner"),
-        proposed: approval,
-      });
-      const blocker = createDatabase(testDatabaseUrl(), { max: 1 });
-      const admin = createDatabase(testDatabaseUrl(), { max: 1 });
-      const owner = createDatabase(testDatabaseUrl(), { max: 1 });
-      const adminName = `owner_grant_admin_${suite}`;
-      const ownerName = `owner_grant_owner_${suite}`;
-      await admin.execute(
-        sql`select set_config('application_name', ${adminName}, false)`,
-      );
-      await owner.execute(
-        sql`select set_config('application_name', ${ownerName}, false)`,
-      );
-      const locked = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
-      const gate = blocker.transaction(async (tx) => {
-        await tx
-          .select()
-          .from(sharedUseRequests)
-          .where(eq(sharedUseRequests.id, request.id))
-          .for("update");
-        locked.resolve();
-        await release.promise;
-      });
-      void gate.catch(locked.reject);
-      const adminStore = createSharedUseStore(admin, "composio");
-      const ownerStore = createSharedUseStore(owner, "composio");
-      const operations: Promise<unknown>[] = [];
-      async function waitForDatabaseLock(name: string) {
-        const deadline = Date.now() + 5000;
-        while (Date.now() < deadline) {
-          const rows = await database.execute(
-            sql`select wait_event_type from pg_stat_activity where application_name = ${name} and datname = current_database()`,
-          );
-          if (rows.some((row) => row.wait_event_type === "Lock")) return;
-        }
-        throw new Error(
-          `The database did not report the expected lock wait for ${name}`,
-        );
-      }
+      await changeServer(app, { ownerGrants: "any" });
+      await changeBot(bot, { visibility: "public" });
+      // Another server, read before the administrator's approval and deaf to announcements since.
+      const behind = createTestPolicyCache({ subscribe: false });
+      await behind.start();
+      behind.stop();
       try {
-        await locked.promise;
-        const adminWork = adminStore.setApproval({
+        await store.setApproval({
           botId: bot,
           serverId: app,
           by: id("admin"),
           approval,
         });
-        operations.push(adminWork);
-        await waitForDatabaseLock(adminName);
-        const ownerWork = ownerStore.approveOwnerGrant({
-          botId: bot,
-          serverId: app,
-          by: id("owner"),
-        });
-        operations.push(ownerWork);
-        await waitForDatabaseLock(ownerName);
-        release.resolve();
-        await gate;
-        await adminWork;
-        expect(await ownerWork).toBeNull();
+        // It still believes there is no approval, so the owner's grant tries to fill the absence.
+        expect(
+          behind.connectionApproval({ agentId: bot, connectionId: app }),
+        ).toBeUndefined();
+        const ownerStore = createSharedUseStore(database, "composio", behind);
+        expect(
+          await ownerStore.approveOwnerGrant({
+            botId: bot,
+            serverId: app,
+            by: id("owner"),
+          }),
+        ).toBeNull();
         expect(await store.approvalSource(bot, app)).toBe("admin");
         expect(await store.approvalFor(bot, app)).toEqual(approval);
+        const [stored] = await storedConnectionApprovals({ agentId: bot });
+        expect(stored?.approvedAs).toBe("admin");
       } finally {
-        release.resolve();
-        await Promise.allSettled([gate, ...operations]);
-        await Promise.all([
-          blocker.$client.end(),
-          admin.$client.end(),
-          owner.$client.end(),
-        ]);
+        behind.stop();
       }
     },
-    15000,
   );
 });
 
@@ -588,12 +578,7 @@ describe("decide", () => {
   });
 
   test("approving writes the proposed approval, members included", async () => {
-    await database
-      .insert(teamBotPublications)
-      .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
-    await database
-      .insert(teamBotAudience)
-      .values({ agentId: bot, kind: "group", value: "platform" });
+    await publishTo(bot, id("owner"), [{ kind: "group", value: "platform" }]);
     await call("newhire");
     const [pending] = await store.pendingFor(bot);
     await store.decide({
@@ -620,9 +605,9 @@ describe("an app with a duplicate row at its url", () => {
   const other = id("otherbot");
 
   beforeEach(async () => {
-    await database.delete(agents).where(eq(agents.id, other));
-    await database.delete(mcpServers).where(eq(mcpServers.id, duplicate));
-    await database.insert(mcpServers).values({
+    await removeBots([other]);
+    await removeServers([duplicate]);
+    await seedServer({
       id: duplicate,
       title: "Team GitHub (copy)",
       vendor: "Composio",
@@ -634,8 +619,8 @@ describe("an app with a duplicate row at its url", () => {
   });
 
   afterAll(async () => {
-    await database.delete(agents).where(eq(agents.id, other));
-    await database.delete(mcpServers).where(eq(mcpServers.id, duplicate));
+    await removeBots([other]);
+    await removeServers([duplicate]);
   });
 
   test("appIdOf names the answering row for either id", async () => {
@@ -644,11 +629,8 @@ describe("an app with a duplicate row at its url", () => {
   });
 
   test("an approval written through the duplicate is the one the gate reads by the answering id", async () => {
-    await database.delete(pluginGrants).where(eq(pluginGrants.agentId, bot));
-    await database.insert(pluginGrants).values({
-      kind: "mcp",
-      ref: `${duplicate}/GITHUB_LIST_ISSUES`,
-      agentId: bot,
+    await changeAccess([{ op: "revokeMatching", kind: "mcp", botIds: [bot] }]);
+    await grantBot(bot, "mcp", `${duplicate}/GITHUB_LIST_ISSUES`, {
       grantedBy: "admin@example.test",
     });
     await store.setApproval({
@@ -667,10 +649,7 @@ describe("an app with a duplicate row at its url", () => {
   });
 
   test("sharedAppsHeldBy lists the app once, by its answering row, when both rows are granted", async () => {
-    await database.insert(pluginGrants).values({
-      kind: "mcp",
-      ref: `${duplicate}/GITHUB_CREATE_ISSUE`,
-      agentId: bot,
+    await grantBot(bot, "mcp", `${duplicate}/GITHUB_CREATE_ISSUE`, {
       grantedBy: "admin@example.test",
     });
     expect(await store.sharedAppsHeldBy(bot)).toEqual([
@@ -679,16 +658,8 @@ describe("an app with a duplicate row at its url", () => {
   });
 
   test("botsHolding the answering id includes a Bot granted only through the duplicate", async () => {
-    await database.insert(agents).values({
-      id: other,
-      name: "Other",
-      type: "built_in",
-      configuration: {},
-    });
-    await database.insert(pluginGrants).values({
-      kind: "mcp",
-      ref: `${duplicate}/GITHUB_LIST_ISSUES`,
-      agentId: other,
+    await seedBot({ id: other, name: "Other", type: "built_in" });
+    await grantBot(other, "mcp", `${duplicate}/GITHUB_LIST_ISSUES`, {
       grantedBy: "admin@example.test",
     });
     const holding = await store.botsHolding(app);
@@ -698,8 +669,8 @@ describe("an app with a duplicate row at its url", () => {
 
   test("a row at the app's url with a trailing slash still answers through the canonical row", async () => {
     const slashy = `${app}-slash`;
-    await database.delete(mcpServers).where(eq(mcpServers.id, slashy));
-    await database.insert(mcpServers).values({
+    await removeServers([slashy]);
+    await seedServer({
       id: slashy,
       title: "Team GitHub (slash)",
       vendor: "Composio",
@@ -709,11 +680,10 @@ describe("an app with a duplicate row at its url", () => {
       accountMode: "personal",
     });
     try {
-      await database.delete(pluginGrants).where(eq(pluginGrants.agentId, bot));
-      await database.insert(pluginGrants).values({
-        kind: "mcp",
-        ref: `${slashy}/GITHUB_LIST_ISSUES`,
-        agentId: bot,
+      await changeAccess([
+        { op: "revokeMatching", kind: "mcp", botIds: [bot] },
+      ]);
+      await grantBot(bot, "mcp", `${slashy}/GITHUB_LIST_ISSUES`, {
         grantedBy: "admin@example.test",
       });
       await store.setApproval({
@@ -729,7 +699,7 @@ describe("an app with a duplicate row at its url", () => {
       });
       expect(await store.botsHolding(app)).toContain(bot);
     } finally {
-      await database.delete(mcpServers).where(eq(mcpServers.id, slashy));
+      await removeServers([slashy]);
     }
   });
 });

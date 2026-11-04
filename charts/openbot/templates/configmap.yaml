@@ -15,3 +15,15 @@ data:
   {{- if .Values.config.publicUrl }}
   TRUSTED_ORIGINS: {{ .Values.config.publicUrl | quote }}
   {{- end }}
+  {{- /*
+    How long a staged attachment is kept before it expires: the staged-attachment culler's window.
+    Staged attachments live in Intelligence now, which removes each one when its expiry passes, so
+    the API stamps this window on every upload; `attachments.culler.enabled: false` keeps them until
+    they are sent or removed, as switching the sweep off always did.
+  */}}
+  {{- $culler := (.Values.attachments | default dict).culler | default dict }}
+  {{- if eq (include "openbot.attachmentsCullerEnabled" .) "true" }}
+  OPENBOT_STAGED_ATTACHMENT_TTL_HOURS: {{ (kindIs "invalid" $culler.olderThanHours | ternary 24 $culler.olderThanHours) | toString | quote }}
+  {{- else }}
+  OPENBOT_STAGED_ATTACHMENT_TTL_HOURS: "off"
+  {{- end }}

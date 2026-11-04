@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { LLMock } from "@copilotkit/aimock";
 import { z } from "zod";
 import {
@@ -6,14 +7,41 @@ import {
   resolveRuntimeAgents,
   runtimeModelForEnvironment,
 } from "../src/copilot";
-import { encryptSecret, resolveModelApiKey } from "../src/credentials";
+import { createCredentialStore, resolveModelApiKey } from "../src/credentials";
 import {
   anthropicMessagesUrl,
   createModelCompleter,
 } from "../src/routing/model";
 import { validateTenantPackage } from "../src/tenant-package";
+import { purgeSecrets, useTestVault } from "./support/vault";
 
-const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+// Model keys stored in the test vault by this file, purged when it is done.
+const storedKeys: string[] = [];
+afterAll(async () => {
+  await purgeSecrets(storedKeys.splice(0));
+});
+
+/** Store a model key in the vault, or rotate the one named onto a new value. Returns its id. */
+async function storeModelKey(
+  provider: "openai" | "anthropic",
+  keyId: string,
+  plaintext: string,
+  previousCredentialId?: string,
+): Promise<string> {
+  const store = createCredentialStore(await useTestVault());
+  const value = {
+    kind: "model" as const,
+    provider,
+    keyId,
+    metadata: {},
+    plaintext,
+  };
+  const { id } = previousCredentialId
+    ? await store.rotate({ ...value, previousCredentialId })
+    : await store.create(value);
+  storedKeys.push(id);
+  return id;
+}
 const originalEnvironment = {
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
   ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
@@ -135,38 +163,45 @@ describe("deployment API-key provider selection", () => {
   });
 
   test("credentials stay provider-scoped and a rotated stored key is read on the next call", async () => {
-    let encryptedValue = await encryptSecret(
-      encryptionKey,
+    const store = createCredentialStore(await useTestVault());
+    const keyId = `primary-model-${randomUUID()}`;
+    // The same name under the other provider: never the one an Anthropic model is given.
+    await storeModelKey("openai", keyId, "wrong-provider-stored");
+    const first = await storeModelKey(
+      "anthropic",
+      keyId,
       "stored-anthropic-one",
     );
     const asked: unknown[] = [];
+    const reader = {
+      revealModelSecret: async (
+        input: { provider: "openai" | "anthropic"; keyId: string },
+        accessor: { purpose: string },
+      ) => {
+        asked.push(input);
+        return store.revealModelSecret(input, accessor);
+      },
+    };
     const resolve = () =>
       resolveModelApiKey({
-        encryptionKey,
         provider: "anthropic",
-        keyId: "primary-model",
-        reader: {
-          readModelSecret: async (input) => {
-            asked.push(input);
-            return { encryptedValue };
-          },
-        },
+        keyId,
+        reader,
         environment: {
           OPENAI_API_KEY: "wrong-provider",
           ANTHROPIC_API_KEY: "environment-anthropic",
         },
+        accessor: { purpose: "model_run" },
       });
     expect(await resolve()).toBe("stored-anthropic-one");
-    encryptedValue = await encryptSecret(encryptionKey, "stored-anthropic-two");
+    await storeModelKey("anthropic", keyId, "stored-anthropic-two", first);
     expect(await resolve()).toBe("stored-anthropic-two");
-    expect(asked).toEqual(
-      Array(2).fill({ provider: "anthropic", keyId: "primary-model" }),
-    );
+    expect(asked).toEqual(Array(2).fill({ provider: "anthropic", keyId }));
     const noStored = {
-      encryptionKey,
       provider: "anthropic" as const,
-      keyId: "primary-model",
-      reader: { readModelSecret: async () => null },
+      keyId: `primary-model-${randomUUID()}`,
+      reader: store,
+      accessor: { purpose: "model_run" },
     };
     expect(
       await resolveModelApiKey({
@@ -183,15 +218,16 @@ describe("deployment API-key provider selection", () => {
         environment: { OPENAI_API_KEY: "wrong-provider" },
       }),
     ).toBeNull();
+    // A stored key the vault will not hand over is a fault, never a reason to use the environment's.
+    // An empty purpose is a request the real vault refuses as invalid.
     await expect(
       resolveModelApiKey({
         ...noStored,
-        reader: {
-          readModelSecret: async () => ({ encryptedValue: "corrupt" }),
-        },
+        keyId,
+        accessor: { purpose: "" },
         environment: { ANTHROPIC_API_KEY: "must-not-fallback" },
       }),
-    ).rejects.toThrow("Credential envelope is invalid");
+    ).rejects.toThrow("VAULT_VALIDATION_ERROR");
   });
 });
 
@@ -241,20 +277,19 @@ test.each([
         BOT_PROVIDER: "anthropic",
         BOT_MODEL: "claude-sonnet-4-5",
       });
-      let encryptedValue = await encryptSecret(
-        encryptionKey,
-        "stored-anthropic-one",
-      );
+      const store = createCredentialStore(await useTestVault());
+      const keyId = `primary-model-${randomUUID()}`;
       const resolve = () =>
         resolveModelApiKey({
-          encryptionKey,
           provider: model.provider,
-          keyId: "primary-model",
+          keyId,
           environment: {},
-          reader: { readModelSecret: async () => ({ encryptedValue }) },
+          reader: store,
+          accessor: { purpose: "model_run" },
         });
+      let stored: string | undefined;
       for (const key of ["stored-anthropic-one", "stored-anthropic-two"]) {
-        encryptedValue = await encryptSecret(encryptionKey, key);
+        stored = await storeModelKey("anthropic", keyId, key, stored);
         const agents = await resolveRuntimeAgents(
           async () => [
             {

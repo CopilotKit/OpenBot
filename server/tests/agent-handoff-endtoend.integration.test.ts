@@ -1,6 +1,13 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { createHandoffDesk } from "../src/agents/handoff";
 import {
   createHandoffRunner,
@@ -10,14 +17,16 @@ import { handoffTool } from "../src/agents/handoff-tool";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  auditEvents,
-  pluginGrants,
-  workItems,
-} from "../src/db/schema";
+import { workItems } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows } from "./support/audit";
+import {
+  changeAccess,
+  grantBot,
+  removeBots,
+  seedBot,
+  useTestConfiguration,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -50,18 +59,11 @@ const desk = createHandoffDesk({
   // The person's own role, as the request path resolves it: an administrator sees Bots a user does
   // not, and a hop to one of those is theirs to make.
   actorFor: async (id: string) => ({ id, role: "user" as const }),
+  // The asking Bot's grants, as this process holds its access in Intelligence.
   mayAddress: async (fromBotId, toBotId) =>
-    (
-      await database
-        .select({ ref: pluginGrants.ref })
-        .from(pluginGrants)
-        .where(
-          and(
-            eq(pluginGrants.kind, "bot"),
-            eq(pluginGrants.agentId, fromBotId),
-          ),
-        )
-    ).some((row) => row.ref === toBotId),
+    (await useTestConfiguration())
+      .accessOf(fromBotId)
+      .grants.some((grant) => grant.kind === "bot" && grant.ref === toBotId),
   auditStore,
   caps: { maxDepth: 2, maxPerRun: 3 },
 });
@@ -72,43 +74,39 @@ async function clean() {
   await database
     .delete(workItems)
     .where(sql`${workItems.payload}->>'actorId' = ${ACTOR}`);
-  for (const id of [ASKER, TARGET]) {
-    await database.delete(pluginGrants).where(eq(pluginGrants.agentId, id));
-    await database.delete(agentProfiles).where(eq(agentProfiles.agentId, id));
-    await database.delete(agents).where(eq(agents.id, id));
-  }
+  // Neither Bot holds another: what a test granted is taken back.
+  await changeAccess([
+    { op: "revokeMatching", kind: "bot", botIds: [ASKER, TARGET] },
+  ]);
 }
 
-beforeEach(async () => {
-  await clean();
+// Made once: every test reads the same two Bots and changes neither.
+beforeAll(async () => {
   for (const [id, name] of [
     [ASKER, "Asker"],
     [TARGET, "Target"],
-  ]) {
-    await database
-      .insert(agents)
-      .values({ id, name, type: "built_in", configuration: {} })
-      .onConflictDoNothing();
-    await database
-      .insert(agentProfiles)
-      .values({
-        agentId: id,
-        name,
-        title: "",
-        roleDescription: "",
-        avatarSeed: id,
-        visibility: "public",
-      })
-      .onConflictDoNothing();
+  ] as const) {
+    await seedBot({
+      id,
+      name,
+      type: "built_in",
+      configuration: { systemPrompt: "" },
+      title: "",
+      roleDescription: "",
+      avatarSeed: id,
+      visibility: "public",
+    });
   }
-  await database
-    .insert(pluginGrants)
-    .values({ kind: "bot", ref: TARGET, agentId: ASKER, grantedBy: "test" })
-    .onConflictDoNothing();
+});
+
+beforeEach(async () => {
+  await clean();
+  await grantBot(ASKER, "bot", TARGET, { grantedBy: "test" });
 });
 
 afterAll(async () => {
   await clean();
+  await removeBots([ASKER, TARGET]);
   await database.$client.end({ timeout: 5 });
 });
 
@@ -237,13 +235,8 @@ describe("a hop, from the tool call to the delivery", () => {
     });
     await runner.sweep();
 
-    const rows = await database
-      .select({
-        eventType: auditEvents.eventType,
-        payload: auditEvents.payload,
-      })
-      .from(auditEvents)
-      .where(eq(auditEvents.targetId, TARGET));
+    // The trail is Intelligence's: read after the outbox is flushed, by this suite's own target.
+    const rows = await auditRows({ targetId: TARGET });
     const kinds = rows.map((row) => row.eventType);
     expect(kinds).toContain("agent.handoff_offered");
     expect(kinds).toContain("agent.handoff_delivered");

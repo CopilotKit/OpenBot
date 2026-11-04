@@ -14,7 +14,8 @@ type SessionLike = {
     id: string;
     email?: string | null;
     name?: string | null;
-    role?: OpenBotRole | null;
+    /** From an organization authority, or Better Auth's copy of the person's row. Only a known role counts. */
+    role?: OpenBotRole | string | null;
   };
 };
 
@@ -79,7 +80,10 @@ export function createRequestActor(deps: {
     if (!user) {
       throw new Error("A CopilotKit run requires a signed-in user.");
     }
-    const roles = user.role ? [user.role] : await deps.rolesForUser(user.id);
+    const roles =
+      user.role === "admin" || user.role === "user"
+        ? [user.role]
+        : await deps.rolesForUser(user.id);
     if (!roles.includes("admin") && !roles.includes("user")) {
       throw new Error("A CopilotKit run requires an authorized user.");
     }

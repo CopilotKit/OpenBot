@@ -1,32 +1,41 @@
-import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
-import type {
-  CredentialSecretReader,
-  CredentialStore,
-} from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  agents,
-  auditEvents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-  pluginGrants,
-  users,
-} from "../src/db/schema";
+import { mcpTools, users } from "../src/db/schema";
 import { accessFor } from "../src/plugins/access";
 import type { ComposioBroker } from "../src/plugins/broker";
 import type { ComposioActions, ComposioResult } from "../src/plugins/composio";
 import { useComposioClient, VERSION_ARG } from "../src/plugins/composio";
+import { serversAt } from "../src/plugins/plugin-store/records";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import {
   CustomServerRefusedError,
   createPluginStore,
 } from "../src/plugins/store";
+import { auditRows, useTestAuditTrail } from "./support/audit";
+import { brokeredId } from "../src/vault/ids";
+import { removeBots, seedBot, useTestConfiguration } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * What ends a brokered connection, and what the trail says when nobody was asking.
@@ -61,6 +70,11 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
+useTestAuditTrail();
 
 const suite = randomUUID().slice(0, 8);
 /** The app: its `mcp_servers.id`, and the slug in its url, which is what a connection is keyed on. */
@@ -109,72 +123,33 @@ const twinId = `duplicate-${suite}`;
  */
 const schemeTwinId = `zz-twin-${suite}`;
 /**
- * THE APPS WHOSE TWO ROWS THE DATABASE AND JAVASCRIPT ORDER DIFFERENTLY, which are the only
- * fixtures here that can tell one rule from the other.
+ * THE APP WHOSE TWO ROWS ONE PLAUSIBLE ORDERING AND ANOTHER PUT THE OTHER WAY ROUND, which is the
+ * only kind of fixture here that can tell one rule from another.
  *
- * Every other pair above is spelled in lower-case ASCII, and for those the two orderings agree:
- * PostgreSQL's `C` collation compares the UTF-8 BYTES and JavaScript's `<` compares UTF-16 CODE
- * UNITS, and below U+0080 those are the same numbers in the same order, while a linguistic collation
- * has nothing to reorder in a pair that differs only in its letters. So a pair like
- * `duplicate-`/`revocable-` proves a rule was applied and cannot say WHICH of the two rules it was —
- * a reading that picks the lower id in SQL and a reading that picks it in JavaScript both answer
- * `duplicate-`.
+ * Every other pair above is spelled in lower-case ASCII, and for those every ordering anybody would
+ * reach for agrees, so a pair like `duplicate-`/`revocable-` proves a rule was applied and cannot say
+ * WHICH rule it was.
  *
- * TWO PAIRS AND NOT ONE, BECAUSE WHERE THE TWO RULES PART COMPANY DEPENDS ON THE COLLATION, AND A
- * TEST OF THIS PROPERTY MAY NOT DEPEND ON WHICH COLLATION IS RUNNING. A byte-ordering collation and
- * a linguistic one disagree with the language in two different places, and each pair below is the
- * disagreement one family produces:
- *
- * - ABOVE THE BMP, which is where byte order and code-unit order part. `U+FFFD` encodes as the bytes
- *   `EF BF BD` and as the single code unit `FFFD`; `U+1F600` encodes as the bytes `F0 9F 98 80` and
- *   as the surrogate pair `D83D DE00`. By bytes the first is smaller — `EF` precedes `F0` — and by
- *   code units the second is, because `D83D` precedes `FFFD`. A linguistic collation weighs the two
- *   as symbols instead and happens to answer as the language does, so this pair says nothing there.
- * - IN THE CASE OF A LETTER, which is where a linguistic collation parts from both of them. `a-` and
- *   `B-` are ordered `B-` first by bytes and by code units alike, because every capital precedes
- *   every lower-case letter in ASCII, and `a-` first under any collation that weighs the letter
- *   before the case. A byte-ordering collation answers as the language does, so this pair says
- *   nothing there.
- *
- * MEASURED RATHER THAN REASONED ABOUT. Both pairs inserted at one url on PostgreSQL 17 and asked for
- * with `order by id`, against a database created under each collation:
- *
- * | collation                   | above the BMP  | the cased pair |
- * | --------------------------- | -------------- | -------------- |
- * | `C` (a Homebrew cluster)    | SEPARATES      | agrees with JS |
- * | `C.UTF-8`                   | SEPARATES      | agrees with JS |
- * | `en_US.utf8` (the CI image) | agrees with JS | SEPARATES      |
- * | ICU `en-US`                 | agrees with JS | SEPARATES      |
- *
- * WHICH IS WHY THERE ARE TWO, AND NOT A CURIOSITY ABOUT EMOJI. The pair above the BMP was the whole
- * fixture once, and the test asserted that the database and the language disagreed about it before
- * asserting which of the two the listing had followed. That guard was right and the fixture was not:
- * it separates the rules on a developer's `C` cluster, and CI runs `pgvector/pgvector:pg17`, whose
- * image locale is `en_US.utf8` — so the suite passed locally and the guard refused, correctly, in
- * CI. A property that holds under every collation cannot be pinned by a fixture that separates under
- * one, so the roster covers both families and the test needs ONE of them to separate, not this one.
+ * ONE RULE, AND A PAIR THE OTHER PLAUSIBLE ONE DISAGREES WITH. Apps live in Intelligence now, and
+ * the order every read takes them in is written once: `allServers` in `plugin-store/records.ts`, by
+ * id under a plain `<`. What could still part from it is a reader that sorted its own way, and the
+ * ordering a person (or a database collation such as the CI image's `en_US.utf8`) reaches for is the
+ * linguistic one. `a-` and `B-` are ordered `B-` first by code units, because every capital precedes
+ * every lower-case letter in ASCII, and `a-` first under any ordering that weighs the letter before
+ * the case. Intelligence holds app ids in ASCII only, so the pair above the BMP this fixture also
+ * carried when the rows were in PostgreSQL cannot be stored at all.
  */
-const orderedToolkit = `ordered-${suite}`;
-/** The row a BYTE-ORDERING collation puts first there: fewer bytes, and a larger first code unit. */
-const byteFirstId = `a\uFFFD-${suite}`;
-/** The row JAVASCRIPT puts first at the same url: a surrogate pair, and larger bytes. */
-const unitFirstId = `a\u{1F600}-${suite}`;
-/** The same question asked of a collation that weighs a letter before its case. */
 const casedToolkit = `cased-${suite}`;
-/** The row a LINGUISTIC collation puts first there: `a` precedes `b` before case is read at all. */
+/** The row a LINGUISTIC ordering puts first there: `a` precedes `b` before case is read at all. */
 const letterFirstId = `a-${suite}`;
-/** The row JAVASCRIPT puts first at the same url: every capital precedes every lower-case letter. */
+/** The row a code-unit `<` puts first at the same url: every capital precedes every lower-case letter. */
 const upperFirstId = `B-${suite}`;
 /**
- * The two of them, each with the row its url's ordering is asked about.
- *
- * `unitFirst` is what a JavaScript `<` over that pair answers — the rule this test exists to tell
- * apart from the database's — and `other` is the row standing beside it. Which of the two the
- * DATABASE answers is written down nowhere here: the test asks it, because that is the half of this
- * the collation decides.
+ * The pair, with the row a code-unit `<` answers (`unitFirst`) and the row standing beside it.
+ * Which of the two the rule every read shares answers is written down nowhere here: the test asks
+ * it.
  */
 const ORDERING_FIXTURES = [
-  { toolkit: orderedToolkit, unitFirst: unitFirstId, other: byteFirstId },
   { toolkit: casedToolkit, unitFirst: upperFirstId, other: letterFirstId },
 ] as const;
 /**
@@ -262,7 +237,7 @@ const enabledId = `composio-${enabledToolkit}`;
 /**
  * The app somebody CONNECTS TWICE, which is the only shape that can tell a first key from a second.
  *
- * Its own name rather than {@link enabledToolkit}'s, because `audit_events` is append-only and no
+ * Its own name rather than {@link enabledToolkit}'s, because the audit trail is append-only and no
  * cleanup in this file can reach it: the test below that asserts ONE `mcp.account_connected` row
  * under that app would be reading this test's rows too, and the two would pass or fail on whichever
  * order the runner happened to pick.
@@ -276,7 +251,7 @@ const rekeyedId = `composio-${rekeyedToolkit}`;
  * Its own name rather than {@link enabledToolkit}'s, for {@link rekeyedToolkit}'s reason and not a
  * different one. The disconnect test below connects with a key FOR REAL, so it files an
  * `mcp.account_connected` row of its own — and the secrecy test, which owns {@link enabledToolkit},
- * asserts there is EXACTLY ONE such row under the app it connects. `audit_events` is append-only
+ * asserts there is EXACTLY ONE such row under the app it connects. The audit trail is append-only
  * and no cleanup here can reach it, so sharing a slug had each of the two reading the other's row,
  * and the pair passed or failed on whichever order the runner happened to walk them in. It passed,
  * on declaration order alone; moving the disconnect test above the secrecy test answered
@@ -379,7 +354,7 @@ const s2sId = `composio-${s2sToolkit}`;
  * FOUR APPS NOBODY ELSE IN THIS FILE CONNECTS, one per test about a check that reached no verdict.
  *
  * A slug of its own for each, on {@link enabledToolkit}'s reasoning taken one step further. Those
- * tests assert on `audit_events`, which is append-only and which nothing here can sweep — so a
+ * tests assert on the audit trail, which is append-only and which nothing here can sweep — so a
  * count or a single-row read under a shared slug is the runner's answer rather than the
  * implementation's, and it reads as passing until somebody adds a test above. Each of these is
  * connected by exactly one test, so "one row under this app" is that test's own act.
@@ -418,7 +393,6 @@ const ownedToolkits = [
   pinnedToolkit,
   undoneToolkit,
   recheckedToolkit,
-  orderedToolkit,
   casedToolkit,
   answeringToolkit,
   refreshedToolkit,
@@ -439,8 +413,8 @@ const admin = "admin@openbot.local";
  * THE SECRET A PERSON TYPES, which the test below looks for everywhere it must not be.
  *
  * A RUN-UNIQUE SPELLING, for the same reason every id here carries one and for one more. The
- * assertions about it are ABSENCE assertions read out of two shared tables, and `audit_events` is
- * append-only — nothing in this file can sweep it — so a fixed spelling would have one run's rows
+ * assertions about it are ABSENCE assertions read out of two shared stores, and the audit trail is
+ * append-only (nothing in this file can sweep it), so a fixed spelling would have one run's rows
  * answering another run's question. With the suffix, "this string is nowhere" is a sentence about
  * rows this run wrote.
  *
@@ -463,61 +437,43 @@ const rotatedKey = `pplx-rotated-value-${suite}`;
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
 /**
- * The vault, and every method loud.
+ * The vault, the real one.
  *
  * A brokered call reaches no credential at all — the deployment's Composio key belongs to the
  * transport and never travels through the store — and neither of the removals under test has a
- * secret of this suite's to retire, because no `mcp_user_token` is ever minted here. So any call to
- * any of these means this file has started exercising something it does not claim to, and a silent
- * stub would hide that.
- *
- * Typed as the interface rather than left to inference, so the shape being stood in for is stated
- * where a reader meets it instead of being inferred from the methods below. That annotation is
- * documentation TODAY AND NOT A CHECK: `tests` is outside `server/tsconfig.json`'s `include`, so
- * `tsc` never reads this file and a method added to the vault goes unremarked here — nothing in
- * this directory would fail, and neither would the assignment further down. It is written anyway so
- * that the day that directory is type-checked, this is already right.
+ * secret of this suite's to retire, because no `mcp_user_token` is ever minted here. So nothing in
+ * this file stores a secret, and a read of one it never stored is refused by the vault rather than
+ * answered.
  */
-const credentialsStub: CredentialSecretReader & CredentialStore = {
-  readSecret: async () => {
-    throw new Error("a brokered call reads no credential");
-  },
-  create: async () => {
-    throw new Error("this suite does not write credentials");
-  },
-  updateSecret: async () => {
-    throw new Error("this suite does not write credentials");
-  },
-  rotate: async () => {
-    throw new Error("this suite does not write credentials");
-  },
-  revoke: async () => {
-    throw new Error("this suite mints no credential to revoke");
-  },
-  isLive: async () => {
-    throw new Error("this suite holds no credential to ask about");
-  },
-  findLiveByKey: async () => {
-    throw new Error("this suite holds no credential to ask about");
-  },
-};
+const credentials = createCredentialStore(await useTestVault());
+
+/** The brokered accounts Intelligence holds now for one app, and one person when named. */
+async function brokeredRows(app: string, userId?: string) {
+  return (await storedConnections()).brokered.filter(
+    (row) => row.app === app && (userId === undefined || row.userId === userId),
+  );
+}
+
+/** The app as Intelligence holds it now, as the one row a select by id used to answer, or none. */
+async function serverRows(id: string) {
+  const server = await storedServer(id);
+  return server ? [server] : [];
+}
 
 /**
  * A store over the real database, keeping every event it writes.
  *
  * Recorded ALONGSIDE the real insert rather than instead of it: the payloads are what these tests
- * assert about, and a store whose audit insert never touched the database would not be exercising
- * the one it has.
+ * assert about, and a store whose audit insert never reached the trail would not be exercising the
+ * one it has. The real insert writes the outbox, and the drainer carries it to Intelligence, where
+ * these tests read it back.
  *
  * AND THOSE ROWS OUTLIVE THE RUN, WHICH {@link clean} CANNOT CHANGE. Every other table this file
- * touches is swept on the way out; `audit_events` is not, and the omission is the database's rule
- * rather than an oversight here. The trail is append-only, enforced by a trigger rather than by the
- * application (`0007_audit_retention_window.sql`): a plain `delete` raises "Audit events are
- * append-only", and the one exemption — a session that sets `openbot.audit_retention_days` to a
- * positive whole number — still refuses any row younger than that many days. The rows this file
- * writes are seconds old at the moment it would sweep them, so NO setting makes them deletable;
- * `3650` is refused for the same reason `1` is. A cleanup here would be a statement that always
- * throws.
+ * touches is swept on the way out; the audit trail is not, and the omission is the trail's rule
+ * rather than an oversight here. The trail lives in Intelligence, which takes rows and never edits
+ * or deletes them on request; only its retention sweep removes a row, and only once it is older
+ * than the deployment's window. The rows this file writes are seconds old, so nothing this file
+ * could ask would remove them. A cleanup here would be a request that cannot be made.
  *
  * What that leaves is bounded rather than unbounded. Every row this file writes is keyed on an id
  * carrying this run's suffix — `targetId` is {@link toolkit}, {@link secondToolkit},
@@ -550,15 +506,21 @@ const auditStore = {
  * compared against whichever order the plan happened to produce.
  */
 async function connectionsHeld(): Promise<string[]> {
-  const rows = await database
-    .select({
-      toolkit: brokeredConnections.app,
-      userId: brokeredConnections.userId,
-    })
-    .from(brokeredConnections)
-    .where(inArray(brokeredConnections.app, ownedToolkits))
-    .orderBy(asc(brokeredConnections.app), asc(brokeredConnections.userId));
-  return rows.map((row) => `${row.toolkit}/${row.userId}`);
+  const rows = (await storedConnections()).brokered
+    .filter((row) => ownedToolkits.includes(row.app))
+    .sort(
+      (left, right) =>
+        compare(left.app, right.app) ||
+        // Null last, as the table's ascending order put it.
+        (left.userId === null ? 1 : 0) - (right.userId === null ? 1 : 0) ||
+        compare(left.userId ?? "", right.userId ?? ""),
+    );
+  return rows.map((row) => `${row.app}/${row.userId}`);
+}
+
+/** Plain string order, for a fixed order over rows Intelligence returns in its own. */
+function compare(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 /**
@@ -789,7 +751,7 @@ const store = createPluginStore({
   database,
   auditStore,
   broker,
-  credentials: credentialsStub,
+  credentials,
   encryptionKey: "x".repeat(44),
   policy: () => policy,
 });
@@ -818,8 +780,8 @@ function useAnsweringClient(actions: Partial<ComposioActions> = {}) {
 
 /** Only this run's rows, and every one of them keyed on an id this run invented. */
 async function clean() {
-  await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
-  await database.delete(agents).where(eq(agents.id, botId));
+  // Purging the Bot removes its grants in Intelligence with it.
+  await removeBots([botId]);
   await database
     .delete(mcpTools)
     .where(
@@ -842,8 +804,6 @@ async function clean() {
         pinnedId,
         undoneId,
         recheckedId,
-        byteFirstId,
-        unitFirstId,
         letterFirstId,
         upperFirstId,
         answeringId,
@@ -854,54 +814,46 @@ async function clean() {
         noAuthTwinId,
       ]),
     );
-  await database
-    .delete(mcpServers)
-    .where(
-      inArray(mcpServers.id, [
-        toolkit,
-        renamedId,
-        enabledId,
-        rekeyedId,
-        reschemedId,
-        probeAppId,
-        probedId,
-        renamedProbedId,
-        decoyId,
-        twinId,
-        schemeTwinId,
-        collidedId,
-        consentId,
-        s2sId,
-        outageId,
-        pinnedId,
-        undoneId,
-        recheckedId,
-        byteFirstId,
-        unitFirstId,
-        letterFirstId,
-        upperFirstId,
-        answeringId,
-        answeringTwinId,
-        refreshedId,
-        refreshedTwinId,
-        unschemedId,
-        noAuthTwinId,
-      ]),
-    );
-  await database
-    .delete(brokeredConnections)
-    .where(inArray(brokeredConnections.app, ownedToolkits));
+  await removeServers([
+    toolkit,
+    renamedId,
+    enabledId,
+    rekeyedId,
+    reschemedId,
+    probeAppId,
+    probedId,
+    renamedProbedId,
+    decoyId,
+    twinId,
+    schemeTwinId,
+    collidedId,
+    consentId,
+    s2sId,
+    outageId,
+    pinnedId,
+    undoneId,
+    recheckedId,
+    letterFirstId,
+    upperFirstId,
+    answeringId,
+    answeringTwinId,
+    refreshedId,
+    refreshedTwinId,
+    unschemedId,
+    noAuthTwinId,
+  ]);
+  await removeConnectionsWhere(
+    (row) => row.kind === "brokered" && ownedToolkits.includes(row.app),
+  );
   await database.delete(users).where(inArray(users.id, [askerId, leaverId]));
 }
 
 /** Which of this run's app rows the deployment still holds, so "the app survived" is an assertion. */
 async function appsHeld(): Promise<string[]> {
-  const rows = await database
-    .select({ id: mcpServers.id })
-    .from(mcpServers)
-    .where(inArray(mcpServers.id, [toolkit, renamedId]))
-    .orderBy(asc(mcpServers.id));
-  return rows.map((row) => row.id);
+  const held: string[] = [];
+  for (const id of [toolkit, renamedId].sort(compare))
+    if (await storedServer(id)) held.push(id);
+  return held;
 }
 
 /**
@@ -915,7 +867,7 @@ async function appsHeld(): Promise<string[]> {
  * carry it. A fixture that says nothing cannot assert what is done about apps that say `OAUTH2`.
  */
 async function addApp() {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: toolkit,
     title: "Revocable App",
     vendor: "Composio",
@@ -940,15 +892,10 @@ async function addApp() {
 
 /** The app, a Bot holding its one action, and optionally somebody who has connected it. */
 async function seedApp(options: { connect?: boolean } = {}) {
-  await database.insert(agents).values({
-    id: botId,
-    name: "Helper",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: botId, name: "Helper", type: "built_in" });
   await addApp();
   if (options.connect !== false) {
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app: toolkit,
       holder: "person",
@@ -1026,7 +973,7 @@ async function addCheckableApp(slug: string): Promise<void> {
  * key-based app is created as, which is what the re-check's own gate admits.
  */
 async function addRenamedApp() {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: renamedProbedId,
     title: "Renamed Probed App",
     vendor: "Composio",
@@ -1058,17 +1005,10 @@ async function addRenamedApp() {
  *
  */
 async function connectedToolkitsFor(userId: string): Promise<string[]> {
-  const rows = await database
-    .select({ toolkit: brokeredConnections.app })
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.userId, userId),
-        inArray(brokeredConnections.app, ownedToolkits),
-      ),
-    )
-    .orderBy(asc(brokeredConnections.app));
-  return rows.map((row) => row.toolkit);
+  return (await storedConnections()).brokered
+    .filter((row) => row.userId === userId && ownedToolkits.includes(row.app))
+    .map((row) => row.app)
+    .sort(compare);
 }
 
 function recordedOfType(eventType: string) {
@@ -1171,7 +1111,7 @@ test("a connection whose person is already deleted is retired, and stops passing
   await database
     .insert(users)
     .values({ id: leaverId, email: `${leaverId}@example.com`, name: "Leaver" });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: toolkit,
     holder: "person",
@@ -1272,14 +1212,14 @@ test("an offboarding the vendor refuses leaves the connection standing", async (
  */
 test("an offboarding carries the vendor's answer per app, in a fixed order", async () => {
   await seedApp({ connect: false });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: secondToolkit,
     holder: "person",
     userId: askerId,
     vendorUserId: askerId,
   });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: toolkit,
     holder: "person",
@@ -1347,14 +1287,14 @@ test("an offboarding carries the vendor's answer per app, in a fixed order", asy
  */
 test("an offboarding one app refuses still records the app that answered", async () => {
   await seedApp({ connect: false });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: toolkit,
     holder: "person",
     userId: askerId,
     vendorUserId: askerId,
   });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: secondToolkit,
     holder: "person",
@@ -1401,14 +1341,14 @@ test("an offboarding one app refuses still records the app that answered", async
  */
 test("a refusal on the first app still fails the act and still asks the second", async () => {
   await seedApp({ connect: false });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: toolkit,
     holder: "person",
     userId: askerId,
     vendorUserId: askerId,
   });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: secondToolkit,
     holder: "person",
@@ -1430,29 +1370,46 @@ test("a refusal on the first app still fails the act and still asks the second",
 });
 
 /**
- * THE ANONYMOUS ACTOR OWNS NOTHING, and `notNull` does not exclude the empty string, so a row at
- * `(toolkit, "")` is legal. Retiring "nobody" must not be what deletes it — that would be an
- * unattributed offboarding reaching a row it cannot possibly own.
+ * THE ANONYMOUS ACTOR OWNS NOTHING. Retiring "nobody" must not reach an account it cannot possibly
+ * own, and must not ask the vendor about nobody.
  *
- * WHOSE ROW THIS IS, since the actor half of the key names nobody. The app half does: {@link
- * toolkit} carries this run's suffix, so the sweep in `clean` takes this row by the same clause it
- * takes the asker's by, and no other file can arrive at the pair by guessing. That is the whole of
- * the ownership — a delete keyed on `user_id = ''` alone would reach every app's anonymous row at
- * once, which is how this fixture came to be removed mid-run by another file, and how a run of
- * this file that died before its cleanup came to refuse every test in that one.
+ * The table's `notNull` admitted the empty string, so a row at `(toolkit, "")` was legal and this
+ * test stood one up to show retiring nobody left it alone. Intelligence refuses a person's account
+ * that names no person, so that row cannot exist any more: the refusal is asserted here, and the
+ * account left standing beside the unattributed retirement is a real person's on the same app.
  */
-test("retiring nobody retires nothing and leaves the anonymous row alone", async () => {
-  await seedApp({ connect: false });
-  await database.insert(brokeredConnections).values({
-    provider: "composio",
-    app: toolkit,
-    holder: "person",
-    userId: "",
-    vendorUserId: "",
-  });
+test("retiring nobody retires nothing, and an account for nobody cannot be stored", async () => {
+  await seedApp();
+  await expect(
+    seedBrokered({
+      provider: "composio",
+      app: toolkit,
+      holder: "person",
+      userId: "",
+      vendorUserId: "",
+    }),
+  ).rejects.toThrow();
+  const vault = await useTestVault();
+  await expect(
+    vault.createConnection({
+      kind: "brokered",
+      id: brokeredId("composio", toolkit, "person", ""),
+      provider: "composio",
+      app: toolkit,
+      holder: "person",
+      userId: "",
+      vendorUserId: "",
+      connectedBy: null,
+      verified: false,
+      verifiedAt: null,
+      probeAction: null,
+    }),
+  ).rejects.toThrow(/CONNECTION_VALIDATION_ERROR/);
 
   expect((await store.retireConnectionsFor("", admin)).retired).toBe(0);
-  expect(await connectedToolkitsFor("")).toEqual([toolkit]);
+  expect(await connectedToolkitsFor("")).toEqual([]);
+  // The person who did connect is untouched by an offboarding that named nobody.
+  expect(await connectedToolkitsFor(askerId)).toEqual([toolkit]);
   // And nothing reached Composio either. An unattributed offboarding has no account to name, so a
   // revoke sent under an empty user id would be this deployment asking the vendor about nobody.
   expect(asksMade()).toEqual([]);
@@ -1580,7 +1537,7 @@ test("removing an app nobody connected asks about nobody and still drops the con
  */
 test("the trail carries the vendor's answer per person, not one answer for the act", async () => {
   await seedApp();
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: toolkit,
     holder: "person",
@@ -1640,37 +1597,30 @@ test("the trail carries the vendor's answer per person, not one answer for the a
  * the same call names it.
  */
 test("both acts that end a brokered connection file it under the app", async () => {
-  await database.insert(agents).values({
-    id: botId,
-    name: "Helper",
-    type: "built_in",
-    configuration: {},
-  });
+  await seedBot({ id: botId, name: "Helper", type: "built_in" });
   // The row id and the app slug deliberately different, which is the only shape that can tell the
   // two keys apart.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: renamedId,
     title: "Revocable App",
     vendor: "Composio",
     url: `composio://${toolkit}`,
     provenance: "composio",
   });
-  await database.insert(brokeredConnections).values([
-    {
-      provider: "composio",
-      app: toolkit,
-      holder: "person",
-      userId: askerId,
-      vendorUserId: askerId,
-    },
-    {
-      provider: "composio",
-      app: toolkit,
-      holder: "person",
-      userId: leaverId,
-      vendorUserId: leaverId,
-    },
-  ]);
+  await seedBrokered({
+    provider: "composio",
+    app: toolkit,
+    holder: "person",
+    userId: askerId,
+    vendorUserId: askerId,
+  });
+  await seedBrokered({
+    provider: "composio",
+    app: toolkit,
+    holder: "person",
+    userId: leaverId,
+    vendorUserId: leaverId,
+  });
 
   // Offboarding one person, then removing the app out from under the other.
   expect((await store.retireConnectionsFor(leaverId, admin)).retired).toBe(1);
@@ -1886,7 +1836,7 @@ test("re-enabling never moves a connected app onto a different flow", async () =
     by: admin,
     connection: { kind: "fields", authScheme: "API_KEY" },
   });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: enabledToolkit,
     holder: "person",
@@ -1901,10 +1851,7 @@ test("re-enabling never moves a connected app onto a different flow", async () =
     connection: { kind: "consent" },
   });
 
-  const [row] = await database
-    .select({ authScheme: mcpServers.authScheme })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, enabledId));
+  const [row] = await serverRows(enabledId);
   expect(row.authScheme).toBe("API_KEY");
 });
 
@@ -1933,10 +1880,7 @@ test("re-enabling an app nobody has connected picks up the vendor's change", asy
     connection: { kind: "consent" },
   });
 
-  const [row] = await database
-    .select({ authScheme: mcpServers.authScheme })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, enabledId));
+  const [row] = await serverRows(enabledId);
   expect(row.authScheme).toBe("OAUTH2");
 });
 
@@ -1978,10 +1922,7 @@ test("re-enabling writes no scheme where the standing config was left alone", as
     connection: { kind: "consent" },
   });
 
-  const [row] = await database
-    .select({ authScheme: mcpServers.authScheme })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, enabledId));
+  const [row] = await serverRows(enabledId);
   expect(row.authScheme).toBe("API_KEY");
 });
 
@@ -2022,18 +1963,7 @@ test("a confirmed connection is recorded verified, at the moment it was earned",
   // of a browser arriving back on a page.
   expect(asksMade()).toEqual([`isConnected:${toolkit}/${askerId}`]);
 
-  const [row] = await database
-    .select({
-      verified: brokeredConnections.verified,
-      verifiedAt: brokeredConnections.verifiedAt,
-    })
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, toolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(toolkit, askerId);
   expect(row.verified).toBe(true);
   expect(row.verifiedAt).not.toBeNull();
   expect(row.verifiedAt?.getTime()).toBeGreaterThanOrEqual(before.getTime());
@@ -2057,7 +1987,7 @@ test("a confirmed connection is recorded verified, at the moment it was earned",
  * as a write.
  */
 test("the probe skips an argument-less write for the read that sorts after it", async () => {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: probeAppId,
     title: "Stripe",
     vendor: "Composio",
@@ -2106,7 +2036,7 @@ test("the probe skips an argument-less write for the read that sorts after it", 
  * an answer for an app that cannot be probed.
  */
 test("an app whose only read takes an argument has no probe", async () => {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: probeAppId,
     title: "Needs An Argument",
     vendor: "Composio",
@@ -2168,7 +2098,7 @@ test.each([
 ])(
   "an action whose required arguments are published under %s is no probe candidate",
   async (_name, inputSchema) => {
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: probeAppId,
       title: "Composes Its Schema",
       vendor: "Composio",
@@ -2198,7 +2128,7 @@ test.each([
  * the catalogue with no probe and no Re-check button over a constraint that does not exist.
  */
 test("an action whose composed schema requires nothing is still a probe candidate", async () => {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: probeAppId,
     title: "Composes And Asks Nothing",
     vendor: "Composio",
@@ -2259,7 +2189,7 @@ test("an app whose only safe read has no recorded version has no probe", async (
 
   expect(await store.probeActionFor(probedId)).toBeNull();
 
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: probedToolkit,
     holder: "person",
@@ -2291,7 +2221,7 @@ test("an app whose only safe read has no recorded version has no probe", async (
  * can be checked gets checked, and the null answer is kept for an app that really has nothing.
  */
 test("the chooser passes over a versionless read for the one it could call", async () => {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: probeAppId,
     title: "Thin Listing",
     vendor: "Composio",
@@ -2346,7 +2276,7 @@ test("the chooser passes over a versionless read for the one it could call", asy
  * with none proves it is not fallen back to when the search finds nothing else.
  */
 test("the probe skips a read the vendor also calls destructive", async () => {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: probeAppId,
     title: "Two Reads",
     vendor: "Composio",
@@ -2414,7 +2344,7 @@ test("the probe skips a read the vendor also calls destructive", async () => {
  * fixture where the identity read also happened to sort first would pass with the preference gone.
  */
 test("the probe prefers the identity read over the read that sorts first", async () => {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: probeAppId,
     title: "Two Safe Reads",
     vendor: "Composio",
@@ -2475,7 +2405,7 @@ test("a listed brokered connection names the action it was checked with", async 
   useAnsweringClient();
   // The app WITHOUT the action, so the only place the name below can come from is the row.
   await addProbedApp({ withProbe: false });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: probedToolkit,
     holder: "person",
@@ -2515,7 +2445,7 @@ test("a listed brokered connection names the action it was checked with", async 
 test("a listed brokered connection nothing was spent on says there is no probe", async () => {
   useAnsweringClient();
   await addProbedApp({ withProbe: false });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: probedToolkit,
     holder: "person",
@@ -2617,7 +2547,7 @@ test("an action listed after the fact does not rewrite what a key was checked wi
 test("a key nothing was spent on becomes checkable when the app publishes something", async () => {
   useAnsweringClient();
   await addProbedApp({ withProbe: false });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: probedToolkit,
     holder: "person",
@@ -2681,7 +2611,7 @@ test("a key nothing was spent on becomes checkable when the app publishes someth
 test("a re-check of an app whose row id is not its slug spends the key it was offered for", async () => {
   useAnsweringClient();
   await addRenamedApp();
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: renamedProbedToolkit,
     holder: "person",
@@ -2732,7 +2662,7 @@ test("a probe never spends a key on the action of a row the composed id would hi
   await addRenamedApp();
   // The decoy: an app of its own, whose only crime is being called what the first app's id would
   // have been composed as.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: decoyId,
     title: "Decoy App",
     vendor: "Composio",
@@ -2800,15 +2730,7 @@ test("a consent connection records no action, because none was spent", async () 
     }),
   ).toEqual({ connected: true });
 
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(probedToolkit, askerId);
   expect(row.verified).toBe(true);
   expect(row.probeAction).toBeNull();
   // Nothing was called to earn that flag, which is the fact the null records.
@@ -2872,15 +2794,7 @@ test("a confirm does not erase what a check spent on a key connection", async ()
 
   // THE STATE BEFORE THE PAGE LOAD, asserted in full rather than assumed from the throw: a named
   // probe, no flag, no date.
-  const [before] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [before] = await brokeredRows(probedToolkit, askerId);
   expect(before.probeAction).toBe(probeAction);
   expect(before.verified).toBe(false);
   expect(before.verifiedAt).toBeNull();
@@ -2895,15 +2809,7 @@ test("a confirm does not erase what a check spent on a key connection", async ()
     }),
   ).toEqual({ connected: true });
 
-  const [after] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [after] = await brokeredRows(probedToolkit, askerId);
   // The record of the check survives the mount, whole: the action it spent, the verdict it reached,
   // and the absence of a date for a claim nobody is making.
   expect(after.probeAction).toBe(probeAction);
@@ -2963,15 +2869,7 @@ test("a confirm does not redate a key the last check verified", async () => {
     values: { generic_api_key: typedKey },
   });
 
-  const [checked] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [checked] = await brokeredRows(probedToolkit, askerId);
   expect(checked.verified).toBe(true);
   expect(checked.probeAction).toBe(probeAction);
   const earned = checked.verifiedAt;
@@ -2985,15 +2883,7 @@ test("a confirm does not redate a key the last check verified", async () => {
     }),
   ).toEqual({ connected: true });
 
-  const [after] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [after] = await brokeredRows(probedToolkit, askerId);
   // The moment the probe earned, unmoved: the date on the row is the date of a check, and a page
   // load is not one.
   expect(after.verifiedAt?.toISOString()).toBe(earned?.toISOString());
@@ -3011,7 +2901,7 @@ test("a confirm does not redate a key the last check verified", async () => {
     by: admin,
     connection: { kind: "consent" },
   });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: enabledToolkit,
     holder: "person",
@@ -3029,15 +2919,7 @@ test("a confirm does not redate a key the last check verified", async () => {
     }),
   ).toEqual({ connected: true });
 
-  const [consent] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, enabledToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [consent] = await brokeredRows(enabledToolkit, askerId);
   expect(consent.verified).toBe(true);
   expect(consent.probeAction).toBeNull();
   expect(consent.verifiedAt?.toISOString()).toBe(consentSeeded.toISOString());
@@ -3069,7 +2951,7 @@ test("a confirm does not redate a key the last check verified", async () => {
  */
 test("a connection is listed once where two server rows name its app", async () => {
   await seedApp();
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: twinId,
     title: "Revocable App, added a second time",
     vendor: "Composio",
@@ -3107,7 +2989,7 @@ test("a re-check reads the app's scheme off the same row the listing names it by
   useAnsweringClient();
   // Before the app's own row, and named to sort after it. See {@link schemeTwinId}: the pre-fix
   // reading is the row physically first, and the rule's is the row that sorts first.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: schemeTwinId,
     title: "Probed App, as it was recorded before",
     vendor: "Composio",
@@ -3147,7 +3029,7 @@ test("a re-check reads the app's scheme off the same row the listing names it by
 test("a confirm reads the app's scheme off the same row the listing names it by", async () => {
   useAnsweringClient();
   // The same pair, ordered the same way. See {@link schemeTwinId}.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: schemeTwinId,
     title: "Probed App, as it was recorded before",
     vendor: "Composio",
@@ -3167,15 +3049,7 @@ test("a confirm reads the app's scheme off the same row the listing names it by"
     }),
   ).toEqual({ connected: true });
 
-  const [after] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [after] = await brokeredRows(probedToolkit, askerId);
   expect(after.verified).toBe(true);
   expect(after.verifiedAt?.toISOString()).toBe(checked.toISOString());
   // And nothing of the app's was called to arrive at that: a confirm asks the vendor, it does not
@@ -3205,7 +3079,7 @@ test("a confirm reads the app's scheme off the same row the listing names it by"
 test("a connect reads the app's scheme off the same row the listing names it by", async () => {
   useAnsweringClient();
   // The same pair as the two tests above, ordered the same way. See {@link schemeTwinId}.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: schemeTwinId,
     title: "Probed App, as it was recorded before",
     vendor: "Composio",
@@ -3344,53 +3218,44 @@ test("the deployment's shared account on its own client is connected", async () 
 });
 
 /**
- * AND THE ROW THE LISTING NAMES IS THE ONE THE DATABASE ORDERS FIRST, NOT THE ONE THIS LANGUAGE DOES.
+ * AND THE ROW THE LISTING NAMES IS THE ONE EVERY OTHER READ OF THE APP RESOLVES IT TO.
  *
- * CRITERION. With two `mcp_servers` rows at one app's url whose ids the database and JavaScript
- * order differently, the connection is listed under the database's answer — the same answer every
- * other read of the app takes, because every other read of the app takes it from SQL.
+ * CRITERION. With two app rows at one app's url whose ids two plausible orderings put the other
+ * way round, the connection is listed under the row the store's one ordering rule answers — the
+ * same answer every other read of the app takes.
  *
- * REASON. "The lower id answers" is one sentence and was two implementations. `brokeredAppRow` —
- * which the probe, the re-check, the connect, the confirm and the disconnect all resolve the app
- * through — asks the database for it, `order by id`, under whatever collation that database is
- * running. The listing picked its own with a JavaScript `<` over the rows it had fetched, which is
- * UTF-16 code unit order and nothing else. Two orderings of one rule agree until they do not, and
- * where they part the page draws an app under one server id while the Re-check button beside it,
- * the probe behind that button and the scheme that decides whether the button appears at all are
- * every one of them about the OTHER row — which is the precise defect the single read was
- * introduced to end, arrived at through the collation instead of through the query.
+ * REASON. "The lower id answers" is one sentence and was once two implementations. `brokeredAppRow`
+ * — which the probe, the re-check, the connect, the confirm and the disconnect all resolve the app
+ * through — and the listing each picked their own, and where they parted the page drew an app under
+ * one server id while the Re-check button beside it, the probe behind that button and the scheme
+ * that decides whether the button appears at all were every one of them about the OTHER row. The
+ * apps are Intelligence's now and the rule is written once (`allServers` in
+ * `plugin-store/records.ts`), and this pins that the listing reads through it rather than ordering
+ * the rows itself.
  *
- * THE FIXTURE IS TWO PAIRS THE TWO RULES REALLY DISAGREE ABOUT, and the disagreement is asserted
- * before the answer is. See {@link ORDERING_FIXTURES}: a lower-case ASCII pair cannot fail this test
- * under either rule, so a test written with one would have passed before the fix and after it.
- *
- * WHICH of the two pairs disagrees is the collation's business and not this test's — a byte-ordering
- * collation separates the rules on one of them and a linguistic collation on the other, and that is
- * exactly the difference between a developer's cluster and the CI image. So the guard is that AT
- * LEAST ONE pair separates them, and the answer is then asserted for both: the property under test
- * is the same one either way round, and nothing about it depends on which collation is running.
+ * THE FIXTURE IS A PAIR TWO ORDERINGS REALLY DISAGREE ABOUT, and the disagreement is asserted before
+ * the answer is. See {@link ORDERING_FIXTURES}: a lower-case ASCII pair cannot fail this test under
+ * any ordering, so a test written with one would pass for a listing that sorted its own way.
  */
-test("a connection is listed under the row the database orders first", async () => {
+test("a connection is listed under the row every other read of the app resolves it to", async () => {
   for (const fixture of ORDERING_FIXTURES) {
-    // Inserted in the order that puts JavaScript's answer physically first as well, so neither the
-    // scan order nor the language's order is the one the assertion expects.
-    await database.insert(mcpServers).values([
-      {
-        id: fixture.unitFirst,
-        title: `Ordered App at ${fixture.toolkit}, as one row spells it`,
-        vendor: "Composio",
-        url: `composio://${fixture.toolkit}`,
-        provenance: "composio",
-      },
-      {
-        id: fixture.other,
-        title: `Ordered App at ${fixture.toolkit}, as the other spells it`,
-        vendor: "Composio",
-        url: `composio://${fixture.toolkit}`,
-        provenance: "composio",
-      },
-    ]);
-    await database.insert(brokeredConnections).values({
+    // Added in the order that puts the code-unit answer first as well, so neither the order they
+    // were made in nor the rule is the only thing the assertion could be agreeing with.
+    await seedServer({
+      id: fixture.unitFirst,
+      title: `Ordered App at ${fixture.toolkit}, as one row spells it`,
+      vendor: "Composio",
+      url: `composio://${fixture.toolkit}`,
+      provenance: "composio",
+    });
+    await seedServer({
+      id: fixture.other,
+      title: `Ordered App at ${fixture.toolkit}, as the other spells it`,
+      vendor: "Composio",
+      url: `composio://${fixture.toolkit}`,
+      provenance: "composio",
+    });
+    await seedBrokered({
       provider: "composio",
       app: fixture.toolkit,
       holder: "person",
@@ -3399,52 +3264,42 @@ test("a connection is listed under the row the database orders first", async () 
     });
   }
 
-  // THE DATABASE'S OWN ANSWER FOR EACH URL, asked the way `brokeredAppRow` asks it. Read rather than
-  // written down, so these expectations are the rule under the collation actually running and not a
-  // guess about one.
+  // THE RULE'S OWN ANSWER FOR EACH URL, asked the way `brokeredAppRow` asks it. Read rather than
+  // written down, so these expectations are the rule as it runs and not a guess about it.
   const answering: string[] = [];
-  // And the pairs the two rules really disagree about. `sort` with no comparator is the JavaScript
-  // ordering the listing used to apply, so a fixture whose SQL answer is not that one is a fixture
-  // that can tell the two rules apart.
+  // And the pairs the rule and a linguistic ordering really disagree about: a fixture whose answer
+  // is not the linguistic one can tell a listing that read through the rule from one that sorted on
+  // its own.
   const separating: string[] = [];
   for (const fixture of ORDERING_FIXTURES) {
-    const [row] = await database
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.url, `composio://${fixture.toolkit}`))
-      .orderBy(asc(mcpServers.id))
-      .limit(1);
+    const [row] = serversAt([`composio://${fixture.toolkit}`]);
     if (!row) throw new Error(`no row answers for ${fixture.toolkit}`);
     answering.push(row.id);
-    if (row.id !== fixture.unitFirst) separating.push(fixture.toolkit);
+    const [linguistic] = [fixture.unitFirst, fixture.other].sort(
+      (left, right) => left.localeCompare(right, "en-US"),
+    );
+    if (row.id !== linguistic) separating.push(fixture.toolkit);
   }
 
   /*
-   * THE TEETH, AND A REFUSAL RATHER THAN A QUIET PASS. If this database orders every pair exactly as
-   * JavaScript does then nothing here can tell the two rules apart any more: the assertion below
-   * would hold for a listing that picked its row in SQL and for one that picked it in JavaScript,
-   * and would have passed before the fix as well as after it.
-   *
-   * THE REPAIR IS A THIRD PAIR THIS COLLATION SEPARATES, NOT A SHORTER TEST — which is why the
-   * collation is named here rather than left to be guessed at from a failing expectation.
+   * THE TEETH, AND A REFUSAL RATHER THAN A QUIET PASS. If the rule ordered every pair exactly as a
+   * linguistic ordering does then nothing here could tell the two apart any more, and the
+   * assertion below would hold for a listing that sorted its own rows as well.
    */
   if (separating.length === 0) {
-    const [running] = await database.execute<{ collation: string }>(
-      sql`select datcollate as collation from pg_database where datname = current_database()`,
-    );
     throw new Error(
-      `This database (collation ${running?.collation ?? "unknown"}) orders every fixture pair the ` +
-        "way JavaScript's `<` does, so none of them can say whether the listing resolved its row " +
-        "in SQL or in JavaScript, and the assertion below has nothing left to prove. Add a pair " +
-        "this collation orders differently to ORDERING_FIXTURES. Do not delete this guard: the " +
-        "defect it protects — a page drawing an app under one server id while every read behind " +
-        "its buttons is about another — is invisible to a fixture the two rules agree about.",
+      "The store's ordering rule answers every fixture pair the way a linguistic ordering does, so " +
+        "none of them can say whether the listing resolved its row through the rule or sorted on " +
+        "its own, and the assertion below has nothing left to prove. Add a pair the two order " +
+        "differently to ORDERING_FIXTURES. Do not delete this guard: the defect it protects — a " +
+        "page drawing an app under one server id while every read behind its buttons is about " +
+        "another — is invisible to a fixture the two orderings agree about.",
     );
   }
 
   const listed = await store.brokeredConnectionsFor(askerId);
   // In the order the listing puts its own rows in, which is a plain string comparison over the ids
-  // it ends up naming — so the expectation is the database's answers, sorted the same way.
+  // it ends up naming — so the expectation is the rule's answers, sorted the same way.
   expect(listed.map((row) => row.serverId)).toEqual([...answering].sort());
 });
 
@@ -3472,7 +3327,7 @@ test("enabling an app records its scheme where the readers read it", async () =>
   useAnsweringClient();
   // The row that already answers for the app: at its url, sorting before the `composio-` id Add is
   // about to mint, and recorded as the consent app this deployment used to create for everything.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: answeringTwinId,
     title: "Answering App, as it was recorded before",
     vendor: "Composio",
@@ -3488,16 +3343,13 @@ test("enabling an app records its scheme where the readers read it", async () =>
     connection: { kind: "fields", authScheme: "API_KEY" },
   });
 
-  const [answering] = await database
-    .select({ authScheme: mcpServers.authScheme })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, answeringTwinId));
+  const [answering] = await serverRows(answeringTwinId);
   expect(answering.authScheme).toBe("API_KEY");
 
   // AND THE READER AGREES, which is the whole point of the column landing there. A person holding a
   // key for this app may re-check it; the pre-fix reading refuses that press in a sentence about a
   // sign-in screen nobody used.
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: answeringToolkit,
     holder: "person",
@@ -3553,7 +3405,7 @@ test("enabling an app lists its actions where the readers look for them", async 
   });
   // The row that already answers for the app: at its url, and sorting before the `composio-` id Add
   // is about to compose.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: refreshedTwinId,
     title: "Refreshed App, as it was recorded before",
     vendor: "Composio",
@@ -3581,7 +3433,7 @@ test("enabling an app lists its actions where the readers look for them", async 
 
   // AND THE READER AGREES, which is the whole point of the actions landing there: `checkable` is
   // what the browser draws the Re-check button off, and it is computed off the resolved row.
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: refreshedToolkit,
     holder: "person",
@@ -3626,7 +3478,7 @@ test("a confirm writes no verdict for an app whose scheme it cannot read", async
   useAnsweringClient();
   // A brokered row with nothing in its scheme column, which is what this deployment reads rather
   // than what it writes. See {@link unschemedToolkit}.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: unschemedId,
     title: "Unschemed App",
     vendor: "Composio",
@@ -3636,7 +3488,7 @@ test("a confirm writes no verdict for an app whose scheme it cannot read", async
   // The worst of the four states, and the one a mount-time write destroys most expensively: a
   // named probe beside `verified: false` is "it ran, the vendor refused the key, and the account is
   // still standing".
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: unschemedToolkit,
     holder: "person",
@@ -3655,15 +3507,7 @@ test("a confirm writes no verdict for an app whose scheme it cannot read", async
     }),
   ).toEqual({ connected: true });
 
-  const [after] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, unschemedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [after] = await brokeredRows(unschemedToolkit, askerId);
   expect(after.probeAction).toBe(unschemedProbeAction);
   expect(after.verified).toBe(false);
   expect(after.verifiedAt).toBeNull();
@@ -3679,15 +3523,7 @@ test("a confirm writes no verdict for an app whose scheme it cannot read", async
     }),
   ).toEqual({ connected: true });
 
-  const [made] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, unschemedToolkit),
-        eq(brokeredConnections.userId, leaverId),
-      ),
-    );
+  const [made] = await brokeredRows(unschemedToolkit, leaverId);
   expect(made.verified).toBe(false);
   expect(made.verifiedAt).toBeNull();
   expect(made.probeAction).toBeNull();
@@ -3715,7 +3551,7 @@ test("a confirm writes no verdict for an app whose scheme it cannot read", async
  */
 test("how an app connects is answered the same way for either of its rows", async () => {
   // The row that answers: at the app's url, sorting first, recorded as a key app.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: answeringTwinId,
     title: "Answering App",
     vendor: "Composio",
@@ -3725,7 +3561,7 @@ test("how an app connects is answered the same way for either of its rows", asyn
   });
   // And the row an enable minted later, under the scheme this deployment used to create for
   // everything. It is the row a page is opened on, and it is not the row that answers.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: answeringId,
     title: "Answering App",
     vendor: "Composio",
@@ -3773,7 +3609,7 @@ test("a duplicate row recording no-auth does not take the gate off an app", asyn
   // The other row at the same url, recorded as needing no account at all, with an action of its own
   // for a Bot to be granted. Named to sort after the app's own row, so the row that answers is not
   // this one.
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: noAuthTwinId,
     title: "Revocable App, as another row records it",
     vendor: "Composio",
@@ -3814,11 +3650,11 @@ test("a duplicate row recording no-auth does not take the gate off an app", asyn
  * their own, and the whole design of it is that the credential travels in one direction: off the
  * request, into `connectWithFields`, out to Composio. Every other participant here is a long-lived,
  * widely-readable record. `composio_connections` is read by offboarding, by disconnect and by the
- * gate on every brokered call; `audit_events` is append-only by trigger, exported, and kept for as
- * long as a deployment's retention window says — so a key that lands in either is not a leak
+ * gate on every brokered call; the audit trail is append-only, held in Intelligence, exported, and
+ * kept for as long as a deployment's retention window says — so a key that lands in either is not a leak
  * somebody can clean up afterwards, it is a leak with a schedule.
  *
- * WHICH IS WHY THIS ASSERTS ABSENCE OUT OF THE TABLES RATHER THAN OFF THE RETURN VALUE. A method
+ * WHICH IS WHY THIS ASSERTS ABSENCE OUT OF THE RECORDS RATHER THAN OFF THE RETURN VALUE. A method
  * can be read for what it puts in a payload; what a reviewer cannot read is what some later writer
  * on the same path adds. Stringifying the rows themselves is the assertion that survives that, and
  * it is not saved by the redactor: neither `values` nor `generic_api_key` is on `sensitiveKeys`, so
@@ -3864,10 +3700,10 @@ test("the values reach Composio and nothing else", async () => {
   expect(schemesSent).toEqual(["API_KEY"]);
 
   /*
-   * THE TRAIL, READ OUT OF THE TABLE RATHER THAN OFF THE RECORDING STORE. The rows are what a
+   * THE TRAIL, READ OUT OF INTELLIGENCE RATHER THAN OFF THE RECORDING STORE. The rows are what a
    * reader of the trail will actually see — after the redactor, after the insert — and this file's
    * `auditStore` keeps a copy of the input beside it, not instead of it. Narrowed to this app
-   * because `audit_events` is append-only: no cleanup here can reach it, so the other tests in this
+   * because the trail is append-only: no cleanup here can reach it, so the other tests in this
    * run have already written `mcp.account_connected` rows under {@link toolkit}.
    *
    * AND THE ONE IS AN ASSERTION RATHER THAN AN ACCIDENT OF ORDER, which it has to be said out loud
@@ -3878,15 +3714,10 @@ test("the values reach Composio and nothing else", async () => {
    * runner's answer rather than the implementation's, and it reads as passing until somebody moves
    * a test.
    */
-  const trail = await database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.account_connected"),
-        eq(auditEvents.targetId, enabledToolkit),
-      ),
-    );
+  const trail = await auditRows({
+    eventType: "mcp.account_connected",
+    targetId: enabledToolkit,
+  });
   expect(trail).toHaveLength(1);
   expect(trail[0].payload).toMatchObject({
     actor: askerId,
@@ -3898,10 +3729,9 @@ test("the values reach Composio and nothing else", async () => {
   });
   expect(JSON.stringify(trail)).not.toContain(typedKey);
 
-  const rows = await database
-    .select()
-    .from(brokeredConnections)
-    .where(inArray(brokeredConnections.app, ownedToolkits));
+  const rows = (await storedConnections()).brokered.filter((row) =>
+    ownedToolkits.includes(row.app),
+  );
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({
     app: enabledToolkit,
@@ -4041,15 +3871,7 @@ test("a check that does not come back clean leaves the account standing, recorde
     `connectWithFields:${probedToolkit}/${askerId}`,
   ]);
 
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(probedToolkit, askerId);
   expect(row).toMatchObject({
     app: probedToolkit,
     userId: askerId,
@@ -4191,15 +4013,7 @@ test("an app with no probe connects unverified rather than not at all", async ()
   // And nothing was taken back either: there was no failure to undo.
   expect(vendorHolds).toEqual([madeAccountId]);
 
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(probedToolkit, askerId);
   expect(row.verified).toBe(false);
   expect(row.verifiedAt).toBeNull();
   // Null in the column too, and it is the row's own sentence rather than the listing's: NOTHING WAS
@@ -4286,15 +4100,7 @@ test("a key that works is recorded verified, with the action it was checked with
     `connectWithFields:${probedToolkit}/${askerId}`,
   ]);
 
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(probedToolkit, askerId);
   expect(row.verified).toBe(true);
   expect(row.verifiedAt).not.toBeNull();
   expect(row.verifiedAt?.getTime()).toBeGreaterThanOrEqual(before.getTime());
@@ -4349,7 +4155,7 @@ test("a key that works is recorded verified, with the action it was checked with
  * an assertion about a value rather than about whether a column is null.
  */
 async function holdProbedApp(verifiedAt: Date | null = null) {
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: probedToolkit,
     holder: "person",
@@ -4423,15 +4229,7 @@ test("a re-check that answers records the connection verified, with the action i
     { slug: probeAction, userId: askerId, version: probeVersion, args: {} },
   ]);
 
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(probedToolkit, askerId);
   expect(row.verified).toBe(true);
   expect(row.verifiedAt?.toISOString()).toBe(answer.verifiedAt);
   // And the action this press spent, written down beside the flag it earned. A re-check is the
@@ -4484,14 +4282,12 @@ test("a re-check writes nothing when the connection was disconnected while it ra
     execute: async ({ slug }) => {
       reached.push(slug);
       // The other tab, landing inside the window between this method's read and its write.
-      await database
-        .delete(brokeredConnections)
-        .where(
-          and(
-            eq(brokeredConnections.app, probedToolkit),
-            eq(brokeredConnections.userId, askerId),
-          ),
-        );
+      await removeConnectionsWhere(
+        (row) =>
+          row.kind === "brokered" &&
+          row.app === probedToolkit &&
+          row.userId === askerId,
+      );
       return answered;
     },
   });
@@ -4506,17 +4302,7 @@ test("a re-check writes nothing when the connection was disconnected while it ra
 
   // NOTHING WAS PUT BACK. This is the assertion: an upsert here leaves a row, and a row is the
   // permission every later brokered call for this person is decided on.
-  expect(
-    await database
-      .select()
-      .from(brokeredConnections)
-      .where(
-        and(
-          eq(brokeredConnections.app, probedToolkit),
-          eq(brokeredConnections.userId, askerId),
-        ),
-      ),
-  ).toEqual([]);
+  expect(await brokeredRows(probedToolkit, askerId)).toEqual([]);
 
   // And nothing on the trail claims a connection was verified: the thing it would be a verdict
   // about is gone.
@@ -4574,15 +4360,7 @@ test("a re-check whose probe fails raises rather than answering unverified", asy
 
   // The row SURVIVES the failure — it is their key that is wrong, not their account — and it stops
   // claiming a verification, with no date left standing on a claim nobody is making.
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(probedToolkit, askerId);
   expect(row).toMatchObject({ app: probedToolkit, verified: false });
   expect(row.verifiedAt).toBeNull();
 
@@ -4636,15 +4414,7 @@ test("an app with nothing to probe leaves the verification exactly as it was", a
 
   // Nothing was called, which is what "nothing to try" means at the vendor.
   expect(reached).toEqual([]);
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(probedToolkit, askerId);
   expect(row.verified).toBe(true);
   expect(row.verifiedAt?.toISOString()).toBe(earned.toISOString());
   // And nothing is on the trail: `mcp.connection_verified` records an account exercised with a real
@@ -4732,15 +4502,7 @@ test("a re-check against a consent connection refuses rather than spending its d
 
   expect(reached).toEqual([]);
   expect(recordedOfType("mcp.connection_verified")).toEqual([]);
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, probedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(probedToolkit, askerId);
   expect(row.verified).toBe(true);
   expect(row.verifiedAt?.toISOString()).toBe(earned.toISOString());
 });
@@ -4817,7 +4579,7 @@ test("disconnecting a key claims no revocation", async () => {
     by: admin,
     connection: { kind: "consent" },
   });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: reschemedToolkit,
     holder: "person",
@@ -4882,7 +4644,7 @@ test("disconnecting a key claims no revocation", async () => {
  */
 test("enabling an app over a row somebody typed leaves a row that says it is brokered", async () => {
   useAnsweringClient();
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: collidedId,
     title: "Typed By Hand",
     vendor: "collector.attacker.example",
@@ -4897,14 +4659,12 @@ test("enabling an app over a row somebody typed leaves a row that says it is bro
     connection: { kind: "consent" },
   });
 
-  const [row] = await database
-    .select({
-      url: mcpServers.url,
-      provenance: mcpServers.provenance,
-      vendor: mcpServers.vendor,
-    })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, collidedId));
+  const [stored] = await serverRows(collidedId);
+  const row = {
+    url: stored.url,
+    provenance: stored.provenance,
+    vendor: stored.vendor,
+  };
   expect(row).toEqual({
     url: `composio://${collidedToolkit}`,
     provenance: "composio",
@@ -4926,7 +4686,7 @@ test("enabling an app over a row somebody typed leaves a row that says it is bro
    * leave, `removeServer` read no app off `accessFor` at all: it deleted the row, asked the vendor
    * nothing, and left the mailbox attached with nothing here left naming it.
    */
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: collidedToolkit,
     holder: "person",
@@ -4972,7 +4732,7 @@ test("a server added by URL may not take a brokered row, and its accounts stay r
     by: admin,
     connection: { kind: "consent" },
   });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: collidedToolkit,
     holder: "person",
@@ -4989,10 +4749,8 @@ test("a server added by URL may not take a brokered row, and its accounts stay r
     }),
   ).rejects.toThrow(CustomServerRefusedError);
 
-  const [row] = await database
-    .select({ url: mcpServers.url, provenance: mcpServers.provenance })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, collidedId));
+  const [stored] = await serverRows(collidedId);
+  const row = { url: stored.url, provenance: stored.provenance };
   expect(row).toEqual({
     url: `composio://${collidedToolkit}`,
     provenance: "composio",
@@ -5033,12 +4791,7 @@ test("a server added by URL may not take the namespace brokered rows are minted 
     }),
   ).rejects.toThrow(CustomServerRefusedError);
 
-  expect(
-    await database
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, collidedId)),
-  ).toEqual([]);
+  expect(await serverRows(collidedId)).toEqual([]);
 });
 
 /**
@@ -5100,15 +4853,7 @@ test("a connect whose check could not reach the vendor keeps the account and acc
     `connectWithFields:${outageToolkit}/${askerId}`,
   ]);
 
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, outageToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(outageToolkit, askerId);
   expect(row.verified).toBe(false);
   expect(row.verifiedAt).toBeNull();
   // THE WHOLE OF THE FIX, in one field: null, and never the name of an action nothing can show ran.
@@ -5125,15 +4870,10 @@ test("a connect whose check could not reach the vendor keeps the account and acc
   // AND THE TRAIL SAYS WHICH OF THE TWO NULLS THIS IS, which the row itself cannot: an app that
   // publishes nothing to try and a check that could not be made read the same on the row, and only
   // here is the second one named.
-  const trail = await database
-    .select()
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.eventType, "mcp.connection_verified"),
-        eq(auditEvents.targetId, outageToolkit),
-      ),
-    );
+  const trail = await auditRows({
+    eventType: "mcp.connection_verified",
+    targetId: outageToolkit,
+  });
   expect(trail).toHaveLength(1);
   expect(trail[0].payload).toMatchObject({
     actor: askerId,
@@ -5168,7 +4908,7 @@ test("a re-check that could not reach the vendor leaves the last check's record 
   await addCheckableApp(recheckedToolkit);
   // The state a real call left days ago: verified, dated, and naming what it spent.
   const checkedAt = new Date("2026-08-01T09:00:00.000Z");
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: recheckedToolkit,
     holder: "person",
@@ -5193,15 +4933,7 @@ test("a re-check that could not reach the vendor leaves the last check's record 
     }),
   ).rejects.toThrow(/connect ETIMEDOUT/);
 
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, recheckedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(recheckedToolkit, askerId);
   // Whole: the verdict, the day it was reached, and the action that reached it.
   expect(row.verified).toBe(true);
   expect(row.verifiedAt?.toISOString()).toBe(checkedAt.toISOString());
@@ -5211,15 +4943,10 @@ test("a re-check that could not reach the vendor leaves the last check's record 
   // is not filed for it.
   expect(reached).toEqual([probeAction]);
   expect(
-    await database
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "mcp.connection_verified"),
-          eq(auditEvents.targetId, recheckedToolkit),
-        ),
-      ),
+    await auditRows({
+      eventType: "mcp.connection_verified",
+      targetId: recheckedToolkit,
+    }),
   ).toEqual([]);
 });
 
@@ -5282,15 +5009,7 @@ test("a connect spends its check on the account it just made", async () => {
   ]);
   // AND THE ROW RECORDS THE FAILED CHECK RATHER THAN A VERDICT IT DID NOT EARN. The older account
   // answered `successful: true`; had the probe gone unpinned, this row would say verified.
-  const [row] = await database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, pinnedToolkit),
-        eq(brokeredConnections.userId, askerId),
-      ),
-    );
+  const [row] = await brokeredRows(pinnedToolkit, askerId);
   expect(row).toMatchObject({ verified: false, probeAction: probeAction });
 });
 

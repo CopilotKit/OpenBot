@@ -1,13 +1,14 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
+import { createAuditStore } from "../src/audit";
 import { computerKeyText } from "../src/computer/computer-key";
 import type {
   ComputerLocation,
   ComputerProvider,
 } from "../src/computer/provider";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, workItems } from "../src/db/schema";
+import { computerActivity, workItems } from "../src/db/schema";
 import {
   CULL_KIND,
   offerIdleComputers,
@@ -51,6 +52,35 @@ function providerWith(computers: ComputerLocation[]) {
   return { provider, stopped };
 }
 
+/*
+ * A computer used at `when`, as the culler reads it: the `computer_activity` bookmark every
+ * `computer.*` audit row moves forward when it is written (see the last test in this file, which
+ * holds the audit store to that). Set here directly because the store stamps the database's clock,
+ * and these cases need a computer last used an hour ago.
+ */
+type Use = {
+  payload: { bot: string; computer?: string; action?: string };
+  createdAt: Date;
+};
+
+async function recordUse(rows: Use | Use[]) {
+  for (const row of Array.isArray(rows) ? rows : [rows]) {
+    const { payload } = row;
+    await database
+      .insert(computerActivity)
+      .values({
+        computer: payload.computer ?? `bot:${payload.bot}`,
+        lastActiveAt: row.createdAt,
+      })
+      .onConflictDoUpdate({
+        target: computerActivity.computer,
+        set: {
+          lastActiveAt: sql`greatest(${computerActivity.lastActiveAt}, excluded.last_active_at)`,
+        },
+      });
+  }
+}
+
 const ran = (botId: string, when: Date) => ({
   eventType: "computer.action_allowed",
   targetType: "computer",
@@ -86,7 +116,7 @@ const minutesAgo = (minutes: number) =>
 describe("suspending computers nobody is using", () => {
   test("a computer idle longer than the threshold is offered, and then suspended", async () => {
     const botId = botOf("idle");
-    await database.insert(auditEvents).values(ran(botId, minutesAgo(45)));
+    await recordUse(ran(botId, minutesAgo(45)));
     const { provider, stopped } = providerWith([
       { key: botKey(botId), status: "running", url: "http://c" },
     ]);
@@ -110,7 +140,7 @@ describe("suspending computers nobody is using", () => {
 
   test("a computer used a minute ago is left alone", async () => {
     const botId = botOf("busy");
-    await database.insert(auditEvents).values(ran(botId, minutesAgo(1)));
+    await recordUse(ran(botId, minutesAgo(1)));
     const { provider, stopped } = providerWith([
       { key: botKey(botId), status: "running", url: "http://c" },
     ]);
@@ -135,7 +165,7 @@ describe("suspending computers nobody is using", () => {
    */
   test("a computer used after being offered is not suspended", async () => {
     const botId = botOf("returned");
-    await database.insert(auditEvents).values(ran(botId, minutesAgo(45)));
+    await recordUse(ran(botId, minutesAgo(45)));
     const { provider, stopped } = providerWith([
       { key: botKey(botId), status: "running", url: "http://c" },
     ]);
@@ -150,7 +180,7 @@ describe("suspending computers nobody is using", () => {
 
     await offerIdleComputers(options);
     // They came back while the item sat on the queue.
-    await database.insert(auditEvents).values(ran(botId, minutesAgo(2)));
+    await recordUse(ran(botId, minutesAgo(2)));
     const report = await suspendClaimedComputers(options);
 
     expect(stopped).toEqual([]);
@@ -179,7 +209,7 @@ describe("suspending computers nobody is using", () => {
 
   test("a computer already stopped is not offered again", async () => {
     const botId = botOf("stopped");
-    await database.insert(auditEvents).values(ran(botId, minutesAgo(90)));
+    await recordUse(ran(botId, minutesAgo(90)));
     const { provider } = providerWith([
       { key: botKey(botId), status: "stopped", url: "http://c" },
     ]);
@@ -201,7 +231,7 @@ describe("suspending computers nobody is using", () => {
   test("two replicas culling together suspend each computer once", async () => {
     const ids = ["a", "b", "c", "d"].map(botOf);
     for (const botId of ids) {
-      await database.insert(auditEvents).values(ran(botId, minutesAgo(60)));
+      await recordUse(ran(botId, minutesAgo(60)));
     }
     const { provider, stopped } = providerWith(
       ids.map((botId) => ({
@@ -264,15 +294,13 @@ describe("suspending computers nobody is using", () => {
       return report;
     };
 
-    await database.insert(auditEvents).values(ran(botId, minutesAgo(60)));
+    await recordUse(ran(botId, minutesAgo(60)));
     expect((await sweep("2026-08-24T12:00:00Z")).suspended).toEqual([
       `bot:${botId}`,
     ]);
 
     // Somebody comes back at 13:00, and it is quiet again by 14:00.
-    await database
-      .insert(auditEvents)
-      .values(ran(botId, new Date("2026-08-24T13:00:00Z")));
+    await recordUse(ran(botId, new Date("2026-08-24T13:00:00Z")));
     const second = await sweep("2026-08-24T14:00:00Z");
 
     expect(second.suspended).toEqual([`bot:${botId}`]);
@@ -287,7 +315,7 @@ describe("suspending computers nobody is using", () => {
    */
   test("a person's computer stays up while any one of their Bots is in use", async () => {
     const person = `person:${botOf("ada")}`;
-    await database.insert(auditEvents).values([
+    await recordUse([
       {
         ...ran(botOf("ada-quiet"), minutesAgo(90)),
         payload: { bot: botOf("ada-quiet"), computer: person, action: "x" },
@@ -320,7 +348,7 @@ describe("suspending computers nobody is using", () => {
   test("a person's computer idle across all their Bots is suspended, once", async () => {
     const personId = botOf("bo");
     const person = `person:${personId}`;
-    await database.insert(auditEvents).values(
+    await recordUse(
       ["one", "two"].map((name) => ({
         ...ran(botOf(`bo-${name}`), minutesAgo(60)),
         payload: { bot: botOf(`bo-${name}`), computer: person, action: "x" },
@@ -355,5 +383,58 @@ describe("suspending computers nobody is using", () => {
       person,
     ]);
     expect(stopped).toEqual([person]);
+  });
+
+  /*
+   * Where the bookmark comes from. The trail moved to Intelligence, and the culler asks "when was
+   * this computer last used" on every sweep, so the answer is kept here: every `computer.*` row the
+   * audit store writes moves its computer forward in the same statement. A row that is not about a
+   * computer moves nothing, and a later row never moves a computer backwards.
+   */
+  test("every computer row the audit store writes moves its computer's last use forward", async () => {
+    const store = createAuditStore(database);
+    const personId = botOf("writer");
+    const isolated = botOf("writer-own");
+    const lastUse = async (computer: string) =>
+      (
+        await database
+          .select({ at: computerActivity.lastActiveAt })
+          .from(computerActivity)
+          .where(eq(computerActivity.computer, computer))
+      )[0]?.at;
+    const before = new Date(Date.now() - 1_000);
+
+    await store.insert({
+      eventType: "computer.action_allowed",
+      targetType: "computer",
+      targetId: isolated,
+      payload: { bot: isolated, computer: `person:${personId}` },
+    });
+    await store.insert({
+      eventType: "computer.action_refused",
+      targetType: "computer",
+      targetId: isolated,
+      payload: { bot: isolated },
+    });
+    await store.insert({
+      eventType: "mcp.call_succeeded",
+      targetType: "tool",
+      targetId: "gmail.send",
+      payload: { bot: botOf("not-a-computer") },
+    });
+
+    expect((await lastUse(`person:${personId}`))?.getTime()).toBeGreaterThan(
+      before.getTime(),
+    );
+    expect((await lastUse(`bot:${isolated}`))?.getTime()).toBeGreaterThan(
+      before.getTime(),
+    );
+    expect(await lastUse(`bot:${botOf("not-a-computer")}`)).toBeUndefined();
+
+    // An older use recorded late never moves the bookmark back.
+    await recordUse(ran(isolated, minutesAgo(600)));
+    expect((await lastUse(`bot:${isolated}`))?.getTime()).toBeGreaterThan(
+      before.getTime(),
+    );
   });
 });

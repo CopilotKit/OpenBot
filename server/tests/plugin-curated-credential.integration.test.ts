@@ -1,16 +1,23 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
-import { encryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { credentials, mcpServers, mcpTools } from "../src/db/schema";
 import { CATALOGUE, serverCredentialKind } from "../src/plugins/catalogue";
 import {
   CustomServerRefusedError,
   createPluginStore,
+  type PluginStore,
 } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  purgeSecrets,
+  removeServers,
+  seedCredential,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * Which credential a curated server is allowed to be pointed at.
@@ -20,8 +27,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * a pair, and a guard on one of them is a guard on the path somebody happened to look at.
  *
  * What is reachable today is narrower than the custom case and worth stating rather than dressing
- * up. `mcp_servers.credential_id` is a real foreign key, so an id naming nothing is refused by the
- * database, and the one entry in the catalogue is `user-oauth`, whose client is registered through
+ * up. The one entry in the catalogue is `user-oauth`, whose client is registered through
  * `registerOAuthClient` and sent to a pinned vendor address. What is left is a credential of the
  * wrong kind being accepted and spent, a malformed id arriving as a database error where a refusal
  * belongs, and the whole hole reopening the moment a fork re-adds a `deployment-bearer` vendor,
@@ -30,29 +36,14 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: {
-    readSecret: async () => null,
-    create: async () => {
-      throw new Error("this suite does not write credentials");
-    },
-    revoke: async () => {
-      throw new Error("this suite does not revoke credentials");
-    },
-  },
-  encryptionKey: "x".repeat(44),
-  policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
-});
+let store: PluginStore;
 
 /** The catalogue key under test. Real, because which credential it takes is a property of the entry. */
 const serverId = "google-drive";
 const suffix = randomUUID().slice(0, 8);
-const deploymentCredentialId = randomUUID();
-const personalCredentialId = randomUUID();
-const oauthClientCredentialId = randomUUID();
+let deploymentCredentialId: string;
+let personalCredentialId: string;
+let oauthClientCredentialId: string;
 
 /**
  * Whether this deployment already had the server, and what it pointed at.
@@ -64,62 +55,58 @@ const oauthClientCredentialId = randomUUID();
 let existing: { credentialId: string | null } | null = null;
 
 beforeAll(async () => {
-  const [row] = await database
-    .select({ credentialId: mcpServers.credentialId })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, serverId));
-  existing = row ?? null;
+  const directory = await useTestVault();
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(directory),
+    encryptionKey: "x".repeat(44),
+    policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
+  });
 
-  const encrypted = await encryptSecret(`${"A".repeat(43)}=`, "not-read-here");
-  await database.insert(credentials).values([
-    {
-      id: deploymentCredentialId,
+  const app = await storedServer(serverId);
+  existing = app ? { credentialId: app.credentialId } : null;
+
+  deploymentCredentialId = (
+    await seedCredential({
       kind: "mcp",
       provider: serverId,
       keyId: `mcp-${serverId}-${suffix}`,
-      encryptedValue: encrypted,
-      metadata: {},
-    },
-    {
-      id: oauthClientCredentialId,
+      plaintext: "not-read-here",
+    })
+  ).id;
+  oauthClientCredentialId = (
+    await seedCredential({
       kind: "mcp_oauth_client",
       provider: serverId,
       keyId: `oauth-client-${serverId}-${suffix}`,
-      encryptedValue: encrypted,
-      metadata: {},
-    },
-    {
-      id: personalCredentialId,
+      plaintext: "not-read-here",
+    })
+  ).id;
+  personalCredentialId = (
+    await seedCredential({
       kind: "mcp_user_token",
       provider: serverId,
       // For a user token the key is the person, which is what makes one pickable by name from the
       // administrator's own credential list.
       keyId: `user_someone_else_${suffix}`,
-      encryptedValue: encrypted,
-      metadata: {},
-    },
-  ]);
+      plaintext: "not-read-here",
+    })
+  ).id;
 });
 
 afterAll(async () => {
   if (existing) {
-    await database
-      .update(mcpServers)
-      .set({ credentialId: existing.credentialId })
-      .where(eq(mcpServers.id, serverId));
+    await changeServer(serverId, { credentialId: existing.credentialId });
   } else {
-    await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
-    await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
+    await removeServers([serverId]);
   }
-  await database
-    .delete(credentials)
-    .where(
-      inArray(credentials.id, [
-        deploymentCredentialId,
-        oauthClientCredentialId,
-        personalCredentialId,
-      ]),
-    );
+  await purgeSecrets([
+    deploymentCredentialId,
+    oauthClientCredentialId,
+    personalCredentialId,
+  ]);
 });
 
 describe("a curated server may only be pointed at its own kind of credential", () => {
@@ -132,13 +119,11 @@ describe("a curated server may only be pointed at its own kind of credential", (
       }),
     ).rejects.toBeInstanceOf(CustomServerRefusedError);
 
-    // The refusal has to stop the write, not merely report on it: a row here is a pointer the next
+    // The refusal has to stop the write, not merely report on it: an app here is a pointer the next
     // refresh dereferences.
-    const rows = await database
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId));
-    expect(rows).toHaveLength(existing ? 1 : 0);
+    const app = await storedServer(serverId);
+    expect(app !== null).toBe(existing !== null);
+    if (app) expect(app.credentialId).toBe(existing?.credentialId ?? null);
   });
 
   test("a deployment token is refused for a vendor reached as the person asking", async () => {
@@ -155,8 +140,8 @@ describe("a curated server may only be pointed at its own kind of credential", (
   });
 
   test("a malformed credential id is a refusal rather than a database error", async () => {
-    // `credentials.id` is a uuid column, so a value that is not one makes the query itself fail and
-    // the administrator gets a 500 where a refusal belongs. The same was true of the custom path
+    // A credential id is a uuid, so a value that is not one used to make the lookup itself fail and
+    // the administrator got a 500 where a refusal belongs. The same was true of the custom path
     // before its shape check, and it is the reason that check reads the shape before the lookup.
     const refused = store
       .addServer({
@@ -177,24 +162,16 @@ describe("a curated server may only be pointed at its own kind of credential", (
      * `user-oauth` entry refuses a credential id.
      */
     await store.addServer({ key: serverId, by: "admin@example.com" });
-    await database
-      .update(mcpServers)
-      .set({ credentialId: oauthClientCredentialId })
-      .where(eq(mcpServers.id, serverId));
+    await changeServer(serverId, { credentialId: oauthClientCredentialId });
 
     await store.addServer({ key: serverId, by: "admin@example.com" });
 
-    const [row] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId));
-    expect(row?.credentialId).toBe(oauthClientCredentialId);
+    expect((await storedServer(serverId))?.credentialId).toBe(
+      oauthClientCredentialId,
+    );
 
-    // Put it back, so the case below reads the column this suite left rather than this one.
-    await database
-      .update(mcpServers)
-      .set({ credentialId: null })
-      .where(eq(mcpServers.id, serverId));
+    // Put it back, so the case below reads the pointer this suite left rather than this one.
+    await changeServer(serverId, { credentialId: null });
   });
 
   test("adding the server without a credential still works", async () => {
@@ -207,11 +184,7 @@ describe("a curated server may only be pointed at its own kind of credential", (
     });
     expect(added.id).toBe(serverId);
 
-    const [row] = await database
-      .select({ credentialId: mcpServers.credentialId })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId));
-    expect(row?.credentialId).toBeNull();
+    expect((await storedServer(serverId))?.credentialId).toBeNull();
   });
 });
 

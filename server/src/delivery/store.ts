@@ -1,31 +1,37 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, max, sql } from "drizzle-orm";
+import { bots } from "../agents/bot-registry/directory";
 import type { Database } from "../db/client";
-import { agents } from "../db/schema/core";
-import { agentProfiles } from "../db/schema/coworker";
 import {
   type DeliveryChallenge,
-  deliveryBindings,
   deliveryChallenges,
   deliveryInbox,
   deliveryOutbox,
-  pushDevices,
 } from "../db/schema/delivery";
-import {
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../db/schema/proactive";
 import { workItems } from "../db/schema/work";
+import { deliveryDirectory, type StoredBinding } from "./directory";
+import { schedules } from "../schedules/directory";
+import type { CheckInSuggestionRecord } from "../schedules/types";
 import {
   type BindingTransport,
   type DeliveryBinding,
   type DeliveryKind,
   DeliveryNotFoundError,
-  DeliveryRefusedError,
   type DeliveryScope,
   type DeliveryState,
   type PushDevice,
 } from "./types";
+
+/**
+ * Delivery, as the router and routes use it.
+ *
+ * WHERE EACH PART LIVES. A person's bindings and push devices are theirs to keep and live in
+ * Intelligence (delivery/directory.ts, held in memory on every instance). The inbound and outbound
+ * queues and the pairing codes in flight are operational: a queued message is already in its
+ * conversation's thread in Intelligence, and a pairing code lasts ten minutes. They stay in this
+ * deployment's database, beside the work queue that runs them, so a send and the work item that
+ * carries it still commit together.
+ */
 export function createDeliveryStore(database: Database) {
   async function enqueue(
     db: Pick<Database, "insert" | "execute">,
@@ -40,21 +46,13 @@ export function createDeliveryStore(database: Database) {
     await db.execute(sql`select pg_notify('openbot_work_offered', ${kind})`);
   }
   return {
-    async listBindings(owner: string) {
-      return database
-        .select()
-        .from(deliveryBindings)
-        .where(eq(deliveryBindings.ownerUserId, owner));
+    async listBindings(owner: string): Promise<StoredBinding[]> {
+      return deliveryDirectory()
+        .bindings()
+        .filter((binding) => binding.ownerUserId === owner);
     },
     async binding(id: string) {
-      return (
-        (
-          await database
-            .select()
-            .from(deliveryBindings)
-            .where(eq(deliveryBindings.id, id))
-        )[0] ?? null
-      );
+      return deliveryDirectory().binding(id);
     },
     async findBinding(
       transport: BindingTransport,
@@ -63,34 +61,28 @@ export function createDeliveryStore(database: Database) {
       address?: string,
     ) {
       return (
-        (
-          await database
-            .select()
-            .from(deliveryBindings)
-            .where(
-              and(
-                eq(deliveryBindings.transport, transport),
-                eq(deliveryBindings.realm, realm),
-                eq(deliveryBindings.identity, identity),
-                eq(deliveryBindings.enabled, true),
-                ...(address ? [eq(deliveryBindings.address, address)] : []),
-              ),
-            )
-        )[0] ?? null
+        deliveryDirectory()
+          .bindings()
+          .find(
+            (binding) =>
+              binding.transport === transport &&
+              binding.realm === realm &&
+              binding.identity === identity &&
+              binding.enabled &&
+              (address === undefined || binding.address === address),
+          ) ?? null
       );
     },
     async bindingsFor(scope: DeliveryScope) {
-      return database
-        .select()
-        .from(deliveryBindings)
-        .where(
-          and(
-            eq(deliveryBindings.ownerUserId, scope.ownerUserId),
-            eq(deliveryBindings.channelId, scope.channelId),
-            eq(deliveryBindings.agentId, scope.agentId),
-            eq(deliveryBindings.threadId, scope.threadId),
-            eq(deliveryBindings.enabled, true),
-          ),
+      return deliveryDirectory()
+        .bindings()
+        .filter(
+          (binding) =>
+            binding.ownerUserId === scope.ownerUserId &&
+            binding.channelId === scope.channelId &&
+            binding.agentId === scope.agentId &&
+            binding.threadId === scope.threadId &&
+            binding.enabled,
         );
     },
     /**
@@ -99,17 +91,37 @@ export function createDeliveryStore(database: Database) {
      * one on each platform, the conversation they are most likely looking at.
      */
     async bindingsByUse(owner: string): Promise<DeliveryBinding[]> {
-      const usedAt = sql`greatest(${deliveryBindings.createdAt}, (select max(${deliveryInbox.createdAt}) from ${deliveryInbox} where ${deliveryInbox.ownerUserId} = ${deliveryBindings.ownerUserId} and ${deliveryInbox.bindingId} = ${deliveryBindings.id}))`;
-      return database
-        .select()
-        .from(deliveryBindings)
+      const mine = deliveryDirectory()
+        .bindings()
+        .filter((binding) => binding.ownerUserId === owner && binding.enabled);
+      if (mine.length === 0) return [];
+      // The last message through each binding is in this deployment's own inbound queue.
+      const lastUse = await database
+        .select({
+          bindingId: deliveryInbox.bindingId,
+          at: max(deliveryInbox.createdAt),
+        })
+        .from(deliveryInbox)
         .where(
           and(
-            eq(deliveryBindings.ownerUserId, owner),
-            eq(deliveryBindings.enabled, true),
+            eq(deliveryInbox.ownerUserId, owner),
+            inArray(
+              deliveryInbox.bindingId,
+              mine.map((binding) => binding.id),
+            ),
           ),
         )
-        .orderBy(desc(usedAt), asc(deliveryBindings.id));
+        .groupBy(deliveryInbox.bindingId);
+      const usedAt = new Map(
+        lastUse.map((row) => [row.bindingId, row.at?.getTime() ?? 0]),
+      );
+      const recency = (binding: StoredBinding) =>
+        Math.max(binding.createdAt.getTime(), usedAt.get(binding.id) ?? 0);
+      return mine.sort(
+        (left, right) =>
+          recency(right) - recency(left) ||
+          (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+      );
     },
     /**
      * Where the items a ping carries were found: each one's check-in conversation with its Bot,
@@ -120,90 +132,44 @@ export function createDeliveryStore(database: Database) {
       suggestionIds: string[],
     ): Promise<{ agentId: string; channelId: string }[]> {
       if (suggestionIds.length === 0) return [];
-      return database
-        .select({
-          agentId: proactiveSuggestions.agentId,
-          channelId: proactiveSettings.channelId,
-        })
-        .from(proactiveSuggestions)
-        .innerJoin(
-          proactiveSettings,
-          eq(proactiveSettings.id, proactiveSuggestions.settingId),
-        )
-        .where(
-          and(
-            eq(proactiveSuggestions.ownerUserId, owner),
-            inArray(proactiveSuggestions.id, suggestionIds),
-          ),
-        )
-        .orderBy(
-          desc(proactiveSuggestions.createdAt),
-          desc(proactiveSuggestions.id),
+      // The items are in Intelligence's check-in suggestions; each one's setting is held in memory.
+      const items: CheckInSuggestionRecord[] = [];
+      for (let start = 0; start < suggestionIds.length; start += 200) {
+        const { items: page } = await schedules().client.all(
+          "check-in-suggestions",
+          {
+            ownerUserId: owner,
+            ids: suggestionIds.slice(start, start + 200),
+          },
         );
+        items.push(...page);
+      }
+      items.sort(
+        (left, right) =>
+          right.createdAt.getTime() - left.createdAt.getTime() ||
+          (right.id > left.id ? 1 : right.id < left.id ? -1 : 0),
+      );
+      const found: { agentId: string; channelId: string }[] = [];
+      for (const item of items) {
+        const setting = await schedules().find(
+          "check-in-settings",
+          item.settingId,
+        );
+        if (setting && setting.deletedAt === null)
+          found.push({ agentId: item.agentId, channelId: setting.channelId });
+      }
+      return found;
     },
     async bind(input: Omit<DeliveryBinding, "id" | "enabled">) {
-      return database.transaction(async (tx) => {
-        const existing = (
-          await tx
-            .select()
-            .from(deliveryBindings)
-            .where(
-              and(
-                eq(deliveryBindings.transport, input.transport),
-                eq(deliveryBindings.realm, input.realm),
-                eq(deliveryBindings.identity, input.identity),
-              ),
-            )
-            .for("update")
-        )[0];
-        if (existing && existing.ownerUserId !== input.ownerUserId)
-          throw new DeliveryRefusedError(
-            "That identity is already connected to another person.",
-          );
-        const row = {
-          ...input,
-          id: existing?.id ?? randomUUID(),
-          enabled: true,
-        };
-        const [bound] = await tx
-          .insert(deliveryBindings)
-          .values(row)
-          .onConflictDoUpdate({
-            target: [
-              deliveryBindings.transport,
-              deliveryBindings.realm,
-              deliveryBindings.identity,
-            ],
-            set: {
-              channelId: row.channelId,
-              agentId: row.agentId,
-              threadId: row.threadId,
-              address: row.address,
-              mentionId: row.mentionId ?? null,
-              enabled: true,
-            },
-            setWhere: eq(deliveryBindings.ownerUserId, input.ownerUserId),
-          })
-          .returning();
-        if (!bound)
-          throw new DeliveryRefusedError(
-            "That identity is already connected to another person.",
-          );
-        return bound;
-      });
+      // An identity already bound to this person is pointed at the new conversation and keeps its
+      // id; one bound to somebody else is refused. Intelligence decides both, in one step.
+      return deliveryDirectory().bind({ ...input, id: randomUUID() });
     },
     async removeBinding(owner: string, id: string) {
-      const rows = await database
-        .update(deliveryBindings)
-        .set({ enabled: false })
-        .where(
-          and(
-            eq(deliveryBindings.ownerUserId, owner),
-            eq(deliveryBindings.id, id),
-          ),
-        )
-        .returning();
-      if (!rows.length)
+      const binding = await deliveryDirectory().binding(id);
+      if (!binding || binding.ownerUserId !== owner)
+        throw new DeliveryNotFoundError("Connection not found.");
+      if (!(await deliveryDirectory().changeBinding(id, { enabled: false })))
         throw new DeliveryNotFoundError("Connection not found.");
     },
     async challenge(
@@ -258,58 +224,22 @@ export function createDeliveryStore(database: Database) {
     },
     async registerDevice(input: Omit<PushDevice, "enabled">) {
       // A token already held by someone else moves only once its owner has signed out on that phone
-      // (which disables the row). Otherwise anyone who learned a token could take over its
-      // notifications, approval and sign-in links included.
-      const [device] = await database
-        .insert(pushDevices)
-        .values({ ...input, enabled: true })
-        .onConflictDoUpdate({
-          target: pushDevices.token,
-          set: {
-            id: input.id,
-            ownerUserId: input.ownerUserId,
-            projectId: input.projectId,
-            platform: input.platform,
-            enabled: true,
-          },
-          setWhere: or(
-            eq(pushDevices.ownerUserId, input.ownerUserId),
-            eq(pushDevices.enabled, false),
-          ),
-        })
-        .returning();
-      if (!device)
-        throw new DeliveryRefusedError(
-          "This device is already registered to another account. Sign out of OpenBot on it first.",
-        );
-      return device;
+      // (which disables the registration). Otherwise anyone who learned a token could take over its
+      // notifications, approval and sign-in links included. Intelligence holds that rule.
+      return deliveryDirectory().register(input);
     },
     async devices(owner: string) {
-      return database
-        .select()
-        .from(pushDevices)
-        .where(
-          and(
-            eq(pushDevices.ownerUserId, owner),
-            eq(pushDevices.enabled, true),
-          ),
-        );
+      return deliveryDirectory()
+        .devices()
+        .filter((device) => device.ownerUserId === owner && device.enabled);
     },
     async device(id: string) {
-      return (
-        (
-          await database
-            .select()
-            .from(pushDevices)
-            .where(eq(pushDevices.id, id))
-        )[0] ?? null
-      );
+      return deliveryDirectory().device(id);
     },
     async removeDevice(owner: string, id: string) {
-      await database
-        .update(pushDevices)
-        .set({ enabled: false })
-        .where(and(eq(pushDevices.id, id), eq(pushDevices.ownerUserId, owner)));
+      const device = await deliveryDirectory().device(id);
+      if (!device || device.ownerUserId !== owner) return;
+      await deliveryDirectory().changeDevice(id, false);
     },
     /**
      * A turn a paired chat surface is running right now, recorded for dedupe and visibility only.
@@ -337,31 +267,33 @@ export function createDeliveryStore(database: Database) {
      * mark and record `opted_out`. A person who disconnects in OpenBot still disables it outright.
      */
     async setSmsOptOut(realm: string, identity: string, optedOut: boolean) {
-      return database
-        .update(deliveryBindings)
-        .set({ optedOutAt: optedOut ? sql`now()` : null })
-        .where(
-          and(
-            eq(deliveryBindings.transport, "sms"),
-            eq(deliveryBindings.realm, realm),
-            eq(deliveryBindings.identity, identity),
-            eq(deliveryBindings.enabled, true),
-          ),
-        )
-        .returning({
-          id: deliveryBindings.id,
-          ownerUserId: deliveryBindings.ownerUserId,
-          channelId: deliveryBindings.channelId,
+      const matching = deliveryDirectory()
+        .bindings()
+        .filter(
+          (binding) =>
+            binding.transport === "sms" &&
+            binding.realm === realm &&
+            binding.identity === identity &&
+            binding.enabled,
+        );
+      const changed: { id: string; ownerUserId: string; channelId: string }[] =
+        [];
+      for (const binding of matching) {
+        const updated = await deliveryDirectory().changeBinding(binding.id, {
+          optedOut,
         });
+        if (updated)
+          changed.push({
+            id: updated.id,
+            ownerUserId: updated.ownerUserId,
+            channelId: updated.channelId,
+          });
+      }
+      return changed;
     },
     /** The Bot's display name and avatar seed, so a chat surface can post under its identity. */
     async botIdentity(agentId: string) {
-      const [row] = await database
-        .select({ name: agents.name, avatarSeed: agentProfiles.avatarSeed })
-        .from(agents)
-        .leftJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
-        .where(eq(agents.id, agentId))
-        .limit(1);
+      const row = await bots().find(agentId);
       return row
         ? {
             agentId,

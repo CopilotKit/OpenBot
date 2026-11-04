@@ -113,6 +113,11 @@ export function toolNamesSent(
 export class CloningRemoteAgent extends AbstractAgent {
   headers?: AgentHeaders;
   private readonly remote: HeaderBearingAgent;
+  /**
+   * Middleware added after construction: a person's memory, their name. The runtime runs a clone per run, and
+   * `clone` builds a fresh instance that attaches OpenBot's own middleware again; without carrying these the clone
+   * ran without them, and a remote Bot never saw the person's memory.
+   */
   private extraMiddleware: (Middleware | MiddlewareFunction)[] = [];
   private captureExtraMiddleware = false;
 
@@ -173,6 +178,33 @@ export class CloningRemoteAgent extends AbstractAgent {
 }
 
 /**
+ * The first line of the prompt the CopilotKit runtime sends when it names a new thread
+ * (`handlers/intelligence/thread-names` in @copilotkit/runtime). It names the thread by running the SAME
+ * Bot again with that prompt, no tools and a throwaway thread, and retries up to three times when the
+ * answer is not a title.
+ */
+const RUNTIME_THREAD_TITLE_PROMPT =
+  "You generate short, specific conversation titles.";
+
+/**
+ * Whether this run is the runtime naming a thread rather than a turn of the conversation.
+ *
+ * Such a run must reach the model with no tools and execute nothing. Handed the Bot's tools, the model
+ * called them on the naming run too: one "please remember" wrote the memory up to four times (the turn,
+ * plus each naming attempt), and one routine request raised two approval cards.
+ */
+export function isThreadTitleRun(
+  input: Pick<RunAgentInput, "messages">,
+): boolean {
+  const first = input.messages?.[0];
+  return (
+    first?.role === "system" &&
+    typeof first.content === "string" &&
+    first.content.startsWith(RUNTIME_THREAD_TITLE_PROMPT)
+  );
+}
+
+/**
  * A built-in Bot that will not hand the model provider a conversation it is going to refuse.
  *
  * FOUND LIVE, ON CHAT. One person's next three messages each failed with
@@ -222,6 +254,12 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
+    // The runtime naming the thread: the Bot's model, and none of its tools, so the naming run does nothing.
+    if (isThreadTitleRun(input) && !("factory" in this.configuration))
+      return new BuiltInAgent({ ...this.configuration, tools: [] }).run({
+        ...input,
+        tools: [],
+      });
     /*
      * FIRST, before the history is touched or an attachment is stamped as sent. A run refused here
      * never started, and nothing downstream should record it as though it had.
@@ -457,7 +495,49 @@ export class UnavailableAgent extends AbstractAgent {
 }
 
 /**
- * The platform client, with one answer corrected.
+ * Intelligence refusing a thread, or a run's lock on it, for the Learning container named with it
+ * and not for anything about the thread: Learning is not on for this project
+ * (`LEARNING_NOT_ENABLED`), or the project has no container by that id
+ * (`LEARNING_CONTAINER_NOT_FOUND`).
+ *
+ * FOUND IN THE BROWSER. An organization whose Learning setting named a container its Intelligence
+ * project did not have, or whose project had Learning off, could not chat at all: every new
+ * conversation failed with "Failed to initialize thread". Learning is something conversations add
+ * to. Without it the conversation goes on, and the admin is shown why on the Learning page.
+ */
+const LEARNING_REFUSALS = new Set([
+  "LEARNING_NOT_ENABLED",
+  "LEARNING_CONTAINER_NOT_FOUND",
+]);
+
+/** A thread that went on without the Learning container it named, and Intelligence's reason. */
+export type LearningRefusal = {
+  code: string;
+  learningContainerId: string;
+  threadId: string;
+};
+
+/**
+ * The `error.code` of an Intelligence refusal. The runtime's `PlatformRequestError` carries the
+ * response body only in its message, as `Intelligence platform error <status>: <body>`.
+ */
+function platformErrorCode(error: unknown): string | undefined {
+  if (!(error instanceof Error) || error.name !== "PlatformRequestError")
+    return undefined;
+  const start = error.message.indexOf("{");
+  if (start < 0) return undefined;
+  try {
+    const body = JSON.parse(error.message.slice(start)) as {
+      error?: { code?: unknown };
+    };
+    return typeof body.error?.code === "string" ? body.error.code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The platform client, with a few answers corrected.
  *
  * A subclass rather than a wrapper. The runtime is handed this object and calls many methods on it,
  * and the base class keeps its state in `#private` fields. Extending keeps every other method on
@@ -468,25 +548,75 @@ export class UnavailableAgent extends AbstractAgent {
  * returns `Response.json` of whatever comes back, so an empty history here is the `{ messages: [] }`
  * the browser expects and a 200 instead of a 500.
  *
- * `ɵgetClientWsUrl` is the other, and only when `browserWsUrl` is given. That address is the one
+ * `ɵgetClientWsUrl` is another, and only when `browserWsUrl` is given. That address is the one
  * the runtime sends the browser in `/info`, and the browser opens it itself, so it has to be the
  * gateway as the browser can reach it. A server in a container reaches local Intelligence at
  * `host.docker.internal`, which a browser on the host cannot resolve, while the browser's
  * `localhost` is, inside the container, the container. Everything the server opens itself, the
  * runner and channel sockets, stays on `wsUrl`.
+ *
+ * `getOrCreateThread` and `ɵacquireThreadLock` are the last two, for a Learning container
+ * Intelligence will not take (see {@link LEARNING_REFUSALS}).
  */
 export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
   readonly #browserClientWsUrl: string | undefined;
+  readonly #onLearningRefused: ((refusal: LearningRefusal) => void) | undefined;
 
   constructor(
     config: ConstructorParameters<typeof CopilotKitIntelligence>[0] & {
       browserWsUrl?: string;
+      /** Told each time a thread goes on without the Learning container it named. */
+      onLearningRefused?: (refusal: LearningRefusal) => void;
     },
   ) {
-    const { browserWsUrl, ...platform } = config;
+    const { browserWsUrl, onLearningRefused, ...platform } = config;
     super(platform);
     const browser = browserWsUrl?.trim();
     this.#browserClientWsUrl = browser ? clientSocket(browser) : undefined;
+    this.#onLearningRefused = onLearningRefused;
+  }
+
+  /**
+   * The same request without its Learning container, when Intelligence refused it only because of
+   * that container. Undefined for any other failure, which the caller throws as it was.
+   */
+  #withoutRefusedLearning<
+    T extends { threadId: string; learningContainerId?: string },
+  >(params: T, error: unknown): T | undefined {
+    if (params.learningContainerId === undefined) return undefined;
+    const code = platformErrorCode(error);
+    if (!code || !LEARNING_REFUSALS.has(code)) return undefined;
+    this.#onLearningRefused?.({
+      code,
+      learningContainerId: params.learningContainerId,
+      threadId: params.threadId,
+    });
+    const { learningContainerId: _refused, ...rest } = params;
+    return rest as T;
+  }
+
+  override async getOrCreateThread(
+    params: Parameters<CopilotKitIntelligence["getOrCreateThread"]>[0],
+  ) {
+    try {
+      return await super.getOrCreateThread(params);
+    } catch (error) {
+      const without = this.#withoutRefusedLearning(params, error);
+      if (!without) throw error;
+      return super.getOrCreateThread(without);
+    }
+  }
+
+  override async ɵacquireThreadLock(
+    params: Parameters<CopilotKitIntelligence["ɵacquireThreadLock"]>[0],
+  ) {
+    try {
+      return await super.ɵacquireThreadLock(params);
+    } catch (error) {
+      const without = this.#withoutRefusedLearning(params, error);
+      if (!without) throw error;
+      return super.ɵacquireThreadLock(without);
+    }
   }
 
   override ɵgetClientWsUrl(): string {

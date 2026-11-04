@@ -6,7 +6,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { agents, users } from "./core";
+import { users } from "./core";
 import { jsonb } from "./json";
 // Recordings from the retired "Teach a browser workflow" panel; nothing reads or writes this table now.
 export const demonstrations = pgTable(
@@ -16,9 +16,7 @@ export const demonstrations = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    botId: text("bot_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    botId: text("bot_id").notNull(),
     title: text("title").notNull(),
     status: text("status")
       .$type<"recording" | "stopped" | "drafted" | "published">()

@@ -1,15 +1,21 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { createAuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
-import { encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { credentials, mcpServers, mcpTools } from "../src/db/schema";
-import { createPluginStore } from "../src/plugins/store";
+import { createPluginStore, type PluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
+import {
+  changeServer,
+  purgeSecrets,
+  recordingCredentialStore,
+  removeServers,
+  seedCredential,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * The whole path an administrator's request actually takes, with nothing stubbed between the request
@@ -19,32 +25,19 @@ import { testEnvironment } from "./support/environment";
  * route's mapping of them against a stubbed store. Both passing does not prove the pair is wired
  * together, and the failure that would live in the gap is quiet in exactly the way that matters: a
  * refusal that reaches the browser as a 500 reads as a broken deployment rather than a correctable
- * mistake, and a refusal that stops short of the write leaves a row pointing at a credential the
- * next refresh spends. So this asks the question end to end and then looks in the table.
+ * mistake, and a refusal that stops short of the write leaves an app pointing at a credential the
+ * next refresh spends. So this asks the question end to end and then looks at what Intelligence holds.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: {
-    // Never read: Drive's tool list is in this deployment's own code, so the add path here reaches
-    // no vault. Loud rather than absent, so a call that starts reaching one is named.
-    readSecret: async () => {
-      throw new Error("this suite does not read credentials");
-    },
-    create: async () => {
-      throw new Error("this suite does not write credentials");
-    },
-    revoke: async () => {
-      throw new Error("this suite does not revoke credentials");
-    },
-  },
-  encryptionKey: "x".repeat(44),
-  policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
-});
+/**
+ * What the store asked of the vault. Drive's tool list is in this deployment's own code, so the
+ * curated add path reaches no vault at all: no read, no write. Recorded rather than absent, so a call
+ * that starts reaching one is named.
+ */
+const vaultCalls: string[] = [];
+let store: PluginStore;
 
 const ADMIN = {
   id: "admin-1",
@@ -79,80 +72,82 @@ function request(
 
 const serverId = "google-drive";
 const suffix = randomUUID().slice(0, 8);
-const personalCredentialId = randomUUID();
+let personalCredentialId: string;
 const customServerId = `route-custom-${suffix}`;
-const foreignCredentialId = randomUUID();
-const ownCredentialId = randomUUID();
+let foreignCredentialId: string;
+let ownCredentialId: string;
 
 /** What this deployment already had, so a database somebody is using is left as it was found. */
 let existing: { credentialId: string | null } | null = null;
 
 beforeAll(async () => {
-  const [row] = await database
-    .select({ credentialId: mcpServers.credentialId })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, serverId));
-  existing = row ?? null;
+  await useTestVault();
+  const recorded = await recordingCredentialStore({
+    calls: vaultCalls,
+    created: [],
+  });
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: {
+      ...recorded,
+      reveal: async (id, accessor) => {
+        vaultCalls.push(`reveal:${id}`);
+        return recorded.reveal(id, accessor);
+      },
+    },
+    encryptionKey: "x".repeat(44),
+    policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
+  });
 
-  const encrypted = await encryptSecret(`${"A".repeat(43)}=`, "not-read-here");
-  await database.insert(credentials).values([
-    {
-      id: personalCredentialId,
+  const app = await storedServer(serverId);
+  existing = app ? { credentialId: app.credentialId } : null;
+
+  personalCredentialId = (
+    await seedCredential({
       kind: "mcp_user_token",
       provider: serverId,
       keyId: `user_someone_else_${suffix}`,
-      encryptedValue: encrypted,
-      metadata: {},
-    },
-    {
-      id: foreignCredentialId,
+      plaintext: "not-read-here",
+    })
+  ).id;
+  foreignCredentialId = (
+    await seedCredential({
       kind: "mcp",
       // Minted for a different server, which is what makes it somebody else's to spend.
       provider: `route-elsewhere-${suffix}`,
       keyId: `mcp-elsewhere-${suffix}`,
-      encryptedValue: encrypted,
-      metadata: {},
-    },
-    {
-      id: ownCredentialId,
+      plaintext: "not-read-here",
+    })
+  ).id;
+  ownCredentialId = (
+    await seedCredential({
       kind: "mcp",
       provider: customServerId,
       keyId: `mcp-${customServerId}`,
-      encryptedValue: encrypted,
-      metadata: {},
-    },
-  ]);
+      plaintext: "not-read-here",
+    })
+  ).id;
 });
 
 afterAll(async () => {
   if (existing) {
-    await database
-      .update(mcpServers)
-      .set({ credentialId: existing.credentialId })
-      .where(eq(mcpServers.id, serverId));
+    await changeServer(serverId, { credentialId: existing.credentialId });
   } else {
-    await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
-    await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
+    await removeServers([serverId]);
   }
-  await database.delete(mcpTools).where(eq(mcpTools.serverId, customServerId));
-  await database.delete(mcpServers).where(eq(mcpServers.id, customServerId));
-  await database
-    .delete(credentials)
-    .where(
-      inArray(credentials.id, [
-        personalCredentialId,
-        foreignCredentialId,
-        ownCredentialId,
-      ]),
-    );
+  await removeServers([customServerId]);
+  await purgeSecrets([
+    personalCredentialId,
+    foreignCredentialId,
+    ownCredentialId,
+  ]);
 });
 
 async function serverRow() {
-  const [row] = await database
-    .select({ credentialId: mcpServers.credentialId })
-    .from(mcpServers)
-    .where(eq(mcpServers.id, serverId));
-  return row ?? null;
+  const app = await storedServer(serverId);
+  return app ? { credentialId: app.credentialId } : null;
 }
 
 describe("adding a curated server over HTTP", () => {
@@ -185,12 +180,14 @@ describe("adding a curated server over HTTP", () => {
 
     expect(response.status).toBe(200);
     expect((await response.json()).server.id).toBe(serverId);
-    // Whatever the column held before, not null: an add that names no credential leaves a registered
+    // Whatever the pointer held before, not null: an add that names no credential leaves a registered
     // OAuth client alone, so asserting null here would pass on a fresh database and fail on the one
     // deployment shape that behaviour exists for.
     expect(await serverRow()).toEqual({
       credentialId: existing?.credentialId ?? null,
     });
+    // Drive's tool list is this deployment's own: nothing in the curated add path reached the vault.
+    expect(vaultCalls).toEqual([]);
   });
 
   test("somebody who is not an administrator is refused before the store", async () => {
@@ -224,11 +221,7 @@ describe("adding a server by URL over HTTP", () => {
 
     expect(response.status).toBe(400);
 
-    const rows = await database
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, customServerId));
-    expect(rows).toHaveLength(0);
+    expect(await storedServer(customServerId)).toBeNull();
   });
 
   test("re-addressing a server that holds a token is refused", async () => {
@@ -256,11 +249,9 @@ describe("adding a server by URL over HTTP", () => {
     );
     expect(moved.status).toBe(400);
 
-    const [row] = await database
-      .select({ url: mcpServers.url })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, customServerId));
-    expect(row?.url).toBe("https://legit.vendor.example/mcp");
+    expect((await storedServer(customServerId))?.url).toBe(
+      "https://legit.vendor.example/mcp",
+    );
   });
 });
 

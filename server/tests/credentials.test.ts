@@ -1,33 +1,63 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
+import type { AuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
 import {
   createCredential,
   createCredentialStore,
-  decryptCredentialForUse,
   decryptSecret,
   encryptSecret,
+  revealCredentialForUse,
   resolveModelApiKey,
   revokeCredential,
   rotateCredential,
 } from "../src/credentials";
-import { createDatabase } from "../src/db/client";
-import { credentials } from "../src/db/schema";
-import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { SecretNameTakenError } from "../src/vault/client";
+import type { ConnectionsDirectory } from "../src/vault/directory";
 import { testEnvironment } from "./support/environment";
+import {
+  purgeSecrets,
+  recordingCredentialStore,
+  secretsNamed,
+  secretValue,
+  seedCredential,
+  storedSecret,
+  useTestVault,
+} from "./support/vault";
 
 const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const config = loadConfig(testEnvironment({ KEY_ENCRYPTION_KEY: key }));
-const database = createDatabase(testDatabaseUrl(), TEST_POOL);
-const credentialIds: string[] = [];
+// Every secret a test stores, in Intelligence's vault, purged when the file is done.
+const secretIds: string[] = [];
+let directory: ConnectionsDirectory;
 
-afterEach(async () => {
-  for (const credentialId of credentialIds.splice(0)) {
-    await database.delete(credentials).where(eq(credentials.id, credentialId));
-  }
+beforeAll(async () => {
+  directory = await useTestVault();
 });
+
+afterAll(async () => {
+  await purgeSecrets(secretIds.splice(0));
+});
+
+/** The real store, recording which of its writes a caller made; what it stores is purged. */
+function recordingStore(calls: string[]) {
+  return recordingCredentialStore({ calls, created: secretIds });
+}
+
+function recordingAudit(audited: unknown[]): AuditStore {
+  return {
+    insert: async (event) => {
+      audited.push(event);
+    },
+  } as AuditStore;
+}
+
+async function seeded(input: Parameters<typeof seedCredential>[0]) {
+  const secret = await seedCredential(input);
+  secretIds.push(secret.id);
+  return secret;
+}
 
 describe("credential encryption", () => {
   test("stores a versioned AES-GCM envelope and restores it only server-side", async () => {
@@ -44,41 +74,19 @@ describe("credential encryption", () => {
   });
 
   test("creates a write-only credential and audits safe metadata", async () => {
-    const stored: unknown[] = [];
+    const calls: string[] = [];
     const audited: unknown[] = [];
+    const keyId = `primary-${randomUUID()}`;
 
     const credential = await createCredential(
       {
-        encryptionKey: key,
-        store: {
-          create: async (value) => {
-            stored.push(value);
-            return { id: "credential-1", revokedAt: null };
-          },
-          // An administrator's credential is replaced by a new row, never edited in place, so a
-          // call here would mean this path had changed shape.
-          updateSecret: async () => {
-            throw new Error(
-              "administrator credentials are not updated in place",
-            );
-          },
-          rotate: async () => {
-            throw new Error("nothing live to replace, so create is the path");
-          },
-          revoke: async () => new Date(),
-          isLive: async () => false,
-          findLiveByKey: async () => null,
-        },
-        auditStore: {
-          insert: async (event) => {
-            audited.push(event);
-          },
-        },
+        store: await recordingStore(calls),
+        auditStore: recordingAudit(audited),
       },
       {
         kind: "model",
         provider: "openai",
-        keyId: "primary",
+        keyId,
         metadata: { label: "Production OpenAI" },
         plaintext: "openai-secret-value",
         actorUserId: "admin",
@@ -86,73 +94,67 @@ describe("credential encryption", () => {
     );
 
     expect(credential).toEqual({
-      id: "credential-1",
+      id: expect.any(String),
       kind: "model",
       provider: "openai",
-      keyId: "primary",
+      keyId,
       metadata: { label: "Production OpenAI" },
       revokedAt: null,
     });
-    expect(JSON.stringify(stored)).not.toContain("openai-secret-value");
+    // Nothing live under the key, so this was an addition, never a replacement.
+    expect(calls).toEqual(["create"]);
+    // The vault holds the value; what it hands back about the secret never carries it.
+    expect(JSON.stringify(await storedSecret(credential.id))).not.toContain(
+      "openai-secret-value",
+    );
+    expect(await secretValue(credential.id)).toBe("openai-secret-value");
     expect(audited).toEqual([
       {
         eventType: "credential.created",
         targetType: "credential",
-        targetId: "credential-1",
+        targetId: credential.id,
         actorUserId: "admin",
         payload: {
           kind: "model",
           provider: "openai",
-          keyId: "primary",
+          keyId,
         },
       },
     ]);
   });
 
   test("rotates then revokes credentials without returning plaintext", async () => {
-    const rotated: { previousCredentialId: string }[] = [];
-    const revoked: string[] = [];
+    const calls: string[] = [];
     const audited: unknown[] = [];
     const service = {
-      encryptionKey: key,
-      store: {
-        create: async () => ({ id: "credential-unused", revokedAt: null }),
-        updateSecret: async () => {
-          throw new Error("administrator credentials are not updated in place");
-        },
-        rotate: async (input: { previousCredentialId: string }) => {
-          rotated.push(input);
-          return { id: "credential-new", revokedAt: null };
-        },
-        revoke: async (id: string) => {
-          revoked.push(id);
-          return new Date("2026-08-13T12:00:00.000Z");
-        },
-      },
-      auditStore: {
-        insert: async (event: unknown) => {
-          audited.push(event);
-        },
-      },
+      store: await recordingStore(calls),
+      auditStore: recordingAudit(audited),
     };
-
-    await rotateCredential(service, {
-      previousCredentialId: "credential-old",
+    const keyId = `secondary-${randomUUID()}`;
+    const previous = await seeded({
       kind: "model",
       provider: "openai",
-      keyId: "secondary",
+      keyId,
+      plaintext: "old-openai-secret",
+    });
+
+    const rotated = await rotateCredential(service, {
+      previousCredentialId: previous.id,
+      kind: "model",
+      provider: "openai",
+      keyId,
       metadata: { label: "Rotated OpenAI" },
       plaintext: "new-openai-secret",
       actorUserId: "admin",
     });
-    await revokeCredential(service, "credential-new", "admin");
+    await revokeCredential(service, rotated.id, "admin");
 
-    // The rotation retires the previous credential inside the store's own
-    // transaction, so the service makes no separate revoke call of its own.
-    expect(rotated.map((call) => call.previousCredentialId)).toEqual([
-      "credential-old",
-    ]);
-    expect(revoked).toEqual(["credential-new"]);
+    // The rotation retires the previous credential inside the vault's own step, so the service
+    // makes no separate revoke call of its own.
+    expect(calls).toEqual([`rotate:${previous.id}`, `revoke:${rotated.id}`]);
+    expect((await storedSecret(previous.id))?.revokedAt).not.toBeNull();
+    expect((await storedSecret(rotated.id))?.replaces).toBe(previous.id);
+    expect((await storedSecret(rotated.id))?.revokedAt).not.toBeNull();
     expect(JSON.stringify(rotated)).not.toContain("new-openai-secret");
     expect(JSON.stringify(audited)).not.toContain("new-openai-secret");
     expect(
@@ -161,94 +163,104 @@ describe("credential encryption", () => {
   });
 
   test("records the refusal when the rotation fails, and never a success", async () => {
-    // The store's rotate is one transaction, so a failure commits nothing and
-    // no row may say a rotation happened. The refusal itself is recorded
-    // though: a rotation aimed at a revoked credential, at one that does not
-    // exist, or at a key other than the credential's own is either a caller
-    // with a bug or an attempt to retire somebody else's key, and it used to
-    // leave nothing behind. The caller still sees the original cause.
+    // The vault's rotation is one step, so a failure stores nothing and no row may say a rotation
+    // happened. The refusal itself is recorded though: a rotation aimed at a revoked credential, at
+    // one that does not exist, or at a key other than the credential's own is either a caller with
+    // a bug or an attempt to retire somebody else's key, and it used to leave nothing behind. The
+    // caller still sees the original cause.
+    const calls: string[] = [];
     const audited: unknown[] = [];
-    const service = {
-      encryptionKey: key,
-      store: {
-        create: async () => {
-          throw new Error("create is not part of a rotation");
-        },
-        rotate: async () => {
-          throw new Error("Previous credential is already revoked");
-        },
-        revoke: async () => {
-          throw new Error("revoke is not part of a failed rotation");
-        },
-      },
-      auditStore: {
-        insert: async (event: unknown) => {
-          audited.push(event);
-        },
-      },
-    };
+    const keyId = `primary-${randomUUID()}`;
+    const previous = await seeded({
+      kind: "model",
+      provider: "openai",
+      keyId,
+      plaintext: "old-openai-secret",
+      revoked: true,
+    });
 
     await expect(
-      rotateCredential(service, {
-        previousCredentialId: "credential-old",
-        kind: "model",
-        provider: "openai",
-        keyId: "primary",
-        metadata: {},
-        plaintext: "new-openai-secret",
-        actorUserId: "admin",
-      }),
+      rotateCredential(
+        {
+          store: await recordingStore(calls),
+          auditStore: recordingAudit(audited),
+        },
+        {
+          previousCredentialId: previous.id,
+          kind: "model",
+          provider: "openai",
+          keyId,
+          metadata: {},
+          plaintext: "new-openai-secret",
+          actorUserId: "admin",
+        },
+      ),
     ).rejects.toThrow("Previous credential is already revoked");
 
     expect(audited).toEqual([
       {
         eventType: "credential.rotation_refused",
         targetType: "credential",
-        targetId: "credential-old",
+        targetId: previous.id,
         actorUserId: "admin",
         payload: {
           kind: "model",
           provider: "openai",
-          keyId: "primary",
+          keyId,
           reason: "Previous credential is already revoked",
         },
       },
     ]);
+    expect(
+      (await secretsNamed({ kind: "model", keyId })).map((s) => s.id),
+    ).toEqual([previous.id]);
   });
 
-  test("decrypts only an active credential for server-side use", async () => {
-    const encryptedValue = await encryptSecret(key, "connector-secret");
+  test("reveals only an active credential for server-side use", async () => {
+    const store = createCredentialStore(directory);
+    const accessor = { purpose: "connector_call" };
+    const live = await seeded({
+      kind: "connector",
+      provider: `connector-${randomUUID()}`,
+      keyId: "token",
+      plaintext: "connector-secret",
+    });
+    const revoked = await seeded({
+      kind: "connector",
+      provider: `connector-${randomUUID()}`,
+      keyId: "token",
+      plaintext: "connector-secret",
+      revoked: true,
+    });
 
     await expect(
-      decryptCredentialForUse(
-        key,
-        { readSecret: async () => ({ encryptedValue, revokedAt: null }) },
-        "credential-1",
-      ),
+      revealCredentialForUse(store, live.id, accessor),
     ).resolves.toBe("connector-secret");
     await expect(
-      decryptCredentialForUse(
-        key,
-        { readSecret: async () => ({ encryptedValue, revokedAt: new Date() }) },
-        "credential-1",
-      ),
+      revealCredentialForUse(store, revoked.id, accessor),
     ).rejects.toThrow("Credential is revoked");
   });
 });
 
 describe("model credential resolution", () => {
+  const accessor = { purpose: "model_run" };
+
   test("prefers a stored model credential over the environment", async () => {
-    const encryptedValue = await encryptSecret(key, "stored-openai-key");
+    const keyId = `openai-api-key-${randomUUID()}`;
+    await seeded({
+      kind: "model",
+      provider: "openai",
+      keyId,
+      plaintext: "stored-openai-key",
+    });
 
     await expect(
       resolveModelApiKey({
-        encryptionKey: key,
-        reader: {
-          readModelSecret: async () => ({ encryptedValue }),
-        },
+        reader: createCredentialStore(directory),
         provider: "openai",
-        keyId: "openai-api-key",
+        keyId,
         environment: { OPENAI_API_KEY: "environment-openai-key" },
+        accessor,
       }),
     ).resolves.toBe("stored-openai-key");
   });
@@ -256,11 +268,11 @@ describe("model credential resolution", () => {
   test("uses OPENAI_API_KEY when no stored credential exists", async () => {
     await expect(
       resolveModelApiKey({
-        encryptionKey: key,
-        reader: { readModelSecret: async () => null },
+        reader: createCredentialStore(directory),
         provider: "openai",
-        keyId: "openai-api-key",
+        keyId: `openai-api-key-${randomUUID()}`,
         environment: { OPENAI_API_KEY: " environment-openai-key " },
+        accessor,
       }),
     ).resolves.toBe("environment-openai-key");
   });
@@ -268,174 +280,150 @@ describe("model credential resolution", () => {
   test("returns null when neither credential source is configured", async () => {
     await expect(
       resolveModelApiKey({
-        encryptionKey: key,
-        reader: { readModelSecret: async () => null },
+        reader: createCredentialStore(directory),
         provider: "openai",
-        keyId: "openai-api-key",
+        keyId: `openai-api-key-${randomUUID()}`,
         environment: {},
+        accessor,
       }),
     ).resolves.toBeNull();
   });
 
-  test("rejects corrupt stored ciphertext instead of falling back to the environment", async () => {
+  test("rejects a stored key the vault refuses to reveal instead of falling back to the environment", async () => {
+    // The vault holds a key under this name and will not hand it over: a fault, not "no key". An
+    // empty purpose is a request the vault refuses as invalid, which is that fault, from the real
+    // vault. Answering with the environment's key here would run a Bot on a key nobody chose.
+    const keyId = `openai-api-key-${randomUUID()}`;
+    await seeded({
+      kind: "model",
+      provider: "openai",
+      keyId,
+      plaintext: "stored-openai-key",
+    });
+
     await expect(
       resolveModelApiKey({
-        encryptionKey: key,
-        reader: {
-          readModelSecret: async () => ({ encryptedValue: "corrupt" }),
-        },
+        reader: createCredentialStore(directory),
         provider: "openai",
-        keyId: "openai-api-key",
+        keyId,
         environment: { OPENAI_API_KEY: "environment-openai-key" },
+        accessor: { purpose: "" },
       }),
-    ).rejects.toThrow("Credential envelope is invalid");
+    ).rejects.toThrow("VAULT_VALIDATION_ERROR");
   });
 });
 
 describe("model credential store lookup", () => {
   test("selects the live matching model credential and ignores the rest", async () => {
-    // A key holds one live credential, which `credentials_active_key_idx`
-    // enforces, so the lookup never has more than one candidate to choose
-    // between. What is under test is the filter: the rows that do not match on
-    // kind, provider or keyId, and the revoked row for this very key, all have
-    // to be passed over.
-    const activeId = randomUUID();
-    const ignoredIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
-    credentialIds.push(activeId, ...ignoredIds);
-
-    await database.insert(credentials).values([
-      {
-        id: activeId,
-        kind: "model",
-        provider: "openai",
-        keyId: "openai-api-key",
-        encryptedValue: "active-value",
-        metadata: {},
-        createdAt: new Date("2026-02-01T00:00:00.000Z"),
-      },
-      {
-        id: ignoredIds[0]!,
-        kind: "connector",
-        provider: "openai",
-        keyId: "openai-api-key",
-        encryptedValue: "wrong-kind-value",
-        metadata: {},
-        createdAt: new Date("2026-03-01T00:00:00.000Z"),
-      },
-      {
-        id: ignoredIds[1]!,
-        kind: "model",
-        provider: "other",
-        keyId: "openai-api-key",
-        encryptedValue: "wrong-provider-value",
-        metadata: {},
-        createdAt: new Date("2026-03-01T00:00:00.000Z"),
-      },
-      {
-        id: ignoredIds[2]!,
-        kind: "model",
-        provider: "openai",
-        keyId: "other-api-key",
-        encryptedValue: "wrong-key-value",
-        metadata: {},
-        createdAt: new Date("2026-03-01T00:00:00.000Z"),
-      },
-      {
-        id: ignoredIds[3]!,
-        kind: "model",
-        provider: "openai",
-        keyId: "openai-api-key",
-        encryptedValue: "revoked-value",
-        metadata: {},
-        revokedAt: new Date("2026-03-01T00:00:00.000Z"),
-        createdAt: new Date("2026-01-01T00:00:00.000Z"),
-      },
-    ]);
+    // A key holds one live credential, which the vault enforces, so the lookup never has more than
+    // one candidate to choose between. What is under test is the filter: the secrets that do not
+    // match on kind, provider or keyId, and the revoked one for this very key, all have to be passed
+    // over.
+    const keyId = `openai-api-key-${randomUUID()}`;
+    await seeded({
+      kind: "model",
+      provider: "openai",
+      keyId,
+      plaintext: "revoked-value",
+      revoked: true,
+    });
+    await seeded({
+      kind: "model",
+      provider: "openai",
+      keyId,
+      plaintext: "active-value",
+    });
+    await seeded({
+      kind: "connector",
+      provider: "openai",
+      keyId,
+      plaintext: "wrong-kind-value",
+    });
+    await seeded({
+      kind: "model",
+      provider: "other",
+      keyId,
+      plaintext: "wrong-provider-value",
+    });
+    await seeded({
+      kind: "model",
+      provider: "openai",
+      keyId: `other-api-key-${randomUUID()}`,
+      plaintext: "wrong-key-value",
+    });
 
     await expect(
-      createCredentialStore(database).readModelSecret({
-        provider: "openai",
-        keyId: "openai-api-key",
-      }),
-    ).resolves.toEqual({ encryptedValue: "active-value" });
+      createCredentialStore(directory).revealModelSecret(
+        { provider: "openai", keyId },
+        { purpose: "model_run" },
+      ),
+    ).resolves.toBe("active-value");
   });
 });
 
 describe("credential store rotation", () => {
   test("retires the previous credential and stores the new one together", async () => {
-    const store = createCredentialStore(database);
-    const previousId = randomUUID();
-    const keyId = `rotation-atomic-${previousId}`;
-    credentialIds.push(previousId);
-    await database.insert(credentials).values({
-      id: previousId,
+    const store = createCredentialStore(directory);
+    const keyId = `rotation-atomic-${randomUUID()}`;
+    const previous = await seeded({
       kind: "model",
       provider: "openai",
       keyId,
-      encryptedValue: "initial",
-      metadata: {},
+      plaintext: "initial",
     });
 
     const rotated = await store.rotate({
-      previousCredentialId: previousId,
+      previousCredentialId: previous.id,
       kind: "model",
       provider: "openai",
       keyId,
       metadata: {},
-      encryptedValue: "rotated",
+      plaintext: "rotated",
     });
-    credentialIds.push(rotated.id);
+    secretIds.push(rotated.id);
 
-    const rows = await database
-      .select({
-        id: credentials.id,
-        encryptedValue: credentials.encryptedValue,
-        revokedAt: credentials.revokedAt,
-      })
-      .from(credentials)
-      .where(eq(credentials.keyId, keyId));
-    const byId = Object.fromEntries(rows.map((row) => [row.id, row]));
+    const byId = Object.fromEntries(
+      (await secretsNamed({ kind: "model", provider: "openai", keyId })).map(
+        (secret) => [secret.id, secret],
+      ),
+    );
 
-    expect(byId[previousId]?.revokedAt).not.toBeNull();
+    expect(byId[previous.id]?.revokedAt).not.toBeNull();
     expect(byId[rotated.id]?.revokedAt).toBeNull();
-    expect(byId[rotated.id]?.encryptedValue).toBe("rotated");
+    expect(await secretValue(rotated.id)).toBe("rotated");
   });
 
   test("refuses a previous credential that is already revoked, and stores nothing", async () => {
-    const store = createCredentialStore(database);
-    const previousId = randomUUID();
-    const keyId = `rotation-revoked-${previousId}`;
-    credentialIds.push(previousId);
-    await database.insert(credentials).values({
-      id: previousId,
+    const store = createCredentialStore(directory);
+    const keyId = `rotation-revoked-${randomUUID()}`;
+    const previous = await seeded({
       kind: "model",
       provider: "openai",
       keyId,
-      encryptedValue: "initial",
-      metadata: {},
-      revokedAt: new Date("2026-08-01T00:00:00.000Z"),
+      plaintext: "initial",
+      revoked: true,
     });
 
     await expect(
       store.rotate({
-        previousCredentialId: previousId,
+        previousCredentialId: previous.id,
         kind: "model",
         provider: "openai",
         keyId,
         metadata: {},
-        encryptedValue: "rotated",
+        plaintext: "rotated",
       }),
     ).rejects.toThrow("already revoked");
 
-    const rows = await database
-      .select({ id: credentials.id })
-      .from(credentials)
-      .where(eq(credentials.keyId, keyId));
-    expect(rows.map((row) => row.id)).toEqual([previousId]);
+    expect(
+      (await secretsNamed({ kind: "model", provider: "openai", keyId })).map(
+        (secret) => secret.id,
+      ),
+    ).toEqual([previous.id]);
   });
 
   test("refuses a previous credential that does not exist, and stores nothing", async () => {
-    const store = createCredentialStore(database);
+    const store = createCredentialStore(directory);
     const missing = randomUUID();
     const keyId = `rotation-missing-${missing}`;
 
@@ -446,66 +434,50 @@ describe("credential store rotation", () => {
         provider: "openai",
         keyId,
         metadata: {},
-        encryptedValue: "orphan-if-broken",
+        plaintext: "orphan-if-broken",
       }),
     ).rejects.toThrow("not found");
 
-    // Nothing was written, so the failed rotation left no credential behind
-    // for this key at all.
-    const rows = await database
-      .select({ id: credentials.id })
-      .from(credentials)
-      .where(eq(credentials.keyId, keyId));
-    expect(rows).toEqual([]);
+    // Nothing was written, so the failed rotation left no credential behind for this key at all.
+    expect(
+      await secretsNamed({ kind: "model", provider: "openai", keyId }),
+    ).toEqual([]);
   });
 
   test("refuses a rotation aimed at a different kind, provider or keyId", async () => {
-    // Rotating one credential with another's identity would retire a secret
-    // the caller never named and leave its key with nothing live, which is a
-    // worse outcome than a raised error.
-    const store = createCredentialStore(database);
-    const previousId = randomUUID();
-    const previousKey = `mismatch-previous-${previousId}`;
-    credentialIds.push(previousId);
-    await database.insert(credentials).values({
-      id: previousId,
+    // Rotating one credential with another's identity would retire a secret the caller never named
+    // and leave its key with nothing live, which is a worse outcome than a raised error.
+    const store = createCredentialStore(directory);
+    const suffix = randomUUID();
+    const previous = await seeded({
       kind: "model",
       provider: "openai",
-      keyId: previousKey,
-      encryptedValue: "previous",
-      metadata: {},
+      keyId: `mismatch-previous-${suffix}`,
+      plaintext: "previous",
     });
 
     await expect(
       store.rotate({
-        previousCredentialId: previousId,
+        previousCredentialId: previous.id,
         kind: "model",
         provider: "openai",
-        keyId: `mismatch-input-${previousId}`,
+        keyId: `mismatch-input-${suffix}`,
         metadata: {},
-        encryptedValue: "would-retire-the-wrong-secret",
+        plaintext: "would-retire-the-wrong-secret",
       }),
     ).rejects.toThrow("does not match");
 
-    const [after] = await database
-      .select({ revokedAt: credentials.revokedAt })
-      .from(credentials)
-      .where(eq(credentials.id, previousId));
-    expect(after?.revokedAt).toBeNull();
+    expect((await storedSecret(previous.id))?.revokedAt).toBeNull();
   });
 
   test("refuses to revoke a credential that is already revoked", async () => {
-    const store = createCredentialStore(database);
-    const id = randomUUID();
-    credentialIds.push(id);
-    await database.insert(credentials).values({
-      id,
+    const store = createCredentialStore(directory);
+    const { id } = await seeded({
       kind: "model",
       provider: "openai",
-      keyId: `revoke-guard-${id}`,
-      encryptedValue: "one",
-      metadata: {},
-      revokedAt: new Date("2026-08-01T00:00:00.000Z"),
+      keyId: `revoke-guard-${randomUUID()}`,
+      plaintext: "one",
+      revoked: true,
     });
 
     await expect(store.revoke(id)).rejects.toThrow("already revoked");
@@ -518,41 +490,42 @@ describe("credential store rotation", () => {
 });
 
 describe("one live credential per key", () => {
-  test("the index refuses a second live credential for the same key", async () => {
-    const first = randomUUID();
-    const second = randomUUID();
-    credentialIds.push(first, second);
-    const keyId = `unique-active-${first}`;
-    await database.insert(credentials).values({
-      id: first,
+  test("the vault refuses a second live credential for the same key", async () => {
+    const keyId = `unique-active-${randomUUID()}`;
+    await seeded({
       kind: "model",
       provider: "openai",
       keyId,
-      encryptedValue: "first",
-      metadata: {},
+      plaintext: "first",
     });
 
+    const second = randomUUID();
+    secretIds.push(second);
     await expect(
-      (async () =>
-        database.insert(credentials).values({
-          id: second,
-          kind: "model",
-          provider: "openai",
-          keyId,
-          encryptedValue: "second",
-          metadata: {},
-        }))(),
-    ).rejects.toThrow();
+      directory.createSecret({
+        id: second,
+        kind: "model",
+        provider: "openai",
+        keyId,
+        ownerUserId: null,
+        metadata: {},
+        plaintext: "second",
+      }),
+    ).rejects.toBeInstanceOf(SecretNameTakenError);
+    expect(
+      (await secretsNamed({ kind: "model", provider: "openai", keyId })).filter(
+        (secret) => secret.revokedAt === null,
+      ),
+    ).toHaveLength(1);
   });
 
   test("storing a credential for a key that has one replaces it", async () => {
-    // The Credentials page offers Add and Revoke and no rotate control, so
-    // replacing a key is done by adding one for the same provider and keyId.
-    // That has to retire what is there rather than raise a unique violation.
+    // The Credentials page offers Add and Revoke and no rotate control, so replacing a key is done
+    // by adding one for the same provider and keyId. That has to retire what is there rather than
+    // be refused because the name is taken.
     const audited: { eventType: string; targetId?: string }[] = [];
     const service = {
-      encryptionKey: key,
-      store: createCredentialStore(database),
+      store: await recordingStore([]),
       auditStore: {
         insert: async (event: { eventType: string; targetId?: string }) => {
           audited.push(event);
@@ -569,7 +542,6 @@ describe("one live credential per key", () => {
       plaintext: "first-secret",
       actorUserId: "admin",
     });
-    credentialIds.push(first.id);
 
     const second = await createCredential(service, {
       kind: "model",
@@ -579,14 +551,13 @@ describe("one live credential per key", () => {
       plaintext: "second-secret",
       actorUserId: "admin",
     });
-    credentialIds.push(second.id);
 
     expect(second.id).not.toBe(first.id);
-    const rows = await database
-      .select({ id: credentials.id, revokedAt: credentials.revokedAt })
-      .from(credentials)
-      .where(eq(credentials.keyId, keyId));
-    const byId = Object.fromEntries(rows.map((row) => [row.id, row]));
+    const byId = Object.fromEntries(
+      (await secretsNamed({ kind: "model", provider: "openai", keyId })).map(
+        (secret) => [secret.id, secret],
+      ),
+    );
     expect(byId[first.id]?.revokedAt).not.toBeNull();
     expect(byId[second.id]?.revokedAt).toBeNull();
 
@@ -600,91 +571,76 @@ describe("one live credential per key", () => {
 
 /**
  * The in-place write, which exists for one caller: a connector whose vendor rotates its refresh
- * token on every exchange. Everything else replaces a credential by writing a new row and revoking
+ * token on every exchange. Everything else replaces a credential by storing a new one and revoking
  * the old one, because that is the act that has an old grant to withdraw.
  */
 describe("credential secret update", () => {
-  /** A live `mcp_user_token` row, which is the only kind of row this write is for. */
+  /** A live `mcp_user_token` secret, which is the only kind this write is for. */
   async function liveCredential(plaintext: string, revoked = false) {
-    const id = randomUUID();
-    credentialIds.push(id);
-    await database.insert(credentials).values({
-      id,
+    const secret = await seeded({
       kind: "mcp_user_token",
       provider: "notion",
-      keyId: `user-${id}`,
-      encryptedValue: await encryptSecret(key, plaintext),
-      metadata: {},
-      revokedAt: revoked ? new Date("2026-03-01T00:00:00.000Z") : null,
+      keyId: `user-${randomUUID()}`,
+      plaintext,
+      revoked,
     });
-    return id;
+    return secret;
   }
 
-  test("re-encrypts a live row without moving it", async () => {
-    const store = createCredentialStore(database);
-    const id = await liveCredential("rt-1");
+  test("replaces a live secret's value without moving it", async () => {
+    const store = createCredentialStore(directory);
+    const { id } = await liveCredential("rt-1");
 
-    await store.updateSecret(id, await encryptSecret(key, "rt-2"));
+    await store.updateSecret(id, "rt-2");
 
-    // The same row, addressed by the same id everything else already holds, now carrying the new
+    // The same secret, addressed by the same id everything else already holds, now carrying the new
     // token — and still live, because nothing about the grant changed.
-    const stored = await store.readSecret(id);
-    expect(stored?.revokedAt).toBeNull();
-    await expect(
-      decryptSecret(key, stored?.encryptedValue ?? ""),
-    ).resolves.toBe("rt-2");
+    expect((await storedSecret(id))?.revokedAt).toBeNull();
+    expect(await secretValue(id)).toBe("rt-2");
   });
 
-  test("refuses a revoked row rather than bringing it back to life", async () => {
-    const store = createCredentialStore(database);
-    const id = await liveCredential("rt-1", true);
+  test("refuses a revoked secret rather than bringing it back to life", async () => {
+    const store = createCredentialStore(directory);
+    const seededSecret = await liveCredential("rt-1", true);
 
-    await expect(
-      store.updateSecret(id, await encryptSecret(key, "rt-2")),
-    ).rejects.toThrow("Credential was not found or is revoked");
+    await expect(store.updateSecret(seededSecret.id, "rt-2")).rejects.toThrow(
+      "Credential was not found or is revoked",
+    );
     // Untouched: a withdrawn grant must not become usable again by being written through.
-    const stored = await store.readSecret(id);
-    await expect(
-      decryptSecret(key, stored?.encryptedValue ?? ""),
-    ).resolves.toBe("rt-1");
+    const after = await storedSecret(seededSecret.id);
+    expect(after?.revokedAt).not.toBeNull();
+    expect(after?.version).toBe(seededSecret.version);
   });
 
-  test("refuses a row that is not there", async () => {
+  test("refuses a secret that is not there", async () => {
     await expect(
-      createCredentialStore(database).updateSecret(
-        randomUUID(),
-        await encryptSecret(key, "rt-2"),
-      ),
+      createCredentialStore(directory).updateSecret(randomUUID(), "rt-2"),
     ).rejects.toThrow("Credential was not found or is revoked");
   });
 
   /**
-   * The write joins the caller's transaction when it is handed one.
+   * A write carrying the version its caller read is refused when the secret changed since.
    *
-   * A rotating vendor is spent under a row lock the caller took, and the re-encryption has to be
-   * part of that transaction: on its own connection it would commit whether or not the caller's
-   * transaction did, and — with every pooled connection inside such a transaction — would wait for a
-   * connection that only the caller could release.
+   * A rotating vendor's token used to be written inside the caller's transaction, under a row lock,
+   * so two writers could not both believe their token was the current one. No OpenBot transaction
+   * can hold the vault, so the guarantee is the version: the second writer, holding what it read
+   * before the first one wrote, is refused and the first one's token stands.
    */
-  test("joins a caller's transaction, so a rollback takes the new secret with it", async () => {
-    const store = createCredentialStore(database);
-    const id = await liveCredential("rt-1");
+  test("refuses a write from a caller holding a version that is no longer current", async () => {
+    const store = createCredentialStore(directory);
+    const seededSecret = await liveCredential("rt-1");
 
+    const first = await store.updateSecret(
+      seededSecret.id,
+      "rt-2",
+      seededSecret.version,
+    );
     await expect(
-      database.transaction(async (transaction) => {
-        await store.updateSecret(
-          id,
-          await encryptSecret(key, "rt-2"),
-          transaction,
-        );
-        throw new Error("the caller changed its mind");
-      }),
-    ).rejects.toThrow("the caller changed its mind");
+      store.updateSecret(seededSecret.id, "rt-3", seededSecret.version),
+    ).rejects.toThrow();
 
-    const stored = await store.readSecret(id);
-    await expect(
-      decryptSecret(key, stored?.encryptedValue ?? ""),
-    ).resolves.toBe("rt-1");
+    expect(await secretValue(seededSecret.id)).toBe("rt-2");
+    expect((await storedSecret(seededSecret.id))?.version).toBe(first.version);
   });
 });
 
@@ -864,8 +820,4 @@ describe("admin credential API", () => {
     expect(calls).toEqual(["rotate:credential-old", "revoke:credential-new"]);
     expect(await rotate.text()).not.toContain("rotated-secret");
   });
-});
-
-afterAll(async () => {
-  await database.$client.close();
 });

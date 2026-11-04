@@ -6,23 +6,41 @@
 // deployment may act in must stop the act rather than be rebuilt as some other account. `store.ts`
 // had two readings of its own — one that absorbed an unreadable pair into `{ holder: "deployment" }`
 // and one that minted `{ holder: "person", userId: "" }` — and both of them fed a REVOKE and an
-// audit row. `brokered_connections_holder_check` is `(person AND user_id IS NOT NULL) OR
-// (deployment AND user_id IS NULL)`, and `''` satisfies `IS NOT NULL`, so the person-with-no-user
-// row IS writable and is what both tests below seed.
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+// audit row. The local `brokered_connections_holder_check` let `''` through (it tests `IS NOT NULL`),
+// so the person-with-no-user row was writable there. Brokered accounts are Intelligence connections
+// now, and Intelligence refuses that pair outright, `''` and `null` alike: the tests below pin that
+// refusal, that the acts the old row stopped then meet no account to hand a revoke, and that the
+// reading itself still refuses the pair should one ever arrive.
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { brokeredConnections, mcpServers } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
-import type { AccountRef } from "../src/plugins/shared-accounts";
-import { createPluginStore, PluginInvariantError } from "../src/plugins/store";
+import { type AccountRef, asAccountRef } from "../src/plugins/shared-accounts";
+import { createPluginStore } from "../src/plugins/store";
+import type { ConnectionsDirectory } from "../src/vault/directory";
+import { brokeredId } from "../src/vault/ids";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedServer,
+  storedConnections,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
 const app = `nobody-gh-${suite}`;
+let directory: ConnectionsDirectory;
 
 /** Every account the broker was ASKED to end, whole, so a wrong holder is visible in the failure. */
 const asked: AccountRef[] = [];
@@ -62,9 +80,12 @@ function freshStore() {
   });
 }
 
-/** A person row carrying no user id — written as `''`, which the table's CHECK does not stop. */
+/**
+ * The app, and an attempt to store a person account on it carrying no user id: `''` and `null`, the
+ * two spellings of nobody. Both are refused by Intelligence, so nothing is stored.
+ */
 async function seedPersonWithNoUser() {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: "Team GitHub",
     vendor: "Composio",
@@ -72,27 +93,48 @@ async function seedPersonWithNoUser() {
     provenance: "composio",
     authScheme: "OAUTH2",
   });
-  await database.insert(brokeredConnections).values({
-    provider: "composio",
-    app,
-    holder: "person",
-    userId: "",
-    vendorUserId: `vendor-${suite}`,
-  });
+  for (const userId of ["", null]) {
+    await expect(
+      directory.createConnection({
+        kind: "brokered",
+        id: `${brokeredId("composio", app, "person", userId)}:${userId === null ? "null" : "empty"}`,
+        provider: "composio",
+        app,
+        holder: "person",
+        userId: userId as string,
+        vendorUserId: `vendor-${suite}`,
+        connectedBy: null,
+        verified: false,
+        verifiedAt: null,
+        probeAction: null,
+      }),
+    ).rejects.toThrow("CONNECTION_VALIDATION_ERROR");
+  }
 }
+
+async function accountsStoredOn(name: string) {
+  return (await storedConnections()).brokered.filter(
+    (connection) => connection.app === name,
+  );
+}
+
+beforeAll(async () => {
+  directory = await useTestVault();
+});
 
 afterEach(async () => {
   asked.length = 0;
-  await database
-    .delete(brokeredConnections)
-    .where(eq(brokeredConnections.app, app));
-  await database.delete(mcpServers).where(inArray(mcpServers.id, [app]));
+  await removeConnectionsWhere(
+    (connection) => connection.kind === "brokered" && connection.app === app,
+  );
+  await removeServers([app]);
 });
 
 describe("a stored pair that names nobody", () => {
-  test("stops `removeServer` before the vendor is asked to end anybody's account", async () => {
+  test("cannot be stored, so `removeServer` never asks the vendor to end anybody's account", async () => {
     const store = freshStore();
     await seedPersonWithNoUser();
+    expect(await accountsStoredOn(app)).toEqual([]);
 
     const outcome = await store.removeServer(app, "admin@example.test").then(
       () => "removed",
@@ -100,38 +142,48 @@ describe("a stored pair that names nobody", () => {
     );
 
     expect(asked).toEqual([]);
-    expect(outcome).toBeInstanceOf(PluginInvariantError);
-    const rows = await database
-      .select({ app: brokeredConnections.app })
-      .from(brokeredConnections)
-      .where(eq(brokeredConnections.app, app));
-    expect(rows).toHaveLength(1);
+    expect(outcome).toBe("removed");
+    expect(await storedServer(app)).toBeNull();
   });
 
-  test("stops the mode switch's read before it hands the account to a revoke", async () => {
+  test("cannot be stored, so the mode switch's read hands no account to a revoke", async () => {
     const store = freshStore();
     await seedPersonWithNoUser();
 
     // The sequence `account-mode.ts` runs: read every account on the app, then end each one.
-    const outcome = await (async () => {
-      const on = await store.accountsOn(app);
-      if (!on) return "not brokered";
-      for (const account of on.accounts) {
-        await store.disconnectBrokered({
-          toolkit: on.toolkit,
-          account,
-          by: "admin@example.test",
-          reason: "mode_switched",
-        });
-      }
-      return "ended";
-    })().then(
-      (answer) => answer,
-      (error: unknown) => error,
-    );
+    const on = await store.accountsOn(app);
+    expect(on).toEqual({ toolkit: app, accounts: [] });
+    for (const account of on?.accounts ?? []) {
+      await store.disconnectBrokered({
+        toolkit: app,
+        account,
+        by: "admin@example.test",
+        reason: "mode_switched",
+      });
+    }
 
     expect(asked).toEqual([]);
-    expect(outcome).toBeInstanceOf(PluginInvariantError);
+  });
+
+  test("is still refused by the reading, should one ever arrive", () => {
+    // The store reads every account through `asAccountRef`, and a `null` there stops the act with a
+    // PluginInvariantError rather than rebuilding the pair as some other account.
+    for (const userId of ["", null]) {
+      expect(
+        asAccountRef({
+          holder: "person",
+          userId,
+          vendorUserId: `vendor-${suite}`,
+        }),
+      ).toBeNull();
+    }
+    expect(
+      asAccountRef({
+        holder: "deployment",
+        userId: "someone",
+        vendorUserId: `vendor-${suite}`,
+      }),
+    ).toBeNull();
   });
 });
 

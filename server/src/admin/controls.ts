@@ -13,14 +13,15 @@
  *   so a path that never crosses the HTTP gate (a Bot's own tool call, OpenTag pairing) is refused
  *   the same way.
  *
- * The computer boundary is synchronous, so it answers from a snapshot of the rows held here and kept
- * current by LISTEN/NOTIFY on {@link ENTERPRISE_TOPIC} plus a one-minute re-read. A snapshot that
- * never loaded refuses everything it is asked about. Every async check reads the database fresh.
+ * The computer boundary is synchronous, so it answers from a snapshot built from the organization
+ * policy every server holds in memory (`policy/cache.ts`), rebuilt the moment Intelligence announces a
+ * change and every minute. A snapshot that never loaded refuses everything it is asked about. Every
+ * async check reads the policy as this server holds it now, never a snapshot, and never a round trip.
  */
 
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
-import { eq } from "drizzle-orm";
 import postgres from "postgres";
+import { bots } from "../agents/bot-registry/directory";
 import {
   type AuditStore,
   addAuditTap,
@@ -42,7 +43,7 @@ import {
 } from "../computer/policy-network";
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
-import { agentProfiles, agents } from "../db/schema";
+import { policy } from "../policy/cache";
 import { isAlwaysOn } from "../plugins/personal-defaults";
 import type { ProactiveAdmin } from "../proactive/contracts";
 import { createOtelEventExporter, type EventExporter } from "../telemetry/otel";
@@ -61,7 +62,6 @@ import {
 import {
   createEnterpriseStore,
   DEFAULT_ENTERPRISE_SETTINGS,
-  ENTERPRISE_TOPIC,
   type EnterpriseSettings,
   type EnterpriseStore,
   type NetworkPolicyRow,
@@ -152,15 +152,16 @@ export function enterpriseControls(): EnterpriseControls | undefined {
 
 /**
  * Skill sharing (Admin, Enterprise controls): whether people may open their Skills to every Bot. Off until the
- * controls have read it, like every switch here. For a person's change, read fresh from the database.
+ * controls have read it, like every switch here. For a person's change, read from the policy as this server holds
+ * it now, which Intelligence's announcement of an administrator's change reaches within a moment.
  */
 export async function skillSharingAllowed(): Promise<boolean> {
   return (await installed?.store.settings())?.skillSharing === true;
 }
 
 /**
- * The same switch for a run, from the snapshot: every replica refreshes it the moment an administrator saves
- * (LISTEN/NOTIFY), so a run pays no query for it.
+ * The same switch for a run, from the snapshot: every replica refreshes it the moment Intelligence announces an
+ * administrator's change, so a run pays no query for it.
  */
 export function skillSharingInSnapshot(): boolean {
   return installed?.snapshot()?.settings.skillSharing === true;
@@ -339,6 +340,9 @@ export async function installEnterpriseControls(
 
   const refresh = async () => {
     try {
+      // Policy that never loaded is not an empty policy: refuse, as before anything was read.
+      if (!policy().loaded())
+        throw new Error("The organization policy has not been read yet.");
       snapshot = await loadSnapshot(store);
     } catch (error) {
       console.error(
@@ -432,13 +436,9 @@ export async function installEnterpriseControls(
       return deps.personBrowserPolicy ?? { mode: "deny_all", rules: [] };
     const current = snapshot;
     if (!current) return { mode: "deny_all", rules: [] };
-    const [profile] = await deps.database
-      .select({ owner: agentProfiles.ownerUserId })
-      .from(agentProfiles)
-      .where(eq(agentProfiles.agentId, botId))
-      .limit(1);
-    const member: Member = profile?.owner
-      ? await store.member(profile.owner)
+    const owner = (await bots().find(botId))?.ownerUserId;
+    const member: Member = owner
+      ? await store.member(owner)
       : { role: "user", groups: [] };
     const cloudNetwork = resolveCapability(
       current.rows,
@@ -488,12 +488,10 @@ export async function installEnterpriseControls(
   };
 
   const ownedBots = async (userId: string) =>
-    (
-      await deps.database
-        .select({ agentId: agentProfiles.agentId })
-        .from(agentProfiles)
-        .where(eq(agentProfiles.ownerUserId, userId))
-    ).map((row) => row.agentId);
+    bots()
+      .cached()
+      .filter((bot) => bot.ownerUserId === userId)
+      .map((bot) => bot.id);
 
   const terminateMemberComputers: EnterpriseControls["terminateMemberComputers"] =
     async (userId, by) => {
@@ -634,22 +632,22 @@ export async function installEnterpriseControls(
     );
   };
 
-  // Every server hears a change, including the one that made it.
-  const connection = postgres(deps.databaseUrl, { max: 1 });
+  /*
+   * Every server hears a change, including the one that made it: Intelligence announces each one and
+   * the policy cache reads it, then tells this. The snapshot is rebuilt and the network policy pushed
+   * to running computers, as the Postgres notification used to.
+   */
   const onChange = () => {
     void refresh().then(() => pushNetworkPolicies());
   };
-  await connection
-    .listen(ENTERPRISE_TOPIC, onChange, onChange)
-    .catch((error) => {
-      console.error(
-        JSON.stringify({
-          type: "enterprise-listen-failed",
-          note: "Changes made on another server reach this one within a minute instead of at once.",
-          error: String(error),
-        }),
-      );
-    });
+  const stopListening = policy().onChange((resource) => {
+    if (
+      resource === "settings" ||
+      resource === "capability_rule" ||
+      resource === "network_rule"
+    )
+      onChange();
+  });
 
   const timers = [
     setInterval(() => void refresh(), 60_000),
@@ -663,20 +661,8 @@ export async function installEnterpriseControls(
           }),
         ),
       );
-      void store
-        .purgeActions(
-          new Date(
-            Date.now() - ACTION_RECORD_RETENTION_DAYS * 24 * 60 * 60 * 1000,
-          ),
-        )
-        .catch((error) =>
-          console.error(
-            JSON.stringify({
-              type: "action-record-purge-failed",
-              error: String(error),
-            }),
-          ),
-        );
+      // Action records past ACTION_RECORD_RETENTION_DAYS are removed by Intelligence, which holds
+      // them, at the window this deployment sets at boot (audit-trail/retention.ts).
     }, 60 * 60_000),
   ];
   for (const timer of timers) timer.unref?.();
@@ -707,9 +693,10 @@ export async function installEnterpriseControls(
     stop: async () => {
       for (const timer of timers) clearInterval(timer);
       for (const remove of removeTaps) remove();
+      stopListening();
       setPolicyOverlay(null);
       installed = undefined;
-      await Promise.allSettled([connection.end(), exporter?.shutdown()]);
+      await Promise.allSettled([exporter?.shutdown()]);
     },
   };
   return installed;
@@ -984,11 +971,7 @@ export async function recordHeadlessUsage(input: {
   const controls = installed;
   if (!controls) return;
   try {
-    const [row] = await controls.deps.database
-      .select({ type: agents.type })
-      .from(agents)
-      .where(eq(agents.id, input.agentId))
-      .limit(1);
+    const row = await bots().find(input.agentId);
     const model =
       row?.type === "built_in" ? controls.deps.builtInModel : undefined;
     // A model nobody named is allowed only while there is no list, as the gate records it.
@@ -1033,11 +1016,7 @@ export async function headlessTurnRefusal(input: {
       return capabilityRefusal("useBots");
     const allowlist = controls.snapshot()?.settings.modelAllowlist;
     if (!allowlist?.enabled) return null;
-    const [row] = await controls.deps.database
-      .select({ type: agents.type })
-      .from(agents)
-      .where(eq(agents.id, input.agentId))
-      .limit(1);
+    const row = await bots().find(input.agentId);
     const model =
       row?.type === "built_in" ? controls.deps.builtInModel : undefined;
     if (!model || allowlist.models.includes(model)) return null;
@@ -1079,8 +1058,8 @@ export async function headlessTurnRefusal(input: {
  * (`proactive/engine.ts`): the "Check-ins" switch for this person, and how many check-ins a Bot may
  * run for one person in a day.
  *
- * Both read fresh, never from the snapshot, as every asynchronous check here does: a switch an admin
- * flipped a second ago stops the next check-in on every replica. Without the controls installed (a
+ * Both read the policy as this server holds it now, never the snapshot, as every asynchronous check
+ * here does: a switch an admin flipped a moment ago stops the next check-in on every replica. Without the controls installed (a
  * script, a test that never installs them) the defaults stand, which is check-ins on and 24 a day.
  * A switch that can't be read refuses, as every other one does, and says so in the log: a check-in
  * then is skipped, never run unchecked.

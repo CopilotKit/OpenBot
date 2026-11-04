@@ -1,23 +1,24 @@
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "../audit";
-import {
-  type CredentialExecutor,
-  CredentialRefusedError,
-  type CredentialStore,
-} from "../credentials";
+import { CredentialRefusedError, type CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
-import { identityLinkChallenges, identityLinks } from "../db/schema";
-import { identityRealmLock, identityUserLock } from "./store";
+import { identityLinkChallenges } from "../db/schema";
+import { idempotencyKey } from "../people/directory/client";
+import { people } from "../people/directory/directory";
+import type {
+  IdentityWrite,
+  LinkedIdentityRecord,
+} from "../people/directory/types";
+import { identityUserLock } from "./store";
 
 /** Revokes a live credential; false when there is none or it was already revoked. */
 async function revokeIfLive(
   credentials: Pick<CredentialStore, "revoke">,
   id: string | null,
-  executor: CredentialExecutor,
 ): Promise<boolean> {
   if (!id) return false;
   try {
-    await credentials.revoke(id, executor);
+    await credentials.revoke(id);
     return true;
   } catch (error) {
     // Already revoked is the outcome wanted, but not this call's doing.
@@ -30,18 +31,21 @@ async function revokeIfLive(
  * Retires a removed person's identity links.
  *
  * Every one of the person's links is marked `needs_reconnect`, whatever its provider: a link with a
- * credential has that credential revoked and detached (`credential_id` null), and a link without one
- * (Slack) changes status only. The rows are NOT deleted — `user_id` deliberately has no foreign key,
- * so the outside account keeps resolving to the removed person and is refused, rather than turning
- * into an unlinked guest. The person's pending link challenges are deleted, so a code issued before
- * the removal cannot be redeemed into a fresh active link afterwards.
+ * credential has that credential detached in the directory and revoked here, and a link without one
+ * (Slack) changes status only. The links are NOT deleted, so the outside account keeps resolving to the
+ * removed person and is refused, rather than turning into an unlinked guest. The person's pending link
+ * codes are deleted first, under `identityUserLock` (the lock `issueChallenge` takes), so a code issued
+ * before the removal cannot be redeemed into a fresh active link afterwards.
  *
- * One transaction, the audit rows included: `auditFor` is handed the transaction and returns the
- * store that writes into it (`createAuditStore(transaction)`, as approvals do), so a link is retired
- * exactly when its `identity.link_retired` row is written. A failure anywhere, an audit row
- * included, rolls the whole retirement back and a retry starts over and audits every link; writing
- * the rows after the commit instead lost the rest for good when one failed, because the retry found
- * every link already retired.
+ * All or nothing, as when the links were rows here. The links live in Intelligence's directory
+ * (people/directory) now, the tokens in Intelligence's vault, and the trail here, so they cannot share
+ * one transaction: every link is first retired in the directory, then the released tokens are revoked in
+ * the vault, then every `identity.link_retired` row is written in ONE transaction here (`auditFor` is
+ * handed it, so the trail's own store writes into it). If any step fails, the links already retired in
+ * the directory are put back as they were and the failure is rethrown, so a retry finds them all still
+ * to retire and audits every one: a link is retired exactly when its row is written. A link put back may
+ * name a token already revoked, which the retry detaches; a detached token is never left live. No
+ * transaction is open while the directory or the vault is called.
  *
  * One row per link that changed, shaped like `retireConnectionsFor`'s `mcp.account_disconnected`
  * rows: target the link id; payload `actor` (the remover, `by`), `owner` (the removed person),
@@ -49,18 +53,6 @@ async function revokeIfLive(
  * a live credential (one already revoked is detached but not reported as revoked). The remover goes
  * in the payload and not in `actorUserId`, because `by` need not be a user id: a SCIM removal passes
  * "scim:directory". Never the subject, realm or credential id.
- *
- * Concurrency. Locks are taken in this order: `identityUserLock`, the lock `issueChallenge` takes, so
- * no code is issued alongside the removal; then the challenges are deleted, which waits for a
- * `redeemChallenge` in flight (it holds its challenge row) to commit, so the link it wrote is seen
- * below; then `identityRealmLock` for every `(provider, realm)` the person has a link in, in sorted
- * order (defensive: writeLink takes only the one key for the realm it writes, and two retirements of
- * one person already queue on the user lock); then the link rows. A writeLink into one of those realms
- * that is already running finishes first and is retired here. One that arrives later waits, and once
- * this commits it goes ahead: it re-links that realm for the removed person, active again, so
- * refusing it is left to linkedUser's callers, which refuse a removed person. The same holds for a
- * writeLink (an OAuth link) into a realm the person had no link in when the realms were read. Both
- * need a callback already past its session check, since the person's sessions are gone by then.
  *
  * Returns how many links changed; a second call returns 0 and writes no audit rows.
  */
@@ -71,68 +63,85 @@ export async function retireIdentityLinks(
   userId: string,
   by: string,
 ): Promise<number> {
-  return database.transaction(async (transaction) => {
-    const auditStore = auditFor(transaction as unknown as Database);
+  await database.transaction(async (transaction) => {
     await identityUserLock(transaction, userId);
     await transaction
       .delete(identityLinkChallenges)
       .where(eq(identityLinkChallenges.userId, userId));
-
-    const realms = await transaction
-      .selectDistinct({
-        provider: identityLinks.provider,
-        realm: identityLinks.realm,
-      })
-      .from(identityLinks)
-      .where(eq(identityLinks.userId, userId))
-      .orderBy(asc(identityLinks.provider), asc(identityLinks.realm));
-    for (const { provider, realm } of realms)
-      await identityRealmLock(transaction, userId, provider, realm);
-
-    const links = await transaction
-      .select({
-        id: identityLinks.id,
-        provider: identityLinks.provider,
-        status: identityLinks.status,
-        credentialId: identityLinks.credentialId,
-      })
-      .from(identityLinks)
-      .where(eq(identityLinks.userId, userId))
-      .orderBy(asc(identityLinks.id))
-      .for("update");
-
-    let changed = 0;
-    for (const link of links) {
-      if (!link.credentialId && link.status === "needs_reconnect") continue;
-      const credentialRevoked = await revokeIfLive(
-        credentials,
-        link.credentialId,
-        transaction,
-      );
-      await transaction
-        .update(identityLinks)
-        .set({
-          credentialId: null,
-          status: "needs_reconnect",
-          updatedAt: new Date(),
-        })
-        .where(eq(identityLinks.id, link.id));
-      await recordAuditEvent(auditStore, {
-        eventType: "identity.link_retired",
-        targetType: "identity_link",
-        targetId: link.id,
-        payload: {
-          actor: by,
-          owner: userId,
-          provider: link.provider,
-          reason: "person_removed",
-          credentialRevoked,
-        },
-      });
-      changed += 1;
-    }
-    return changed;
   });
+
+  const client = people().client;
+  const links = (await client.listIdentities({ userId }))
+    .filter((link) => link.credentialId || link.status !== "needs_reconnect")
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const retired: { before: LinkedIdentityRecord; after: IdentityWrite }[] = [];
+
+  /** Put every link this call retired back as it was. Said, not thrown: the caller's failure is the news. */
+  const putBack = async () => {
+    for (const { before, after } of retired) {
+      try {
+        await client.updateIdentity(
+          before.id,
+          { status: before.status, credentialId: before.credentialId },
+          idempotencyKey("retire-identity-undo"),
+          after.identity.version,
+        );
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "identity-retire-undo-failed",
+            linkId: before.id,
+            note: "This link was retired in the directory and its trail row was not written. Its credential, if any, is detached and still live.",
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+  };
+
+  try {
+    for (const link of links) {
+      const written = await client.updateIdentity(
+        link.id,
+        { credentialId: null, status: "needs_reconnect" },
+        idempotencyKey("retire-identity"),
+        link.version,
+      );
+      // Unlinked meanwhile: nothing left to retire.
+      if (written) retired.push({ before: link, after: written });
+    }
+    // The released tokens, revoked in the vault before the trail's transaction opens.
+    const revoked = new Map<string, boolean>();
+    for (const { before, after } of retired) {
+      let credentialRevoked = false;
+      for (const released of after.released)
+        credentialRevoked =
+          (await revokeIfLive(credentials, released)) || credentialRevoked;
+      revoked.set(before.id, credentialRevoked);
+    }
+    await database.transaction(async (transaction) => {
+      const auditStore = auditFor(transaction as unknown as Database);
+      for (const { before } of retired) {
+        const credentialRevoked = revoked.get(before.id) ?? false;
+        await recordAuditEvent(auditStore, {
+          eventType: "identity.link_retired",
+          targetType: "identity_link",
+          targetId: before.id,
+          payload: {
+            actor: by,
+            owner: userId,
+            provider: before.provider,
+            reason: "person_removed",
+            credentialRevoked,
+          },
+        });
+      }
+    });
+  } catch (error) {
+    await putBack();
+    throw error;
+  }
+  return retired.length;
 }
 
 /**

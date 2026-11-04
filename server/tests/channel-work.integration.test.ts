@@ -1,4 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, like, sql } from "drizzle-orm";
 import { HANDOFF_KIND } from "../src/agents/handoff";
@@ -12,17 +19,19 @@ import {
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
+import { users, workItems } from "../src/db/schema";
 import {
-  agentProfiles,
-  agents,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  routineRuns,
-  routines,
-  users,
-  workItems,
-} from "../src/db/schema";
+  changeRun,
+  seedRoutine,
+  seedRun,
+  useTestSchedules,
+} from "./support/schedules";
+import { removeBots, useTestBots } from "./support/bots";
+import {
+  addConversationMember,
+  newThreadId,
+  purgeConversations,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -57,23 +66,17 @@ afterEach(async () => {
     .delete(workItems)
     .where(like(workItems.key, `%${testPrefix}%`));
   for (const routineId of createdRoutineIds.splice(0)) {
-    await database.delete(routines).where(eq(routines.id, routineId));
+    await (await useTestSchedules()).purge("routines", routineId);
   }
-  for (const channelId of createdChannelIds.splice(0)) {
-    await database
-      .delete(intelligenceChannelMappings)
-      .where(eq(intelligenceChannelMappings.channelId, channelId));
-    await database.delete(channels).where(eq(channels.id, channelId));
-  }
-  for (const agentId of createdAgentIds.splice(0)) {
-    await database
-      .delete(agentProfiles)
-      .where(eq(agentProfiles.agentId, agentId));
-    await database.delete(agents).where(eq(agents.id, agentId));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
+  await removeBots(createdAgentIds.splice(0));
   for (const userId of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, userId));
   }
+});
+
+beforeAll(async () => {
+  await useTestBots();
 });
 
 afterAll(async () => {
@@ -161,13 +164,8 @@ async function workFor(
 /** A second person in the channel, with a thread of their own in it, as `group.ts` adds one. */
 async function addMember(channelId: string) {
   const member = await createUser();
-  const threadId = `${testPrefix}-thread-${randomUUID()}`;
-  await database
-    .insert(channelMemberships)
-    .values({ channelId, userId: member.id });
-  await database
-    .insert(intelligenceChannelMappings)
-    .values({ userId: member.id, channelId, threadId });
+  const threadId = newThreadId();
+  await addConversationMember(channelId, member.id, threadId);
   return { member, channel: { id: channelId, threadId } };
 }
 
@@ -320,18 +318,15 @@ describe("what a conversation is waiting on", () => {
   test("a routine firing into it, until the run has an outcome", async () => {
     const { owner, asker, channel } = await setup();
     const routineId = `${testPrefix}-routine`;
-    await database.insert(routines).values({
+    await seedRoutine({
       id: routineId,
       ownerUserId: owner.id,
       agentId: asker,
       channelId: channel.id,
-      instruction: "Post the standup summary.",
-      cron: "0 9 * * *",
-      nextRunAt: new Date(Date.now() + 86_400_000),
     });
     createdRoutineIds.push(routineId);
     const runId = `${testPrefix}-run`;
-    await database.insert(routineRuns).values({ id: runId, routineId });
+    await seedRun(routineId, runId);
 
     const running = await workFor(owner, channel);
     expect(running).toHaveLength(1);
@@ -342,10 +337,7 @@ describe("what a conversation is waiting on", () => {
       botId: asker,
     });
 
-    await database
-      .update(routineRuns)
-      .set({ status: "succeeded", finishedAt: new Date() })
-      .where(eq(routineRuns.id, runId));
+    await changeRun(runId, { status: "succeeded", finishedAt: new Date() });
     expect(await workFor(owner, channel)).toEqual([]);
   });
   test("only what this person's own thread and routines wait on, in a shared channel", async () => {
@@ -353,19 +345,14 @@ describe("what a conversation is waiting on", () => {
     const { member, channel: theirs } = await addMember(channel.id);
     await hop({ threadId: channel.threadId, toName: "Ana" });
     const routineId = `${testPrefix}-routine-shared`;
-    await database.insert(routines).values({
+    await seedRoutine({
       id: routineId,
       ownerUserId: owner.id,
       agentId: asker,
       channelId: channel.id,
-      instruction: "Post the standup summary.",
-      cron: "0 9 * * *",
-      nextRunAt: new Date(Date.now() + 86_400_000),
     });
     createdRoutineIds.push(routineId);
-    await database
-      .insert(routineRuns)
-      .values({ id: `${testPrefix}-run-shared`, routineId });
+    await seedRun(routineId, `${testPrefix}-run-shared`);
 
     expect(await workFor(owner, channel)).toHaveLength(2);
     // The other member's read names neither the Bot the owner asked nor the owner's routine.

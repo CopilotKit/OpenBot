@@ -7,6 +7,9 @@ import {
   redactAuditPayload,
 } from "../src/audit";
 import { loadConfig } from "../src/config";
+import { createDatabase } from "../src/db/client";
+import { auditRows } from "./support/audit";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
 const config = loadConfig({
@@ -95,30 +98,27 @@ describe("audit payload redaction", () => {
   test("a direct store insert is redacted too", async () => {
     // Redaction used to live only in recordAuditEvent, so a direct insert()
     // stored secrets in cleartext. The store is the last line of defence.
-    let stored: unknown;
-    const store = createAuditStore({
-      insert: () => ({
-        values: (event: unknown) => {
-          stored = event;
-          return {
-            returning: async () => [
-              { id: "synthetic-audit-id", createdAt: new Date(0) },
-            ],
-          };
-        },
-      }),
-    } as never);
+    // What is checked is what the trail in Intelligence holds, through the
+    // real outbox and drainer, so no path between the store and the trail
+    // can put the secret back.
+    const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+    const targetId = `credential-${crypto.randomUUID()}`;
+    try {
+      await createAuditStore(database).insert({
+        eventType: "credential.created",
+        targetType: "credential",
+        targetId,
+        payload: { apiKey: "plaintext-key", provider: "openai" },
+      } as never);
 
-    await store.insert({
-      eventType: "credential.created",
-      targetType: "credential",
-      targetId: "credential-1",
-      payload: { apiKey: "plaintext-key", provider: "openai" },
-    } as never);
+      const [stored] = await auditRows({ targetType: "credential", targetId });
 
-    expect(stored).toMatchObject({
-      payload: { apiKey: "[REDACTED]", provider: "openai" },
-    });
+      expect(stored).toMatchObject({
+        payload: { apiKey: "[REDACTED]", provider: "openai" },
+      });
+    } finally {
+      await database.$client.close();
+    }
   });
 });
 

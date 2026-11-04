@@ -1,27 +1,25 @@
 /**
  * The enterprise controls, as stored.
  *
- * Every write goes in a transaction with a `pg_notify` on {@link ENTERPRISE_TOPIC}, delivered on
- * commit, so every API server re-reads the same rows the moment one of them saves a change. Same
- * shape as the computer boundary in `computer/policy-store.ts`, and for the same reason: a switch
- * that applies on one replica out of N reads as working while it does not.
+ * The switches an administrator sets (capabilities, enterprise settings, network rules) live in
+ * Intelligence's organization policy (`policy/`), held in memory on every server and kept current by
+ * Intelligence's change announcements, so every server enforces the same rows the moment one of them
+ * saves a change. A switch that applies on one replica out of N reads as working while it does not.
+ *
+ * Who is an administrator and in which groups is the person's row here, this deployment's copy of
+ * Intelligence's directory. The records kept about what Bots did (Action Recording, model usage) go
+ * through the outbox to Intelligence's audit trail (`audit-trail/`) and are read back from there.
  */
-import { and, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
+import { writeOutbox } from "../audit-trail/outbox";
+import { auditTrail, flushBeforeRead } from "../audit-trail/trail";
 import type { Database } from "../db/client";
-import {
-  actionRecords,
-  capabilitySettings,
-  enterpriseSettings,
-  modelUsage,
-  networkPolicies,
-  scimGroups,
-  userRoles,
-  users,
-} from "../db/schema";
+import { people } from "../people/directory/directory";
+import { users } from "../db/schema";
+import { policy } from "../policy/cache";
+import type { PolicySettings, PolicySettingsPatch } from "../policy/types";
 import { currentEdition, PERSONAL_ENTERPRISE_SETTINGS } from "../edition";
 import type { CapabilityRow, Member } from "./capabilities";
-
-export const ENTERPRISE_TOPIC = "enterprise_settings_changed";
 
 export type EnterpriseSettings = {
   /** Only a registered enterprise identity provider may sign anybody in. */
@@ -57,15 +55,36 @@ export const DEFAULT_ENTERPRISE_SETTINGS: EnterpriseSettings = {
   proactiveDailyRuns: 24,
 };
 
-const SETTING_KEYS = {
-  ssoRequired: "sso_required",
-  actionRecording: "action_recording",
-  inactiveComputerDays: "inactive_computer_days",
-  modelAllowlist: "model_allowlist",
-  mcpAllowlist: "mcp_allowlist",
-  skillSharing: "skill_sharing",
-  proactiveDailyRuns: "proactive_daily_runs",
-} as const satisfies Record<keyof EnterpriseSettings, string>;
+/** OpenBot's settings, read from Intelligence's. The one field with another name is the computers'. */
+export function enterpriseSettingsFrom(
+  stored: PolicySettings,
+): EnterpriseSettings {
+  return {
+    ssoRequired: stored.ssoRequired,
+    actionRecording: stored.actionRecording,
+    inactiveComputerDays: stored.inactiveEnvironmentDays,
+    modelAllowlist: {
+      enabled: stored.modelAllowlist.enabled,
+      models: [...stored.modelAllowlist.models],
+    },
+    mcpAllowlist: {
+      enabled: stored.mcpAllowlist.enabled,
+      servers: [...stored.mcpAllowlist.servers],
+    },
+    skillSharing: stored.skillSharing,
+    proactiveDailyRuns: stored.proactiveDailyRuns,
+  };
+}
+
+/** One OpenBot setting as the change Intelligence takes. */
+export function settingPatch<K extends keyof EnterpriseSettings>(
+  key: K,
+  value: EnterpriseSettings[K],
+): PolicySettingsPatch {
+  if (key === "inactiveComputerDays")
+    return { inactiveEnvironmentDays: value as number };
+  return { [key]: value } as PolicySettingsPatch;
+}
 
 export type NetworkPolicyRow = {
   scopeKind: "organization" | "group";
@@ -86,57 +105,31 @@ export type ModelUsageSummary = {
   lastUsedAt: string;
 };
 
-/** Stored as `{ value }` so every key is a JSON object, which the jsonb column type requires. */
-function unwrap<K extends keyof EnterpriseSettings>(
-  key: K,
-  stored: Record<string, unknown> | undefined,
-): EnterpriseSettings[K] {
-  const fallback = DEFAULT_ENTERPRISE_SETTINGS[key];
-  const value = stored?.value;
-  if (value === undefined) return fallback;
-  if (typeof fallback === "boolean")
-    return (
-      typeof value === "boolean" ? value : fallback
-    ) as EnterpriseSettings[K];
-  if (typeof fallback === "number") {
-    return (
-      typeof value === "number" && Number.isInteger(value) && value >= 0
-        ? value
-        : fallback
-    ) as EnterpriseSettings[K];
-  }
-  const list = value as {
-    enabled?: unknown;
-    models?: unknown;
-    servers?: unknown;
-  };
-  const items = (
-    key === "modelAllowlist" ? list.models : list.servers
-  ) as unknown;
-  return {
-    enabled: list.enabled === true,
-    [key === "modelAllowlist" ? "models" : "servers"]: Array.isArray(items)
-      ? items.filter((item): item is string => typeof item === "string")
-      : [],
-  } as EnterpriseSettings[K];
+/** Intelligence's microsecond timestamps, as the millisecond ISO strings these rows always carried. */
+function millisecondIso(timestamp: string): string {
+  return new Date(timestamp.replace(/\.(\d{3})\d*Z$/, ".$1Z")).toISOString();
 }
 
-async function announce(database: Pick<Database, "execute">) {
-  await database.execute(sql`select pg_notify(${ENTERPRISE_TOPIC}, '')`);
+/**
+ * The policy, refusing while it has never been read: an unread policy is not an empty one, and every
+ * caller here fails closed on an error, as it did when the database could not be read.
+ */
+function loadedPolicy() {
+  const held = policy();
+  if (!held.loaded())
+    throw new Error(
+      "This server has not read the organization policy from Intelligence yet.",
+    );
+  return held;
 }
 
 export function createEnterpriseStore(database: Database) {
   return {
+    /** From memory: the policy every server holds and Intelligence keeps current. */
     async settings(): Promise<EnterpriseSettings> {
       // Fixed for the personal edition: a value a team deployment left behind is not read.
       if (currentEdition() === "personal") return PERSONAL_ENTERPRISE_SETTINGS;
-      const rows = await database.select().from(enterpriseSettings);
-      const byKey = new Map(rows.map((row) => [row.key, row.value]));
-      return Object.fromEntries(
-        (Object.keys(SETTING_KEYS) as (keyof EnterpriseSettings)[]).map(
-          (key) => [key, unwrap(key, byKey.get(SETTING_KEYS[key]))],
-        ),
-      ) as EnterpriseSettings;
+      return enterpriseSettingsFrom(loadedPolicy().settings());
     },
 
     async setSetting<K extends keyof EnterpriseSettings>(
@@ -144,33 +137,22 @@ export function createEnterpriseStore(database: Database) {
       value: EnterpriseSettings[K],
       by: string,
     ): Promise<void> {
-      await database.transaction(async (tx) => {
-        await tx
-          .insert(enterpriseSettings)
-          .values({
-            key: SETTING_KEYS[key],
-            value: { value },
-            updatedBy: by,
-            updatedAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: enterpriseSettings.key,
-            set: { value: { value }, updatedBy: by, updatedAt: new Date() },
-          });
-        await announce(tx);
+      await policy().patchSettings({
+        ...settingPatch(key, value),
+        updatedBy: by,
       });
     },
 
     async capabilityRows(): Promise<CapabilityRow[]> {
       if (currentEdition() === "personal") return [];
-      return database
-        .select({
-          scopeKind: capabilitySettings.scopeKind,
-          scopeId: capabilitySettings.scopeId,
-          capability: capabilitySettings.capability,
-          allowed: capabilitySettings.allowed,
-        })
-        .from(capabilitySettings);
+      return loadedPolicy()
+        .capabilityRules()
+        .map((rule) => ({
+          scopeKind: rule.scopeKind,
+          scopeId: rule.scopeId,
+          capability: rule.capability,
+          allowed: rule.allowed,
+        }));
     },
 
     /** `allowed: null` removes the row, returning that scope to whatever sits beneath it. */
@@ -178,64 +160,34 @@ export function createEnterpriseStore(database: Database) {
       row: Omit<CapabilityRow, "allowed"> & { allowed: boolean | null },
       by: string,
     ): Promise<void> {
-      await database.transaction(async (tx) => {
-        const where = and(
-          eq(capabilitySettings.scopeKind, row.scopeKind),
-          eq(capabilitySettings.scopeId, row.scopeId),
-          eq(capabilitySettings.capability, row.capability),
-        );
-        if (row.allowed === null) {
-          await tx.delete(capabilitySettings).where(where);
-        } else {
-          await tx
-            .insert(capabilitySettings)
-            .values({
-              scopeKind: row.scopeKind,
-              scopeId: row.scopeId,
-              capability: row.capability,
-              allowed: row.allowed,
-              updatedBy: by,
-              updatedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: [
-                capabilitySettings.scopeKind,
-                capabilitySettings.scopeId,
-                capabilitySettings.capability,
-              ],
-              set: {
-                allowed: row.allowed,
-                updatedBy: by,
-                updatedAt: new Date(),
-              },
-            });
-        }
-        await announce(tx);
-      });
+      const key = {
+        scopeKind: row.scopeKind,
+        scopeId: row.scopeKind === "organization" ? "" : row.scopeId,
+        capability: row.capability,
+      };
+      if (row.allowed === null) await policy().deleteCapabilityRule(key);
+      else await policy().putCapabilityRule(key, row.allowed, by);
     },
 
     /** One person as the capability rules see them. Unknown means a plain user in no group. */
     async member(userId: string): Promise<Member> {
-      const roles = await database
-        .select({ role: userRoles.role })
-        .from(userRoles)
-        .where(eq(userRoles.userId, userId));
+      // The role and groups on the person's row: this deployment's copy of the directory's person.
       const person = await database
-        .select({ groups: users.groups })
+        .select({ role: users.role, groups: users.groups })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
       return {
-        role: roles.some((row) => row.role === "admin") ? "admin" : "user",
+        role: person[0]?.role === "admin" ? "admin" : "user",
         groups: person[0]?.groups ?? [],
       };
     },
 
     async adminIds(): Promise<Set<string>> {
       const rows = await database
-        .select({ userId: userRoles.userId })
-        .from(userRoles)
-        .where(eq(userRoles.role, "admin"));
+        .select({ userId: users.id })
+        .from(users)
+        .where(eq(users.role, "admin"));
       return new Set(rows.map((row) => row.userId));
     },
 
@@ -261,78 +213,65 @@ export function createEnterpriseStore(database: Database) {
       const fromPeople = await database.execute(
         sql`select distinct unnest(${users.groups}) as name from ${users} order by 1`,
       );
-      const provisioned = await database
-        .select({ name: scimGroups.displayName })
-        .from(scimGroups);
+      // Groups the company's directory provisioned, members or not: Intelligence's directory holds them.
+      const provisioned = await people().client.groupNames();
       const names = new Set<string>();
       for (const row of fromPeople as unknown as { name: string }[]) {
         if (row.name) names.add(row.name);
       }
-      for (const row of provisioned) names.add(row.name);
+      for (const name of provisioned) names.add(name);
       return [...names].sort((a, b) => a.localeCompare(b));
     },
 
     async networkPolicies(): Promise<NetworkPolicyRow[]> {
       // No screen edits these in the personal edition, so a team deployment's policy is not read.
       if (currentEdition() === "personal") return [];
-      const rows = await database.select().from(networkPolicies);
-      return rows.map((row) => ({
-        scopeKind: row.scopeKind,
-        scopeId: row.scopeId,
-        mode: row.mode,
-        rules: Array.isArray((row.rules as { entries?: unknown }).entries)
-          ? (row.rules as { entries: unknown[] }).entries
-          : [],
-        locked: row.locked,
-        updatedBy: row.updatedBy,
-        updatedAt: row.updatedAt.toISOString(),
-      }));
+      return loadedPolicy()
+        .networkRules()
+        .map((row) => ({
+          scopeKind: row.scopeKind,
+          scopeId: row.scopeId,
+          mode: row.mode,
+          rules: [...row.rules],
+          locked: row.locked,
+          updatedBy: row.updatedBy,
+          updatedAt: row.updatedAt,
+        }));
     },
 
     async setNetworkPolicy(
       row: Omit<NetworkPolicyRow, "updatedBy" | "updatedAt">,
       by: string,
     ): Promise<void> {
-      await database.transaction(async (tx) => {
-        const values = {
+      await policy().putNetworkRule(
+        {
           scopeKind: row.scopeKind,
-          scopeId: row.scopeId,
+          scopeId: row.scopeKind === "organization" ? "" : row.scopeId,
+        },
+        {
           mode: row.mode,
-          rules: { entries: row.rules },
+          rules: row.rules,
           locked: row.scopeKind === "organization" ? row.locked : false,
-          updatedBy: by,
-          updatedAt: new Date(),
-        };
-        await tx
-          .insert(networkPolicies)
-          .values(values)
-          .onConflictDoUpdate({
-            target: [networkPolicies.scopeKind, networkPolicies.scopeId],
-            set: values,
-          });
-        await announce(tx);
-      });
+        },
+        by,
+      );
     },
 
     async removeNetworkPolicy(
       scopeKind: NetworkPolicyRow["scopeKind"],
       scopeId: string,
     ): Promise<boolean> {
-      return database.transaction(async (tx) => {
-        const removed = await tx
-          .delete(networkPolicies)
-          .where(
-            and(
-              eq(networkPolicies.scopeKind, scopeKind),
-              eq(networkPolicies.scopeId, scopeId),
-            ),
-          )
-          .returning({ scopeId: networkPolicies.scopeId });
-        await announce(tx);
-        return removed.length > 0;
+      return policy().deleteNetworkRule({
+        scopeKind,
+        scopeId: scopeKind === "organization" ? "" : scopeId,
       });
     },
 
+    /**
+     * Action Recording's row, written to the outbox and carried to Intelligence's action records
+     * (`audit-trail/`). Intelligence keeps them for `actionRetentionDays` (90, set at boot) and removes
+     * older ones itself, which is why there is no purge here any more.
+     */
     async recordAction(input: {
       surface: "cloud" | "local";
       botId?: string | null;
@@ -341,36 +280,36 @@ export function createEnterpriseStore(database: Database) {
       command: string;
       outcome: string;
     }): Promise<void> {
-      await database.insert(actionRecords).values({
+      await writeOutbox(database, "action", {
         surface: input.surface,
-        botId: input.botId ?? null,
-        actorUserId: input.actorUserId ?? null,
+        agentId: input.botId || null,
+        actorUserId: input.actorUserId || null,
         toolName: input.toolName,
         command: input.command,
         outcome: input.outcome,
       });
     },
 
+    /** The newest action records, from Intelligence, after sending what this deployment just wrote. */
     async actions(limit = 100) {
-      const rows = await database
-        .select()
-        .from(actionRecords)
-        .orderBy(desc(actionRecords.createdAt))
-        .limit(Math.min(Math.max(limit, 1), 500));
-      return rows.map((row) => ({
-        ...row,
-        createdAt: row.createdAt.toISOString(),
+      const trail = auditTrail();
+      await flushBeforeRead(trail);
+      const { actions } = await trail.client.actions({
+        limit: Math.min(Math.max(limit, 1), 500),
+      });
+      return actions.map((row) => ({
+        id: row.id,
+        surface: row.surface,
+        botId: row.agentId,
+        actorUserId: row.actorUserId,
+        toolName: row.toolName,
+        command: row.command,
+        outcome: row.outcome,
+        createdAt: millisecondIso(row.occurredAt),
       }));
     },
 
-    async purgeActions(olderThan: Date): Promise<number> {
-      const removed = await database
-        .delete(actionRecords)
-        .where(lt(actionRecords.createdAt, olderThan))
-        .returning({ id: actionRecords.id });
-      return removed.length;
-    },
-
+    /** Which model served a run, written to the outbox and carried to Intelligence's model usage. */
     async recordModelUsage(input: {
       userId?: string | null;
       agentId: string;
@@ -380,11 +319,11 @@ export function createEnterpriseStore(database: Database) {
       source: "configured" | "observed" | "unknown";
       allowed: boolean;
     }): Promise<void> {
-      await database.insert(modelUsage).values({
-        userId: input.userId ?? null,
+      await writeOutbox(database, "usage", {
+        userId: input.userId || null,
         agentId: input.agentId,
-        threadId: input.threadId ?? null,
-        runId: input.runId ?? null,
+        threadId: input.threadId || null,
+        runId: input.runId || null,
         model: input.model,
         source: input.source,
         allowed: input.allowed,
@@ -393,34 +332,35 @@ export function createEnterpriseStore(database: Database) {
 
     async modelUsageSummary(sinceDays: number): Promise<ModelUsageSummary[]> {
       const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
-      const rows = await database
-        .select({
-          model: modelUsage.model,
-          source: modelUsage.source,
-          runs: sql<number>`count(*)::int`,
-          refused: sql<number>`count(*) filter (where not ${modelUsage.allowed})::int`,
-          people: sql<number>`count(distinct ${modelUsage.userId})::int`,
-          lastUsedAt: sql<string>`max(${modelUsage.createdAt})`,
-        })
-        .from(modelUsage)
-        .where(gt(modelUsage.createdAt, since))
-        .groupBy(modelUsage.model, modelUsage.source)
-        .orderBy(sql`count(*) desc`);
+      const trail = auditTrail();
+      await flushBeforeRead(trail);
+      const rows = await trail.client.usageSummary(since.toISOString());
       return rows.map((row) => ({
-        ...row,
-        lastUsedAt: new Date(row.lastUsedAt).toISOString(),
+        model: row.model,
+        source: row.source,
+        runs: row.runs,
+        refused: row.refused,
+        people: row.people,
+        lastUsedAt: millisecondIso(row.lastUsedAt),
       }));
     },
 
     async recentModelUsage(limit = 50) {
-      const rows = await database
-        .select()
-        .from(modelUsage)
-        .orderBy(desc(modelUsage.createdAt))
-        .limit(Math.min(Math.max(limit, 1), 500));
-      return rows.map((row) => ({
-        ...row,
-        createdAt: row.createdAt.toISOString(),
+      const trail = auditTrail();
+      await flushBeforeRead(trail);
+      const { records } = await trail.client.usage({
+        limit: Math.min(Math.max(limit, 1), 500),
+      });
+      return records.map((row) => ({
+        id: row.id,
+        userId: row.userId,
+        agentId: row.agentId,
+        threadId: row.threadId,
+        runId: row.runId,
+        model: row.model,
+        source: row.source,
+        allowed: row.allowed,
+        createdAt: millisecondIso(row.occurredAt),
       }));
     },
 

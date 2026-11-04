@@ -1,6 +1,6 @@
 # OpenBot on Kubernetes
 
-Runs OpenBot on any Kubernetes cluster: EKS, GKE, AKS, or your own. One chart, five targets, and the
+Runs OpenBot on any Kubernetes cluster: EKS, GKE, AKS, or your own. One chart, six targets, and the
 only difference between them is values.
 
 ## What a cluster needs first
@@ -284,7 +284,7 @@ drops in the same transaction. A deployment that added a vector column of its ow
 where that is not true, and `0010` is written to fail rather than take it; that deployment should
 keep the extension and apply only the table drops by hand.
 
-## The five targets
+## The six targets
 
 `ci/` holds a values file per target, and each is the shortest thing that expresses what is different
 about that cluster:
@@ -296,6 +296,7 @@ about that cluster:
 | `eks-sandbox-values.yaml` | The same, with a computer for each person rather than one shared browser. `shared` and `sandbox` render a different Deployment, different RBAC and a different pod template, so a target that renders only one checks half the chart. |
 | `gke-values.yaml` | Workload Identity, Secret Manager, Gateway API instead of an Ingress. |
 | `aks-values.yaml` | Workload identity, Key Vault, the AKS web app routing class. |
+| `multi-org-values.yaml` | One organization's release in a cluster it shares with others: computers in a namespace of their own, gVisor, policies that admit only the ingress controller, a database on a shared PostgreSQL. See [Several organizations in one cluster](#several-organizations-in-one-cluster). |
 
 Render any of them without a cluster:
 
@@ -358,7 +359,8 @@ asked for inside more than one API replica; `networkPolicy.enabled` is set with 
 and no `networkPolicy.extraEgress`, or with `computers.mode: sandbox` and no
 `networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks, or
 `computers.egressProxy` is turned on with policies and no `networkPolicy.computerExtraEgress`, or with
-no `secrets.egressProxyUrl` where this chart writes the Secret; or
+no `secrets.egressProxyUrl` where this chart writes the Secret; `computers.sandbox.namespace` names a
+namespace whose computers another release already holds; or
 `routines.enabled` is set with no `secrets.workerSharedSecret` — and, on `externalSecrets`, no
 `worker-shared-secret` key named for it to read instead. One combination gets no refusal at all:
 `secrets.existingSecret` with `routines.enabled`, because the Secret this chart would otherwise
@@ -529,9 +531,12 @@ below, and [docs/routines.md](../../docs/routines.md).
 A third CronJob **deletes data, is on by default, and is the only one of the three that does**:
 `attachments.culler` sweeps staged attachments that were never sent. A file uploaded into the
 composer is stored the moment it is pasted or dropped, before anybody presses send — so closing the
-tab, or changing your mind, leaves bytes in the database that no message will ever point at. The
-sweep removes those, hourly (`attachments.culler.schedule`), once they are older than
-`attachments.culler.olderThanHours` — **24 hours by default**.
+tab, or changing your mind, leaves bytes that no message will ever point at. Staged attachments now
+live in Intelligence's file store, and the API stores each one with an expiry of
+`attachments.culler.olderThanHours` — **24 hours by default** — after which Intelligence deletes it
+(the chart passes the window as `OPENBOT_STAGED_ATTACHMENT_TTL_HOURS`). The CronJob itself sweeps,
+hourly (`attachments.culler.schedule`), the unsent rows left in this deployment's own `attachments`
+table from before attachments moved, which is kept unwritten for one release.
 
 It is on by default where the other two are off, because it needs nothing but the database that
 every deployment already has, and because the alternative is a table of blobs that only grows. What
@@ -604,6 +609,124 @@ networkPolicy:
 `EGRESS_PROXY_DEFAULT` covers every Bot and `EGRESS_PROXY_<BOT>` names one, with the Bot's id
 upper-cased and anything unusual replaced. Naming a proxy the policy provably blocks is refused at
 install rather than found as a browser that fails on every page.
+
+**Who may open the API's port is `networkPolicy.ingressFrom`.** Empty, which is the default, admits
+any pod and any address on it, as this policy always has. Name your ingress controller's namespace
+there and nothing else in the cluster can reach the API except through its address; the routines
+sweep, which calls the API from inside the release, is let in beside it. A computer admits its own
+release's API and nothing else, in whichever namespace the computers run.
+
+## Several organizations in one cluster
+
+One OpenBot serves one organization. Several organizations share a cluster by each having a release
+of this chart: its own namespace, a namespace of its own for its computers, its own database on one
+shared PostgreSQL, its own address, Intelligence project and sign-in. Each is installed by hand with
+`helm install`; nothing here provisions organizations for you.
+
+### Once per cluster
+
+Installed once and shared by every release. The chart creates none of them, and no release owns them.
+
+| What | Why |
+| --- | --- |
+| The agent-sandbox controller and its CRDs | `computers.mode: sandbox` creates `Sandbox` objects. See [A computer for each Bot](#a-computer-for-each-bot). |
+| A RuntimeClass for gVisor or Kata | Each release names it in `computers.runtimeClassName`. GKE Sandbox and AKS provide one; on EKS it is your own node configuration. |
+| An ingress controller or a Gateway | Each release names its class (`ingress.className`) or `httpRoute.parentRefs`, and a host of its own. |
+| A CNI that enforces NetworkPolicy | Without one the policies below are resources that do nothing. See [NetworkPolicy](#networkpolicy-and-whether-your-cluster-enforces-one). |
+| One PostgreSQL with pgvector | Each organization gets a database on it. |
+
+### Once per organization
+
+**1. Two namespaces**, one for the release and one for its computers. Create them yourself: the chart
+writes into the computers namespace but never creates or deletes it, because deleting it would delete
+every person's computer and their logins.
+
+```sh
+kubectl create namespace acme
+kubectl create namespace acme-computers
+```
+
+**2. A database and a login role**, as the shared PostgreSQL's administrator:
+
+```sql
+CREATE ROLE openbot_acme LOGIN PASSWORD '...';
+CREATE DATABASE openbot_acme OWNER openbot_acme;
+REVOKE ALL ON DATABASE openbot_acme FROM PUBLIC;
+```
+
+The `REVOKE` is not optional. PostgreSQL grants `CONNECT` on every new database to every role, so
+without it one organization's role can open another organization's database.
+
+The first install's migrations create the `vector` extension and a later one drops it (see
+[Your own database](#your-own-database-which-is-what-a-real-deployment-uses)). pgvector is not a
+trusted extension, so on your own PostgreSQL only a superuser can create it: grant it for the first
+install and take it back straight after. On a managed database, grant and revoke the vendor's
+extension role the same way. Upgrades need neither.
+
+```sql
+ALTER ROLE openbot_acme SUPERUSER;     -- before the first helm install
+ALTER ROLE openbot_acme NOSUPERUSER;   -- after it
+```
+
+**3. The Secrets**, in the organization's namespace: the database URL, and every secret the chart
+asks for, generated for this organization alone.
+
+```sh
+kubectl -n acme create secret generic openbot-database \
+  --from-literal=database-url='postgresql://openbot_acme:...@postgres.example.internal:5432/openbot_acme?sslmode=require'
+```
+
+**4. A values file**, which is what differs from one organization to the next.
+[`ci/multi-org-values.yaml`](ci/multi-org-values.yaml) is a complete one.
+
+| Value | Per organization |
+| --- | --- |
+| The release's namespace (`helm install -n`) | `acme` |
+| `computers.sandbox.namespace` | `acme-computers` |
+| `database.existingSecret` | The Secret from step 3 |
+| `config.publicUrl`, and `ingress.hosts` or `httpRoute.hostnames` | `https://acme.openbot.example.com`. Every release needs a host of its own. |
+| `secrets.intelligenceApiKey` | The runtime key of the organization's own Intelligence project |
+| `config.auth`, `config.initialAdminEmails`, `config.allowedEmailDomains` and the client secret | The organization's sign-in |
+| `secrets.keyEncryptionKey`, `betterAuthSecret`, `computerToken`, `workerSharedSecret` | Generated for this organization, never shared |
+
+Each release also names, without creating, the cluster's pieces: `computers.runtimeClassName`,
+`ingress.className`, `networkPolicy.kubernetesApiCidr`, `networkPolicy.ingressFrom` (the ingress
+controller's namespace) and `networkPolicy.extraEgress` (the shared PostgreSQL).
+
+**5. Install.**
+
+```sh
+helm install acme charts/openbot -n acme -f acme.yaml
+```
+
+### What keeps them apart
+
+- **Nothing is shared by name.** Every object the chart writes is named for the release and sits in
+  one of its two namespaces, every selector carries the release, and nothing is cluster-scoped. CI
+  renders each target as two organizations side by side and fails on any overlap
+  (`scripts/check-chart-tenancy.ts`).
+- **The API's cluster credential reaches its own computers and nothing else.** Its Role and
+  RoleBinding are in its computers namespace, with no ClusterRole: it cannot list, create or change a
+  Sandbox anywhere else.
+- **A computers namespace belongs to one release.** The API lists every Sandbox in its namespace and
+  the culler suspends the ones its own database has not seen used, so a second release there would
+  suspend the first one's computers. The chart writes a claim into the namespace (a ConfigMap named
+  `openbot-computers`) and refuses an install into a namespace another release holds.
+- **The network policies admit only the organization's own pods.** A computer admits its own API, and
+  the API admits what `networkPolicy.ingressFrom` names and its own routines sweep. Set
+  `ingressFrom`; with it empty, any pod in the cluster can open any organization's API port.
+- **A computer reads its token from its own namespace.** The chart writes a Secret holding only the
+  computer token (and the egress proxy URL, when one is on) into the computers namespace, from the
+  literal or the same secret store. With `secrets.existingSecret`, `computers.existingTokenSecret`,
+  `computers.egressProxy.existingSecret` or `imagePullSecrets`, create those Secrets in the computers
+  namespace as well, and a namespaced `SecretStore` needs one there too.
+- **The shared computer is never shared between organizations.** In `computers.mode: shared` each
+  release runs its own, with its own token, at an address the chart derives from the release, so two
+  releases cannot be pointed at one. `external` names a computer by URL and token: give each
+  organization its own, because one computer holds the logins of everybody who uses it.
+- **Uninstalling one leaves the others running.** `helm uninstall acme` removes that release's
+  objects only. Its computers and their volumes stay in `acme-computers`, logins intact, until you
+  delete the namespace; its database stays until you drop it.
 
 ## Getting past bot checks
 

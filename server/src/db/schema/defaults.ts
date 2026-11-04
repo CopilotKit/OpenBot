@@ -6,7 +6,7 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import { agents, users } from "./core";
+import { users } from "./core";
 
 /** What a person can switch off that OpenBot otherwise switches on for them. */
 export type DefaultFeature = "memory_source" | "proactive_research";
@@ -23,6 +23,10 @@ export type DefaultFeature = "memory_source" | "proactive_research";
  * `scope` narrows the feature: for a memory source it is the app (the server id), because a person who
  * removed their Bot's Gmail source said "not Gmail for this Bot", whichever Gmail action it read. For
  * background research it is empty: one setting per person and Bot.
+ *
+ * MOVED TO INTELLIGENCE. Read once, by the upgrade copy (`configuration/upgrade.ts`), and written by
+ * nothing: this is held in Intelligence now (see `configuration/types.ts`). Kept for one release so a
+ * deployment that upgrades still has the rows to copy, then dropped.
  */
 export const defaultOptOuts = pgTable(
   "default_opt_outs",
@@ -30,9 +34,7 @@ export const defaultOptOuts = pgTable(
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
     feature: text("feature").$type<DefaultFeature>().notNull(),
     scope: text("scope").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true })

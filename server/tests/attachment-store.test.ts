@@ -1,4 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MAX_IMAGE_BYTES } from "@openbot/shared/attachments";
 import { eq, sql } from "drizzle-orm";
@@ -12,17 +19,24 @@ import {
 } from "../src/channels/attachments";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
+import { attachments, users } from "../src/db/schema";
 import {
-  attachments,
-  channelMemberships,
-  channels,
-  users,
-} from "../src/db/schema";
+  purgeConversations,
+  seedConversation,
+  useTestConversations,
+} from "./support/conversations";
+import { filesClient } from "../src/files/client";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
+import {
+  attachmentsInChannel,
+  seedAttachment,
+  useTestFiles,
+} from "./support/files";
 
 const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
+useTestFiles();
 
 const testPrefix = `attachment-store-${randomUUID()}`;
 const createdAttachmentIds: string[] = [];
@@ -31,22 +45,32 @@ const createdUserIds: string[] = [];
 
 afterEach(async () => {
   for (const id of createdAttachmentIds.splice(0)) {
-    await database.delete(attachments).where(eq(attachments.id, id));
+    await filesClient().delete(id, `test:${randomUUID()}`);
   }
-  for (const id of createdChannelIds.splice(0)) {
-    await database.delete(channels).where(eq(channels.id, id));
-  }
+  await purgeConversations(createdChannelIds.splice(0));
   for (const id of createdUserIds.splice(0)) {
     await database.delete(users).where(eq(users.id, id));
   }
+});
+
+beforeAll(async () => {
+  // The upload and fetch routes ask the conversation directory whether a channel is live and who
+  // is in it, so the process needs the real one, against the test Intelligence.
+  await useTestConversations();
 });
 
 afterAll(async () => {
   await database.$client.close();
 });
 
-/** A user and a channel to hang an attachment off of, nothing more. */
-async function seedChannel(db: typeof database) {
+/**
+ * A user and a channel to hang an attachment off of, nothing more: a conversation in Intelligence
+ * with nobody in it.
+ */
+async function seedChannel(
+  db: typeof database,
+  options: { member?: boolean } = {},
+) {
   const userId = `${testPrefix}-user-${randomUUID()}`;
   await db.insert(users).values({
     id: userId,
@@ -55,43 +79,39 @@ async function seedChannel(db: typeof database) {
   createdUserIds.push(userId);
 
   const channelId = `${testPrefix}-channel-${randomUUID()}`;
-  await db.insert(channels).values({
+  createdChannelIds.push(channelId);
+  await seedConversation({
     id: channelId,
     name: "Attachment Store Test Channel",
     description: "Round-trip test channel.",
+    members: options.member ? [{ userId }] : [],
   });
-  createdChannelIds.push(channelId);
 
   return { userId, channelId };
 }
 
-describe("an attachment's bytes through the bytea column", () => {
+describe("an attachment's bytes through Intelligence's file store", () => {
   test("survive the round trip unchanged, byte for byte", async () => {
     const { userId, channelId } = await seedChannel(database);
-    // Deliberately includes both a null byte and 0xff: a driver that
-    // treats bytea as text would mangle one of these on the way through.
+    // Deliberately includes both a null byte and 0xff: a transport that
+    // treats bytes as text would mangle one of these on the way through.
     const payload = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x00, 0xff]);
 
-    const [inserted] = await database
-      .insert(attachments)
-      .values({
-        channelId,
-        uploadedBy: userId,
-        name: "test.bin",
-        mimeType: "application/octet-stream",
-        sizeBytes: payload.byteLength,
-        bytes: payload,
-      })
-      .returning();
-    createdAttachmentIds.push(inserted.id);
+    const id = await seedAttachment({
+      channelId,
+      uploadedBy: userId,
+      name: "test.bin",
+      mimeType: "application/octet-stream",
+      bytes: payload,
+    });
+    createdAttachmentIds.push(id);
 
-    const [read] = await database
-      .select()
-      .from(attachments)
-      .where(eq(attachments.id, inserted.id));
+    const read = await filesClient().content(id);
+    const file = await filesClient().get(id);
 
-    expect(Buffer.compare(read.bytes, payload)).toBe(0);
-    expect(read.attachedAt).toBeNull();
+    expect(Buffer.compare(read ?? Buffer.alloc(0), payload)).toBe(0);
+    expect(file?.sizeBytes).toBe(payload.byteLength);
+    expect(file?.committedAt).toBeNull();
   });
 });
 
@@ -127,8 +147,9 @@ describe("a file uploaded through the route and fetched back", () => {
   }
 
   test("comes back byte for byte, under the headers it was stored with", async () => {
-    const { userId, channelId } = await seedChannel(database);
-    await database.insert(channelMemberships).values({ channelId, userId });
+    const { userId, channelId } = await seedChannel(database, {
+      member: true,
+    });
 
     /*
      * A real PNG signature so the route's sniffer names it `image/png` on the bytes rather than on
@@ -200,9 +221,7 @@ describe("a file uploaded through the route and fetched back", () => {
  * than its 403. `seedChannel` alone makes a channel nobody belongs to.
  */
 async function seedMemberChannel() {
-  const { userId, channelId } = await seedChannel(database);
-  await database.insert(channelMemberships).values({ channelId, userId });
-  return { userId, channelId };
+  return seedChannel(database, { member: true });
 }
 
 /**
@@ -281,12 +300,11 @@ function uploadRequest(
   );
 }
 
-/** The rows this channel holds, so a refusal can be checked against its own channel and no other. */
+/** The files this channel holds, so a refusal can be checked against its own channel and no other. */
 async function rowsIn(channelId: string) {
-  return await database
-    .select({ id: attachments.id })
-    .from(attachments)
-    .where(eq(attachments.channelId, channelId));
+  return (await attachmentsInChannel(channelId)).map((file) => ({
+    id: file.id,
+  }));
 }
 
 describe("the body limit in front of the upload route", () => {

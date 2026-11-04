@@ -1,6 +1,6 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray, like } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   type AuditEventInput,
   type AuditStore,
@@ -8,47 +8,84 @@ import {
 } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  credentials,
-  identityLinkChallenges,
-  identityLinks,
-} from "../src/db/schema";
+import { identityLinkChallenges } from "../src/db/schema";
 import {
   retireIdentityLinks,
   retireOwnedAccounts,
 } from "../src/identity/retire";
 import { createIdentityStore, identityUserLock } from "../src/identity/store";
 import { IdentityLinkError } from "../src/identity/types";
+import { idempotencyKey } from "../src/people/directory/client";
+import { auditRows } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  purgeDirectoryPeople,
+  seedDirectoryPerson,
+  useTestPeople,
+} from "./support/directory";
+import { purgeSecrets, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
-const vault = createCredentialStore(database);
+let vault: ReturnType<typeof createCredentialStore>;
 const realm = `test-${randomUUID()}`;
 const createdCredentials: string[] = [];
 const users: string[] = [];
 const ADMIN = "admin-remover";
 
+// Links live in Intelligence's organization directory, and belong to people it holds.
+const directory = useTestPeople();
+
+beforeAll(async () => {
+  vault = createCredentialStore(await useTestVault());
+});
+
 afterAll(async () => {
-  await database
-    .delete(identityLinks)
-    .where(like(identityLinks.realm, `${realm}%`));
+  // Purging a person takes their links with them.
+  await purgeDirectoryPeople(users);
   if (users.length)
     await database
       .delete(identityLinkChallenges)
       .where(inArray(identityLinkChallenges.userId, users));
-  if (createdCredentials.length)
-    await database
-      .delete(credentials)
-      .where(inArray(credentials.id, createdCredentials));
+  await purgeSecrets(createdCredentials.splice(0));
   await database.$client.close();
 });
 
-const user = () => {
-  const id = randomUUID();
+/** A person the directory holds, for links to belong to. */
+async function user() {
+  const { id } = await seedDirectoryPerson();
   users.push(id);
   return id;
-};
+}
+
+/** A link as a person would have made it, in the directory. Returns its id. */
+async function insertLink(values: {
+  provider: string;
+  realm: string;
+  subject: string;
+  userId: string;
+  verifiedBy: "challenge" | "oauth";
+  credentialId?: string;
+  status: "active" | "needs_reconnect";
+}): Promise<string> {
+  const { identity } = await directory.client.linkIdentity(
+    {
+      userId: values.userId,
+      provider: values.provider,
+      realm: values.realm,
+      subject: values.subject,
+      verifiedBy: values.verifiedBy,
+      ...(values.credentialId ? { credentialId: values.credentialId } : {}),
+    },
+    idempotencyKey("test-link"),
+  );
+  if (values.status === "needs_reconnect")
+    await directory.client.updateIdentity(
+      identity.id,
+      { status: "needs_reconnect" },
+      idempotencyKey("test-link-status"),
+    );
+  return identity.id;
+}
 
 function recorder() {
   const rows: AuditEventInput[] = [];
@@ -60,27 +97,20 @@ function recorder() {
   return { rows, store };
 }
 
-const statusOf = async (linkId: string) =>
-  (
-    await database
-      .select()
-      .from(identityLinks)
-      .where(eq(identityLinks.id, linkId))
-  )[0];
+const statusOf = async (linkId: string) => directory.client.getIdentity(linkId);
 
 test("retiring a removed person's links revokes their tokens and keeps the rows", async () => {
-  const userId = user();
+  const userId = await user();
   const credential = await vault.create({
     kind: "connector",
     provider: "github-user-token",
     keyId: randomUUID(),
     metadata: {},
-    encryptedValue: "x",
+    plaintext: "x",
   });
   createdCredentials.push(credential.id);
-  const linkId = randomUUID();
-  await database.insert(identityLinks).values({
-    id: linkId,
+  let linkId = "";
+  linkId = await insertLink({
     provider: "github",
     realm,
     subject: randomUUID(),
@@ -140,11 +170,10 @@ test("retiring a removed person's links revokes their tokens and keeps the rows"
 });
 
 test("a link without a credential is also marked needs_reconnect, and audited without its subject", async () => {
-  const userId = user();
-  const linkId = randomUUID();
+  const userId = await user();
+  let linkId = "";
   const subject = `U-${randomUUID()}`;
-  await database.insert(identityLinks).values({
-    id: linkId,
+  linkId = await insertLink({
     provider: "slack",
     realm,
     subject,
@@ -185,19 +214,18 @@ test("a link without a credential is also marked needs_reconnect, and audited wi
 });
 
 test("a credential revoked before the removal is not reported as revoked by it", async () => {
-  const userId = user();
+  const userId = await user();
   const credential = await vault.create({
     kind: "connector",
     provider: "github-user-token",
     keyId: randomUUID(),
     metadata: {},
-    encryptedValue: "x",
+    plaintext: "x",
   });
   createdCredentials.push(credential.id);
   await vault.revoke(credential.id);
-  const linkId = randomUUID();
-  await database.insert(identityLinks).values({
-    id: linkId,
+  let linkId = "";
+  linkId = await insertLink({
     provider: "github",
     realm,
     subject: randomUUID(),
@@ -223,9 +251,8 @@ test("a credential revoked before the removal is not reported as revoked by it",
 });
 
 test("a directory remover is recorded in the payload only, never as the acting user", async () => {
-  const userId = user();
-  await database.insert(identityLinks).values({
-    id: randomUUID(),
+  const userId = await user();
+  await insertLink({
     provider: "slack",
     realm,
     subject: randomUUID(),
@@ -252,18 +279,19 @@ test("a directory remover is recorded in the payload only, never as the acting u
 });
 
 test("an audit row that fails to write rolls the retirement back, so a retry retires and audits every link", async () => {
-  const userId = user();
-  const linkIds = [randomUUID(), randomUUID()];
-  for (const id of linkIds)
-    await database.insert(identityLinks).values({
-      id,
-      provider: "slack",
-      realm: `${realm}-${id}`,
-      subject: randomUUID(),
-      userId,
-      verifiedBy: "challenge",
-      status: "active",
-    });
+  const userId = await user();
+  const linkIds: string[] = [];
+  for (const id of [randomUUID(), randomUUID()])
+    linkIds.push(
+      await insertLink({
+        provider: "slack",
+        realm: `${realm}-${id}`,
+        subject: randomUUID(),
+        userId,
+        verifiedBy: "challenge",
+        status: "active",
+      }),
+    );
   let written = 0;
   const failing: AuditStore = {
     insert: async () => {
@@ -294,11 +322,10 @@ test("an audit row that fails to write rolls the retirement back, so a retry ret
     expect((await statusOf(id))?.status).toBe("needs_reconnect");
 });
 
-test("the audit trail's own store writes the rows inside the retirement's transaction", async () => {
-  const userId = user();
-  const linkId = randomUUID();
-  await database.insert(identityLinks).values({
-    id: linkId,
+test("the audit trail's own store writes the rows inside the retirement's own transaction", async () => {
+  const userId = await user();
+  let linkId = "";
+  linkId = await insertLink({
     provider: "slack",
     realm,
     subject: randomUUID(),
@@ -317,16 +344,15 @@ test("the audit trail's own store writes the rows inside the retirement's transa
     ),
   ).toBe(1);
 
-  const rows = await database
-    .select()
-    .from(auditEvents)
-    .where(eq(auditEvents.targetId, linkId));
+  // The store writes the row to the outbox inside the retirement's transaction; once that commits,
+  // the drainer carries it to the trail in Intelligence, where it is read.
+  const rows = await auditRows({ targetId: linkId });
   expect(rows).toHaveLength(1);
   expect(rows[0]?.eventType).toBe("identity.link_retired");
 });
 
 test("a pending challenge cannot be redeemed after the person is removed", async () => {
-  const userId = user();
+  const userId = await user();
   const identities = createIdentityStore(database, vault);
   const { code } = await identities.issueChallenge(userId, "slack");
 
@@ -353,7 +379,7 @@ test("a pending challenge cannot be redeemed after the person is removed", async
 });
 
 test("retirement waits on the per-person identity lock that issuing a code takes", async () => {
-  const userId = user();
+  const userId = await user();
   let release = () => {};
   const released = new Promise<void>((resolve) => {
     release = resolve;

@@ -1,5 +1,14 @@
 /**
- * One sweep: delete attachments somebody staged and never sent.
+ * One sweep: delete attachments somebody staged and never sent — from this deployment's own
+ * `attachments` table, which is where they lived before attachments moved into Intelligence's file
+ * store.
+ *
+ * WHAT IS LEFT FOR IT TO DO. New attachments are files in Intelligence: a staged one carries the
+ * same window as its expiry (`OPENBOT_STAGED_ATTACHMENT_TTL_HOURS`, written by the chart from
+ * `attachments.culler.olderThanHours`), and Intelligence removes it when that passes. The local table
+ * is kept, unwritten, for one release, and the boot-time copy (src/files/upgrade.ts) does not bring
+ * over a staged row already past the window; this sweep reclaims those rows' bytes from the local
+ * table, as it always did, until the table goes.
  *
  * Attach a file, change your mind and close the tab, and that row sits in `attachments` forever —
  * no message ever pointed back at it, just bytes with an `attached_at` that stayed null.

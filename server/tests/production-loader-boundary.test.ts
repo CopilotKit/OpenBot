@@ -80,7 +80,9 @@ describe("production server loader boundary", () => {
     expect(result.exitCode).not.toBe(0);
     expect(output).not.toContain("require() async module");
     expect(output).not.toContain("OPENBOT_SERVER_LOADER_SMOKE");
-    expect(output).toContain("Failed query: insert into");
+    // Whichever statement boot sends first: the point is that the entry loaded and reached the database. Boot now
+    // reads which upgrade copies are done before it writes anything, so the first is a select.
+    expect(output).toMatch(/Failed query: (insert into|select)/);
     expect(output).toMatch(
       /Connection closed|Failed to connect|ERR_POSTGRES_CONNECTION_REFUSED/,
     );

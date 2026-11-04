@@ -1,12 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { AgentActor } from "../agents/profile-types";
 import type { ChannelStore } from "../channels/routes";
 import type { Database } from "../db/client";
-import { proactiveSuggestions } from "../db/schema";
 import type { TaskService } from "../proactive/contracts";
+import { schedules } from "../schedules/directory";
 import type { WorkQueue } from "../work/queue";
 import { PROACTIVE_TASK_KIND, TASK_RUNS } from "./state";
 import { itemAsk, TaskRefusedError, type TaskStore, whyOf } from "./store";
@@ -74,20 +73,12 @@ const turnSchema = z.object({
   runs: z.number().int().positive().optional(),
 });
 
-/** Another Start of the same item opened its task first; this one's conversation is rolled back. */
-class ItemAlreadyOpened extends Error {
-  constructor() {
-    super("This item already opened a task.");
-    this.name = "ItemAlreadyOpened";
-  }
-}
-
 export type TaskRunner = ReturnType<typeof createTaskRunner>;
 
 export function createTaskRunner(deps: {
-  database: Pick<Database, "transaction" | "select">;
+  database: Pick<Database, "select">;
   store: TaskStore;
-  channels: Pick<ChannelStore, "create">;
+  channels: Pick<ChannelStore, "draft">;
   actorFor: (ownerUserId: string) => Promise<AgentActor>;
   queue: WorkQueue;
   /** Who claims, for the queue: `workOwner("tasks")`. */
@@ -115,40 +106,24 @@ export function createTaskRunner(deps: {
     const found = await deps.store.byItem(ownerUserId, item.id);
     if (found) return found;
     const actor = await deps.actorFor(ownerUserId);
-    try {
-      return await deps.database.transaction(async (transaction) => {
-        const channel = await deps.channels.create(
-          actor,
-          [item.agentId],
-          transaction,
-        );
-        const task = await deps.store.create(
-          {
-            ownerUserId,
-            agentId: item.agentId,
-            channelId: channel.id,
-            title: item.title,
-            why: whyOf(item.detail),
-            origin: "check_in",
-            suggestionId: item.id,
-            sourceApp: item.sourceApp,
-            sourceLink: item.sourceLink,
-          },
-          transaction,
-        );
-        /*
-         * Two Starts of one item at once: the second waits on the first's row under the unique
-         * index, then finds it there. Thrown, so its own conversation is rolled back with it.
-         */
-        if (!task) throw new ItemAlreadyOpened();
-        return task;
-      });
-    } catch (error) {
-      if (!(error instanceof ItemAlreadyOpened)) throw error;
-      const winner = await deps.store.byItem(ownerUserId, item.id);
-      if (!winner) throw error;
-      return winner;
-    }
+    const conversation = await deps.channels.draft(actor, [item.agentId]);
+    /*
+     * The task and its conversation are one write in Intelligence. Two Starts of one item at once:
+     * the second finds the first's task under the item and makes nothing.
+     */
+    return deps.store.create(
+      {
+        ownerUserId,
+        agentId: item.agentId,
+        title: item.title,
+        why: whyOf(item.detail),
+        origin: "check_in",
+        suggestionId: item.id,
+        sourceApp: item.sourceApp,
+        sourceLink: item.sourceLink,
+      },
+      conversation,
+    );
   }
 
   /** Queue a task's turn, once per key, and start it now. */
@@ -212,18 +187,13 @@ export function createTaskRunner(deps: {
        * Queued by a Start from before tasks, which ran the ask in the person's own conversation. It
        * gets its task now, and its turn is queued as a task's, so started work never lands there.
        */
-      const [item] = work.suggestionId
-        ? await deps.database
-            .select()
-            .from(proactiveSuggestions)
-            .where(
-              and(
-                eq(proactiveSuggestions.ownerUserId, work.ownerUserId),
-                eq(proactiveSuggestions.id, work.suggestionId),
-              ),
-            )
-            .limit(1)
-        : [];
+      const found = work.suggestionId
+        ? await schedules().client.get(
+            "check-in-suggestions",
+            work.suggestionId,
+          )
+        : null;
+      const item = found?.ownerUserId === work.ownerUserId ? found : null;
       if (!item) throw new TaskRefusedError("This task has nothing to start.");
       const task = await open(work.ownerUserId, item);
       await queueTurn(

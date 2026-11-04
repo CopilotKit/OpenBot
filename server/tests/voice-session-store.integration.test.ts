@@ -1,21 +1,19 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import type { SaveVoiceSessionInput } from "@openbot/shared/voice-session";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  channelMemberships,
-  channels,
-  intelligenceChannelMappings,
-  users,
-  voiceSessions,
-} from "../src/db/schema";
+import { users } from "../src/db/schema";
 import { createVoiceSessionStore } from "../src/voice/sessions";
+import { deleteBot, removeBots, useTestBots } from "./support/bots";
+import {
+  addConversationMember,
+  conversationClient,
+  purgeConversations,
+} from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -28,7 +26,7 @@ const channelStore = createChannelStore(
   profiles,
   createThreadIdentity("voice-store-test"),
 );
-const store = createVoiceSessionStore(database, channelStore);
+const store = createVoiceSessionStore(channelStore);
 const prefix = `voice-${randomUUID()}`;
 const owner = { id: `${prefix}-owner`, role: "user" } as const;
 const member = { id: `${prefix}-member`, role: "user" } as const;
@@ -37,6 +35,7 @@ let channelId: string;
 let agentId: string;
 
 beforeAll(async () => {
+  await useTestBots();
   for (const actor of [owner, member, outsider])
     await database.insert(users).values({
       id: actor.id,
@@ -52,18 +51,13 @@ beforeAll(async () => {
   agentId = profile.id;
   const channel = await channelStore.create(owner, [profile.id]);
   channelId = channel.id;
-  await database
-    .insert(channelMemberships)
-    .values({ channelId, userId: member.id });
-  await database
-    .insert(intelligenceChannelMappings)
-    .values({ channelId, userId: member.id, threadId: randomUUID() });
+  // A second member, with a thread of their own, as adding someone to a group does.
+  await addConversationMember(channelId, member.id);
 });
 
 afterAll(async () => {
-  if (channelId)
-    await database.delete(channels).where(eq(channels.id, channelId));
-  if (agentId) await database.delete(agents).where(eq(agents.id, agentId));
+  if (channelId) await purgeConversations([channelId]);
+  if (agentId) await removeBots([agentId]);
   await database
     .delete(users)
     .where(inArray(users.id, [owner.id, member.id, outsider.id]));
@@ -111,11 +105,9 @@ test("sessions persist as JSON, are immutable/idempotent, and are shared only wi
   );
   expect(summary.summaryStatus).toBe("ready");
   expect((await store.save(owner, request)).summary).toBe(summary.summary);
-  const [row] = await database
-    .select()
-    .from(voiceSessions)
-    .where(eq(voiceSessions.id, request.id));
-  expect(row?.transcript.entries).toEqual(request.transcript);
+  // Stored in Intelligence, as JSON, exactly as sent.
+  const stored = await (await conversationClient()).voice.get(request.id);
+  expect(stored?.transcript).toEqual(request.transcript);
 });
 
 test("pagination handles equal timestamps without missing or repeating sessions", async () => {
@@ -139,10 +131,7 @@ test("pagination handles equal timestamps without missing or repeating sessions"
 });
 
 test("deleted agents make voice writes inactive while existing history stays readable", async () => {
-  await database
-    .update(agentProfiles)
-    .set({ deletedAt: new Date() })
-    .where(eq(agentProfiles.agentId, agentId));
+  await deleteBot(agentId);
   await expect(store.save(owner, input())).rejects.toThrow("no longer active");
   expect((await store.list(owner, channelId)).sessions.length).toBeGreaterThan(
     0,

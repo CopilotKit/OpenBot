@@ -1,6 +1,12 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { createAuditStore } from "../src/audit";
@@ -8,8 +14,20 @@ import type { AppVariables } from "../src/auth/guards";
 import { createComponentRoutes } from "../src/components/routes";
 import { createSandboxedStore } from "../src/components/sandboxed";
 import { createComponentStore } from "../src/components/store";
+import { createConfigurationClient } from "../src/configuration/client";
+import {
+  createBotConfiguration,
+  installBotConfiguration,
+} from "../src/configuration/directory";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, components, sandboxedComponents } from "../src/db/schema";
+import {
+  makeTestComponent,
+  removeTestComponents,
+  storedComponent,
+  testIntelligence,
+  useTestConfiguration,
+} from "./support/bots";
+import { auditRows, useTestAuditTrail } from "./support/audit";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -17,12 +35,14 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * publishing one is not the same act. The source lives beside the governance row, and a publication
  * that writes only the governance row offers every Bot a component that cannot draw.
  *
- * These tests cross the real route and both stores against Postgres. A mocked store could prove the
- * route called something; it could not prove the two rows commit together, the revision is stable on
- * a retry, or a failed governance write leaves the source unpublished.
+ * These tests cross the real route and both stores against a real Intelligence, where a component's
+ * governance and its source are one record. A mocked store could prove the route called something; it
+ * could not prove the two halves commit together, the revision is stable on a retry, or a failed write
+ * leaves the source unpublished.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 const auditStore = createAuditStore(database);
 const componentStore = createComponentStore(database);
 const sandboxedStore = createSandboxedStore(database, auditStore);
@@ -90,28 +110,27 @@ async function saveDraft(
 }
 
 async function governanceOf(name: string) {
-  const [row] = await database
-    .select()
-    .from(components)
-    .where(eq(components.name, name));
-  return row;
+  return (await storedComponent(name)) ?? undefined;
 }
 
+/** The source half, in the old row's names. */
 async function sourceOf(name: string) {
-  const [row] = await database
-    .select()
-    .from(sandboxedComponents)
-    .where(eq(sandboxedComponents.name, name));
-  return row;
+  const source = (await storedComponent(name))?.source;
+  if (!source) return undefined;
+  return {
+    published: source.isPublished,
+    publishedHtml: source.published?.html ?? null,
+    revision: source.revision,
+  };
 }
+
+beforeAll(async () => {
+  await useTestConfiguration();
+});
 
 afterEach(async () => {
-  for (const name of fixtureNames) {
-    await database
-      .delete(sandboxedComponents)
-      .where(eq(sandboxedComponents.name, name));
-    await database.delete(components).where(eq(components.name, name));
-  }
+  for (const name of fixtureNames)
+    if (await storedComponent(name)) await removeTestComponents([name]);
   fixtureNames.clear();
 });
 
@@ -134,13 +153,11 @@ describe("the generic Published switch on a sandboxed component", () => {
 
   test("refuses a sandboxed governance row with no source", async () => {
     const { name } = fixture("missing");
-    await database.insert(components).values({
-      name,
+    await makeTestComponent(name, {
+      published: false,
       title: "A missing source",
       kind: "sandboxed",
       draftDescription: "Draws something.",
-      published: false,
-      updatedBy: ADMIN.email,
     });
 
     const response = await postPublication(name, true);
@@ -181,52 +198,54 @@ describe("the generic Published switch on a sandboxed component", () => {
     expect((await postPublication(name, true)).status).toBe(200);
 
     expect((await sourceOf(name))?.revision).toBe(1);
-    const events = await database
-      .select()
-      .from(auditEvents)
-      .where(eq(auditEvents.targetId, name));
+    const events = await auditRows({ targetId: name });
     expect(
       events.filter((event) => event.eventType === "component.published"),
     ).toHaveLength(1);
   });
 
-  test("a failure after the source write rolls the whole publish back", async () => {
+  test("a publish Intelligence does not take leaves both halves unpublished", async () => {
     const { slug, name } = fixture("rollback");
     await saveDraft(slug);
-    const functionName = `reject_${name}`;
-    const triggerName = `reject_${name}`;
-
-    await database.execute(
-      sql.raw(`
-        CREATE FUNCTION ${functionName}() RETURNS trigger LANGUAGE plpgsql AS $$
-        BEGIN
-          IF NEW.name = '${name}' THEN
-            RAISE EXCEPTION 'forced publication failure';
-          END IF;
-          RETURN NEW;
-        END
-        $$;
-        CREATE TRIGGER ${triggerName}
-          BEFORE UPDATE ON components
-          FOR EACH ROW EXECUTE FUNCTION ${functionName}();
-      `),
-    );
-
+    const heard = await useTestConfiguration();
+    // A replica whose every write fails on the way: Intelligence answers 500 to each.
+    const intelligence = testIntelligence();
+    const failing = createBotConfiguration({
+      client: createConfigurationClient({
+        ...intelligence,
+        fetch: (async (
+          input: Parameters<typeof fetch>[0],
+          init?: RequestInit,
+        ) =>
+          init?.method === "PUT"
+            ? new Response(
+                JSON.stringify({ error: { code: "INTERNAL_SERVER_ERROR" } }),
+                { status: 500 },
+              )
+            : fetch(input, init)) as typeof fetch,
+      }),
+      registry: {
+        subscribe: async () => {
+          throw new Error("This replica hears nothing.");
+        },
+      },
+      resyncIntervalMs: 3_600_000,
+    });
+    await failing.start();
+    installBotConfiguration(failing);
     try {
       await expect(sandboxedStore.publish(name, ADMIN.email)).rejects.toThrow();
-
-      const source = await sourceOf(name);
-      const governance = await governanceOf(name);
-      expect(source?.published).toBeFalse();
-      expect(source?.publishedHtml).toBeNull();
-      expect(source?.revision).toBe(0);
-      expect(governance?.published).toBeFalse();
     } finally {
-      await database.execute(
-        sql.raw(`DROP TRIGGER ${triggerName} ON components`),
-      );
-      await database.execute(sql.raw(`DROP FUNCTION ${functionName}()`));
+      failing.stop();
+      installBotConfiguration(heard);
     }
+
+    const source = await sourceOf(name);
+    const governance = await governanceOf(name);
+    expect(source?.published).toBeFalse();
+    expect(source?.publishedHtml).toBeNull();
+    expect(source?.revision).toBe(0);
+    expect(governance?.published).toBeFalse();
   });
 
   test("unpublish withdraws the source and the governance row together", async () => {

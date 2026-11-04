@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { decryptOAuthToken, setTokenUtil } from "better-auth/oauth2";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import {
   exportJWK,
   generateKeyPair,
@@ -13,32 +13,34 @@ import {
   SignJWT,
 } from "jose";
 import { createApp } from "../src/app";
-import { createPeopleStore } from "../src/people/store";
 import { createAuditStore } from "../src/audit";
 import { createAuth } from "../src/auth";
 import { createEntra, withEntraBearer } from "../src/auth/entra";
 import { createRoleRepository } from "../src/auth/guards";
 import { loadConfig } from "../src/config";
-import { encryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  accounts,
-  agents,
-  auditEvents,
-  credentials,
-  mcpServers,
-  revokedAccess,
-  sessions,
-  users,
-} from "../src/db/schema";
+import { accounts, revokedAccess, sessions, users } from "../src/db/schema";
+import { createPeopleStore } from "../src/people/store";
 import {
   CustomServerRefusedError,
   createPluginStore,
 } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import { createRequestActor } from "../src/request-actor";
+import { auditRows } from "./support/audit";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPeople } from "./support/directory";
+import { useTestPolicy } from "./support/policy";
 import { testEnvironment } from "./support/environment";
+import {
+  purgeSecrets,
+  removeServers,
+  seedCredential,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * A company system behind Microsoft Entra, reached as the signed-in person.
@@ -385,25 +387,19 @@ const newEntra = (settings = microsoft) => {
 };
 const signIn = newEntra();
 
-const credentialReader = {
-  readSecret: async (id: string) => {
-    const [row] = await database
-      .select({
-        encryptedValue: credentials.encryptedValue,
-        revokedAt: credentials.revokedAt,
-      })
-      .from(credentials)
-      .where(eq(credentials.id, id));
-    return row ?? null;
-  },
-} as never;
+/*
+ * The vault, real: the deployment's token for the plain server is a secret in Intelligence, read
+ * through the same store the server wires. Installed before the store below is built, because the
+ * app under test is built at module scope around it.
+ */
+const credentialStore = createCredentialStore(await useTestVault());
 
 const storeWith = (tokens?: ReturnType<typeof createEntra>) =>
   createPluginStore({
     brokerProvider: "composio",
     database,
     auditStore,
-    credentials: credentialReader,
+    credentials: credentialStore,
     encryptionKey: config.keyEncryptionKey,
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     ...(tokens ? { entra: tokens } : {}),
@@ -483,19 +479,32 @@ async function signedInWithMicrosoft(who: { oid: string; upn: string }) {
   return id;
 }
 
+/**
+ * The person's stored refresh token: what the column holds (a reference to a vault secret, see
+ * auth/sign-in-secrets.ts), what Better Auth reads back through its adapter (its own encryption of the
+ * token), and the token itself.
+ */
 async function storedRefreshToken(id: string) {
   const ctx = (await betterAuth.$context) as unknown as Parameters<
     typeof decryptOAuthToken
-  >[1];
+  >[1] & {
+    internalAdapter: {
+      findAccounts(
+        userId: string,
+      ): Promise<{ providerId: string; refreshToken?: string | null }[]>;
+    };
+  };
   const [row] = await database
     .select({ refreshToken: accounts.refreshToken })
     .from(accounts)
     .where(and(eq(accounts.userId, id), eq(accounts.providerId, "microsoft")));
+  const read = (await ctx.internalAdapter.findAccounts(id)).find(
+    (account) => account.providerId === "microsoft",
+  )?.refreshToken;
   return {
     raw: row?.refreshToken ?? null,
-    plain: row?.refreshToken
-      ? await decryptOAuthToken(row.refreshToken, ctx)
-      : null,
+    stored: read ?? null,
+    plain: read ? await decryptOAuthToken(read, ctx) : null,
   };
 }
 
@@ -518,6 +527,11 @@ async function backgroundCall(
 }
 
 beforeAll(async () => {
+  // Sign-in and Bot reset read the organization policy (support/policy.ts).
+  await useTestPolicy();
+  // And sign-in stamps the person in the people directory, which this file installs for itself
+  // rather than relying on a file that ran before it in the same process.
+  useTestPeople();
   const pair = await generateKeyPair("RS256", { extractable: true });
   signingKey = pair.privateKey;
   // As Entra publishes its keys: a kid and a use, and no `alg`.
@@ -560,19 +574,13 @@ beforeAll(async () => {
     return realFetch(new Request(local, request));
   }) as typeof fetch;
 
-  await database
-    .insert(agents)
-    .values({ id: BOT, name: BOT, type: "remote_ag_ui", configuration: {} });
-  await database.insert(credentials).values({
+  await seedBot({ id: BOT, name: BOT });
+  await seedCredential({
     id: DEPLOYMENT_CREDENTIAL,
     kind: "mcp",
     provider: PLAIN,
     keyId: `mcp-${PLAIN}`,
-    encryptedValue: await encryptSecret(
-      config.keyEncryptionKey,
-      `deployment-token-${tag}`,
-    ),
-    metadata: {},
+    plaintext: `deployment-token-${tag}`,
   });
 });
 
@@ -580,11 +588,14 @@ afterAll(async () => {
   globalThis.fetch = realFetch;
   entraServer?.stop(true);
   mcpServer?.stop(true);
-  await database.delete(mcpServers).where(like(mcpServers.id, `obo-%-${tag}`));
-  await database.delete(agents).where(eq(agents.id, BOT));
-  await database
-    .delete(credentials)
-    .where(inArray(credentials.id, [DEPLOYMENT_CREDENTIAL]));
+  const { servers } = await (await useTestVault()).client.toolServers.all();
+  await removeServers(
+    servers
+      .map((server) => server.id)
+      .filter((id) => id.startsWith("obo-") && id.endsWith(`-${tag}`)),
+  );
+  await removeBots([BOT]);
+  await purgeSecrets([DEPLOYMENT_CREDENTIAL]);
   await database.delete(users).where(like(users.email, `%-${tag}@obo.test`));
   await database
     .delete(revokedAccess)
@@ -614,16 +625,14 @@ describe("an app calls OpenBot with a person's Entra token", () => {
       .from(sessions)
       .where(eq(sessions.userId, (await userId(ADMIN)) ?? ""));
     expect(signedIn).toHaveLength(0);
-    // The sign-in itself is still on the trail.
-    const trail = await database
-      .select({ id: auditEvents.id })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "session.signed_in"),
-          eq(auditEvents.actorUserId, (await userId(ADMIN)) ?? ""),
-        ),
-      );
+    // The sign-in itself is still on the trail, read by her id (which no other run has).
+    const adminId = (await userId(ADMIN)) ?? "";
+    const trail = adminId
+      ? await auditRows({
+          eventType: "session.signed_in",
+          actorUserId: adminId,
+        })
+      : [];
     expect(trail).toHaveLength(1);
   });
 
@@ -856,9 +865,12 @@ describe("a routine reaches the system as its person, with nobody in the browser
 
     const after = await storedRefreshToken(caraId);
     expect(after.plain).not.toBe(before.plain);
-    // The one Entra now honours, and still encrypted the way Better Auth writes it.
+    // The one Entra now honours, still encrypted the way Better Auth writes it, and held by the vault:
+    // the column names a secret.
     expect(entra.refreshTokens.get(after.plain ?? "")?.oid).toBe(cara.oid);
-    expect(after.raw).not.toBe(after.plain);
+    expect(after.stored).not.toBe(after.plain);
+    expect(after.raw).toStartWith("vault:");
+    expect(after.raw).not.toBe(before.raw);
   });
 
   test("a person who never signed in with Microsoft is told so", async () => {
@@ -1024,10 +1036,6 @@ describe("what does not change", () => {
         by: ADMIN,
       }),
     ).rejects.toBeInstanceOf(CustomServerRefusedError);
-    const [row] = await database
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, id));
-    expect(row).toBeUndefined();
+    expect(await storedServer(id)).toBeNull();
   });
 });

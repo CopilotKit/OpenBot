@@ -14,27 +14,52 @@
  *   made by hand passes (`MemoryIngestion.defaultSourceCandidates`).
  *
  * Isolation is unchanged, because nothing here is a new path to a memory: a default source is an
- * ordinary `memory_sources` row owned by the person and bound to one Bot, and what it imports is
- * recalled by that Bot only, unreviewed until the person confirms it (so not mirrored to
- * Intelligence until then). A default research setting is an ordinary `proactive_settings` row.
+ * ordinary memory source in Intelligence, owned by the person and bound to one Bot, and what it imports
+ * is recalled by that Bot only, unreviewed until the person confirms it. A default research setting is
+ * an ordinary check-in setting, which lives in Intelligence's agent schedules (`proactive/store.ts`).
  *
- * NEVER SWITCHED BACK ON. Turning either off keeps its row with `enabled = false`, and a row of any
- * kind means there is nothing to adopt. Removing one writes `default_opt_outs`, which adoption reads
- * first. Both checks and the insert run under one advisory lock per person and Bot, which removal
- * takes too, so a removal and an adoption arriving together cannot interleave into a re-creation.
- * Removal waits for the lock; adoption only tries it and steps aside when it is held, so it never
- * parks a pooled connection behind another transaction.
+ * NEVER SWITCHED BACK ON. Turning either off keeps it with `enabled = false`, and a source or setting of
+ * any kind means there is nothing to adopt. Removing one records an opt-out in the person's preferences
+ * in Intelligence (`declinedDefaults`), which adoption reads, from the copy this instance holds.
+ *
+ * A removal and an adoption arriving together cannot interleave into a re-creation, though the source is
+ * in Intelligence and no OpenBot transaction is held across a call to it. The ORDER keeps it: removal
+ * records the opt-out in Intelligence first and deletes the source after; adoption reads the sources
+ * from Intelligence first and the opt-outs after. Whichever the adoption sees (the source still there,
+ * or gone with its opt-out already recorded), it does not add the app back. Two adoptions at once make
+ * one source: its id is made from the person, Bot and app. A research setting is adopted under a named
+ * lease per person and Bot (`work/local-lock.ts`) that removal and a reset take too: its setting is made
+ * in Intelligence, and no transaction here may be held open across that call. Removal waits for the
+ * lease or the lock; adoption only tries them and steps aside when one is held, so it never waits
+ * behind one.
+ *
+ * ON A PERSON'S TURN. Whether this person already has check-ins with this Bot is read from the
+ * schedule directory's memory, so a conversation that has them, which is nearly every one, never
+ * reaches Intelligence. Only a missing one is made there, and Intelligence's rule of one setting per
+ * person and Bot makes two replicas adopting it at once harmless.
+ *
+ * ACROSS REPLICAS. Another replica's copy of the preferences may not have heard of an opt-out yet when
+ * it adopts, so an adoption that created anything asks Intelligence afresh once it has, and takes back
+ * whatever an opt-out now covers. Either the removal's delete came after the adoption's write (and
+ * deleted it), or the opt-out was already in Intelligence when the adoption asked.
  *
  * Off for the whole deployment with OPENBOT_MEMORY_SOURCE_DEFAULTS=false and
  * OPENBOT_PROACTIVE_DEFAULTS=false. Either switch stops new defaults; neither touches existing rows.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { Database } from "../db/client";
-import { type DefaultFeature, defaultOptOuts } from "../db/schema/defaults";
-import { memorySources } from "../db/schema/memory";
-import { proactiveSettings } from "../db/schema/proactive";
+import { botConfiguration } from "../configuration/directory";
+import type { DefaultFeature } from "../db/schema/defaults";
+import { schedules } from "../schedules/directory";
+import {
+  releaseLocalLock,
+  tryLocalLock,
+  withLocalLock,
+} from "../work/local-lock";
 import type { MemoryIngestion } from "./ingestion";
+import type { MemoryStore } from "./store";
+import { MemoryNotFoundError } from "./types";
 
 /**
  * How often check-ins run when OpenBot switched them on, in minutes: hourly, the most often a Bot
@@ -43,9 +68,6 @@ import type { MemoryIngestion } from "./ingestion";
 export const DEFAULT_RESEARCH_INTERVAL_MINUTES = 60;
 /** The shortest gap between two adoption passes for one person and Bot in this process. */
 const MIN_INTERVAL_MS = 5 * 60_000;
-
-/** A transaction or the database: anything that can run the statements below. */
-type Executor = Pick<Database, "execute" | "select" | "insert" | "delete">;
 
 const lockKey = (ownerUserId: string, agentId: string) =>
   `openbot:defaults:${ownerUserId}:${agentId}`;
@@ -80,20 +102,62 @@ async function tryLockDefaults(
   return [...rows][0]?.locked === true;
 }
 
-/** Record that a person turned a default down. Idempotent. */
-export async function recordOptOut(
-  executor: Pick<Database, "insert">,
-  input: {
-    ownerUserId: string;
-    agentId: string;
-    feature: DefaultFeature;
-    scope?: string;
-  },
+/** The lease research adoption and research removal share, per person and Bot. */
+const researchLockKey = (ownerUserId: string, agentId: string) =>
+  `defaults:research:${ownerUserId}:${agentId}`;
+/**
+ * How long the research lease may be held: a read of the opt-outs and one write to Intelligence, with
+ * the client's own retries. A holder that dies frees it after this.
+ */
+const RESEARCH_LOCK_TTL_MS = 60_000;
+
+/**
+ * Run `work` holding the research lease for this person and Bot, waiting for it. Removal and a reset
+ * use this: a person's removal always lands.
+ */
+export function withResearchDefaultsLock<T>(
+  database: Database,
+  ownerUserId: string,
+  agentId: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  return withLocalLock(database, researchLockKey(ownerUserId, agentId), work, {
+    ttlMs: RESEARCH_LOCK_TTL_MS,
+    waitMs: 30_000,
+  });
+}
+
+/**
+ * Record that a person turned a default down, in their preferences in Intelligence. Idempotent.
+ *
+ * Called BEFORE the transaction that removes what they turned down, never inside one: no OpenBot
+ * transaction waits on Intelligence. An opt-out written for a removal that then finds nothing to
+ * remove is still what the person said.
+ */
+export async function recordOptOut(input: {
+  ownerUserId: string;
+  agentId: string;
+  feature: DefaultFeature;
+  scope?: string;
+}) {
+  await recordOptOuts(input.ownerUserId, [input]);
+}
+
+/** Several at once, in one write. */
+export async function recordOptOuts(
+  ownerUserId: string,
+  optOuts: { agentId: string; feature: DefaultFeature; scope?: string }[],
 ) {
-  await executor
-    .insert(defaultOptOuts)
-    .values({ ...input, scope: input.scope ?? "" })
-    .onConflictDoNothing();
+  if (optOuts.length === 0) return;
+  await botConfiguration().changePreferences(
+    ownerUserId,
+    optOuts.map((optOut) => ({
+      op: "optOut" as const,
+      botId: optOut.agentId,
+      feature: optOut.feature,
+      scope: optOut.scope ?? "",
+    })),
+  );
 }
 
 /** The app half of a tool ref, which is what a memory-source opt-out is scoped to. */
@@ -101,23 +165,42 @@ export function sourceServerId(toolRef: string) {
   return toolRef.split("/")[0] ?? toolRef;
 }
 
-async function declined(
-  executor: Executor,
+/** The scopes this person turned down for this Bot and feature, from the preferences held here. */
+function declined(
   ownerUserId: string,
   agentId: string,
   feature: DefaultFeature,
 ) {
-  const rows = await executor
-    .select({ scope: defaultOptOuts.scope })
-    .from(defaultOptOuts)
-    .where(
-      and(
-        eq(defaultOptOuts.ownerUserId, ownerUserId),
-        eq(defaultOptOuts.agentId, agentId),
-        eq(defaultOptOuts.feature, feature),
-      ),
-    );
-  return new Set(rows.map((row) => row.scope));
+  return declinedIn(
+    botConfiguration().preferencesOf(ownerUserId).optOuts,
+    agentId,
+    feature,
+  );
+}
+
+function declinedIn(
+  optOuts: { botId: string; feature: string; scope: string }[],
+  agentId: string,
+  feature: DefaultFeature,
+) {
+  return new Set(
+    optOuts
+      .filter((row) => row.botId === agentId && row.feature === feature)
+      .map((row) => row.scope),
+  );
+}
+
+/**
+ * The person's opt-outs as Intelligence holds them now, past this instance's copy: asked once an
+ * adoption has created something, so an opt-out another replica wrote a moment ago is seen.
+ */
+async function declinedNow(
+  ownerUserId: string,
+  agentId: string,
+  feature: DefaultFeature,
+) {
+  const fresh = await botConfiguration().preferences.refresh(ownerUserId);
+  return declinedIn(fresh?.optOuts ?? [], agentId, feature);
 }
 
 export type MemoryDefaults = ReturnType<typeof createMemoryDefaults>;
@@ -125,6 +208,8 @@ export type MemoryDefaults = ReturnType<typeof createMemoryDefaults>;
 export function createMemoryDefaults(options: {
   database: Database;
   ingestion: Pick<MemoryIngestion, "defaultSourceCandidates" | "sync">;
+  /** Where the person's memory sources are: Intelligence. */
+  memory: Pick<MemoryStore, "sourcesFor" | "adoptSource" | "removeSource">;
   /** OPENBOT_MEMORY_SOURCE_DEFAULTS, on unless switched off. */
   sources: boolean;
   /** OPENBOT_PROACTIVE_DEFAULTS, on unless switched off. */
@@ -173,6 +258,33 @@ export function createMemoryDefaults(options: {
       timestamp: new Date().toISOString(),
     });
 
+  /**
+   * What an adoption just created, less anything an opt-out written on another replica a moment ago
+   * covers: those are removed again in Intelligence. Returns the ids that stand.
+   */
+  async function takeBackDeclinedSources(
+    ownerUserId: string,
+    agentId: string,
+    created: { id: string; serverId: string }[],
+  ): Promise<string[]> {
+    if (created.length === 0) return [];
+    const optedOut = await declinedNow(ownerUserId, agentId, "memory_source");
+    const declinedIds = created
+      .filter((source) => optedOut.has(source.serverId))
+      .map((source) => source.id);
+    for (const id of declinedIds) {
+      try {
+        await options.memory.removeSource(ownerUserId, id);
+      } catch (error) {
+        // Gone already: the person, or another replica, removed it first.
+        if (!(error instanceof MemoryNotFoundError)) throw error;
+      }
+    }
+    return created
+      .filter((source) => !declinedIds.includes(source.id))
+      .map((source) => source.id);
+  }
+
   /** Switch on a memory source for each connected app the Bot can read. Returns the new ids. */
   async function adoptSources(
     ownerUserId: string,
@@ -185,47 +297,31 @@ export function createMemoryDefaults(options: {
       agentId,
     );
     if (!candidates.length) return [];
-    const created = await options.database.transaction(async (transaction) => {
-      if (!(await tryLockDefaults(transaction, ownerUserId, agentId)))
-        return [];
-      const existing = await transaction
-        .select({ toolRef: memorySources.toolRef })
-        .from(memorySources)
-        .where(
-          and(
-            eq(memorySources.ownerUserId, ownerUserId),
-            eq(memorySources.agentId, agentId),
-          ),
-        );
-      const covered = new Set(
-        existing.map((row) => sourceServerId(row.toolRef)),
-      );
-      const optedOut = await declined(
-        transaction,
+    // The sources first, then the opt-outs: removal records its opt-out before it deletes.
+    const existing = await options.memory.sourcesFor(ownerUserId, agentId);
+    const free = await options.database.transaction((transaction) =>
+      tryLockDefaults(transaction, ownerUserId, agentId),
+    );
+    if (!free) return [];
+    const optedOut = declined(ownerUserId, agentId, "memory_source");
+    const covered = new Set(
+      existing.map((source) => sourceServerId(source.toolRef)),
+    );
+    const created: { id: string; serverId: string }[] = [];
+    for (const candidate of candidates) {
+      // Any source on this app, on or off, made by hand or by us, is the person's choice already.
+      if (covered.has(candidate.serverId) || optedOut.has(candidate.serverId))
+        continue;
+      const source = await options.memory.adoptSource(
         ownerUserId,
         agentId,
-        "memory_source",
+        candidate,
       );
-      const ids: string[] = [];
-      for (const candidate of candidates) {
-        // Any source on this app, on or off, made by hand or by us, is the person's choice already.
-        if (covered.has(candidate.serverId) || optedOut.has(candidate.serverId))
-          continue;
-        const id = randomUUID();
-        await transaction.insert(memorySources).values({
-          id,
-          ownerUserId,
-          agentId,
-          toolRef: candidate.toolRef,
-          title: candidate.title,
-          args: {},
-        });
-        covered.add(candidate.serverId);
-        ids.push(id);
-      }
-      return ids;
-    });
-    for (const id of created) {
+      covered.add(candidate.serverId);
+      if (source) created.push({ id: source.id, serverId: candidate.serverId });
+    }
+    const kept = await takeBackDeclinedSources(ownerUserId, agentId, created);
+    for (const id of kept) {
       log({
         type: "memory-defaults",
         outcome: "source_adopted",
@@ -235,7 +331,7 @@ export function createMemoryDefaults(options: {
       // Read now rather than on the next sweep, so the Bot has the facts by the person's next turn.
       void options.ingestion.sync(ownerUserId, id).catch(failed("sync"));
     }
-    return created;
+    return kept;
   }
 
   /** Switch on background research by this Bot into this conversation. True when it did. */
@@ -245,53 +341,86 @@ export function createMemoryDefaults(options: {
     channelId: string,
   ): Promise<boolean> {
     if (!options.research) return false;
+    // One per person and Bot, on or off, is the person's choice already: from memory, no round trip.
+    const has = () =>
+      schedules()
+        .cached("check-in-settings")
+        .some(
+          (setting) =>
+            setting.ownerUserId === ownerUserId &&
+            setting.agentId === agentId &&
+            setting.deletedAt === null,
+        );
+    if (has()) return false;
     if (!(await options.canDeliver(ownerUserId, channelId, agentId)))
       return false;
-    const adopted = await options.database.transaction(async (transaction) => {
-      if (!(await tryLockDefaults(transaction, ownerUserId, agentId)))
-        return false;
+    const lock = researchLockKey(ownerUserId, agentId);
+    const holder = randomUUID();
+    if (
+      !(await tryLocalLock(
+        options.database,
+        lock,
+        holder,
+        RESEARCH_LOCK_TTL_MS,
+      ))
+    )
+      return false;
+    let adoptedId: string | null = null;
+    try {
       if (
+        declined(ownerUserId, agentId, "proactive_research").size === 0 &&
+        // One default per person and Bot: any check-in already there, on or off, is the person's
+        // choice. Read from Intelligence under the lease, since a Bot can now hold several and
+        // nothing else stops a second.
         (
-          await declined(
-            transaction,
+          await schedules().client.all("check-in-settings", {
             ownerUserId,
             agentId,
-            "proactive_research",
-          )
-        ).size
-      )
-        return false;
-      // One default per person and Bot: any check-in already there, on or off, is the person's
-      // choice. Checked under the lock, since a Bot can now hold several and nothing else stops a
-      // second.
-      const [existing] = await transaction
-        .select({ id: proactiveSettings.id })
-        .from(proactiveSettings)
-        .where(
-          and(
-            eq(proactiveSettings.ownerUserId, ownerUserId),
-            eq(proactiveSettings.agentId, agentId),
-          ),
-        )
-        .limit(1);
-      if (existing) return false;
-      const rows = await transaction
-        .insert(proactiveSettings)
-        .values({
-          id: randomUUID(),
+          })
+        ).items.length === 0
+      ) {
+        const id = randomUUID();
+        await schedules().create("check-in-settings", {
+          id,
           ownerUserId,
           agentId,
           channelId,
           threadId: options.mintThreadId(),
+          focus: "",
+          // Everything the Bot can read, as a check-in OpenBot switches on by itself always watched.
+          subject: "",
+          sourceLink: null,
           intervalMinutes: DEFAULT_RESEARCH_INTERVAL_MINUTES,
           enabled: true,
           nextRunAt: new Date(
             now() + DEFAULT_RESEARCH_INTERVAL_MINUTES * 60_000,
           ),
-        })
-        .returning({ id: proactiveSettings.id });
-      return rows.length > 0;
-    });
+          lastRunAt: null,
+          lastStatus: "idle",
+          lastError: null,
+        });
+        adoptedId = id;
+      }
+    } finally {
+      await releaseLocalLock(options.database, lock, holder).catch(
+        failed("research-lock"),
+      );
+    }
+    // Asked afresh, as for sources: an opt-out written on another replica a moment ago wins.
+    if (
+      adoptedId !== null &&
+      (await declinedNow(ownerUserId, agentId, "proactive_research")).size > 0
+    ) {
+      const taken = adoptedId;
+      await withResearchDefaultsLock(
+        options.database,
+        ownerUserId,
+        agentId,
+        () => schedules().purge("check-in-settings", taken),
+      );
+      return false;
+    }
+    const adopted = adoptedId !== null;
     if (adopted)
       log({
         type: "memory-defaults",

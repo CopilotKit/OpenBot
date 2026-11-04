@@ -11,21 +11,9 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { type AuditEventInput, recordAuditEvent } from "../../audit";
-import {
-  agentProfiles,
-  agents,
-  appAccessRequests,
-  brokeredConnections,
-  credentials as credentialRows,
-  mcpServers,
-  mcpTools,
-  mcpUserCredentials,
-  pluginGrants,
-  teamBotConsentDefaults,
-  teamBotConsents,
-  teamBotPublications,
-  users,
-} from "../../db/schema";
+import { bots } from "../../agents/bot-registry/directory";
+import { botConfiguration } from "../../configuration/directory";
+import { appAccessRequests, mcpTools, users } from "../../db/schema";
 import { BROKERED_PROFILE, brokeredProvenance, toolkitOfFor } from "../access";
 import {
   type AppAccess,
@@ -48,7 +36,16 @@ import {
   catalogueEntry,
   classifyTool,
 } from "../catalogue";
+import { vault } from "../../vault/directory";
 import type { StoreContext } from "./context";
+import {
+  allBrokered,
+  allGrants,
+  allServers,
+  findServer,
+  serversAt,
+  updateServer,
+} from "./records";
 import { iso } from "./model";
 
 /**
@@ -197,20 +194,18 @@ export function appAccessMethods(context: StoreContext) {
    * Ordered by id so the grouping meets rows in the order the answering rule names them.
    */
   async function allRows(): Promise<ServerRow[]> {
-    return database
-      .select({
-        id: mcpServers.id,
-        title: mcpServers.title,
-        logo: mcpServers.logo,
-        url: mcpServers.url,
-        provenance: mcpServers.provenance,
-        authScheme: mcpServers.authScheme,
-        accountMode: mcpServers.accountMode,
-        credentialId: mcpServers.credentialId,
-        ownerGrants: mcpServers.ownerGrants,
-      })
-      .from(mcpServers)
-      .orderBy(asc(mcpServers.id));
+    // From memory: the apps are Intelligence's, held by this instance's vault directory.
+    return allServers().map((server) => ({
+      id: server.id,
+      title: server.title,
+      logo: server.logo,
+      url: server.url,
+      provenance: server.provenance,
+      authScheme: server.authScheme,
+      accountMode: server.accountMode,
+      credentialId: server.credentialId,
+      ownerGrants: server.ownerGrants,
+    }));
   }
 
   /**
@@ -433,12 +428,9 @@ export function appAccessMethods(context: StoreContext) {
   async function grantsByServer(
     agentId: string,
   ): Promise<Map<string, { byAdmin: boolean }>> {
-    const grants = await database
-      .select({ ref: pluginGrants.ref, grantedAs: pluginGrants.grantedAs })
-      .from(pluginGrants)
-      .where(
-        and(eq(pluginGrants.kind, "mcp"), eq(pluginGrants.agentId, agentId)),
-      );
+    const grants = botConfiguration()
+      .accessOf(agentId)
+      .grants.filter((grant) => grant.kind === "mcp");
     const servers = new Map<string, { byAdmin: boolean }>();
     for (const grant of grants) {
       const serverId = grant.ref.split("/")[0] ?? "";
@@ -458,17 +450,8 @@ export function appAccessMethods(context: StoreContext) {
 
   /** Who owns a Bot that still stands: a person's id, or null for one nobody owns or none at all. */
   async function botOwnerOf(agentId: string): Promise<string | null> {
-    const [row] = await database
-      .select({ ownerUserId: agentProfiles.ownerUserId })
-      .from(agentProfiles)
-      .where(
-        and(
-          eq(agentProfiles.agentId, agentId),
-          isNull(agentProfiles.deletedAt),
-        ),
-      )
-      .limit(1);
-    return row?.ownerUserId ?? null;
+    const bot = await bots().find(agentId);
+    return bot && bot.deletedAt === null ? bot.ownerUserId : null;
   }
 
   /**
@@ -494,62 +477,38 @@ export function appAccessMethods(context: StoreContext) {
       connectedAt: Date | null;
     }) => ({ usable: usable(row), connectedAt: iso(row.connectedAt) });
 
-    const [personal, deployment, held] = await Promise.all([
-      userId && toolkits.length > 0
-        ? database
-            .select({
-              app: brokeredConnections.app,
-              verified: brokeredConnections.verified,
-              probeAction: brokeredConnections.probeAction,
-              connectedAt: brokeredConnections.connectedAt,
-            })
-            .from(brokeredConnections)
-            .where(
-              and(
-                eq(brokeredConnections.provider, brokerProvider),
-                eq(brokeredConnections.holder, "person"),
-                eq(brokeredConnections.userId, userId),
-                inArray(brokeredConnections.app, toolkits),
-              ),
-            )
-        : [],
-      toolkits.length > 0
-        ? database
-            .select({
-              app: brokeredConnections.app,
-              verified: brokeredConnections.verified,
-              probeAction: brokeredConnections.probeAction,
-              connectedAt: brokeredConnections.connectedAt,
-            })
-            .from(brokeredConnections)
-            .where(
-              and(
-                eq(brokeredConnections.provider, brokerProvider),
-                eq(brokeredConnections.holder, "deployment"),
-                inArray(brokeredConnections.app, toolkits),
-              ),
-            )
-        : [],
-      userId && heldIds.length > 0
-        ? database
-            .select({
-              serverId: mcpUserCredentials.serverId,
-              revokedAt: credentialRows.revokedAt,
-              connectedAt: mcpUserCredentials.connectedAt,
-            })
-            .from(mcpUserCredentials)
-            .innerJoin(
-              credentialRows,
-              eq(credentialRows.id, mcpUserCredentials.credentialId),
-            )
-            .where(
-              and(
-                eq(mcpUserCredentials.userId, userId),
-                inArray(mcpUserCredentials.serverId, heldIds),
-              ),
-            )
-        : [],
-    ]);
+    // From memory: connections and the vault's metadata are held by this instance's directory.
+    const wanted = new Set(toolkits);
+    const brokered = allBrokered(brokerProvider).filter((row) =>
+      wanted.has(row.app),
+    );
+    const personal = userId
+      ? brokered.filter(
+          (row) => row.holder === "person" && row.userId === userId,
+        )
+      : [];
+    const deployment = brokered.filter((row) => row.holder === "deployment");
+    const heldServers = new Set(heldIds);
+    const held = userId
+      ? allGrants()
+          .filter(
+            (grant) =>
+              grant.userId === userId && heldServers.has(grant.serverId),
+          )
+          // A grant naming a secret the vault no longer holds was excluded by the old inner join.
+          .flatMap((grant) => {
+            const secret = vault().peekSecret(grant.credentialId);
+            return secret
+              ? [
+                  {
+                    serverId: grant.serverId,
+                    revokedAt: secret.revokedAt,
+                    connectedAt: grant.connectedAt,
+                  },
+                ]
+              : [];
+          })
+      : [];
     return {
       personalBrokered: new Map(personal.map((row) => [row.app, fact(row)])),
       deploymentBrokered: new Map(
@@ -605,21 +564,9 @@ export function appAccessMethods(context: StoreContext) {
     agentId: string,
     userId: string,
   ): Promise<string | null> {
-    const [row] = await database
-      .select({ ownerUserId: agentProfiles.ownerUserId })
-      .from(teamBotPublications)
-      .innerJoin(
-        agentProfiles,
-        eq(agentProfiles.agentId, teamBotPublications.agentId),
-      )
-      .where(
-        and(
-          eq(teamBotPublications.agentId, agentId),
-          isNull(agentProfiles.deletedAt),
-        ),
-      )
-      .limit(1);
-    const owner = row?.ownerUserId ?? null;
+    const published = botConfiguration().access.get(agentId)?.publication;
+    const bot = published ? await bots().find(agentId) : null;
+    const owner = bot && bot.deletedAt === null ? bot.ownerUserId : null;
     return owner && owner !== userId ? owner : null;
   }
 
@@ -631,22 +578,13 @@ export function appAccessMethods(context: StoreContext) {
     userId: string,
     agentId: string,
   ): Promise<Set<string>> {
-    const [forBot, forEvery] = await Promise.all([
-      database
-        .select({ serverId: teamBotConsents.serverId })
-        .from(teamBotConsents)
-        .where(
-          and(
-            eq(teamBotConsents.userId, userId),
-            eq(teamBotConsents.agentId, agentId),
-          ),
-        ),
-      database
-        .select({ serverId: teamBotConsentDefaults.serverId })
-        .from(teamBotConsentDefaults)
-        .where(eq(teamBotConsentDefaults.userId, userId)),
+    const preferences = botConfiguration().preferencesOf(userId);
+    return new Set([
+      ...preferences.consents
+        .filter((consent) => consent.botId === agentId)
+        .map((consent) => consent.serverId),
+      ...preferences.consentDefaults.map((consent) => consent.serverId),
     ]);
-    return new Set([...forBot, ...forEvery].map((row) => row.serverId));
   }
 
   /**
@@ -831,7 +769,6 @@ export function appAccessMethods(context: StoreContext) {
 
   const requestColumns = {
     request: appAccessRequests,
-    botName: agents.name,
     requesterEmail: users.email,
     requesterName: users.name,
   };
@@ -863,11 +800,20 @@ export function appAccessMethods(context: StoreContext) {
     const rows = await database
       .select(requestColumns)
       .from(appAccessRequests)
-      .leftJoin(agents, eq(agents.id, appAccessRequests.agentId))
       .leftJoin(users, eq(users.id, appAccessRequests.requestedBy))
       .where(where)
       .orderBy(desc(appAccessRequests.createdAt), asc(appAccessRequests.id));
-    return rows.map(toRecord);
+    const named = await bots().findMany(
+      rows.flatMap((row) => (row.request.agentId ? [row.request.agentId] : [])),
+    );
+    return rows.map((row) =>
+      toRecord({
+        ...row,
+        botName: row.request.agentId
+          ? (named.get(row.request.agentId)?.name ?? null)
+          : null,
+      }),
+    );
   }
 
   /** See `closeAppAccessRequest` below. */
@@ -1037,16 +983,11 @@ export function appAccessMethods(context: StoreContext) {
       ownerGrants: OwnerGrants | null;
       by: string;
     }): Promise<boolean> {
-      const [row] = await database
-        .select({ url: mcpServers.url, ownerGrants: mcpServers.ownerGrants })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, input.serverId))
-        .limit(1);
+      const row = await findServer(input.serverId);
       if (!row) return false;
-      await database
-        .update(mcpServers)
-        .set({ ownerGrants: input.ownerGrants, updatedAt: new Date() })
-        .where(eq(mcpServers.url, row.url));
+      for (const sibling of serversAt([row.url])) {
+        await updateServer(sibling.id, { ownerGrants: input.ownerGrants });
+      }
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
         targetType: "mcp_server",

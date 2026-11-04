@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type { ExchangeResponse } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
-import { count, eq, inArray } from "drizzle-orm";
+import { count, inArray } from "drizzle-orm";
 import { GATED_ROUTES, runtimeRun } from "../src/admin/gate";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { createApp } from "../src/app";
@@ -11,21 +11,23 @@ import type { AuditEventInput } from "../src/audit";
 import type { RoleRepository } from "../src/auth/guards";
 import { createStallGuard } from "../src/channels/stall-guard";
 import { loadConfig } from "../src/config";
+import { botConfiguration } from "../src/configuration/directory";
 import { mountCopilotRuntime } from "../src/copilot";
 import { createDatabase } from "../src/db/client";
-import { agents, users } from "../src/db/schema/core";
+import { users } from "../src/db/schema/core";
 import { routines } from "../src/db/schema/coworker";
-import {
-  learningOpenSkills,
-  learningSkillSharing,
-} from "../src/db/schema/learning";
-import { skills } from "../src/db/schema/plugins";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { createLearningSharingStore } from "../src/learning/sharing";
+import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { createRequestActor } from "../src/request-actor";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
+import {
+  removeLearningPeople,
+  testLearningIntelligence,
+} from "./support/learning";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-scope-${randomUUID()}`;
@@ -59,6 +61,7 @@ const recorder = createRecorderExtension({
   organizationAuth: undefined,
   roleRepository,
   peopleStore: { isRevoked: async () => false },
+  trajectoryBindings: createTrajectoryBindingStore(testLearningIntelligence()),
   personalSpaces: {
     containerFor: (userId) => `space-of-${userId}`,
     state: async () => ({ state: "unassigned", containerId: null }),
@@ -125,7 +128,7 @@ args[12] = auditStore;
 args[34] = {
   recorder,
   personalLearning: {
-    store: createLearningSharingStore(database),
+    store: createLearningSharingStore(testLearningIntelligence()),
     skillsOf: async () => ({ skills: [] }),
     invalidate: () => {},
     sharingAllowed: async () => true,
@@ -147,24 +150,30 @@ const call = (path: string, init: RequestInit & { json?: unknown } = {}) => {
 };
 
 async function counts() {
-  const of = async (
-    table:
-      | typeof routines
-      | typeof skills
-      | typeof learningSkillSharing
-      | typeof learningOpenSkills,
-  ) => (await database.select({ n: count() }).from(table))[0]?.n ?? 0;
+  const of = async (table: typeof routines) =>
+    (await database.select({ n: count() }).from(table))[0]?.n ?? 0;
+  // The person's sharing choice lives in Intelligence: its version moves on any change.
+  const space = await testLearningIntelligence().personalSpace(owner);
   return {
     routines: await of(routines),
-    skills: await of(skills),
-    sharing: await of(learningSkillSharing),
-    openSkills: await of(learningOpenSkills),
+    // Skills live in Intelligence: the ones this process holds, which every write here would change
+    // (and every fetch to Intelligence is refused in this file besides).
+    skills: botConfiguration().skills.all().length,
+    space: { version: space.version, sharing: space.sharing },
   };
 }
 
 let token = "";
 
 beforeAll(async () => {
+  // Made before every fetch is refused below: the Bot is in Intelligence, and this process holds it
+  // from here on without asking again.
+  await seedBot({
+    id: BOT,
+    name: "Bot",
+    type: "built_in",
+    configuration: { systemPrompt: "Work." },
+  });
   spies.push(
     spyOn(
       CopilotKitIntelligence.prototype,
@@ -196,9 +205,6 @@ beforeAll(async () => {
   await database
     .insert(users)
     .values({ id: owner, email: `${owner}@example.test`, name: "The Owner" });
-  await database
-    .insert(agents)
-    .values({ id: BOT, name: "Bot", type: "built_in", configuration: {} });
   const minted = await call("/api/recorder/connect-codes", {
     method: "POST",
     headers: COOKIE,
@@ -216,7 +222,8 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const spy of spies) spy.mockRestore();
   guard.stop();
-  await database.delete(agents).where(eq(agents.id, BOT));
+  await removeBots([BOT]);
+  await removeLearningPeople([owner]);
   await database.delete(users).where(inArray(users.id, [owner]));
   await database.$client.close();
 });

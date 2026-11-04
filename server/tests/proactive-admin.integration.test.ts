@@ -32,24 +32,7 @@ import { createAuditStore } from "../src/audit";
 import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  auditEvents,
-  botLifecycle,
-  capabilitySettings,
-  enterpriseSettings,
-  modelUsage,
-  proactivePeople,
-  proactivePings,
-  proactiveRuns,
-  proactiveSettings,
-  proactiveSuggestions,
-  userRoles,
-  users,
-  workItems,
-} from "../src/db/schema";
-import { createMemoryStore } from "../src/memory/store";
+import { users, workItems } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
 import type {
   ProactiveMetricsResponse,
@@ -66,16 +49,44 @@ import type {
   SuggestionStatus,
 } from "../src/proactive/types";
 import { createWorkQueue } from "../src/work/queue";
+import { auditRows, useTestAuditTrail } from "./support/audit";
+import {
+  clearPreferences,
+  removeBots,
+  seedBot,
+  setBotPreference,
+  useTestConfiguration,
+} from "./support/bots";
+import {
+  changeCheckIn,
+  makeDue,
+  pingsOf,
+  purgeSchedulesOf,
+  purgeWhere,
+  seedHistory,
+} from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestSchedules } from "./support/schedules";
+import { useTestPolicy } from "./support/policy";
+import { testMemory } from "./support/memory";
+import { useTestPeople } from "./support/directory";
+import { useTestVault } from "./support/vault";
 
 /*
  * The admin's say over check-ins, through the real path: real Postgres, the real enterprise controls
  * and their routes, the real proactive store, work queue and headless turn runner, with the engine
  * asking `proactiveAdmin` exactly as the server wires it. The model is the only fake: a scripted
  * AG-UI agent that looks and finds nothing, so a request reaching it is a check-in that ran.
+ *
+ * The audit trail and model usage live in Intelligence: a check-in reads its own reads from the trail
+ * there, and the setting's change is read back from it.
  */
 
+useTestAuditTrail();
+
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// The groups a directory provisioned are Intelligence's organization directory's.
+useTestPeople();
 const auditStore = createAuditStore(database);
 const suite = randomUUID().slice(0, 8);
 const admin = { id: `ci-admin-${suite}`, email: `ci-admin-${suite}@acme.test` };
@@ -96,11 +107,13 @@ const FAR = new Date("2100-01-01T00:00:00Z");
 
 const store = createProactiveStore(database);
 const queue = createWorkQueue(database);
+// Apps and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore,
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: Buffer.alloc(32, 7).toString("base64"),
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async () => ({ text: "[]", isError: false }),
@@ -113,29 +126,30 @@ const settingOf = (person: { id: string }, bot: string) =>
   settings.get(`${person.id}:${bot}`) as ProactiveSetting;
 
 beforeAll(async () => {
+  await useTestSchedules();
+  await useTestConfiguration();
+  await useTestPolicy();
   await database.insert(users).values([
     { ...admin, name: "Admin" },
     { ...seller, name: "Seller", groups: [`sales-${suite}`] },
     { ...member, name: "Member" },
   ]);
-  await database.insert(userRoles).values({ userId: admin.id, role: "admin" });
-  await database.insert(agents).values([
-    { id: inboxBot, name: "Inbox Bot", type: "built_in", configuration: {} },
-    {
-      id: calendarBot,
-      name: "Calendar Bot",
-      type: "built_in",
-      configuration: {},
-    },
-  ]);
-  await database.insert(agentProfiles).values({
-    agentId: inboxBot,
+  // The role is on the person's row, this deployment's copy of Intelligence's directory.
+  await database
+    .update(users)
+    .set({ role: "admin" })
+    .where(eq(users.id, admin.id));
+  await seedBot({
+    id: inboxBot,
+    name: "Inbox Bot",
+    type: "built_in",
     ownerUserId: admin.id,
     title: "Inbox",
     roleDescription: "Reads mail",
     avatarSeed: `inbox-seed-${suite}`,
-    visibility: "private",
   });
+  // Made without a picture of its own: a Bot's picture is then drawn from its id.
+  await seedBot({ id: calendarBot, name: "Calendar Bot", type: "built_in" });
   for (const person of people)
     for (const bot of [inboxBot, calendarBot])
       settings.set(
@@ -159,12 +173,12 @@ const settingIds = () => [...settings.values()].map((setting) => setting.id);
 
 /** Every switch back to untouched, every setting on and not due, and nothing in the ledger. */
 async function reset() {
-  await database
-    .delete(capabilitySettings)
-    .where(eq(capabilitySettings.capability, "proactive"));
-  await database
-    .delete(enterpriseSettings)
-    .where(eq(enterpriseSettings.key, "proactive_daily_runs"));
+  const cache = await useTestPolicy();
+  for (const rule of cache.capabilityRules())
+    if (rule.capability === "proactive") await cache.deleteCapabilityRule(rule);
+  await cache.patchSettings({
+    proactiveDailyRuns: DEFAULT_ENTERPRISE_SETTINGS.proactiveDailyRuns,
+  });
   await controls.refresh();
   await database
     .delete(workItems)
@@ -174,21 +188,12 @@ async function reset() {
         inArray(sql<string>`${workItems.payload}->>'settingId'`, settingIds()),
       ),
     );
-  await database
-    .delete(proactiveSuggestions)
-    .where(inArray(proactiveSuggestions.settingId, settingIds()));
-  await database.delete(proactivePings).where(
-    inArray(
-      proactivePings.ownerUserId,
-      people.map((person) => person.id),
-    ),
-  );
-  await database
-    .delete(proactiveRuns)
-    .where(inArray(proactiveRuns.settingId, settingIds()));
-  await database
-    .delete(botLifecycle)
-    .where(inArray(botLifecycle.agentId, [inboxBot, calendarBot]));
+  await purgeWhere("check-in-suggestions", { settingId: settingIds() });
+  await purgeWhere("check-in-pings", {
+    ownerUserId: people.map((person) => person.id),
+  });
+  await purgeWhere("check-in-runs", { settingId: settingIds() });
+  await clearPreferences(people.map((person) => person.id));
   await database
     .update(users)
     .set({ preferences: {} })
@@ -198,25 +203,21 @@ async function reset() {
         people.map((person) => person.id),
       ),
     );
-  await database
-    .update(proactiveSettings)
-    .set({ enabled: true, nextRunAt: FAR, lastStatus: "idle", lastRunAt: null })
-    .where(inArray(proactiveSettings.id, settingIds()));
+  for (const id of settingIds())
+    await changeCheckIn(id, {
+      enabled: true,
+      nextRunAt: FAR,
+      lastStatus: "idle",
+      lastRunAt: null,
+    });
 }
 beforeEach(reset);
 
 afterAll(async () => {
   await reset();
   await controls?.stop();
-  await database
-    .delete(modelUsage)
-    .where(inArray(modelUsage.agentId, [inboxBot, calendarBot]));
-  await database
-    .delete(proactiveSettings)
-    .where(inArray(proactiveSettings.id, settingIds()));
-  await database
-    .delete(agents)
-    .where(inArray(agents.id, [inboxBot, calendarBot]));
+  await purgeSchedulesOf(people.map((person) => person.id));
+  await removeBots([inboxBot, calendarBot]);
   await database.delete(users).where(like(users.email, `%${suite}%`));
   await database.$client.close();
 });
@@ -299,7 +300,7 @@ function replica() {
   });
   const engine = createProactiveEngine({
     store,
-    memory: createMemoryStore(database),
+    memory: testMemory(database).store,
     queue,
     owner: `ci-replica-${suite}-${randomUUID()}`,
     runTurn: async (input) => {
@@ -323,15 +324,7 @@ function replica() {
 
 /** Make these settings due, and sweep until every one of them has been tried. */
 async function checkIn(...due: ProactiveSetting[]) {
-  await database
-    .update(proactiveSettings)
-    .set({ nextRunAt: new Date(Date.now() - 1_000) })
-    .where(
-      inArray(
-        proactiveSettings.id,
-        due.map((setting) => setting.id),
-      ),
-    );
+  for (const setting of due) await makeDue(setting.id);
   const { engine, asked } = replica();
   for (let sweep = 0; sweep < due.length + 2; sweep += 1) await engine.sweep();
   return asked;
@@ -463,6 +456,30 @@ describe("the Check-ins switch", () => {
   });
 });
 
+/** An open item no ping has carried yet, raised by the inbox Bot at `createdAt`. */
+function waitingItem(input: {
+  ownerUserId: string;
+  settingId: string;
+  title: string;
+  detail: string;
+  createdAt: Date;
+}) {
+  return {
+    id: randomUUID(),
+    agentId: inboxBot,
+    runId: `ci-run-${randomUUID()}`,
+    sourceApp: null,
+    sourceRef: null,
+    sourceLink: null,
+    status: "open",
+    dedupeKey: null,
+    pingId: null,
+    deliveredAt: null,
+    resolvedAt: null,
+    ...input,
+  };
+}
+
 describe("the ping pass", () => {
   test("skips past the people an admin turned check-ins off for, so nobody behind them waits for ever", async () => {
     // More people with older waiting items than one pass looks at, every one of them refused.
@@ -474,9 +491,8 @@ describe("the ping pass", () => {
     }));
     await database.insert(users).values(refused);
     const everyone = [...refused.map((person) => person.id), admin.id];
-    await database
-      .delete(proactivePeople)
-      .where(inArray(proactivePeople.ownerUserId, everyone));
+    for (const person of everyone)
+      await (await useTestSchedules()).purge("check-in-people", person);
     const theirSettings: string[] = [];
     try {
       const hourAgo = Date.now() - 60 * 60_000;
@@ -487,41 +503,37 @@ describe("the ping pass", () => {
           `ci-thread-${randomUUID()}`,
         );
         theirSettings.push(setting.id);
-        await database.insert(proactiveSuggestions).values({
-          id: randomUUID(),
-          ownerUserId: person.id,
-          agentId: inboxBot,
-          settingId: setting.id,
-          runId: `ci-run-${randomUUID()}`,
-          title: `Waiting since before the switch ${index}`,
-          detail: "Raised before check-ins were turned off.",
-          createdAt: new Date(hourAgo - (index + 1) * 60_000),
-        });
+        await seedHistory("check-in-suggestions", [
+          waitingItem({
+            ownerUserId: person.id,
+            settingId: setting.id,
+            title: `Waiting since before the switch ${index}`,
+            detail: "Raised before check-ins were turned off.",
+            createdAt: new Date(hourAgo - (index + 1) * 60_000),
+          }),
+        ]);
       }
       // The admin is still allowed, and their item is the newest of all.
-      await database.insert(proactiveSuggestions).values({
-        id: randomUUID(),
-        ownerUserId: admin.id,
-        agentId: inboxBot,
-        settingId: settingOf(admin, inboxBot).id,
-        runId: `ci-run-${randomUUID()}`,
-        title: "Reply to Sam",
-        detail: "Sam asked for the spec by Friday.",
-        createdAt: new Date(hourAgo),
-      });
+      await seedHistory("check-in-suggestions", [
+        waitingItem({
+          ownerUserId: admin.id,
+          settingId: settingOf(admin, inboxBot).id,
+          title: "Reply to Sam",
+          detail: "Sam asked for the spec by Friday.",
+          createdAt: new Date(hourAgo),
+        }),
+      ]);
 
       const { engine } = replica();
       await engine.sweep();
 
-      const pinged = await database
-        .select({ ownerUserId: proactivePings.ownerUserId })
-        .from(proactivePings)
-        .where(inArray(proactivePings.ownerUserId, everyone));
+      const pinged: { ownerUserId: string }[] = [];
+      for (const person of everyone)
+        for (const ping of await pingsOf(person))
+          pinged.push({ ownerUserId: ping.ownerUserId });
       expect(pinged).toEqual([{ ownerUserId: admin.id }]);
     } finally {
-      await database
-        .delete(proactiveSettings)
-        .where(inArray(proactiveSettings.id, theirSettings));
+      await purgeSchedulesOf(refused.map((person) => person.id));
       await database.delete(users).where(
         inArray(
           users.id,
@@ -580,16 +592,11 @@ describe("the daily cap", () => {
     });
 
     // The change is on the audit trail with who made it, like every other enterprise setting.
-    const trail = await database
-      .select({ payload: auditEvents.payload })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.eventType, "enterprise.setting_changed"),
-          eq(auditEvents.targetId, "proactiveDailyRuns"),
-          eq(auditEvents.actorUserId, admin.id),
-        ),
-      );
+    const trail = await auditRows({
+      eventType: "enterprise.setting_changed",
+      targetId: "proactiveDailyRuns",
+      actorUserId: admin.id,
+    });
     expect(trail.map((row) => row.payload)).toContainEqual({
       setting: "proactiveDailyRuns",
       before: 24,
@@ -608,17 +615,23 @@ describe("the numbers", () => {
     setting: ProactiveSetting,
     runs: [ProactiveRunOutcome, ProactiveSkipReason | null, number][],
   ) {
-    await database.insert(proactiveRuns).values(
+    await seedHistory(
+      "check-in-runs",
       runs.map(([outcome, skipReason, agoMinutes]) => ({
         id: `ci-run-${randomUUID()}`,
         settingId: setting.id,
         ownerUserId: setting.ownerUserId,
         agentId: setting.agentId,
+        threadId: null,
         trigger: "schedule" as const,
         outcome,
         skipReason,
+        itemsRaised: 0,
+        reads: 0,
+        error: null,
         startedAt: minutesAgo(agoMinutes),
         finishedAt: outcome === "running" ? null : minutesAgo(agoMinutes - 1),
+        createdAt: minutesAgo(agoMinutes),
       })),
     );
   }
@@ -626,7 +639,8 @@ describe("the numbers", () => {
     setting: ProactiveSetting,
     items: [string, SuggestionStatus, number, boolean][],
   ) {
-    await database.insert(proactiveSuggestions).values(
+    await seedHistory(
+      "check-in-suggestions",
       items.map(([title, status, agoMinutes, pinged]) => ({
         id: `ci-item-${randomUUID()}`,
         ownerUserId: setting.ownerUserId,
@@ -637,7 +651,10 @@ describe("the numbers", () => {
         detail: `Why: ${title}`,
         sourceApp: "Mail",
         sourceRef: "mail/list_messages",
+        sourceLink: null,
         status,
+        dedupeKey: null,
+        pingId: null,
         createdAt: minutesAgo(agoMinutes),
         deliveredAt: pinged ? minutesAgo(agoMinutes - 1) : null,
         resolvedAt: status === "open" ? null : minutesAgo(agoMinutes - 2),
@@ -675,7 +692,7 @@ describe("the numbers", () => {
       ["Renew the lease", "started", 10 * DAY, true],
     ]);
     await seedItems(calendar, [["Move the standup", "open", 60, false]]);
-    await database.insert(proactivePings).values([
+    await seedHistory("check-in-pings", [
       {
         id: `ci-ping-${randomUUID()}`,
         ownerUserId: member.id,
@@ -702,6 +719,7 @@ describe("the numbers", () => {
         text: "5 things need you",
         pushBody: "5 things need you",
         createdAt: minutesAgo(5),
+        offeredAt: null,
       },
       {
         id: `ci-ping-${randomUUID()}`,
@@ -719,15 +737,8 @@ describe("the numbers", () => {
       .update(users)
       .set({ preferences: { proactive: "off" } })
       .where(eq(users.id, admin.id));
-    await database.insert(botLifecycle).values({
-      ownerUserId: seller.id,
-      agentId: calendarBot,
-      pausedAt: new Date(),
-    });
-    await database
-      .update(proactiveSettings)
-      .set({ enabled: false })
-      .where(eq(proactiveSettings.id, calendar.id));
+    await setBotPreference(seller.id, calendarBot, { pausedAt: new Date() });
+    await changeCheckIn(calendar.id, { enabled: false });
 
     const week = await metrics();
     expect(week.days).toBe(7);
@@ -756,7 +767,7 @@ describe("the numbers", () => {
       pinged: 3,
     });
     // Nobody decided anything the calendar Bot raised yet, so there is no acceptance to show. A Bot
-    // with no picture of its own is drawn from its id, as everywhere else.
+    // made with no picture of its own is drawn from its id, as everywhere else.
     expect(botIn(week, calendarBot)).toMatchObject({
       name: "Calendar Bot",
       avatarSeed: calendarBot,

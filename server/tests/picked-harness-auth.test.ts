@@ -1,22 +1,101 @@
-import { expect, spyOn, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { RunAgentInput } from "@ag-ui/client";
 import { BunSQLPreparedQuery } from "drizzle-orm/bun-sql";
 import type { PreparedQueryConfig } from "drizzle-orm/pg-core";
+import { createAgentRegistryClient } from "../src/agents/bot-registry/client";
+import {
+  type BotDirectory,
+  bots,
+  createBotDirectory,
+  installBotDirectory,
+} from "../src/agents/bot-registry/directory";
 import { createAgentProfileStore } from "../src/agents/profile-store";
+import { createConfigurationClient } from "../src/configuration/client";
+import {
+  type BotConfiguration,
+  botConfiguration,
+  createBotConfiguration,
+  installBotConfiguration,
+} from "../src/configuration/directory";
 import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
 import { buildAgents } from "../src/copilot";
-import { encryptSecret } from "../src/credentials";
+import {
+  type CredentialAccessor,
+  createCredentialStore,
+} from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { loadTenantPackage } from "../src/tenant-package";
 import { testEnvironment } from "./support/environment";
+import { purgeSecrets, seedCredential, useTestVault } from "./support/vault";
 
 const fixtureToken = "synthetic-deployment-token";
-const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+// The customer keys this file stores in the test vault, purged when it is done.
+const customerKeys: string[] = [];
+afterAll(async () => {
+  await purgeSecrets(customerKeys.splice(0));
+});
 
-/** Real query construction, with only the SQL execution boundary replaced. No database connects. */
+/**
+ * A Bot as Intelligence's agent registry sends it on the wire (`agents/bot-registry/client.ts`), so the
+ * real client and directory translate it exactly as they translate the registry's own answer: `kind`
+ * for the type, `managedBy` for the package, and a key as `auth.credentialRef`.
+ */
+function wireAgent(
+  id: string,
+  kind: "built_in" | "remote_ag_ui",
+  configuration: Record<string, unknown>,
+) {
+  const now = new Date().toISOString();
+  return {
+    id,
+    kind,
+    createdAt: now,
+    version: 1,
+    updatedAt: now,
+    deletedAt: null,
+    name: "Picked Harness",
+    title: "Synthetic harness",
+    description: "Answer the controlled protocol request.",
+    avatar: id,
+    model: null,
+    visibility: "private",
+    ownerUserId: null,
+    managedBy: null,
+    isolated: false,
+    callbackTokenHash: null,
+    callbackTokenIssuedAt: null,
+    configuration,
+  };
+}
+
+/** The directory installed before this fixture replaced it, put back after. */
+function installedDirectory(): BotDirectory | undefined {
+  try {
+    return bots();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The Bot configuration installed before this fixture replaced it, put back after. */
+function installedConfiguration(): BotConfiguration | undefined {
+  try {
+    return botConfiguration();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Real query construction and the real Bot directory and registry client, with only the boundaries
+ * replaced: the SQL execution, and the registry's transport, which answers the directory's one full
+ * read with the Bots below. No database connects for the roster. A customer's key is the one thing
+ * read from a real service: it is a secret in the test Intelligence's vault, as it is in production.
+ */
 async function runPicked(options: {
   bundled: boolean;
   installed: boolean;
@@ -89,6 +168,18 @@ async function runPicked(options: {
       ? value.replace("http://127.0.0.1", "HTTP://LOCALHOST")
       : value;
   };
+  // A customer's key is a secret in the real vault; the Bot's configuration names it by id.
+  const customerKey = options.customerAuth
+    ? await seedCredential({
+        kind: "agent",
+        provider: "ag-ui",
+        keyId: `picked-harness-${randomUUID()}`,
+        metadata: { header: "Authorization" },
+        plaintext: "Bearer synthetic-customer-key",
+      })
+    : undefined;
+  if (customerKey) customerKeys.push(customerKey.id);
+  const credentials = createCredentialStore(await useTestVault());
   let storedEndpoint = endpoint(options.target ?? "picked");
   if (options.packageProducer) {
     const publicEnvironment = {
@@ -131,6 +222,67 @@ async function runPicked(options: {
         : "",
     }),
   );
+  const registryRequests: string[] = [];
+  const stored = [
+    wireAgent("picked-harness", "remote_ag_ui", {
+      endpoint: storedEndpoint,
+      ...(options.customerAuth
+        ? {
+            auth: {
+              header: "Authorization",
+              credentialRef: customerKey?.id,
+            },
+          }
+        : {}),
+    }),
+    // Intelligence refuses a remote Bot without a valid http(s) endpoint, so the Bot it can hold that
+    // the loader cannot run is one in the box with no instruction.
+    ...(options.invalidCompanion
+      ? [wireAgent("invalid-companion", "built_in", { systemPrompt: "" })]
+      : []),
+  ];
+  const directory = createBotDirectory({
+    registry: createAgentRegistryClient({
+      apiUrl: "http://127.0.0.1:1",
+      apiKey: "synthetic-project-key",
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        registryRequests.push(
+          `${init?.method ?? "GET"} ${url.pathname}${url.search}`,
+        );
+        if ((init?.method ?? "GET") !== "GET" || url.pathname !== "/api/agents")
+          throw new Error("Unexpected request at the registry boundary");
+        return Response.json({
+          agents: stored,
+          nextCursor: null,
+          joinCode: null,
+        });
+      }) as typeof fetch,
+    }),
+  });
+  const previousDirectory = installedDirectory();
+  installBotDirectory(directory);
+  // The Bot configuration, through the real client with only its transport replaced: every listing
+  // is empty, so no Bot holds anything and no Team Bot is published.
+  const configuration = createBotConfiguration({
+    client: createConfigurationClient({
+      apiUrl: "http://127.0.0.1:1",
+      apiKey: "synthetic-project-key",
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if ((init?.method ?? "GET") !== "GET")
+          throw new Error("Unexpected write at the configuration boundary");
+        void input;
+        return Response.json({ items: [], nextCursor: null });
+      }) as typeof fetch,
+    }),
+    registry: {
+      subscribe: async () => {
+        throw new Error("This fixture hears no announcements.");
+      },
+    },
+  });
+  const previousConfiguration = installedConfiguration();
+  installBotConfiguration(configuration);
   const database = createDatabase(config.databaseUrl);
   let sqlCalls = 0;
   const refuseDatabase = spyOn(database.$client, "unsafe").mockImplementation(
@@ -138,59 +290,33 @@ async function runPicked(options: {
       throw new Error("This fixture must never connect to a database");
     },
   );
+  // Only this fixture's queries are answered here. The process may also hold the test Bot directory,
+  // whose purge cleanup runs its own SQL whenever Intelligence announces one; that goes through.
+  const realExecute = BunSQLPreparedQuery.prototype.execute;
   const execute = spyOn(
     BunSQLPreparedQuery.prototype,
     "execute",
   ).mockImplementation(async function (
     this: BunSQLPreparedQuery<PreparedQueryConfig>,
+    ...args: Parameters<typeof realExecute>
   ) {
+    if ((this as unknown as { client: unknown }).client !== database.$client)
+      return realExecute.apply(this, args);
     const { sql } = this.getQuery();
     sqlCalls++;
-    if (
-      sql.startsWith("select distinct ") &&
-      sql.includes('"agent_profiles"."deleted_at" is not null')
-    )
-      return [];
-    if (
-      !sql.startsWith("select ") ||
-      !sql.includes('"agent_profiles"."deleted_at" is null')
-    ) {
-      throw new Error("Unexpected SQL at the controlled roster boundary");
-    }
-    const rows = [
-      {
-        id: "picked-harness",
-        name: "Picked Harness",
-        type: "remote_ag_ui",
-        title: "Synthetic harness",
-        roleDescription: "Answer the controlled protocol request.",
-        configuration: {
-          endpoint: storedEndpoint,
-          ...(options.customerAuth
-            ? {
-                auth: {
-                  header: "Authorization",
-                  credentialId: "synthetic-customer",
-                },
-              }
-            : {}),
-        },
-      },
-    ];
-    return options.invalidCompanion
-      ? [
-          ...rows,
-          {
-            ...rows[0],
-            id: "invalid-companion",
-            configuration: { endpoint: "not a valid URL" },
-          },
-        ]
-      : rows;
+    // The one query the roster still makes here: the actor's groups, which decide which Team Bots
+    // reach them. The publications themselves are in the (empty) Bot configuration.
+    if (sql.startsWith('select "groups" from "users"')) return [];
+    throw new Error("Unexpected SQL at the controlled roster boundary");
   });
   let credentialReads = 0;
   let failed = false;
   try {
+    await configuration.start();
+    await directory.start();
+    expect(registryRequests).toEqual([
+      "GET /api/agents?limit=100&includeDeleted=true",
+    ]);
     const app = createApp(
       config,
       {
@@ -224,20 +350,13 @@ async function runPicked(options: {
         isolationAvailable: false,
       },
     });
-    const vault = options.customerAuth
+    const vault = customerKey
       ? {
-          encryptionKey,
           reader: {
-            async readSecret(id: string) {
-              expect(id).toBe("synthetic-customer");
+            async reveal(id: string, accessor: CredentialAccessor) {
+              expect(id).toBe(customerKey.id);
               credentialReads++;
-              return {
-                encryptedValue: await encryptSecret(
-                  encryptionKey,
-                  "Bearer synthetic-customer-key",
-                ),
-                revokedAt: null,
-              };
+              return credentials.reveal(id, accessor);
             },
           },
         }
@@ -265,8 +384,10 @@ async function runPicked(options: {
     } finally {
       quietFailure.mockRestore();
     }
-    expect(sqlCalls).toBe(2);
+    expect(sqlCalls).toBe(1);
     expect(refuseDatabase).not.toHaveBeenCalled();
+    // Bots are read from the directory's memory, never from Intelligence per load.
+    expect(registryRequests).toHaveLength(1);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.method).toBe("POST");
     console.log(
@@ -281,6 +402,10 @@ async function runPicked(options: {
   } finally {
     execute.mockRestore();
     refuseDatabase.mockRestore();
+    directory.stop();
+    configuration.stop();
+    if (previousDirectory) installBotDirectory(previousDirectory);
+    if (previousConfiguration) installBotConfiguration(previousConfiguration);
     await database.$client.close();
     await server.stop(true);
   }

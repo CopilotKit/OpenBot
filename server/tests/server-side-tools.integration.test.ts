@@ -1,20 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MCPMock } from "@copilotkit/aimock/mcp";
-import { and, eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
-import {
-  agents,
-  auditEvents,
-  mcpServers,
-  mcpTools,
-  pluginGrants,
-} from "../src/db/schema";
-import { createPluginStore } from "../src/plugins/store";
+import { createCredentialStore } from "../src/credentials";
+import { mcpTools } from "../src/db/schema";
+import { createPluginStore, type PluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
+import { auditRows, useTestAuditTrail } from "./support/audit";
+import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 /**
  * A tool call that happens with no browser involved.
@@ -30,6 +27,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+useTestAuditTrail();
 
 const suite = randomUUID().slice(0, 8);
 const holderId = `agent_tools_holder_${suite}`;
@@ -40,27 +38,24 @@ const ref = `${serverId}/${toolName}`;
 
 let policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: { readSecret: async () => null },
-  encryptionKey: "x".repeat(44),
-  policy: () => policy,
-});
+let store: PluginStore;
 
 const mock = new MCPMock();
 /** What the server on the other end was actually asked, recorded where the assertion can see it. */
 const received: unknown[] = [];
 
 beforeAll(async () => {
-  // Both Bots must exist: a grant is a row against a real agent, which is what keeps a grant from
-  // outliving the Bot it was given to.
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => policy,
+  });
+  // Both Bots must exist: a grant names a real Bot, and purging that Bot takes its grants with it.
   for (const id of [holderId, strangerId]) {
-    await database
-      .insert(agents)
-      .values({ id, name: id, type: "remote_ag_ui", configuration: {} })
-      .onConflictDoNothing();
+    await seedBot({ id, name: id, type: "remote_ag_ui" });
   }
 
   mock.addTool({
@@ -79,16 +74,13 @@ beforeAll(async () => {
   });
   const url = await mock.start();
 
-  await database
-    .insert(mcpServers)
-    .values({
-      id: serverId,
-      title: "Notes",
-      vendor: "notes",
-      url,
-      provenance: "custom",
-    })
-    .onConflictDoNothing();
+  await seedServer({
+    id: serverId,
+    title: "Notes",
+    vendor: "notes",
+    url,
+    provenance: "custom",
+  });
   await database
     .insert(mcpTools)
     .values({
@@ -106,14 +98,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database
-    .delete(pluginGrants)
-    .where(and(eq(pluginGrants.kind, "skill"), eq(pluginGrants.ref, ref)));
-  await database.delete(pluginGrants).where(eq(pluginGrants.ref, ref));
-  await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
-  await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
-  await database.delete(agents).where(eq(agents.id, holderId));
-  await database.delete(agents).where(eq(agents.id, strangerId));
+  // The grants go with the Bots below: purging a Bot takes its access with it, in Intelligence.
+  await removeServers([serverId]);
+  await removeBots([holderId, strangerId]);
   await mock.stop();
 });
 
@@ -161,10 +148,7 @@ describe("the tools a Bot is handed on the server", () => {
   });
 
   test("the call is still audited, and still names the Bot", async () => {
-    const rows = await database
-      .select()
-      .from(auditEvents)
-      .where(eq(auditEvents.targetId, ref));
+    const rows = await auditRows({ targetId: ref });
 
     const succeeded = rows.filter(
       (row) => row.eventType === "mcp.call_succeeded",
@@ -194,10 +178,11 @@ describe("the tools a Bot is handed on the server", () => {
       // And marked, so the transcript can draw it as a refusal rather than as a result. The wording
       // is an administrator's to change; the marker is not, which is the whole reason it exists.
       expect(text?.startsWith(REFUSAL_MARKER)).toBe(true);
-      const rejected = await database
-        .select()
-        .from(auditEvents)
-        .where(eq(auditEvents.eventType, "mcp.call_rejected"));
+      // Under this run's tool: the trail is shared by every run, so "any rejection" is not a claim.
+      const rejected = await auditRows({
+        eventType: "mcp.call_rejected",
+        targetId: ref,
+      });
       expect(rejected.length).toBeGreaterThan(0);
     } finally {
       policy = { mode: "enforce", deny: [], allow: ["true"] };

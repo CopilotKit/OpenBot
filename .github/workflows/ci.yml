@@ -166,7 +166,7 @@ jobs:
       # One red target must not hide whether another is red too.
       fail-fast: false
       matrix:
-        target: [self-hosted, eks, eks-sandbox, gke, aks]
+        target: [self-hosted, eks, eks-sandbox, gke, aks, multi-org]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -309,6 +309,13 @@ jobs:
       # review, the other by a live upgrade after the first had been fixed one key over.
       - name: A new values key can be absent
         run: bun scripts/check-new-values-keys.ts charts/openbot/ci/${{ matrix.target }}-values.yaml
+      # And that two organizations can each have a release of this target in one cluster. Every way
+      # of breaking that renders and installs cleanly: a selector without the release label, a
+      # policy in the wrong namespace, a name that is the namespace's rather than the release's. So
+      # this renders the target as two releases, in namespaces of their own and then in one, and
+      # fails on anything either could select, reach or overwrite of the other's.
+      - name: Two organizations in one cluster
+        run: bun scripts/check-chart-tenancy.ts charts/openbot/ci/${{ matrix.target }}-values.yaml
 
   test:
     name: tests
@@ -333,6 +340,16 @@ jobs:
     env:
       DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot_test
       TEST_DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot_test
+      # And a real Intelligence, where OpenBot keeps its Bots, policy, vault, files, memory, audit,
+      # schedules, conversations and people. The step before the suite starts it on these ports and
+      # makes these two keys work, for a throwaway organization in its own database: literals like
+      # the database password above, not secrets, so a fork's pull request runs every test too.
+      TEST_INTELLIGENCE_API_URL: http://127.0.0.1:7862
+      TEST_INTELLIGENCE_GATEWAY_WS_URL: ws://127.0.0.1:7863
+      TEST_INTELLIGENCE_API_KEY: cpk_sOBTEST1_openbottestsfirstproject
+      TEST_INTELLIGENCE_API_KEY_2: cpk_sOBTEST2_openbottestssecondproject
+      TEST_INTELLIGENCE_DATABASE_URL: postgresql://intelligence:intelligence@127.0.0.1:7860/intelligence_app
+      TEST_INTELLIGENCE_REDIS_URL: redis://127.0.0.1:7861
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -375,6 +392,11 @@ jobs:
         with:
           version: v3.19.0
       - run: helm dependency build charts/openbot
+      # Intelligence's published image, pinned by digest in the script, with its own Postgres and
+      # Redis. It stops here, naming what is missing, when that Intelligence lacks a capability
+      # OpenBot keeps there, rather than failing the suite one test at a time.
+      - name: A real Intelligence for the tests
+        run: scripts/test-intelligence.sh up
       # A passing job must include the expected test floor. Import-time failures can otherwise skip
       # files before their tests are registered.
       - run: bun run test:ci
@@ -574,6 +596,11 @@ jobs:
           tags: openbot:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # The server reads its Bots, schedules and the rest of what it keeps in Intelligence before it
+      # serves, and refuses to start when Intelligence cannot answer. So the image boots against the
+      # same throwaway Intelligence the tests use, reached on that Intelligence's own network.
+      - name: A real Intelligence for the image
+        run: scripts/test-intelligence.sh up >> "$GITHUB_ENV"
       # Building it says the layers resolve. Running it says the supervision tree comes up and stays
       # up, which is a different claim and the one that has broken before.
       - name: The image boots and serves
@@ -585,20 +612,17 @@ jobs:
           # meant it. This was `OPENBOT_DEV_NO_AUTH=1` before, which the code never accepted at all,
           # since it compares against the exact string "true"; it did nothing and nothing noticed.
           #
-          # Placeholders, not secrets. `loadConfig` refuses to start without Intelligence and a
-          # licence configured, but it only checks that they are present and well-formed; nothing is
-          # contacted at start-up and /api/capabilities reads config alone. So this proves the image
-          # boots and serves without needing a licence, which is the part CI cannot have: a licence
-          # is bound to the machine it was issued for. Whether Intelligence actually answers is what
-          # the smoke journey checks, on a real deployment.
+          # No licence: a licence is bound to the machine it was issued for, which is the part CI
+          # cannot have, and the image boots and serves without one.
           docker run -d --name openbot-ci -p 3001:3001 \
+            --network openbot-test-intelligence \
             -e EMBEDDED_POSTGRES=on \
             -e KEY_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
             -e TRUSTED_ORIGINS=http://localhost:3001 \
-             -e OPENBOT_SINGLE_USER=true \
-             -e INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai \
-            -e INTELLIGENCE_GATEWAY_WS_URL=wss://realtime.intelligence.copilotkit.ai \
-            -e INTELLIGENCE_API_KEY=ci-not-a-real-key \
+            -e OPENBOT_SINGLE_USER=true \
+            -e INTELLIGENCE_API_URL=http://openbot-test-intelligence:4201 \
+            -e INTELLIGENCE_GATEWAY_WS_URL=ws://openbot-test-intelligence:4401 \
+            -e INTELLIGENCE_API_KEY="$TEST_INTELLIGENCE_API_KEY" \
             openbot:ci
           for attempt in $(seq 1 150); do
             if curl -fsS http://localhost:3001/api/capabilities >/dev/null 2>&1; then

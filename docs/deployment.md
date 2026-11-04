@@ -72,9 +72,15 @@ exactly as the server does: give it the same env file and add those two. Until s
 routine is stored, its next run time is computed, the Routines page shows it, and it never fires.
 See [routines.md](routines.md).
 
-**The staged-attachment sweep.** Same shape as the routines schedule, with a consequence worth
-stating on its own: a file dropped into the composer is stored before it is sent, and nothing in
-this image reclaims the ones that never were. The sweep is `bun scripts/cull-staged-attachments.ts`
+**The staged-attachment window.** A file dropped into the composer is stored before it is sent.
+Attachments live in Intelligence's file store, and each staged one is stored with an expiry:
+`OPENBOT_STAGED_ATTACHMENT_TTL_HOURS` from now (24 by default, a fraction is a fraction of an hour,
+`off` keeps staged files until they are sent or removed). Intelligence deletes it when that passes;
+a send clears it. The Helm chart writes the variable from `attachments.culler`.
+
+**The staged-attachment sweep.** Before attachments moved into Intelligence they were rows in this
+deployment's database, which keeps that table, unwritten, for one release; this sweep reclaims the
+unsent rows left in it. Same shape as the routines schedule. The sweep is `bun scripts/cull-staged-attachments.ts`
 from `/app/server`, one pass then exit, which the Helm chart runs hourly and which deletes unsent
 attachments older than 24 hours — the window is the script's one positional argument, so
 `bun scripts/cull-staged-attachments.ts 72` keeps them for three days, and a fraction is a fraction
@@ -238,6 +244,35 @@ are capped at 350 per instance on the basic tier.
 
 **Railway, Render, Fly.io.** All run this image directly and all provision PostgreSQL in a click,
 which makes them the shortest path from nothing to a running deployment.
+
+## Several organizations in one cluster
+
+One OpenBot serves one organization. To run OpenBot for several organizations on one Kubernetes
+cluster, install the Helm chart once per organization, each release in a namespace of its own, with
+its computers in a second namespace of its own and its own database on one shared PostgreSQL. Each
+organization is installed by hand; there is no automated provisioning.
+
+**Once per cluster**, and never by a release: the agent-sandbox controller and its CRDs, a gVisor (or
+Kata) RuntimeClass, an ingress controller or Gateway, a CNI that enforces NetworkPolicy, and the
+PostgreSQL every organization's database lives on.
+
+**Once per organization**: the two namespaces, a database and login role with `CONNECT` revoked from
+everybody else, the Secrets, and a values file naming:
+
+| Value | Per organization |
+| --- | --- |
+| The release's namespace | `acme` |
+| `computers.sandbox.namespace` | `acme-computers` |
+| `database.existingSecret` | The organization's own database URL |
+| `config.publicUrl` and the Ingress host | Its own address |
+| `secrets.intelligenceApiKey` | The key of its own Intelligence project |
+| `config.auth`, `config.initialAdminEmails`, `config.allowedEmailDomains` | Its own sign-in |
+
+The chart refuses a computers namespace another release already holds, gives each release's
+credential only its own computers namespace, and, with `networkPolicy.enabled` and
+`networkPolicy.ingressFrom` set, lets no organization's pods reach another's API or computers. The
+steps, the SQL and what keeps the releases apart are in
+[the chart's README](../charts/openbot/README.md#several-organizations-in-one-cluster).
 
 ## Known costs
 

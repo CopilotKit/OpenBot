@@ -8,7 +8,6 @@ import {
 import { createAgentFetch } from "../src/agents/endpoint";
 import { loadConfig } from "../src/config";
 import { mountCopilotRuntime, registeredAgentFromRow } from "../src/copilot";
-import { encryptSecret } from "../src/credentials";
 import { testEnvironment } from "./support/environment";
 
 /**
@@ -28,7 +27,6 @@ import { testEnvironment } from "./support/environment";
  * once the platform has locked the thread and the runner has joined.
  */
 
-const ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const LEAKED_BEARER = "Bearer leak-me";
 
 /** The headers a Bot's endpoint saw, one entry per request, keyed by which Bot it was. */
@@ -156,11 +154,11 @@ async function remoteBot(id: string, header: string, key: string) {
   });
   if (agent?.type !== "remote_ag_ui")
     throw new Error(`${id} did not parse as a remote Bot`);
-  const encryptedValue = await encryptSecret(ENCRYPTION_KEY, key);
+  // The vault hands the key to its reader in the clear; this Bot's credential is the one it reveals.
   const headers = await agentAuthHeaders({
-    reader: { readSecret: async () => ({ encryptedValue, revokedAt: null }) },
-    encryptionKey: ENCRYPTION_KEY,
+    reader: { reveal: async () => ({ value: key, version: 1 }) },
     auth: authFromConfiguration(configuration),
+    botId: id,
   });
   if (headers) agent.headers = headers;
   return agent;

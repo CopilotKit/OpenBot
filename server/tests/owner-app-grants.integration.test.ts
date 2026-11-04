@@ -9,7 +9,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
@@ -20,20 +20,10 @@ import {
 } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
-import {
-  agentProfiles,
-  agents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-  pluginGrants,
-  sharedUseApprovals,
-  teamBotConsents,
-  teamBotPublications,
-  users,
-} from "../src/db/schema";
+import { mcpTools, users } from "../src/db/schema";
 import type { AppAccess } from "../src/plugins/app-access";
 import type { GiveableApp } from "../src/plugins/plugin-store/app-access";
+import { allBrokered } from "../src/plugins/plugin-store/records";
 import { createPluginRoutes } from "../src/plugins/routes";
 import {
   createSharedUseGate,
@@ -44,16 +34,35 @@ import {
   createTeamBots,
   TEAM_BOT_CONSENT_MARKER,
 } from "../src/team-bots/team-bots";
+import {
+  clearPreferences,
+  removeBots,
+  storedAccess,
+  useTestBots,
+} from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  resetTestPolicy,
+  storedConnectionApprovals,
+  useTestPolicy,
+} from "./support/policy";
 import { stubBroker } from "./support/stub-broker";
+import {
+  changeServer,
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * A Bot's owner giving one of their own apps to their own Bot — and the one rule that makes that
  * safe to publish: a grant the owner made runs on the ASKING person's own account, never the
  * owner's, even on the owner's published Team Bot.
  *
- * Real tables, real routes, the real Team Bot credential rule. The broker is the one thing faked,
- * and nothing here reaches it past the directory.
+ * Real tables, real apps and connections in Intelligence, real routes, the real Team Bot credential
+ * rule. The broker is the one thing faked, and nothing here reaches it past the directory.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -103,15 +112,9 @@ const profiles = createAgentProfileStore(
 
 /** Which servers each person holds their own account on, as `index.ts` reads it for Team Bots. */
 async function connectedServers(userId: string): Promise<Set<string>> {
-  const rows = await database
-    .select({ app: brokeredConnections.app })
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.holder, "person"),
-        eq(brokeredConnections.userId, userId),
-      ),
-    );
+  const rows = allBrokered("composio").filter(
+    (row) => row.holder === "person" && row.userId === userId,
+  );
   return new Set(rows.map((row) => `composio-${row.app}`));
 }
 const teamBots = createTeamBots({ database, connectedServers });
@@ -154,7 +157,7 @@ async function seedApp(
   title: string,
   accountMode: "personal" | "shared" = "personal",
 ) {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: key,
     title,
     vendor: "Composio",
@@ -184,7 +187,7 @@ async function seedApp(
 }
 
 async function connect(userId: string, name = "gmail") {
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app: slug(name),
     holder: "person",
@@ -216,33 +219,30 @@ async function stateOf(actorId: string, botId: string, app = GMAIL) {
   return ((await response.json()) as { app: AppAccess }).app;
 }
 
+/** Every grant this Bot holds, as Intelligence holds them now. */
 async function grantsOn(botId: string) {
-  return database
-    .select({ ref: pluginGrants.ref, grantedAs: pluginGrants.grantedAs })
-    .from(pluginGrants)
-    .where(eq(pluginGrants.agentId, botId));
+  return (await storedAccess(botId)).grants.map((grant) => ({
+    ref: grant.ref,
+    grantedAs: grant.grantedAs,
+  }));
 }
 
 async function clear() {
-  await database
-    .delete(teamBotConsents)
-    .where(inArray(teamBotConsents.userId, people));
-  if (createdBots.length) {
-    await database
-      .delete(teamBotPublications)
-      .where(inArray(teamBotPublications.agentId, createdBots));
-    await database
-      .delete(agentProfiles)
-      .where(inArray(agentProfiles.agentId, createdBots.splice(0)));
-  }
-  await database
-    .delete(brokeredConnections)
-    .where(like(brokeredConnections.app, `%${suite}%`));
-  await database.delete(mcpServers).where(like(mcpServers.id, `%${suite}%`));
-  await database.delete(agents).where(like(agents.name, "Research Helper"));
+  await clearPreferences(people);
+  // For good, with their publications, grants and approvals, as deleting the agents rows did.
+  await removeBots(createdBots.splice(0));
+  await removeConnectionsWhere(
+    (connection) =>
+      connection.kind === "brokered" && connection.app.includes(suite),
+  );
+  await removeServers([GMAIL, SLACK]);
 }
 
 beforeAll(async () => {
+  await useTestBots();
+  await useTestVault();
+  await useTestPolicy();
+  await resetTestPolicy();
   for (const user of people)
     await database.insert(users).values({
       id: user,
@@ -345,7 +345,7 @@ describe("an owner giving their own app to their own Bot", () => {
     expect(notAdmin.status).toBe(403);
 
     // An app this deployment never added stays an admin's to turn on.
-    await database.delete(mcpServers).where(eq(mcpServers.id, GMAIL));
+    await removeServers([GMAIL]);
     const absent = await appAs(owner).request(
       `/api/plugins/grants`,
       send("POST", { kind: "mcp", ref: `${GMAIL}/FETCH`, agentId: bot }),
@@ -490,7 +490,7 @@ describe("a Shared app whose rule lets Bot owners decide", () => {
   /** The admin opens Slack, a Shared app with its team account connected, to owners. */
   async function openSlack() {
     await seedApp(SLACK, "Slack", "shared");
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app: slug("slack"),
       holder: "deployment",
@@ -523,17 +523,17 @@ describe("a Shared app whose rule lets Bot owners decide", () => {
       })
     ).allowed;
 
+  /** The approval as Intelligence holds it, past any server's memory. */
   async function approvalRow(botId: string) {
-    const [row] = await database
-      .select({
-        audience: sharedUseApprovals.audience,
-        outsideInput: sharedUseApprovals.outsideInput,
-        approvedBy: sharedUseApprovals.approvedBy,
-        approvedAs: sharedUseApprovals.approvedAs,
-      })
-      .from(sharedUseApprovals)
-      .where(eq(sharedUseApprovals.agentId, botId));
-    return row ?? null;
+    const [row] = await storedConnectionApprovals({ agentId: botId });
+    return row
+      ? {
+          audience: row.audience,
+          outsideInput: row.outsideInput,
+          approvedBy: row.approvedBy,
+          approvedAs: row.approvedAs,
+        }
+      : null;
   }
 
   const publishToTeam = (botId: string) =>
@@ -675,10 +675,7 @@ describe("a Shared app whose rule lets Bot owners decide", () => {
     const bot = await botOf(owner);
     expect((await give(bot)).status).toBe(200);
     // The rule changed without the withdrawal, as a replica from before this change would.
-    await database
-      .update(mcpServers)
-      .set({ ownerGrants: null })
-      .where(eq(mcpServers.id, SLACK));
+    await changeServer(SLACK, { ownerGrants: null });
     expect(await approvalRow(bot)).not.toBeNull();
     expect(await allowed(bot, owner)).toBe(false);
   });
