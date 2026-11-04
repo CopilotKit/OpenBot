@@ -71,6 +71,8 @@ export type ApprovalInboxData = {
     channelId?: string;
     question: string;
     why?: string;
+    /** The separate decisions inside the question, each answered on its own. */
+    parts?: { header: string; question: string; options?: string[] }[];
     createdAt: string;
   }[];
 };

@@ -15,6 +15,15 @@ import { saidItWentAhead } from "@/lib/plugins/tool-result";
 const parameters = z.object({
   question: z.string().optional(),
   why: z.string().optional(),
+  parts: z
+    .array(
+      z.object({
+        header: z.string().optional(),
+        question: z.string().optional(),
+        options: z.array(z.string()).optional(),
+      }),
+    )
+    .optional(),
 });
 
 /**
@@ -50,6 +59,25 @@ export function EscalationTool() {
              */}
             {given?.why ? (
               <p className="text-muted-foreground">{given.why}</p>
+            ) : null}
+            {given?.parts?.length ? (
+              <ol className="list-decimal space-y-0.5 pl-5">
+                {given.parts.map((part, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: the parts arrive as one list and never reorder
+                  <li key={index}>
+                    {part.header ? (
+                      <span className="font-medium">{part.header}: </span>
+                    ) : null}
+                    {part.question}
+                    {part.options?.length ? (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        ({part.options.join(", ")})
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
             ) : null}
           </div>
         </ToolLine>

@@ -1,5 +1,6 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { questionPartSchema } from "../agents/escalation";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema/work";
 import { ApprovalNotFoundError, ApprovalRefusedError } from "./types";
@@ -11,6 +12,8 @@ const questionSchema = z.object({
   runId: z.string().min(1),
   question: z.string().min(1).max(6000),
   why: z.string().max(6000).optional(),
+  /** The separate decisions inside the question, each answered on its own. */
+  parts: z.array(questionPartSchema).max(6).optional(),
   mode: z.literal("completed_question"),
   sourceBotId: z.string().min(1).optional(),
   channelId: z.string().min(1).optional(),
@@ -65,6 +68,7 @@ export function listedQuestion(row: {
         channelId: value.data.channelId,
         question: value.data.question,
         why: value.data.why,
+        parts: value.data.parts,
         createdAt: row.createdAt,
       }
     : null;
