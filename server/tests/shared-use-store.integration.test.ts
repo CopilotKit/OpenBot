@@ -12,7 +12,6 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
-  mcpServers,
   responsibilities,
   sharedUseApprovals,
   sharedUseRequests,
@@ -52,6 +51,12 @@ import {
 beforeAll(async () => {
   await useTestPolicy();
 });
+import {
+  changeServer,
+  removeServers,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -72,12 +77,17 @@ async function seedUser(name: string, groups: string[] = []) {
   });
 }
 
+beforeAll(async () => {
+  await useTestVault();
+});
+
 beforeEach(async () => {
   await database
     .delete(sharedUseRequests)
     .where(eq(sharedUseRequests.agentId, bot));
   await removeBots([bot]);
-  await database.delete(mcpServers).where(eq(mcpServers.id, app));
+  // Takes the app's approvals, requests and grants here with it, as the cascade from mcp_servers did.
+  await removeServers([app]);
   await database
     .delete(users)
     .where(
@@ -90,7 +100,7 @@ beforeEach(async () => {
   await seedUser("named");
   await seedUser("newhire", ["platform"]);
   await seedUser("stranger");
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: "Team GitHub",
     vendor: "Composio",
@@ -117,7 +127,8 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await removeBots([bot]);
-  await database.delete(mcpServers).where(eq(mcpServers.id, app));
+  // Takes the app's approvals, requests and grants here with it, as the cascade from mcp_servers did.
+  await removeServers([app]);
   await database
     .delete(users)
     .where(
@@ -516,10 +527,7 @@ describe("owner approvals", () => {
             ? [{ kind: "user" as const, value: id("named") }]
             : [],
       };
-      await database
-        .update(mcpServers)
-        .set({ ownerGrants: "any" })
-        .where(eq(mcpServers.id, app));
+      await changeServer(app, { ownerGrants: "any" });
       await changeBot(bot, { visibility: "public" });
       // Another server, read before the administrator's approval and deaf to announcements since.
       const behind = createTestPolicyCache({ subscribe: false });
@@ -600,8 +608,8 @@ describe("an app with a duplicate row at its url", () => {
 
   beforeEach(async () => {
     await removeBots([other]);
-    await database.delete(mcpServers).where(eq(mcpServers.id, duplicate));
-    await database.insert(mcpServers).values({
+    await removeServers([duplicate]);
+    await seedServer({
       id: duplicate,
       title: "Team GitHub (copy)",
       vendor: "Composio",
@@ -614,7 +622,7 @@ describe("an app with a duplicate row at its url", () => {
 
   afterAll(async () => {
     await removeBots([other]);
-    await database.delete(mcpServers).where(eq(mcpServers.id, duplicate));
+    await removeServers([duplicate]);
   });
 
   test("appIdOf names the answering row for either id", async () => {
@@ -663,8 +671,8 @@ describe("an app with a duplicate row at its url", () => {
 
   test("a row at the app's url with a trailing slash still answers through the canonical row", async () => {
     const slashy = `${app}-slash`;
-    await database.delete(mcpServers).where(eq(mcpServers.id, slashy));
-    await database.insert(mcpServers).values({
+    await removeServers([slashy]);
+    await seedServer({
       id: slashy,
       title: "Team GitHub (slash)",
       vendor: "Composio",
@@ -693,7 +701,7 @@ describe("an app with a duplicate row at its url", () => {
       });
       expect(await store.botsHolding(app)).toContain(bot);
     } finally {
-      await database.delete(mcpServers).where(eq(mcpServers.id, slashy));
+      await removeServers([slashy]);
     }
   });
 });

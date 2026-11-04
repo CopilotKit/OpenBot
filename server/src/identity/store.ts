@@ -10,13 +10,10 @@
  * loses only a link somebody was about to make (they ask for another). They are in-flight work.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { CredentialRefusedError, type CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
-import {
-  credentials as credentialRows,
-  identityLinkChallenges,
-} from "../db/schema";
+import { identityLinkChallenges } from "../db/schema";
 import {
   CredentialTakenError,
   IdentityLinkedElsewhereError,
@@ -26,6 +23,7 @@ import {
 } from "../people/directory/client";
 import { people } from "../people/directory/directory";
 import type { LinkedIdentityRecord } from "../people/directory/types";
+import { vault } from "../vault/directory";
 import {
   acceptsMethod,
   isIdentityProvider,
@@ -78,15 +76,17 @@ function toLink(
   };
 }
 
-/** Revoke vault rows the directory says no link holds any more. Already revoked is the outcome wanted. */
+/**
+ * Revoke vault secrets the directory says no link holds any more. Already revoked is the outcome
+ * wanted. Called with no transaction open: the vault is Intelligence's.
+ */
 async function revokeReleased(
   credentials: Revoke,
   released: readonly string[],
-  executor: Database,
 ) {
   for (const id of released) {
     try {
-      await credentials.revoke(id, executor);
+      await credentials.revoke(id);
     } catch (error) {
       if (!(error instanceof CredentialRefusedError)) throw error;
     }
@@ -119,30 +119,26 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CREDENTIAL_UNAVAILABLE = "The credential for this link is not available.";
 
 /**
- * Whether `credentialId` may back a link to this provider: a live vault row that is the provider's own
- * user token (kind "connector", vault provider equal to the registry's `credentialProvider`), so a
+ * Whether `credentialId` may back a link to this provider: a live vault secret that is the provider's
+ * own user token (kind "connector", vault provider equal to the registry's `credentialProvider`), so a
  * link can never adopt, and a later unlink or replace never revoke, some other secret such as an
  * operator key. That no other link holds it is the directory's to enforce, in the link write itself.
+ * Read through this instance's vault directory to Intelligence.
  */
 async function requireLinkableCredential(
-  database: Database,
   provider: IdentityProvider,
   credentialId: string,
 ) {
   const credentialProvider = PROVIDERS[provider].credentialProvider;
   if (!credentialProvider) throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
-  const [live] = await database
-    .select({ id: credentialRows.id })
-    .from(credentialRows)
-    .where(
-      and(
-        eq(credentialRows.id, credentialId),
-        isNull(credentialRows.revokedAt),
-        eq(credentialRows.kind, "connector"),
-        eq(credentialRows.provider, credentialProvider),
-      ),
-    );
-  if (!live) throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
+  const live = await vault().findSecret(credentialId);
+  if (
+    !live ||
+    live.revokedAt !== null ||
+    live.kind !== "connector" ||
+    live.provider !== credentialProvider
+  )
+    throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
 }
 
 /**
@@ -156,7 +152,6 @@ async function requireLinkableCredential(
  * revoked here, after it has answered.
  */
 async function writeLink(
-  database: Database,
   credentials: Revoke,
   identity: Identity,
   userId: string,
@@ -196,7 +191,7 @@ async function writeLink(
       throw new IdentityInputError();
     throw error;
   }
-  await revokeReleased(credentials, written.released, database);
+  await revokeReleased(credentials, written.released);
   return toLink(written.identity, identity.provider);
 }
 
@@ -304,12 +299,8 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
       const credentialId = proof.credentialId?.toLowerCase() ?? undefined;
       const handle = normalizeHandle(proof.handle);
       if (credentialId)
-        await requireLinkableCredential(
-          database,
-          identity.provider,
-          credentialId,
-        );
-      return writeLink(database, credentials, identity, userId, {
+        await requireLinkableCredential(identity.provider, credentialId);
+      return writeLink(credentials, identity, userId, {
         method: proof.method,
         handle,
         credentialId,
@@ -335,7 +326,7 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
         idempotencyKey("unlink-identity"),
       );
       if (!removed) return null;
-      await revokeReleased(credentials, removed.released, database);
+      await revokeReleased(credentials, removed.released);
       return { provider: removed.identity.provider };
     },
 
@@ -464,16 +455,10 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
         return taken;
       });
       try {
-        return await writeLink(
-          database,
-          credentials,
-          identity,
-          consumed.userId,
-          {
-            method: "challenge",
-            handle: normalized,
-          },
-        );
+        return await writeLink(credentials, identity, consumed.userId, {
+          method: "challenge",
+          handle: normalized,
+        });
       } catch (error) {
         await database
           .insert(identityLinkChallenges)

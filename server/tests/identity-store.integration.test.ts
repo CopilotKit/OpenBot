@@ -1,9 +1,7 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { inArray } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { credentials } from "../src/db/schema";
 import { createIdentityStore } from "../src/identity/store";
 import {
   type Identity,
@@ -17,23 +15,26 @@ import {
   seedDirectoryPerson,
   useTestPeople,
 } from "./support/directory";
+import { purgeSecrets, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 // Links live in Intelligence's organization directory, and belong to people it holds.
 const directory = useTestPeople();
 const people: string[] = [];
-const vault = createCredentialStore(database);
-const store = createIdentityStore(database, vault);
+let vault: ReturnType<typeof createCredentialStore>;
+let store: ReturnType<typeof createIdentityStore>;
 const realm = `test-${randomUUID()}`;
 const createdCredentials: string[] = [];
+
+beforeAll(async () => {
+  vault = createCredentialStore(await useTestVault());
+  store = createIdentityStore(database, vault);
+});
 
 afterAll(async () => {
   // Purging a person takes their links with them.
   await purgeDirectoryPeople(people);
-  if (createdCredentials.length)
-    await database
-      .delete(credentials)
-      .where(inArray(credentials.id, createdCredentials));
+  await purgeSecrets(createdCredentials.splice(0));
   await database.$client.close();
 });
 
@@ -58,7 +59,7 @@ async function credential(
     provider,
     keyId: randomUUID(),
     metadata: {},
-    encryptedValue: "not-a-real-ciphertext",
+    plaintext: "not-a-real-token",
   });
   createdCredentials.push(id);
   return id;

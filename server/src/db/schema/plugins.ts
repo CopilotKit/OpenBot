@@ -196,9 +196,9 @@ export const mcpServers = pgTable(
 export const mcpTools = pgTable(
   "mcp_tools",
   {
-    serverId: text("server_id")
-      .notNull()
-      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    // An app (tool server) id in Intelligence. No foreign key: apps are not in this database; removing
+    // one removes these rows explicitly (vault/local-rows.ts).
+    serverId: text("server_id").notNull(),
     name: text("name").notNull(),
     /**
      * THE VENDOR'S OWN SPELLING OF THIS ACTION, which is not always a name a model may be offered.
@@ -307,6 +307,21 @@ export const mcpTools = pgTable(
  * the previous build wrote the row without one. The one way a query reads that column, so a null
  * never reaches a vendor or fails a comparison. See {@link mcpTools.vendorName}.
  */
+/**
+ * How an app's tool list last refreshed: when, what went wrong, which tools were left out.
+ *
+ * OPERATIONAL, beside {@link mcpTools}, which it describes: both are this deployment's cache of what
+ * the app's server last said, and a refresh rebuilds both. These three facts were columns of
+ * `mcp_servers`, which is no longer written now that apps live in Intelligence.
+ */
+export const mcpToolLists = pgTable("mcp_tool_lists", {
+  serverId: text("server_id").primaryKey(),
+  refreshedAt: timestamp("refreshed_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  skippedTools: text("skipped_tools").array(),
+  updatedAt: updatedAt(),
+});
+
 export const vendorNameOf = () =>
   sql<string>`coalesce(${mcpTools.vendorName}, ${mcpTools.name})`;
 
@@ -625,9 +640,9 @@ export const pendingAuthorizations = pgTable(
     actorId: text("actor_id")
       .primaryKey()
       .references(() => users.id, { onDelete: "cascade" }),
-    serverId: text("server_id")
-      .notNull()
-      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    // An app (tool server) id in Intelligence. No foreign key: apps are not in this database; removing
+    // one removes these rows explicitly (vault/local-rows.ts).
+    serverId: text("server_id").notNull(),
     /**
      * The one action Authorize was pressed for, or `null` for Connect, which asks the broker for
      * everything the app's actions need. Null rather than the app's own name, because the verifier

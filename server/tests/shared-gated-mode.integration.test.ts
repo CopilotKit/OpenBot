@@ -2,21 +2,30 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { brokeredConnections, mcpServers, mcpTools } from "../src/db/schema";
+import { mcpTools } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -51,10 +60,9 @@ const broker: ConnectedAppBroker = {
 };
 
 const policy = { mode: "enforce" as const, deny: [], allow: ["true"] };
-const credentialsStub = {} as never;
 
 async function seed() {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: "Team GitHub",
     vendor: "Composio",
@@ -73,7 +81,7 @@ async function seed() {
     version: "1",
   });
   await seedBot({ id: bot, name: "Helper", type: "built_in" });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app,
     holder: "deployment",
@@ -84,13 +92,17 @@ async function seed() {
 }
 
 async function clean() {
-  await database
-    .delete(brokeredConnections)
-    .where(eq(brokeredConnections.app, app));
-  await database.delete(mcpServers).where(eq(mcpServers.id, app));
+  await removeConnectionsWhere(
+    (connection) => connection.kind === "brokered" && connection.app === app,
+  );
+  // Takes the app's local rows (its tools) with it, as the cascade from mcp_servers did.
+  await removeServers([app]);
   await removeBots([bot]);
 }
 
+beforeAll(async () => {
+  await useTestVault();
+});
 beforeEach(async () => {
   await clean();
 });
@@ -113,7 +125,7 @@ describe("connectionTokenFor's gatedMode guard", () => {
       brokerProvider: "composio",
       database,
       auditStore: createAuditStore(database),
-      credentials: credentialsStub,
+      credentials: createCredentialStore(await useTestVault()),
       encryptionKey: "x".repeat(44),
       policy: () => policy,
       broker,
@@ -126,10 +138,10 @@ describe("connectionTokenFor's gatedMode guard", () => {
        * is already in flight.
        */
       sharedUse: async () => {
-        await database
-          .update(mcpServers)
-          .set({ accountMode: "personal", sharedVendorUserId: null })
-          .where(eq(mcpServers.id, app));
+        await changeServer(app, {
+          accountMode: "personal",
+          sharedVendorUserId: null,
+        });
         return { allowed: true };
       },
     });

@@ -1806,6 +1806,8 @@ function brokeredApp(
           },
           title: row.title,
           mode: "shared" as const,
+          // The app is the row itself: the fixture holds no second row at its url.
+          appId: row.id,
         };
       }
       return {
@@ -1816,6 +1818,7 @@ function brokeredApp(
         },
         title: row.title,
         mode: "personal" as const,
+        appId: row.id,
       };
     },
     brokeredConnection: async (input: {

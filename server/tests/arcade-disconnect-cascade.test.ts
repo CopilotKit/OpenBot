@@ -1,13 +1,29 @@
 // server/tests/arcade-disconnect-cascade.test.ts
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
+import { auditEvents } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
@@ -76,20 +92,23 @@ const broker: ConnectedAppBroker = {
   accountName: async () => "acme",
 };
 
-const store = createPluginStore({
-  brokerProvider: "arcade",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: {} as never,
-  encryptionKey: "x".repeat(44),
-  policy: () => ({ mode: "enforce" as const, deny: [], allow: ["true"] }),
-  broker,
+let store: ReturnType<typeof createPluginStore>;
+beforeAll(async () => {
+  store = createPluginStore({
+    brokerProvider: "arcade",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => ({ mode: "enforce" as const, deny: [], allow: ["true"] }),
+    broker,
+  });
 });
 
 const seeded: string[] = [];
 async function hold(app: string, userId: string) {
   seeded.push(app);
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "arcade",
     app,
     holder: "person",
@@ -103,7 +122,7 @@ async function hold(app: string, userId: string) {
  */
 async function holdForDeployment(app: string, vendorUserId: string) {
   seeded.push(app);
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "arcade",
     app,
     holder: "deployment",
@@ -118,7 +137,7 @@ async function holdForDeployment(app: string, vendorUserId: string) {
 const servers: string[] = [];
 async function server(app: string, authScheme: string) {
   servers.push(app);
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: app,
     vendor: "Arcade",
@@ -127,14 +146,12 @@ async function server(app: string, authScheme: string) {
     authScheme,
   });
 }
+/** The brokered accounts Intelligence still holds for these apps, by app. */
 const rowsFor = async (apps: string[]) =>
-  (
-    await database
-      .select({ app: brokeredConnections.app })
-      .from(brokeredConnections)
-      .where(inArray(brokeredConnections.app, apps))
-      .orderBy(asc(brokeredConnections.app))
-  ).map((row) => row.app);
+  (await storedConnections()).brokered
+    .filter((connection) => apps.includes(connection.app))
+    .map((connection) => connection.app)
+    .sort();
 // Filed by owner, because the trail is append-only and an earlier test's rows are still there.
 const trailFor = (userId: string) =>
   database
@@ -154,13 +171,14 @@ const trailFor = (userId: string) =>
 // The audit trail is append-only, so it is never cleaned: every name here carries this run's suffix.
 afterEach(async () => {
   if (seeded.length) {
-    await database
-      .delete(brokeredConnections)
-      .where(inArray(brokeredConnections.app, seeded));
+    await removeConnectionsWhere(
+      (connection) =>
+        connection.kind === "brokered" && seeded.includes(connection.app),
+    );
   }
   seeded.length = 0;
   if (servers.length) {
-    await database.delete(mcpServers).where(inArray(mcpServers.id, servers));
+    await removeServers(servers);
   }
   servers.length = 0;
   revoked.length = 0;

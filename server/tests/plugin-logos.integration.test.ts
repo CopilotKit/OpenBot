@@ -1,17 +1,23 @@
-import { afterAll, afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { mcpServers } from "../src/db/schema";
 import type { BrokerApp } from "../src/plugins/broker";
 import { backfillBrokeredLogos } from "../src/plugins/logos";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeServers,
+  seedServer,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const ids: string[] = [];
+beforeAll(async () => {
+  await useTestVault();
+});
 afterEach(async () => {
-  for (const id of ids.splice(0))
-    await database.delete(mcpServers).where(eq(mcpServers.id, id));
+  await removeServers(ids.splice(0));
 });
 afterAll(async () => {
   await database.$client.close();
@@ -23,7 +29,7 @@ async function server(
   urlOf = (id: string) => `composio://${id}`,
 ) {
   const id = `logo-${randomUUID()}`;
-  await database.insert(mcpServers).values({
+  await seedServer({
     id,
     title: "Example",
     vendor: "Composio",
@@ -49,12 +55,9 @@ function app(slug: string): BrokerApp {
     connection: { kind: "fields", authScheme: "API_KEY" },
   };
 }
-async function row(id: string) {
-  const [result] = await database
-    .select()
-    .from(mcpServers)
-    .where(eq(mcpServers.id, id));
-  return result;
+/** The app as Intelligence holds it now. */
+function row(id: string) {
+  return storedServer(id);
 }
 
 test("fills existing brokered apps by their URL, preserving existing logos and schemes", async () => {

@@ -12,27 +12,30 @@
  * refused" check reads `audit_events` and `pending_authorizations` through `inArray` on this case's
  * own names only, so a minted attempt by any other case could not satisfy or redden it.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { createAuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  mcpServers,
-  pendingAuthorizations,
-} from "../src/db/schema";
+import { auditEvents, pendingAuthorizations } from "../src/db/schema";
 import type { ConnectedAppBroker, GrantState } from "../src/plugins/broker";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
 let counter = 0;
+let credentials: ReturnType<typeof createCredentialStore>;
+
+beforeAll(async () => {
+  credentials = createCredentialStore(await useTestVault());
+});
 
 type Provider = "arcade" | "composio";
 let calls: { toolkit: string; account: AccountRef }[] = [];
@@ -108,7 +111,7 @@ function build(who: string, role: "admin" | "user", provider: Provider) {
     brokerProvider: provider,
     database,
     auditStore,
-    credentials: {} as never,
+    credentials,
     encryptionKey: "x".repeat(44),
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     broker,
@@ -152,7 +155,7 @@ async function run(mode: "personal" | "shared", provider: Provider = "arcade") {
   ids.push(names.id);
   toolkits.push(names.toolkit);
   viewers.push(names.viewer);
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: names.id,
     title: "Gmail",
     vendor: provider === "arcade" ? "Arcade" : "Composio",
@@ -179,7 +182,7 @@ const grants = (
   );
 
 afterAll(async () => {
-  await database.delete(mcpServers).where(inArray(mcpServers.id, ids));
+  await removeServers(ids);
   await database.$client.close();
 });
 

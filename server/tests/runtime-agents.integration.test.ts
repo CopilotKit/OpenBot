@@ -14,7 +14,10 @@ import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { standingRoleMessage } from "../src/copilot";
-import { type CredentialSecretReader, encryptSecret } from "../src/credentials";
+import {
+  type CredentialSecretReader,
+  createCredentialStore,
+} from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema";
 import { removeBots, useTestBots } from "./support/bots";
@@ -23,6 +26,7 @@ import {
   storedConversation,
 } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { purgeSecrets, seedCredential, useTestVault } from "./support/vault";
 
 const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
@@ -35,7 +39,6 @@ const channelStore = createChannelStore(
   createThreadIdentity("test-deployment"),
 );
 const managedAgentToken = "managed-agent-token";
-const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const loadAgents = createRuntimeAgentLoader(database, undefined, {
   endpoint: managedEndpoint,
   token: managedAgentToken,
@@ -46,6 +49,7 @@ const testPrefix = `runtime-agents-${randomUUID()}`;
 const createdUserIds: string[] = [];
 const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
+const createdSecretIds: string[] = [];
 
 afterEach(async () => {
   await purgeConversations(createdChannelIds.splice(0));
@@ -60,6 +64,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await purgeSecrets(createdSecretIds.splice(0));
   await database.$client.close();
 });
 
@@ -189,19 +194,21 @@ describe("runtime agent loading", () => {
     const owner = await createUser();
     const profile = await createCoworker(owner, { name: "Research Mastra" });
     const vaultReads: string[] = [];
-    const credentialId = `credential-${randomUUID()}`;
+    const key = await seedCredential({
+      kind: "agent",
+      provider: "ag-ui",
+      keyId: profile.id,
+      metadata: { header: "Authorization" },
+      plaintext: "Bearer mastra-secret",
+    });
+    createdSecretIds.push(key.id);
+    const credentialId = key.id;
+    const store = createCredentialStore(await useTestVault());
+    // The real store, recording which secrets the loader asked the vault for.
     const reader: CredentialSecretReader = {
-      readSecret: async (id) => {
+      reveal: async (id, accessor) => {
         vaultReads.push(id);
-        return id === credentialId
-          ? {
-              encryptedValue: await encryptSecret(
-                encryptionKey,
-                "Bearer mastra-secret",
-              ),
-              revokedAt: null,
-            }
-          : null;
+        return store.reveal(id, accessor);
       },
     };
     await setAgentRun(profile.id, {
@@ -215,10 +222,7 @@ describe("runtime agent loading", () => {
         },
       },
     });
-    const loadWithVault = createRuntimeAgentLoader(database, {
-      reader,
-      encryptionKey,
-    });
+    const loadWithVault = createRuntimeAgentLoader(database, { reader });
 
     const loaded = await loadWithVault(owner);
 

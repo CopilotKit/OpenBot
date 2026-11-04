@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import {
+  CredentialRefusedError,
   type CredentialSecretReader,
   type CredentialStore,
-  decryptSecret,
-  encryptSecret,
+  CredentialUnusableError,
 } from "../credentials";
 import type { Database } from "../db/client";
 import { responsibilitySourceBindings } from "../db/schema/responsibilities";
@@ -18,7 +18,6 @@ export function createResponsibilityBindingStore(
   vault: {
     store: CredentialStore;
     reader: CredentialSecretReader;
-    encryptionKey: string;
   },
 ) {
   const safeColumns = {
@@ -47,22 +46,17 @@ export function createResponsibilityBindingStore(
           "Supply a webhook secret of 1–4096 characters.",
         );
       const id = randomUUID();
-      const encryptedValue = await encryptSecret(
-        vault.encryptionKey,
-        input.secret,
-      );
-      return database.transaction(async (transaction) => {
-        const credential = await vault.store.create(
-          {
-            kind: "connector",
-            provider: "github-webhook",
-            keyId: id,
-            metadata: { ownerUserId },
-            encryptedValue,
-          },
-          transaction,
-        );
-        const [binding] = await transaction
+      // The secret goes to the vault first, then the binding that names it; a binding that could not
+      // be written takes its secret back with it, so no live secret is left that nothing names.
+      const credential = await vault.store.create({
+        kind: "connector",
+        provider: "github-webhook",
+        keyId: id,
+        metadata: { ownerUserId },
+        plaintext: input.secret,
+      });
+      try {
+        const [binding] = await database
           .insert(responsibilitySourceBindings)
           .values({
             id,
@@ -75,26 +69,32 @@ export function createResponsibilityBindingStore(
         if (!binding)
           throw new Error("GitHub event binding creation returned no row.");
         return { ...binding, webhookPath: `/api/events/github/${id}` };
-      });
+      } catch (error) {
+        await vault.store.revoke(credential.id).catch(() => undefined);
+        throw error;
+      }
     },
     async remove(ownerUserId: string, id: string) {
-      await database.transaction(async (transaction) => {
-        const [binding] = await transaction
-          .select()
-          .from(responsibilitySourceBindings)
-          .where(
-            and(
-              eq(responsibilitySourceBindings.id, id),
-              eq(responsibilitySourceBindings.ownerUserId, ownerUserId),
-            ),
-          )
-          .for("update");
-        if (!binding) throw new ResponsibilityNotFoundError();
-        await vault.store.revoke(binding.credentialId, transaction);
-        await transaction
-          .delete(responsibilitySourceBindings)
-          .where(eq(responsibilitySourceBindings.id, id));
-      });
+      const [binding] = await database
+        .select()
+        .from(responsibilitySourceBindings)
+        .where(
+          and(
+            eq(responsibilitySourceBindings.id, id),
+            eq(responsibilitySourceBindings.ownerUserId, ownerUserId),
+          ),
+        );
+      if (!binding) throw new ResponsibilityNotFoundError();
+      // Revoked before the row goes, so a failure between the two leaves a binding naming a revoked
+      // secret (which accepts nothing, and a retry removes) rather than a live secret nothing names.
+      try {
+        await vault.store.revoke(binding.credentialId);
+      } catch (error) {
+        if (!(error instanceof CredentialRefusedError)) throw error;
+      }
+      await database
+        .delete(responsibilitySourceBindings)
+        .where(eq(responsibilitySourceBindings.id, id));
     },
     async githubBindingFor(id: string) {
       const [binding] = await database
@@ -102,15 +102,20 @@ export function createResponsibilityBindingStore(
         .from(responsibilitySourceBindings)
         .where(eq(responsibilitySourceBindings.id, id));
       if (!binding) return null;
-      const credential = await vault.reader.readSecret(binding.credentialId);
-      if (!credential || credential.revokedAt) return null;
+      let secret: string;
+      try {
+        ({ value: secret } = await vault.reader.reveal(binding.credentialId, {
+          purpose: "webhook_signature_check",
+          userId: binding.ownerUserId,
+        }));
+      } catch (error) {
+        if (error instanceof CredentialUnusableError) return null;
+        throw error;
+      }
       return {
         ownerUserId: binding.ownerUserId,
         repository: binding.repository,
-        secret: await decryptSecret(
-          vault.encryptionKey,
-          credential.encryptedValue,
-        ),
+        secret,
       };
     },
   };

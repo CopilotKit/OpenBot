@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { ActionActor, ComputerGateway } from "../computer/gateway";
 import type { SignInCodeResult, SignInFillResult } from "../computer/schema";
-import { decryptSecret, encryptSecret } from "../credentials";
 import {
   originOf,
   type PasswordStore,
@@ -45,8 +44,6 @@ export type SignInServiceDependencies = {
     ComputerGateway,
     "signIn" | "signInCode" | "requestHelp" | "seatFor"
   >;
-  /** The deployment's KEY_ENCRYPTION_KEY, the same one `credentials.ts` encrypts under. */
-  encryptionKey: string;
   auditStore?: AuditStore;
   /**
    * The administrator's "password manager" switch, asked on every use. Absent means on.
@@ -256,7 +253,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
         ownerUserId: owner,
         origin,
         username,
-        encryptedPassword: await encryptSecret(deps.encryptionKey, password),
+        password,
       });
       await audit("password.saved", actor, "password", saved.id, {
         site: origin,
@@ -660,10 +657,16 @@ export function createSignInService(deps: SignInServiceDependencies) {
           "That saved login is not for this site.",
           404,
         );
-      const password = await decryptSecret(
-        deps.encryptionKey,
-        login.encryptedPassword,
+      const password = await store.revealPassword(
+        owner,
+        login.id,
+        request.botId,
       );
+      if (password === null)
+        throw new SignInRefusedError(
+          "That saved login is not for this site.",
+          404,
+        );
       return view(
         await fill(
           owner,
@@ -758,10 +761,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
       const rows = await store.logins(owner);
       return {
         passwordManager,
-        logins: rows.map(
-          ({ encryptedPassword: _secret, ownerUserId: _owner, ...rest }) =>
-            rest,
-        ),
+        logins: rows.map(({ ownerUserId: _owner, ...rest }) => rest),
       };
     },
 

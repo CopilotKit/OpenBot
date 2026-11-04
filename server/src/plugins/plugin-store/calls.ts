@@ -9,7 +9,7 @@ import {
 } from "../../computer/policy";
 import { botConfiguration } from "../../configuration/directory";
 import { withoutStatement } from "../../db/query-failure";
-import { brokeredConnections, mcpTools, vendorNameOf } from "../../db/schema";
+import { mcpTools, vendorNameOf } from "../../db/schema";
 import { isProactiveInitiator } from "../../proactive/initiator";
 import {
   classifyTool,
@@ -24,6 +24,7 @@ import type { AccountMode } from "../shared-accounts";
 import { transportFor } from "../transport";
 import { withVendorDeadline } from "../vendor-deadline";
 import type { StoreContext } from "./context";
+import { removeBrokered } from "./records";
 import {
   effectiveUrl,
   type PluginDecision,
@@ -535,6 +536,7 @@ export function callMethods(context: StoreContext) {
           input.credentialActorId ?? input.actorId,
           access,
           gatedMode,
+          input.botId,
         );
         const vendor =
           injectedVendor ?? transportFor(access.transport).callTool;
@@ -688,25 +690,20 @@ export function callMethods(context: StoreContext) {
        * the confirm's, the delete files no trail entry: nobody disconnected anything here.
        */
       if (gone && access.credential === "brokered" && access.toolkit)
-        await database
-          .delete(brokeredConnections)
-          .where(
-            gatedMode === "shared"
-              ? and(
-                  eq(brokeredConnections.provider, brokerProvider),
-                  eq(brokeredConnections.app, access.toolkit),
-                  eq(brokeredConnections.holder, "deployment"),
-                )
-              : and(
-                  eq(brokeredConnections.provider, brokerProvider),
-                  eq(brokeredConnections.app, access.toolkit),
-                  eq(brokeredConnections.holder, "person"),
-                  eq(
-                    brokeredConnections.userId,
-                    input.credentialActorId ?? input.actorId,
-                  ),
-                ),
-          );
+        await removeBrokered(
+          gatedMode === "shared"
+            ? {
+                provider: brokerProvider,
+                app: access.toolkit,
+                holder: "deployment",
+              }
+            : {
+                provider: brokerProvider,
+                app: access.toolkit,
+                holder: "person",
+                userId: input.credentialActorId ?? input.actorId,
+              },
+        );
       throw new PluginRefusedError(
         connectAppRefusal({
           serverId: row.id,

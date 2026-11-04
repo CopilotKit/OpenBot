@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import {
@@ -8,11 +8,7 @@ import {
 } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  credentials,
-  identityLinkChallenges,
-} from "../src/db/schema";
+import { auditEvents, identityLinkChallenges } from "../src/db/schema";
 import {
   retireIdentityLinks,
   retireOwnedAccounts,
@@ -26,9 +22,10 @@ import {
   seedDirectoryPerson,
   useTestPeople,
 } from "./support/directory";
+import { purgeSecrets, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
-const vault = createCredentialStore(database);
+let vault: ReturnType<typeof createCredentialStore>;
 const realm = `test-${randomUUID()}`;
 const createdCredentials: string[] = [];
 const users: string[] = [];
@@ -37,6 +34,10 @@ const ADMIN = "admin-remover";
 // Links live in Intelligence's organization directory, and belong to people it holds.
 const directory = useTestPeople();
 
+beforeAll(async () => {
+  vault = createCredentialStore(await useTestVault());
+});
+
 afterAll(async () => {
   // Purging a person takes their links with them.
   await purgeDirectoryPeople(users);
@@ -44,10 +45,7 @@ afterAll(async () => {
     await database
       .delete(identityLinkChallenges)
       .where(inArray(identityLinkChallenges.userId, users));
-  if (createdCredentials.length)
-    await database
-      .delete(credentials)
-      .where(inArray(credentials.id, createdCredentials));
+  await purgeSecrets(createdCredentials.splice(0));
   await database.$client.close();
 });
 
@@ -107,7 +105,7 @@ test("retiring a removed person's links revokes their tokens and keeps the rows"
     provider: "github-user-token",
     keyId: randomUUID(),
     metadata: {},
-    encryptedValue: "x",
+    plaintext: "x",
   });
   createdCredentials.push(credential.id);
   let linkId = "";
@@ -221,7 +219,7 @@ test("a credential revoked before the removal is not reported as revoked by it",
     provider: "github-user-token",
     keyId: randomUUID(),
     metadata: {},
-    encryptedValue: "x",
+    plaintext: "x",
   });
   createdCredentials.push(credential.id);
   await vault.revoke(credential.id);

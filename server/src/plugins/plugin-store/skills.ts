@@ -7,7 +7,7 @@ import {
 } from "../../configuration/client";
 import { botConfiguration } from "../../configuration/directory";
 import type { SkillEntry } from "../../configuration/types";
-import { mcpServers, mcpTools, vendorNameOf } from "../../db/schema";
+import { mcpTools, vendorNameOf } from "../../db/schema";
 
 /** How many times a save is redone on top of somebody else's that saved first. */
 const SAVE_ATTEMPTS = 3;
@@ -17,6 +17,7 @@ function byTitle(left: SkillEntry, right: SkillEntry) {
   return left.title.localeCompare(right.title);
 }
 import type { StoreContext } from "./context";
+import { findServer } from "./records";
 import { PluginRefusedError, type SkillActor, type SkillRecord } from "./model";
 
 /**
@@ -119,12 +120,7 @@ export function skillMethods(context: StoreContext) {
      */
     async serverExists(serverId: string): Promise<boolean> {
       if (!serverId) return false;
-      const [row] = await database
-        .select({ id: mcpServers.id })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-        .limit(1);
-      return row !== undefined;
+      return (await findServer(serverId)) !== null;
     },
 
     /**

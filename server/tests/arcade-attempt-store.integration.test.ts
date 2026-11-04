@@ -3,13 +3,15 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { mcpServers, pendingAuthorizations } from "../src/db/schema";
+import { pendingAuthorizations } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { removePeople, seedPeople } from "./support/people";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -48,17 +50,7 @@ const broker: ConnectedAppBroker = {
 
 const policy = { mode: "enforce" as const, deny: [], allow: ["true"] };
 
-const store = createPluginStore({
-  brokerProvider: "arcade",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: {} as never,
-  encryptionKey: "x".repeat(44),
-  policy: () => policy,
-  broker,
-  deploymentId: `acme-${suite}`,
-  sharedUse: async () => ({ allowed: true }),
-});
+let store: ReturnType<typeof createPluginStore>;
 
 const account = (actor: string): AccountRef => ({
   holder: "person",
@@ -96,7 +88,18 @@ const actor = async (name: string) => {
 };
 
 beforeAll(async () => {
-  await database.insert(mcpServers).values({
+  store = createPluginStore({
+    brokerProvider: "arcade",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => policy,
+    broker,
+    deploymentId: `acme-${suite}`,
+    sharedUse: async () => ({ allowed: true }),
+  });
+  await seedServer({
     id: serverId,
     title: "Attempt store",
     vendor: "Arcade",
@@ -105,8 +108,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Cascades to the attempts.
-  await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
+  // Takes the attempts with it (`vault/local-rows.ts`), as the cascade from mcp_servers did.
+  await removeServers([serverId]);
   await removePeople(database, actors);
   await database.$client.close();
 });

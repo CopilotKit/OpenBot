@@ -27,7 +27,7 @@ import { createDatabase } from "../src/db/client";
 import { modelUsage } from "../src/db/schema/admin";
 import { users } from "../src/db/schema/core";
 import { deliveryOutbox } from "../src/db/schema/delivery";
-import { mcpServers, mcpTools } from "../src/db/schema/plugins";
+import { mcpTools } from "../src/db/schema/plugins";
 import {
   proactivePeople,
   proactivePings,
@@ -74,6 +74,7 @@ import {
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
 import { testMemory } from "./support/memory";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 /*
  * Check-ins and pings through the real path: real Postgres, the real proactive and delivery stores,
@@ -102,11 +103,13 @@ const taskChannel = `check-in-task-channel-${suite}`;
 const device = `check-in-device-${suite}`;
 
 const auditStore = createAuditStore(database);
+// Apps and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore,
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: Buffer.alloc(32, 7).toString("base64"),
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async () => ({ text: "[]", isError: false }),
@@ -146,22 +149,20 @@ beforeAll(async () => {
   // The person's own conversation with each Bot, where its check-ins live.
   await seedChannel(owner, [inboxBot], { id: inboxChannel });
   await seedChannel(owner, [calendarBot], { id: calendarChannel });
-  await database.insert(mcpServers).values([
-    {
-      id: mail,
-      title: "Mail",
-      vendor: "Fixture",
-      url: "https://mail.example.test/mcp",
-      provenance: "custom",
-    },
-    {
-      id: diary,
-      title: "Calendar",
-      vendor: "Fixture",
-      url: "https://calendar.example.test/mcp",
-      provenance: "custom",
-    },
-  ]);
+  await seedServer({
+    id: mail,
+    title: "Mail",
+    vendor: "Fixture",
+    url: "https://mail.example.test/mcp",
+    provenance: "custom",
+  });
+  await seedServer({
+    id: diary,
+    title: "Calendar",
+    vendor: "Fixture",
+    url: "https://calendar.example.test/mcp",
+    provenance: "custom",
+  });
   await database.insert(mcpTools).values([
     {
       serverId: mail,
@@ -268,9 +269,7 @@ afterAll(async () => {
   await database.delete(users).where(eq(users.id, owner));
   await purgeConversations([inboxChannel, calendarChannel, taskChannel]);
   await removeBots([inboxBot, calendarBot]);
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [mail, diary]));
+  await removeServers([mail, diary]);
   await database.$client.close();
 });
 

@@ -1,10 +1,6 @@
 import { eq } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "../audit";
-import {
-  type CredentialExecutor,
-  CredentialRefusedError,
-  type CredentialStore,
-} from "../credentials";
+import { CredentialRefusedError, type CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import { identityLinkChallenges } from "../db/schema";
 import { idempotencyKey } from "../people/directory/client";
@@ -19,11 +15,10 @@ import { identityUserLock } from "./store";
 async function revokeIfLive(
   credentials: Pick<CredentialStore, "revoke">,
   id: string | null,
-  executor: CredentialExecutor,
 ): Promise<boolean> {
   if (!id) return false;
   try {
-    await credentials.revoke(id, executor);
+    await credentials.revoke(id);
     return true;
   } catch (error) {
     // Already revoked is the outcome wanted, but not this call's doing.
@@ -43,13 +38,14 @@ async function revokeIfLive(
  * before the removal cannot be redeemed into a fresh active link afterwards.
  *
  * All or nothing, as when the links were rows here. The links live in Intelligence's directory
- * (people/directory) now, and the vault and the trail here, so they cannot share one transaction:
- * every link is first retired in the directory, then the released credentials are revoked and every
- * `identity.link_retired` row is written in ONE transaction here (`auditFor` is handed it, so the trail's
- * own store writes into it). If any step fails, the links already retired in the directory are put back
- * as they were and the failure is rethrown, so a retry finds them all still to retire and audits every
- * one: a link is retired exactly when its row is written. No transaction is open while the directory is
- * called.
+ * (people/directory) now, the tokens in Intelligence's vault, and the trail here, so they cannot share
+ * one transaction: every link is first retired in the directory, then the released tokens are revoked in
+ * the vault, then every `identity.link_retired` row is written in ONE transaction here (`auditFor` is
+ * handed it, so the trail's own store writes into it). If any step fails, the links already retired in
+ * the directory are put back as they were and the failure is rethrown, so a retry finds them all still
+ * to retire and audits every one: a link is retired exactly when its row is written. A link put back may
+ * name a token already revoked, which the retry detaches; a detached token is never left live. No
+ * transaction is open while the directory or the vault is called.
  *
  * One row per link that changed, shaped like `retireConnectionsFor`'s `mcp.account_disconnected`
  * rows: target the link id; payload `actor` (the remover, `by`), `owner` (the removed person),
@@ -114,15 +110,19 @@ export async function retireIdentityLinks(
       // Unlinked meanwhile: nothing left to retire.
       if (written) retired.push({ before: link, after: written });
     }
+    // The released tokens, revoked in the vault before the trail's transaction opens.
+    const revoked = new Map<string, boolean>();
+    for (const { before, after } of retired) {
+      let credentialRevoked = false;
+      for (const released of after.released)
+        credentialRevoked =
+          (await revokeIfLive(credentials, released)) || credentialRevoked;
+      revoked.set(before.id, credentialRevoked);
+    }
     await database.transaction(async (transaction) => {
-      const executor = transaction as unknown as Database;
-      const auditStore = auditFor(executor);
-      for (const { before, after } of retired) {
-        let credentialRevoked = false;
-        for (const released of after.released)
-          credentialRevoked =
-            (await revokeIfLive(credentials, released, executor)) ||
-            credentialRevoked;
+      const auditStore = auditFor(transaction as unknown as Database);
+      for (const { before } of retired) {
+        const credentialRevoked = revoked.get(before.id) ?? false;
         await recordAuditEvent(auditStore, {
           eventType: "identity.link_retired",
           targetType: "identity_link",

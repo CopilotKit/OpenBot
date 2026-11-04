@@ -10,6 +10,7 @@ import type { EntraTokens } from "../../auth/entra-refusal";
 import type { Database } from "../../db/client";
 import { isQueryFailure, withoutStatement } from "../../db/query-failure";
 import { pendingAuthorizations } from "../../db/schema";
+import { IntelligenceApiError } from "../../vault/http";
 import type { CheckPrivateShare } from "../../proactive/private-share";
 import {
   BROKERED_PROFILE,
@@ -754,7 +755,14 @@ export function isDeploymentFault(error: unknown): error is Error {
      * Callers that SHOW the sentence to an operator must still ask {@link withoutStatement} for
      * it rather than reading `.message`; this predicate settles who may be told, not what.
      */
-    isQueryFailure(error)
+    isQueryFailure(error) ||
+    /*
+     * The same shelf for the vault and the connections, which are Intelligence's now: a read or
+     * write Intelligence refused or could not answer (a key it no longer accepts, an outage) is this
+     * deployment's fault and nobody else's, and the call is refused as one rather than reported as
+     * the vendor's.
+     */
+    error instanceof IntelligenceApiError
   );
 }
 

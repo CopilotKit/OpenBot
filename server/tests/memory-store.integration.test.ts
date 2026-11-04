@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createBotReset } from "../src/agents/lifecycle-reset";
 import { createAuditStore } from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import { mcpServers, mcpTools } from "../src/db/schema/plugins";
+import { mcpTools } from "../src/db/schema/plugins";
 import { createMemoryIngestion } from "../src/memory/ingestion";
 import { MemoryNotFoundError, MemoryRefusedError } from "../src/memory/types";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
@@ -15,6 +15,7 @@ import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { removeTestMemory, testMemory } from "./support/memory";
 import { useTestPolicy } from "./support/policy";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `memory-${randomUUID()}`;
@@ -30,11 +31,13 @@ let vendorError = false;
 /** Thrown by the vendor instead of answering, when set: how a refused call reaches a sync. */
 let vendorThrows: Error | null = null;
 const calls: { actorId?: string; botId?: string }[] = [];
+// Apps and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: Buffer.alloc(32, 7).toString("base64"),
   policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
   callVendor: async (connection) => {
@@ -71,7 +74,7 @@ beforeAll(async () => {
     title: "Other Bot",
     roleDescription: "Assist",
   });
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: server,
     title: "Memory connector",
     vendor: "Fixture",
@@ -101,7 +104,7 @@ afterAll(async () => {
   await removeTestMemory([owner, other]);
   await database.delete(users).where(inArray(users.id, [owner, other]));
   await removeBots([bot, otherBot]);
-  await database.delete(mcpServers).where(eq(mcpServers.id, server));
+  await removeServers([server]);
   await database.$client.close();
 });
 async function source() {

@@ -9,10 +9,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { mcpServers, pendingAuthorizations } from "../src/db/schema/plugins";
+import { pendingAuthorizations } from "../src/db/schema/plugins";
 import { checkRoster } from "./support/constraints";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { removePeople, seedPeople } from "./support/people";
+import { removeServers, seedServer } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -88,8 +89,9 @@ const refusedBy = async (run: () => Promise<unknown>): Promise<string> => {
   return "accepted";
 };
 
+// The app the attempts are for. It lives in Intelligence; removing it takes its attempts here with it.
 beforeAll(async () => {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: serverId,
     title: "Attempt constraints",
     vendor: "test",
@@ -98,7 +100,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database.execute(sql`delete from mcp_servers where id = ${serverId}`);
+  await removeServers([serverId]);
   await removePeople(database, [...seeded]);
   await database.$client.close();
 });
@@ -312,6 +314,11 @@ describe("pending_authorizations keys the people it names", () => {
    * same rule without anybody remembering this test — and the list is pinned too, so dropping or
    * adding one is a visible edit. `user_id` has no key (and no index) of its own; see the
    * user-is-actor cases below.
+   *
+   * `server_id` lost its key when apps moved to Intelligence (0076): there is no `mcp_servers` row
+   * to cascade from. Its index stays asked for by name, because the cascade is now run by hand
+   * (`vault/local-rows.ts` deletes this table's rows by `server_id` when an app is removed), and
+   * that delete scanning the table is the same cost the index was added to remove.
    */
   test("every foreign key on the table has an index leading with its column", async () => {
     const keys = await database.execute(sql`
@@ -333,7 +340,8 @@ describe("pending_authorizations keys the people it names", () => {
       );
     expect(
       Object.fromEntries(columns.map((column) => [column, led(column)])),
-    ).toEqual({ actor_id: true, server_id: true });
+    ).toEqual({ actor_id: true });
+    expect(led("server_id")).toBe(true);
   });
 });
 

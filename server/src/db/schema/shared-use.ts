@@ -11,7 +11,6 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { jsonb } from "./json";
-import { mcpServers } from "./plugins";
 
 /**
  * What an administrator approved for one Bot reaching one Shared app: who may steer a run that uses
@@ -22,9 +21,9 @@ export const sharedUseApprovals = pgTable(
   "shared_use_approvals",
   {
     agentId: text("agent_id").notNull(),
-    serverId: text("server_id")
-      .notNull()
-      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    // An app (tool server) id in Intelligence. No foreign key: apps are not in this database; removing
+    // one removes these rows explicitly (vault/local-rows.ts).
+    serverId: text("server_id").notNull(),
     audience: text("audience").$type<"owner" | "people" | "team">().notNull(),
     outsideInput: boolean("outside_input").notNull(),
     approvedBy: text("approved_by").notNull(),
@@ -90,9 +89,9 @@ export const sharedUseRequests = pgTable(
   {
     id: text("id").primaryKey(),
     agentId: text("agent_id").notNull(),
-    serverId: text("server_id")
-      .notNull()
-      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    // An app (tool server) id in Intelligence. No foreign key: apps are not in this database; removing
+    // one removes these rows explicitly (vault/local-rows.ts).
+    serverId: text("server_id").notNull(),
     proposedAudience: text("proposed_audience")
       .$type<"owner" | "people" | "team">()
       .notNull(),

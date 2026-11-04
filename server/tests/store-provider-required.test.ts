@@ -1,13 +1,26 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { brokeredConnections, mcpServers } from "../src/db/schema";
 import { BROKERED_PROFILE, type BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  useTestVault,
+} from "./support/vault";
 
 /*
  * `brokerProvider` is REQUIRED on `PluginStoreOptions`, and this file is the pin for both halves of
@@ -23,14 +36,25 @@ const suite = randomUUID().slice(0, 8);
 const serverIds: string[] = [];
 const apps: string[] = [];
 
-afterEach(async () => {
-  for (const id of serverIds.splice(0))
-    await database.delete(mcpServers).where(eq(mcpServers.id, id));
-  for (const app of apps.splice(0))
-    await database
-      .delete(brokeredConnections)
-      .where(eq(brokeredConnections.app, app));
+beforeAll(async () => {
+  await useTestVault();
 });
+afterEach(async () => {
+  await removeServers(serverIds.splice(0));
+  const named = new Set(apps.splice(0));
+  await removeConnectionsWhere(
+    (connection) => connection.kind === "brokered" && named.has(connection.app),
+  );
+});
+
+/** The brokered accounts Intelligence holds on an app, as the old rows by app. */
+async function accountsStoredOn(app: string, provider?: BrokerProvider) {
+  return (await storedConnections()).brokered.filter(
+    (connection) =>
+      connection.app === app &&
+      (provider === undefined || connection.provider === provider),
+  );
+}
 afterAll(async () => {
   await database.$client.close();
 });
@@ -63,7 +87,7 @@ describe("the store reads and writes its own provider's slice", () => {
   test("an arcade store writes arcade rows that only an arcade store reads back", async () => {
     const app = `Gmail${suite}`;
     const id = `required-${suite}-${randomUUID().slice(0, 6)}`;
-    await database.insert(mcpServers).values({
+    await seedServer({
       id,
       title: "Example",
       vendor: BROKERED_PROFILE.arcade.vendor,
@@ -85,13 +109,7 @@ describe("the store reads and writes its own provider's slice", () => {
       probeAction: null,
     });
 
-    const rows = await database
-      .select({
-        provider: brokeredConnections.provider,
-        userId: brokeredConnections.userId,
-      })
-      .from(brokeredConnections)
-      .where(eq(brokeredConnections.app, app));
+    const rows = await accountsStoredOn(app);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.provider).toBe("arcade");
 
@@ -109,7 +127,7 @@ describe("the store reads and writes its own provider's slice", () => {
   test("a composio store writes composio rows and does not see the arcade ones", async () => {
     const app = `gmail${suite}`;
     const id = `required-${suite}-${randomUUID().slice(0, 6)}`;
-    await database.insert(mcpServers).values({
+    await seedServer({
       id,
       title: "Example",
       vendor: BROKERED_PROFILE.composio.vendor,
@@ -121,7 +139,7 @@ describe("the store reads and writes its own provider's slice", () => {
     apps.push(app);
 
     // An arcade row already filed under the same app name, which a composio store must not read.
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "arcade",
       app,
       holder: "person",
@@ -140,15 +158,7 @@ describe("the store reads and writes its own provider's slice", () => {
       probeAction: null,
     });
 
-    const written = await database
-      .select({ userId: brokeredConnections.userId })
-      .from(brokeredConnections)
-      .where(
-        and(
-          eq(brokeredConnections.app, app),
-          eq(brokeredConnections.provider, "composio"),
-        ),
-      );
+    const written = await accountsStoredOn(app, "composio");
     expect(written).toHaveLength(1);
     expect(written[0]?.userId).toBe(`user-${suite}`);
 
@@ -169,7 +179,7 @@ describe("the store reads and writes its own provider's slice", () => {
   test("an arcade store writes arcade rows and does not see the composio ones", async () => {
     const app = `Notion${suite}`;
     const id = `required-${suite}-${randomUUID().slice(0, 6)}`;
-    await database.insert(mcpServers).values({
+    await seedServer({
       id,
       title: "Example",
       vendor: BROKERED_PROFILE.arcade.vendor,
@@ -181,7 +191,7 @@ describe("the store reads and writes its own provider's slice", () => {
     apps.push(app);
 
     // A composio row already filed under the same app name, which an arcade store must not read.
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app,
       holder: "person",
@@ -200,15 +210,7 @@ describe("the store reads and writes its own provider's slice", () => {
       probeAction: null,
     });
 
-    const written = await database
-      .select({ userId: brokeredConnections.userId })
-      .from(brokeredConnections)
-      .where(
-        and(
-          eq(brokeredConnections.app, app),
-          eq(brokeredConnections.provider, "arcade"),
-        ),
-      );
+    const written = await accountsStoredOn(app, "arcade");
     expect(written).toHaveLength(1);
     expect(written[0]?.userId).toBe(`user-${suite}`);
 

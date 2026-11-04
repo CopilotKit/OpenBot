@@ -7,7 +7,7 @@ import { computerGuidance } from "@openbot/shared/bot-prompt";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
-import { eq, inArray, ne, sql } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
@@ -67,6 +67,16 @@ import { removeBotPolicy, sweepPurgedBotPolicy } from "./policy/bot-rows";
 import { createPolicyCache, installPolicyCache } from "./policy/cache";
 import { createOrgPolicyClient } from "./policy/client";
 import { copyLocalPolicyToIntelligence } from "./policy/upgrade";
+import { createVaultClient } from "./vault/client";
+import {
+  createConnectionsDirectory,
+  installConnectionsDirectory,
+} from "./vault/directory";
+import {
+  removeServerLocalRows,
+  sweepRemovedServerRows,
+} from "./vault/local-rows";
+import { copyLocalVaultToIntelligence } from "./vault/upgrade";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
@@ -185,7 +195,7 @@ import {
   runtimeModelForEnvironment,
   type ToolSelection,
 } from "./copilot";
-import { brokeredConnections, users } from "./db/schema";
+import { mcpToolLists, users } from "./db/schema";
 import {
   createCredentialAdminService,
   createCredentialStore,
@@ -299,6 +309,7 @@ import {
   createSharedUseGate,
   createSharedUseStore,
 } from "./plugins/shared-use-store";
+import { allBrokered } from "./plugins/plugin-store/records";
 import { ensureSingleUserIdentity } from "./plugins/single-user-identity";
 import { createPluginStore } from "./plugins/store";
 import {
@@ -705,14 +716,42 @@ await sweepPurgedBotReferences(
     ),
   ),
 );
-// The vault, built before the agent store because a customer's agent may sit behind a key and that
-// key belongs here rather than on the agent row. See agents/auth-header.ts.
-const credentialStore = createCredentialStore(database);
+/**
+ * The vault, the apps and the connections, from Intelligence, held in memory on this instance and kept
+ * fresh by Intelligence's change announcements (vault/directory.ts). Built before the agent store
+ * because a customer's agent may sit behind a key and that key belongs in the vault rather than on the
+ * agent row (agents/auth-header.ts). Fatal when Intelligence cannot answer, as the Bot directory is.
+ */
+const vaultDirectory = installConnectionsDirectory(
+  createConnectionsDirectory({
+    client: createVaultClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  }),
+);
+// An app removed for good takes this deployment's rows that named it, as the old cascade did.
+vaultDirectory.onServerRemoved((serverId) =>
+  removeServerLocalRows(database, [serverId]),
+);
+await vaultDirectory.start();
+// An upgraded deployment's secrets, apps and connections, copied from the local tables once
+// (vault/upgrade.ts), decrypted with the local key they were written under.
+await copyLocalVaultToIntelligence(
+  database,
+  vaultDirectory,
+  config.keyEncryptionKey,
+);
+await sweepRemovedServerRows(
+  database,
+  vaultDirectory.servers().map((server) => server.id),
+);
+const credentialStore = createCredentialStore(vaultDirectory);
 const identityStore = createIdentityStore(database, credentialStore);
 const agentVault = {
   store: credentialStore,
   reader: credentialStore,
-  encryptionKey: config.keyEncryptionKey,
 };
 const agentProfileStore = createAgentProfileStore(
   database,
@@ -1046,11 +1085,11 @@ const chooseSkills = createModelCompleter({
   model: runtimeModel,
   resolveApiKey: () =>
     resolveModelApiKey({
-      encryptionKey: config.keyEncryptionKey,
       reader: credentialStore,
       provider: runtimeModel.provider,
       keyId: tenantPackage.model.credentialSecretRef,
       environment: process.env,
+      accessor: { purpose: "skill_selection" },
     }),
 });
 
@@ -1213,10 +1252,10 @@ const composio =
  * on keys: having both keys set is the expected state while the old provider's connections are ended.
  */
 if (wiredProvider) {
-  const [{ count: otherProviderRows }] = await database
-    .select({ count: sql<number>`count(*)::int` })
-    .from(brokeredConnections)
-    .where(ne(brokeredConnections.provider, wiredProvider));
+  // The connections are Intelligence's, held by this instance's vault directory (started above).
+  const otherProviderRows = allBrokered().filter(
+    (row) => row.provider !== wiredProvider,
+  ).length;
   assertActivatable(wiredProvider, otherProviderRows);
 }
 /*
@@ -1241,7 +1280,6 @@ const signInService = computerGateway
           ownerUserId,
           "passwordManager",
         )) ?? true,
-      encryptionKey: config.keyEncryptionKey,
       auditStore: bootAuditStore,
       notify: createSignInNotifier({
         database,
@@ -1303,14 +1341,9 @@ const signInService = computerGateway
  * value, so the gate and the approvals it reads agree.
  */
 const providerConfiguration = providerDecision(config);
-const brokerProvider = storedProvider(
-  providerConfiguration,
-  (
-    await database
-      .selectDistinct({ provider: brokeredConnections.provider })
-      .from(brokeredConnections)
-  ).map((row) => row.provider),
-);
+const brokerProvider = storedProvider(providerConfiguration, [
+  ...new Set(allBrokered().map((row) => row.provider)),
+]);
 if (providerConfiguration.kind === "ambiguous") {
   /*
    * Said out loud, once, at startup: this deployment has two keys and no answer, so nothing is
@@ -1330,7 +1363,7 @@ const sharedUseStore = createSharedUseStore(database, brokerProvider);
  * this every one of them on the same broker key shared one set of grants. Connections recorded under
  * that shared name are retired here, never ended at the broker. See `ensureSingleUserIdentity`.
  */
-await ensureSingleUserIdentity(database, {
+await ensureSingleUserIdentity({
   singleUser: config.singleUser,
   provider: composio?.provider ?? null,
 });
@@ -1384,6 +1417,35 @@ const accountModes = createAccountModeSwitch({
   audit: bootAuditStore,
 });
 
+/*
+ * An app's tool list is this deployment's own cache of what the app's server last said (`mcp_tools`,
+ * `mcp_tool_lists`); the app itself is Intelligence's. A deployment whose cache is empty for an app
+ * it holds (a new database pointed at an existing Intelligence project, or a cache lost with it)
+ * lists it again in the background, once, rather than offering it with no tools until an
+ * administrator presses Refresh. A failure is said and changes nothing.
+ */
+void (async () => {
+  const listed = new Set(
+    (
+      await database
+        .selectDistinct({ serverId: mcpToolLists.serverId })
+        .from(mcpToolLists)
+    ).map((row) => row.serverId),
+  );
+  for (const server of vaultDirectory.servers()) {
+    if (listed.has(server.id)) continue;
+    await pluginStore.refreshTools(server.id).catch((error: unknown) =>
+      console.warn(
+        JSON.stringify({
+          type: "app-tool-list-rebuild-failed",
+          serverId: server.id,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+    );
+  }
+})();
+
 // Logo metadata is optional; a vendor outage must not prevent the API from starting.
 if (composio) {
   void backfillBrokeredLogos(
@@ -1424,7 +1486,6 @@ const responsibilityStore = createResponsibilityStore(database, {
 const responsibilityBindings = createResponsibilityBindingStore(database, {
   store: credentialStore,
   reader: credentialStore,
-  encryptionKey: config.keyEncryptionKey,
 });
 const deliveryStore = createDeliveryStore(database);
 
@@ -1455,7 +1516,6 @@ const responsibilityTriggerStore = createTriggerStore(
   {
     store: credentialStore,
     reader: credentialStore,
-    encryptionKey: config.keyEncryptionKey,
   },
   { slackAccess },
 );
@@ -1618,11 +1678,11 @@ const intentRouter = createIntentRouter({
     model: runtimeModel,
     resolveApiKey: () =>
       resolveModelApiKey({
-        encryptionKey: config.keyEncryptionKey,
         reader: credentialStore,
         provider: runtimeModel.provider,
         keyId: tenantPackage.model.credentialSecretRef,
         environment: process.env,
+        accessor: { purpose: "intent_routing" },
       }),
   }),
 });
@@ -1634,24 +1694,35 @@ void reportModelAvailability({
   model: runtimeModel.defaultModel,
   apiKey: () =>
     resolveModelApiKey({
-      encryptionKey: config.keyEncryptionKey,
       reader: credentialStore,
       provider: runtimeModel.provider,
       keyId: tenantPackage.model.credentialSecretRef,
       environment: process.env,
+      accessor: { purpose: "model_availability_check" },
     }),
 });
 
 // Named collaborators are bound once in actorAgentResolver for chat, hops, and headless turns.
 
-/** The deployment's model key, resolved per call so a credential rotated a moment ago is used next. */
-const resolveRuntimeModelApiKey = () =>
+/**
+ * The deployment's model key, resolved per call so a credential rotated a moment ago is used next. The
+ * vault records the read with the person and Bot it was for, when the caller knows them.
+ */
+const resolveRuntimeModelApiKey = (reader?: {
+  userId?: string;
+  botId?: string;
+  purpose?: string;
+}) =>
   resolveModelApiKey({
-    encryptionKey: config.keyEncryptionKey,
     reader: credentialStore,
     provider: runtimeModel.provider,
     keyId: tenantPackage.model.credentialSecretRef,
     environment: process.env,
+    accessor: {
+      purpose: reader?.purpose ?? "model_run",
+      userId: reader?.userId ?? null,
+      botId: reader?.botId ?? null,
+    },
   });
 
 const hostAccessBroker = createHostAccessBroker(Date.now, {
@@ -2826,7 +2897,8 @@ const channelSummaries = {
   transcript: routineIntelligence,
   title: createChannelTitler({
     model: runtimeModel.defaultModel,
-    resolveApiKey: resolveRuntimeModelApiKey,
+    resolveApiKey: () =>
+      resolveRuntimeModelApiKey({ purpose: "conversation_title" }),
   }),
   owner: workOwner("summariser"),
 };
@@ -2961,11 +3033,7 @@ const app = createApp(
   auth,
   roleRepository,
   createAuditReader(database),
-  createCredentialAdminService(
-    config.keyEncryptionKey,
-    credentialStore,
-    createAuditStore(database),
-  ),
+  createCredentialAdminService(credentialStore, createAuditStore(database)),
   createPackageStatusReader(),
   // The runtime call: the model, per-actor agent loading, and the two identity
   // functions are how a run is attributed to a person.
@@ -3068,7 +3136,8 @@ const app = createApp(
     store: createVoiceSessionStore(channelStore),
     summarize: createVoiceSummarizer({
       model: runtimeModel,
-      resolveApiKey: resolveRuntimeModelApiKey,
+      resolveApiKey: () =>
+        resolveRuntimeModelApiKey({ purpose: "voice_summary" }),
     }),
     channels: channelStore,
   },

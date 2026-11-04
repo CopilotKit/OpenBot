@@ -11,22 +11,36 @@
  * "untouched" and "nothing audited" assertions therefore name keys no other case writes — an
  * unwanted deletion or audit row for one of them could only have come from this case.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { createAuditStore } from "../src/audit";
 import { loadConfig } from "../src/config";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
+import { auditEvents } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
 let counter = 0;
+let credentials: ReturnType<typeof createCredentialStore>;
+
+beforeAll(async () => {
+  credentials = createCredentialStore(await useTestVault());
+});
 
 type Provider = "arcade" | "composio";
 let revokes: string[] = [];
@@ -82,7 +96,7 @@ function build(who: string, provider: Provider) {
     brokerProvider: provider,
     database,
     auditStore,
-    credentials: {} as never,
+    credentials,
     encryptionKey: "x".repeat(44),
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     broker,
@@ -130,7 +144,7 @@ function run(provider: Provider = "arcade") {
 }
 
 async function app(n: ReturnType<typeof run>, toolkit: string) {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: n.id(toolkit),
     title: toolkit,
     vendor: n.provider === "arcade" ? "Arcade" : "Composio",
@@ -146,7 +160,7 @@ async function hold(
   vendorUserId: string,
   holder: "person" | "deployment" = "person",
 ) {
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: n.provider,
     app: toolkit,
     holder,
@@ -154,14 +168,12 @@ async function hold(
     vendorUserId,
   });
 }
+/** The brokered accounts Intelligence holds now for these apps, by app. */
 const rowsFor = async (names: string[]) =>
-  (
-    await database
-      .select({ app: brokeredConnections.app })
-      .from(brokeredConnections)
-      .where(inArray(brokeredConnections.app, names))
-      .orderBy(asc(brokeredConnections.app))
-  ).map((row) => row.app);
+  (await storedConnections()).brokered
+    .filter((connection) => names.includes(connection.app))
+    .map((connection) => connection.app)
+    .sort();
 const trailFor = async (names: string[]) =>
   (
     await database
@@ -187,15 +199,11 @@ const disconnect = (n: ReturnType<typeof run>, toolkit: string) =>
   );
 
 afterAll(async () => {
-  await database
-    .delete(brokeredConnections)
-    .where(inArray(brokeredConnections.app, toolkits));
-  await database.delete(mcpServers).where(
-    inArray(
-      mcpServers.id,
-      toolkits.map((t) => `srv-${t}`),
-    ),
+  await removeConnectionsWhere(
+    (connection) =>
+      connection.kind === "brokered" && toolkits.includes(connection.app),
   );
+  await removeServers(toolkits.map((t) => `srv-${t}`));
   await database.$client.close();
 });
 

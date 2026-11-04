@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { decryptOAuthToken, setTokenUtil } from "better-auth/oauth2";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import {
   exportJWK,
   generateKeyPair,
@@ -19,13 +19,11 @@ import { createAuth } from "../src/auth";
 import { createEntra, withEntraBearer } from "../src/auth/entra";
 import { createRoleRepository } from "../src/auth/guards";
 import { loadConfig } from "../src/config";
-import { encryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
   accounts,
   auditEvents,
-  credentials,
-  mcpServers,
   revokedAccess,
   sessions,
   users,
@@ -40,6 +38,13 @@ import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
 import { testEnvironment } from "./support/environment";
+import {
+  purgeSecrets,
+  removeServers,
+  seedCredential,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * A company system behind Microsoft Entra, reached as the signed-in person.
@@ -386,25 +391,19 @@ const newEntra = (settings = microsoft) => {
 };
 const signIn = newEntra();
 
-const credentialReader = {
-  readSecret: async (id: string) => {
-    const [row] = await database
-      .select({
-        encryptedValue: credentials.encryptedValue,
-        revokedAt: credentials.revokedAt,
-      })
-      .from(credentials)
-      .where(eq(credentials.id, id));
-    return row ?? null;
-  },
-} as never;
+/*
+ * The vault, real: the deployment's token for the plain server is a secret in Intelligence, read
+ * through the same store the server wires. Installed before the store below is built, because the
+ * app under test is built at module scope around it.
+ */
+const credentialStore = createCredentialStore(await useTestVault());
 
 const storeWith = (tokens?: ReturnType<typeof createEntra>) =>
   createPluginStore({
     brokerProvider: "composio",
     database,
     auditStore,
-    credentials: credentialReader,
+    credentials: credentialStore,
     encryptionKey: config.keyEncryptionKey,
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     ...(tokens ? { entra: tokens } : {}),
@@ -564,16 +563,12 @@ beforeAll(async () => {
   }) as typeof fetch;
 
   await seedBot({ id: BOT, name: BOT });
-  await database.insert(credentials).values({
+  await seedCredential({
     id: DEPLOYMENT_CREDENTIAL,
     kind: "mcp",
     provider: PLAIN,
     keyId: `mcp-${PLAIN}`,
-    encryptedValue: await encryptSecret(
-      config.keyEncryptionKey,
-      `deployment-token-${tag}`,
-    ),
-    metadata: {},
+    plaintext: `deployment-token-${tag}`,
   });
 });
 
@@ -581,11 +576,14 @@ afterAll(async () => {
   globalThis.fetch = realFetch;
   entraServer?.stop(true);
   mcpServer?.stop(true);
-  await database.delete(mcpServers).where(like(mcpServers.id, `obo-%-${tag}`));
+  const { servers } = await (await useTestVault()).client.toolServers.all();
+  await removeServers(
+    servers
+      .map((server) => server.id)
+      .filter((id) => id.startsWith("obo-") && id.endsWith(`-${tag}`)),
+  );
   await removeBots([BOT]);
-  await database
-    .delete(credentials)
-    .where(inArray(credentials.id, [DEPLOYMENT_CREDENTIAL]));
+  await purgeSecrets([DEPLOYMENT_CREDENTIAL]);
   await database.delete(users).where(like(users.email, `%-${tag}@obo.test`));
   await database
     .delete(revokedAccess)
@@ -1025,10 +1023,6 @@ describe("what does not change", () => {
         by: ADMIN,
       }),
     ).rejects.toBeInstanceOf(CustomServerRefusedError);
-    const [row] = await database
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, id));
-    expect(row).toBeUndefined();
+    expect(await storedServer(id)).toBeNull();
   });
 });

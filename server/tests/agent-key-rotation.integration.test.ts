@@ -1,25 +1,33 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
-import { createAgentProfileStore } from "../src/agents/profile-store";
+import { eq } from "drizzle-orm";
+import {
+  type AgentProfileStore,
+  createAgentProfileStore,
+} from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { credentials, users } from "../src/db/schema";
+import { users } from "../src/db/schema";
 import { removeBots, useTestBots } from "./support/bots";
 import { testDatabaseUrl } from "./support/database";
+import {
+  liveSecrets,
+  purgeSecrets,
+  secretsNamed,
+  useTestVault,
+} from "./support/vault";
 
 /**
- * Editing a Bot's key, against a real database.
+ * Editing a Bot's key, against a real database and the real vault.
  *
- * The rotation tests elsewhere hand `storeAgentAuth` a fake store, which can answer any call
- * instantly and holds no locks. That is enough to prove which vault call is made and useless for
- * proving the call can be made at all: every failure this file exists to catch is a lock taken by
- * one connection and waited for by another, and a fake has neither.
+ * Proving which vault call is made is not enough; this file proves the call can be made at all from
+ * where the edit makes it. The key is a secret in Intelligence's vault, and no OpenBot transaction
+ * may be held open across a call to it.
  *
- * The pool is pinned to one connection deliberately. A vault write on its own connection, made while
- * the edit holds a transaction open, is a second session competing with that transaction, and at
- * `max: 1` it cannot even be handed a connection until that transaction ends, which it never will,
+ * The pool is pinned to one connection deliberately. An edit that held a transaction open across the
+ * vault call would hold the only connection while it waits, and any query the edit or the store makes
+ * on the way cannot even be handed a connection until that transaction ends, which it never will,
  * because the transaction is awaiting the call. The edit hangs until something times it out. At the
  * driver's default pool the same shape survives as a row-lock wait instead, slower to hit and
  * identical in effect, so one connection is the honest setting for the question being asked. The Bot
@@ -29,12 +37,7 @@ import { testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), { max: 1 });
 
-const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-const store = createCredentialStore(database);
-const profiles = createAgentProfileStore(database, undefined, {
-  store,
-  encryptionKey,
-});
+let profiles: AgentProfileStore;
 
 const suite = randomUUID().slice(0, 8);
 const actor: AgentActor = { id: `user_${suite}`, role: "admin" };
@@ -63,21 +66,16 @@ async function within<T>(label: string, work: Promise<T>): Promise<T> {
   }
 }
 
+/** The live keys the vault holds for this Bot, as Intelligence holds them now. */
 async function liveKeysFor(agentId: string) {
-  return database
-    .select({ id: credentials.id })
-    .from(credentials)
-    .where(
-      and(
-        eq(credentials.kind, "agent"),
-        eq(credentials.keyId, agentId),
-        isNull(credentials.revokedAt),
-      ),
-    );
+  return liveSecrets({ kind: "agent", provider: "ag-ui", keyId: agentId });
 }
 
 beforeAll(async () => {
   await useTestBots();
+  profiles = createAgentProfileStore(database, undefined, {
+    store: createCredentialStore(await useTestVault()),
+  });
   await database.insert(users).values({
     id: actor.id,
     email: `${actor.id}@openbot.test`,
@@ -99,9 +97,12 @@ beforeAll(async () => {
 afterAll(async () => {
   if (created.length) {
     await removeBots(created);
-    await database
-      .delete(credentials)
-      .where(inArray(credentials.keyId, created));
+    for (const agentId of created)
+      await purgeSecrets(
+        (await secretsNamed({ kind: "agent", keyId: agentId })).map(
+          (secret) => secret.id,
+        ),
+      );
   }
   await database.delete(users).where(eq(users.id, actor.id));
   await database.$client.end();
@@ -132,12 +133,11 @@ describe("editing a Bot's key", () => {
 
   test("the credential it replaced is revoked, not merely unreferenced", async () => {
     const [agentId] = created;
-    const rows = await database
-      .select({ id: credentials.id, revokedAt: credentials.revokedAt })
-      .from(credentials)
-      .where(
-        and(eq(credentials.kind, "agent"), eq(credentials.keyId, agentId)),
-      );
+    const rows = await secretsNamed({
+      kind: "agent",
+      provider: "ag-ui",
+      keyId: agentId,
+    });
 
     expect(rows).toHaveLength(2);
     expect(rows.filter((row) => row.revokedAt === null)).toHaveLength(1);

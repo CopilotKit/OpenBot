@@ -21,7 +21,7 @@ import type { AgentActor } from "./profile-types";
 export function createRuntimeAgentLoader(
   database: Database,
   /** Resolves a customer agent's key at load time. Absent means no agent can carry one. */
-  vault?: { reader: CredentialSecretReader; encryptionKey: string },
+  vault?: { reader: CredentialSecretReader },
   /** Secret for the deployment-managed Bot. Never sent to customer-owned endpoints. */
   managedAgent?: ManagedAgentConfig,
 ) {
@@ -44,8 +44,9 @@ export function createRuntimeAgentLoader(
       if (isRemoteAgent && vault) {
         const headers = await agentAuthHeaders({
           reader: vault.reader,
-          encryptionKey: vault.encryptionKey,
           auth: authFromConfiguration(row.configuration),
+          botId: agent.id,
+          userId: actor.id,
         });
         if (headers) agent.headers = headers;
       }

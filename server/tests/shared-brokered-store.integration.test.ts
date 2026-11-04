@@ -2,6 +2,7 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -9,15 +10,11 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { readConnectPrompt } from "@openbot/shared/connect-prompt";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema";
+import { auditEvents, mcpTools } from "../src/db/schema";
 import {
   BrokerAccountGoneError,
   type ConnectedAppBroker,
@@ -27,6 +24,16 @@ import { createPluginStore } from "../src/plugins/store";
 import { expectOnlyRefusal } from "./helpers/refusals";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -71,7 +78,16 @@ const broker: ConnectedAppBroker = {
 };
 
 const policy = { mode: "enforce" as const, deny: [], allow: ["true"] };
-const credentialsStub = {} as never;
+let credentialsStub: ReturnType<typeof createCredentialStore>;
+beforeAll(async () => {
+  credentialsStub = createCredentialStore(await useTestVault());
+});
+
+/** The brokered accounts Intelligence holds now at this file's app. */
+const brokeredAtApp = async () =>
+  (await storedConnections()).brokered.filter(
+    (connection) => connection.app === app,
+  );
 
 function freshStore() {
   return createPluginStore({
@@ -91,7 +107,7 @@ async function seedShared(
   store: ReturnType<typeof freshStore>,
   connected: boolean,
 ) {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: app,
     title: "Team GitHub",
     vendor: "Composio",
@@ -117,7 +133,7 @@ async function seedShared(
     "admin@example.test",
   );
   if (connected) {
-    await database.insert(brokeredConnections).values({
+    await seedBrokered({
       provider: "composio",
       app,
       holder: "deployment",
@@ -129,12 +145,11 @@ async function seedShared(
 }
 
 async function clean() {
-  await database
-    .delete(brokeredConnections)
-    .where(eq(brokeredConnections.app, app));
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [app, duplicate]));
+  await removeConnectionsWhere(
+    (connection) => connection.kind === "brokered" && connection.app === app,
+  );
+  // Takes the apps' tools and grants here with them, as the cascade from mcp_servers did.
+  await removeServers([app, duplicate]);
   await removeBots([bot]);
 }
 
@@ -216,10 +231,7 @@ describe("a shared app", () => {
     const store = freshStore();
     await seedShared(store, true);
     await store.retireConnectionsFor(admin, "hr@example.test");
-    const rows = await database
-      .select()
-      .from(brokeredConnections)
-      .where(eq(brokeredConnections.app, app));
+    const rows = await brokeredAtApp();
     expect(rows).toHaveLength(1);
     expect(revoked).toEqual([]);
   });
@@ -240,15 +252,9 @@ describe("a shared app", () => {
       verified: true,
       probeAction: null,
     });
-    const rows = await database
-      .select({ connectedBy: brokeredConnections.connectedBy })
-      .from(brokeredConnections)
-      .where(
-        and(
-          eq(brokeredConnections.app, app),
-          eq(brokeredConnections.holder, "deployment"),
-        ),
-      );
+    const rows = (await brokeredAtApp())
+      .filter((connection) => connection.holder === "deployment")
+      .map((connection) => ({ connectedBy: connection.connectedBy }));
     expect(rows).toEqual([{ connectedBy: "admin-b" }]);
   });
 
@@ -271,10 +277,9 @@ describe("a shared app", () => {
       verified: false,
       probeAction: null,
     });
-    const rows = await database
-      .select({ connectedBy: brokeredConnections.connectedBy })
-      .from(brokeredConnections)
-      .where(eq(brokeredConnections.app, app));
+    const rows = (await brokeredAtApp()).map((connection) => ({
+      connectedBy: connection.connectedBy,
+    }));
     expect(rows).toEqual([{ connectedBy: "admin-a" }]);
   });
 
@@ -305,10 +310,9 @@ describe("a shared app", () => {
         verified: true,
         probeAction: null,
       });
-      const rows = await database
-        .select({ vendorUserId: brokeredConnections.vendorUserId })
-        .from(brokeredConnections)
-        .where(eq(brokeredConnections.app, app));
+      const rows = (await brokeredAtApp()).map((connection) => ({
+        vendorUserId: connection.vendorUserId,
+      }));
       expect(rows).toEqual([{ vendorUserId: `new-${suite}` }]);
     },
   );
@@ -337,13 +341,10 @@ describe("a shared app", () => {
       only: "a row that is still there",
     });
     expect(wrote).toBe(false);
-    const rows = await database
-      .select({
-        vendorUserId: brokeredConnections.vendorUserId,
-        verified: brokeredConnections.verified,
-      })
-      .from(brokeredConnections)
-      .where(eq(brokeredConnections.app, app));
+    const rows = (await brokeredAtApp()).map((connection) => ({
+      vendorUserId: connection.vendorUserId,
+      verified: connection.verified,
+    }));
     expect(rows).toEqual([{ vendorUserId: VENDOR_ID, verified: true }]);
   });
 
@@ -416,10 +417,10 @@ describe("a personal app", () => {
   test("still refuses a person with no account with the personal sentence", async () => {
     const store = freshStore();
     await seedShared(store, false);
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "personal", sharedVendorUserId: null })
-      .where(eq(mcpServers.id, app));
+    await changeServer(app, {
+      accountMode: "personal",
+      sharedVendorUserId: null,
+    });
     const said = await store
       .callTool({
         ref: `${app}/GITHUB_LIST_ISSUES`,
@@ -437,11 +438,8 @@ describe("a personal app", () => {
   test("offboarding a person revokes only their own rows", async () => {
     const store = freshStore();
     await seedShared(store, true);
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "personal" })
-      .where(eq(mcpServers.id, app));
-    await database.insert(brokeredConnections).values({
+    await changeServer(app, { accountMode: "personal" });
+    await seedBrokered({
       provider: "composio",
       app,
       holder: "person",
@@ -449,15 +447,11 @@ describe("a personal app", () => {
       vendorUserId: asker,
     });
     await store.retireConnectionsFor(asker, "hr@example.test");
-    const left = await database
-      .select({ holder: brokeredConnections.holder })
-      .from(brokeredConnections)
-      .where(
-        and(
-          eq(brokeredConnections.app, app),
-          inArray(brokeredConnections.holder, ["person", "deployment"]),
-        ),
-      );
+    const left = (await brokeredAtApp())
+      .filter((connection) =>
+        ["person", "deployment"].includes(connection.holder),
+      )
+      .map((connection) => ({ holder: connection.holder }));
     expect(left).toEqual([{ holder: "deployment" }]);
     expect(revoked).toEqual([asker]);
   });
@@ -471,7 +465,7 @@ describe("a duplicate row at an app's url", () => {
       sharedVendorUserId: string | null;
     },
   ) {
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: duplicate,
       title: "Team GitHub (copy)",
       vendor: "Composio",
@@ -562,11 +556,11 @@ describe("a duplicate row at an app's url", () => {
     });
     // The deployment account exists, so taking the Shared branch would succeed rather than refuse.
     await seedShared(store, true);
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "personal", sharedVendorUserId: null })
-      .where(eq(mcpServers.id, app));
-    await database.insert(brokeredConnections).values({
+    await changeServer(app, {
+      accountMode: "personal",
+      sharedVendorUserId: null,
+    });
+    await seedBrokered({
       provider: "composio",
       app,
       holder: "person",
@@ -659,11 +653,11 @@ describe("a duplicate row at an app's url", () => {
       sharedVendorUserId: VENDOR_ID,
     });
     await store.setAccountModeColumns(duplicate, "personal", null);
-    const rows = await database
-      .select({ id: mcpServers.id, accountMode: mcpServers.accountMode })
-      .from(mcpServers)
-      .where(inArray(mcpServers.id, [app, duplicate]))
-      .orderBy(mcpServers.id);
+    const rows: { id: string; accountMode: string | null }[] = [];
+    for (const id of [app, duplicate]) {
+      const row = await storedServer(id);
+      if (row) rows.push({ id: row.id, accountMode: row.accountMode });
+    }
     expect(rows).toEqual([
       { id: app, accountMode: "personal" },
       { id: duplicate, accountMode: "shared" },
@@ -690,17 +684,9 @@ describe("an account the vendor no longer holds", () => {
 
   /** Who still holds a row at the app, by holder. */
   const rowsFor = async (holder: "person" | "deployment") =>
-    (
-      await database
-        .select({ userId: brokeredConnections.userId })
-        .from(brokeredConnections)
-        .where(
-          and(
-            eq(brokeredConnections.app, app),
-            eq(brokeredConnections.holder, holder),
-          ),
-        )
-    ).map((row) => row.userId);
+    (await brokeredAtApp())
+      .filter((connection) => connection.holder === holder)
+      .map((connection) => connection.userId);
 
   /* Counted before and after: the trail is not cleaned between tests, which share the app id. */
   const failures = async () =>
@@ -744,27 +730,25 @@ describe("an account the vendor no longer holds", () => {
   test("on a personal app: refused with a card offering Reconnect", async () => {
     const store = freshStore();
     await seedShared(store, false);
-    await database
-      .update(mcpServers)
-      .set({ accountMode: "personal", sharedVendorUserId: null })
-      .where(eq(mcpServers.id, app));
-    await database.insert(brokeredConnections).values([
-      {
-        provider: "composio",
-        app,
-        holder: "person",
-        userId: asker,
-        vendorUserId: `vendor-${asker}`,
-      },
-      // Somebody else's account at the same app, which the vendor still holds.
-      {
-        provider: "composio",
-        app,
-        holder: "person",
-        userId: admin,
-        vendorUserId: `vendor-${admin}`,
-      },
-    ]);
+    await changeServer(app, {
+      accountMode: "personal",
+      sharedVendorUserId: null,
+    });
+    await seedBrokered({
+      provider: "composio",
+      app,
+      holder: "person",
+      userId: asker,
+      vendorUserId: `vendor-${asker}`,
+    });
+    // Somebody else's account at the same app, which the vendor still holds.
+    await seedBrokered({
+      provider: "composio",
+      app,
+      holder: "person",
+      userId: admin,
+      vendorUserId: `vendor-${admin}`,
+    });
     gone();
     const said = await store
       .callTool({

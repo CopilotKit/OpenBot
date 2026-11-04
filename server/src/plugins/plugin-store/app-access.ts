@@ -13,15 +13,7 @@ import {
 import { type AuditEventInput, recordAuditEvent } from "../../audit";
 import { bots } from "../../agents/bot-registry/directory";
 import { botConfiguration } from "../../configuration/directory";
-import {
-  appAccessRequests,
-  brokeredConnections,
-  credentials as credentialRows,
-  mcpServers,
-  mcpTools,
-  mcpUserCredentials,
-  users,
-} from "../../db/schema";
+import { appAccessRequests, mcpTools, users } from "../../db/schema";
 import { BROKERED_PROFILE, brokeredProvenance, toolkitOfFor } from "../access";
 import {
   type AppAccess,
@@ -44,7 +36,16 @@ import {
   catalogueEntry,
   classifyTool,
 } from "../catalogue";
+import { vault } from "../../vault/directory";
 import type { StoreContext } from "./context";
+import {
+  allBrokered,
+  allGrants,
+  allServers,
+  findServer,
+  serversAt,
+  updateServer,
+} from "./records";
 import { iso } from "./model";
 
 /**
@@ -193,20 +194,18 @@ export function appAccessMethods(context: StoreContext) {
    * Ordered by id so the grouping meets rows in the order the answering rule names them.
    */
   async function allRows(): Promise<ServerRow[]> {
-    return database
-      .select({
-        id: mcpServers.id,
-        title: mcpServers.title,
-        logo: mcpServers.logo,
-        url: mcpServers.url,
-        provenance: mcpServers.provenance,
-        authScheme: mcpServers.authScheme,
-        accountMode: mcpServers.accountMode,
-        credentialId: mcpServers.credentialId,
-        ownerGrants: mcpServers.ownerGrants,
-      })
-      .from(mcpServers)
-      .orderBy(asc(mcpServers.id));
+    // From memory: the apps are Intelligence's, held by this instance's vault directory.
+    return allServers().map((server) => ({
+      id: server.id,
+      title: server.title,
+      logo: server.logo,
+      url: server.url,
+      provenance: server.provenance,
+      authScheme: server.authScheme,
+      accountMode: server.accountMode,
+      credentialId: server.credentialId,
+      ownerGrants: server.ownerGrants,
+    }));
   }
 
   /**
@@ -478,62 +477,38 @@ export function appAccessMethods(context: StoreContext) {
       connectedAt: Date | null;
     }) => ({ usable: usable(row), connectedAt: iso(row.connectedAt) });
 
-    const [personal, deployment, held] = await Promise.all([
-      userId && toolkits.length > 0
-        ? database
-            .select({
-              app: brokeredConnections.app,
-              verified: brokeredConnections.verified,
-              probeAction: brokeredConnections.probeAction,
-              connectedAt: brokeredConnections.connectedAt,
-            })
-            .from(brokeredConnections)
-            .where(
-              and(
-                eq(brokeredConnections.provider, brokerProvider),
-                eq(brokeredConnections.holder, "person"),
-                eq(brokeredConnections.userId, userId),
-                inArray(brokeredConnections.app, toolkits),
-              ),
-            )
-        : [],
-      toolkits.length > 0
-        ? database
-            .select({
-              app: brokeredConnections.app,
-              verified: brokeredConnections.verified,
-              probeAction: brokeredConnections.probeAction,
-              connectedAt: brokeredConnections.connectedAt,
-            })
-            .from(brokeredConnections)
-            .where(
-              and(
-                eq(brokeredConnections.provider, brokerProvider),
-                eq(brokeredConnections.holder, "deployment"),
-                inArray(brokeredConnections.app, toolkits),
-              ),
-            )
-        : [],
-      userId && heldIds.length > 0
-        ? database
-            .select({
-              serverId: mcpUserCredentials.serverId,
-              revokedAt: credentialRows.revokedAt,
-              connectedAt: mcpUserCredentials.connectedAt,
-            })
-            .from(mcpUserCredentials)
-            .innerJoin(
-              credentialRows,
-              eq(credentialRows.id, mcpUserCredentials.credentialId),
-            )
-            .where(
-              and(
-                eq(mcpUserCredentials.userId, userId),
-                inArray(mcpUserCredentials.serverId, heldIds),
-              ),
-            )
-        : [],
-    ]);
+    // From memory: connections and the vault's metadata are held by this instance's directory.
+    const wanted = new Set(toolkits);
+    const brokered = allBrokered(brokerProvider).filter((row) =>
+      wanted.has(row.app),
+    );
+    const personal = userId
+      ? brokered.filter(
+          (row) => row.holder === "person" && row.userId === userId,
+        )
+      : [];
+    const deployment = brokered.filter((row) => row.holder === "deployment");
+    const heldServers = new Set(heldIds);
+    const held = userId
+      ? allGrants()
+          .filter(
+            (grant) =>
+              grant.userId === userId && heldServers.has(grant.serverId),
+          )
+          // A grant naming a secret the vault no longer holds was excluded by the old inner join.
+          .flatMap((grant) => {
+            const secret = vault().peekSecret(grant.credentialId);
+            return secret
+              ? [
+                  {
+                    serverId: grant.serverId,
+                    revokedAt: secret.revokedAt,
+                    connectedAt: grant.connectedAt,
+                  },
+                ]
+              : [];
+          })
+      : [];
     return {
       personalBrokered: new Map(personal.map((row) => [row.app, fact(row)])),
       deploymentBrokered: new Map(
@@ -1008,16 +983,11 @@ export function appAccessMethods(context: StoreContext) {
       ownerGrants: OwnerGrants | null;
       by: string;
     }): Promise<boolean> {
-      const [row] = await database
-        .select({ url: mcpServers.url, ownerGrants: mcpServers.ownerGrants })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, input.serverId))
-        .limit(1);
+      const row = await findServer(input.serverId);
       if (!row) return false;
-      await database
-        .update(mcpServers)
-        .set({ ownerGrants: input.ownerGrants, updatedAt: new Date() })
-        .where(eq(mcpServers.url, row.url));
+      for (const sibling of serversAt([row.url])) {
+        await updateServer(sibling.id, { ownerGrants: input.ownerGrants });
+      }
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
         targetType: "mcp_server",

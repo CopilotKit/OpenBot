@@ -12,7 +12,6 @@ import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { count } from "drizzle-orm";
 import { setRole } from "../src/auth/roles";
-import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { identityLinks, revokedAccess, userRoles } from "../src/db/schema";
 import { createIdentityStore } from "../src/identity/store";
@@ -27,6 +26,7 @@ import {
   useTestPeople,
 } from "./support/directory";
 import { sourceFiles, stripComments } from "./support/source-scan";
+import { vaultCredentials } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const made: string[] = [];
@@ -92,10 +92,7 @@ describe("the legacy people tables", () => {
       skin: "openbot",
     });
     await createOnboardingStore(database).complete(person.id);
-    const identities = createIdentityStore(
-      database,
-      createCredentialStore(database),
-    );
+    const identities = createIdentityStore(database, vaultCredentials());
     const link = await identities.linkVerified(
       {
         provider: "slack",

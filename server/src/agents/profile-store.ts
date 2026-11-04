@@ -401,7 +401,7 @@ export function createAgentProfileStore(
    * Where a customer agent's key is kept. Optional so a deployment without a vault still runs; an
    * agent with a key then simply cannot be created, which is better than storing it in the clear.
    */
-  vault?: { store: CredentialStore; encryptionKey: string },
+  vault?: { store: CredentialStore },
 ): AgentProfileStore {
   const managedConfiguration = managedAgentAgUiUrl
     ? { endpoint: managedAgentAgUiUrl.toString() }
@@ -501,7 +501,6 @@ export function createAgentProfileStore(
       if (endpoint && input.auth && vault) {
         auth = await storeAgentAuth({
           store: vault.store,
-          encryptionKey: vault.encryptionKey,
           agentId: id,
           header: input.auth.header,
           value: input.auth.value,
@@ -572,7 +571,6 @@ export function createAgentProfileStore(
               // rotates rather than inserting a second live row for the same agent id.
               auth = await storeAgentAuth({
                 store: vault.store,
-                encryptionKey: vault.encryptionKey,
                 agentId: id,
                 header: input.auth.header,
                 value: input.auth.value,

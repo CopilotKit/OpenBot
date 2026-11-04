@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
@@ -18,13 +18,21 @@ import {
   seedDirectoryPerson,
   useTestPeople,
 } from "./support/directory";
+import { useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
-const store = createIdentityStore(database, createCredentialStore(database));
+let store: ReturnType<typeof createIdentityStore>;
 const realm = `test-${randomUUID()}`;
 const users: string[] = [];
 // Links live in Intelligence's organization directory, and belong to people it holds.
 useTestPeople();
+
+beforeAll(async () => {
+  store = createIdentityStore(
+    database,
+    createCredentialStore(await useTestVault()),
+  );
+});
 
 afterAll(async () => {
   if (users.length)

@@ -1,13 +1,25 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { brokeredConnections, mcpServers } from "../src/db/schema";
 import { BROKERED_PROFILE, type BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 /*
  * `store.ts` reads the app out of a row's url through the provider's own parser, dispatched in
@@ -19,13 +31,15 @@ const suite = randomUUID().slice(0, 8);
 const serverIds: string[] = [];
 const connectionApps: string[] = [];
 
+beforeAll(async () => {
+  await useTestVault();
+});
 afterEach(async () => {
-  for (const id of serverIds.splice(0))
-    await database.delete(mcpServers).where(eq(mcpServers.id, id));
-  for (const app of connectionApps.splice(0))
-    await database
-      .delete(brokeredConnections)
-      .where(eq(brokeredConnections.app, app));
+  await removeServers(serverIds.splice(0));
+  const apps = new Set(connectionApps.splice(0));
+  await removeConnectionsWhere(
+    (connection) => connection.kind === "brokered" && apps.has(connection.app),
+  );
 });
 afterAll(async () => {
   await database.$client.close();
@@ -48,7 +62,7 @@ function storeFor(brokerProvider: BrokerProvider) {
 
 async function seed(provenance: BrokerProvider, url: string, app: string) {
   const id = `dispatch-${suite}-${randomUUID().slice(0, 6)}`;
-  await database.insert(mcpServers).values({
+  await seedServer({
     id,
     title: "Example",
     // What production mints: the broker's label out of `BROKERED_PROFILE`, never the lower-case
@@ -59,7 +73,7 @@ async function seed(provenance: BrokerProvider, url: string, app: string) {
     authScheme: "OAUTH2",
   });
   serverIds.push(id);
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: provenance,
     app,
     holder: "person",
@@ -70,23 +84,31 @@ async function seed(provenance: BrokerProvider, url: string, app: string) {
   return id;
 }
 
+/*
+ * Each app name carries this file's suite, because `accountsOn` counts every account any holder has on
+ * the app, and every test file shares one Intelligence project: another file's `gmail` account would
+ * otherwise be counted here.
+ */
+const Gmail = `Gmail${suite}`;
+const gmail = `gmail${suite}`;
+
 describe("the toolkit a row names is read by the store's own provider", () => {
   test("an arcade://Gmail row resolves to Gmail with case intact under arcade", async () => {
-    const id = await seed("arcade", `arcade://Gmail`, `Gmail`);
+    const id = await seed("arcade", `arcade://${Gmail}`, Gmail);
     const answer = await storeFor("arcade").accountsOn(id);
-    expect(answer?.toolkit).toBe("Gmail");
+    expect(answer?.toolkit).toBe(Gmail);
     expect(answer?.accounts).toHaveLength(1);
   });
 
   test("the same row under composio names no app and is refused, not mis-parsed", async () => {
-    const id = await seed("arcade", `arcade://Gmail`, `Gmail`);
+    const id = await seed("arcade", `arcade://${Gmail}`, Gmail);
     expect(await storeFor("composio").accountsOn(id)).toBeNull();
   });
 
   test("a composio://gmail row under composio is unchanged", async () => {
-    const id = await seed("composio", `composio://gmail`, `gmail`);
+    const id = await seed("composio", `composio://${gmail}`, gmail);
     const answer = await storeFor("composio").accountsOn(id);
-    expect(answer?.toolkit).toBe("gmail");
+    expect(answer?.toolkit).toBe(gmail);
     expect(answer?.accounts).toHaveLength(1);
   });
 
@@ -97,7 +119,7 @@ describe("the toolkit a row names is read by the store's own provider", () => {
    * says the second one holds.
    */
   test("a composio://gmail row under arcade names no app and is refused, not mis-parsed", async () => {
-    const id = await seed("composio", `composio://gmail`, `gmail`);
+    const id = await seed("composio", `composio://${gmail}`, gmail);
     expect(await storeFor("arcade").accountsOn(id)).toBeNull();
   });
 });

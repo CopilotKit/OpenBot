@@ -49,7 +49,11 @@ export type ActorAgentResolverDependencies = {
   loadNameForActor?: (actorId: string) => Promise<string | null>;
   loadAgents: LoadAgentsForActor;
   model: RuntimeModel;
-  resolveModelApiKey: () => Promise<string | null>;
+  /** The deployment's model key, for this person's run of this Bot: the vault records who read it. */
+  resolveModelApiKey: (reader?: {
+    userId?: string;
+    botId?: string;
+  }) => Promise<string | null>;
   stallGuard?: StallGuard;
   loadToolsForActor?: (
     actorId: string,
@@ -132,7 +136,13 @@ export function createActorAgentResolver(
     return resolveRuntimeAgents(
       () => Promise.resolve(runnable),
       deps.model,
-      deps.resolveModelApiKey,
+      (botIds) =>
+        deps.resolveModelApiKey({
+          userId: actor.id,
+          // The one Bot this run builds, or every built-in Bot it builds: the key is resolved once
+          // for all of them, so that is the honest answer to which Bots read it.
+          botId: onlyAgentId ?? botIds?.join(",").slice(0, 200),
+        }),
       deps.stallGuard,
       deps.loadToolsForActor?.(actor.id, context?.initiator),
       deps.signRunForActor?.(actor.id, context?.initiator, context?.depth),

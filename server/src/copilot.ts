@@ -1817,7 +1817,8 @@ function mastraOpenBotContext({
 export async function resolveRuntimeAgents(
   loadAgents: () => Promise<RegisteredAgent[]>,
   model: RuntimeModel,
-  resolveModelApiKey: () => Promise<string | null>,
+  /** Given the built-in Bots the key is resolved for, so the vault records which Bots read it. */
+  resolveModelApiKey: (botIds?: string[]) => Promise<string | null>,
   stallGuard?: StallGuard,
   loadTools?: LoadToolsForBot,
   signRun?: SignRun,
@@ -1877,7 +1878,11 @@ export async function resolveRuntimeAgents(
   if (registered.length === 0) return {};
 
   const apiKey = registered.some((agent) => agent.type === "built_in")
-    ? await resolveModelApiKey()
+    ? await resolveModelApiKey(
+        registered
+          .filter((agent) => agent.type === "built_in")
+          .map((agent) => agent.id),
+      )
     : null;
   return buildAgents(
     registered,

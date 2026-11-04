@@ -22,16 +22,11 @@ import type { ApprovalCandidate } from "../src/approvals/types";
 import { type AuditInitiator, createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { type RegisteredAgent, registeredAgentFromRow } from "../src/copilot";
-import { createCredentialStore, encryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { auditEvents } from "../src/db/schema";
-import { credentials, users } from "../src/db/schema/core";
-import {
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-  mcpUserCredentials,
-} from "../src/db/schema/plugins";
+import { users } from "../src/db/schema/core";
+import { mcpTools } from "../src/db/schema/plugins";
 import {
   proactivePeople,
   proactivePings,
@@ -65,6 +60,20 @@ import {
 } from "./support/bots";
 import { purgeConversations, seedChannel } from "./support/conversations";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  changeServer,
+  purgeSecrets,
+  removeConnectionsWhere,
+  removeServers,
+  type SeedCredential,
+  type SeedServer,
+  seedBrokered,
+  seedCredential,
+  seedGrant,
+  seedServer,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 import { testMemory } from "./support/memory";
 
 /*
@@ -83,7 +92,7 @@ beforeAll(async () => {
   await useTestConfiguration();
 });
 const suite = randomUUID().slice(0, 8);
-/** 32 zero bytes in base64: a real AES-256 key, because the vault is opened for Notion's grant. */
+/** 32 zero bytes in base64: a real AES-256 key, as the store is configured with one. */
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const allowEverything = (): ActionPolicy => ({
   mode: "enforce",
@@ -124,6 +133,9 @@ const auditStore = createAuditStore(database);
 const store = createProactiveStore(database);
 const memory = testMemory(database).store;
 const queue = createWorkQueue(database);
+// Apps, connections and credentials live in Intelligence: the process's vault directory, before
+// any store.
+const directory = await useTestVault();
 
 /** What reached a vendor, and what the approval gate was asked, in order. */
 const vendorCalls: { url: string; token?: string; tool: string }[] = [];
@@ -136,7 +148,7 @@ function pluginStoreFor(brokerProvider: "composio" | "arcade") {
     brokerProvider,
     database,
     auditStore,
-    credentials: createCredentialStore(database),
+    credentials: createCredentialStore(directory),
     encryptionKey: KEY,
     policy: allowEverything,
     approvalGate: async (candidate: ApprovalCandidate) => {
@@ -296,19 +308,17 @@ afterAll(async () => {
 const FAR = new Date("2100-01-01T00:00:00Z");
 
 const fixtures = (() => {
-  /** Rows this suite found already there, so it puts back exactly what it borrowed. */
+  /** Apps and rows this suite found already there, so it puts back exactly what it borrowed. */
   const createdServers: string[] = [];
   const createdTools: { serverId: string; name: string }[] = [];
   const createdCredentials: string[] = [];
   let notionClientBefore: string | null = null;
 
-  async function server(row: typeof mcpServers.$inferInsert) {
-    const inserted = await database
-      .insert(mcpServers)
-      .values(row)
-      .onConflictDoNothing()
-      .returning({ id: mcpServers.id });
-    if (inserted.length) createdServers.push(row.id);
+  /** Add an app unless Intelligence has one under this id already: the old `DO NOTHING`. */
+  async function server(row: SeedServer) {
+    if (await storedServer(row.id)) return;
+    await seedServer(row);
+    createdServers.push(row.id);
   }
   async function tool(row: typeof mcpTools.$inferInsert) {
     const inserted = await database
@@ -319,15 +329,8 @@ const fixtures = (() => {
     if (inserted.length)
       createdTools.push({ serverId: row.serverId, name: row.name });
   }
-  async function secret(
-    row: Omit<typeof credentials.$inferInsert, "encryptedValue">,
-    value: string,
-  ) {
-    const [stored] = await database
-      .insert(credentials)
-      .values({ ...row, encryptedValue: await encryptSecret(KEY, value) })
-      .returning({ id: credentials.id });
-    if (!stored) throw new Error("credential was not stored");
+  async function secret(row: Omit<SeedCredential, "plaintext">, value: string) {
+    const stored = await seedCredential({ ...row, plaintext: value });
     createdCredentials.push(stored.id);
     return stored.id;
   }
@@ -354,11 +357,7 @@ const fixtures = (() => {
         url: "https://mcp.notion.com/mcp",
         provenance: "first-party",
       });
-      const [notion] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, NOTION));
-      notionClientBefore = notion?.credentialId ?? null;
+      notionClientBefore = (await storedServer(NOTION))?.credentialId ?? null;
       const client = await secret(
         {
           kind: "mcp_oauth_client",
@@ -368,10 +367,7 @@ const fixtures = (() => {
         },
         JSON.stringify({ clientId: `client-${suite}`, clientSecret: "" }),
       );
-      await database
-        .update(mcpServers)
-        .set({ credentialId: client })
-        .where(eq(mcpServers.id, NOTION));
+      await changeServer(NOTION, { credentialId: client });
       const grantToken = await secret(
         {
           kind: "mcp_user_token",
@@ -381,7 +377,7 @@ const fixtures = (() => {
         },
         `refresh-${suite}`,
       );
-      await database.insert(mcpUserCredentials).values({
+      await seedGrant({
         serverId: NOTION,
         userId: owner,
         credentialId: grantToken,
@@ -419,7 +415,7 @@ const fixtures = (() => {
       });
       await tool({ serverId: MAIL, name: "MAIL_FETCH_EMAILS", effect: "read" });
       await tool({ serverId: MAIL, name: "MAIL_SEND_EMAIL", effect: "write" });
-      await database.insert(brokeredConnections).values({
+      await seedBrokered({
         provider: "composio",
         app: MAIL_APP,
         holder: "person",
@@ -439,7 +435,7 @@ const fixtures = (() => {
       });
       await tool({ serverId: TASKS, name: "ListTasks", effect: "read" });
       await tool({ serverId: TASKS, name: "CreateTask", effect: "write" });
-      await database.insert(brokeredConnections).values({
+      await seedBrokered({
         provider: "arcade",
         app: TASKS_APP,
         holder: "person",
@@ -502,17 +498,10 @@ const fixtures = (() => {
           botIds: [botId],
         })),
       );
-      await database
-        .delete(brokeredConnections)
-        .where(eq(brokeredConnections.userId, owner));
-      await database
-        .delete(mcpUserCredentials)
-        .where(eq(mcpUserCredentials.userId, owner));
-      // The client pointer back before its credential goes: the column is a foreign key.
-      await database
-        .update(mcpServers)
-        .set({ credentialId: notionClientBefore })
-        .where(eq(mcpServers.id, NOTION));
+      await removeConnectionsWhere((connection) => connection.userId === owner);
+      // The client pointer back before its credential goes, so the app never names a gone secret.
+      if (!createdServers.includes(NOTION))
+        await changeServer(NOTION, { credentialId: notionClientBefore });
       for (const created of createdTools)
         await database
           .delete(mcpTools)
@@ -522,14 +511,8 @@ const fixtures = (() => {
               eq(mcpTools.name, created.name),
             ),
           );
-      if (createdServers.length)
-        await database
-          .delete(mcpServers)
-          .where(inArray(mcpServers.id, createdServers));
-      if (createdCredentials.length)
-        await database
-          .delete(credentials)
-          .where(inArray(credentials.id, createdCredentials));
+      await removeServers(createdServers);
+      await purgeSecrets(createdCredentials);
     },
   };
 })();

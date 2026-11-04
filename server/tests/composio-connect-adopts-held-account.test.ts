@@ -1,13 +1,21 @@
 // server/tests/composio-connect-adopts-held-account.test.ts
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { ComposioMultipleConnectedAccountsError } from "@composio/core";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
+import { auditEvents } from "../src/db/schema";
 import {
   buildComposioClient,
   type ComposioVendor,
@@ -15,6 +23,13 @@ import {
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedServer,
+  storedConnections,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * PRESSING CONNECT ON AN APP COMPOSIO ALREADY HOLDS AN ACCOUNT FOR, WITH NO ROW FOR IT HERE.
@@ -186,10 +201,10 @@ function heldBy(userId: string, toolkit: string): HeldAccount {
   };
 }
 
-/** The app's row, as enabling it writes one: a consent app, Personal or Shared. */
+/** The app, as enabling it writes one: a consent app, Personal or Shared. */
 async function enable(toolkit: string, mode: "personal" | "shared") {
   made.push(toolkit);
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: toolkit,
     title: "GitHub",
     vendor: "Composio",
@@ -211,7 +226,7 @@ function signedInAs(
     brokerProvider: "composio",
     database,
     auditStore: createAuditStore(database),
-    credentials: {} as never,
+    credentials,
     encryptionKey: "x".repeat(44),
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     broker,
@@ -256,11 +271,9 @@ const pressConnect = (
         }),
   });
 
-const rowsFor = (toolkit: string) =>
-  database
-    .select()
-    .from(brokeredConnections)
-    .where(eq(brokeredConnections.app, toolkit));
+/** The brokered accounts Intelligence holds for this app now. */
+const rowsFor = async (toolkit: string) =>
+  (await storedConnections()).brokered.filter((row) => row.app === toolkit);
 
 const connectedTrail = (toolkit: string) =>
   database
@@ -273,12 +286,18 @@ const connectedTrail = (toolkit: string) =>
       ),
     );
 
+let credentials: ReturnType<typeof createCredentialStore>;
+
+beforeAll(async () => {
+  credentials = createCredentialStore(await useTestVault());
+});
+
 afterEach(async () => {
   if (made.length === 0) return;
-  await database
-    .delete(brokeredConnections)
-    .where(inArray(brokeredConnections.app, made));
-  await database.delete(mcpServers).where(inArray(mcpServers.id, made));
+  await removeConnectionsWhere(
+    (row) => row.kind === "brokered" && made.includes(row.app),
+  );
+  await removeServers(made);
   made.length = 0;
 });
 

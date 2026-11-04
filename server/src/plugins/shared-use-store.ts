@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { AuditInitiator } from "../audit";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { createRoleRepository } from "../auth/guards";
@@ -8,7 +8,6 @@ import type { Database } from "../db/client";
 import { bots } from "../agents/bot-registry/directory";
 import { botConfiguration } from "../configuration/directory";
 import {
-  mcpServers,
   responsibilities,
   responsibilityTriggers,
   sharedUseRequests,
@@ -18,6 +17,12 @@ import { type PolicyCache, policy } from "../policy/cache";
 import { PolicyVersionConflictError } from "../policy/client";
 import type { ConnectionApprovalRecord } from "../policy/types";
 import { BROKERED_PROFILE, type BrokerProvider, toolkitOfFor } from "./access";
+import {
+  allServers,
+  findServer,
+  peekServer,
+  serversAt,
+} from "./plugin-store/records";
 import {
   type ActorFacts,
   type ApprovalMember,
@@ -146,22 +151,15 @@ export function createSharedUseStore(
    */
   async function rowsOfApp(
     serverId: string,
-    executor: Database | Transaction = database,
+    /** Unused: the apps are read from memory, which is safe inside any caller's transaction. */
+    _executor: Database | Transaction = database,
   ): Promise<{ appId: string; url: string | null; ids: string[] }> {
-    const [row] = await executor
-      .select({ url: mcpServers.url })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
+    const row = peekServer(serverId);
     const url = row?.url ?? null;
     const toolkit = url ? appOfUrl(url) : null;
     if (!toolkit) return { appId: serverId, url, ids: [serverId] };
     const canonical = canonicalUrlOf(toolkit);
-    const siblings = await executor
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.url, canonical))
-      .orderBy(asc(mcpServers.id));
+    const siblings = serversAt([canonical]);
     const ids = siblings.map((sibling) => sibling.id);
     if (!ids.includes(serverId)) ids.push(serverId);
     return { appId: siblings[0]?.id ?? serverId, url, ids };
@@ -187,7 +185,7 @@ export function createSharedUseStore(
    * The approval for this Bot at the app, whoever set it, and whether it may be read now.
    *
    * The approval is Intelligence's (organization policy), read from memory: this is on the path of
-   * every call that spends a Shared app's account. Whether owners decide is the app's own row here.
+   * every call that spends a Shared app's account. Whether owners decide is the app's own, from memory.
    */
   async function storedApproval(botId: string, serverId: string) {
     const approval = cache().connectionApproval({
@@ -195,14 +193,8 @@ export function createSharedUseStore(
       connectionId: serverId,
     });
     if (!approval) return null;
-    const [app] = await database
-      .select({
-        ownerGrants: mcpServers.ownerGrants,
-        accountMode: mcpServers.accountMode,
-      })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
+    // The app's own two fields, from memory: an app that is gone leaves owners deciding nothing.
+    const app = peekServer(serverId);
     return {
       audience: approval.audience,
       outsideInput: approval.outsideInput,
@@ -409,14 +401,7 @@ export function createSharedUseStore(
     by: string;
   }): Promise<SharedUseApproval | null> {
     const serverId = await appIdOf(input.serverId);
-    const [app] = await database
-      .select({
-        accountMode: mcpServers.accountMode,
-        ownerGrants: mcpServers.ownerGrants,
-      })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverId))
-      .limit(1);
+    const app = await findServer(serverId);
     if (app?.accountMode !== "shared" || app.ownerGrants !== "any") return null;
     if (await storedApproval(input.botId, serverId)) return null;
     const approval: SharedUseApproval = {
@@ -597,10 +582,8 @@ export function createSharedUseStore(
       ...new Set(grants.map((grant) => grant.ref.split("/")[0] ?? "")),
     ].filter(Boolean);
     if (serverIds.length === 0) return [];
-    const granted = await database
-      .select({ id: mcpServers.id, url: mcpServers.url })
-      .from(mcpServers)
-      .where(inArray(mcpServers.id, serverIds));
+    const wanted = new Set(serverIds);
+    const granted = allServers().filter((row) => wanted.has(row.id));
     const toolkitOfRow = (url: string | null) => (url ? appOfUrl(url) : null);
     const canonicalUrls = [
       ...new Set(
@@ -610,14 +593,7 @@ export function createSharedUseStore(
           .map(canonicalUrlOf),
       ),
     ];
-    const atUrls =
-      canonicalUrls.length === 0
-        ? []
-        : await database
-            .select({ id: mcpServers.id, url: mcpServers.url })
-            .from(mcpServers)
-            .where(inArray(mcpServers.url, canonicalUrls))
-            .orderBy(asc(mcpServers.id));
+    const atUrls = serversAt(canonicalUrls);
     const answeringAt = new Map<string, string>();
     for (const row of atUrls)
       if (row.url && !answeringAt.has(row.url))
@@ -631,15 +607,10 @@ export function createSharedUseStore(
         }),
       ),
     ];
-    return database
-      .select({ serverId: mcpServers.id, title: mcpServers.title })
-      .from(mcpServers)
-      .where(
-        and(
-          inArray(mcpServers.id, appIds),
-          eq(mcpServers.accountMode, "shared"),
-        ),
-      );
+    const apps = new Set(appIds);
+    return allServers()
+      .filter((row) => apps.has(row.id) && row.accountMode === "shared")
+      .map((row) => ({ serverId: row.id, title: row.title }));
   }
 
   /*
@@ -661,10 +632,9 @@ export function createSharedUseStore(
     const toolkit = url ? appOfUrl(url) : null;
     let allIds = ids;
     if (toolkit) {
-      const schemeRows = await database
-        .select({ id: mcpServers.id, url: mcpServers.url })
-        .from(mcpServers)
-        .where(sql`${mcpServers.url} like ${`${scheme}%`}`);
+      const schemeRows = allServers().filter((row) =>
+        row.url.startsWith(scheme),
+      );
       const matching = schemeRows
         .filter((row) => row.url && appOfUrl(row.url) === toolkit)
         .map((row) => row.id);
@@ -761,15 +731,17 @@ export function createSharedUseStore(
   async function rows(
     where: ReturnType<typeof and> | ReturnType<typeof eq>,
   ): Promise<SharedUseRequestRow[]> {
-    const selected = await database
-      .select({
-        request: sharedUseRequests,
-        title: mcpServers.title,
-      })
-      .from(sharedUseRequests)
-      .innerJoin(mcpServers, eq(mcpServers.id, sharedUseRequests.serverId))
-      .where(where)
-      .orderBy(sql`${sharedUseRequests.createdAt} desc`);
+    // A request whose app is gone is left out, as the join to the app's row left it out.
+    const selected = (
+      await database
+        .select({ request: sharedUseRequests })
+        .from(sharedUseRequests)
+        .where(where)
+        .orderBy(sql`${sharedUseRequests.createdAt} desc`)
+    ).flatMap((row) => {
+      const app = peekServer(row.request.serverId);
+      return app ? [{ ...row, title: app.title }] : [];
+    });
     // A request whose Bot Intelligence no longer has is left out, as the join to `agents` left it out.
     const known = await bots().findMany(
       selected.map((row) => row.request.agentId),

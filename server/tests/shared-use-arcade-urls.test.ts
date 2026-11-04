@@ -8,9 +8,9 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { mcpServers, users } from "../src/db/schema";
+import { users } from "../src/db/schema";
 import type { BrokerProvider } from "../src/plugins/access";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import {
@@ -21,6 +21,7 @@ import {
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
+import { removeServers, seedServer, useTestVault } from "./support/vault";
 
 // Shared app approvals and approval rules are Intelligence's organization policy.
 beforeAll(async () => {
@@ -48,9 +49,7 @@ const spec: Record<BrokerProvider, { toolkit: string; scheme: string }> = {
 
 async function cleanup() {
   await removeBots([bot]);
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [lowId, highId]));
+  await removeServers([lowId, highId]);
   await database.delete(users).where(eq(users.id, owner));
 }
 
@@ -64,7 +63,7 @@ async function seed(provider: BrokerProvider) {
     groups: [],
   });
   for (const rowId of [lowId, highId])
-    await database.insert(mcpServers).values({
+    await seedServer({
       id: rowId,
       title: `Team ${rowId}`,
       vendor: provider,
@@ -90,6 +89,9 @@ async function seed(provider: BrokerProvider) {
   });
 }
 
+beforeAll(async () => {
+  await useTestVault();
+});
 beforeEach(cleanup);
 afterAll(cleanup);
 /* The pool this file opened, given back. `bun test` runs every file in one process and nothing

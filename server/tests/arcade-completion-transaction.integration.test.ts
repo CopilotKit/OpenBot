@@ -1,20 +1,22 @@
 // server/tests/arcade-completion-transaction.integration.test.ts
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  brokeredConnections,
-  mcpServers,
-  pendingAuthorizations,
-} from "../src/db/schema";
+import { auditEvents, pendingAuthorizations } from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import { createPluginStore } from "../src/plugins/store";
 import { testDatabaseUrl } from "./support/database";
 import { removePeople, seedPeople } from "./support/people";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedServer,
+  storedConnections,
+  useTestVault,
+} from "./support/vault";
 
 /*
  * FOUR CONNECTIONS RATHER THAN THE SHARED `TEST_POOL` OF TWO, because the race below drives two
@@ -154,16 +156,11 @@ const attemptWith = async (actorId: string, authId: string) => {
   return claimed.attempt;
 };
 
-const connectionsFor = (app: string) =>
-  database
-    .select()
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.provider, "arcade"),
-        eq(brokeredConnections.app, app),
-      ),
-    );
+/** The Arcade accounts Intelligence holds now for this app. */
+const connectionsFor = async (app: string) =>
+  (await storedConnections()).brokered.filter(
+    (row) => row.provider === "arcade" && row.app === app,
+  );
 
 const connectedEventsFor = (app: string) =>
   database
@@ -186,7 +183,8 @@ const attemptRow = async (actorId: string) => {
 };
 
 beforeAll(async () => {
-  await database.insert(mcpServers).values({
+  await useTestVault();
+  await seedServer({
     id: serverId,
     title: "Completion transaction",
     vendor: "Arcade",
@@ -195,12 +193,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Cascades to the attempts. The connections are keyed on the app, not the server, so they go
-  // separately; the audit rows cannot go at all, which is what `audit_events_append_only` is for.
-  await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
-  await database
-    .delete(brokeredConnections)
-    .where(like(brokeredConnections.app, `%-${suite}`));
+  // Takes the attempts with it (the app's local rows go when it does). The connections are keyed on
+  // the app, not the server, so they go separately; the audit rows cannot go at all, which is what
+  // `audit_events_append_only` is for.
+  await removeServers([serverId]);
+  await removeConnectionsWhere(
+    (row) => row.kind === "brokered" && row.app.endsWith(`-${suite}`),
+  );
   await removePeople(database, people);
   await database.$client.close();
 });
@@ -398,13 +397,19 @@ describe("completeAuthorizationAttempt", () => {
     expect(attempt.completedAt).not.toBeNull();
   });
 
-  test("a failure between the connection write and the audit write persists NEITHER", async () => {
+  /*
+   * THE ACCOUNT IS INTELLIGENCE'S AND THE ATTEMPT AND ITS TRAIL ARE OURS, so no transaction holds
+   * both. The account is written first and is idempotent (its id is its natural key); the attempt's
+   * settlement and the audit row are one transaction after it. A failure between them leaves the
+   * attempt OPEN and the trail silent, so the callback's retry completes it — and the retry finds
+   * the account already there and writes no second one.
+   */
+  test("a failure between the account write and the audit write settles nothing, and a retry completes it once", async () => {
     const a = await actor("rollback");
     const app = toolkit("rollback");
     await attemptWith(a, "ar_rollback");
-
-    await expect(
-      brokenAuditStore.completeAuthorizationAttempt({
+    const complete = (on: typeof store) =>
+      on.completeAuthorizationAttempt({
         actorId: a,
         authId: "ar_rollback",
         toolkit: app,
@@ -412,17 +417,23 @@ describe("completeAuthorizationAttempt", () => {
         action: "Google.SendEmail",
         scopes: ["gmail.send"],
         authProvider: "google",
-      }),
-    ).rejects.toThrow("injected audit failure");
+      });
 
-    // BOTH tables, because "it returned" is not evidence that nothing was written.
-    expect((await connectionsFor(app)).length).toBe(0);
+    await expect(complete(brokenAuditStore)).rejects.toThrow(
+      "injected audit failure",
+    );
+
+    // No audit row, because "it returned" is not evidence that nothing was written.
     expect((await connectedEventsFor(app)).length).toBe(0);
-
-    // And the attempt is still claimable, because its UPDATE was in the same transaction.
+    // And the attempt is still claimable, because its UPDATE was in the audit's transaction.
     const attempt = await attemptRow(a);
     expect(attempt.completedAt).toBeNull();
     expect(attempt.outcome).toBeNull();
+
+    expect(await complete(store)).toEqual({ claimed: true });
+    expect((await connectionsFor(app)).length).toBe(1);
+    expect((await connectedEventsFor(app)).length).toBe(1);
+    expect((await attemptRow(a)).outcome).toBe("completed");
   });
 
   test("an auth_id that does not match the row writes nothing and leaves the row UNCHANGED", async () => {

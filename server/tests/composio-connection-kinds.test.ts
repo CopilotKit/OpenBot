@@ -13,17 +13,9 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import type { ActionPolicy } from "../src/computer/policy";
-import type {
-  CredentialSecretReader,
-  CredentialStore,
-} from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  auditEvents,
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema";
+import { auditEvents, mcpTools } from "../src/db/schema";
 import {
   BrokerRefusalError,
   type ConnectedAppBroker,
@@ -43,6 +35,14 @@ import {
 } from "../src/plugins/store";
 import { removeBots, seedBot, useTestConfiguration } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedConnections,
+  useTestVault,
+} from "./support/vault";
 
 /**
  * Which flow an app gets, decided from what Composio's own catalogue publishes.
@@ -618,30 +618,11 @@ const PROBE_VERSION = "20260903_00";
 
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
-/** The vault, and every method loud: nothing on these paths reads a credential of ours. */
-const credentialsStub: CredentialSecretReader & CredentialStore = {
-  readSecret: async () => {
-    throw new Error("a brokered call reads no credential");
-  },
-  create: async () => {
-    throw new Error("this suite writes no credentials");
-  },
-  updateSecret: async () => {
-    throw new Error("this suite writes no credentials");
-  },
-  rotate: async () => {
-    throw new Error("this suite writes no credentials");
-  },
-  revoke: async () => {
-    throw new Error("this suite mints no credential to revoke");
-  },
-  isLive: async () => {
-    throw new Error("this suite holds no credential to ask about");
-  },
-  findLiveByKey: async () => {
-    throw new Error("this suite holds no credential to ask about");
-  },
-};
+/**
+ * The vault, the real one: nothing on these paths reads or writes a credential of ours, and a read
+ * of one this suite never stored would be refused by it rather than answered.
+ */
+const credentials = createCredentialStore(await useTestVault());
 
 /** What the broker was asked, so "the vendor was told" is an assertion and not a guess. */
 let brokerAsks: string[] = [];
@@ -712,7 +693,7 @@ const store = createPluginStore({
   database,
   auditStore: createAuditStore(database),
   broker,
-  credentials: credentialsStub,
+  credentials,
   encryptionKey: "x".repeat(44),
   policy: () => policy,
 });
@@ -773,27 +754,27 @@ async function connectPress(
   };
 }
 
-/** An app row as an enable leaves one, under whatever literal the caller is asking about. */
+/** An app as an enable leaves one, under whatever literal the caller is asking about. */
 async function seedApp(
   id: string,
   slug: string,
   recorded: string | null,
 ): Promise<void> {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id,
     title: `Kinds ${slug}`,
     vendor: "Composio",
     url: `composio://${slug}`,
     provenance: "composio",
-    ...(recorded === null ? {} : { authScheme: recorded }),
+    authScheme: recorded,
     /*
      * PERSONAL, EXCEPT FOR THE APP WITH NO ACCOUNT AT ALL. `accountFor` in `shared-accounts.ts`
-     * answers `none` for a `NO_AUTH` scheme before it ever reads this column, so the `none` member
+     * answers `none` for a `NO_AUTH` scheme before it ever reads this field, so the `none` member
      * needs no mode — every other member has an account, and an ambiguous mode would refuse the
      * per-person gate and the connect route with a sentence about a setting rather than the one
      * each cell is actually about.
      */
-    ...(recorded === "NO_AUTH" ? {} : { accountMode: "personal" as const }),
+    accountMode: recorded === "NO_AUTH" ? null : "personal",
   });
 }
 
@@ -809,45 +790,32 @@ async function publishProbe(serverId: string): Promise<void> {
   });
 }
 
+/** The person's brokered accounts on this run's apps, as Intelligence holds them now. */
+async function personRows() {
+  return (await storedConnections()).brokered.filter(
+    (row) =>
+      row.holder === "person" &&
+      row.userId === person &&
+      TOOLKITS.includes(row.app),
+  );
+}
+
 /**
- * The date one row claims it was last verified on, which is the fact a re-stamp destroys.
+ * The date one account claims it was last verified on, which is the fact a re-stamp destroys.
  *
- * READ AS THE COLUMN RATHER THAN THROUGH `brokeredConnectionsFor`, because what is at stake is the
- * stored value and not the sentence a screen draws from it: a confirm that re-dates the row to the
- * page load leaves every derived reading perfectly consistent with itself and wrong about the day.
+ * READ AS THE STORED FIELD RATHER THAN THROUGH `brokeredConnectionsFor`, because what is at stake
+ * is the stored value and not the sentence a screen draws from it: a confirm that re-dates the
+ * account to the page load leaves every derived reading perfectly consistent with itself and wrong
+ * about the day.
  */
 async function verifiedAtOf(toolkit: string): Promise<Date | null> {
-  const [row] = await database
-    .select({ verifiedAt: brokeredConnections.verifiedAt })
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.app, toolkit),
-        eq(brokeredConnections.holder, "person"),
-        eq(brokeredConnections.userId, person),
-      ),
-    )
-    .limit(1);
+  const row = (await personRows()).find((each) => each.app === toolkit);
   return row?.verifiedAt ?? null;
 }
 
 /** What this deployment believes the person holds, out of this run's apps only. */
 async function recordedHere(): Promise<string[]> {
-  const rows = await database
-    .select({
-      app: brokeredConnections.app,
-      verified: brokeredConnections.verified,
-      probeAction: brokeredConnections.probeAction,
-    })
-    .from(brokeredConnections)
-    .where(
-      and(
-        eq(brokeredConnections.holder, "person"),
-        eq(brokeredConnections.userId, person),
-        inArray(brokeredConnections.app, TOOLKITS),
-      ),
-    );
-  return rows.map(
+  return (await personRows()).map(
     (row) => `${row.app}:${row.verified}:${row.probeAction ?? "null"}`,
   );
 }
@@ -856,10 +824,10 @@ async function clean(): Promise<void> {
   // Purging the Bot removes its grants in Intelligence with it.
   await removeBots([botId]);
   await database.delete(mcpTools).where(inArray(mcpTools.serverId, APP_IDS));
-  await database.delete(mcpServers).where(inArray(mcpServers.id, APP_IDS));
-  await database
-    .delete(brokeredConnections)
-    .where(inArray(brokeredConnections.app, TOOLKITS));
+  await removeServers(APP_IDS);
+  await removeConnectionsWhere(
+    (row) => row.kind === "brokered" && TOOLKITS.includes(row.app),
+  );
 }
 
 beforeEach(async () => {
@@ -1120,16 +1088,14 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
            * apart, so the assertion cannot pass on a clock that did not tick.
            */
           const consentedOn = new Date("2026-09-01T10:00:00.000Z");
-          await database
-            .delete(brokeredConnections)
-            .where(
-              and(
-                eq(brokeredConnections.app, APP.consent.slug),
-                eq(brokeredConnections.holder, "person"),
-                eq(brokeredConnections.userId, person),
-              ),
-            );
-          await database.insert(brokeredConnections).values({
+          await removeConnectionsWhere(
+            (row) =>
+              row.kind === "brokered" &&
+              row.app === APP.consent.slug &&
+              row.holder === "person" &&
+              row.userId === person,
+          );
+          await seedBrokered({
             provider: "composio",
             app: APP.consent.slug,
             holder: "person",
@@ -1288,20 +1254,17 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         decides: "spends a call against the key this deployment already holds",
         assert: async () => {
           useAnsweringClient();
-          await database
-            .insert(brokeredConnections)
+          await seedBrokered({
+            provider: "composio",
 
-            .values({
-              provider: "composio",
+            app: APP.key.slug,
 
-              app: APP.key.slug,
+            holder: "person",
 
-              holder: "person",
+            userId: person,
 
-              userId: person,
-
-              vendorUserId: person,
-            });
+            vendorUserId: person,
+          });
           expect(
             await store.recheckBrokeredConnection({
               toolkit: APP.key.slug,
@@ -1316,20 +1279,17 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           "refuses — there is no key here to re-check — and spends nothing, which is what protects the date the consent earned",
         assert: async () => {
           useAnsweringClient();
-          await database
-            .insert(brokeredConnections)
+          await seedBrokered({
+            provider: "composio",
 
-            .values({
-              provider: "composio",
+            app: APP.consent.slug,
 
-              app: APP.consent.slug,
+            holder: "person",
 
-              holder: "person",
+            userId: person,
 
-              userId: person,
-
-              vendorUserId: person,
-            });
+            vendorUserId: person,
+          });
           expect(
             await refusalOf(
               store.recheckBrokeredConnection({
@@ -1347,20 +1307,17 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           "the same refusal — there is no account here, let alone a key, and nothing is spent",
         assert: async () => {
           useAnsweringClient();
-          await database
-            .insert(brokeredConnections)
+          await seedBrokered({
+            provider: "composio",
 
-            .values({
-              provider: "composio",
+            app: APP.none.slug,
 
-              app: APP.none.slug,
+            holder: "person",
 
-              holder: "person",
+            userId: person,
 
-              userId: person,
-
-              vendorUserId: person,
-            });
+            vendorUserId: person,
+          });
           expect(
             await refusalOf(
               store.recheckBrokeredConnection({
@@ -1378,20 +1335,17 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           "the same refusal, which is the closed direction: there is no key recorded to re-check",
         assert: async () => {
           useAnsweringClient();
-          await database
-            .insert(brokeredConnections)
+          await seedBrokered({
+            provider: "composio",
 
-            .values({
-              provider: "composio",
+            app: APP.unreadable.slug,
 
-              app: APP.unreadable.slug,
+            holder: "person",
 
-              holder: "person",
+            userId: person,
 
-              userId: person,
-
-              vendorUserId: person,
-            });
+            vendorUserId: person,
+          });
           expect(
             await refusalOf(
               store.recheckBrokeredConnection({
@@ -1413,20 +1367,17 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         decides:
           "claims NO vendor revocation: there is no grant behind an API key for anybody to withdraw",
         assert: async () => {
-          await database
-            .insert(brokeredConnections)
+          await seedBrokered({
+            provider: "composio",
 
-            .values({
-              provider: "composio",
+            app: APP.key.slug,
 
-              app: APP.key.slug,
+            holder: "person",
 
-              holder: "person",
+            userId: person,
 
-              userId: person,
-
-              vendorUserId: person,
-            });
+            vendorUserId: person,
+          });
           expect(
             await store.disconnectBrokered({
               toolkit: APP.key.slug,
@@ -1441,20 +1392,17 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         decides:
           "reports the vendor's own withdrawal as asked for, which is a real request for a consent account",
         assert: async () => {
-          await database
-            .insert(brokeredConnections)
+          await seedBrokered({
+            provider: "composio",
 
-            .values({
-              provider: "composio",
+            app: APP.consent.slug,
 
-              app: APP.consent.slug,
+            holder: "person",
 
-              holder: "person",
+            userId: person,
 
-              userId: person,
-
-              vendorUserId: person,
-            });
+            vendorUserId: person,
+          });
           expect(
             await store.disconnectBrokered({
               toolkit: APP.consent.slug,
@@ -1469,20 +1417,17 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         decides:
           "reports whatever the vendor says it ended, which is the same claim it makes for everything it cannot call a key app",
         assert: async () => {
-          await database
-            .insert(brokeredConnections)
+          await seedBrokered({
+            provider: "composio",
 
-            .values({
-              provider: "composio",
+            app: APP.none.slug,
 
-              app: APP.none.slug,
+            holder: "person",
 
-              holder: "person",
+            userId: person,
 
-              userId: person,
-
-              vendorUserId: person,
-            });
+            vendorUserId: person,
+          });
           expect(
             await store.disconnectBrokered({
               toolkit: APP.none.slug,
@@ -1504,20 +1449,17 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         decides:
           "reports it as asked for too — an app this deployment cannot say holds a key is one whose withdrawal it has to report as asked",
         assert: async () => {
-          await database
-            .insert(brokeredConnections)
+          await seedBrokered({
+            provider: "composio",
 
-            .values({
-              provider: "composio",
+            app: APP.unreadable.slug,
 
-              app: APP.unreadable.slug,
+            holder: "person",
 
-              holder: "person",
+            userId: person,
 
-              userId: person,
-
-              vendorUserId: person,
-            });
+            vendorUserId: person,
+          });
           expect(
             await store.disconnectBrokered({
               toolkit: APP.unreadable.slug,
@@ -1721,20 +1663,17 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
           "writes nothing and files nothing; answers the held row beside a null probe that says why the press could not improve on it",
         assert: async () => {
           useAnsweringClient();
-          await database
-            .insert(brokeredConnections)
+          await seedBrokered({
+            provider: "composio",
 
-            .values({
-              provider: "composio",
+            app: NO_PROBE_APP.slug,
 
-              app: NO_PROBE_APP.slug,
+            holder: "person",
 
-              holder: "person",
+            userId: person,
 
-              userId: person,
-
-              vendorUserId: person,
-            });
+            vendorUserId: person,
+          });
           expect(
             await store.recheckBrokeredConnection({
               toolkit: NO_PROBE_APP.slug,
@@ -1751,20 +1690,17 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
         decides: "records verified under the probe's name",
         assert: async () => {
           useAnsweringClient();
-          await database
-            .insert(brokeredConnections)
+          await seedBrokered({
+            provider: "composio",
 
-            .values({
-              provider: "composio",
+            app: APP.key.slug,
 
-              app: APP.key.slug,
+            holder: "person",
 
-              holder: "person",
+            userId: person,
 
-              userId: person,
-
-              vendorUserId: person,
-            });
+            vendorUserId: person,
+          });
           expect(
             await store.recheckBrokeredConnection({
               toolkit: APP.key.slug,
@@ -1791,7 +1727,7 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
               };
             },
           });
-          await database.insert(brokeredConnections).values({
+          await seedBrokered({
             provider: "composio",
             app: APP.key.slug,
             holder: "person",
@@ -1832,7 +1768,7 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
               throw new Error("Composio was not reachable");
             },
           });
-          await database.insert(brokeredConnections).values({
+          await seedBrokered({
             provider: "composio",
             app: APP.key.slug,
             holder: "person",

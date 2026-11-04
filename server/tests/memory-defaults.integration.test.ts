@@ -9,11 +9,7 @@ import {
 } from "../src/configuration/directory";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import {
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-} from "../src/db/schema/plugins";
+import { mcpTools } from "../src/db/schema/plugins";
 import { proactiveSettings } from "../src/db/schema/proactive";
 import {
   createMemoryDefaults,
@@ -32,6 +28,13 @@ import {
   useTestConfiguration,
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
@@ -41,10 +44,12 @@ const bot = `defaults-bot-${suite}`;
 const secondBot = `defaults-second-${suite}`;
 const app = `linear-${suite}`;
 const unconnected = `notes-${suite}`;
+// Apps, connections and credentials live in Intelligence: the process's vault directory, before the store.
+const directory = await useTestVault();
 const plugins = createPluginStore({
   database,
   auditStore: createAuditStore(database),
-  credentials: createCredentialStore(database),
+  credentials: createCredentialStore(directory),
   encryptionKey: Buffer.alloc(32, 7).toString("base64"),
   // This suite's apps are `composio://` rows with `provenance: "composio"`, and the store has no
   // default for this: it dispatches the toolkit read on it, so the fixtures name their own broker.
@@ -120,26 +125,24 @@ beforeAll(async () => {
       title: id,
       roleDescription: "Assist",
     });
-  await database.insert(mcpServers).values([
-    {
-      id: app,
-      title: "Linear",
-      vendor: "Composio",
-      url: `composio://${app}`,
-      provenance: "composio",
-      authScheme: "OAUTH2",
-      accountMode: "personal",
-    },
-    {
-      id: unconnected,
-      title: "Notes",
-      vendor: "Composio",
-      url: `composio://${unconnected}`,
-      provenance: "composio",
-      authScheme: "OAUTH2",
-      accountMode: "personal",
-    },
-  ]);
+  await seedServer({
+    id: app,
+    title: "Linear",
+    vendor: "Composio",
+    url: `composio://${app}`,
+    provenance: "composio",
+    authScheme: "OAUTH2",
+    accountMode: "personal",
+  });
+  await seedServer({
+    id: unconnected,
+    title: "Notes",
+    vendor: "Composio",
+    url: `composio://${unconnected}`,
+    provenance: "composio",
+    authScheme: "OAUTH2",
+    accountMode: "personal",
+  });
   await database.insert(mcpTools).values([
     // A lookup that needs an argument, the app's own bookkeeping, a write, and the person's records.
     {
@@ -188,7 +191,7 @@ beforeAll(async () => {
     ])
       await plugins.grant("mcp", ref, agentId, owner);
   // The owner connected Linear in their own account; nobody connected Notes.
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider: "composio",
     app,
     holder: "person",
@@ -200,9 +203,10 @@ afterAll(async () => {
   await removeTestMemory([owner, other]);
   await database.delete(users).where(inArray(users.id, [owner, other]));
   await removeBots([bot, secondBot]);
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, [app, unconnected]));
+  await removeServers([app, unconnected]);
+  await removeConnectionsWhere(
+    (connection) => connection.userId === owner || connection.userId === other,
+  );
   await database.$client.close();
 });
 

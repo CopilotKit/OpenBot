@@ -3,10 +3,11 @@ import { randomUUID } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema";
 import { createPluginRoutes } from "../src/plugins/routes";
-import { createPluginStore } from "../src/plugins/store";
+import { createPluginStore, type PluginStore } from "../src/plugins/store";
 import {
   removeBots,
   seedBot,
@@ -14,19 +15,13 @@ import {
   useTestConfiguration,
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestVault } from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
-const store = createPluginStore({
-  brokerProvider: "composio",
-  database,
-  auditStore: createAuditStore(database),
-  credentials: { readSecret: async () => null },
-  encryptionKey: "x".repeat(44),
-  policy: () => policy,
-});
+let store: PluginStore;
 
 const suite = randomUUID().slice(0, 8);
 const alice = `user_alice_${suite}`;
@@ -41,6 +36,14 @@ const botlessSlug = `botless-${suite}`;
 const missingBot = `agent_missing_${suite}`;
 
 beforeAll(async () => {
+  store = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(await useTestVault()),
+    encryptionKey: "x".repeat(44),
+    policy: () => policy,
+  });
   for (const id of [alice, bob]) {
     await database
       .insert(users)

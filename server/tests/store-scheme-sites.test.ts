@@ -2,17 +2,16 @@
  * Broker-specific store behavior: connection listings, probes and reserved screen names
  * use the configured provider, and adding an app preserves its scheme.
  */
-import { afterAll, afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { inArray, like } from "drizzle-orm";
+import { like } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
+import type {
+  CredentialSecretReader,
+  CredentialStore,
+} from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import {
-  brokeredConnections,
-  mcpServers,
-  mcpTools,
-  users,
-} from "../src/db/schema";
+import { mcpTools, users } from "../src/db/schema";
 import { BROKERED_PROFILE, type BrokerProvider } from "../src/plugins/access";
 import type { BrokerConnection } from "../src/plugins/broker";
 import {
@@ -21,27 +20,57 @@ import {
 } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { stubBroker } from "./support/stub-broker";
+import {
+  recordingCredentialStore,
+  removeConnectionsWhere,
+  removeServers,
+  seedBrokered,
+  seedServer,
+  storedServer,
+  useTestVault,
+} from "./support/vault";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
 
 /** Every row this file writes is named `sss…`, so the cleanup can take the whole family. */
 const tag = (name: string) => `sss${name}${suite}`;
+const family = /(^|-)sss/;
+
+/**
+ * The vault, real, recording every write a path makes: nothing here may store, rotate or revoke a
+ * credential, and `afterEach` says so whether or not production let a throw out.
+ */
+const vaultWrites: string[] = [];
+let credentials: CredentialSecretReader & CredentialStore;
+
+beforeAll(async () => {
+  await useTestVault();
+  credentials = await recordingCredentialStore({
+    calls: vaultWrites,
+    created: [],
+  });
+});
 
 async function clean() {
   await database.delete(mcpTools).where(like(mcpTools.serverId, "%sss%"));
-  await database
-    .delete(brokeredConnections)
-    .where(like(brokeredConnections.app, "%sss%"));
-  await database.delete(mcpServers).where(like(mcpServers.id, "%sss%"));
-  // The screen names themselves: a refusal that regressed would leave a row behind, and the row
+  await removeConnectionsWhere(
+    (connection) =>
+      connection.kind === "brokered" && family.test(connection.app),
+  );
+  const { servers } = await (await useTestVault()).client.toolServers.all();
+  await removeServers(
+    servers.map((server) => server.id).filter((id) => family.test(id)),
+  );
+  // The screen names themselves: a refusal that regressed would leave an app behind, and the app
   // would then make every later run of those tests fail for the wrong reason.
-  await database
-    .delete(mcpServers)
-    .where(inArray(mcpServers.id, ["composio", "arcade"]));
+  await removeServers(["composio", "arcade"]);
   await database.delete(users).where(like(users.id, "%sss%"));
 }
 afterEach(clean);
+afterEach(() => {
+  expect(vaultWrites.splice(0)).toEqual([]);
+});
 afterAll(async () => {
   await clean();
   await database.$client.close();
@@ -78,27 +107,7 @@ function storeFor(provider: BrokerProvider) {
     brokerProvider: provider,
     database,
     auditStore: createAuditStore(database),
-    credentials: {
-      readSecret: async () => null,
-      create: async () => {
-        throw new Error("vault");
-      },
-      updateSecret: async () => {
-        throw new Error("vault");
-      },
-      rotate: async () => {
-        throw new Error("vault");
-      },
-      isLive: async () => {
-        throw new Error("vault");
-      },
-      findLiveByKey: async () => {
-        throw new Error("vault");
-      },
-      revoke: async () => {
-        throw new Error("vault");
-      },
-    },
+    credentials,
     encryptionKey: "x".repeat(44),
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     broker,
@@ -114,7 +123,7 @@ const APP: Record<BrokerProvider, string> = {
 };
 
 async function seedApp(provider: BrokerProvider, serverId: string) {
-  await database.insert(mcpServers).values({
+  await seedServer({
     id: serverId,
     title: "Gmail",
     vendor: BROKERED_PROFILE[provider].vendor,
@@ -132,7 +141,7 @@ async function seedPersonConnection(provider: BrokerProvider, userId: string) {
     emailVerified: true,
     groups: [],
   });
-  await database.insert(brokeredConnections).values({
+  await seedBrokered({
     provider,
     app: APP[provider],
     holder: "person",
@@ -240,11 +249,8 @@ for (const [id, vendor] of [
           `${id} is the name of this deployment's own ${vendor} screen, so a server added there could never be opened. Choose another.`,
         ).message,
       );
-      const [found] = await database
-        .select({ id: mcpServers.id })
-        .from(mcpServers)
-        .where(inArray(mcpServers.id, ["composio", "arcade"]));
-      expect(found).toBeUndefined();
+      expect(await storedServer("composio")).toBeNull();
+      expect(await storedServer("arcade")).toBeNull();
     });
   }
 }

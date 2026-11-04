@@ -1,12 +1,21 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { Hono } from "hono";
 import type { AuditEventInput } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { seal } from "../src/auth/signed-value";
-import { decryptSecret } from "../src/credentials";
+import { createCredentialStore } from "../src/credentials";
 import { githubCallbackRoutes } from "../src/identity/github-callback";
 import { sealGithubState } from "../src/identity/github-oauth";
 import { IdentityConflictError } from "../src/identity/types";
+import { purgeSecrets, secretValue, useTestVault } from "./support/vault";
 
 const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const now = new Date("2026-01-01T00:00:00.000Z");
@@ -16,6 +25,15 @@ const FAILED = "https://app.test/connections/github?linked=failed";
 const TAKEN = "https://app.test/connections/github?linked=github-taken";
 
 type Harness = ReturnType<typeof build>;
+
+/** Every token a harness stored in the test vault, purged when the file is done. */
+const storedTokens: string[] = [];
+afterAll(async () => {
+  await purgeSecrets(storedTokens.splice(0));
+});
+
+/** The real credential store over the test vault. */
+const vaultStore = async () => createCredentialStore(await useTestVault());
 
 function build(
   options: {
@@ -33,6 +51,8 @@ function build(
 ) {
   const fetchCalls: string[] = [];
   const created: unknown[] = [];
+  /** The ids the vault gave what this harness stored, in order. */
+  const createdIds: string[] = [];
   const revoked: string[] = [];
   const linked: unknown[][] = [];
   const audits: AuditEventInput[] = [];
@@ -64,16 +84,21 @@ function build(
       if (options.activeError) throw options.activeError;
       return options.active ?? true;
     },
+    // The real store, recording what the callback asked of it; a fault is injected only where a
+    // test names one, in place of the vault's own answer.
     credentials: {
       create: async (value) => {
         if (options.createError) throw options.createError;
         created.push(value);
-        return { id: "cred-new", revokedAt: null };
+        const stored = await (await vaultStore()).create(value);
+        createdIds.push(stored.id);
+        storedTokens.push(stored.id);
+        return stored;
       },
       revoke: async (id) => {
         revoked.push(id);
         if (options.revokeError) throw options.revokeError;
-        return new Date();
+        return (await vaultStore()).revoke(id);
       },
     },
     identity: {
@@ -107,6 +132,7 @@ function build(
     app,
     fetchCalls,
     created,
+    createdIds,
     revoked,
     linked,
     audits,
@@ -159,7 +185,6 @@ describe("GitHub sign-in callback", () => {
       provider: string;
       keyId: string;
       metadata: unknown;
-      encryptedValue: string;
     };
     expect(stored).toMatchObject({
       kind: "connector",
@@ -167,22 +192,24 @@ describe("GitHub sign-in callback", () => {
       metadata: { login: "dana" },
     });
     expect(stored.keyId).toMatch(/^person:42:[0-9a-f-]{36}$/);
-    expect(JSON.parse(await decryptSecret(key, stored.encryptedValue))).toEqual(
-      {
-        accessToken: "gho_secret",
-        refreshToken: "ghr_secret",
-        expiresAt: "2026-01-01T08:00:00.000Z",
-        refreshTokenExpiresAt: new Date(
-          now.getTime() + 15897600 * 1000,
-        ).toISOString(),
-      },
-    );
+    expect(JSON.parse(await secretValue(harness.createdIds[0] ?? ""))).toEqual({
+      accessToken: "gho_secret",
+      refreshToken: "ghr_secret",
+      expiresAt: "2026-01-01T08:00:00.000Z",
+      refreshTokenExpiresAt: new Date(
+        now.getTime() + 15897600 * 1000,
+      ).toISOString(),
+    });
 
     expect(harness.linked).toEqual([
       [
         { provider: "github", realm: "github.com", subject: "42" },
         "person",
-        { method: "oauth", handle: "dana", credentialId: "cred-new" },
+        {
+          method: "oauth",
+          handle: "dana",
+          credentialId: harness.createdIds[0],
+        },
       ],
     ]);
     expect(harness.audits).toEqual([
@@ -223,7 +250,7 @@ describe("GitHub sign-in callback", () => {
     ).toBe(FAILED);
     // The callback holds no handle on the old credential at all (no rotate, no lookup by key):
     // the only revoke it issues is for the token this attempt stored.
-    expect(harness.revoked).toEqual(["cred-new"]);
+    expect(harness.revoked).toEqual(harness.createdIds);
     expect(harness.audits).toHaveLength(0);
   });
 
@@ -345,7 +372,7 @@ describe("GitHub sign-in callback", () => {
     expect(
       await call(harness, `code=the-code&state=${await validState()}`),
     ).toBe(TAKEN);
-    expect(harness.revoked).toEqual(["cred-new"]);
+    expect(harness.revoked).toEqual(harness.createdIds);
     expect(harness.audits).toHaveLength(0);
   });
 
@@ -354,7 +381,7 @@ describe("GitHub sign-in callback", () => {
     expect(
       await call(harness, `code=the-code&state=${await validState()}`),
     ).toBe(FAILED);
-    expect(harness.revoked).toEqual(["cred-new"]);
+    expect(harness.revoked).toEqual(harness.createdIds);
   });
 
   test("a revoke that throws still redirects github-taken", async () => {
@@ -366,7 +393,7 @@ describe("GitHub sign-in callback", () => {
       await call(harness, `code=the-code&state=${await validState()}`),
     ).toBe(TAKEN);
     expect(harness.audits).toHaveLength(0);
-    expect(harness.revoked).toEqual(["cred-new"]);
+    expect(harness.revoked).toEqual(harness.createdIds);
   });
 
   test("nothing secret is ever logged", async () => {
