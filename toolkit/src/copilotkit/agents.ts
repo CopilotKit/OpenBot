@@ -178,6 +178,33 @@ export class CloningRemoteAgent extends AbstractAgent {
 }
 
 /**
+ * The first line of the prompt the CopilotKit runtime sends when it names a new thread
+ * (`handlers/intelligence/thread-names` in @copilotkit/runtime). It names the thread by running the SAME
+ * Bot again with that prompt, no tools and a throwaway thread, and retries up to three times when the
+ * answer is not a title.
+ */
+const RUNTIME_THREAD_TITLE_PROMPT =
+  "You generate short, specific conversation titles.";
+
+/**
+ * Whether this run is the runtime naming a thread rather than a turn of the conversation.
+ *
+ * Such a run must reach the model with no tools and execute nothing. Handed the Bot's tools, the model
+ * called them on the naming run too: one "please remember" wrote the memory up to four times (the turn,
+ * plus each naming attempt), and one routine request raised two approval cards.
+ */
+export function isThreadTitleRun(
+  input: Pick<RunAgentInput, "messages">,
+): boolean {
+  const first = input.messages?.[0];
+  return (
+    first?.role === "system" &&
+    typeof first.content === "string" &&
+    first.content.startsWith(RUNTIME_THREAD_TITLE_PROMPT)
+  );
+}
+
+/**
  * A built-in Bot that will not hand the model provider a conversation it is going to refuse.
  *
  * FOUND LIVE, ON CHAT. One person's next three messages each failed with
@@ -227,6 +254,12 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
+    // The runtime naming the thread: the Bot's model, and none of its tools, so the naming run does nothing.
+    if (isThreadTitleRun(input) && !("factory" in this.configuration))
+      return new BuiltInAgent({ ...this.configuration, tools: [] }).run({
+        ...input,
+        tools: [],
+      });
     /*
      * FIRST, before the history is touched or an attachment is stamped as sent. A run refused here
      * never started, and nothing downstream should record it as though it had.

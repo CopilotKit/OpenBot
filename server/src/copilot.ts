@@ -26,6 +26,7 @@ import {
   BuiltInAgentWithSaneHistory,
   CloningRemoteAgent,
   IntelligenceKnowingANewThread,
+  isThreadTitleRun,
   RUNTIME_STATE_TOOLS,
   RunBuiltAgent,
   UnavailableAgent,
@@ -73,8 +74,6 @@ import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
-import type { ProductTelemetry } from "./telemetry/product";
-import { productRuntimeHook } from "./telemetry/product-boundaries";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { RemoteLearnedSkillsMiddleware } from "./learning/remote";
 import {
@@ -98,6 +97,8 @@ import {
 } from "./plugins/selection";
 import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
+import type { ProductTelemetry } from "./telemetry/product";
+import { productRuntimeHook } from "./telemetry/product-boundaries";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
 /**
@@ -1726,6 +1727,8 @@ function remoteAgentWithStandingRole(
    */
   return new CloningRemoteAgent(remote, (target) => {
     target.use((input, next) => {
+      // The runtime naming the thread runs this Bot too. It is offered none of the Bot's tools and runs none.
+      if (isThreadTitleRun(input)) return next.run({ ...input, tools: [] });
       const stream = defer(() =>
         from(
           Promise.all([
