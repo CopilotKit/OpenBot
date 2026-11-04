@@ -39,7 +39,7 @@ set -euo pipefail
 # CAPABILITIES below. This is a release-validation build of CopilotKit/Intelligence#2210, not a
 # release: repin it to the Intelligence release that contains #2210 before CopilotKit/OpenBot#987
 # merges.
-DEFAULT_IMAGE="ghcr.io/copilotkit/intelligence/composite:0.15.2-validation.c2e70fa5fda4@sha256:3659cf2c3a5c481e571484931203c390f5e8115ea07879a14eb4c98c8c69a098"
+DEFAULT_IMAGE="ghcr.io/copilotkit/intelligence/composite:0.15.2-validation.475e19312b53@sha256:bfc9b1533c15fa32cff54d845dd82afa380c00ff8e3541c6966c468c64438666"
 INTELLIGENCE_IMAGE="${INTELLIGENCE_IMAGE:-$DEFAULT_IMAGE}"
 NAME="${TEST_INTELLIGENCE_NAME:-openbot-test-intelligence}"
 PORT="${TEST_INTELLIGENCE_PORT:-7860}"
