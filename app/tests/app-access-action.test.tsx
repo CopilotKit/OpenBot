@@ -56,7 +56,12 @@ type Sent = { method: string; url: string; body: unknown };
 function mounted(
   access: AppAccess,
   answer?: { status: number; body: unknown },
-  options: { admin?: boolean; personal?: boolean } = {},
+  options: {
+    admin?: boolean;
+    personal?: boolean;
+    /** Holds the connect route's answer until it settles, so a test can refetch first. */
+    connectGate?: Promise<void>;
+  } = {},
 ) {
   const sent: Sent[] = [];
   const opened: string[] = [];
@@ -88,8 +93,10 @@ function mounted(
       return Response.json({ agent: { id: "expenses", name: "Expenses" } });
     if (answer && method !== "GET")
       return Response.json(answer.body, { status: answer.status });
-    if (url.endsWith("/connect?returnTo=settings"))
+    if (url.endsWith("/connect?returnTo=settings")) {
+      await options.connectGate;
       return Response.json({ authorizationUrl: "https://gmail.test/consent" });
+    }
     return Response.json({ request: { id: "req_1" }, created: true });
   }) as unknown as typeof fetch;
 
@@ -526,6 +533,32 @@ test.each(["disabled", "not_granted"] as const)(
     ]);
   },
 );
+
+test("in the personal edition, Connect still opens the sign-in when turning the app on swaps the button", async () => {
+  let release: () => void = () => {};
+  const connectGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { view, sent, opened, swap } = mounted(
+    appAccess({ state: "disabled", unavailable: "absent" }),
+    undefined,
+    { admin: true, personal: true, connectGate },
+  );
+  fireEvent.click(await view.findByRole("button", { name: "Connect Gmail" }));
+  await waitFor(() =>
+    expect(
+      sent.some((call) => call.url.endsWith("/connect?returnTo=settings")),
+    ).toBe(true),
+  );
+  // The refetch after turning it on: the app is on now, and only this person's sign-in is missing.
+  swap(appAccess({ state: "not_connected" }));
+  release();
+  await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+  expect(
+    (await view.findByRole("button", { name: "Waiting for Gmail…" }))
+      .textContent,
+  ).toBe("Waiting for Gmail…");
+});
 
 test("in the personal edition, the card says what is missing rather than who to ask", () => {
   for (const state of ["disabled", "not_granted"] as const) {

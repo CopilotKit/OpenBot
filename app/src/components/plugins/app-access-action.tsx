@@ -1,7 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
+import {
+  type ConnectInNewTab,
+  useConnectInNewTab,
+} from "@/components/plugins/connect-in-new-tab";
 import { Button } from "@/components/ui/button";
 import { agentQueryOptions } from "@/lib/agents/queries";
 import {
@@ -139,6 +142,13 @@ export function AppAccessAction({
   const me = useQuery(currentUserQueryOptions()).data;
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  /*
+   * ONE TAB FOR EVERY BUTTON BELOW. The personal edition's Connect turns the app on and then asks
+   * for the sign-in; turning it on refetches this app, which swaps `PersonalConnectAction` for
+   * `ConnectAction` while the sign-in is still being asked for. Held here, the tab survives the
+   * swap: it is navigated, and the button that replaced the first one goes on waiting for it.
+   */
+  const tab = useConnectInNewTab();
   if (access.state === "ready" || access.state === "shared_not_approved")
     return null;
   if (
@@ -147,14 +157,16 @@ export function AppAccessAction({
       (access.state === "disabled" &&
         (access.unavailable === null || access.unavailable === "absent")))
   )
-    return <PersonalConnectAction access={access} agentId={agentId} />;
+    return (
+      <PersonalConnectAction access={access} agentId={agentId} tab={tab} />
+    );
   if (access.state === "reconnect" && access.accountHolder === "owner")
     return null;
   if (access.state === "not_connected" || access.state === "reconnect")
-    return <ConnectAction access={access} />;
+    return <ConnectAction access={access} tab={tab} />;
   // Theirs to give, admin or not: an owner's grant keeps every call on the asker's own account.
   if (access.state === "owner_grantable")
-    return <OwnerGiveAction access={access} agentId={agentId} />;
+    return <OwnerGiveAction access={access} agentId={agentId} tab={tab} />;
   if (me?.role === "admin")
     return <AdminAction agentId={agentId} access={access} />;
   return <RequestAction agentId={agentId} access={access} />;
@@ -269,13 +281,14 @@ function AdminAction({
 function OwnerGiveAction({
   agentId,
   access,
+  tab,
 }: {
   agentId: string;
   access: AppAccess;
+  tab: ConnectInNewTab;
 }) {
   const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
   const give = useMutation(giveBotAppMutationOptions(queryClient));
-  const tab = useConnectInNewTab();
   const { waiting, stopWaiting } = tab;
   const name = access.displayName;
   /** Pressed while the account still had to be connected: give it as soon as it is. */
@@ -385,12 +398,13 @@ function OwnerGiveAction({
 function PersonalConnectAction({
   agentId,
   access,
+  tab,
 }: {
   agentId: string;
   access: AppAccess;
+  tab: ConnectInNewTab;
 }) {
   const approve = useMutation(approveBotAppMutationOptions(queryClient));
-  const tab = useConnectInNewTab();
   const { waiting } = tab;
   const name = access.displayName;
   const signsIn = access.connect === "oauth" || access.connect === "consent";
@@ -475,9 +489,14 @@ function PersonalConnectAction({
 }
 
 /** The person's own account: connect it, or reconnect it. */
-function ConnectAction({ access }: { access: AppAccess }) {
+function ConnectAction({
+  access,
+  tab,
+}: {
+  access: AppAccess;
+  tab: ConnectInNewTab;
+}) {
   const label = access.state === "reconnect" ? "Reconnect" : "Connect";
-  const tab = useConnectInNewTab();
   const { waiting, stopWaiting } = tab;
 
   /*
