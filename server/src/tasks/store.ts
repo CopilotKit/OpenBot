@@ -4,7 +4,7 @@ import { conversations } from "../conversations/directory";
 import { writeKey } from "../conversations/http";
 import type { AgentTask, ConversationDraft } from "../conversations/types";
 import type { Database } from "../db/client";
-import { workItems } from "../db/schema";
+import { proactiveSuggestions, workItems } from "../db/schema";
 import type { BotTaskOrigin } from "../db/schema/tasks";
 import type { BotTaskCounts, TaskPayload } from "../proactive/contracts";
 import {
@@ -55,6 +55,54 @@ export type NewTask = {
 };
 
 /** A task as Intelligence holds it, under the names `bot_tasks` used. */
+/**
+ * Unlink every task whose check-in item is gone, as the old foreign key did (`on delete set null`).
+ *
+ * The items stay in this deployment's database and the tasks are in Intelligence, so no constraint
+ * joins them any more. Whatever removed an item (a person removing a Bot's research, a reset, a
+ * cascade), the next read of its task finds no item under its reference, unlinks it in Intelligence,
+ * and answers with it unlinked. A failed unlink is said and retried on the next read; the answer
+ * is unlinked either way.
+ */
+async function withLiveItems(
+  database: Database,
+  rows: TaskRow[],
+): Promise<TaskRow[]> {
+  const refs = [
+    ...new Set(
+      rows.flatMap((row) => (row.suggestionId ? [row.suggestionId] : [])),
+    ),
+  ];
+  if (refs.length === 0) return rows;
+  const live = new Set(
+    (
+      await database
+        .select({ id: proactiveSuggestions.id })
+        .from(proactiveSuggestions)
+        .where(inArray(proactiveSuggestions.id, refs))
+    ).map((row) => row.id),
+  );
+  const client = conversations().client;
+  return Promise.all(
+    rows.map(async (row) => {
+      if (!row.suggestionId || live.has(row.suggestionId)) return row;
+      await client.tasks
+        .unlinkOrigin(row.id, writeKey("task.unlink"))
+        .catch((error: unknown) =>
+          console.warn(
+            JSON.stringify({
+              type: "task-unlink-failed",
+              taskId: row.id,
+              note: "Its check-in item is gone; the next read of the task tries again.",
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          ),
+        );
+      return { ...row, suggestionId: null };
+    }),
+  );
+}
+
 export function taskRowOf(task: AgentTask): TaskRow {
   return {
     id: task.id,
@@ -161,7 +209,7 @@ export async function listedTasks(
       listed.push(...done.filter((task) => again.has(task.id)));
     }
   }
-  return listed
+  return (await withLiveItems(database, listed))
     .sort(
       (left, right) =>
         right.createdAt.getTime() - left.createdAt.getTime() ||
@@ -218,7 +266,9 @@ export function createTaskStore(
   /** The owner's task, or null: another person's task is the same as no task. */
   async function owned(owner: string, id: string): Promise<TaskRow | null> {
     const task = await client().tasks.get(id);
-    return task && task.userId === owner ? taskRowOf(task) : null;
+    if (!task || task.userId !== owner) return null;
+    const [row] = await withLiveItems(database, [taskRowOf(task)]);
+    return row ?? null;
   }
 
   async function oneWithState(owner: string, id: string) {
@@ -305,7 +355,12 @@ export function createTaskStore(
         1,
       );
       const task = tasks[0];
-      return task ? { id: task.id, channelId: task.conversationId } : null;
+      if (!task) return null;
+      // An item that is gone opened no task any more: its task is unlinked.
+      const [row] = await withLiveItems(database, [taskRowOf(task)]);
+      return row?.suggestionId === itemId
+        ? { id: task.id, channelId: task.conversationId }
+        : null;
     },
     list,
     get: one,

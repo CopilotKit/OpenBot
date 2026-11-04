@@ -280,14 +280,16 @@ test("starting an item opens one task, in a conversation of its own", async () =
     );
     expect(await maybeConversation(second)).toBeNull();
     expect((await storedTask(opened.id))?.origin).toBe("check_in");
-    // The item going away leaves its task, and its conversation, where they were.
+    // The item going away leaves its task, unlinked, and its conversation where it was.
     await database
       .delete(proactiveSuggestions)
       .where(eq(proactiveSuggestions.id, started.id));
+    expect((await store.get(owner, opened.id)).suggestionId).toBeNull();
+    expect(await store.byItem(owner, started.id)).toBeNull();
     expect(await storedTask(opened.id)).toMatchObject({
       id: opened.id,
       conversationId: first,
-      originRef: started.id,
+      originRef: null,
     });
     expect((await maybeConversation(first))?.taskId).toBe(opened.id);
   } finally {

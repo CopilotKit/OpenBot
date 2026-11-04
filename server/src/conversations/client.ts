@@ -1013,6 +1013,19 @@ export function createConversationClient(settings: IntelligenceApiSettings) {
         return taskFromWire((await response.json()) as WireTask);
       },
 
+      /** Unlink a task from what it was started from: the item is gone. */
+      async unlinkOrigin(id: string, key: string): Promise<AgentTask | null> {
+        const response = await request(
+          "PATCH",
+          `/api/agent-tasks/${encode(id)}`,
+          { body: { originRef: null }, idempotencyKey: key },
+        );
+        if (response.status === 404) return null;
+        if (response.status !== 200)
+          return refused(response, `unlink task ${id}`);
+        return taskFromWire((await response.json()) as WireTask);
+      },
+
       async resolve(
         id: string,
         resolvedAt: string | null,
