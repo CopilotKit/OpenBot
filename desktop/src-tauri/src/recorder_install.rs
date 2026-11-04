@@ -1015,6 +1015,33 @@ mod tests {
             .all(|c| c[7] == manifest.to_string_lossy().as_ref()));
     }
 
+    // The CLI's detached sign-in service runs the bundled node.exe after the app quits; an install
+    // or uninstall that does not stop it first cannot replace or delete that file.
+    #[test]
+    fn installing_and_uninstalling_on_windows_first_stop_only_this_installations_bundled_cli() {
+        let hooks = include_str!("../windows/hooks.nsh");
+        let body = |hook: &str| {
+            hooks
+                .split(&format!("!macro {hook}\n"))
+                .nth(1)
+                .and_then(|rest| rest.split("!macroend").next())
+                .unwrap_or_else(|| panic!("hooks.nsh has no {hook}"))
+                .to_string()
+        };
+        for hook in ["NSIS_HOOK_PREINSTALL", "NSIS_HOOK_PREUNINSTALL"] {
+            assert!(
+                body(hook).contains("!insertmacro OPENBOT_STOP_BUNDLED_CLI"),
+                "{hook}"
+            );
+        }
+        let stop = body("OPENBOT_STOP_BUNDLED_CLI");
+        assert!(
+            stop.contains("$$_.Path -like '$INSTDIR\\cli-bundle\\*'"),
+            "{stop}"
+        );
+        assert!(stop.contains("Stop-Process -Force"));
+    }
+
     #[test]
     fn uninstalling_on_windows_removes_every_key_and_the_manifest_the_install_writes() {
         let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
