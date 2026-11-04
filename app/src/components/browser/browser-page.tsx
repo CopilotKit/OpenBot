@@ -1,50 +1,22 @@
 import type {
   BrowserApiState,
   BrowserOpenResponse,
-  BrowserProduct,
   RealBrowserOpenResponse,
 } from "@openbot/shared/openbot-browser";
-import { IconBrowser } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import {
-  PageEmpty,
-  PageRows,
-  PageSection,
-  PageShell,
-} from "@/components/layout/page-shell";
+import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
-import { Separator } from "@/components/ui/separator";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { queryClient } from "@/query-client";
+import { TEACH_A_BOT } from "./browser-nav-item";
 import { ScreenBrowser } from "./browser-screen";
-import { NativeNarrationRow } from "./narration";
-import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
-import {
-  RECORDING_DESCRIPTION,
-  RecordingRow,
-  StoppedRow,
-  useRecording,
-} from "./recording";
+import { TeachSteps } from "./teach-steps";
 
-const TITLE = "Browser";
+const TITLE = TEACH_A_BOT;
 const DESCRIPTION =
-  "Your own browser, with the OpenBot Recorder already in it. Record a task and what you do goes into your own Learning space.";
-
-const PRODUCT_NAMES: Record<BrowserProduct, string> = {
-  chrome: "Google Chrome",
-  msedge: "Microsoft Edge",
-  chromium: "Chromium",
-};
+  "Show your Bots how to do a task. Name it, press Start recording, and do it in the browser that opens.";
 
 /**
  * The Browser page: the signed-in person's own browser, opened when they arrive, and Record and Stop for it.
@@ -80,8 +52,12 @@ export function BrowserPage() {
   return <OpenedBrowser state={state.data} />;
 }
 
-/** Opens the browser once on arrival, then shows it the way the answer says it shows: a window, or the page. */
+/**
+ * Shows the browser the way the server says it shows. A window on the person's desktop (`native`) opens when they press
+ * Open, so arriving here opens nothing. A browser in the page is the page itself, so it opens once on arrival.
+ */
 function OpenedBrowser({ state }: { state: BrowserApiState }) {
+  const native = state.shows === "native";
   const open = useMutation(openBrowserMutationOptions(queryClient));
   // Its own mutation, so bringing the browser forward never blanks the page while it is asked.
   const reopen = useMutation(openBrowserMutationOptions(queryClient));
@@ -89,11 +65,13 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
   const asked = useRef(false);
   const { mutate } = open;
   useEffect(() => {
-    if (asked.current) return;
+    if (native || asked.current) return;
     asked.current = true;
     mutate();
-  }, [mutate]);
+  }, [mutate, native]);
 
+  // A window on the person's desktop opens with Start recording, from the page itself.
+  if (native) return <NativeBrowser state={state} />;
   const opened: BrowserOpenResponse | RealBrowserOpenResponse | undefined =
     reopen.data ?? open.data;
   if (!opened) {
@@ -129,95 +107,20 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
       />
     );
   }
-  return (
-    <NativeBrowser
-      product={state.browser ?? opened.browser}
-      state={state}
-      reopen={() => reopen.mutate()}
-      reopening={reopen.isPending}
-      reopenError={reopen.error}
-    />
-  );
+  // Only an older server says nothing of where its browser shows, and it may answer with a window after all.
+  return <NativeBrowser state={state} />;
 }
 
 /**
  * THE PERSON'S BROWSER AS A WINDOW ON THEIR DESKTOP (OpenBot Desktop): their own Chrome, or Edge, in a profile of its
- * own. The window is the browser, so this page says where it is, brings it to the front, and carries Record and Stop,
- * which the Recorder's toolbar button in that window also has.
+ * own. The page walks the person through it in three steps (`TeachSteps`): what it does, naming the task, and opening
+ * the browser already recording. They stop in the browser, from the Recorder's mark at the top of each page, which asks
+ * whether to save the recording, or here with Stop, which saves it.
  */
-function NativeBrowser({
-  product,
-  state,
-  reopen,
-  reopening,
-  reopenError,
-}: {
-  product: BrowserProduct;
-  state: BrowserApiState;
-  reopen: () => void;
-  reopening: boolean;
-  reopenError: Error | null;
-}) {
-  const choice = useNarrationChoice();
-  const recording = useRecording(state, choice);
+function NativeBrowser({ state }: { state: BrowserApiState }) {
   return (
-    <PageShell title={TITLE} description={DESCRIPTION}>
-      <PageSection title="Your browser">
-        <PageRows>
-          <Item size="sm">
-            <ItemMedia variant="icon">
-              <IconBrowser />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>{PRODUCT_NAMES[product]}</ItemTitle>
-              <ItemDescription>
-                {state.problem ??
-                  (state.open
-                    ? "Open in its own window on your desktop."
-                    : "Closed.")}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Button
-                disabled={reopening}
-                onClick={reopen}
-                size="sm"
-                variant="outline"
-              >
-                {state.open ? "Bring to front" : "Open"}
-              </Button>
-            </ItemActions>
-          </Item>
-        </PageRows>
-        {reopenError ? (
-          <p className="mt-2 text-destructive text-sm" role="alert">
-            {reopenError.message}
-          </p>
-        ) : null}
-      </PageSection>
-      <PageSection title="Record a task" description={RECORDING_DESCRIPTION}>
-        <PageRows>
-          <RecordingRow recording={recording} />
-          {recording.stopped ? (
-            <>
-              <Separator />
-              <StoppedRow stopped={recording.stopped} />
-            </>
-          ) : null}
-          <Separator />
-          <NativeNarrationRow
-            voice={state.recorder?.voice}
-            choice={choice}
-            recording={recording.phase !== "idle"}
-          />
-        </PageRows>
-        {recording.error ? (
-          <p className="mt-2 text-destructive text-sm" role="alert">
-            {recording.error.message}
-          </p>
-        ) : null}
-      </PageSection>
-      <NarrationChoiceDialog {...recording.question} />
+    <PageShell title={TITLE}>
+      <TeachSteps state={state} />
     </PageShell>
   );
 }

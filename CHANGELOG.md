@@ -129,6 +129,20 @@ is the one place for apps, saved logins and keys, and every Bot can use every ap
 Admin is replaced by a short list of what OpenBot for Business adds. See `docs/personal-edition.md`.
 Deployments that do not set it behave as before.
 
+`scripts/start.sh` starts your own browser in the personal edition: your installed Chrome or Edge,
+as a window on your desktop with the Recorder in it, as OpenBot Desktop does for the team edition.
+**Teach a Bot** in the sidebar takes you to the page where Open opens it. `scripts/stop.sh` stops it.
+
+The sidebar's **Browser** button is now **Teach a Bot**, in every edition. It always takes you to
+its page, and a browser that opens as a window on your desktop opens only when you press Open
+there. The popover that recorded in the browser OpenBot is open in is gone: record with the
+Recorder's own button in that browser.
+
+You can also record a task in a Bot's browser in the personal edition: take control of its screen and
+press Record. Its one computer carries only your Bots, so `scripts/start.sh` starts it as yours
+(`COMPUTER_PERSON_ID`), and the server allows Record there. Every other OpenBot whose Bots share one
+computer still refuses it.
+
 ### A responsibility hears about large pull requests
 
 GitHub events for a responsibility were refused above 32 KB, and most `pull_request` deliveries are

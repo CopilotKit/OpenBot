@@ -283,6 +283,10 @@ services:
       # Every Bot without a computer of its own reaches this one, so each gets its own folder of
       # files and its shell starts there. The supervisor's per-Bot computers do not need it.
       COMPUTER_SEPARATE_WORKSPACES: "on"
+      # Set by scripts/start.sh in the personal edition, where every Bot on this computer is the one
+      # person's: it is theirs, so Record runs in their Bots' browsers here (person-access.ts). Empty
+      # everywhere else, where the Bots here may be anybody's and Record is refused.
+      COMPUTER_PERSON_ID: ${COMPUTER_PERSON_ID:-}
     volumes:
       - agent-workspace:/workspace
       # Chromium's user-data directory is volume-backed so logins survive container restarts.

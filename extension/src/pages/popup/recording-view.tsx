@@ -188,7 +188,7 @@ function keptSentence(kept: NonNullable<RecorderState["kept"]>): string {
 /** Where the stopped recording went in Intelligence: the person's own Learning space, or why Learning will not see it. */
 function destinationLines(state: RecorderState): string[] {
   const { lastStopped, learning } = state;
-  if (!lastStopped) return [];
+  if (!lastStopped || lastStopped.discarded) return [];
   // Into the person's space whenever the capture pass joined it, checked or not.
   const space = !learning
     ? null
@@ -201,10 +201,12 @@ function destinationLines(state: RecorderState): string[] {
 /** Which of the after-Stop rows show: sent (Intelligence has all of the last stopped recording) or still sending. */
 function afterStopRows(state: RecorderState, connected: boolean) {
   const keptRecordings = state.kept?.recordings ?? 0;
+  // One the person discarded from the recording mark was not sent: the popup says nothing of it.
+  const saved = state.lastStopped !== undefined && !state.lastStopped.discarded;
   return {
     keptRecordings,
     streaming: connected && state.draining > keptRecordings,
-    sent: connected && state.lastStopped !== undefined && state.draining === 0,
+    sent: connected && saved && state.draining === 0,
   };
 }
 
@@ -215,7 +217,12 @@ export function afterStopLearningSentence(
   connected: boolean,
 ): string | null {
   const { sent, streaming } = afterStopRows(state, connected);
-  if (!(sent || streaming) || !state.lastStopped || !state.learning)
+  if (
+    !(sent || streaming) ||
+    !state.lastStopped ||
+    state.lastStopped.discarded ||
+    !state.learning
+  )
     return null;
   return learningSentence(state.learning);
 }
