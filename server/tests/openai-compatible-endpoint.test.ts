@@ -205,3 +205,53 @@ test("on OpenAI itself nothing is set: the runtime already calls the Responses A
   ).toBeUndefined();
   expect(environment.COPILOTKIT_OPENAI_API).toBeUndefined();
 });
+
+describe("the API chosen at boot, before any Bot runs", () => {
+  const GATEWAY = "https://gateway.internal/v1";
+
+  test.each(["gpt-6.1-terra", "gpt-5.6-terra", "openai/gpt-6.1-terra"])(
+    "behind a gateway, %s gets responses, and the environment says so",
+    (defaultModel) => {
+      const environment: Record<string, string | undefined> = {
+        OPENAI_BASE_URL: GATEWAY,
+      };
+      expect(
+        chooseOpenAIApi({ provider: "openai", defaultModel }, environment),
+      ).toBe("responses");
+      expect(environment.COPILOTKIT_OPENAI_API).toBe("responses");
+    },
+  );
+
+  test.each(["chat", "responses", "  chat  ", "something-else"])(
+    "an operator's COPILOTKIT_OPENAI_API=%p is left exactly as written",
+    (value) => {
+      const environment: Record<string, string | undefined> = {
+        OPENAI_BASE_URL: GATEWAY,
+        COPILOTKIT_OPENAI_API: value,
+      };
+      expect(
+        chooseOpenAIApi(
+          { provider: "openai", defaultModel: "gpt-6.1-terra" },
+          environment,
+        ),
+      ).toBeUndefined();
+      expect(environment.COPILOTKIT_OPENAI_API).toBe(value);
+    },
+  );
+
+  test.each([
+    ["a model Chat Completions takes tools on", "openai", "gpt-5.5"],
+    ["an Anthropic model", "anthropic", "claude-sonnet-5"],
+  ] as const)(
+    "behind a gateway, %s is left to the runtime",
+    (_, provider, defaultModel) => {
+      const environment: Record<string, string | undefined> = {
+        OPENAI_BASE_URL: GATEWAY,
+      };
+      expect(
+        chooseOpenAIApi({ provider, defaultModel }, environment),
+      ).toBeUndefined();
+      expect(environment.COPILOTKIT_OPENAI_API).toBeUndefined();
+    },
+  );
+});

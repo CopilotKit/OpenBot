@@ -281,10 +281,7 @@ test("consumption forwards bounded references without claiming execution success
     message_id: "message",
     consumption_surface: "web",
   });
-  // Read off an event that was sent, so a missing event fails here instead of passing as no outcome.
-  const properties = f.sent[0]?.properties;
-  if (!properties) throw new Error("No telemetry event was sent.");
-  expect(properties.outcome).toBeUndefined();
+  expect(f.sent[0]?.properties).not.toHaveProperty("outcome");
 });
 test("transport failures are observed and do not reject product flows", async () => {
   const warnings: string[] = [];
