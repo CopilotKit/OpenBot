@@ -15,6 +15,7 @@ import type {
   LearningTarget,
 } from "@openbot/shared/learning";
 import { z } from "zod";
+import { LearningAssignmentsChangedError } from "./intelligence";
 import type { LearningSettingsStore } from "./settings";
 import type { OpenSkillSource } from "./sharing";
 
@@ -208,6 +209,8 @@ const PERSONAL_WAIT_MS = 2_000;
 const PERSONAL_READ_MS = 5_000;
 /** A space that refused (missing, revoked, not entitled, unreadable) is not asked again by runs for this long. */
 const PERSONAL_RETRY_MS = 60_000;
+/** A thread's container decided again after a refusal for stale settings, at most this many times in all. */
+const DECIDE_ATTEMPTS = 3;
 
 export function createLearningRuntime(options: {
   store: LearningSettingsStore;
@@ -399,14 +402,22 @@ export function createLearningRuntime(options: {
     /**
      * Bind once, before thread creation. The SDK calls this selector before its ownership check,
      * so the verified user scopes the durable decision. Existing Threads are never backfilled.
+     *
+     * Decided from this instance's copy of the settings and written with the version it came from. When another
+     * instance changed the settings and this one has not heard yet, Intelligence refuses the write; the settings are
+     * read again and the thread decided again, so it never joins a container the settings no longer name. A thread
+     * this instance has seen bound already is answered from memory: a binding never changes.
      */
     async containerForThread(
       input: LearningThread,
     ): Promise<string | undefined> {
       if (!input.userId.trim())
         throw new Error("Learning Thread assignment requires a verified user.");
-      const target = selectLearningTarget(await store.read(), input.agentId);
+      let { settings, version } = await store.snapshot();
+      let target = selectLearningTarget(settings, input.agentId);
       if (!target) return undefined;
+      const known = store.boundThread(input.userId, input.threadId);
+      if (known !== undefined) return known ?? undefined;
       let exists = false;
       try {
         await client.getThread({
@@ -425,13 +436,28 @@ export function createLearningRuntime(options: {
         )
           throw error;
       }
-      const containerId = await store.bindThread({
-        userId: input.userId,
-        threadId: input.threadId,
-        agentId: input.agentId,
-        containerId: exists ? null : (target?.containerId ?? null),
-      });
-      return containerId ?? undefined;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const containerId = await store.bindThread({
+            userId: input.userId,
+            threadId: input.threadId,
+            agentId: input.agentId,
+            containerId: exists ? null : target.containerId,
+            assignmentsVersion: version,
+          });
+          return containerId ?? undefined;
+        } catch (error) {
+          if (
+            !(error instanceof LearningAssignmentsChangedError) ||
+            attempt >= DECIDE_ATTEMPTS
+          )
+            throw error;
+          await store.refresh();
+          ({ settings, version } = await store.snapshot());
+          target = selectLearningTarget(settings, input.agentId);
+          if (!target) return undefined;
+        }
+      }
     },
     async status(agentId: string): Promise<LearningDeliveryStatus> {
       const target = selectLearningTarget(await store.read(), agentId);

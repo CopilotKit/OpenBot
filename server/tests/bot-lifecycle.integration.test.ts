@@ -30,7 +30,6 @@ import {
   users,
 } from "../src/db/schema/core";
 import { routines } from "../src/db/schema/coworker";
-import { memorySources, personalMemories } from "../src/db/schema/memory";
 import {
   proactiveSettings,
   proactiveSuggestions,
@@ -46,6 +45,7 @@ import {
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
+import { removeTestMemory, testMemory } from "./support/memory";
 
 /**
  * Pause, reset, Activity, attention, follow-ups and update routing against a real PostgreSQL.
@@ -58,6 +58,10 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `lifecycle-${randomUUID()}`;
 const owner = `${prefix}-owner`;
 const other = `${prefix}-other`;
+/** Memory lives in Intelligence; these name what the tests seed there. */
+const memory = testMemory(createDatabase(testDatabaseUrl(), TEST_POOL));
+const ownMemoryId = new Map<string, string>();
+const formedMemoryId = new Map<string, string>();
 const bot = `${prefix}-bot`;
 const helper = `${prefix}-helper`;
 const direct = `${prefix}-direct`;
@@ -126,29 +130,29 @@ beforeAll(async () => {
       instruction: "Watch CI",
       successCriteria: "Green",
     });
-    await database.insert(memorySources).values({
-      id: `${prefix}-source-${person}`,
-      ownerUserId: person,
+    await memory.intelligence.createSource({
+      id: `source-${randomUUID()}-${person === owner ? "owner" : "other"}`,
+      userId: person,
       agentId: bot,
-      toolRef: "docs/read",
+      connectorRef: "docs/read",
       title: "Docs",
     });
-    await database.insert(personalMemories).values([
+    const [source] = await memory.intelligence.sources({ userId: person });
+    await memory.intelligence.importRecords(person, source?.id as string, [
       {
-        id: `${prefix}-memory-${person}-1`,
-        ownerUserId: person,
-        sourceId: `${prefix}-source-${person}`,
+        externalId: "1",
         content: "Launch is Tuesday",
+        contentDigest: "launch",
         provenance: "Docs",
       },
-      // A memory of the person's own, from no source: not this Bot's, so a reset keeps it.
-      {
-        id: `${prefix}-memory-${person}-own`,
-        ownerUserId: person,
-        content: "Prefers mornings",
-        provenance: "You",
-      },
     ]);
+    // A memory of the person's own, from no source: not this Bot's, so a reset keeps it.
+    const own = await memory.intelligence.createMemory(person, {
+      content: "Prefers mornings",
+      provenance: "You",
+      formedBy: "person",
+    });
+    ownMemoryId.set(person, own.id);
   }
   await database.insert(workItems).values([
     {
@@ -484,6 +488,7 @@ describe("reset", () => {
   const softDeleted: string[] = [];
   const reset = createBotReset({
     database,
+    memory: memory.store,
     softDeleteChannel: async (_actor, channelId) => {
       softDeleted.push(channelId);
       await database
@@ -523,16 +528,11 @@ describe("reset", () => {
       routines: 1,
       responsibilities: 1,
     });
-    const kept = await database
-      .select({ id: personalMemories.id })
-      .from(personalMemories)
-      .where(
-        and(
-          eq(personalMemories.ownerUserId, owner),
-          eq(personalMemories.id, `${prefix}-memory-${owner}-own`),
-        ),
-      );
-    expect(kept).toHaveLength(1);
+    const kept = await memory.intelligence.getMemory(
+      owner,
+      ownMemoryId.get(owner) as string,
+    );
+    expect(kept?.invalidatedAt).toBeNull();
     const [sharedRow] = await database
       .select({ deletedAt: channels.deletedAt })
       .from(channels)
@@ -553,14 +553,14 @@ describe("reset", () => {
 
   test("a reset also takes what the Bot formed, its research and the permissions it was given", async () => {
     for (const person of [owner, other]) {
-      await database.insert(personalMemories).values({
-        id: `${prefix}-formed-${person}`,
-        ownerUserId: person,
+      const formed = await memory.intelligence.createMemory(person, {
         content: "Owns the billing service",
         provenance: "Read from GitHub",
-        formedBy: "bot",
-        formedByAgentId: bot,
+        formedBy: "agent",
+        agentId: bot,
+        reviewState: "unreviewed",
       });
+      formedMemoryId.set(person, formed.id);
       await database.insert(proactiveSettings).values({
         id: `${prefix}-research-${person}`,
         ownerUserId: person,
@@ -617,10 +617,9 @@ describe("reset", () => {
       person: string,
     ) =>
       table === "memory"
-        ? database
-            .select({ id: personalMemories.id })
-            .from(personalMemories)
-            .where(eq(personalMemories.id, `${prefix}-formed-${person}`))
+        ? memory.intelligence
+            .getMemory(person, formedMemoryId.get(person) as string)
+            .then((found) => (found ? [found] : []))
         : table === "research"
           ? database
               .select({ id: proactiveSuggestions.id })
@@ -653,23 +652,19 @@ describe("reset", () => {
     await database
       .insert(users)
       .values({ id: person, email: `${person}@example.test` });
-    await database.insert(memorySources).values([
-      {
-        id: `${prefix}-off-source`,
-        ownerUserId: person,
-        agentId: bot,
-        toolRef: "mail/search",
-        title: "Mail",
-        enabled: false,
-      },
-      {
-        id: `${prefix}-on-source`,
-        ownerUserId: person,
-        agentId: bot,
-        toolRef: "calendar/list",
-        title: "Calendar",
-      },
-    ]);
+    await memory.intelligence.createSource({
+      userId: person,
+      agentId: bot,
+      connectorRef: "mail/search",
+      title: "Mail",
+      enabled: false,
+    });
+    await memory.intelligence.createSource({
+      userId: person,
+      agentId: bot,
+      connectorRef: "calendar/list",
+      title: "Calendar",
+    });
     await database.insert(proactiveSettings).values({
       id: `${prefix}-off-research`,
       ownerUserId: person,
@@ -690,15 +685,11 @@ describe("reset", () => {
         { feature: "proactive_research", scope: "" },
       ],
     );
-    expect(
-      await database
-        .select({ id: memorySources.id })
-        .from(memorySources)
-        .where(eq(memorySources.ownerUserId, person)),
-    ).toEqual([]);
+    expect(await memory.intelligence.sources({ userId: person })).toEqual([]);
   });
 });
 
 afterAll(async () => {
+  await removeTestMemory([owner, other, `${prefix}-chooser`]);
   await database.$client.close();
 });

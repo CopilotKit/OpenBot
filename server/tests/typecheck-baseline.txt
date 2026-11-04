@@ -46,10 +46,6 @@ server/tests/approvals.test.ts: error TS2322: Type 'Promise<{ id: string; ownerU
 server/tests/approvals.test.ts: error TS2741: Property 'preconnect' is missing in type '() => Promise<Response>' but required in type 'typeof fetch'.
 server/tests/attachment-routes.test.ts: error TS2322: Type 'Response | Promise<Response>' is not assignable to type 'Promise<Response>'.
 server/tests/attachment-routes.test.ts: error TS2322: Type 'Response | Promise<Response>' is not assignable to type 'Promise<Response>'.
-server/tests/attachment-routes.test.ts: error TS2339: Property 'then' does not exist on type 'Response | Promise<Response>'.
-server/tests/attachment-routes.test.ts: error TS2339: Property 'then' does not exist on type 'Response | Promise<Response>'.
-server/tests/attachment-routes.test.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
-server/tests/attachment-routes.test.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
 server/tests/attachment-store.test.ts: error TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'BlobPart'.
 server/tests/attachment-store.test.ts: error TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'BlobPart'.
 server/tests/attachment-store.test.ts: error TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'BlobPart'.

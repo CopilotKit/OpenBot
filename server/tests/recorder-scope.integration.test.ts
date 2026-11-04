@@ -16,17 +16,18 @@ import { mountCopilotRuntime } from "../src/copilot";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { routines } from "../src/db/schema/coworker";
-import {
-  learningOpenSkills,
-  learningSkillSharing,
-} from "../src/db/schema/learning";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { createLearningSharingStore } from "../src/learning/sharing";
+import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { createRequestActor } from "../src/request-actor";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
+import {
+  removeLearningPeople,
+  testLearningIntelligence,
+} from "./support/learning";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `recorder-scope-${randomUUID()}`;
@@ -60,6 +61,7 @@ const recorder = createRecorderExtension({
   organizationAuth: undefined,
   roleRepository,
   peopleStore: { isRevoked: async () => false },
+  trajectoryBindings: createTrajectoryBindingStore(testLearningIntelligence()),
   personalSpaces: {
     containerFor: (userId) => `space-of-${userId}`,
     state: async () => ({ state: "unassigned", containerId: null }),
@@ -126,7 +128,7 @@ args[12] = auditStore;
 args[34] = {
   recorder,
   personalLearning: {
-    store: createLearningSharingStore(database),
+    store: createLearningSharingStore(testLearningIntelligence()),
     skillsOf: async () => ({ skills: [] }),
     invalidate: () => {},
     sharingAllowed: async () => true,
@@ -148,19 +150,16 @@ const call = (path: string, init: RequestInit & { json?: unknown } = {}) => {
 };
 
 async function counts() {
-  const of = async (
-    table:
-      | typeof routines
-      | typeof learningSkillSharing
-      | typeof learningOpenSkills,
-  ) => (await database.select({ n: count() }).from(table))[0]?.n ?? 0;
+  const of = async (table: typeof routines) =>
+    (await database.select({ n: count() }).from(table))[0]?.n ?? 0;
+  // The person's sharing choice lives in Intelligence: its version moves on any change.
+  const space = await testLearningIntelligence().personalSpace(owner);
   return {
     routines: await of(routines),
     // Skills live in Intelligence: the ones this process holds, which every write here would change
     // (and every fetch to Intelligence is refused in this file besides).
     skills: botConfiguration().skills.all().length,
-    sharing: await of(learningSkillSharing),
-    openSkills: await of(learningOpenSkills),
+    space: { version: space.version, sharing: space.sharing },
   };
 }
 
@@ -224,6 +223,7 @@ afterAll(async () => {
   for (const spy of spies) spy.mockRestore();
   guard.stop();
   await removeBots([BOT]);
+  await removeLearningPeople([owner]);
   await database.delete(users).where(inArray(users.id, [owner]));
   await database.$client.close();
 });

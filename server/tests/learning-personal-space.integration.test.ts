@@ -1,10 +1,9 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { LearnedSkillsError } from "@copilotkit/runtime/v2";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import { learningPersonSpaces } from "../src/db/schema/learning";
 import {
   createLearningContainer,
   type KeyIntelligence,
@@ -16,12 +15,17 @@ import {
 } from "../src/learning/personal-space";
 import { skillSnapshot } from "./fixtures/learned-skills";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import {
+  removeLearningPeople,
+  testLearningIntelligence,
+} from "./support/learning";
 
 /*
- * Several OpenBot replicas making the same person's Learning space at once, against one database and one Intelligence.
- * Intelligence is faked as it behaves: a container id is unique per project, a second create answers 409
- * LEARNING_CONTAINER_ALREADY_EXISTS, and the runtime key's skills read says whether a container exists. Each replica
- * creates through the real service-token path in learning/ensure-container.ts.
+ * Several OpenBot replicas making the same person's Learning space at once, against one Intelligence. Which spaces were
+ * seen to exist is kept in the real test Intelligence's Learning assignments. Container creation, which needs a
+ * credential this suite does not hold, is faked as Intelligence behaves: a container id is unique per project, a second
+ * create answers 409 LEARNING_CONTAINER_ALREADY_EXISTS, and the runtime key's skills read says whether a container
+ * exists. Each replica creates through the real service-token path in learning/ensure-container.ts.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -89,7 +93,7 @@ function replica() {
         return skillSnapshot();
       },
     } as never,
-    store: createPersonSpaceStore(database),
+    store: createPersonSpaceStore(testLearningIntelligence()),
     create: (container) =>
       createLearningContainer({
         directory: process.cwd(),
@@ -112,6 +116,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await removeLearningPeople([person]);
   await database.delete(users).where(inArray(users.id, [person]));
   await database.$client.close();
 });
@@ -132,12 +137,12 @@ test("a person's space is created once across concurrent calls on several replic
   expect(posts.length).toBeGreaterThanOrEqual(1);
   expect(posts.length).toBeLessThanOrEqual(replicas.length);
   expect(posts.every((post) => post.id === SPACE)).toBe(true);
-  expect(
-    await database
-      .select({ containerId: learningPersonSpaces.containerId })
-      .from(learningPersonSpaces)
-      .where(eq(learningPersonSpaces.userId, person)),
-  ).toEqual([{ containerId: SPACE }]);
+  // Intelligence remembers the space as seen to exist (one record per person). A replica whose probe ran before the
+  // space was made forgets and confirms it again, as it deleted and re-inserted the row before, so the version can
+  // count those writes; what must hold is where it ends.
+  const space = await testLearningIntelligence().personalSpace(person);
+  expect(space.learningContainerId).toBe(SPACE);
+  expect(space.confirmedAt).not.toBeNull();
 });
 
 test("a replica that starts after the space exists never asks Intelligence to create it", async () => {

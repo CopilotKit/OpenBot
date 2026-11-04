@@ -12,36 +12,41 @@
  *   made by hand passes (`MemoryIngestion.defaultSourceCandidates`).
  *
  * Isolation is unchanged, because nothing here is a new path to a memory: a default source is an
- * ordinary `memory_sources` row owned by the person and bound to one Bot, and what it imports is
- * recalled by that Bot only, unreviewed until the person confirms it (so not mirrored to
- * Intelligence until then). A default research setting is an ordinary `proactive_settings` row.
+ * ordinary memory source in Intelligence, owned by the person and bound to one Bot, and what it imports
+ * is recalled by that Bot only, unreviewed until the person confirms it. A default research setting is
+ * an ordinary `proactive_settings` row.
  *
- * NEVER SWITCHED BACK ON. Turning either off keeps its row with `enabled = false`, and a row of any
- * kind means there is nothing to adopt. Removing one records an opt-out in the person's preferences
- * in Intelligence (`declinedDefaults`), which adoption reads first, from the copy this instance holds.
- * Both checks and the insert run under one advisory lock per person and Bot, which removal takes too,
- * so a removal and an adoption arriving together cannot interleave into a re-creation. Removal waits
- * for the lock; adoption only tries it and steps aside when it is held, so it never parks a pooled
- * connection behind another transaction.
+ * NEVER SWITCHED BACK ON. Turning either off keeps it with `enabled = false`, and a source or setting of
+ * any kind means there is nothing to adopt. Removing one records an opt-out in the person's preferences
+ * in Intelligence (`declinedDefaults`), which adoption reads, from the copy this instance holds.
  *
- * ACROSS REPLICAS. The opt-out is written to Intelligence BEFORE the removal's transaction deletes the
- * row, and no transaction waits on Intelligence. Another replica's copy may not have heard of the
- * opt-out yet when it adopts, so an adoption that created anything asks Intelligence afresh once it
- * has committed, and takes back whatever an opt-out now covers. Either the removal's delete came
- * after the adoption's insert (and deleted it), or the opt-out was already in Intelligence when the
- * adoption asked.
+ * A removal and an adoption arriving together cannot interleave into a re-creation, though the source is
+ * in Intelligence and no OpenBot transaction is held across a call to it. The ORDER keeps it: removal
+ * records the opt-out in Intelligence first and deletes the source after; adoption reads the sources
+ * from Intelligence first and the opt-outs after. Whichever the adoption sees (the source still there,
+ * or gone with its opt-out already recorded), it does not add the app back. Two adoptions at once make
+ * one source: its id is made from the person, Bot and app. A research setting is a row here, adopted
+ * under one advisory lock per person and Bot that removal takes too. Removal waits for the lock;
+ * adoption only tries it and steps aside when it is held, so it never parks a pooled connection behind
+ * another transaction.
+ *
+ * ACROSS REPLICAS. Another replica's copy of the preferences may not have heard of an opt-out yet when
+ * it adopts, so an adoption that created anything asks Intelligence afresh once it has, and takes back
+ * whatever an opt-out now covers. Either the removal's delete came after the adoption's write (and
+ * deleted it), or the opt-out was already in Intelligence when the adoption asked.
  *
  * Off for the whole deployment with OPENBOT_MEMORY_SOURCE_DEFAULTS=false and
  * OPENBOT_PROACTIVE_DEFAULTS=false. Either switch stops new defaults; neither touches existing rows.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { botConfiguration } from "../configuration/directory";
 import type { DefaultFeature } from "../db/schema/defaults";
-import { memorySources } from "../db/schema/memory";
 import { proactiveSettings } from "../db/schema/proactive";
 import type { MemoryIngestion } from "./ingestion";
+import type { MemoryStore } from "./store";
+import { MemoryNotFoundError } from "./types";
 
 /**
  * How often check-ins run when OpenBot switched them on, in minutes: hourly, the most often a Bot
@@ -165,6 +170,8 @@ export type MemoryDefaults = ReturnType<typeof createMemoryDefaults>;
 export function createMemoryDefaults(options: {
   database: Database;
   ingestion: Pick<MemoryIngestion, "defaultSourceCandidates" | "sync">;
+  /** Where the person's memory sources are: Intelligence. */
+  memory: Pick<MemoryStore, "sourcesFor" | "adoptSource" | "removeSource">;
   /** OPENBOT_MEMORY_SOURCE_DEFAULTS, on unless switched off. */
   sources: boolean;
   /** OPENBOT_PROACTIVE_DEFAULTS, on unless switched off. */
@@ -215,7 +222,7 @@ export function createMemoryDefaults(options: {
 
   /**
    * What an adoption just created, less anything an opt-out written on another replica a moment ago
-   * covers: those are deleted again under the same lock. Returns the ids that stand.
+   * covers: those are removed again in Intelligence. Returns the ids that stand.
    */
   async function takeBackDeclinedSources(
     ownerUserId: string,
@@ -227,18 +234,13 @@ export function createMemoryDefaults(options: {
     const declinedIds = created
       .filter((source) => optedOut.has(source.serverId))
       .map((source) => source.id);
-    if (declinedIds.length > 0) {
-      await options.database.transaction(async (transaction) => {
-        await lockDefaults(transaction, ownerUserId, agentId);
-        await transaction
-          .delete(memorySources)
-          .where(
-            and(
-              eq(memorySources.ownerUserId, ownerUserId),
-              inArray(memorySources.id, declinedIds),
-            ),
-          );
-      });
+    for (const id of declinedIds) {
+      try {
+        await options.memory.removeSource(ownerUserId, id);
+      } catch (error) {
+        // Gone already: the person, or another replica, removed it first.
+        if (!(error instanceof MemoryNotFoundError)) throw error;
+      }
     }
     return created
       .filter((source) => !declinedIds.includes(source.id))
@@ -257,41 +259,29 @@ export function createMemoryDefaults(options: {
       agentId,
     );
     if (!candidates.length) return [];
-    const created = await options.database.transaction(async (transaction) => {
-      if (!(await tryLockDefaults(transaction, ownerUserId, agentId)))
-        return [];
-      const existing = await transaction
-        .select({ toolRef: memorySources.toolRef })
-        .from(memorySources)
-        .where(
-          and(
-            eq(memorySources.ownerUserId, ownerUserId),
-            eq(memorySources.agentId, agentId),
-          ),
-        );
-      const covered = new Set(
-        existing.map((row) => sourceServerId(row.toolRef)),
+    // The sources first, then the opt-outs: removal records its opt-out before it deletes.
+    const existing = await options.memory.sourcesFor(ownerUserId, agentId);
+    const free = await options.database.transaction((transaction) =>
+      tryLockDefaults(transaction, ownerUserId, agentId),
+    );
+    if (!free) return [];
+    const optedOut = declined(ownerUserId, agentId, "memory_source");
+    const covered = new Set(
+      existing.map((source) => sourceServerId(source.toolRef)),
+    );
+    const created: { id: string; serverId: string }[] = [];
+    for (const candidate of candidates) {
+      // Any source on this app, on or off, made by hand or by us, is the person's choice already.
+      if (covered.has(candidate.serverId) || optedOut.has(candidate.serverId))
+        continue;
+      const source = await options.memory.adoptSource(
+        ownerUserId,
+        agentId,
+        candidate,
       );
-      const optedOut = declined(ownerUserId, agentId, "memory_source");
-      const made: { id: string; serverId: string }[] = [];
-      for (const candidate of candidates) {
-        // Any source on this app, on or off, made by hand or by us, is the person's choice already.
-        if (covered.has(candidate.serverId) || optedOut.has(candidate.serverId))
-          continue;
-        const id = randomUUID();
-        await transaction.insert(memorySources).values({
-          id,
-          ownerUserId,
-          agentId,
-          toolRef: candidate.toolRef,
-          title: candidate.title,
-          args: {},
-        });
-        covered.add(candidate.serverId);
-        made.push({ id, serverId: candidate.serverId });
-      }
-      return made;
-    });
+      covered.add(candidate.serverId);
+      if (source) created.push({ id: source.id, serverId: candidate.serverId });
+    }
     const kept = await takeBackDeclinedSources(ownerUserId, agentId, created);
     for (const id of kept) {
       log({

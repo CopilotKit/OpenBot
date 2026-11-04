@@ -21,6 +21,7 @@ function fixture() {
   const bindings = new Map<string, string | null>();
   const store: LearningSettingsStore = {
     read: async () => settings,
+    snapshot: async () => ({ settings, version: 0 }),
     write: async (next) => {
       settings = next;
       return settings;
@@ -32,6 +33,11 @@ function fixture() {
       if (!bindings.has(key)) bindings.set(key, containerId);
       return bindings.get(key) ?? null;
     },
+    // Never remembered, so every call reaches bindThread and its rule.
+    boundThread: () => undefined,
+    refresh: async () => {},
+    start: async () => {},
+    stop: () => {},
   };
   const client = new CopilotKitIntelligence({ apiKey: "synthetic-never-sent" });
   let exists = false;

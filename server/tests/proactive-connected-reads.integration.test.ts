@@ -40,7 +40,6 @@ import {
   proactiveSuggestions,
 } from "../src/db/schema/proactive";
 import { workItems } from "../src/db/schema/work";
-import { createMemoryStore } from "../src/memory/store";
 import {
   CustomServerRefusedError,
   createPluginStore,
@@ -65,6 +64,7 @@ import {
   useTestConfiguration,
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { testMemory } from "./support/memory";
 
 /*
  * A check-in reads what the person connected with their own account, through the tools that say
@@ -121,7 +121,7 @@ const ref = (server: string, tool: string) => `${server}/${tool}`;
 
 const auditStore = createAuditStore(database);
 const store = createProactiveStore(database);
-const memory = createMemoryStore(database);
+const memory = testMemory(database).store;
 const queue = createWorkQueue(database);
 
 /** What reached a vendor, and what the approval gate was asked, in order. */

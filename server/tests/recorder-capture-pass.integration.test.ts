@@ -11,7 +11,7 @@ import {
   recorderPaths,
 } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
@@ -21,8 +21,6 @@ import { loadConfig } from "../src/config";
 import { mountCopilotRuntime } from "../src/copilot";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import { learningPersonSpaces } from "../src/db/schema/learning";
-import { recorderTrajectoryBindings } from "../src/db/schema/recorder";
 import type { LearningContainerSpec } from "../src/learning/ensure-container";
 import {
   createPersonalLearningSpaces,
@@ -30,17 +28,23 @@ import {
   personalLearningContainerId,
 } from "../src/learning/personal-space";
 import { createLearningSettingsStore } from "../src/learning/settings";
+import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { createRequestActor } from "../src/request-actor";
 import { skillSnapshot } from "./fixtures/learned-skills";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
+import {
+  removeLearningPeople,
+  testLearningIntelligence,
+} from "./support/learning";
 
 /*
  * The capture pass end to end, through the app index.ts builds: the Recorder's routes, the runtime mounted with the
  * Recorder's gate and Learning space selector, and the request identity that answers the Recorder's bearer only here.
- * Intelligence is the one thing faked: its trajectory join answers a grant and records what it was asked, its skills
- * read says which Learning containers exist, and a service token's create makes one.
+ * Whose each trajectory is, and which spaces were seen to exist, are kept in the real test Intelligence's Learning
+ * assignments. The Runtime's own Intelligence calls are faked: its trajectory join answers a grant and records what it
+ * was asked, its skills read says which Learning containers exist, and a service token's create makes one.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -91,6 +95,7 @@ const recorder = createRecorderExtension({
   organizationAuth: undefined,
   roleRepository,
   peopleStore: { isRevoked: async () => false },
+  trajectoryBindings: createTrajectoryBindingStore(testLearningIntelligence()),
   personalSpaces: createPersonalLearningSpaces({
     readSettings: async () => learning,
     snapshots: {
@@ -104,7 +109,7 @@ const recorder = createRecorderExtension({
         return skillSnapshot();
       },
     } as never,
-    store: createPersonSpaceStore(database),
+    store: createPersonSpaceStore(testLearningIntelligence()),
     create: async (container) => {
       created.push(container);
       if (containers.has(container.id)) return "present";
@@ -212,12 +217,10 @@ const as = (person: string) => ({
   authorization: `Bearer ${tokens[person]}`,
 });
 
+/** Whose Intelligence says the trajectory is: the binding the gate made there. */
 async function bindingOf(trajectoryId: string) {
-  return database
-    .select()
-    .from(recorderTrajectoryBindings)
-    .where(eq(recorderTrajectoryBindings.trajectoryId, trajectoryId))
-    .then((rows) => rows.map(({ userId }) => ({ userId })));
+  const userId = await testLearningIntelligence().trajectoryOwner(trajectoryId);
+  return userId === null ? [] : [{ userId }];
 }
 
 beforeAll(async () => {
@@ -261,6 +264,7 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const spy of spies) spy.mockRestore();
   guard.stop();
+  await removeLearningPeople([owner, stranger]);
   await database.delete(users).where(inArray(users.id, [owner, stranger]));
   await database.$client.close();
 });
@@ -292,11 +296,9 @@ describe("the capture pass", () => {
   test("the person's space was made once, on first need, and OpenBot remembers it", async () => {
     expect(created.filter((spec) => spec.id === OWNER_SPACE)).toHaveLength(1);
     expect(
-      await database
-        .select({ containerId: learningPersonSpaces.containerId })
-        .from(learningPersonSpaces)
-        .where(eq(learningPersonSpaces.userId, owner)),
-    ).toEqual([{ containerId: OWNER_SPACE }]);
+      (await testLearningIntelligence().personalSpace(owner))
+        .learningContainerId,
+    ).toBe(OWNER_SPACE);
   });
 
   test("a reconnect asks for a fresh pass and gets one, joined to the same space", async () => {

@@ -1,192 +1,24 @@
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import { personalMemories } from "../src/db/schema/memory";
-import {
-  createIntelligenceMemory,
-  type IntelligenceMemoryClient,
-} from "../src/memory/intelligence";
+import { createIntelligenceMemory } from "../src/memory/intelligence";
 import { createMemoryStore } from "../src/memory/store";
 import {
-  MemoryNotFoundError,
   MemoryRefusedError,
   MemoryUnavailableError,
 } from "../src/memory/types";
-import { removeBots, seedBot } from "./support/bots";
+import { removeBots, seedBot, testIntelligence } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { eventually, removeTestMemory, testMemory } from "./support/memory";
 
-/**
- * A stand-in for CopilotKit Intelligence memory: memories per user, retired rather than deleted,
- * project-scoped rows that must never reach a person, and switches for "not entitled" and
- * "unreachable". Every call is recorded so a test can assert who was asked about what.
+/*
+ * A person's memory lives in Intelligence, and other apps on the same Intelligence project read it the
+ * way the CopilotKit runtime does: `GET /api/memories` and `POST /api/memories/recall` with no metadata
+ * filters, for the person, with a user-only grant. These tests read and write through that same door to
+ * show what another app sees, and what it wrote that OpenBot shows.
  */
-function fakeIntelligence() {
-  type Row = {
-    id: string;
-    userId: string;
-    scope: "user" | "project";
-    content: string;
-    invalidatedAt: string | null;
-  };
-  const rows: Row[] = [];
-  const calls: { method: string; userId?: string; grant?: unknown }[] = [];
-  const state = { entitled: true, down: false };
-  let next = 1;
-  const fail = (status: number) =>
-    Object.assign(new Error(`HTTP ${status}`), { status });
-  const guard = () => {
-    if (state.down) throw new TypeError("fetch failed");
-    if (!state.entitled) throw fail(403);
-  };
-  const summary = (row: Row) => ({
-    id: row.id,
-    kind: "topical",
-    scope: row.scope,
-    content: row.content,
-    sourceThreadIds: [],
-    invalidatedAt: row.invalidatedAt,
-  });
-  const client = {
-    async getRuntimeEntitlements() {
-      calls.push({ method: "getRuntimeEntitlements" });
-      if (state.down) throw new TypeError("fetch failed");
-      return {
-        status: "ready",
-        entitlement: {
-          active: true,
-          source: "managedOrgSubscription",
-          features: { memory: state.entitled },
-          limits: {},
-        },
-      };
-    },
-    async listMemories(params: { userId: string; memoryGrant?: unknown }) {
-      calls.push({
-        method: "listMemories",
-        userId: params.userId,
-        grant: params.memoryGrant,
-      });
-      guard();
-      // A platform that ignored the grant: project rows come back too, and must be filtered out.
-      return {
-        memories: rows
-          .filter(
-            (row) =>
-              !row.invalidatedAt &&
-              (row.userId === params.userId || row.scope === "project"),
-          )
-          .map(summary),
-      };
-    },
-    async recallMemories(params: {
-      userId: string;
-      query: string;
-      memoryGrant?: unknown;
-    }) {
-      calls.push({
-        method: "recallMemories",
-        userId: params.userId,
-        grant: params.memoryGrant,
-      });
-      guard();
-      return {
-        memories: rows
-          .filter(
-            (row) =>
-              !row.invalidatedAt &&
-              (row.userId === params.userId || row.scope === "project") &&
-              row.content.toLowerCase().includes(params.query.toLowerCase()),
-          )
-          .map((row) => ({ ...summary(row), score: 0.9 })),
-      };
-    },
-    async createMemory(params: {
-      userId: string;
-      content: string;
-      memoryGrant?: unknown;
-    }) {
-      calls.push({
-        method: "createMemory",
-        userId: params.userId,
-        grant: params.memoryGrant,
-      });
-      guard();
-      const row: Row = {
-        id: `int-${next++}`,
-        userId: params.userId,
-        scope: "user",
-        content: params.content,
-        invalidatedAt: null,
-      };
-      rows.push(row);
-      return { ...summary(row), absorbed: false };
-    },
-    async updateMemory(params: {
-      userId: string;
-      id: string;
-      content: string;
-      memoryGrant?: unknown;
-    }) {
-      calls.push({ method: "updateMemory", userId: params.userId });
-      guard();
-      const old = rows.find(
-        (row) =>
-          row.id === params.id &&
-          row.userId === params.userId &&
-          !row.invalidatedAt,
-      );
-      if (!old) throw fail(404);
-      old.invalidatedAt = new Date().toISOString();
-      const row: Row = {
-        id: `int-${next++}`,
-        userId: params.userId,
-        scope: "user",
-        content: params.content,
-        invalidatedAt: null,
-      };
-      rows.push(row);
-      return { ...summary(row), retiredId: old.id };
-    },
-    async removeMemory(params: { userId: string; id: string }) {
-      calls.push({ method: "removeMemory", userId: params.userId });
-      guard();
-      const row = rows.find(
-        (candidate) =>
-          candidate.id === params.id &&
-          candidate.userId === params.userId &&
-          !candidate.invalidatedAt,
-      );
-      if (!row) throw fail(404);
-      row.invalidatedAt = new Date().toISOString();
-    },
-  };
-  const live = (userId: string) =>
-    rows.filter((row) => row.userId === userId && !row.invalidatedAt);
-  const seed = (
-    userId: string,
-    content: string,
-    scope: Row["scope"] = "user",
-  ) => {
-    const row: Row = {
-      id: `int-${next++}`,
-      userId,
-      scope,
-      content,
-      invalidatedAt: null,
-    };
-    rows.push(row);
-    return row.id;
-  };
-  return {
-    client: client as unknown as IntelligenceMemoryClient,
-    calls,
-    state,
-    live,
-    seed,
-  };
-}
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `memint-${randomUUID()}`;
@@ -194,10 +26,61 @@ const ada = `${prefix}-ada`;
 const grace = `${prefix}-grace`;
 const bot = `${prefix}-bot`;
 const otherBot = `${prefix}-other-bot`;
+const { store, cache, intelligence } = testMemory(database);
 
-let fake: ReturnType<typeof fakeIntelligence>;
-let clock = 1_000_000;
-let store: ReturnType<typeof createMemoryStore>;
+/** A request as another app on the project makes it, with the runtime SDK's headers. */
+async function otherApp(
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+  path: string,
+  userId: string,
+  body?: unknown,
+  grant: { user: string; project: string } = {
+    user: "read-write",
+    project: "none",
+  },
+) {
+  const settings = testIntelligence();
+  const response = await fetch(`${settings.apiUrl}${path}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${settings.apiKey}`,
+      "x-cpki-user-id": userId,
+      "x-cpki-memory-grant": JSON.stringify(grant),
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  return {
+    status: response.status,
+    body: response.status === 204 ? null : await response.json(),
+  };
+}
+
+/** What another app sees of a person's memory. */
+const seenByOtherApps = async (userId: string) =>
+  (
+    (await otherApp("GET", "/api/memories", userId)).body as {
+      memories: { content: string }[];
+    }
+  ).memories.map((memory) => memory.content);
+
+/** A memory another app writes for the person, as the runtime SDK's createMemory does. */
+const writtenByOtherApp = async (
+  userId: string,
+  content: string,
+  scope: "user" | "project" = "user",
+) =>
+  (
+    (
+      await otherApp(
+        "POST",
+        "/api/memories",
+        userId,
+        { content, kind: "topical", scope, sourceThreadIds: [] },
+        { user: "read-write", project: "read-write" },
+      )
+    ).body as { id: string }
+  ).id;
 
 beforeAll(async () => {
   await database.insert(users).values([
@@ -207,127 +90,171 @@ beforeAll(async () => {
   await seedBot({ id: bot, name: "Bot", type: "built_in" });
   await seedBot({ id: otherBot, name: "Other", type: "built_in" });
 });
-beforeEach(async () => {
-  await database
-    .delete(personalMemories)
-    .where(inArray(personalMemories.ownerUserId, [ada, grace]));
-  fake = fakeIntelligence();
-  clock += 10 * 60_000 + 1;
-  store = createMemoryStore(database, {
-    intelligence: createIntelligenceMemory({
-      client: fake.client,
-      now: () => clock,
-      log: () => {},
-    }),
-  });
-});
 afterAll(async () => {
-  await database
-    .delete(personalMemories)
-    .where(inArray(personalMemories.ownerUserId, [ada, grace]));
+  await removeTestMemory([ada, grace]);
   await removeBots([bot, otherBot]);
   await database.delete(users).where(inArray(users.id, [ada, grace]));
   await database.$client.end();
 });
 
-const rowOf = async (id: string) =>
-  (
-    await database
-      .select()
-      .from(personalMemories)
-      .where(eq(personalMemories.id, id))
-  )[0];
-
 test("a memory the person writes is stored in Intelligence, under that person only", async () => {
   const memory = await store.create(ada, {
     content: "Prefers morning meetings",
   });
-  const row = await rowOf(memory.id);
-  expect(row?.intelligenceMemoryId).toBeTruthy();
-  expect(fake.live(ada).map((m) => m.content)).toEqual([
-    "Prefers morning meetings",
-  ]);
-  expect(fake.live(grace)).toEqual([]);
-  const writes = fake.calls.filter((call) => call.method === "createMemory");
-  expect(writes.every((call) => call.userId === ada)).toBe(true);
-  expect(writes[0]?.grant).toEqual({ user: "read-write", project: "none" });
-});
-
-test("an edit supersedes the Intelligence copy, and pausing or forgetting retires it", async () => {
-  const memory = await store.create(ada, { content: "Lives in Lisbon" });
-  const first = (await rowOf(memory.id))?.intelligenceMemoryId;
-  await store.update(ada, memory.id, { content: "Lives in Porto" });
-  const edited = await rowOf(memory.id);
-  expect(edited?.intelligenceMemoryId).not.toBe(first);
-  expect(fake.live(ada).map((m) => m.content)).toEqual(["Lives in Porto"]);
-
-  await store.update(ada, memory.id, { enabled: false });
-  expect(fake.live(ada)).toEqual([]);
-  expect((await rowOf(memory.id))?.intelligenceMemoryId).toBeNull();
-
-  await store.update(ada, memory.id, { enabled: true });
-  expect(fake.live(ada).map((m) => m.content)).toEqual(["Lives in Porto"]);
-
+  const held = await intelligence.allMemories(ada);
+  expect(held.find((entry) => entry.id === memory.id)).toMatchObject({
+    content: "Prefers morning meetings",
+    formedBy: "person",
+    provenance: "You",
+    reviewState: "confirmed",
+  });
+  expect(await seenByOtherApps(ada)).toContain("Prefers morning meetings");
+  expect(await intelligence.allMemories(grace)).toEqual([]);
   await store.remove(ada, memory.id);
-  expect(fake.live(ada)).toEqual([]);
 });
 
-test("a Bot-formed memory reaches Intelligence only once the person confirms it", async () => {
+test("an edit reaches other apps, and pausing or forgetting takes it from them", async () => {
+  const memory = await store.create(ada, { content: "Lives in Lisbon" });
+  const edited = await store.update(ada, memory.id, {
+    content: "Lives in Porto",
+  });
+  const seen = await seenByOtherApps(ada);
+  expect(seen).toContain("Lives in Porto");
+  expect(seen).not.toContain("Lives in Lisbon");
+
+  await store.update(ada, edited.id, { enabled: false });
+  expect(await seenByOtherApps(ada)).not.toContain("Lives in Porto");
+
+  await store.update(ada, edited.id, { enabled: true });
+  expect(await seenByOtherApps(ada)).toContain("Lives in Porto");
+
+  await store.remove(ada, edited.id);
+  expect(await seenByOtherApps(ada)).not.toContain("Lives in Porto");
+});
+
+test("a Bot-formed memory is seen exactly as before: its own Bot inside OpenBot, and once confirmed every other app", async () => {
+  /*
+   * What the mirror gave before this moved: an unreviewed Bot-formed memory stayed in OpenBot; once the
+   * person confirmed it, it was mirrored as the person's own, so every other app on the project read it
+   * and recalled it; pausing or forgetting it took it back. Inside OpenBot it only ever reached the Bot
+   * that formed it (and only while it held the app it was read from).
+   */
+  const held = { botId: bot, heldServerIds: new Set(["linear"]) };
+  const other = { botId: otherBot, heldServerIds: new Set(["linear"]) };
+  const contents = async (formedFor: typeof held) =>
+    (await store.retrieve(ada, [], "", formedFor)).map((m) => m.content);
+  const recalledByOtherApps = async (query: string) =>
+    (
+      (await otherApp("POST", "/api/memories/recall", ada, { query })).body as {
+        memories: { content: string }[];
+      }
+    ).memories.map((memory) => memory.content);
+
   const formed = await store.formMemory(ada, {
     agentId: bot,
     content: "Owns the billing migration",
     sourceApp: "Linear",
+    sourceRef: "linear/get_issue",
   });
-  expect(fake.live(ada)).toEqual([]);
-  await store.update(ada, formed.id, { reviewState: "confirmed" });
-  expect(fake.live(ada).map((m) => m.content)).toEqual([
+  // Awaiting review: its own Bot only.
+  expect(await contents(held)).toContain("Owns the billing migration");
+  expect(await contents(other)).not.toContain("Owns the billing migration");
+  expect(await seenByOtherApps(ada)).not.toContain(
     "Owns the billing migration",
-  ]);
+  );
+
+  // Confirmed: still its own Bot only inside OpenBot, and now every other app on the project.
+  await store.update(ada, formed.id, { reviewState: "confirmed" });
+  expect(await contents(held)).toContain("Owns the billing migration");
+  expect(await contents(other)).not.toContain("Owns the billing migration");
+  expect(await seenByOtherApps(ada)).toContain("Owns the billing migration");
+  expect(await recalledByOtherApps("billing")).toContain(
+    "Owns the billing migration",
+  );
+  // Its Bot no longer holding the app withdraws it from that Bot, not from the other apps.
+  expect(
+    await contents({ botId: bot, heldServerIds: new Set<string>() }),
+  ).not.toContain("Owns the billing migration");
+  expect(await seenByOtherApps(ada)).toContain("Owns the billing migration");
+
+  // Paused, then forgotten: gone from every other app again.
+  await store.update(ada, formed.id, { enabled: false });
+  expect(await seenByOtherApps(ada)).not.toContain(
+    "Owns the billing migration",
+  );
+  await store.update(ada, formed.id, { enabled: true });
+  expect(await seenByOtherApps(ada)).toContain("Owns the billing migration");
+  await store.remove(ada, formed.id);
+  expect(await seenByOtherApps(ada)).not.toContain(
+    "Owns the billing migration",
+  );
+  expect(await recalledByOtherApps("billing")).not.toContain(
+    "Owns the billing migration",
+  );
 });
 
-test("not entitled: nothing is sent, the tables are the whole store, and nothing fails", async () => {
-  fake.state.entitled = false;
+test("without semantic memory, memory is stored and a search is the word match it always was", async () => {
   const memory = await store.create(ada, { content: "Allergic to peanuts" });
-  expect((await rowOf(memory.id))?.intelligenceMemoryId).toBeNull();
-  expect(fake.calls.some((call) => call.method === "createMemory")).toBe(false);
-  expect((await store.list(ada)).map((m) => m.content)).toEqual([
+  expect((await store.list(ada)).map((m) => m.content)).toContain(
     "Allergic to peanuts",
-  ]);
+  );
   const recalled = await store.retrieve(ada, [], "peanuts");
   expect(recalled.map((m) => m.content)).toEqual(["Allergic to peanuts"]);
+  // This Intelligence has no embedder, so it says it recalls by keyword.
+  expect((await intelligence.recall(ada, "peanuts", { limit: 5 })).mode).toBe(
+    "keyword",
+  );
+  await store.remove(ada, memory.id);
 });
 
-test("unreachable: writes stay local and the next pass backfills them once, without duplicates", async () => {
-  fake.state.down = true;
+test("Intelligence unreachable: a person's memory already held still answers each turn; a write says try again", async () => {
   const memory = await store.create(ada, { content: "Reports to Grace" });
-  expect((await rowOf(memory.id))?.intelligenceMemoryId).toBeNull();
-  expect((await store.list(ada)).map((m) => m.content)).toEqual([
+  expect((await store.list(ada)).map((m) => m.content)).toContain(
     "Reports to Grace",
-  ]);
-
-  fake.state.down = false;
-  clock += 61_000;
-  expect(await store.mirrorPending()).toBeGreaterThan(0);
-  expect(fake.live(ada).map((m) => m.content)).toEqual(["Reports to Grace"]);
-  await store.mirrorPending();
-  expect(fake.live(ada)).toHaveLength(1);
+  );
+  // The same instance's copy, with Intelligence gone from under it.
+  const down = createMemoryStore(database, {
+    intelligence: createIntelligenceMemory({
+      apiUrl: "http://127.0.0.1:1",
+      apiKey: testIntelligence().apiKey,
+    }),
+    cache,
+  });
+  expect((await down.retrieve(ada, [], "")).map((m) => m.content)).toContain(
+    "Reports to Grace",
+  );
+  await expect(
+    down.create(ada, { content: "Started in March" }),
+  ).rejects.toBeInstanceOf(MemoryUnavailableError);
+  await expect(
+    down.update(ada, memory.id, { content: "Reports to Ada" }),
+  ).rejects.toBeInstanceOf(MemoryUnavailableError);
+  await store.remove(ada, memory.id);
 });
 
 test("another person's Intelligence memories never reach this person, nor do project-wide ones", async () => {
-  fake.seed(grace, "Grace's private fact");
-  fake.seed(grace, "Shared across the project", "project");
-  const own = fake.seed(ada, "Ada likes tea");
+  await writtenByOtherApp(grace, "Grace's private fact");
+  const shared = await writtenByOtherApp(
+    grace,
+    "Shared across the project",
+    "project",
+  );
+  const own = await writtenByOtherApp(ada, "Ada likes tea");
+  cache.forget(ada);
   const listed = await store.list(ada);
   expect(listed.map((m) => m.content)).toEqual(["Ada likes tea"]);
-  expect(listed[0]?.id).toBe(`intelligence:${own}`);
+  expect(listed[0]?.id).toBe(own);
   expect(listed[0]?.formedBy).toBe("intelligence");
   const recalled = await store.retrieve(ada, [], "fact");
   expect(recalled).toEqual([]);
-  expect(
-    fake.calls
-      .filter((call) => call.userId !== undefined)
-      .every((call) => call.userId === ada),
-  ).toBe(true);
+  await store.remove(ada, own);
+  await otherApp(
+    "DELETE",
+    `/api/memories/${shared}?purge=true`,
+    grace,
+    undefined,
+    { user: "read-write", project: "read-write" },
+  );
 });
 
 test("recall keeps a Bot-formed memory to the Bot that formed it", async () => {
@@ -347,39 +274,162 @@ test("recall keeps a Bot-formed memory to the Bot that formed it", async () => {
     heldServerIds: new Set(),
   });
   expect(forOther).toEqual([]);
+  await store.remove(ada, formed.id);
 });
 
-test("a memory only Intelligence holds is the person's own: recalled, edited and forgotten here", async () => {
-  const id = fake.seed(ada, "Uses vim keybindings");
+test("a memory another app wrote is the person's own: recalled, edited and forgotten here", async () => {
+  await writtenByOtherApp(ada, "Uses vim keybindings");
+  cache.forget(ada);
   const context = await store.retrieve(ada, [], "");
   expect(context.map((m) => m.content)).toContain("Uses vim keybindings");
-  const edited = await store.update(ada, `intelligence:${id}`, {
+  const written = context.find((m) => m.content === "Uses vim keybindings");
+  // An id from before this release, prefixed, still reaches it.
+  const edited = await store.update(ada, `intelligence:${written?.id}`, {
     content: "Uses emacs keybindings",
   });
-  expect(fake.live(ada).map((m) => m.content)).toEqual([
-    "Uses emacs keybindings",
-  ]);
+  expect(edited.formedBy).toBe("intelligence");
+  const seen = await seenByOtherApps(ada);
+  expect(seen).toContain("Uses emacs keybindings");
+  expect(seen).not.toContain("Uses vim keybindings");
   await expect(
     store.update(ada, edited.id, { enabled: false }),
   ).rejects.toBeInstanceOf(MemoryRefusedError);
   await store.remove(ada, edited.id);
-  expect(fake.live(ada)).toEqual([]);
+  expect(await seenByOtherApps(ada)).not.toContain("Uses emacs keybindings");
 });
 
-test("a memory OpenBot describes cannot be forgotten through its Intelligence id", async () => {
-  const memory = await store.create(ada, { content: "Has a dog" });
-  const linked = (await rowOf(memory.id))?.intelligenceMemoryId;
-  await expect(
-    store.remove(ada, `intelligence:${linked}`),
-  ).rejects.toBeInstanceOf(MemoryNotFoundError);
-  expect(fake.live(ada)).toHaveLength(1);
+test("a memory OpenBot formed is forgotten as a tombstone, kept so it is not formed again", async () => {
+  const formed = await store.formMemory(ada, {
+    agentId: bot,
+    content: "Has a dog named Biscuit",
+    sourceApp: "Photos",
+  });
+  await store.remove(ada, formed.id);
+  const tombstone = (
+    await intelligence.allMemories(ada, { includeInvalidated: true })
+  ).find((memory) => memory.id === formed.id);
+  expect(tombstone).toMatchObject({ content: "", formedBy: "agent" });
+  expect(tombstone?.invalidatedAt).toBeTruthy();
+  expect(
+    await store.formMemory(ada, {
+      agentId: otherBot,
+      content: "Has a dog named Biscuit",
+      sourceApp: "Photos",
+    }),
+  ).toEqual({ id: formed.id, duplicate: true, forgotten: true });
 });
 
-test("editing an Intelligence-only memory while Intelligence is down answers unavailable, not a crash", async () => {
-  const id = fake.seed(ada, "Speaks Portuguese");
-  fake.state.down = true;
-  clock += 10 * 60_000 + 1;
-  await expect(
-    store.update(ada, `intelligence:${id}`, { content: "Speaks Spanish" }),
-  ).rejects.toBeInstanceOf(MemoryUnavailableError);
+test("a change made on another instance reaches this one's copy by the change feed", async () => {
+  const here = testMemory(database, { changes: true });
+  const there = testMemory(database, { changes: true });
+  try {
+    await eventually(
+      () => here.cache.subscribed() && there.cache.subscribed(),
+      "both instances joined",
+    );
+    const memory = await there.store.create(ada, {
+      content: "Prefers the window seat",
+    });
+    // This instance holds Ada's memory before the change.
+    expect(
+      (await here.store.retrieve(ada, [], "")).map((m) => m.content),
+    ).toContain("Prefers the window seat");
+    await there.store.update(ada, memory.id, { enabled: false });
+    await eventually(
+      async () =>
+        !(await here.store.retrieve(ada, [], ""))
+          .map((m) => m.content)
+          .includes("Prefers the window seat"),
+      "the pause to reach the other instance",
+    );
+    await there.store.remove(ada, memory.id);
+  } finally {
+    here.cache.stop();
+    there.cache.stop();
+  }
+});
+
+test("a Bot deleted for good takes its memory sources and the memories it formed, for everyone", async () => {
+  const gone = `${prefix}-purged-bot`;
+  const source = await store.createSource(ada, {
+    agentId: gone,
+    toolRef: "docs/search",
+    title: "Docs",
+    args: {},
+  });
+  await intelligence.importRecords(ada, source.id, [
+    {
+      externalId: "1",
+      content: "Imported for the gone Bot",
+      contentDigest: "g1",
+    },
+  ]);
+  await store.formMemory(grace, {
+    agentId: gone,
+    content: "Formed by the gone Bot",
+    sourceApp: "Docs",
+  });
+  const own = await store.create(ada, { content: "Ada's own, kept" });
+  await store.forgetBot(gone);
+  expect(await intelligence.sources({ agentId: gone })).toEqual([]);
+  const left = [
+    ...(await intelligence.allMemories(ada, { includeInvalidated: true })),
+    ...(await intelligence.allMemories(grace, { includeInvalidated: true })),
+  ].map((memory) => memory.content);
+  expect(left).not.toContain("Imported for the gone Bot");
+  expect(left).not.toContain("Formed by the gone Bot");
+  expect(left).toContain("Ada's own, kept");
+  await store.remove(ada, own.id);
+});
+
+test("removing a person takes every memory and source of theirs, and no one else's", async () => {
+  const leaving = `${prefix}-leaving`;
+  await store.createSource(leaving, {
+    agentId: bot,
+    toolRef: "docs/search",
+    title: "Docs",
+    args: {},
+  });
+  await store.create(leaving, { content: "Leaving soon" });
+  const stays = await store.create(ada, { content: "Ada stays" });
+  await store.forgetPerson(leaving);
+  expect(
+    await intelligence.allMemories(leaving, { includeInvalidated: true }),
+  ).toEqual([]);
+  expect(await intelligence.sources({ userId: leaving })).toEqual([]);
+  expect((await store.list(ada)).map((memory) => memory.id)).toContain(
+    stays.id,
+  );
+  await store.remove(ada, stays.id);
+});
+
+test("at boot, the memory of a Bot purged while nothing was running goes too; a living Bot's stays", async () => {
+  const purged = `${prefix}-purged-while-down`;
+  const living = `${prefix}-living`;
+  for (const agentId of [purged, living])
+    await store.createSource(ada, {
+      agentId,
+      toolRef: "docs/search",
+      title: "Docs",
+      args: {},
+    });
+  await store.formMemory(ada, {
+    agentId: purged,
+    content: "Formed by the Bot purged while down",
+    sourceApp: "Docs",
+  });
+  const swept = await store.sweepPurgedBots(async () => [
+    ...(await intelligence.sources({}))
+      .map((source) => ({ id: source.agentId ?? "" }))
+      .filter((bot) => bot.id !== purged),
+  ]);
+  expect(swept).toEqual([purged]);
+  expect(await intelligence.sources({ agentId: purged })).toEqual([]);
+  expect(await intelligence.sources({ agentId: living })).toHaveLength(1);
+  expect(
+    (await intelligence.allMemories(ada, { includeInvalidated: true })).map(
+      (memory) => memory.content,
+    ),
+  ).not.toContain("Formed by the Bot purged while down");
+  await intelligence.purgeSources({ agentId: living });
 });

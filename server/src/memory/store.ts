@@ -1,24 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  and,
-  desc,
-  eq,
-  inArray,
-  isNotNull,
-  isNull,
-  lte,
-  ne,
-  not,
-  or,
-  type SQL,
-  sql,
-} from "drizzle-orm";
 import type { Database } from "../db/client";
-import { memorySources, personalMemories } from "../db/schema/memory";
-import { lockDefaults, recordOptOut, sourceServerId } from "./defaults";
-import type {
-  IntelligenceMemory,
-  IntelligenceMemoryRecord,
+import type { MemoryCache } from "./cache";
+import { recordOptOut, sourceServerId } from "./defaults";
+import {
+  type IntelligenceMemory,
+  MemoryIntelligenceError,
+  memoryIdempotencyKey,
+  type WireMemory,
+  type WireMemorySource,
 } from "./intelligence";
 import {
   type FormedMemoryInput,
@@ -27,6 +16,7 @@ import {
   MemoryNotFoundError,
   type MemoryRecord,
   MemoryRefusedError,
+  type MemorySource,
   MemoryUnavailableError,
   parseMemoryInput,
   parseMemoryPatch,
@@ -34,353 +24,284 @@ import {
 } from "./types";
 
 /**
- * The id a memory gets in OpenBot when only Intelligence holds it. Prefixed so the routes can tell
- * it from an OpenBot row id without a lookup, and so it can never collide with one.
+ * Ids this OpenBot once gave a memory only Intelligence held. Every memory now has its Intelligence id,
+ * so the prefix is dropped wherever an old transcript or tab still sends it.
  */
 const INTELLIGENCE_ID_PREFIX = "intelligence:";
 const INTELLIGENCE_PROVENANCE = "CopilotKit Intelligence";
+/** Where a person's own memory came from, when they wrote it. */
+const PERSON_PROVENANCE = "You";
+/** How long a claimed sync holds its source before another claimant may take it. */
+const SYNC_LEASE_MS = 120_000;
+/** When a source syncs again after a sync, successful or not. */
+const SYNC_INTERVAL_MS = 900_000;
+/** How long a known answer about whether semantic recall is on is reused. */
+const MODE_TTL_MS = 10 * 60_000;
 
-const digestOf = (content: string) =>
-  createHash("sha256").update(content).digest("hex");
+const bareId = (id: string) =>
+  id.startsWith(INTELLIGENCE_ID_PREFIX)
+    ? id.slice(INTELLIGENCE_ID_PREFIX.length)
+    : id;
+
+const date = (value: string | null | undefined) =>
+  value ? new Date(value) : null;
 
 /**
- * What Intelligence should hold: a live, switched-on memory the person has accepted.
- *
- * A Bot-formed or imported memory waits for the person's review before it leaves OpenBot, and a
- * paused or forgotten one is retired from Intelligence, because Intelligence has no field for
- * "paused" and anything else reading the person's Intelligence memory would otherwise see it.
+ * A memory OpenBot formed carries who formed it; one with no `formedBy` was written for the person by
+ * another app on the same Intelligence project (or by Intelligence itself).
  */
-// Parenthesised: drizzle's `not()` does not wrap a raw fragment, so without them `not(mirrorEligible)`
-// negated only its first clause.
-const mirrorEligible = sql`(${personalMemories.deletedAt} IS NULL AND ${personalMemories.enabled} AND ${personalMemories.reviewState} IN ('confirmed', 'edited') AND ${personalMemories.content} <> '')`;
-const contentDigest = sql`encode(sha256(convert_to(${personalMemories.content}, 'UTF8')), 'hex')`;
+const isOtherApps = (memory: WireMemory) => memory.formedBy === null;
 
-type MemoryRow = typeof personalMemories.$inferSelect;
-const isMirrorEligible = (row: MemoryRow) =>
-  row.deletedAt === null &&
-  row.enabled &&
-  (row.reviewState === "confirmed" || row.reviewState === "edited") &&
-  row.content !== "";
+/**
+ * Whether a memory another app wrote is one this person sees: what a default Intelligence reader sees,
+ * confirmed, switched on, for every agent. OpenBot's own memories are all shown, in every state.
+ */
+const shown = (memory: WireMemory) =>
+  !memory.invalidatedAt &&
+  memory.scope === "user" &&
+  (!isOtherApps(memory) ||
+    (memory.agentId === null &&
+      memory.enabled &&
+      memory.reviewState !== "unreviewed"));
 
-function fromIntelligence(
+/** A memory as OpenBot's screens, tools and rules read it. */
+export function toMemoryRecord(
   ownerUserId: string,
-  memory: IntelligenceMemoryRecord,
+  memory: WireMemory,
 ): MemoryRecord {
-  const now = new Date();
+  const otherApps = isOtherApps(memory);
+  const formedBy: MemoryRecord["formedBy"] = otherApps
+    ? "intelligence"
+    : memory.formedBy === "agent"
+      ? "bot"
+      : (memory.formedBy as "person" | "import");
   return {
-    id: `${INTELLIGENCE_ID_PREFIX}${memory.id}`,
+    id: memory.id,
     ownerUserId,
     content: memory.content,
-    provenance: INTELLIGENCE_PROVENANCE,
-    enabled: true,
-    reviewState: "confirmed",
-    formedBy: "intelligence",
-    formedByAgentId: null,
-    sourceId: null,
-    externalId: null,
-    importDigest: null,
-    sourceApp: INTELLIGENCE_PROVENANCE,
-    sourceRef: null,
-    sourceLink: null,
-    observedAt: null,
-    deletedAt: null,
+    provenance:
+      memory.provenance ??
+      (otherApps ? INTELLIGENCE_PROVENANCE : PERSON_PROVENANCE),
+    enabled: otherApps ? true : memory.enabled,
+    reviewState: otherApps ? "confirmed" : memory.reviewState,
+    formedBy,
+    formedByAgentId:
+      formedBy === "bot" ? (memory.formedByAgentId ?? memory.agentId) : null,
+    sourceId: memory.sourceId,
+    externalId: memory.externalId,
+    importDigest: memory.contentDigest,
+    sourceApp: otherApps ? INTELLIGENCE_PROVENANCE : memory.sourceApp,
+    sourceRef: memory.sourceRef,
+    sourceLink: memory.sourceLink,
+    observedAt: date(memory.observedAt),
+    deletedAt: date(memory.invalidatedAt),
     intelligenceMemoryId: memory.id,
     intelligenceDigest: null,
-    createdAt: now,
-    updatedAt: now,
+    createdAt: new Date(memory.createdAt),
+    updatedAt: new Date(memory.updatedAt),
   };
 }
 
+/** A memory source as OpenBot reads it. */
+export function toMemorySource(source: WireMemorySource): MemorySource {
+  return {
+    id: source.id,
+    ownerUserId: source.userId,
+    agentId: source.agentId ?? "",
+    toolRef: source.connectorRef,
+    title: source.title,
+    args: source.settings,
+    enabled: source.enabled,
+    syncStatus: source.syncStatus,
+    syncError: source.syncError,
+    lastSyncAt: date(source.lastSyncAt),
+    nextSyncAt: new Date(source.nextSyncAt),
+    createdAt: new Date(source.createdAt),
+    updatedAt: new Date(source.updatedAt),
+  };
+}
+
+const newestFirst = (a: { updatedAt: Date }, b: { updatedAt: Date }) =>
+  b.updatedAt.getTime() - a.updatedAt.getTime();
+
 /**
- * A person's memory: CopilotKit Intelligence when this deployment is entitled to it, OpenBot's own
- * tables when it is not.
+ * Whether Intelligence could not be reached or failed, as opposed to refusing: the person is told to
+ * try again (503) rather than that the request was wrong.
+ */
+function unavailable(error: unknown): boolean {
+  return (
+    error instanceof MemoryIntelligenceError &&
+    (error.status === null || error.status >= 500)
+  );
+}
+
+/**
+ * A person's memory, kept in CopilotKit Intelligence: the memories they wrote, imported from an app, or a
+ * Bot observed, and the apps they are imported from. Intelligence holds all of it (the words, who formed
+ * each, whether it is reviewed or paused, which Bot may see it, the source and record it came from, and
+ * forgotten ones as tombstones); OpenBot keeps none of it.
  *
- * When Intelligence memory is available, it holds the content and does the recall, and every memory
- * the person has accepted is mirrored there. The OpenBot row stays as the record of what Intelligence
- * has no field for: where a memory came from, whether it is reviewed or paused, which Bot formed it
- * and which source it was imported from. Those decide which Bot may see a memory, so every rule a
- * Bot's recall obeys is still applied here, over the rows, before anything Intelligence returns
- * reaches a Bot. Memories Intelligence holds for the person that no row describes (formed by another
- * app on the project, or by Intelligence) are read back as the person's own, the way a memory the
- * person wrote is.
+ * Storage is on every Intelligence plan. Semantic recall is Intelligence's paid feature: when it answers in
+ * hybrid mode, a search is ranked by it; otherwise a search is OpenBot's own match over the person's words,
+ * as it always was without it.
  *
- * Without Intelligence memory, nothing here calls the platform, and the store behaves exactly as it
- * did before: the tables are the whole store. Losing Intelligence mid-flight (a lapsed licence, an
- * outage) falls back to the tables rather than failing; a memory that lives only in Intelligence is
- * the one thing the tables cannot stand in for, and editing or forgetting one then answers 503.
+ * Every rule a Bot's recall obeys is applied here, over the person's memories as this instance holds them
+ * (`cache.ts`), before anything reaches a Bot: Bot-formed memories only to the Bot that formed them, and
+ * only while it still holds the app they were read from; imported ones only through a source this Bot may
+ * use; paused ones to no Bot; the person's own, and those another app wrote for them, to every Bot of
+ * theirs. Memories another app wrote for the person show here and can be edited or forgotten here.
  */
 export function createMemoryStore(
   database: Database,
-  options: { intelligence?: IntelligenceMemory } = {},
+  options: {
+    intelligence: IntelligenceMemory;
+    cache: MemoryCache;
+    now?: () => number;
+  },
 ) {
-  const { intelligence } = options;
-  /** One mirror pass per person at a time in this process, so two writes cannot both create. */
-  const mirroring = new Map<string, Promise<unknown>>();
+  const { intelligence, cache } = options;
+  const now = options.now ?? Date.now;
+  let semantic: { hybrid: boolean; until: number } | undefined;
 
-  const getSource = async (ownerUserId: string, id: string) => {
-    const [row] = await database
-      .select()
-      .from(memorySources)
-      .where(
-        and(
-          eq(memorySources.id, id),
-          eq(memorySources.ownerUserId, ownerUserId),
-        ),
-      );
-    if (!row) throw new MemoryNotFoundError();
-    return row;
-  };
-
-  /** Whether another live row of this person's points at the same Intelligence memory. */
-  async function linkIsShared(row: MemoryRow): Promise<boolean> {
-    if (!row.intelligenceMemoryId) return false;
-    const [other] = await database
-      .select({ id: personalMemories.id })
-      .from(personalMemories)
-      .where(
-        and(
-          eq(personalMemories.ownerUserId, row.ownerUserId),
-          eq(personalMemories.intelligenceMemoryId, row.intelligenceMemoryId),
-          ne(personalMemories.id, row.id),
-          isNull(personalMemories.deletedAt),
-        ),
-      )
-      .limit(1);
-    return other !== undefined;
-  }
-
-  /** Bring one row's Intelligence copy in line with it. Leaves the row as it was on any failure. */
-  async function mirrorRow(memory: IntelligenceMemory, row: MemoryRow) {
-    const owner = row.ownerUserId;
-    if (isMirrorEligible(row)) {
-      const digest = digestOf(row.content);
-      let id: string | undefined;
-      if (!row.intelligenceMemoryId) {
-        id = await memory.create(owner, row.content);
-      } else if (await linkIsShared(row)) {
-        // Intelligence merged two of this person's memories into one. Superseding it would retire
-        // the other row's copy too, so this row gets a memory of its own instead.
-        id = await memory.create(owner, row.content);
-      } else {
-        const result = await memory.supersede(
-          owner,
-          row.intelligenceMemoryId,
-          row.content,
-        );
-        id =
-          result === "gone" ? await memory.create(owner, row.content) : result;
-      }
-      if (!id) return;
-      await database
-        .update(personalMemories)
-        .set({ intelligenceMemoryId: id, intelligenceDigest: digest })
-        .where(eq(personalMemories.id, row.id));
-      return;
-    }
-    if (!row.intelligenceMemoryId) return;
-    const retired =
-      (await linkIsShared(row)) ||
-      (await memory.remove(owner, row.intelligenceMemoryId));
-    if (!retired) return;
-    await database
-      .update(personalMemories)
-      .set({ intelligenceMemoryId: null, intelligenceDigest: null })
-      .where(eq(personalMemories.id, row.id));
-  }
-
-  /** Rows whose Intelligence copy is missing, stale, or should no longer exist. */
-  const outOfStep = or(
-    and(
-      mirrorEligible,
-      or(
-        isNull(personalMemories.intelligenceMemoryId),
-        sql`${personalMemories.intelligenceDigest} IS DISTINCT FROM ${contentDigest}`,
-      ),
-    ),
-    and(not(mirrorEligible), isNotNull(personalMemories.intelligenceMemoryId)),
-  ) as SQL;
-
-  /**
-   * Mirror this person's out-of-step rows (or only `rowId`). Serialised per person in this process;
-   * across replicas, a race creates at most a near-duplicate, which Intelligence absorbs into the
-   * existing memory and answers with its id. Never throws: a failure leaves the row out of step, and
-   * the next pass picks it up.
-   */
-  async function mirror(ownerUserId: string, rowId?: string, limit = 50) {
-    if (!intelligence) return 0;
-    const memory = intelligence;
-    const previous = mirroring.get(ownerUserId) ?? Promise.resolve();
-    const run = previous
-      .catch(() => {})
-      .then(async () => {
-        if (!(await memory.available())) return 0;
-        const rows = await database
-          .select()
-          .from(personalMemories)
-          .where(
-            and(
-              eq(personalMemories.ownerUserId, ownerUserId),
-              rowId ? eq(personalMemories.id, rowId) : undefined,
-              outOfStep,
-            ),
-          )
-          .limit(limit);
-        for (const row of rows) {
-          try {
-            await mirrorRow(memory, row);
-          } catch (error) {
-            console.error(
-              JSON.stringify({
-                type: "memory-mirror-error",
-                error: error instanceof Error ? error.name : "UnknownError",
-                context: { memoryId: row.id },
-                timestamp: new Date().toISOString(),
-              }),
-            );
-          }
-        }
-        return rows.length;
-      });
-    mirroring.set(ownerUserId, run);
+  async function person(ownerUserId: string) {
     try {
-      return await run;
-    } finally {
-      if (mirroring.get(ownerUserId) === run) mirroring.delete(ownerUserId);
+      return await cache.get(ownerUserId);
+    } catch (error) {
+      if (unavailable(error)) throw new MemoryUnavailableError();
+      throw error;
     }
   }
 
-  /** Every Intelligence id this person's rows point at, forgotten rows included. */
-  async function linkedIds(ownerUserId: string) {
-    const rows = await database
-      .select({
-        id: personalMemories.id,
-        intelligenceMemoryId: personalMemories.intelligenceMemoryId,
-      })
-      .from(personalMemories)
-      .where(
-        and(
-          eq(personalMemories.ownerUserId, ownerUserId),
-          isNotNull(personalMemories.intelligenceMemoryId),
-        ),
+  /**
+   * One live memory of this person's, or not found. An id a content edit has since replaced (a Bot that
+   * recalled it before the person edited it, a tab not yet refreshed) still finds the memory it became.
+   */
+  async function memoryOf(ownerUserId: string, id: string) {
+    const memories = (await person(ownerUserId)).memories;
+    const held = memories.find((entry) => entry.id === bareId(id));
+    if (held && shown(held)) return held;
+    let next: string | null | undefined = bareId(id);
+    for (let hop = 0; next && hop < 20; hop++) {
+      const memory = await write(() =>
+        intelligence.getMemory(ownerUserId, next as string),
       );
-    return new Set(rows.map((row) => row.intelligenceMemoryId as string));
+      if (!memory) break;
+      if (!memory.invalidatedAt) {
+        if (!shown(memory)) break;
+        cache.invalidate(ownerUserId);
+        return memory;
+      }
+      next = memory.supersededBy;
+    }
+    throw new MemoryNotFoundError();
   }
 
-  /** The person's Intelligence memories that no OpenBot row describes. */
-  async function intelligenceOnly(
-    ownerUserId: string,
-    memories: IntelligenceMemoryRecord[],
-  ): Promise<MemoryRecord[]> {
-    if (!memories.length) return [];
-    const linked = await linkedIds(ownerUserId);
-    return memories
-      .filter((memory) => !linked.has(memory.id))
-      .map((memory) => fromIntelligence(ownerUserId, memory));
+  /** A source read fresh from Intelligence, when it is this person's. */
+  async function freshSource(ownerUserId: string, id: string) {
+    const source = await intelligence.getSource(id);
+    if (!source || source.userId !== ownerUserId)
+      throw new MemoryNotFoundError();
+    return source;
   }
 
   /**
-   * The rows a Bot may recall, every filter in the query. Bot-formed memories go only to the Bot that
-   * formed them, and only while it still holds their source app; imported ones only through a source
-   * this Bot may use; the person's own to every Bot of theirs.
+   * A change to a source at the version just read, read again and redone when somebody else changed it
+   * first. `decide` sees the current source and returns the change, or null to make none.
    */
-  function eligibleRows(
+  async function changeSource(
+    ownerUserId: string,
+    id: string,
+    decide: (
+      source: WireMemorySource,
+    ) => Parameters<IntelligenceMemory["updateSource"]>[1] | null,
+    attempts = 3,
+  ): Promise<WireMemorySource | null> {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const source = await freshSource(ownerUserId, id);
+      const patch = decide(source);
+      if (!patch) return null;
+      const result = await intelligence.updateSource(id, patch, source.version);
+      if (result === null) throw new MemoryNotFoundError();
+      if (result === "stale") continue;
+      cache.putSource(result);
+      return result;
+    }
+    return null;
+  }
+
+  async function write<T>(call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (error) {
+      if (unavailable(error)) throw new MemoryUnavailableError();
+      throw error;
+    }
+  }
+
+  /**
+   * The memories a Bot may recall, best first. Bot-formed memories go only to the Bot that formed them,
+   * and only while it still holds their source app; imported ones only through a source this Bot may use;
+   * the person's own, and those another app wrote for them, to every Bot of theirs. Paused ones to none.
+   */
+  function eligible(
+    memories: WireMemory[],
     ownerUserId: string,
     eligibleSourceIds: string[],
     formed: { botId: string; heldServerIds: ReadonlySet<string> } | undefined,
-    narrow: { term?: string; intelligenceIds?: string[] },
-  ) {
-    const held = [...(formed?.heldServerIds ?? [])];
-    const formedByThisBot = formed
-      ? and(
-          eq(personalMemories.formedBy, "bot"),
-          eq(personalMemories.formedByAgentId, formed.botId),
-          or(
-            isNull(personalMemories.sourceRef),
-            held.length > 0
-              ? inArray(
-                  sql<string>`split_part(${personalMemories.sourceRef}, '/', 1)`,
-                  held,
-                )
-              : sql`false`,
-          ),
-        )
-      : undefined;
-    const personOrSource = and(
-      sql`${personalMemories.formedBy} <> 'bot'`,
-      or(
-        isNull(personalMemories.sourceId),
-        eligibleSourceIds.length > 0
-          ? inArray(personalMemories.sourceId, eligibleSourceIds)
-          : sql`false`,
-      ),
-    );
-    return database
-      .select()
-      .from(personalMemories)
-      .where(
-        and(
-          eq(personalMemories.ownerUserId, ownerUserId),
-          eq(personalMemories.enabled, true),
-          isNull(personalMemories.deletedAt),
-          formedByThisBot
-            ? or(formedByThisBot, personOrSource)
-            : personOrSource,
-          narrow.term
-            ? sql`strpos(lower(${personalMemories.content}), lower(${narrow.term})) > 0`
-            : undefined,
-          narrow.intelligenceIds
-            ? narrow.intelligenceIds.length > 0
-              ? inArray(
-                  personalMemories.intelligenceMemoryId,
-                  narrow.intelligenceIds,
-                )
-              : sql`false`
-            : undefined,
-        ),
-      )
-      .orderBy(desc(personalMemories.updatedAt))
-      .limit(40);
+  ): MemoryRecord[] {
+    const sources = new Set(eligibleSourceIds);
+    return memories
+      .filter(shown)
+      .map((memory) => toMemoryRecord(ownerUserId, memory))
+      .filter((memory) => {
+        if (!memory.enabled) return false;
+        if (memory.formedBy === "bot")
+          return (
+            !!formed &&
+            memory.formedByAgentId === formed.botId &&
+            (memory.sourceRef === null ||
+              formed.heldServerIds.has(memory.sourceRef.split("/")[0] ?? ""))
+          );
+        return memory.sourceId === null || sources.has(memory.sourceId);
+      });
   }
 
   return {
     async list(ownerUserId: string): Promise<MemoryRecord[]> {
-      const rows = await database
-        .select()
-        .from(personalMemories)
-        .where(
-          and(
-            eq(personalMemories.ownerUserId, ownerUserId),
-            isNull(personalMemories.deletedAt),
-          ),
-        )
-        .orderBy(desc(personalMemories.updatedAt))
-        .limit(500);
-      if (!intelligence) return rows;
-      const remote = await intelligence.list(ownerUserId);
-      if (!remote) return rows;
-      return [...rows, ...(await intelligenceOnly(ownerUserId, remote))];
+      return (await person(ownerUserId)).memories
+        .filter(shown)
+        .map((memory) => toMemoryRecord(ownerUserId, memory))
+        .sort(newestFirst)
+        .slice(0, 500);
     },
-    async create(ownerUserId: string, input: unknown) {
-      const [row] = await database
-        .insert(personalMemories)
-        .values({
-          id: randomUUID(),
+    async create(ownerUserId: string, input: unknown): Promise<MemoryRecord> {
+      const parsed = parseMemoryInput(input);
+      // Named here, so a retry after a lost answer is the same memory, never a second.
+      const id = randomUUID();
+      const memory = await write(() =>
+        intelligence.createMemory(
           ownerUserId,
-          ...parseMemoryInput(input),
-          reviewState: "confirmed",
-        })
-        .returning();
-      if (!row) throw new Error("Memory insert returned no row.");
-      await mirror(ownerUserId, row.id);
-      return row;
+          {
+            id,
+            content: parsed.content,
+            provenance: parsed.provenance,
+            enabled: parsed.enabled,
+            reviewState: "confirmed",
+            formedBy: "person",
+          },
+          memoryIdempotencyKey(`create:${id}`),
+        ),
+      );
+      cache.putMemory(ownerUserId, memory);
+      return toMemoryRecord(ownerUserId, memory);
     },
     /**
      * A memory a Bot formed from something it observed, awaiting the person's review.
      *
-     * Deduplicated on content per Bot, since each Bot is given only the memories it formed itself:
-     * a second Bot forming the same fact keeps its own row. Forgetting is the person's, so a fact
-     * they forgot from any Bot stays forgotten, even when a Bot reads the same record again
-     * tomorrow. It reaches Intelligence only once the person accepts it.
+     * Deduplicated on content per Bot, since each Bot is given only the memories it formed itself: a
+     * second Bot forming the same fact keeps its own. Forgetting is the person's, so a fact they forgot
+     * from any Bot stays forgotten, even when a Bot reads the same record again tomorrow. Intelligence
+     * decides both, race-safe: a forgotten fact from any Bot first, then this Bot's own.
      */
     async formMemory(ownerUserId: string, input: FormedMemoryInput) {
       const parsed = formedMemorySchema.safeParse({
@@ -396,38 +317,9 @@ export function createMemoryStore(
       const digest = createHash("sha256")
         .update(parsed.data.content.toLocaleLowerCase())
         .digest("hex");
-      const [existing] = await database
-        .select({
-          id: personalMemories.id,
-          deletedAt: personalMemories.deletedAt,
-        })
-        .from(personalMemories)
-        .where(
-          and(
-            eq(personalMemories.ownerUserId, ownerUserId),
-            eq(personalMemories.formedBy, "bot"),
-            eq(personalMemories.importDigest, digest),
-            or(
-              eq(personalMemories.formedByAgentId, input.agentId),
-              isNotNull(personalMemories.deletedAt),
-            ),
-          ),
-        )
-        // A forgotten row first, so another Bot's tombstone wins over this Bot's live row.
-        .orderBy(sql`${personalMemories.deletedAt} IS NULL`)
-        .limit(1);
-      if (existing)
-        return {
-          id: existing.id,
-          duplicate: true,
-          forgotten: !!existing.deletedAt,
-        };
-      const observedAt = parsed.data.observedAt ?? new Date();
-      const [row] = await database
-        .insert(personalMemories)
-        .values({
-          id: randomUUID(),
-          ownerUserId,
+      const observedAt = parsed.data.observedAt ?? new Date(now());
+      const memory = await write(() =>
+        intelligence.createMemory(ownerUserId, {
           content: parsed.data.content,
           provenance:
             `${parsed.data.sourceApp}${parsed.data.sourceLink ? ` (${parsed.data.sourceLink})` : ""}, observed ${observedAt.toISOString()}`.slice(
@@ -435,42 +327,23 @@ export function createMemoryStore(
               500,
             ),
           reviewState: "unreviewed",
-          formedBy: "bot",
+          formedBy: "agent",
+          // Who formed it, not who may see it: OpenBot keeps it to this Bot (`eligible`), and once the
+          // person confirms it every other app on the project reads it, as the mirror gave them before.
           formedByAgentId: input.agentId,
+          contentDigest: digest,
           sourceApp: parsed.data.sourceApp,
           sourceRef: input.sourceRef ?? null,
           sourceLink: parsed.data.sourceLink ?? null,
-          observedAt,
-          importDigest: digest,
-        })
-        .onConflictDoNothing({
-          target: [
-            personalMemories.ownerUserId,
-            personalMemories.formedByAgentId,
-            personalMemories.importDigest,
-          ],
-          where: sql`${personalMemories.formedBy} = 'bot'`,
-        })
-        .returning({ id: personalMemories.id });
-      if (row) return { id: row.id, duplicate: false, forgotten: false };
-      // Formed by a concurrent run between the check above and this insert.
-      const [raced] = await database
-        .select({
-          id: personalMemories.id,
-          deletedAt: personalMemories.deletedAt,
-        })
-        .from(personalMemories)
-        .where(
-          and(
-            eq(personalMemories.ownerUserId, ownerUserId),
-            eq(personalMemories.formedBy, "bot"),
-            eq(personalMemories.formedByAgentId, input.agentId),
-            eq(personalMemories.importDigest, digest),
-          ),
-        )
-        .limit(1);
-      if (!raced) throw new Error("Memory insert returned no row.");
-      return { id: raced.id, duplicate: true, forgotten: !!raced.deletedAt };
+          observedAt: observedAt.toISOString(),
+        }),
+      );
+      cache.putMemory(ownerUserId, memory);
+      return {
+        id: memory.id,
+        duplicate: memory.duplicate === true,
+        forgotten: !!memory.invalidatedAt,
+      };
     },
     async update(
       ownerUserId: string,
@@ -478,361 +351,415 @@ export function createMemoryStore(
       input: unknown,
     ): Promise<MemoryRecord> {
       const patch = parseMemoryPatch(input);
-      if (id.startsWith(INTELLIGENCE_ID_PREFIX)) {
-        // Intelligence keeps the content and nothing else, so there is nothing to pause or review.
+      const current = await memoryOf(ownerUserId, id);
+      if (isOtherApps(current)) {
+        // Another app's memory: its words can change here, but OpenBot does not pause or review it.
         if (patch.enabled !== undefined)
           throw new MemoryRefusedError(
             "A memory kept in CopilotKit Intelligence can be edited or forgotten, not paused.",
           );
-        const remoteId = id.slice(INTELLIGENCE_ID_PREFIX.length);
-        if (!patch.content) {
-          const current = (await intelligence?.list(ownerUserId))?.find(
-            (memory) => memory.id === remoteId,
-          );
-          if (!current) throw new MemoryNotFoundError();
-          return fromIntelligence(ownerUserId, current);
-        }
-        if (!intelligence || !(await intelligence.available()))
-          throw new MemoryUnavailableError();
-        const result = await intelligence.supersede(
-          ownerUserId,
-          remoteId,
-          patch.content,
-        );
-        if (result === "gone") throw new MemoryNotFoundError();
-        if (!result) throw new MemoryUnavailableError();
-        return fromIntelligence(ownerUserId, {
-          id: result,
-          content: patch.content,
-        });
+        if (!patch.content) return toMemoryRecord(ownerUserId, current);
       }
-      const [row] = await database
-        .update(personalMemories)
-        .set({
-          ...patch,
-          ...(patch.content ? { reviewState: "edited" as const } : {}),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(personalMemories.id, id),
-            eq(personalMemories.ownerUserId, ownerUserId),
-            isNull(personalMemories.deletedAt),
-          ),
-        )
-        .returning();
-      if (!row) throw new MemoryNotFoundError();
-      await mirror(ownerUserId, row.id);
-      return row;
+      const changed = await write(() =>
+        intelligence.updateMemory(
+          ownerUserId,
+          current.id,
+          isOtherApps(current)
+            ? { content: patch.content }
+            : {
+                ...(patch.content ? { content: patch.content } : {}),
+                ...(patch.enabled === undefined
+                  ? {}
+                  : { enabled: patch.enabled }),
+                // A person's words over an imported or observed fact are theirs: an edit marks it so,
+                // and the next import leaves them.
+                ...(patch.content
+                  ? { reviewState: "edited" as const }
+                  : patch.reviewState
+                    ? { reviewState: patch.reviewState }
+                    : {}),
+              },
+        ),
+      );
+      if (!changed) {
+        cache.invalidate(ownerUserId);
+        throw new MemoryNotFoundError();
+      }
+      cache.putMemory(ownerUserId, changed, changed.retiredId);
+      return toMemoryRecord(ownerUserId, changed);
     },
     async remove(ownerUserId: string, id: string) {
-      if (id.startsWith(INTELLIGENCE_ID_PREFIX)) {
-        if (!intelligence || !(await intelligence.available()))
-          throw new MemoryUnavailableError();
-        const remoteId = id.slice(INTELLIGENCE_ID_PREFIX.length);
-        // Only a memory of this person's that no row describes is forgotten by this id. A linked one
-        // is forgotten through its row, so its provenance and tombstone go with it.
-        if ((await linkedIds(ownerUserId)).has(remoteId))
-          throw new MemoryNotFoundError();
-        if (!(await intelligence.remove(ownerUserId, remoteId)))
-          throw new MemoryUnavailableError();
-        return;
-      }
-      // Imported tombstones prevent the next sync from resurrecting a fact the person deleted.
-      const [row] = await database
-        .update(personalMemories)
-        .set({
-          deletedAt: new Date(),
-          enabled: false,
-          content: "",
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(personalMemories.id, id),
-            eq(personalMemories.ownerUserId, ownerUserId),
-            isNull(personalMemories.deletedAt),
-          ),
-        )
-        .returning({ id: personalMemories.id });
-      if (!row) throw new MemoryNotFoundError();
-      await mirror(ownerUserId, row.id);
+      const current = await memoryOf(ownerUserId, id);
+      // A forgotten memory OpenBot formed stays as a blank tombstone, so the next sync cannot resurrect
+      // an imported fact the person deleted and no Bot forms it again. Another app's is retired as that
+      // app would.
+      const done = await write(() =>
+        intelligence.forgetMemory(ownerUserId, current.id, {
+          erase: !isOtherApps(current),
+        }),
+      );
+      cache.dropMemory(ownerUserId, current.id);
+      if (!done) throw new MemoryNotFoundError();
     },
-    /**
-     * Mirror out-of-step memories to Intelligence, oldest owners first: the backfill on the first
-     * pass after a deployment becomes entitled, and afterwards anything a failure left behind.
-     * Idempotent: a row is out of step until its Intelligence id and digest match its content.
-     */
-    async mirrorPending(limitPeople = 20) {
-      if (!intelligence || !(await intelligence.available())) return 0;
-      const owners = await database
-        .selectDistinct({ ownerUserId: personalMemories.ownerUserId })
-        .from(personalMemories)
-        .where(outOfStep)
-        .limit(limitPeople);
-      let mirrored = 0;
-      for (const { ownerUserId } of owners)
-        mirrored += await mirror(ownerUserId);
-      return mirrored;
+    async sources(ownerUserId: string): Promise<MemorySource[]> {
+      return (await person(ownerUserId)).sources
+        .map(toMemorySource)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     },
-    async sources(ownerUserId: string) {
-      return database
-        .select()
-        .from(memorySources)
-        .where(eq(memorySources.ownerUserId, ownerUserId))
-        .orderBy(desc(memorySources.createdAt));
+    async getSource(ownerUserId: string, id: string): Promise<MemorySource> {
+      return toMemorySource(await write(() => freshSource(ownerUserId, id)));
     },
-    getSource,
-    async createSource(ownerUserId: string, input: unknown) {
-      const [row] = await database
-        .insert(memorySources)
-        .values({
-          id: randomUUID(),
-          ownerUserId,
-          ...parseMemorySourceInput(input),
-        })
-        .returning();
-      if (!row) throw new Error("Memory source insert returned no row.");
-      return row;
+    async createSource(
+      ownerUserId: string,
+      input: unknown,
+    ): Promise<MemorySource> {
+      const parsed = parseMemorySourceInput(input);
+      const id = randomUUID();
+      const source = await write(() =>
+        intelligence.createSource(
+          {
+            id,
+            userId: ownerUserId,
+            agentId: parsed.agentId,
+            connectorRef: parsed.toolRef,
+            title: parsed.title,
+            settings: parsed.args,
+          },
+          memoryIdempotencyKey(`create-source:${id}`),
+        ),
+      );
+      cache.putSource(source);
+      return toMemorySource(source);
     },
     async setSourceEnabled(ownerUserId: string, id: string, enabled: boolean) {
-      const [row] = await database
-        .update(memorySources)
-        .set({ enabled, nextSyncAt: new Date(), updatedAt: new Date() })
-        .where(
-          and(
-            eq(memorySources.id, id),
-            eq(memorySources.ownerUserId, ownerUserId),
-          ),
-        )
-        .returning();
-      if (!row) throw new MemoryNotFoundError();
-      return row;
+      const source = await write(() =>
+        changeSource(ownerUserId, id, () => ({
+          enabled,
+          nextSyncAt: new Date(now()).toISOString(),
+        })),
+      );
+      if (!source) throw new MemoryUnavailableError();
+      return toMemorySource(source);
     },
+    /**
+     * Remove a source, and with it every memory imported from it. Removing a source is turning that app
+     * down for this Bot: OpenBot never adds it back. The opt-out is recorded FIRST, in the person's
+     * preferences in Intelligence; only then is the source deleted there. Adoption reads the sources
+     * before the opt-outs, so whichever it sees, it does not add the app back (defaults.ts).
+     */
     async removeSource(ownerUserId: string, id: string) {
-      // The source's memories cascade with it; retire their Intelligence copies first.
-      if (intelligence && (await intelligence.available())) {
-        const linked = await database
-          .select()
-          .from(personalMemories)
-          .where(
-            and(
-              eq(personalMemories.ownerUserId, ownerUserId),
-              eq(personalMemories.sourceId, id),
-              isNotNull(personalMemories.intelligenceMemoryId),
-            ),
-          );
-        for (const row of linked)
-          await mirrorRow(intelligence, {
-            ...row,
-            deletedAt: new Date(),
-            enabled: false,
-          }).catch(() => {});
-      }
-      const [source] = await database
-        .select({
-          agentId: memorySources.agentId,
-          toolRef: memorySources.toolRef,
-        })
-        .from(memorySources)
-        .where(
-          and(
-            eq(memorySources.id, id),
-            eq(memorySources.ownerUserId, ownerUserId),
-          ),
-        )
-        .limit(1);
-      if (!source) throw new MemoryNotFoundError();
-      // Removing a source is turning that app down for this Bot: OpenBot never adds it back. Said in
-      // Intelligence before the row goes, so no adoption on any replica can bring it back between
-      // the two (memory/defaults.ts).
+      const source = await write(() => freshSource(ownerUserId, id));
+      // Said in the person's preferences in Intelligence before the source goes, so no adoption on any
+      // replica can bring it back between the two (memory/defaults.ts).
       await recordOptOut({
         ownerUserId,
-        agentId: source.agentId,
+        agentId: source.agentId ?? "",
         feature: "memory_source",
-        scope: sourceServerId(source.toolRef),
+        scope: sourceServerId(source.connectorRef),
       });
-      await database.transaction(async (transaction) => {
-        await lockDefaults(transaction, ownerUserId, source.agentId);
-        const [row] = await transaction
-          .delete(memorySources)
-          .where(
-            and(
-              eq(memorySources.id, id),
-              eq(memorySources.ownerUserId, ownerUserId),
-            ),
-          )
-          .returning({ toolRef: memorySources.toolRef });
-        if (!row) throw new MemoryNotFoundError();
-      });
+      const deleted = await write(() => intelligence.deleteSource(id));
+      cache.dropSource(ownerUserId, id);
+      if (!deleted) throw new MemoryNotFoundError();
     },
-    async dueSources(limit = 5) {
-      return database
-        .select()
-        .from(memorySources)
-        .where(
-          and(
-            eq(memorySources.enabled, true),
-            lte(memorySources.nextSyncAt, new Date()),
-          ),
+    /** This person's sources for one Bot, read fresh from Intelligence (not this instance's copy). */
+    async sourcesFor(
+      ownerUserId: string,
+      agentId: string,
+    ): Promise<MemorySource[]> {
+      return (await intelligence.sources({ userId: ownerUserId, agentId })).map(
+        toMemorySource,
+      );
+    },
+    /**
+     * Switch on the source OpenBot picked for one app by default. Its id is made from the person, the Bot
+     * and the app, so two instances adopting the same default at once make one source, not two. Null when
+     * that id already names a different source (the person's own, made since).
+     */
+    async adoptSource(
+      ownerUserId: string,
+      agentId: string,
+      candidate: { serverId: string; toolRef: string; title: string },
+    ): Promise<MemorySource | null> {
+      const id = `default-${createHash("sha256")
+        .update(`${ownerUserId}\n${agentId}\n${candidate.serverId}`)
+        .digest("hex")
+        .slice(0, 40)}`;
+      try {
+        const source = await intelligence.createSource(
+          {
+            id,
+            userId: ownerUserId,
+            agentId,
+            connectorRef: candidate.toolRef,
+            title: candidate.title,
+            settings: {},
+          },
+          // A fresh key: the same default made again after a reset is a new source, not a replay. Two
+          // instances adopting it at once meet on the id instead.
+          memoryIdempotencyKey("adopt-source"),
+        );
+        cache.putSource(source);
+        return toMemorySource(source);
+      } catch (error) {
+        if (
+          error instanceof MemoryIntelligenceError &&
+          error.code === "MEMORY_SOURCE_ALREADY_EXISTS"
         )
-        .limit(Math.min(limit, 10));
+          return null;
+        throw error;
+      }
     },
-    async claimSync(ownerUserId: string, id: string) {
-      const now = new Date();
-      const [row] = await database
-        .update(memorySources)
-        .set({
+    /** Sources due to sync, across everyone. Background work: read from Intelligence. */
+    async dueSources(limit = 5): Promise<MemorySource[]> {
+      const due = await intelligence.sources({
+        enabled: true,
+        dueBefore: new Date(now()),
+        limit: Math.min(limit, 10),
+      });
+      return due.map(toMemorySource);
+    },
+    /**
+     * Claim a source's sync: switched on, and not already running unless its lease ran out. Of two
+     * claimants only one succeeds (Intelligence refuses the other's stale version).
+     */
+    async claimSync(
+      ownerUserId: string,
+      id: string,
+    ): Promise<MemorySource | null> {
+      const at = now();
+      const source = await freshSource(ownerUserId, id).catch((error) => {
+        if (error instanceof MemoryNotFoundError) return null;
+        throw error;
+      });
+      if (
+        !source?.enabled ||
+        (source.syncStatus === "running" &&
+          new Date(source.nextSyncAt).getTime() > at)
+      )
+        return null;
+      const claimed = await intelligence.updateSource(
+        id,
+        {
           syncStatus: "running",
-          nextSyncAt: new Date(now.getTime() + 120_000),
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(memorySources.id, id),
-            eq(memorySources.ownerUserId, ownerUserId),
-            eq(memorySources.enabled, true),
-            or(
-              sql`${memorySources.syncStatus} <> 'running'`,
-              lte(memorySources.nextSyncAt, now),
-            ),
-          ),
-        )
-        .returning();
-      return row ?? null;
+          nextSyncAt: new Date(at + SYNC_LEASE_MS).toISOString(),
+        },
+        source.version,
+      );
+      if (!claimed || claimed === "stale") return null;
+      cache.putSource(claimed);
+      return toMemorySource(claimed);
     },
     async failSync(ownerUserId: string, id: string, error: string) {
-      await database
-        .update(memorySources)
-        .set({
-          syncStatus: "error",
-          syncError: error.slice(0, 500),
-          nextSyncAt: new Date(Date.now() + 900_000),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(memorySources.id, id),
-            eq(memorySources.ownerUserId, ownerUserId),
-          ),
-        );
+      await changeSource(ownerUserId, id, () => ({
+        syncStatus: "error",
+        syncError: error.slice(0, 500),
+        nextSyncAt: new Date(now() + SYNC_INTERVAL_MS).toISOString(),
+      })).catch((failure) => {
+        if (failure instanceof MemoryNotFoundError) return null;
+        throw failure;
+      });
     },
+    /**
+     * Bring in what a sync read. Intelligence upserts each record by its id in the source: a new one is
+     * imported unreviewed, an unchanged one is left, and a changed one is refreshed unless the person
+     * edited or forgot it (whose words stay; its provenance is refreshed).
+     */
     async completeSync(
       ownerUserId: string,
       sourceId: string,
       records: ImportedMemory[],
     ) {
-      await database.transaction(async (transaction) => {
-        const [source] = await transaction
-          .select()
-          .from(memorySources)
-          .where(
-            and(
-              eq(memorySources.id, sourceId),
-              eq(memorySources.ownerUserId, ownerUserId),
-              eq(memorySources.enabled, true),
-            ),
-          )
-          .for("update");
-        if (!source) throw new MemoryNotFoundError();
-        for (const record of records) {
-          await transaction
-            .insert(personalMemories)
-            .values({
-              id: randomUUID(),
-              ownerUserId,
-              sourceId,
-              externalId: record.externalId,
-              importDigest: record.digest,
-              content: record.content,
-              provenance: `${source.title}: ${record.provenance}`,
-              formedBy: "import",
-              sourceApp: source.title,
-              sourceRef: source.toolRef,
-              observedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: [personalMemories.sourceId, personalMemories.externalId],
-              set: {
-                content: sql`CASE WHEN ${personalMemories.reviewState} = 'edited' OR ${personalMemories.deletedAt} IS NOT NULL THEN ${personalMemories.content} ELSE ${record.content} END`,
-                provenance: `${source.title}: ${record.provenance}`,
-                importDigest: record.digest,
-                updatedAt: new Date(),
-              },
-              setWhere: sql`${personalMemories.importDigest} IS DISTINCT FROM ${record.digest}`,
-            });
-        }
-        await transaction
-          .update(memorySources)
-          .set({
-            syncStatus: "succeeded",
-            syncError: null,
-            lastSyncAt: new Date(),
-            nextSyncAt: new Date(Date.now() + 900_000),
-            updatedAt: new Date(),
-          })
-          .where(eq(memorySources.id, sourceId));
-      });
-      // A confirmed import whose content changed upstream is out of step now; mirror it.
-      await mirror(ownerUserId);
+      const source = await freshSource(ownerUserId, sourceId);
+      if (!source.enabled) throw new MemoryNotFoundError();
+      const observedAt = new Date(now()).toISOString();
+      const results = await intelligence.importRecords(
+        ownerUserId,
+        sourceId,
+        records.map((record) => ({
+          externalId: record.externalId,
+          content: record.content,
+          contentDigest: record.digest,
+          provenance: `${source.title}: ${record.provenance}`.slice(0, 1000),
+          sourceApp: source.title,
+          sourceRef: source.connectorRef,
+          observedAt,
+        })),
+        { reviewState: "unreviewed" },
+      );
+      if (!results) throw new MemoryNotFoundError();
+      await changeSource(ownerUserId, sourceId, () => ({
+        syncStatus: "succeeded",
+        syncError: null,
+        lastSyncAt: new Date(now()).toISOString(),
+        nextSyncAt: new Date(now() + SYNC_INTERVAL_MS).toISOString(),
+      }));
+      // What was imported reaches this instance's copy on the person's next turn.
+      cache.invalidate(ownerUserId);
     },
     async retrieve(
       ownerUserId: string,
       eligibleSourceIds: string[],
       search = "",
       /**
-       * The Bot asking and the app servers it currently holds. Bot-formed memories are returned
-       * only to the Bot that formed them, and only while it still holds their source app; without
-       * this argument none are returned.
+       * The Bot asking and the app servers it currently holds. Bot-formed memories are returned only to
+       * the Bot that formed them, and only while it still holds their source app; without this argument
+       * none are returned.
        */
       formed?: { botId: string; heldServerIds: ReadonlySet<string> },
     ): Promise<MemoryRecord[]> {
-      const term = search.trim();
-      const local = await eligibleRows(ownerUserId, eligibleSourceIds, formed, {
-        term,
-      });
-      if (!intelligence) return local;
-      if (term) {
-        /*
-         * Ranked by Intelligence, filtered by the rows. A recalled memory a row describes reaches
-         * this Bot only if that row is one this Bot may recall; one no row describes is the
-         * person's own. The substring matches from the rows follow, for anything recall missed.
-         */
-        const recalled = await intelligence.recall(ownerUserId, term, 20);
-        if (!recalled) return local;
-        const allowed = await eligibleRows(
-          ownerUserId,
-          eligibleSourceIds,
-          formed,
-          { intelligenceIds: recalled.map((memory) => memory.id) },
-        );
-        const byRemote = new Map(
-          allowed.map((row) => [row.intelligenceMemoryId, row]),
-        );
-        const unlinked = new Set(
-          (await intelligenceOnly(ownerUserId, recalled)).map(
-            (memory) => memory.intelligenceMemoryId,
-          ),
-        );
-        const ranked: MemoryRecord[] = recalled.flatMap((memory) => {
-          const row = byRemote.get(memory.id);
-          if (row) return [row];
-          return unlinked.has(memory.id)
-            ? [fromIntelligence(ownerUserId, memory)]
-            : [];
-        });
-        const seen = new Set(ranked.map((memory) => memory.id));
-        return [
-          ...ranked,
-          ...local.filter((memory) => !seen.has(memory.id)),
-        ].slice(0, 40);
+      const term = search.trim().toLocaleLowerCase();
+      const allowed = eligible(
+        (await person(ownerUserId)).memories,
+        ownerUserId,
+        eligibleSourceIds,
+        formed,
+      );
+      // OpenBot's own first, newest first, then up to 20 another app wrote for the person.
+      const own = allowed
+        .filter((memory) => memory.formedBy !== "intelligence")
+        .sort(newestFirst);
+      const others = allowed
+        .filter((memory) => memory.formedBy === "intelligence")
+        .sort(newestFirst);
+      if (!term)
+        return [...own.slice(0, 40), ...others.slice(0, 20)].slice(0, 40);
+      const matching = [...own, ...others].filter((memory) =>
+        memory.content.toLocaleLowerCase().includes(term),
+      );
+      /*
+       * Ranked by Intelligence when it recalls semantically, filtered by these rules: a recalled memory
+       * reaches this Bot only if this Bot may recall it. The word matches follow, for anything recall
+       * missed. Without semantic recall, the word matches alone, as before.
+       */
+      const ranked: MemoryRecord[] = [];
+      if (!semantic || semantic.until <= now() || semantic.hybrid) {
+        try {
+          const recalled = await intelligence.recall(ownerUserId, term, {
+            limit: 20,
+            ...(formed ? { agentId: formed.botId } : {}),
+          });
+          semantic = {
+            hybrid: recalled.mode === "hybrid",
+            until: now() + MODE_TTL_MS,
+          };
+          if (recalled.mode === "hybrid") {
+            const byId = new Map(allowed.map((memory) => [memory.id, memory]));
+            for (const memory of recalled.memories) {
+              const record = byId.get(memory.id);
+              if (record) ranked.push(record);
+            }
+          }
+        } catch (error) {
+          // Recall ranks; the word matches still answer without it.
+          semantic = { hybrid: false, until: now() + 60_000 };
+          console.warn(
+            JSON.stringify({
+              type: "memory-recall-error",
+              error: error instanceof Error ? error.message : String(error),
+              timestamp: new Date(now()).toISOString(),
+            }),
+          );
+        }
       }
-      const remote = await intelligence.list(ownerUserId);
-      if (!remote) return local;
+      const seen = new Set(ranked.map((memory) => memory.id));
       return [
-        ...local,
-        ...(await intelligenceOnly(ownerUserId, remote)).slice(0, 20),
+        ...ranked,
+        ...matching.filter((memory) => !seen.has(memory.id)),
       ].slice(0, 40);
+    },
+    /**
+     * Remove a person's memory for good, when OpenBot removes the person: their sources (and what they
+     * imported) and every memory of theirs. The old tables' foreign keys took these with the person.
+     */
+    async forgetPerson(ownerUserId: string) {
+      await intelligence.purgeSources({ userId: ownerUserId });
+      await intelligence.purgePerson(ownerUserId);
+      cache.forget(ownerUserId);
+    },
+    /**
+     * Remove a Bot's memory for good, when the Bot is purged: the sources bound to it (and what they
+     * imported) and every memory it formed, for everyone.
+     */
+    async forgetBot(botId: string) {
+      await intelligence.purgeSources({ agentId: botId });
+      await intelligence.purgeAgent(botId);
+      cache.forget();
+    },
+    /**
+     * At boot: the memory of every Bot purged while no instance was running to hear it. A Bot is found by
+     * the sources bound to it, read BEFORE the Bots are listed (as `sweepPurgedBotRows` reads its rows
+     * first), so a Bot made between the two reads is never taken for a purged one.
+     */
+    async sweepPurgedBots(
+      listAll: () => Promise<Iterable<{ id: string }>>,
+    ): Promise<string[]> {
+      const named = new Set(
+        (await intelligence.sources({}))
+          .map((source) => source.agentId)
+          .filter((id): id is string => !!id),
+      );
+      if (named.size === 0) return [];
+      const known = new Set<string>();
+      for (const bot of await listAll()) known.add(bot.id);
+      const gone = [...named].filter((id) => !known.has(id));
+      for (const botId of gone) {
+        await intelligence.purgeSources({ agentId: botId });
+        await intelligence.purgeAgent(botId);
+      }
+      if (gone.length > 0) {
+        cache.forget();
+        console.warn(
+          JSON.stringify({
+            type: "bot-memory-swept",
+            note: "Memory sources named Bots that Intelligence no longer has; they and those Bots' memories were removed.",
+            bots: gone,
+          }),
+        );
+      }
+      return gone;
+    },
+    /**
+     * What resetting one Bot for one person removes of their memory: its sources (with the memories they
+     * imported) and the memories it formed itself. Read from Intelligence, not this instance's copy.
+     */
+    async botResetPlan(ownerUserId: string, agentId: string) {
+      const [sources, memories] = await Promise.all([
+        intelligence.sources({ userId: ownerUserId, agentId }),
+        intelligence.allMemories(ownerUserId),
+      ]);
+      const sourceIds = new Set(sources.map((source) => source.id));
+      return {
+        sources: sources.map(toMemorySource),
+        importedMemories: memories.filter(
+          (memory) =>
+            memory.sourceId !== null &&
+            sourceIds.has(memory.sourceId) &&
+            !memory.invalidatedAt,
+        ).length,
+        formedMemoryIds: memories
+          .filter(
+            (memory) =>
+              memory.formedBy === "agent" &&
+              (memory.formedByAgentId ?? memory.agentId) === agentId &&
+              memory.sourceId === null &&
+              !memory.invalidatedAt,
+          )
+          .map((memory) => memory.id),
+      };
+    },
+    /** Carry out {@link botResetPlan}'s removals in Intelligence. */
+    async resetBot(
+      ownerUserId: string,
+      plan: { sources: MemorySource[]; formedMemoryIds: string[] },
+    ) {
+      for (const source of plan.sources)
+        await intelligence.deleteSource(source.id);
+      let formed = 0;
+      for (const id of plan.formedMemoryIds)
+        if (await intelligence.forgetMemory(ownerUserId, id, { purge: true }))
+          formed += 1;
+      cache.forget(ownerUserId);
+      return formed;
     },
   };
 }

@@ -120,6 +120,7 @@ import {
 import {
   loadAttachmentForTurn,
   markAttachmentsSent,
+  stagedAttachmentTtlHours,
 } from "./channels/attachments";
 import {
   createChannelEventHub,
@@ -193,6 +194,11 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
+import { createFilesClient, installFilesClient } from "./files/client";
+import {
+  copyLocalAttachmentsToIntelligence,
+  copyLocalPageFramesToIntelligence,
+} from "./files/upgrade";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -203,6 +209,7 @@ import { githubCallbackRoutes } from "./identity/github-callback";
 import { retireIdentityLinks, retireOwnedAccounts } from "./identity/retire";
 import { slackCodeRedeemer } from "./identity/slack-redeem";
 import { createIdentityStore } from "./identity/store";
+import { createProjectChangesClient } from "./intelligence/project-changes";
 import {
   createIntelligenceClient,
   observeIntelligenceAuthentication,
@@ -213,6 +220,7 @@ import {
   probeLearningContainer,
   withLearningAutoAssign,
 } from "./learning/auto-assign";
+import { createLearningChanges } from "./learning/changes";
 import {
   cliLoginPresent,
   createLearningContainer,
@@ -222,6 +230,7 @@ import {
   type LearningContainerCredentials,
   learningSetupInstructions,
 } from "./learning/ensure-container";
+import { createLearningIntelligence } from "./learning/intelligence";
 import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
@@ -232,10 +241,13 @@ import {
   createLearningSharingStore,
   createOpenSkillIndex,
 } from "./learning/sharing";
+import { copyLocalLearningToIntelligence } from "./learning/upgrade";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
+import { createMemoryCache } from "./memory/cache";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
+import { copyLocalMemoryToIntelligence } from "./memory/upgrade";
 import { memoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
@@ -285,6 +297,7 @@ import {
 import { checkInToolsFor, createCheckInScope } from "./proactive/scope";
 import { createProactiveStore } from "./proactive/store";
 import { createProviderOAuthProxy } from "./provider-oauth";
+import { createTrajectoryBindingStore } from "./recorder/trajectory-bindings";
 import { createRecorderExtension } from "./recorder/wiring";
 import { createRequestActor } from "./request-actor";
 import { createResponsibilityBindingStore } from "./responsibilities/bindings";
@@ -340,8 +353,25 @@ const profileStore = createProfileStore(database);
 // Every dispatch point asks whether its person paused the Bot, from the preferences this instance
 // holds of Intelligence's. See agents/lifecycle.ts.
 configureBotLifecycle({ pauses: configuredPauses });
+/*
+ * Learning settings and pointers live in Intelligence's Learning assignments (learning/intelligence.ts): the Admin
+ * settings, each thread's container, each person's space and sharing choice, and whose each Recorder trajectory is. The
+ * settings and the open-Skill index are read on every run, so each instance holds them in memory, kept fresh by
+ * Intelligence's `learning_changes` announcements and a timer.
+ */
+const learningIntelligence = createLearningIntelligence({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
+const learningChanges = createLearningChanges({
+  client: createProjectChangesClient({
+    apiUrl: config.runtime.intelligence.apiUrl,
+    apiKey: config.runtime.intelligence.apiKey,
+  }),
+  gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+});
 const learningSettingsStore = createLearningSettingsStore(
-  database,
+  learningIntelligence,
   config.learning,
 );
 // Its own client, like the self-host banner's: the constructor opens nothing.
@@ -407,7 +437,7 @@ const learningAutoAssign = createLearningAutoAssign({
 const personalLearningSpaces = createPersonalLearningSpaces({
   readSettings: () => learningSettingsStore.read(),
   snapshots: learningProbeIntelligence,
-  store: createPersonSpaceStore(database),
+  store: createPersonSpaceStore(learningIntelligence, learningChanges),
   ...(learningCanCreate && learningApiOrigin
     ? {
         create: (container) =>
@@ -426,15 +456,25 @@ const personalLearningSpaces = createPersonalLearningSpaces({
         .limit(1)
     ).map((row) => row.name?.trim() || null)[0] ?? null,
 });
-const learningSharingStore = createLearningSharingStore(database);
+const learningSharingStore = createLearningSharingStore(learningIntelligence, {
+  // A change saved here is in this instance's index before the Settings route answers.
+  onSaved: (space) => openSkillIndex.apply(space),
+});
 /** What everyone opened to every Bot, in memory: runs read this, never each person's space or the table. */
 const openSkillIndex = createOpenSkillIndex({
   read: () => learningSharingStore.openSources(),
+  readOne: (userId) => learningIntelligence.personalSpace(userId),
 });
 const learningSettings = withLearningAutoAssign(
   learningSettingsStore,
   learningAutoAssign,
 );
+// An upgraded deployment's Learning settings and pointers, copied from the local tables once (learning/upgrade.ts).
+await copyLocalLearningToIntelligence(database, learningIntelligence);
+learningChanges.start();
+// Fatal when Intelligence cannot answer, as the Bot directory is: every run reads these settings.
+await learningSettingsStore.start(learningChanges);
+openSkillIndex.start(learningChanges);
 learningAutoAssign.start();
 await initializeDevActorUser(database, config.singleUser);
 /*
@@ -457,6 +497,21 @@ botDirectory.onPurged((botId) => removeBotLocalRows(database, [botId]));
 await botDirectory.start();
 // An upgraded deployment's Bots, copied from the local tables once (agents/bot-registry/upgrade.ts).
 await copyLocalBotsToIntelligence(database, botDirectory);
+/*
+ * Chat attachments and the screenshots browser turns keep live in Intelligence's file store
+ * (files/client.ts). Installed before anything serves or reads one, and an upgraded deployment's
+ * files copied in from the local tables once (files/upgrade.ts), loud when any is missing.
+ */
+installFilesClient(
+  createFilesClient({
+    apiUrl: config.runtime.intelligence.apiUrl,
+    apiKey: config.runtime.intelligence.apiKey,
+  }),
+);
+await copyLocalAttachmentsToIntelligence(database, {
+  stagedTtlHours: stagedAttachmentTtlHours(process.env),
+});
+await copyLocalPageFramesToIntelligence(database);
 // Rows naming a Bot purged while no instance was running to hear it. After the copy: before it, an
 // upgrading deployment's own Bots are not in Intelligence yet.
 await sweepPurgedBotRows(
@@ -520,6 +575,29 @@ await sweepPurgedBotPolicy(
   async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
   botStillGone,
 );
+/*
+ * Each person's memories and memory sources live in Intelligence (memory/intelligence.ts), on every plan.
+ * Every turn reads them, so each instance holds a person's memory once read, kept fresh by Intelligence's
+ * `memory_changes` announcements and a timer (memory/cache.ts). An upgraded deployment's memory is copied
+ * in from the local tables once (memory/upgrade.ts), after its Bots and after the rows of Bots purged
+ * meanwhile are swept, loud when any is missing.
+ */
+const memoryIntelligence = createIntelligenceMemory({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
+await copyLocalMemoryToIntelligence(database, memoryIntelligence);
+const memoryCache = createMemoryCache({
+  intelligence: memoryIntelligence,
+  changes: {
+    client: createProjectChangesClient({
+      apiUrl: config.runtime.intelligence.apiUrl,
+      apiKey: config.runtime.intelligence.apiKey,
+    }),
+    gatewayWsUrl: config.runtime.intelligence.gatewayWsUrl,
+  },
+});
+memoryCache.start();
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
@@ -749,7 +827,7 @@ const componentCatalog = headlessComponentCatalog({
   audit: auditSink(bootAuditStore),
 });
 // One store: the gateway writes through it, a route reads it, and the sweep below takes the old ones out.
-const pageFrameStore = createPageFrameStore(database);
+const pageFrameStore = createPageFrameStore();
 let deliveryNotifications: (
   scope: DeliveryScope,
   input: {
@@ -1481,14 +1559,18 @@ const hostAccessBroker = createHostAccessBroker(Date.now, {
 // grant, the policy and the audit row are exactly where they were. Host-folder tools are also
 // server-dispatched: the selected Bot and the signed-in owner are bound here, then the desktop worker
 // receives only opaque grant ids and relative paths.
-// Memory lives in CopilotKit Intelligence when this deployment is entitled to it, and in OpenBot's own
-// tables when it is not; see memory/store.ts. Its own client, like the thread reader's: the
-// constructor opens nothing.
+// Memory lives in CopilotKit Intelligence; see memory/store.ts.
 const personalMemoryStore = createMemoryStore(database, {
-  intelligence: createIntelligenceMemory({
-    client: createIntelligenceClient(config.runtime.intelligence),
-  }),
+  intelligence: memoryIntelligence,
+  cache: memoryCache,
 });
+// A Bot deleted for good takes the memory sources bound to it and the memories it formed, as the old
+// foreign keys did.
+botDirectory.onPurged((botId) => personalMemoryStore.forgetBot(botId));
+// And of a Bot purged while no instance was running to hear it.
+await personalMemoryStore.sweepPurgedBots(
+  async () => (await botDirectory.registry.all({ includeDeleted: true })).bots,
+);
 const recorderExtension = createRecorderExtension({
   config,
   database,
@@ -1496,6 +1578,7 @@ const recorderExtension = createRecorderExtension({
   roleRepository,
   peopleStore,
   personalSpaces: personalLearningSpaces,
+  trajectoryBindings: createTrajectoryBindingStore(learningIntelligence),
   auditStore: bootAuditStore,
   ...(betterAuth
     ? { sessionLifetimeMs: await sessionLifetimeMs(betterAuth) }
@@ -1574,6 +1657,7 @@ const deliveryScopeFor: DeliveryScopeResolver = async (
 const memoryDefaults = createMemoryDefaults({
   database,
   ingestion: memoryIngestion,
+  memory: personalMemoryStore,
   sources: config.memoryDefaults.sources,
   research: config.memoryDefaults.research,
   channelBots: async (ownerUserId, channelId) =>
@@ -1602,20 +1686,6 @@ const memorySweep = repeatAfterEach(async () => {
         type: "memory-sweep-error",
         error: error instanceof Error ? error.name : "UnknownError",
         context: { operation: "syncDue" },
-        timestamp: new Date().toISOString(),
-      }),
-    );
-  }
-  // Mirror to Intelligence what is out of step: the backfill on the first passes after a deployment
-  // becomes entitled, and afterwards whatever an outage left behind. A no-op without Intelligence.
-  try {
-    await personalMemoryStore.mirrorPending();
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "memory-sweep-error",
-        error: error instanceof Error ? error.name : "UnknownError",
-        context: { operation: "mirrorPending" },
         timestamp: new Date().toISOString(),
       }),
     );
@@ -2991,6 +3061,7 @@ const app = createApp(
         database,
         softDeleteChannel: (actor, channelId) =>
           channelStore.softDelete(actor, channelId),
+        memory: personalMemoryStore,
       }),
       activity: createActivityStore(database),
       wakeUps: wakeUpStore,
@@ -3037,6 +3108,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     wakeUpSweep.stop();
     wakeUpReaper.stop();
     memorySweep.stop();
+    memoryCache.stop();
     proactiveSweep.stop();
     taskSweep.stop();
     approvalSweep.stop();

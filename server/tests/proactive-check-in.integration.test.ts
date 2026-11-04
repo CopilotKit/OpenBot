@@ -39,7 +39,6 @@ import { botTasks } from "../src/db/schema/tasks";
 import { workItems } from "../src/db/schema/work";
 import { createDeliveryRouter } from "../src/delivery/router";
 import { createDeliveryStore } from "../src/delivery/store";
-import { createMemoryStore } from "../src/memory/store";
 import { createPluginStore } from "../src/plugins/store";
 import type { ProactiveAdmin, TaskService } from "../src/proactive/contracts";
 import {
@@ -69,6 +68,7 @@ import {
 } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { useTestPolicy } from "./support/policy";
+import { testMemory } from "./support/memory";
 
 /*
  * Check-ins and pings through the real path: real Postgres, the real proactive and delivery stores,
@@ -107,7 +107,7 @@ const plugins = createPluginStore({
   callVendor: async () => ({ text: "[]", isError: false }),
 });
 const store = createProactiveStore(database);
-const memory = createMemoryStore(database);
+const memory = testMemory(database).store;
 const queue = createWorkQueue(database);
 const deliveries = createDeliveryStore(database);
 const router = createDeliveryRouter({

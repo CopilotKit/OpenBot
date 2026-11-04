@@ -531,9 +531,12 @@ below, and [docs/routines.md](../../docs/routines.md).
 A third CronJob **deletes data, is on by default, and is the only one of the three that does**:
 `attachments.culler` sweeps staged attachments that were never sent. A file uploaded into the
 composer is stored the moment it is pasted or dropped, before anybody presses send — so closing the
-tab, or changing your mind, leaves bytes in the database that no message will ever point at. The
-sweep removes those, hourly (`attachments.culler.schedule`), once they are older than
-`attachments.culler.olderThanHours` — **24 hours by default**.
+tab, or changing your mind, leaves bytes that no message will ever point at. Staged attachments now
+live in Intelligence's file store, and the API stores each one with an expiry of
+`attachments.culler.olderThanHours` — **24 hours by default** — after which Intelligence deletes it
+(the chart passes the window as `OPENBOT_STAGED_ATTACHMENT_TTL_HOURS`). The CronJob itself sweeps,
+hourly (`attachments.culler.schedule`), the unsent rows left in this deployment's own `attachments`
+table from before attachments moved, which is kept unwritten for one release.
 
 It is on by default where the other two are off, because it needs nothing but the database that
 every deployment already has, and because the alternative is a table of blobs that only grows. What
