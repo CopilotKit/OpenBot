@@ -1,14 +1,12 @@
 /** One part of setup, named for what it is about rather than counted. */
-export type Section = "Account" | "Bot" | "Install" | "AI" | "Start";
+export type Section = "Account" | "Install" | "AI" | "Start";
 
 /*
- * A local first run signs in to CopilotKit first; a hosted one picks its Bot first. Both then
- * install, connect an AI, and start. A section can hold several screens (Account is the sign-in and
- * then the agreement), which is why these are names and not "Step 1 of 4": a step that holds two
- * steps reads as a miscount.
+ * Setup signs in to CopilotKit, installs, connects an AI, and starts. A section can hold several
+ * screens (Account is the sign-in and then the agreement), which is why these are names and not
+ * "Step 1 of 4": a step that holds two steps reads as a miscount.
  */
-const LOCAL: Section[] = ["Account", "Install", "AI", "Start"];
-const HOSTED: Section[] = ["Bot", "Install", "AI", "Start"];
+const SECTIONS: Section[] = ["Account", "Install", "AI", "Start"];
 
 /**
  * Where you are in setup, and what is left: every section by name, the current one marked.
@@ -17,8 +15,8 @@ const HOSTED: Section[] = ["Bot", "Install", "AI", "Start"];
  * step that signs in to a CopilotKit account. The name is decoration here: the window's title
  * already says it, so it is hidden from assistive technology rather than read on every screen.
  */
-export function Sections({ local, at }: { local: boolean; at: Section }) {
-  const names = local ? LOCAL : HOSTED;
+export function Sections({ at }: { at: Section }) {
+  const names = SECTIONS;
   const current = names.indexOf(at);
   return (
     <div className="setup-header">

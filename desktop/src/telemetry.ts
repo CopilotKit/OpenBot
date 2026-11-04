@@ -3,7 +3,6 @@ import type { ModelChoice } from "./ProviderPicker";
 
 export type SetupStep =
   | "welcome"
-  | "harness"
   | "install"
   | "account"
   | "model"

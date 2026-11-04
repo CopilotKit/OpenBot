@@ -75,16 +75,6 @@ struct Shell {
     containers: Mutex<Option<ContainerDeployment>>,
     /// A verified down allows a following Stop/Quit to be an idempotent no-op.
     stopped_container_root: Mutex<Option<PathBuf>>,
-    /// An Intelligence sign-in waiting for its loopback callback.
-    signing_in_to_intelligence:
-        Mutex<Option<openbot_desktop_lib::intelligence::SigningInToIntelligence>>,
-    /// The credential that sign-in produced, held so a project can be chosen with it.
-    intelligence_credential: Mutex<Option<String>>,
-    /// Proof that this runtime key's project has the default Learning container.
-    intelligence_learning: Mutex<Option<openbot_desktop_lib::intelligence::ProvisionedConnection>>,
-    self_hosted_intelligence:
-        Mutex<Option<std::sync::Arc<openbot_desktop_lib::self_hosted_intelligence::SigningIn>>>,
-    self_hosted_sign_in_generation: std::sync::atomic::AtomicU64,
     /// A ChatGPT sign-in waiting for the browser redirect to complete it.
     ///
     /// Held for the same reason the Claude one is: a person leaves and comes back in the middle.
@@ -257,7 +247,6 @@ struct SavedModelSessions {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedConfiguration {
-    intelligence_api_key: Option<bool>,
     model_api_keys: SavedModelApiKeys,
     model_sessions: SavedModelSessions,
     model: Option<openbot_desktop_lib::saved_intent::ModelIntent>,
@@ -454,21 +443,7 @@ fn report_downloads<R: tauri::Runtime>(
     );
 }
 
-fn cancel_self_hosted_sign_in(shell: &Shell) {
-    shell
-        .self_hosted_sign_in_generation
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let signing = shell.self_hosted_intelligence.lock().unwrap().take();
-    if let Some(signing) = signing {
-        signing.cancel();
-    }
-}
-
 fn remember_selected_root(shell: &Shell, root: &Path) {
-    let changed = shell.selected_root.lock().unwrap().as_deref() != Some(root);
-    if changed {
-        cancel_self_hosted_sign_in(shell);
-    }
     *shell.selected_root.lock().unwrap() = Some(root.to_path_buf());
 }
 
@@ -685,8 +660,8 @@ async fn prepare_installation(
          * OpenBot is pulling images and nothing else. This step used to download Bun and install
          * the app's packages here, on every machine, and on a fresh Windows machine that took longer
          * than everything else in the install together: Defender scans each of the thousands of
-         * small files it writes. The one thing on the host that still needs them, the self-hosted
-         * Intelligence sign-in helper, prepares them itself the first time somebody uses it.
+         * small files it writes. The one thing on the host that still needs them, the person's own
+         * browser, has them prepared by the first Start that runs it.
          */
         report_running(
             &handle,
@@ -1281,68 +1256,21 @@ fn saved_secret(root: &Path, key: &str) -> Result<String, Problem> {
         .map(|found| found.get(key).cloned().unwrap_or_default())
 }
 
+/// The key `local connect` gave OpenBot for its local Intelligence stack, from the credential store.
 fn intelligence_key_for_start(
     root: &Path,
-    given: String,
     mut resolve: impl FnMut(&Path, &str) -> Result<String, Problem>,
 ) -> Result<String, Problem> {
-    let key = if given.trim().is_empty() {
-        resolve(root, "INTELLIGENCE_API_KEY").map_err(|problem| {
-            problem.connection(openbot_desktop_lib::problem::Connection::Intelligence)
-        })?
-    } else {
-        given
-    };
+    let key = resolve(root, "INTELLIGENCE_API_KEY").map_err(|problem| {
+        problem.connection(openbot_desktop_lib::problem::Connection::Intelligence)
+    })?;
     if key.trim().is_empty() {
-        return Err(Problem::plain("That saved CopilotKit connection is no longer available. Sign in again or enter a project key.")
-            .connection(openbot_desktop_lib::problem::Connection::Intelligence));
+        return Err(Problem::plain(
+            "OpenBot's connection to Intelligence on this computer is no longer available. Set up Intelligence again.",
+        )
+        .connection(openbot_desktop_lib::problem::Connection::Intelligence));
     }
     Ok(key)
-}
-
-fn seed_learning_default(
-    root: &Path,
-    settings: &mut std::collections::BTreeMap<String, String>,
-    proof: Option<&openbot_desktop_lib::intelligence::ProvisionedConnection>,
-) -> Result<(), Problem> {
-    const TARGET: &str = "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID";
-    let Some(proof) = proof else {
-        return Ok(());
-    };
-    if settings.get("INTELLIGENCE_API_KEY") != Some(&proof.api_key)
-        || settings
-            .get("INTELLIGENCE_API_URL")
-            .map(|api| api.trim_end_matches('/'))
-            != Some(proof.api_url.trim_end_matches('/'))
-        || settings.contains_key(TARGET)
-    {
-        return Ok(());
-    }
-    let existing = match std::fs::read_to_string(root.join(".env")) {
-        Ok(existing) => existing,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => {
-            return Err(Problem::with(
-                "OpenBot could not read its Learning settings.",
-                error.to_string(),
-            ));
-        }
-    };
-    // Preserve both dotenv assignment forms, including an optional export prefix and spacing.
-    let configured = existing.lines().any(|line| {
-        let Some((key, value)) = line.split_once('=') else {
-            return false;
-        };
-        let mut words = key.split_whitespace();
-        matches!(
-            (words.next(), words.next(), words.next()),
-            (Some(TARGET), None, None) | (Some("export"), Some(TARGET), None)
-        ) && !value.trim().is_empty()
-    });
-    if !configured {
-        settings.insert(TARGET.into(), proof.learning_container_id.clone());
-    }
-    Ok(())
 }
 
 fn require_existing_encryption_key(
@@ -1608,70 +1536,37 @@ async fn reset_leftover_database<R: tauri::Runtime>(
 }
 
 /// Write the `.env`, raise the containers, migrate, then wait for the server container to answer.
+///
+/// `api_url` and `gateway_ws_url` are the local Intelligence stack's addresses; its key is the one
+/// `local connect` gave OpenBot, read from the credential store.
 #[tauri::command]
-#[allow(
-    clippy::too_many_arguments,
-    reason = "These named fields preserve the existing Tauri IPC contract."
-)]
 async fn start_stack<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     root: String,
     api_url: String,
     gateway_ws_url: String,
-    api_key: String,
     model: ChosenModel,
     // The row the person picked, with the address only for the bring-your-own row.
     harness: Option<harness::HarnessChoice>,
-    organization_auth_url: Option<String>,
     // Both registers on the way out: see `problem.rs`. Anything that still returns a bare string
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
     let menus = app.clone();
-    let started = start_stack_inner(
-        app,
-        root,
-        api_url,
-        gateway_ws_url,
-        api_key,
-        model,
-        harness,
-        organization_auth_url,
-    )
-    .await;
+    let started = start_stack_inner(app, root, api_url, gateway_ws_url, model, harness).await;
     // The menu bar says whether OpenBot is running.
     refresh_menus(&menus);
     started
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Mirror the command fields while testing startup with a resolved root."
-)]
 async fn start_stack_inner<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     root: PathBuf,
     api_url: String,
     gateway_ws_url: String,
-    api_key: String,
     model: ChosenModel,
     harness: Option<harness::HarnessChoice>,
-    organization_auth_url: Option<String>,
 ) -> Result<(), Problem> {
-    let organization_auth_url = organization_auth_url.map(|url| url.trim().to_string());
-    if let Some(url) = organization_auth_url.as_ref().filter(|url| !url.is_empty()) {
-        if !reqwest::Url::parse(url).is_ok_and(|url| {
-            matches!(url.scheme(), "http" | "https")
-                && url.has_host()
-                && url.username().is_empty()
-                && url.password().is_none()
-        }) {
-            return Err(Problem::plain(
-                "Enter a valid http:// or https:// organization OpenBot URL.",
-            )
-            .connection(openbot_desktop_lib::problem::Connection::Organization));
-        }
-    }
     let shell = app.state::<Shell>();
     let attempt = StartAttempt::begin(&shell)?;
     install_recorder_host_at_start();
@@ -1882,7 +1777,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             return Err(problem.into());
         }
 
-        let api_key = intelligence_key_for_start(&root, api_key, saved_secret)?;
+        let api_key = intelligence_key_for_start(&root, saved_secret)?;
         let existing_secrets = openbot_desktop_lib::vault::already_given_no_ui(
             &root,
             &root.join(".env"),
@@ -1967,9 +1862,6 @@ async fn start_stack_inner<R: tauri::Runtime>(
             // new KEY_ENCRYPTION_KEY and orphans everything the server had encrypted under the old one.
             &existing_secrets,
         );
-        if let Some(authority) = organization_auth_url {
-            settings.insert("OPENBOT_ORGANIZATION_AUTH_URL".into(), authority);
-        }
         openbot_env::explain_browser_absence(&mut settings, browser_absent);
         /*
          * Each Bot's computer on the network the server container is on.
@@ -2006,11 +1898,6 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 linux_server_user(found.engine, owner.uid(), owner.gid()),
             );
         }
-        seed_learning_default(
-            &root,
-            &mut settings,
-            shell.intelligence_learning.lock().unwrap().as_ref(),
-        )?;
         /*
          * The credentials come out here and never reach the file.
          *
@@ -2164,8 +2051,8 @@ async fn start_stack_inner<R: tauri::Runtime>(
      *
      * After the server answers: the server reaches it only when the person opens their browser, so
      * it is not on the way to the window answering. Bun and the computer's packages are prepared the
-     * first time a Start has a browser to run, and reused after that, as the Intelligence sign-in
-     * helper prepares them. Installing OpenBot no longer does.
+     * first time a Start has a browser to run, and reused after that. Installing OpenBot no longer
+     * does.
      */
     let browser_bun = match local_browser.as_ref() {
         Some(_) => {
@@ -2532,7 +2419,6 @@ where
     I: FnOnce(&Path) -> Result<(), String>,
 {
     let _closing = local_eval::closing_for_stop();
-    cancel_self_hosted_sign_in(shell);
     shell
         .stopped_in_session
         .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -3223,44 +3109,15 @@ fn show_openbot_on<R: tauri::Runtime>(
     let shell = app.state::<Shell>();
     let _startup = shell.startup.lock().unwrap();
     let root = cleanup_root(&shell, &stack::default_root());
-    let organization_recovery = !quit_cleanup_notice_path(&root).exists()
-        && shell
-            .recovery_required
-            .lock()
-            .unwrap()
-            .as_ref()
-            .is_some_and(|recovery| {
-                recovery.root == root
-                    && recovery.connection
-                        == Some(openbot_desktop_lib::problem::Connection::Organization)
-            });
-    if recovery_required_or_pending_quit_notice(&shell, &root) && !organization_recovery {
+    if recovery_required_or_pending_quit_notice(&shell, &root) {
         return Err("Part of OpenBot needs recovery. Try starting OpenBot once more.".into());
     }
     let url = owned_app_url(&shell, &root, ports).ok_or_else(|| {
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
-    let authority =
-        openbot_env::already_set(&root.join(".env"), &["OPENBOT_ORGANIZATION_AUTH_URL"])
-            .remove("OPENBOT_ORGANIZATION_AUTH_URL")
-            .unwrap_or_default();
-    let destination = if authority.is_empty() {
-        if organization_recovery {
-            return Err(Problem::plain(
-                "Restore this installation's organization OpenBot URL before signing in.",
-            )
-            .connection(openbot_desktop_lib::problem::Connection::Organization));
-        }
-        // Only the owned app itself; an organization's OpenBot is not this machine's page.
-        intelligence_bridge::allow(&app, &url);
-        url
-    } else {
-        openbot_desktop_lib::organization_auth::session_destination(&root, &authority, &url)?
-    };
-    if organization_recovery {
-        clear_recovery_required(&shell, &root);
-    }
-    // Organization destinations can contain a one-use session ticket; never log them.
+    // Only the owned app itself.
+    intelligence_bridge::allow(&app, &url);
+    let destination = url;
     eprintln!("[show] navigating to the owned OpenBot app");
     let window = app
         .get_webview_window("main")
@@ -3424,7 +3281,7 @@ enum WindowPage {
     /// OpenBot served from this machine, from a release whose styles make no room for the window
     /// buttons: the system's title bar, still in the app's own light or dark.
     LocalApp,
-    /// Anything else, such as an organization's OpenBot: the system's title bar.
+    /// Anything else: the system's title bar.
     Other,
 }
 
@@ -4037,22 +3894,6 @@ fn recorder_host_test_app_url() -> Option<String> {
     None
 }
 
-/// The organization's sign-in address when this deployment runs in organization mode.
-fn organization_authority(root: &Path) -> Option<String> {
-    openbot_env::already_set(&root.join(".env"), &["OPENBOT_ORGANIZATION_AUTH_URL"])
-        .remove("OPENBOT_ORGANIZATION_AUTH_URL")
-        .filter(|authority| !authority.is_empty())
-}
-
-/// A sign-in the organization or the local OpenBot refused is one to make again; anything else may pass.
-fn organization_refusal(problem: &Problem) -> recorder_host::Refusal {
-    if problem.connection == Some(openbot_desktop_lib::problem::Connection::Organization) {
-        recorder_host::Refusal::NotSignedIn
-    } else {
-        recorder_host::Refusal::OrganizationUnavailable
-    }
-}
-
 /// The ping's one question to the app: does `/api/capabilities` answer through the app's port, on either loopback.
 fn recorder_ping_app_answers(port: u16) -> bool {
     stack::answering_within(
@@ -4078,35 +3919,6 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
         std::env::var_os("APPDATA").as_deref().map(Path::new),
     );
     let root = preparation::selected_root(&config);
-    // For a ping: whether Desktop holds the organization sign-in at all, read from this computer alone.
-    let signed_in_root = root.clone();
-    let signed_in: recorder_host::Check<Result<(), recorder_host::Refusal>> = Box::new(move || {
-        let Some(root) = signed_in_root.as_deref() else {
-            return Ok(());
-        };
-        let Some(authority) = organization_authority(root) else {
-            return Ok(());
-        };
-        match openbot_desktop_lib::organization_auth::signed_in_locally(root, &authority) {
-            Ok(true) => Ok(()),
-            Ok(false) => Err(recorder_host::Refusal::NotSignedIn),
-            Err(problem) => Err(organization_refusal(&problem)),
-        }
-    });
-    // For a handoff: in organization mode the local OpenBot admits only its organization session cookie, handed
-    // over from Desktop's saved sign-in exactly as opening the window does. Never logged.
-    let organization_root = root.clone();
-    let organization_cookie: recorder_host::OrganizationCookie = Box::new(move |app_url| {
-        let Some(root) = organization_root.as_deref() else {
-            return Ok(None);
-        };
-        let Some(authority) = organization_authority(root) else {
-            return Ok(None);
-        };
-        openbot_desktop_lib::organization_auth::local_session_cookie(root, &authority, app_url)
-            .map(Some)
-            .map_err(|problem| organization_refusal(&problem))
-    });
     if let Some(url) = recorder_host_test_app_url() {
         let port = reqwest::Url::parse(&url)
             .ok()
@@ -4114,9 +3926,7 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
         return recorder_host::HostEnvironment {
             installed: Box::new(|| true),
             app_answers: Box::new(move || port.is_some_and(recorder_ping_app_answers)),
-            signed_in,
             app_url: Box::new(move || Some(url.clone())),
-            organization_cookie,
         };
     }
     let installed = root.is_some();
@@ -4130,13 +3940,11 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
                 .and_then(|root| openbot_env::Ports::read(root).ok())
                 .is_some_and(|ports| recorder_ping_app_answers(ports.app))
         }),
-        signed_in,
         app_url: Box::new(move || {
             let root = root.as_deref()?;
             let ports = openbot_env::Ports::read(root).ok()?;
             app_url_published_by(None, root, &ports)
         }),
-        organization_cookie,
     }
 }
 
@@ -4427,17 +4235,13 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
     let mut values = openbot_desktop_lib::vault::already_given_file_only(
         &env_file,
         &[
-            "INTELLIGENCE_API_KEY",
-            "INTELLIGENCE_API_URL",
-            "INTELLIGENCE_GATEWAY_WS_URL",
-            "OPENBOT_ORGANIZATION_AUTH_URL",
             /*
-             * The model credentials too, so the wizard never asks twice for one of these either.
+             * The model credentials, so the wizard never asks twice for one of these.
              *
              * A key already in the file is one somebody has already produced, and making them find
-             * it again means opening a dotfile in an editor. Read back for the same reason the
-             * Intelligence key is: it is their own file, on their own machine, and this is the
-             * screen that asks for it.
+             * it again means opening a dotfile in an editor. Read back because it is their own file,
+             * on their own machine, and this is the screen that asks for it. Intelligence's settings
+             * are not read: they belong to the local stack, which Start is given afresh.
              */
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
@@ -4454,16 +4258,21 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
         (file_present || intent.categories.contains(&category)).then_some(true)
     };
     let claude_plan = values.remove("CLAUDE_CODE_OAUTH_TOKEN").is_some();
+    let local_eval = local_eval_state::read(&root, None);
     AlreadyConfigured {
-        launch: preparation::launch(&root),
+        /*
+         * A launch only with the local Intelligence stack it launched with.
+         *
+         * An installation set up by an earlier app against hosted or self-hosted Intelligence has a
+         * launch record and no local stack. Offering that launch would reopen it against a service
+         * this app no longer connects to, so it is not offered: the window starts the local setup,
+         * and the installation, its settings and its data are all left where they are.
+         */
+        launch: preparation::launch(&root).filter(|_| local_eval.is_some()),
         installation: preparation::installation(&root),
         auto_start: true,
-        local_eval: local_eval_state::read(&root, None),
+        local_eval,
         saved: SavedConfiguration {
-            intelligence_api_key: hint(
-                Category::Intelligence,
-                values.contains_key("INTELLIGENCE_API_KEY"),
-            ),
             model_api_keys: SavedModelApiKeys {
                 openai: hint(
                     Category::OpenAiApiKey,
@@ -4491,12 +4300,6 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
         },
         values,
     }
-}
-
-/// The harness picker's rows. Data, so the screen is a list and not twelve branches.
-#[tauri::command]
-fn harnesses() -> Vec<harness::Harness> {
-    harness::catalogue()
 }
 
 /// Start a Claude plan sign-in and return the address a browser has to open.
@@ -4620,273 +4423,8 @@ async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String>
         .map_err(|error| format!("The sign-in did not finish: {error}"))?
 }
 
-/// A self-hosted server authenticates in its own browser session. Only the selected project's
-/// runtime key crosses into the window; the helper owns and then closes the temporary browser.
-#[tauri::command]
-async fn begin_self_hosted_intelligence_sign_in(
-    app: tauri::AppHandle,
-    root: String,
-    api_url: String,
-) -> Result<Vec<openbot_desktop_lib::intelligence::Project>, Problem> {
-    let root = stack::root_from(&root);
-    let shell = app.state::<Shell>();
-    remember_selected_root(&shell, &root);
-    cancel_self_hosted_sign_in(&shell);
-    let generation = shell
-        .self_hosted_sign_in_generation
-        .load(std::sync::atomic::Ordering::SeqCst);
-    tauri::async_runtime::spawn_blocking(move || {
-        // The helper is a Bun script run from the downloaded source, and the only thing on the host
-        // that still needs Bun and the source's packages. Installing OpenBot no longer prepares
-        // them, so the first sign-in does, once; later ones reuse what it recorded.
-        let bun = preparation::install_dependencies_if_needed(&root, || {
-            install::ensure_bun(&root, which_bun())
-        })?;
-        let shell = app.state::<Shell>();
-        let signing = {
-            let mut slot = shell.self_hosted_intelligence.lock().unwrap();
-            if generation
-                != shell
-                    .self_hosted_sign_in_generation
-                    .load(std::sync::atomic::Ordering::SeqCst)
-            {
-                return Err(Problem::plain("That Intelligence sign-in was cancelled."));
-            }
-            let signing = openbot_desktop_lib::self_hosted_intelligence::SigningIn::begin(
-                &root, &bun, &api_url,
-            )?;
-            *slot = Some(signing.clone());
-            signing
-        };
-        let result = signing.projects();
-        if result.is_err() {
-            let mut slot = shell.self_hosted_intelligence.lock().unwrap();
-            if slot
-                .as_ref()
-                .is_some_and(|active| std::sync::Arc::ptr_eq(active, &signing))
-            {
-                slot.take();
-            }
-            drop(slot);
-            signing.cancel();
-        }
-        result
-    })
-    .await
-    .map_err(|_| Problem::plain("Intelligence sign-in could not finish."))?
-}
-
-#[tauri::command]
-async fn finish_self_hosted_intelligence_sign_in(
-    app: tauri::AppHandle,
-    root: String,
-    project: String,
-) -> Result<String, Problem> {
-    let root = stack::root_from(&root);
-    let signing = app
-        .state::<Shell>()
-        .self_hosted_intelligence
-        .lock()
-        .unwrap()
-        .clone()
-        .filter(|signing| signing.root == root)
-        .ok_or_else(|| Problem::plain("Sign in to this Intelligence server first."))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let result = signing.connect(&project);
-        let shell = app.state::<Shell>();
-        let mut slot = shell.self_hosted_intelligence.lock().unwrap();
-        if !slot
-            .as_ref()
-            .is_some_and(|active| std::sync::Arc::ptr_eq(active, &signing))
-        {
-            return Err(Problem::plain("That Intelligence sign-in was cancelled."));
-        }
-        slot.take();
-        let provisioned = match result {
-            Ok(provisioned) => provisioned,
-            Err(problem) => {
-                drop(slot);
-                signing.cancel();
-                return Err(problem);
-            }
-        };
-        let key = provisioned.api_key.clone();
-        *shell.intelligence_learning.lock().unwrap() = Some(provisioned);
-        Ok(key)
-    })
-    .await
-    .map_err(|_| Problem::plain("Intelligence sign-in could not finish."))?
-}
-
-#[tauri::command]
-async fn cancel_self_hosted_intelligence_sign_in(app: tauri::AppHandle) -> Result<(), Problem> {
-    tauri::async_runtime::spawn_blocking(move || cancel_self_hosted_sign_in(&app.state::<Shell>()))
-        .await
-        .map_err(|_| Problem::plain("The Intelligence sign-in could not be closed."))
-}
-
-/// Start signing in to Intelligence and return the address a browser has to open.
-#[tauri::command]
-async fn begin_intelligence_sign_in(app: tauri::AppHandle) -> Result<String, String> {
-    let (signing, url) = openbot_desktop_lib::intelligence::SigningInToIntelligence::begin()?;
-    *app.state::<Shell>()
-        .signing_in_to_intelligence
-        .lock()
-        .unwrap() = Some(signing);
-    let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
-    Ok(url)
-}
-
-/// Wait for that sign-in, and answer with the projects it can see.
-///
-/// The credential is kept on this side rather than handed to the window: the window's business is
-/// which project, and a credential it never holds is one it cannot leak into a log or a screenshot.
-#[tauri::command]
-async fn finish_intelligence_sign_in(
-    app: tauri::AppHandle,
-) -> Result<Vec<openbot_desktop_lib::intelligence::Project>, openbot_desktop_lib::problem::Problem>
-{
-    let signing = app
-        .state::<Shell>()
-        .signing_in_to_intelligence
-        .lock()
-        .unwrap()
-        .take()
-        .ok_or_else(|| {
-            openbot_desktop_lib::problem::Problem::plain(
-                "That sign-in is no longer running. Start it again.",
-            )
-        })?;
-    let (credential, projects) = tauri::async_runtime::spawn_blocking(move || signing.finish())
-        .await
-        .map_err(|error| {
-            openbot_desktop_lib::problem::Problem::plain(format!(
-                "The sign-in did not finish: {error}"
-            ))
-        })??;
-    *app.state::<Shell>().intelligence_credential.lock().unwrap() = Some(credential);
-    Ok(projects)
-}
-
-/// Create a project using the account already signed in, without exposing its credential to the UI.
-#[tauri::command]
-async fn create_intelligence_project(
-    app: tauri::AppHandle,
-    name: String,
-) -> Result<openbot_desktop_lib::intelligence::Project, Problem> {
-    let credential = app
-        .state::<Shell>()
-        .intelligence_credential
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| Problem::plain("Sign in to CopilotKit first."))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        openbot_desktop_lib::intelligence::create_project(&credential, &name)
-    })
-    .await
-    .map_err(|error| Problem::with("Your project could not be created.", error.to_string()))?
-}
-
-/// Create a key for the project somebody chose, and hand it back for the field.
-#[tauri::command]
-async fn intelligence_key_for(
-    app: tauri::AppHandle,
-    project: String,
-) -> Result<String, openbot_desktop_lib::problem::Problem> {
-    let credential = app
-        .state::<Shell>()
-        .intelligence_credential
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| {
-            openbot_desktop_lib::problem::Problem::plain("Sign in to CopilotKit first.")
-        })?;
-    let provisioned = tauri::async_runtime::spawn_blocking(move || {
-        openbot_desktop_lib::intelligence::provision_connection(&credential, &project)
-    })
-    .await
-    .map_err(|error| {
-        openbot_desktop_lib::problem::Problem::plain(format!("A key could not be created: {error}"))
-    })??;
-    let key = provisioned.api_key.clone();
-    *app.state::<Shell>().intelligence_learning.lock().unwrap() = Some(provisioned);
-    Ok(key)
-}
-
-#[tauri::command]
-async fn begin_organization_sign_in(
-    app: tauri::AppHandle,
-    root: String,
-    authority_url: String,
-    provider: String,
-) -> Result<String, Problem> {
-    let root = stack::root_from(&root);
-    let handle = app.clone();
-    let url = tauri::async_runtime::spawn_blocking(move || {
-        let shell = handle.state::<Shell>();
-        let _startup = shell.startup.lock().unwrap();
-        if shell.root.lock().unwrap().as_deref() != Some(root.as_path()) {
-            return Err(Problem::plain(
-                "Start this OpenBot installation before signing in to its organization.",
-            ));
-        }
-        let configured =
-            openbot_env::already_set(&root.join(".env"), &["OPENBOT_ORGANIZATION_AUTH_URL"])
-                .remove("OPENBOT_ORGANIZATION_AUTH_URL")
-                .unwrap_or_default();
-        if configured.trim() != authority_url.trim() {
-            return Err(Problem::plain(
-                "Save this organization's OpenBot URL before signing in.",
-            ));
-        }
-        openbot_desktop_lib::organization_auth::begin(&root, &authority_url, &provider)
-    })
-    .await
-    .map_err(|_| Problem::plain("Organization sign-in could not start."))??;
-    if tauri_plugin_opener::OpenerExt::opener(&app)
-        .open_url(&url, None::<&str>)
-        .is_err()
-    {
-        eprintln!(
-            "[organization] browser could not open; use the sign-in address shown in the window"
-        );
-    }
-    Ok(url)
-}
-
-#[tauri::command]
-async fn finish_organization_sign_in(
-    app: tauri::AppHandle,
-    root: String,
-) -> Result<openbot_desktop_lib::organization_auth::OrganizationUser, Problem> {
-    let root = stack::root_from(&root);
-    tauri::async_runtime::spawn_blocking(move || {
-        let shell = app.state::<Shell>();
-        let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
-        let user = openbot_desktop_lib::organization_auth::finish(&root)?;
-        let _startup = shell.startup.lock().unwrap();
-        if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
-            || shell.root.lock().unwrap().as_deref() != Some(root.as_path())
-        {
-            return Err(Problem::plain(
-                "That sign-in belongs to a previous OpenBot run. Open this installation again.",
-            ));
-        }
-        Ok(user)
-    })
-    .await
-    .map_err(|_| Problem::plain("Organization sign-in did not finish."))?
-}
-
-#[tauri::command]
-fn cancel_organization_sign_in(root: String) {
-    openbot_desktop_lib::organization_auth::cancel(&stack::root_from(&root));
-}
-
-/// The model screen's rows. Independent of the picker above, and required to stay that way: no
-/// harness on that list is tied to a vendor's models, so choosing one may not narrow this.
+/// The model screen's rows. Independent of the Bot, and required to stay that way: no harness is
+/// tied to a vendor's models, so the Bot may not narrow this.
 #[tauri::command]
 fn providers() -> Vec<provider::Provider> {
     provider::catalogue()
@@ -5791,7 +5329,6 @@ fn publish_connection_failure<R: tauri::Runtime>(
     let said = match connection {
         openbot_desktop_lib::problem::Connection::Model => "Your AI connection was refused. Refresh it to continue using your existing OpenBot.",
         openbot_desktop_lib::problem::Connection::Intelligence => "Your CopilotKit connection was refused. Refresh it to continue using your existing OpenBot.",
-        openbot_desktop_lib::problem::Connection::Organization => "Your organization sign-in needs to be refreshed to continue using your existing OpenBot.",
     };
     mark_recovery_required(&shell, root, generation);
     if let Some(recovery) = shell.recovery_required.lock().unwrap().as_mut() {
@@ -5962,7 +5499,7 @@ refresh it.
 
 What is left of the host-process supervisor. Docker's restart policy keeps the server and the worker
 up now, so nothing here starts anything. The server still knows, as only it can, when the model, the
-Intelligence or the organization sign-in it was given has been refused, and it tells the desktop
+Intelligence it was given has been refused, and it tells the desktop
 through the token minted for this run. The watcher ends with the run it was started for: a Stop or
 another Start moves the generation on, and clearing the root says there is no run at all.
 */
@@ -6912,7 +6449,6 @@ fn main() {
             last_failure,
             default_root,
             selected_root,
-            harnesses,
             providers,
             already_configured,
             begin_claude_sign_in,
@@ -6922,16 +6458,6 @@ fn main() {
             finish_model_oauth,
             cancel_model_oauth,
             finish_chatgpt_sign_in,
-            begin_self_hosted_intelligence_sign_in,
-            finish_self_hosted_intelligence_sign_in,
-            cancel_self_hosted_intelligence_sign_in,
-            begin_intelligence_sign_in,
-            finish_intelligence_sign_in,
-            intelligence_key_for,
-            create_intelligence_project,
-            begin_organization_sign_in,
-            finish_organization_sign_in,
-            cancel_organization_sign_in,
             run_local_eval,
             list_local_eval,
             cancel_local_eval,
@@ -7218,51 +6744,6 @@ mod tests {
         )
         .unwrap();
         let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn learning_default_is_written_only_for_the_provisioned_connection() {
-        use std::collections::BTreeMap;
-        let root = temp_root("learning-default-env");
-        std::fs::create_dir_all(&root).unwrap();
-        let proof = openbot_desktop_lib::intelligence::ProvisionedConnection {
-            api_key: "runtime-key".into(),
-            api_url: "https://api.intelligence.example".into(),
-            learning_container_id: "openbot".into(),
-        };
-        for (api, key, existing, verified, expected) in [
-            ("https://api.intelligence.example", "runtime-key", None, true, Some("openbot")),
-            ("https://api.intelligence.example", "runtime-key", Some(""), true, Some("openbot")),
-            ("https://api.intelligence.example/", "runtime-key", Some(""), true, Some("openbot")),
-            ("https://other.example", "runtime-key", Some(""), true, None),
-            ("https://api.intelligence.example", "other-key", Some(""), true, None),
-            ("https://api.intelligence.example", "runtime-key", Some(""), false, None),
-            ("https://api.intelligence.example", "runtime-key", Some("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID=custom\nCPK_INTELLIGENCE_SKILLS_REVISION=7\n"), true, Some("custom")),
-            ("https://api.intelligence.example", "runtime-key", Some("export \tCPK_INTELLIGENCE_LEARNING_CONTAINER_ID = custom\n"), true, Some("custom")),
-        ] {
-            if let Some(existing) = existing {
-                std::fs::write(root.join(".env"), existing).unwrap();
-            }
-            let mut settings = BTreeMap::from([
-                ("INTELLIGENCE_API_URL".into(), api.into()),
-                ("INTELLIGENCE_API_KEY".into(), key.into()),
-            ]);
-            seed_learning_default(&root, &mut settings, verified.then_some(&proof)).unwrap();
-            openbot_env::write(&root.join(".env"), &settings, &BTreeMap::new()).unwrap();
-            let read = openbot_env::read_already_set(&root.join(".env"), &["CPK_INTELLIGENCE_LEARNING_CONTAINER_ID", "CPK_INTELLIGENCE_SKILLS_REVISION"]).unwrap();
-            if let Some(exported) = existing.filter(|text| text.starts_with("export")) {
-                // The shared setup reader does not parse export syntax; the file must keep the
-                // custom assignment with no bare assignment appended to override it.
-                assert!(!read.contains_key("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID"));
-                assert!(std::fs::read_to_string(root.join(".env")).unwrap().contains(exported));
-                continue;
-            }
-            assert_eq!(read.get("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID").map(String::as_str), expected);
-            if expected == Some("custom") {
-                assert_eq!(read.get("CPK_INTELLIGENCE_SKILLS_REVISION").map(String::as_str), Some("7"));
-            }
-        }
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -7656,8 +7137,10 @@ mod tests {
 
     #[test]
     fn stop_retains_completed_installation_and_disables_only_automatic_start() {
-        let root = temp_root("stopped-completed-installation");
-        std::fs::create_dir_all(&root).unwrap();
+        let root = local_eval_root(
+            "stopped-completed-installation",
+            Some(local_eval_state::Ownership::Created),
+        );
         std::fs::write(root.join(preparation::FILE), "{}").unwrap();
         preparation::record_launch(
             &root,
@@ -7690,7 +7173,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join(".env"),
-            "INTELLIGENCE_API_URL=https://synthetic.example\n",
+            "OPENAI_BASE_URL=https://synthetic.example\n",
         )
         .unwrap();
         for metadata in [
@@ -7706,9 +7189,10 @@ mod tests {
                     .unwrap();
             }
             for legacy in ["", "INTELLIGENCE_API_KEY=synthetic-cpk\nOPENAI_API_KEY=synthetic-openai\nANTHROPIC_API_KEY=synthetic-anthropic\nCLAUDE_CODE_OAUTH_TOKEN=synthetic-claude\n"] {
-                std::fs::write(root.join(".env"), format!("INTELLIGENCE_API_URL=https://synthetic.example\n{legacy}")).unwrap();
+                std::fs::write(root.join(".env"), format!("OPENAI_BASE_URL=https://synthetic.example\n{legacy}")).unwrap();
                 let configured = already_configured_for_root(root.to_string_lossy().into_owned());
-                assert_eq!(configured.values["INTELLIGENCE_API_URL"], "https://synthetic.example");
+                assert_eq!(configured.values["OPENAI_BASE_URL"], "https://synthetic.example");
+                assert!(!configured.values.contains_key("INTELLIGENCE_API_KEY"));
                 assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
             }
         }
@@ -7843,7 +7327,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join(".env"),
-            "INTELLIGENCE_API_URL=https://trim.example.test\n",
+            "OPENAI_BASE_URL=https://trim.example.test\n",
         )
         .unwrap();
         let typed = format!(" \n{}\t ", root.display());
@@ -7851,7 +7335,7 @@ mod tests {
         let normal = already_configured_for_root(root.to_string_lossy().into_owned());
         assert_eq!(configured.values, normal.values);
         assert_eq!(
-            configured.values.get("INTELLIGENCE_API_URL"),
+            configured.values.get("OPENAI_BASE_URL"),
             Some(&"https://trim.example.test".to_string())
         );
         std::fs::remove_dir_all(root).unwrap();
@@ -7875,18 +7359,60 @@ mod tests {
 
         let configured = already_configured_for_root(root.to_string_lossy().into_owned());
 
-        assert_eq!(
-            configured.values.get("INTELLIGENCE_API_KEY"),
-            Some(&"file-cpk".to_string())
-        );
+        assert!(!configured.values.contains_key("INTELLIGENCE_API_KEY"));
         assert_eq!(
             configured.values.get("OPENAI_API_KEY"),
             Some(&"file-openai".to_string())
         );
-        assert_eq!(configured.saved.intelligence_api_key, Some(true));
         assert_eq!(configured.saved.model_api_keys.openai, Some(true));
         assert_eq!(configured.saved.model_sessions.openai, Some(true));
         assert_eq!(configured.saved.model_sessions.anthropic, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An installation an earlier app set up against hosted or self-hosted Intelligence, or behind
+    /// an organization's sign-in: its launch is not offered, so the window starts the local setup,
+    /// and nothing of it is read back or removed.
+    #[test]
+    fn a_hosted_installation_is_not_offered_as_a_launch_and_is_left_in_place() {
+        let root = temp_root("openbot-already-configured-hosted");
+        std::fs::create_dir_all(&root).unwrap();
+        let env = "INTELLIGENCE_API_KEY=synthetic-hosted-key\nINTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai\nINTELLIGENCE_GATEWAY_WS_URL=wss://realtime.intelligence.copilotkit.ai\nOPENBOT_ORGANIZATION_AUTH_URL=https://openbot.company.example\nOPENAI_API_KEY=synthetic-openai\n";
+        std::fs::write(root.join(".env"), env).unwrap();
+        std::fs::write(root.join(preparation::FILE), "{}").unwrap();
+        preparation::record_launch(&root, None).unwrap();
+        assert!(preparation::launch(&root).is_some());
+
+        let configured = already_configured_for_root(root.to_string_lossy().into_owned());
+        let json = serde_json::to_value(&configured).unwrap();
+        assert!(json.get("launch").is_none(), "{json}");
+        assert!(json.get("localEval").is_none(), "{json}");
+        assert!(json["saved"].get("intelligenceApiKey").is_none(), "{json}");
+        for hosted in [
+            "INTELLIGENCE_API_KEY",
+            "INTELLIGENCE_API_URL",
+            "INTELLIGENCE_GATEWAY_WS_URL",
+            "OPENBOT_ORGANIZATION_AUTH_URL",
+        ] {
+            assert!(!configured.values.contains_key(hosted), "{json}");
+        }
+        assert!(!json.to_string().contains("synthetic-hosted-key"));
+        // The model answer is still read back, and the saved files are untouched.
+        assert_eq!(configured.saved.model_api_keys.openai, Some(true));
+        assert_eq!(std::fs::read_to_string(root.join(".env")).unwrap(), env);
+        assert!(preparation::launch(&root).is_some());
+
+        // Once the local stack is recorded, the same installation's launch is offered again.
+        let stack = local_eval::StackId::parse("local-abc123").unwrap();
+        local_eval_state::begin(
+            &root,
+            &stack,
+            local_eval_state::Ownership::Created,
+            LOCAL_EVAL_PIN,
+        )
+        .unwrap();
+        let configured = already_configured_for_root(root.to_string_lossy().into_owned());
+        assert!(configured.launch.is_some());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -7954,7 +7480,6 @@ mod tests {
                 std::fs::write(root.join(openbot_desktop_lib::saved_intent::FILE), input).unwrap();
             }
             let unknown = already_configured_for_root(root.to_string_lossy().into_owned());
-            assert_eq!(unknown.saved.intelligence_api_key, None);
             assert_eq!(unknown.saved.model_sessions.anthropic, None);
         }
         std::fs::write(
@@ -7963,7 +7488,6 @@ mod tests {
         )
         .unwrap();
         let recorded = already_configured_for_root(root.to_string_lossy().into_owned());
-        assert_eq!(recorded.saved.intelligence_api_key, Some(true));
         assert_eq!(recorded.saved.model_sessions.anthropic, Some(true));
         assert_eq!(recorded.saved.model_api_keys.anthropic, None);
         assert_eq!(recorded.saved.model_sessions.openai, None);
@@ -8025,7 +7549,7 @@ mod tests {
             }
         }
         for denied in [false, true] {
-            let result = intelligence_key_for_start(&root, String::new(), |_, key| {
+            let result = intelligence_key_for_start(&root, |_, key| {
                 assert_eq!(key, "INTELLIGENCE_API_KEY");
                 if denied {
                     Err(Problem::plain("synthetic access denied"))
@@ -11207,7 +10731,7 @@ mod tests {
             .contains(LOCAL_KEY));
 
         // Start then takes it from the vault exactly like a key pasted earlier.
-        let key = intelligence_key_for_start(&root, String::new(), |_, name| {
+        let key = intelligence_key_for_start(&root, |_, name| {
             Ok(vault.borrow().get(name).cloned().unwrap_or_default())
         })
         .unwrap();
@@ -11765,9 +11289,10 @@ fn main() {
                 } else {
                     serde_json::json!({"provider":"openai","login":"api-key","apiKey":"synthetic-container-root-key"})
                 };
+                remember_local_intelligence_key(root);
                 let result = self.invoke("start_stack", serde_json::json!({
                     "root":root,"apiUrl":"https://intelligence.example.test","gatewayWsUrl":"wss://gateway.example.test",
-                    "apiKey":"synthetic-intelligence-key","model":model,"harness":null,
+                    "model":model,"harness":null,
                 })).expect_err("fixture Start must stop before host startup");
                 println!(
                     "CONTAINER_START={}",
@@ -12695,9 +12220,10 @@ fn main() {
             vec!["fixture-image".into()],
         )
         .unwrap();
+        remember_local_intelligence_key(&root);
         let problem = invoke("start_stack", serde_json::json!({
             "root":root, "apiUrl":"https://intelligence.example.test", "gatewayWsUrl":"wss://gateway.example.test",
-            "apiKey":"synthetic-intelligence-key", "model":model, "harness":choice,
+            "model":model, "harness":choice,
         })).expect_err("intentional migration barrier prevents host/DB startup");
         let commands = std::fs::read_to_string(&record).unwrap_or_default();
         assert!(
@@ -12901,6 +12427,7 @@ fn main() {
         }
         let root = temp_root("openbot-dead-compose-start");
         write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
         let record = temp_root("openbot-dead-compose-record").join("commands.log");
         std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
         let _path = SerializedPath::set_only_with("docker", "dead-service");
@@ -12915,7 +12442,6 @@ fn main() {
             root.clone(),
             "https://intelligence.example.test".into(),
             "wss://gateway.example.test".into(),
-            "synthetic-intelligence-key".into(),
             ChosenModel {
                 provider: "openai".into(),
                 login: "api-key".into(),
@@ -12926,7 +12452,6 @@ fn main() {
                 token: None,
                 saved: Some(false),
             },
-            None,
             None,
         ))
         .expect_err("a dead required Compose service must fail Start");
@@ -12980,6 +12505,7 @@ fn main() {
         }
         let root = temp_root("openbot-anthropic-bot-selection-start");
         write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
         let record = temp_root("openbot-anthropic-bot-selection-record").join("commands.log");
         std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
         let _path = SerializedPath::set_only_with("docker", "anthropic");
@@ -12994,7 +12520,6 @@ fn main() {
             root.clone(),
             "https://intelligence.example.test".into(),
             "wss://gateway.example.test".into(),
-            "synthetic-intelligence-key".into(),
             ChosenModel {
                 provider: "anthropic".into(),
                 login: "api-key".into(),
@@ -13005,7 +12530,6 @@ fn main() {
                 token: None,
                 saved: Some(false),
             },
-            None,
             None,
         ))
         .expect_err("dead selected LangGraph service must fail Start");
@@ -13513,6 +13037,16 @@ fn main() {
     /// A Compose file from a release that runs the server and worker as services.
     const INSTALLED_COMPOSE: &str = "services:\n  server: {}\n  worker: {}\n";
 
+    /// The key `local connect` would have stored, which Start reads from the credential store.
+    fn remember_local_intelligence_key(root: &Path) {
+        openbot_desktop_lib::vault::remember(
+            root,
+            "INTELLIGENCE_API_KEY",
+            "synthetic-intelligence-key",
+        )
+        .unwrap();
+    }
+
     fn write_installed_deployment(root: &Path) {
         const DEPLOYMENT_VERSION: &str = "v0.0.8";
         std::fs::create_dir_all(root.join("server")).unwrap();
@@ -13793,7 +13327,7 @@ fn main() {
             url: setup.parse().unwrap(),
             body: tauri::ipc::InvokeBody::Json(serde_json::json!({
                 "root": f.owned, "apiUrl": "https://intelligence.example.test",
-                "gatewayWsUrl": "wss://gateway.example.test", "apiKey": "synthetic-unused-key",
+                "gatewayWsUrl": "wss://gateway.example.test",
                 "model": {"provider": "synthetic-invalid-provider", "login": "api-key"}, "harness": null,
             })), headers: Default::default(), invoke_key: tauri::test::INVOKE_KEY.into(),
         }).expect_err("synthetic credential preflight must reject before store access");
@@ -14683,34 +14217,6 @@ fn main() {
                 "tray/reopen must not adopt an unrelated successful app-port responder"
             );
         }
-    }
-
-    #[test]
-    fn showing_owned_organization_app_requires_its_session_without_forgetting_installation() {
-        let f = RestoreFixture::new();
-        std::fs::write(
-            f.owned.join(".env"),
-            "OPENBOT_ORGANIZATION_AUTH_URL=https://company.example\n",
-        )
-        .unwrap();
-        let app = f.app(&f.owned, "tauri://localhost/");
-        let window = app.get_webview_window("main").unwrap();
-        let before = window.url().unwrap();
-        let failure = show_openbot_on(app.handle().clone(), &f.ports).unwrap_err();
-        assert_eq!(
-            failure.connection,
-            Some(openbot_desktop_lib::problem::Connection::Organization)
-        );
-        assert_eq!(
-            window.url().unwrap(),
-            before,
-            "no unauthenticated navigation"
-        );
-        assert_eq!(
-            app.state::<Shell>().selected_root.lock().unwrap().as_ref(),
-            Some(&f.owned)
-        );
-        assert!(published_by_server(&f.owned, &[f.ports.server]));
     }
 
     #[test]

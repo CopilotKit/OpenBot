@@ -299,37 +299,6 @@ h2 {
   flex-wrap: wrap;
 }
 
-.connection-form {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  padding: 0;
-  margin: 0;
-}
-
-.connection-actions {
-  margin-top: 0;
-}
-
-.new-project-form {
-  margin-top: 16px;
-}
-
-.tile.project-choice {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "name";
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-
-/* Where Intelligence runs: two rows with no mark. */
-.tile.intelligence-choice {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas:
-    "name"
-    "summary";
-}
-
 /*
  * Buttons are OpenBot's `Button`: sentence case in the body face, 10px corners, the near-black
  * primary fill. `lg` (40px) on these screens, as the app's own onboarding sets its Continue.
@@ -584,17 +553,8 @@ button.text-link.change-provider {
 }
 
 /*
- * A tile carries its own ink, and this is not belt-and-braces.
- *
- * MEASURED: the project list rendered as six blank white rectangles. `button` sets
- * `color: var(--accent-ink)`, which is white, and `.tile` overrode the background to white without
- * overriding the colour. The provider and Bot rows are `label`s and never inherited it, so the one
- * tile in the product that is a real button was the one nobody could read. Nothing errored and
- * nothing looked broken: the names were simply invisible, and the screen asked somebody to choose
- * between six empty boxes.
- *
- * A tile that is a button also undoes the button's size and centring: it is a row of reading text,
- * not a control label. Drawn as the app's outline `Item`: 16px in, 12px between mark and text.
+ * A tile carries its own ink and undoes a button's size and centring, so it reads as a row of text
+ * whatever element draws it. Drawn as the app's outline `Item`: 16px in, 12px between mark and text.
  */
 .tile {
   position: relative;
@@ -627,15 +587,13 @@ button.text-link.change-provider {
     box-shadow 100ms ease;
 }
 
-.tile:active,
-button.tile:active:not(:disabled) {
+.tile:active {
   transform: none;
   background: var(--muted);
   transition: none;
 }
 
-.tile:hover,
-button.tile:hover:not(:disabled) {
+.tile:hover {
   background: color-mix(in srgb, var(--muted) 60%, var(--card));
 }
 
@@ -655,9 +613,6 @@ button.tile:hover:not(:disabled) {
 .tile-summary {
   grid-area: summary;
 }
-.tile-note {
-  grid-column: 2;
-}
 
 .tile-name {
   font-weight: 500;
@@ -669,19 +624,6 @@ button.tile:hover:not(:disabled) {
   color: var(--text-secondary);
   font-size: var(--text-sm);
   line-height: 20px;
-}
-
-/* A pill, as the app draws a badge. */
-.tile-note {
-  justify-self: start;
-  font-size: var(--text-xs);
-  line-height: 16px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: var(--secondary);
-  border-radius: var(--r-full);
-  padding: 1px 8px;
-  margin-top: 4px;
 }
 
 /* A brand's mark, or its name where no usable mark exists. Same box either way. */
@@ -731,7 +673,7 @@ button.tile:hover:not(:disabled) {
   box-shadow: 0 0 0 3px var(--lilac-30);
 }
 
-/* The framework list, which almost nobody should open. */
+/* A disclosure: options almost nobody should open. */
 details {
   border-top: 1px solid var(--border);
   padding-top: 14px;

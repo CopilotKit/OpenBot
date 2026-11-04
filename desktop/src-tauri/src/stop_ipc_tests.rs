@@ -339,6 +339,14 @@ mod stop_ipc {
         )
         .unwrap();
         preparation::record_launch(&fixture.root, None).unwrap();
+        // A launch is offered only with its local Intelligence stack; a shared one is never stopped.
+        local_eval_state::begin(
+            &fixture.root,
+            &local_eval::StackId::parse("local-abc123").unwrap(),
+            local_eval_state::Ownership::Shared,
+            LOCAL_EVAL_PIN,
+        )
+        .unwrap();
         let configured = || {
             already_configured(
                 fixture.app.handle().clone(),

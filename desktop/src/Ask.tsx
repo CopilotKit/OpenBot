@@ -37,7 +37,6 @@ export function Ask({
   onOpen,
   onBack,
   onViewIntelligence,
-  local = false,
   failure: setupFailure,
 }: {
   /** Which of `PRESET_QUESTIONS` the box starts with; one at random unless a test says. */
@@ -49,8 +48,6 @@ export function Ask({
   onBack: () => void | Promise<void>;
   /** Local mode with a recorded stack: opens its Intelligence dashboard, already signed in. */
   onViewIntelligence?: () => Promise<void>;
-  /** The local first run's wording: "Try OpenBot" as its heading. */
-  local?: boolean;
   /** A failure from setup itself, shown inside this card rather than under it. */
   failure?: ReactNode;
 }) {
@@ -126,12 +123,11 @@ export function Ask({
   const asked = answer !== null;
   return (
     <div className="sheet">
-      <Sections local={local} at="Start" />
-      <h1>{local ? "Try OpenBot" : "Ask it something."}</h1>
+      <Sections at="Start" />
+      <h1>Try OpenBot</h1>
       <p className="lede">
-        {local
-          ? "OpenBot is up. Ask your Bot something: use this question, try another, or type your own."
-          : "Your Bot is set up. This proves it can answer before you start using it."}
+        OpenBot is up. Ask your Bot something: use this question, try another,
+        or type your own.
       </p>
 
       <div className="field">
