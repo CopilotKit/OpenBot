@@ -5,11 +5,11 @@ import {
 } from "@openbot/shared/learning";
 import { eq } from "drizzle-orm";
 import type { Database } from "../db/client";
-import { currentEdition } from "../edition";
 import {
   learningSettings,
   learningThreadBindings,
 } from "../db/schema/learning";
+import { currentEdition } from "../edition";
 
 export type LearningSettingsStore = {
   read(): Promise<LearningSettings>;

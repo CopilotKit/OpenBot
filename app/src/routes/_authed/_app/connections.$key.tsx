@@ -9,13 +9,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { IdentityConnectionPage } from "@/components/connections/identity-connection-page";
-import { PluginPage } from "@/components/manage/plugin-page";
 import {
   PageEmpty,
   PageRows,
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { PluginPage } from "@/components/manage/plugin-page";
 import {
   BrokeredAccountRow,
   useBrokeredAccount,

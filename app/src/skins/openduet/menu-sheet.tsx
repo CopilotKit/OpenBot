@@ -16,6 +16,7 @@ import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { waitingOnYou } from "@/components/bot-profile/attention";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -39,7 +40,6 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { useMessageListEmphasis } from "@/lib/settings/message-list";

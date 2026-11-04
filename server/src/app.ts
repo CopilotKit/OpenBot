@@ -128,9 +128,6 @@ import { REFUSAL_MARKER, vendorAnswer } from "./plugins/tools";
 import type { ProactiveEngine } from "./proactive/engine";
 import { createProactiveRoutes } from "./proactive/routes";
 import type { ProactiveStore } from "./proactive/store";
-import { createTaskRoutes } from "./tasks/routes";
-import type { TaskRunner } from "./tasks/runner";
-import type { TaskStore } from "./tasks/store";
 import {
   type ModelProviderProxy,
   mountProviderOAuthProxy,
@@ -140,8 +137,8 @@ import {
   RECORDER_BEARER_PREFIX,
 } from "./recorder/guard";
 import { createRecorderRoutes } from "./recorder/routes";
-import { createReleaseStatusRoutes } from "./release-status";
 import type { RecorderExtensionDeps } from "./recorder/wiring";
+import { createReleaseStatusRoutes } from "./release-status";
 import { createOriginGuard, createSingleUserGate } from "./request-trust";
 import type { ResponsibilityBindingStore } from "./responsibilities/bindings";
 import type { ResponsibilityEngine } from "./responsibilities/engine";
@@ -154,11 +151,14 @@ import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
-import type { ProductTelemetry } from "./telemetry/product";
-import { createProductTelemetryRoutes } from "./telemetry/product-routes";
 import type { SelfHostBanner } from "./self-host-banner";
+import { createTaskRoutes } from "./tasks/routes";
+import type { TaskRunner } from "./tasks/runner";
+import type { TaskStore } from "./tasks/store";
 import { createTeamBotRoutes } from "./team-bots/routes";
 import type { TeamBots } from "./team-bots/team-bots";
+import type { ProductTelemetry } from "./telemetry/product";
+import { createProductTelemetryRoutes } from "./telemetry/product-routes";
 import type { PackageStatusReader } from "./tenant-package";
 import {
   INSTRUCTIONS_LIMIT,

@@ -4,11 +4,11 @@
  * boot boundary.
  */
 import { intelligenceApiKey } from "@openbot/shared/intelligence-key";
-import { listenPort } from "@openbot/shared/listen-port";
 import {
   isLearningContainerId,
   type LearningTarget,
 } from "@openbot/shared/learning";
+import { listenPort } from "@openbot/shared/listen-port";
 import {
   BROWSER_ABSENT_ENV,
   BROWSER_URL_ENV,
@@ -25,11 +25,11 @@ import { normalizeDomain } from "./auth/email-domain";
 import { organizationAuthority } from "./auth/organization";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
-import { type Edition, parseEdition } from "./edition";
 import {
   type TranscriptionConfig,
   transcriptionConfig,
 } from "./dictation/config";
+import { type Edition, parseEdition } from "./edition";
 import type { BrokerProvider } from "./plugins/access";
 import { type VoiceConfig, voiceConfig } from "./voice/config";
 import { type WebBotAuth, webBotAuthFromEnv } from "./web-bot-auth";

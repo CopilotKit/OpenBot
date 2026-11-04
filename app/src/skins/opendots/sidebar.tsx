@@ -22,6 +22,7 @@ import {
 } from "@/components/app-sidebar/app-sidebar";
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -41,7 +42,6 @@ import {
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { memoriesQueryOptions } from "@/lib/memory";
-import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";

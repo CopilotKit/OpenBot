@@ -18,6 +18,7 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
+import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import {
   DropdownMenu,
@@ -42,7 +43,6 @@ import { setBotPausedMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import { botLifecycleQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
-import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { type NavigationItem, useNavigationItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
