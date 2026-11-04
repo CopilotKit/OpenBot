@@ -62,7 +62,7 @@ export const TEAM_FEATURE_GROUPS: readonly {
         icon: IconAdjustments,
       },
       { title: "Rules every Bot follows", icon: IconListCheck },
-      { title: "Approval rules for everyone", icon: IconChecks },
+      { title: "Governance for everyone", icon: IconChecks },
       { title: "A full audit trail, with export", icon: IconHistory },
     ],
   },
@@ -141,6 +141,7 @@ export function TeamFeaturesDialog() {
                 </ul>
               </section>
             ))}
+            <p className="text-muted-foreground text-sm">And tons more…</p>
             {/* An anchor, not Button: Base UI gives a rendered anchor role="button", and this is a link. */}
             <a
               className={cn(buttonVariants(), "mt-2 w-full")}
