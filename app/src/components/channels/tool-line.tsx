@@ -19,6 +19,7 @@ export function ToolLine({
   failed,
   notYet,
   byYou,
+  bare,
   children,
 }: {
   /** Drawn before the label, small and muted. A group of steps puts its kinds here. */
@@ -45,6 +46,12 @@ export function ToolLine({
   byYou?: boolean;
   /** Shown when the line is expanded. Without it the line is not expandable. */
   children?: ReactNode;
+  /**
+   * The expanded part grows with what it holds instead of scrolling, for children that bound
+   * themselves: a group's list of steps, each of which folds its own result. One scrolling box
+   * inside another left two scrollbars side by side.
+   */
+  bare?: boolean;
 }) {
   const tone = refused
     ? "text-destructive"
@@ -104,7 +111,9 @@ export function ToolLine({
        * Headings are cut down to the size of the surrounding text. A tool result is markdown a
        * server wrote for a model, so its `#` is a section marker rather than a page title.
        */}
-      <div className="mt-2 max-h-80 overflow-auto border-l pl-3 text-xs [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
+      <div
+        className={`mt-2 border-l pl-3 text-xs ${bare ? "" : "max-h-80 overflow-auto"} [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium`}
+      >
         {children}
       </div>
     </details>
