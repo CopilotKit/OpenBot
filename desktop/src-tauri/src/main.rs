@@ -226,6 +226,9 @@ struct Progress {
     running: bool,
     #[serde(rename = "downloadBytes", skip_serializing_if = "Option::is_none")]
     download_bytes: Option<u64>,
+    /// Install's image downloads, while they run: see `pull_metrics::Downloads`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    downloads: Option<pull_metrics::Downloads>,
 }
 
 #[derive(Serialize)]
@@ -403,6 +406,7 @@ fn report<R: tauri::Runtime>(
             detail: detail.into(),
             running: false,
             download_bytes: None,
+            downloads: None,
         },
     );
 }
@@ -421,6 +425,26 @@ fn report_running<R: tauri::Runtime>(
             detail: detail.into(),
             running: true,
             download_bytes,
+            downloads: None,
+        },
+    );
+}
+
+/// Install's running image downloads: the step's sentence, the overall bytes as `downloadBytes`
+/// for anything that reads only that, and the per-image detail.
+fn report_downloads<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    downloads: pull_metrics::Downloads,
+) {
+    let _ = app.emit(
+        "setup:progress",
+        Progress {
+            step: "images".into(),
+            ok: true,
+            detail: "Downloading local software.".into(),
+            running: true,
+            download_bytes: (downloads.bytes > 0).then_some(downloads.bytes),
+            downloads: Some(downloads),
         },
     );
 }
@@ -1268,6 +1292,7 @@ async fn prepare_installation_inner(
         images.sort();
         images.dedup();
         // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.
+        let pacer = Mutex::new(pull_metrics::Pacer::default());
         pull_metrics::pull_images_limited(
             &images,
             pull_metrics::IMAGE_PULLS_AT_ONCE,
@@ -1277,15 +1302,16 @@ async fn prepare_installation_inner(
                 })
             },
             || attempt.require_current(),
-            |done, total, bytes| {
-                // `done` counts FINISHED pulls, so this reads "(0/7)" while the first pulls run.
-                // The byte figure is the sum over every pull, running and finished.
-                report_running(
-                    &handle,
-                    "images",
-                    format!("Downloading local software ({done}/{total})."),
-                    (bytes > 0).then_some(bytes),
-                )
+            |downloads| {
+                // `done` counts FINISHED pulls; the bytes are the sum over every pull, running and
+                // finished. Paced to a few reports a second, which also measures the speed.
+                let paced = pacer
+                    .lock()
+                    .unwrap()
+                    .offer(std::time::Instant::now(), downloads);
+                if let Some(downloads) = paced {
+                    report_downloads(&handle, downloads);
+                }
             },
         )?;
         report(
@@ -2886,6 +2912,7 @@ impl QuitStatus {
             detail: String::new(),
             running: state == QuitStepState::Running,
             download_bytes: None,
+            downloads: None,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,

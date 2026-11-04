@@ -1,5 +1,23 @@
 import { type ReactNode, useEffect, useState } from "react";
 
+/** What the Install step says while it downloads OpenBot's software. */
+export const INSTALL_BLURB =
+  "This installs the full OpenBot platform on this computer: the server, your Bots and the computers they work on, and Intelligence. It's a large download the first time, so it can take a while.";
+
+/** One image downloading now. `size` is there once the image has said how big it is. */
+export type ImagePull = { name: string; bytes: number; size?: number };
+
+/** Install's image downloads, as the native side reports them: see `pull_metrics::Downloads`. */
+export type Downloads = {
+  /** Images finished, of `total`. */
+  done: number;
+  total: number;
+  /** Downloaded so far, over every image. */
+  bytes: number;
+  bytesPerSecond?: number;
+  pulling: ImagePull[];
+};
+
 /** One setup step, as the native side reports it or the window runs it. */
 export type Progress = {
   step: string;
@@ -7,6 +25,7 @@ export type Progress = {
   detail: string;
   running?: boolean;
   downloadBytes?: number;
+  downloads?: Downloads;
   /** When a running row began, if earlier than the row appeared on this screen. */
   startedAt?: number;
 };
@@ -111,6 +130,7 @@ export function plainInstallSteps(
       running: stillPreparing,
       detail: preparingNow?.detail ?? "",
       downloadBytes: preparingNow?.downloadBytes,
+      downloads: preparingNow?.downloads,
     });
   }
   if (rest.length > 0 || (installing && !stillPreparing && !preparingFailed)) {
@@ -124,6 +144,7 @@ export function plainInstallSteps(
       running: installingNow,
       detail: restNow?.detail ?? "",
       downloadBytes: restNow?.downloadBytes,
+      downloads: restNow?.downloads,
     });
   }
   return rows;
@@ -132,6 +153,7 @@ export function plainInstallSteps(
 function SetupProgressRow({ step }: { step: Progress }) {
   const running = step.running ?? false;
   const elapsed = useElapsed(running, step.startedAt);
+  const downloads = running ? step.downloads : undefined;
   return (
     <li className="step" aria-label={label(step.step)}>
       <span
@@ -155,13 +177,52 @@ function SetupProgressRow({ step }: { step: Progress }) {
       <span className="detail">
         {step.detail}
         {step.downloadBytes != null &&
+          downloads == null &&
           ` ${formatDownloadBytes(step.downloadBytes)} downloaded.`}
       </span>
+      {downloads && <DownloadDetail downloads={downloads} />}
     </li>
   );
 }
 
-function formatDownloadBytes(bytes: number): string {
+/** The images downloading now, each with its own figure, over one line for the whole download. */
+function DownloadDetail({ downloads }: { downloads: Downloads }) {
+  return (
+    <div className="downloads">
+      {downloads.pulling.length > 0 && (
+        <ul className="downloads-now" aria-label="Downloading now">
+          {downloads.pulling.map((image) => (
+            <li key={image.name} aria-label={image.name}>
+              <span className="downloads-name">{image.name}</span>
+              {image.bytes > 0 && (
+                <span className="downloads-bytes">{imageFigure(image)}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="downloads-summary">{downloadsSummary(downloads)}</p>
+    </div>
+  );
+}
+
+function imageFigure(image: ImagePull): string {
+  const bytes = formatDownloadBytes(image.bytes);
+  return image.size ? `${bytes} of ${formatDownloadBytes(image.size)}` : bytes;
+}
+
+/** "1.2 GB downloaded · 24.5 MB/s · 3 of 9 images done", leaving out what is not known yet. */
+export function downloadsSummary(downloads: Downloads): string {
+  const parts: string[] = [];
+  if (downloads.bytes > 0)
+    parts.push(`${formatDownloadBytes(downloads.bytes)} downloaded`);
+  if (downloads.bytesPerSecond != null)
+    parts.push(`${formatDownloadBytes(downloads.bytesPerSecond)}/s`);
+  parts.push(`${downloads.done} of ${downloads.total} images done`);
+  return parts.join(" · ");
+}
+
+export function formatDownloadBytes(bytes: number): string {
   if (bytes < 1000) return `${bytes} B`;
   const units = ["kB", "MB", "GB", "TB"];
   const power = Math.min(Math.floor(Math.log10(bytes) / 3), units.length);

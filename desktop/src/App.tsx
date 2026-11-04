@@ -28,6 +28,7 @@ import { RuntimeUpdates } from "./RuntimeUpdates";
 import { Sections } from "./Sections";
 import { StartFresh } from "./StartFresh";
 import {
+  INSTALL_BLURB,
   type Progress,
   plainInstallSteps,
   SetupProgress,
@@ -733,7 +734,7 @@ function Setup() {
           <p className="lede">
             {installationReady
               ? "OpenBot’s local software is ready. Next, connect your AI."
-              : "OpenBot is installing what it needs on this computer. This can take a few minutes."}
+              : INSTALL_BLURB}
           </p>
           <SetupProgress steps={plainInstallSteps(steps, busy)} />
           {/* Intelligence sets itself up alongside, once the install has Docker answering. */}
