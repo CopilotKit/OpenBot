@@ -701,6 +701,15 @@ export function App() {
     />
   );
 
+  const runtimeRecovery = (
+    <RuntimeUpdates
+      key={root}
+      root={root}
+      onApply={applyRuntimeUpdate}
+      recoveryOnly
+    />
+  );
+
   /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
   async function startFresh(volumes: string[], containers: string[]) {
     setBusy(true);
@@ -847,6 +856,7 @@ export function App() {
     return (
       <main>
         <Welcome onStart={() => setStep("harness")} />
+        {runtimeRecovery}
         {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
@@ -880,6 +890,7 @@ export function App() {
           }}
           onBack={() => setStep("welcome")}
         />
+        {runtimeRecovery}
       </main>
     );
   }
@@ -972,6 +983,7 @@ export function App() {
             )}
           </div>
         </div>
+        {runtimeRecovery}
       </main>
     );
   }
@@ -1022,6 +1034,7 @@ export function App() {
           }}
         />
         {displayedFailure && <Failure problem={displayedFailure} />}
+        {runtimeRecovery}
       </main>
     );
   }

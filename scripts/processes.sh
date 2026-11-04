@@ -101,3 +101,40 @@ stop_matching() {
   fi
   pkill -f "$1" >/dev/null 2>&1 || true
 }
+
+# Match a host worker only in this checkout. Other local installations may use the same argv.
+# Unknown ownership refuses startup; a worker disappearing during inspection is harmless.
+# Windows keeps its existing process discovery; host updates there remain unsupported.
+running_here() {
+  local pattern="$1" root="$2" pids pid cwd path status found=false
+  if openbot_windows_without pgrep || openbot_windows_without lsof; then
+    running "$pattern"
+    return
+  fi
+  if pids="$(pgrep -f "$pattern")"; then
+    :
+  else
+    status=$?
+    if [ "$status" -ne 1 ]; then
+      printf '%s\n' "Could not discover host worker processes" >&2
+      return 2
+    fi
+  fi
+  for pid in $pids; do
+    if ! cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null)"; then
+      if kill -0 "$pid" 2>/dev/null; then
+        printf '%s\n' "Could not establish host worker ownership (pid $pid)" >&2
+        return 2
+      fi
+      continue
+    fi
+    path="$(printf '%s\n' "$cwd" | sed -n 's/^n//p')"
+    case "$path" in
+      *$'\n'*) printf '%s\n' "Could not establish host worker ownership (pid $pid)" >&2; return 2 ;;
+      /*) ;;
+      *) printf '%s\n' "Could not establish host worker ownership (pid $pid)" >&2; return 2 ;;
+    esac
+    if [ "$path" = "$root" ]; then found=true; fi
+  done
+  [ "$found" = true ]
+}

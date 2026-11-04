@@ -2,7 +2,7 @@
 
 OpenBot Desktop keeps its installed runtime pin during normal Start and Repair. Runtime updates are explicit: open **Runtime updates** in the existing installation screen, enter an exact release tag, check compatibility, stage its source and images, acknowledge downtime and database recovery, then apply. The native application and runtime have separate delivery paths.
 
-The updater keeps the selected root, saved Docker/Podman engine, Compose project, volume names and supervisor namespace. It replaces managed vendor source leaves in that root. It preserves `.env`, native records, credentials, keys, profiles, workspaces, override files, all of `examples`, and a configured tenant source directory. Generated dependencies/build output is excluded from source comparison. Modified, added or removed managed source requires upstream integration instead of artifact replacement.
+The updater keeps the selected root, saved Docker/Podman engine, Compose project, volume names and supervisor namespace. It replaces managed vendor source leaves in that root. It preserves `.env`, native records, credentials, keys, profiles, workspaces, override files, all of `examples`, and a configured tenant source directory. Generated dependencies/build output is excluded from source comparison, including the exact gitignored `app/src/lib/generated/application-config.ts` file that the app compiler writes from tenant configuration. Other source in that directory remains managed. Modified, added or removed managed source requires upstream integration instead of artifact replacement.
 
 ## Distribution policy and existing installations
 
