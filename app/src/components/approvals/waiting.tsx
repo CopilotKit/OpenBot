@@ -26,6 +26,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupText,
+  InputGroupTextarea,
+} from "@/components/ui/input-group";
+import {
   Item,
   ItemContent,
   ItemDescription,
@@ -359,11 +366,11 @@ function AnswerDialog({
             </DialogDescription>
           )}
         </DialogHeader>
-        <div className="rounded-lg border border-border bg-card focus-within:ring-2 focus-within:ring-ring/40">
-          <Textarea
+        <InputGroup>
+          <InputGroupTextarea
             aria-label="Your answer"
             autoFocus
-            className="min-h-28 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+            className="min-h-28"
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -374,8 +381,8 @@ function AnswerDialog({
             placeholder={`Reply to ${name}`}
             value={text}
           />
-          <div className="flex items-center justify-between gap-3 px-3 pb-3">
-            <span className="text-muted-foreground text-xs">
+          <InputGroupAddon align="block-end">
+            <InputGroupText className="text-xs">
               {answer.error ? (
                 <span className="text-destructive" role="alert">
                   {answer.error.message}
@@ -383,12 +390,18 @@ function AnswerDialog({
               ) : (
                 `${MAC ? "⌘" : "Ctrl"}↵ to send`
               )}
-            </span>
-            <Button disabled={!ready} onClick={send}>
+            </InputGroupText>
+            <InputGroupButton
+              className="ml-auto"
+              disabled={!ready}
+              onClick={send}
+              size="sm"
+              variant="default"
+            >
               {answer.isPending ? "Sending…" : "Send answer"}
-            </Button>
-          </div>
-        </div>
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
       </DialogContent>
     </Dialog>
   );
