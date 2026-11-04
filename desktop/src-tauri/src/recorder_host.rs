@@ -9,21 +9,20 @@
 //! The host answers three messages, each within its own deadline ([`DEADLINES`]), which sits below the time the
 //! extension waits for the answer, so the extension always hears why instead of giving up.
 //!
-//! `ping` says, cheaply, whether a connect would work now: an OpenBot is installed, its app answers on its port, and in
-//! organization mode Desktop holds a sign-in for the organization. It reads two files and asks the app one question. It
-//! does not prove which process answers, sends nothing secret and mints nothing.
+//! `ping` says, cheaply, whether a connect would work now: an OpenBot is installed and its app answers on its port. It
+//! reads two files and asks the app one question. It does not prove which process answers, sends nothing secret and
+//! mints nothing.
 //!
-//! `handoff` makes sure the deployment's own processes hold its ports, hands the organization sign-in over in
-//! organization mode, asks that OpenBot for a one-time connect code and returns it with the OpenBot's address, so the
-//! Recorder can connect without the person typing either.
+//! `handoff` makes sure the deployment's own processes hold its ports, asks that OpenBot for a one-time connect code and
+//! returns it with the OpenBot's address, so the Recorder can connect without the person typing either.
 //!
 //! `address` says which address this computer's OpenBot answers on, after the same ownership checks a handoff makes, and
 //! mints nothing. The Recorder takes a connect from a page with no Connect click only when the page's origin is exactly
 //! this address: any other program on this computer can serve a page on a loopback port, and only the host knows which
 //! one is OpenBot Desktop's.
 //!
-//! Every reply carries `ok`. `ok: false` comes with `error`, one of the stable codes of [`Refusal`]. Neither a code nor
-//! any cookie is ever written to a log.
+//! Every reply carries `ok`. `ok: false` comes with `error`, one of the stable codes of [`Refusal`]. A code is never
+//! written to a log.
 use crate::recorder_install::{allowed_origins, linux_config_dir, Os};
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
@@ -52,13 +51,8 @@ pub enum Refusal {
     /// `not-running`: this computer's OpenBot is not running, its app does not answer, or a process that is not this
     /// OpenBot's holds its port.
     NotRunning,
-    /// `not-signed-in`: organization mode, and Desktop holds no sign-in for the organization, or the organization or
-    /// the local OpenBot refused the one it holds. Signing in again in OpenBot Desktop fixes it.
+    /// `not-signed-in`: the local OpenBot refused to give Desktop a connect code.
     NotSignedIn,
-    /// `organization-unavailable`: organization mode, and the sign-in Desktop holds could not be handed over now: the
-    /// organization's OpenBot did not answer, or answered with an error, or the saved sign-in could not be read. Trying
-    /// again later may work.
-    OrganizationUnavailable,
     /// `handoff-failed`: the local OpenBot answered the request for a connect code without one.
     HandoffFailed,
     /// `timed-out`: the host did not finish within its deadline.
@@ -76,7 +70,6 @@ impl Refusal {
             Refusal::NotInstalled => "not-installed",
             Refusal::NotRunning => "not-running",
             Refusal::NotSignedIn => "not-signed-in",
-            Refusal::OrganizationUnavailable => "organization-unavailable",
             Refusal::HandoffFailed => "handoff-failed",
             Refusal::TimedOut => "timed-out",
             Refusal::HostFailed => "host-failed",
@@ -88,21 +81,14 @@ impl Refusal {
 /// One question main.rs answers about this computer's OpenBot. Asked from the host's worker thread.
 pub type Check<T> = Box<dyn Fn() -> T + Send + Sync>;
 
-/// The local organization session cookie for the app at the given address. Ok(None) in single-user mode.
-pub type OrganizationCookie = Box<dyn Fn(&str) -> Result<Option<String>, Refusal> + Send + Sync>;
-
 /// What main.rs knows about this computer's OpenBot.
 pub struct HostEnvironment {
     /// A selected root exists.
     pub installed: Check<bool>,
     /// For a ping: the app answers on its port. Quick, and not proof of which process answered.
     pub app_answers: Check<bool>,
-    /// For a ping: Ok in single-user mode or when Desktop holds an organization sign-in, read without the network.
-    pub signed_in: Check<Result<(), Refusal>>,
     /// For a handoff: the owned app's address, None when it is not running or another process holds its port.
     pub app_url: Check<Option<String>>,
-    /// For a handoff: the organization sign-in handed to the local OpenBot, as its session cookie.
-    pub organization_cookie: OrganizationCookie,
 }
 
 /// How long the host gives each message before it answers `timed-out`.
@@ -249,7 +235,7 @@ fn ping(origin_allowed: bool, env: &HostEnvironment) -> Result<(), Refusal> {
     if !(env.app_answers)() {
         return Err(Refusal::NotRunning);
     }
-    (env.signed_in)()
+    Ok(())
 }
 
 /// The address this computer's OpenBot answers on, once its own processes are proved to hold its ports (`app_url`). It
@@ -276,24 +262,21 @@ fn handoff(
         return Err(Refusal::NotInstalled);
     }
     let app_url = (env.app_url)().ok_or(Refusal::NotRunning)?;
-    let cookie = (env.organization_cookie)(&app_url)?;
-    let mut request = client
+    let response = client
         .post(format!(
             "{}/api/recorder/connect-codes",
             app_url.trim_end_matches('/')
         ))
-        .json(&json!({ "via": "desktop" }));
-    if let Some(cookie) = cookie {
-        request = request.header("cookie", cookie);
-    }
-    let response = request.send().map_err(|error| {
-        eprintln!("[recorder-host] the local OpenBot did not answer the handoff");
-        if error.is_timeout() {
-            Refusal::TimedOut
-        } else {
-            Refusal::NotRunning
-        }
-    })?;
+        .json(&json!({ "via": "desktop" }))
+        .send()
+        .map_err(|error| {
+            eprintln!("[recorder-host] the local OpenBot did not answer the handoff");
+            if error.is_timeout() {
+                Refusal::TimedOut
+            } else {
+                Refusal::NotRunning
+            }
+        })?;
     let status = response.status();
     if status != reqwest::StatusCode::CREATED {
         eprintln!("[recorder-host] the local OpenBot answered the handoff with {status}");
@@ -445,7 +428,6 @@ mod tests {
     use std::net::TcpListener;
     use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
     use std::time::Instant;
 
     const ID: &str = "icpcnhgjghecmklnjbccdgdicklblcgd";
@@ -682,48 +664,31 @@ mod tests {
         assert_eq!(config["identifier"], DESKTOP);
     }
 
-    /// What the host asked of the environment: each deep check it ran, and the addresses it asked a cookie for.
+    /// What the host asked of the environment: each deep check it ran.
     #[derive(Default)]
     struct Asked {
         app_answers: AtomicUsize,
-        signed_in: AtomicUsize,
         app_url: AtomicUsize,
-        cookies: Mutex<Vec<String>>,
-    }
-
-    impl Asked {
-        fn cookies(&self) -> Vec<String> {
-            self.cookies.lock().unwrap().clone()
-        }
     }
 
     /// A computer's OpenBot as a test describes it.
     struct Computer {
         installed: bool,
         app_url: Option<String>,
-        signed_in: Result<(), Refusal>,
-        cookie: Result<Option<String>, Refusal>,
     }
 
-    /// Installed, running at `app_url`, single-user mode.
+    /// Installed, running at `app_url`.
     fn running(app_url: &str) -> Computer {
         Computer {
             installed: true,
             app_url: Some(app_url.to_string()),
-            signed_in: Ok(()),
-            cookie: Ok(None),
         }
     }
 
     fn environment(computer: Computer) -> (Arc<HostEnvironment>, Arc<Asked>) {
         let asked = Arc::new(Asked::default());
-        let (a, b, c, d) = (asked.clone(), asked.clone(), asked.clone(), asked.clone());
-        let Computer {
-            installed,
-            app_url,
-            signed_in,
-            cookie,
-        } = computer;
+        let (a, c) = (asked.clone(), asked.clone());
+        let Computer { installed, app_url } = computer;
         let answers = app_url.is_some();
         let environment = HostEnvironment {
             installed: Box::new(move || installed),
@@ -731,17 +696,9 @@ mod tests {
                 a.app_answers.fetch_add(1, Ordering::SeqCst);
                 answers
             }),
-            signed_in: Box::new(move || {
-                b.signed_in.fetch_add(1, Ordering::SeqCst);
-                signed_in
-            }),
             app_url: Box::new(move || {
                 c.app_url.fetch_add(1, Ordering::SeqCst);
                 app_url.clone()
-            }),
-            organization_cookie: Box::new(move |url| {
-                d.cookies.lock().unwrap().push(url.to_string());
-                cookie.clone()
             }),
         };
         (Arc::new(environment), asked)
@@ -819,7 +776,6 @@ mod tests {
             Refusal::NotInstalled,
             Refusal::NotRunning,
             Refusal::NotSignedIn,
-            Refusal::OrganizationUnavailable,
             Refusal::HandoffFailed,
             Refusal::TimedOut,
             Refusal::HostFailed,
@@ -835,7 +791,6 @@ mod tests {
                 "not-installed",
                 "not-running",
                 "not-signed-in",
-                "organization-unavailable",
                 "handoff-failed",
                 "timed-out",
                 "host-failed",
@@ -854,10 +809,8 @@ mod tests {
         );
         assert_untouched(&listener);
         assert_eq!(asked.app_answers.load(Ordering::SeqCst), 1);
-        assert_eq!(asked.signed_in.load(Ordering::SeqCst), 1);
-        // Neither the ownership check behind `app_url` nor the organization handover runs for a ping.
+        // The ownership check behind `app_url` does not run for a ping.
         assert_eq!(asked.app_url.load(Ordering::SeqCst), 0);
-        assert!(asked.cookies().is_empty());
     }
 
     #[test]
@@ -881,22 +834,6 @@ mod tests {
                 },
                 "not-running",
             ),
-            (
-                true,
-                Computer {
-                    signed_in: Err(Refusal::NotSignedIn),
-                    ..running(&url)
-                },
-                "not-signed-in",
-            ),
-            (
-                true,
-                Computer {
-                    signed_in: Err(Refusal::OrganizationUnavailable),
-                    ..running(&url)
-                },
-                "organization-unavailable",
-            ),
         ];
         for (origin_allowed, computer, code) in cases {
             let (environment, asked) = environment(computer);
@@ -905,7 +842,6 @@ mod tests {
                 unavailable(code)
             );
             assert_eq!(asked.app_url.load(Ordering::SeqCst), 0, "{code}");
-            assert!(asked.cookies().is_empty(), "{code}");
         }
         assert_untouched(&listener);
     }
@@ -928,27 +864,7 @@ mod tests {
             serde_json::from_str::<Value>(&body).unwrap(),
             json!({ "via": "desktop" })
         );
-        assert_eq!(asked.cookies(), vec![url]);
         assert_eq!(asked.app_url.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn handoff_in_organization_mode_sends_the_local_session_cookie() {
-        let (url, listener) = fake_app();
-        let app = answer_once(listener, reply("201 Created", MINTED));
-        let (environment, asked) = environment(Computer {
-            cookie: Ok(Some("openbot.organization-session=v".into())),
-            ..running(&url)
-        });
-        assert_eq!(
-            ask(json!({ "type": "handoff" }), true, &environment),
-            json!({ "ok": true, "openbotUrl": url, "code": "obc_fixture" })
-        );
-        let (head, _) = app.join().unwrap();
-        assert!(head
-            .to_lowercase()
-            .contains("cookie: openbot.organization-session=v\r\n"));
-        assert_eq!(asked.cookies(), vec![url]);
     }
 
     #[test]
@@ -1013,7 +929,7 @@ mod tests {
 
     #[test]
     fn handoff_without_a_running_app_is_not_running() {
-        let (environment, asked) = environment(Computer {
+        let (environment, _) = environment(Computer {
             app_url: None,
             ..running("http://127.0.0.1:9")
         });
@@ -1021,13 +937,12 @@ mod tests {
             ask(json!({ "type": "handoff" }), true, &environment),
             not("not-running")
         );
-        assert!(asked.cookies().is_empty());
     }
 
     #[test]
     fn handoff_without_an_install_is_not_installed() {
         let (url, listener) = fake_app();
-        let (environment, asked) = environment(Computer {
+        let (environment, _) = environment(Computer {
             installed: false,
             ..running(&url)
         });
@@ -1036,7 +951,6 @@ mod tests {
             not("not-installed")
         );
         assert_untouched(&listener);
-        assert!(asked.cookies().is_empty());
     }
 
     #[test]
@@ -1048,28 +962,7 @@ mod tests {
             not("origin-not-allowed")
         );
         assert_untouched(&listener);
-        assert!(asked.cookies().is_empty());
         assert_eq!(asked.app_url.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn handoff_passes_on_why_the_organization_sign_in_could_not_be_handed_over() {
-        for (refusal, code) in [
-            (Refusal::NotSignedIn, "not-signed-in"),
-            (Refusal::OrganizationUnavailable, "organization-unavailable"),
-        ] {
-            let (url, listener) = fake_app();
-            let (environment, asked) = environment(Computer {
-                cookie: Err(refusal),
-                ..running(&url)
-            });
-            assert_eq!(
-                ask(json!({ "type": "handoff" }), true, &environment),
-                not(code)
-            );
-            assert_untouched(&listener);
-            assert_eq!(asked.cookies(), vec![url]);
-        }
     }
 
     #[test]
@@ -1080,10 +973,9 @@ mod tests {
             ask(json!({ "type": "address" }), true, &environment),
             json!({ "ok": true, "openbotUrl": url })
         );
-        // The ownership checks behind `app_url` ran; nothing asked the app for a code or handed over a sign-in.
+        // The ownership checks behind `app_url` ran; nothing asked the app for a code.
         assert_eq!(asked.app_url.load(Ordering::SeqCst), 1);
         assert_untouched(&listener);
-        assert!(asked.cookies().is_empty());
     }
 
     #[test]
@@ -1117,7 +1009,6 @@ mod tests {
                 not(code)
             );
             assert_eq!(asked.app_url.load(Ordering::SeqCst), checks, "{code}");
-            assert!(asked.cookies().is_empty(), "{code}");
         }
         assert_untouched(&listener);
     }
@@ -1130,7 +1021,6 @@ mod tests {
             assert_eq!(ask(message, true, &environment), not("unknown-message"));
         }
         assert_untouched(&listener);
-        assert!(asked.cookies().is_empty());
         assert_eq!(asked.app_answers.load(Ordering::SeqCst), 0);
     }
 
@@ -1193,12 +1083,10 @@ mod tests {
                 std::thread::sleep(Duration::from_secs(3));
                 true
             }),
-            signed_in: Box::new(|| Ok(())),
             app_url: Box::new(|| {
                 std::thread::sleep(Duration::from_secs(3));
                 None
             }),
-            organization_cookie: Box::new(|_| Ok(None)),
         };
         let deadlines = Deadlines {
             ping: Duration::from_millis(100),
@@ -1238,9 +1126,7 @@ mod tests {
         let broken = HostEnvironment {
             installed: Box::new(|| panic!("a broken check")),
             app_answers: Box::new(|| true),
-            signed_in: Box::new(|| Ok(())),
             app_url: Box::new(|| None),
-            organization_cookie: Box::new(|_| Ok(None)),
         };
         let (status, replies) = serve_all(
             &[json!({ "type": "ping" }), json!({ "type": "handoff" })],

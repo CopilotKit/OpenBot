@@ -11,7 +11,7 @@ import { ExternalLink } from "./ExternalLink";
 export type Problem = {
   said: string;
   detail?: string | null;
-  connection?: "model" | "intelligence" | "organization" | null;
+  connection?: "model" | "intelligence" | null;
   database_reset?: string | null;
   /** Every volume a confirmed fresh-install reset removes, the database included. */
   leftover_reset?: string[] | null;

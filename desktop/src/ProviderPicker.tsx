@@ -154,7 +154,6 @@ export function ProviderPicker({
   onBack,
   returning = false,
   busy: starting = false,
-  local = false,
   status,
   failure: setupFailure,
   onProviderChange,
@@ -178,8 +177,6 @@ export function ProviderPicker({
   onBack?: () => void;
   returning?: boolean;
   busy?: boolean;
-  /** A local first run: its sections are Account, Install, AI and Start. */
-  local?: boolean;
   /** One line about work running behind this screen. */
   status?: ReactNode;
   /** A failure from setup itself (a Start that sent the window back here), shown in this card. */
@@ -574,7 +571,7 @@ export function ProviderPicker({
 
   return (
     <div className="sheet">
-      {!returning && <Sections local={local} at="AI" />}
+      {!returning && <Sections at="AI" />}
       <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
       <p className="lede">
         Choose the AI your Bots use. Sign in with a plan you already have, or

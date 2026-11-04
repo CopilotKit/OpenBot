@@ -1055,7 +1055,7 @@ pub const MINTED: [&str; 6] = [
 /// earlier run wrote outlives the answer that implied it: `BOT_MODEL` once asked OpenAI for a model
 /// an earlier endpoint had named, and `OPENBOT_BROWSER_URL` would send the person to a browser that
 /// no longer runs.
-pub const REMOVED_WHEN_UNSET: [&str; 7] = [
+pub const REMOVED_WHEN_UNSET: [&str; 8] = [
     "BOT_PROVIDER",
     "BOT_MODEL",
     "AGENT_BOT_MODEL",
@@ -1064,6 +1064,9 @@ pub const REMOVED_WHEN_UNSET: [&str; 7] = [
     crate::local_browser::BROWSER_ABSENT_ENV,
     // A machine that moves from rootless Podman to Docker must go back to `host-gateway`.
     HOST_GATEWAY_ENV,
+    // Written by earlier apps that could sign in through an organization's OpenBot. This app runs
+    // OpenBot for one person, so a Start takes it out rather than leave the server expecting it.
+    "OPENBOT_ORGANIZATION_AUTH_URL",
 ];
 
 /// What `docker-compose.yml` maps `host.docker.internal` to, in place of `host-gateway`.
@@ -1817,6 +1820,40 @@ HTTPS_PROXY=http://proxy:8080
         for key in ["AGENT_COMPUTER_URL", "COMPUTER_SUPERVISOR_URL"] {
             assert_eq!(with[key], without[key], "a Bot's computer moved: {key}");
         }
+    }
+
+    /// An earlier app that could sign in through an organization wrote its address here. A Start
+    /// takes it out, so the server runs for this one person; the person's own lines stay.
+    #[test]
+    fn an_earlier_organization_address_is_taken_out_by_a_start() {
+        let dir = temp_root("env-organization-gone");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = env_at(&dir);
+        std::fs::write(
+            &path,
+            "OPENBOT_ORGANIZATION_AUTH_URL=https://openbot.company.example\nMY_OWN=kept\n",
+        )
+        .unwrap();
+        let settings = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert!(!settings.contains_key("OPENBOT_ORGANIZATION_AUTH_URL"));
+        let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
+            .iter()
+            .filter(|key| !settings.contains_key(**key))
+            .map(|key| (key.to_string(), String::new()))
+            .collect();
+        write(&path, &settings, &purge).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("OPENBOT_ORGANIZATION_AUTH_URL"), "{text}");
+        assert!(text.contains("MY_OWN=kept"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// Chrome uninstalled since the last Start: the server must stop being pointed at a browser that

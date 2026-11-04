@@ -119,7 +119,7 @@ export function CopilotKitAccount({
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
           CopilotKit is named where that is true: the account and the agreement's own title. */}
-      <Sections local at="Account" />
+      <Sections at="Account" />
       <h1>
         {agreement
           ? "Accept the evaluation agreement"

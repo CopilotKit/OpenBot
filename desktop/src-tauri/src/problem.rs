@@ -17,7 +17,6 @@ use serde::Serialize;
 pub enum Connection {
     Model,
     Intelligence,
-    Organization,
 }
 
 /// A failure, in both registers.

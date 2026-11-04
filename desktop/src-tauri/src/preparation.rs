@@ -491,9 +491,8 @@ fn complete_with(
 /// `selection=None` is the auth check, which has no authority to change the Bot selection.
 ///
 /// No runtime and no packages: OpenBot's server and worker are containers now, so what Start needs
-/// from the installation is the deployment it laid out and the images it downloaded. Installation
-/// still records the host packages, for the self-hosted Intelligence sign-in that runs on the host,
-/// and that sign-in checks them itself.
+/// from the installation is the deployment it laid out and the images it downloaded. The host
+/// packages are the person's browser's, which a Start that runs one prepares and checks itself.
 pub fn require(
     root: &Path,
     selection: Option<&Option<HarnessChoice>>,
@@ -752,8 +751,8 @@ fn main() {
     }
 
     /// Installing is pulling images, so a clean machine, which has never installed the host's
-    /// packages, completes it. The self-hosted sign-in installs them later, and that is not a
-    /// change to the installation.
+    /// packages, completes it. A Start that runs the person's browser installs them later, and that
+    /// is not a change to the installation.
     #[test]
     fn a_clean_machine_installs_without_the_hosts_packages() {
         let f = Fixture::new();
