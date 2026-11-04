@@ -6,7 +6,7 @@ import {
   type RunAgentInput,
 } from "@ag-ui/client";
 import {
-  type CopilotKitIntelligence,
+  CopilotKitIntelligence,
   IntelligenceAgentRunner,
 } from "@copilotkit/runtime/v2";
 import { createIntelligenceThreadLock } from "@openbot/toolkit/copilotkit/thread-lock";
@@ -25,17 +25,24 @@ import { createIntelligenceClient } from "../src/intelligence-client";
  * recording one) and when a run's terminal event arrives.
  *
  * The CopilotKit release that records stops (`ɵrecordRunStop` on the client, `recordStop` on the
- * Intelligence runner) is not out; `@copilotkit/runtime` 1.83.0 has neither. So two stand-ins carry
- * that release's behaviour on top of the real 1.83.0 client and runner: `recordingStops` gives the
- * client the method, and `StopRecordingRunner` calls a run's `recordStop` when it is asked to stop
- * the run, within two seconds, before the terminal event, and stops the run whatever the record did.
- * The last test is 1.83.0 exactly as installed.
+ * Intelligence runner, from 1.84.1) is not what CI installs; `@copilotkit/runtime` 1.83.0 has
+ * neither. So where the installed runtime lacks it, two stand-ins carry that release's behaviour on
+ * top of the real client and runner: `recordingStops` gives the client the method, and
+ * `StopRecordingRunner` calls a run's `recordStop` when it is asked to stop the run, within two
+ * seconds, before the terminal event, and stops the run whatever the record did. Where the installed
+ * runtime records stops itself, its runner does that and the stand-in does nothing, so a stop is
+ * recorded once, as it is in production. The last test is the runtime exactly as installed.
  */
+
+/** Whether the installed runtime records the stops its runner makes (1.84.1 and later). */
+const runtimeRecordsStops =
+  typeof (CopilotKitIntelligence.prototype as { ɵrecordRunStop?: unknown })
+    .ɵrecordRunStop === "function";
 
 const OWNER = "user_owner";
 const AGENT = "bot_helper";
 
-type Moment = { at: "connect" | "terminal"; threadId: string };
+type Moment = { at: "connect" | "stop_run" | "terminal"; threadId: string };
 const timeline: Moment[] = [];
 const requests: { method: string; path: string }[] = [];
 let platform: ReturnType<typeof Bun.serve>;
@@ -47,11 +54,21 @@ beforeAll(() => {
     port: 0,
     async fetch(request, server) {
       const url = new URL(request.url);
-      if (url.pathname === "/runner/websocket")
-        return server.upgrade(request, {
-          data: undefined,
-          headers: { "Sec-WebSocket-Protocol": "phoenix" },
-        })
+      // The runner's socket, and the client socket a recorded stop is sent on.
+      if (
+        url.pathname === "/runner/websocket" ||
+        url.pathname === "/client/websocket"
+      )
+        // The subprotocol the client asked for, if any: the runner asks for `phoenix`, a client does not.
+        return server.upgrade(
+          request,
+          request.headers.get("sec-websocket-protocol")
+            ? {
+                data: undefined,
+                headers: { "Sec-WebSocket-Protocol": "phoenix" },
+              }
+            : { data: undefined },
+        )
           ? undefined
           : new Response("upgrade failed", { status: 400 });
       const text = await request.text();
@@ -103,6 +120,9 @@ beforeAll(() => {
         for (const item of pushed as { type?: string; threadId?: string }[])
           if (item.type === "RUN_FINISHED" || item.type === "RUN_ERROR")
             timeline.push({ at: "terminal", threadId: item.threadId ?? "" });
+        // A browser's Stop, and a stop the runtime records, as the gateway receives it.
+        if (event === "stop_run" && topic.startsWith("thread:"))
+          timeline.push({ at: "stop_run", threadId: topic.slice(7) });
         socket.send(
           JSON.stringify([
             joinRef,
@@ -184,7 +204,7 @@ class StopRecordingRunner extends IntelligenceAgentRunner {
 
   override async stop(request: Parameters<IntelligenceAgentRunner["stop"]>[0]) {
     const record = this.records.get(request.threadId);
-    if (record) {
+    if (record && !runtimeRecordsStops) {
       const deadline = new AbortController();
       const timer = setTimeout(() => deadline.abort(), 2_000);
       await record(deadline.signal).catch(() => undefined);
@@ -447,8 +467,9 @@ test("on the installed runtime, a client without the method is handed nothing an
     typeof (client as { ɵrecordRunStop?: unknown }).ɵrecordRunStop ===
       "function",
   ]);
+  // Where it has the method, the installed client records the stop the gateway's way, once.
   expect(moments("thread-installed")).toEqual(
-    runner.armed[0] ? ["connect", "terminal"] : ["terminal"],
+    runner.armed[0] ? ["connect", "stop_run", "terminal"] : ["terminal"],
   );
   expect(
     requests.filter(
