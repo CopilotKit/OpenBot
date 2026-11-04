@@ -624,21 +624,121 @@ jobs:
             docker logs openbot-ci
             exit 1
           }
-      - name: A Bot's shell cannot reach the deployment secrets
+      # Reading a secret is one way to reach it, and the checks below the first two are the others.
+      # Root reads /run/s6/container_environment, so anything that runs a command as root through
+      # sudo is a read of every secret in it; and owning /app is rewriting the code the API runs and
+      # the page it serves. Each of those passed here when this only tried the direct reads.
+      - name: A Bot's shell cannot reach the deployment secrets or the API's code
         run: |
           set -uo pipefail
-          if docker exec -u pwuser openbot-ci env -i PATH=/usr/bin:/bin sh -c '
-                for e in /proc/[0-9]*/environ; do tr "\0" "\n" < "$e" 2>/dev/null; done
-              ' | grep -q "^KEY_ENCRYPTION_KEY="; then
+          failed=0
+          # As a Bot's shell runs: `pwuser`, with an environment of its own rather than the image's.
+          bot() {
+            docker exec -u pwuser openbot-ci env -i PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+              HOME=/workspace sh -c "$1"
+          }
+
+          # shellcheck disable=SC2016 # `$e` is the Bot's shell's to expand, not this one's.
+          if bot 'for e in /proc/[0-9]*/environ; do tr "\0" "\n" 2>/dev/null < "$e"; done' \
+              | grep -q "^KEY_ENCRYPTION_KEY="; then
             echo "::error::A pwuser shell reads KEY_ENCRYPTION_KEY from a sibling process /proc/<pid>/environ."
-            exit 1
+            failed=1
           fi
-          if docker exec -u pwuser openbot-ci env -i PATH=/usr/bin:/bin sh -c \
-                'cat /run/s6/container_environment/KEY_ENCRYPTION_KEY 2>/dev/null' | grep -q .; then
+          if bot 'cat /run/s6/container_environment/KEY_ENCRYPTION_KEY 2>/dev/null' | grep -q .; then
             echo "::error::A pwuser shell reads KEY_ENCRYPTION_KEY from /run/s6/container_environment."
-            exit 1
+            failed=1
           fi
-          echo "pwuser cannot reach KEY_ENCRYPTION_KEY"
+
+          # sudo runs the package helper and nothing else, with the environment reset.
+          granted="$(bot 'sudo -n -l' 2>&1)"
+          commands="$(printf '%s\n' "$granted" | sed -n '/may run the following/,$p' | sed '1d; s/^ *//')"
+          if [ "$commands" != "(root) NOPASSWD: /usr/local/sbin/openbot-apt" ]; then
+            echo "::error::sudo grants pwuser more than openbot-apt: $commands"
+            failed=1
+          fi
+          if ! printf '%s\n' "$granted" | grep -q 'env_reset'; then
+            echo "::error::sudo does not reset the environment for pwuser."
+            failed=1
+          fi
+
+          # Each attempt below is a documented way to make apt-get or dpkg run a command as root
+          # (https://gtfobins.org/gtfobins/apt-get/), and each command it would run is the same
+          # one: create /tmp/openbot-ran-as-root. So the check is both that sudo or the helper said
+          # no, and that the file is not there afterwards. `x.deb` is a real package whose
+          # postinst does the same thing, and `apt.conf` sets both hooks.
+          bot 'set -e; rm -rf /tmp/openbot-probe; mkdir -p /tmp/openbot-probe/pkg/DEBIAN
+            cd /tmp/openbot-probe
+            printf "%s\n" "Package: openbot-probe" "Version: 1.0" "Architecture: all" \
+              "Maintainer: OpenBot CI <ci@example.invalid>" "Description: runs a command as root" \
+              > pkg/DEBIAN/control
+            printf "#!/bin/sh\ntouch /tmp/openbot-ran-as-root\n" > pkg/DEBIAN/postinst
+            chmod 0755 pkg/DEBIAN/postinst
+            dpkg-deb --root-owner-group --build pkg x.deb >/dev/null
+            printf "%s\n" "APT::Update::Pre-Invoke { \"touch /tmp/openbot-ran-as-root\"; };" \
+              "DPkg::Pre-Invoke { \"touch /tmp/openbot-ran-as-root\"; };" > apt.conf' \
+            || { echo "::error::Could not build the probe package as pwuser."; failed=1; }
+          ran_as_root() {
+            docker exec openbot-ci test -e /tmp/openbot-ran-as-root
+          }
+          refused() {
+            docker exec openbot-ci rm -f /tmp/openbot-ran-as-root
+            if bot "cd /tmp/openbot-probe && $1" >/dev/null 2>&1; then
+              echo "::error::Allowed as pwuser: $1"
+              failed=1
+            fi
+            if ran_as_root; then
+              echo "::error::Ran a command as root: $1"
+              failed=1
+            fi
+          }
+          refused 'sudo -n apt-get update -o APT::Update::Pre-Invoke::="touch /tmp/openbot-ran-as-root"'
+          refused 'sudo -n apt-get install -y -c apt.conf jq'
+          refused 'sudo -n dpkg -i x.deb'
+          refused 'sudo -n /usr/local/sbin/openbot-apt update -o APT::Update::Pre-Invoke::="touch /tmp/openbot-ran-as-root"'
+          refused 'sudo -n openbot-apt update extra'
+          refused 'sudo -n openbot-apt install -o DPkg::Pre-Invoke::="touch /tmp/openbot-ran-as-root" jq'
+          refused 'sudo -n openbot-apt install -c apt.conf jq'
+          refused 'sudo -n openbot-apt install --allow-unauthenticated jq'
+          refused 'sudo -n openbot-apt install ./x.deb'
+          refused 'sudo -n openbot-apt install /tmp/openbot-probe/x.deb'
+          refused 'sudo -n openbot-apt install x.deb'
+          refused 'sudo -n openbot-apt install jq=1.0'
+          refused 'sudo -n openbot-apt install sudo-'
+          refused 'sudo -n openbot-apt changelog apt'
+          refused 'sudo -n APT_CONFIG=/tmp/openbot-probe/apt.conf openbot-apt update'
+          # Exported rather than set through sudo, which sudo allows and then resets. The update may
+          # succeed; what must not happen is the hook.
+          docker exec openbot-ci rm -f /tmp/openbot-ran-as-root
+          bot 'APT_CONFIG=/tmp/openbot-probe/apt.conf sudo -n openbot-apt update' >/dev/null 2>&1
+          if ran_as_root; then
+            echo "::error::APT_CONFIG from a Bot's shell reached apt-get as root."
+            failed=1
+          fi
+
+          # And the feature itself, which is the reason sudo is here at all.
+          if ! output="$(bot 'sudo -n openbot-apt update && sudo -n openbot-apt install jq && jq --version' 2>&1)"; then
+            echo "::error::sudo openbot-apt install jq did not install jq."
+            printf '%s\n' "$output" | tail -20
+            failed=1
+          fi
+
+          # /app is root's: the API's code and the page it serves cannot be changed from here.
+          if bot ': >> /app/app/dist/index.html' 2>/dev/null; then
+            echo "::error::A pwuser shell can write /app/app/dist/index.html, which the API serves."
+            failed=1
+          fi
+          if bot 'touch /app/server/src/openbot-probe.ts' 2>/dev/null; then
+            echo "::error::A pwuser shell can write under /app/server, which the API runs."
+            failed=1
+          fi
+          writable="$(bot 'find /app /usr/local/sbin /etc/sudoers.d \( -writable -o -user pwuser \) -print 2>/dev/null | head -5')"
+          if [ -n "$writable" ]; then
+            echo "::error::pwuser owns or can write: $writable"
+            failed=1
+          fi
+
+          [ "$failed" -eq 0 ] || exit 1
+          echo "pwuser cannot reach KEY_ENCRYPTION_KEY, run anything as root but a package install, or change /app"
       - if: always()
         run: docker rm -f openbot-ci >/dev/null 2>&1 || true
 

@@ -115,6 +115,15 @@ answer, is refused before the model is called. Chat Completions refuses more tha
 search never sends more. The person is told why, and the audit log records it under Blocked as "Too
 many tools for its model".
 
+### A Bot's shell in the one-container image installs packages and nothing else as root
+
+In the `openbot` image (one container, and Helm's computer pods), a Bot installs a package with
+`sudo openbot-apt update` and `sudo openbot-apt install <package>`, which is what its tool
+description now says. `sudo apt-get`, `sudo dpkg` and the other package commands are refused: with
+any arguments they ran any command as root, and root there reads the deployment's secrets. The
+helper takes package names only. `/app` is no longer owned by the Bot's user, so a Bot cannot change
+the API's code or the page it serves. Computers that run as root keep using `apt-get` directly.
+
 ### Bots can install packages on their computers
 
 Package installs such as Nmap and ping now work on supervisor-managed computers. Existing computers
