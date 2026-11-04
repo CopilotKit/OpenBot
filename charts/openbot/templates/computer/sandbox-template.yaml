@@ -1,5 +1,5 @@
 {{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.warmPool.enabled }}
-{{- $ns := default .Release.Namespace .Values.computers.sandbox.namespace -}}
+{{- $ns := include "openbot.computersNamespace" . -}}
 {{/*
 The template a warm pool cuts pre-warmed computers from.
 
@@ -14,7 +14,7 @@ group, which is easy to get wrong and fails as "no matches for kind" at install.
 apiVersion: extensions.agents.x-k8s.io/v1beta1
 kind: SandboxTemplate
 metadata:
-  name: {{ $ns }}-computer
+  name: {{ include "openbot.componentName" (dict "root" . "component" "computer") }}
   namespace: {{ $ns }}
   labels:
 {{ include "openbot.labels" . | indent 4 }}

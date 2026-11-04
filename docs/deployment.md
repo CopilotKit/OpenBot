@@ -239,6 +239,35 @@ are capped at 350 per instance on the basic tier.
 **Railway, Render, Fly.io.** All run this image directly and all provision PostgreSQL in a click,
 which makes them the shortest path from nothing to a running deployment.
 
+## Several organizations in one cluster
+
+One OpenBot serves one organization. To run OpenBot for several organizations on one Kubernetes
+cluster, install the Helm chart once per organization, each release in a namespace of its own, with
+its computers in a second namespace of its own and its own database on one shared PostgreSQL. Each
+organization is installed by hand; there is no automated provisioning.
+
+**Once per cluster**, and never by a release: the agent-sandbox controller and its CRDs, a gVisor (or
+Kata) RuntimeClass, an ingress controller or Gateway, a CNI that enforces NetworkPolicy, and the
+PostgreSQL every organization's database lives on.
+
+**Once per organization**: the two namespaces, a database and login role with `CONNECT` revoked from
+everybody else, the Secrets, and a values file naming:
+
+| Value | Per organization |
+| --- | --- |
+| The release's namespace | `acme` |
+| `computers.sandbox.namespace` | `acme-computers` |
+| `database.existingSecret` | The organization's own database URL |
+| `config.publicUrl` and the Ingress host | Its own address |
+| `secrets.intelligenceApiKey` | The key of its own Intelligence project |
+| `config.auth`, `config.initialAdminEmails`, `config.allowedEmailDomains` | Its own sign-in |
+
+The chart refuses a computers namespace another release already holds, gives each release's
+credential only its own computers namespace, and, with `networkPolicy.enabled` and
+`networkPolicy.ingressFrom` set, lets no organization's pods reach another's API or computers. The
+steps, the SQL and what keeps the releases apart are in
+[the chart's README](../charts/openbot/README.md#several-organizations-in-one-cluster).
+
 ## Known costs
 
 **The browser images carry only the Chromium browser family.** The all-in-one Dockerfile and the
