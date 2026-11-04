@@ -73,6 +73,8 @@ import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
+import type { ProductTelemetry } from "./telemetry/product";
+import { productRuntimeHook } from "./telemetry/product-boundaries";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { RemoteLearnedSkillsMiddleware } from "./learning/remote";
 import {
@@ -95,6 +97,7 @@ import {
   selectTools,
 } from "./plugins/selection";
 import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
+import { corsOrigin } from "./request-trust";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
 /**
@@ -1986,6 +1989,7 @@ export function mountCopilotRuntime(
   identifyUser: IdentifyUser,
   identifyActor: IdentifyActor,
   options: {
+    productTelemetry?: ProductTelemetry;
     basePath?: string;
     onRunBusy?: (input: { threadId: string; busy: boolean }) => void;
     learningSettings?: LearningSettingsStore;
@@ -2105,6 +2109,8 @@ export function mountCopilotRuntime(
     // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
     // other deployment's. Adds no events of its own.
     telemetryProperties: {
+      app_id: "openbot",
+      ...options.productTelemetry?.deploymentProperties(),
       ...(config.accessibility ? { accessibility_title: "OpenBot" } : {}),
       ...desktopTelemetryProperties(),
     },
@@ -2126,6 +2132,21 @@ export function mountCopilotRuntime(
      */
     ...(config.generativeUi ? { openGenerativeUI: true } : {}),
     ...generativeUiMiddlewares(config.generativeUi),
+    /*
+     * Nothing the person's request carried is passed on to a Bot.
+     *
+     * Left unset, the runtime copies `authorization` and every `x-*` header from the request that
+     * started a run onto the agent it runs, and a remote Bot's agent is a POST to whatever address
+     * its author registered. Anyone allowed to publish a Bot can register their own, so a colleague
+     * signed in with an Entra bearer would hand that author a token OpenBot itself accepts.
+     *
+     * No Bot reads anything from the person's request. A Bot's key and the deployment's token are
+     * the Bot's own headers, set on the server when the Bot is loaded, and the signed run travels in
+     * the body, so all three still go. `authorization` and `x-` together are every header the runtime
+     * would forward. This is a denylist because the runtime's allowlist cannot be empty: `allow: []`
+     * is read as no allowlist at all, and forwards both.
+     */
+    forwardHeaders: { deny: ["authorization"], denyPrefixes: ["x-"] },
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(identifyActor, resolver) as never,
@@ -2135,9 +2156,29 @@ export function mountCopilotRuntime(
     handler: createCopilotHonoHandler({
       runtime,
       basePath,
-      ...(trajectoryCapture
-        ? { hooks: { onBeforeHandler: trajectoryCapture.gate } }
-        : {}),
+      /*
+       * This deployment's own origins and the Recorder, and nobody else.
+       *
+       * Left out, the runtime answers `Access-Control-Allow-Origin: *` on every response and 204 to
+       * every preflight, so any website the person visited could read their threads and messages
+       * here. The app calls the runtime on its own origin and needs no CORS at all; the Recorder is
+       * an extension, which its host permission lets past CORS anyway, and is named so that stays
+       * true whatever Chrome decides. An origin it does not name gets no CORS headers and the
+       * browser keeps the answer from the page.
+       */
+      cors: { origin: corsOrigin(config) },
+      hooks: {
+        onBeforeHandler: async (context) => {
+          const gated = await trajectoryCapture?.gate(context);
+          if (!options.productTelemetry) return gated;
+          return (
+            (await productRuntimeHook(
+              options.productTelemetry,
+              identifyActor,
+            )({ ...context, request: gated ?? context.request })) ?? gated
+          );
+        },
+      },
     }),
     learning,
     /**

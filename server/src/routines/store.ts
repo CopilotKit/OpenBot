@@ -29,8 +29,8 @@
  * implementations of the same hard thing, one of which nobody tests.
  */
 
-import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
 import { createHash } from "node:crypto";
+import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
 import { eq, sql } from "drizzle-orm";
 import { conversations } from "../conversations/directory";
 import { isMember } from "../conversations/types";
@@ -150,6 +150,7 @@ export type RoutineInput = {
  * told whose they were would be a runner that could be told the wrong answer.
  */
 export type RoutineRunContext = {
+  source?: "schedule" | "run_now" | "trigger";
   routineId: string;
   ownerUserId: string;
   agentId: string;
@@ -907,6 +908,7 @@ export function createRoutineStore(database: Database): RoutineStore {
       if (!routine || routine.deletedAt !== null) return null;
       return {
         routineId: routine.id,
+        source: run.source,
         ownerUserId: routine.ownerUserId,
         agentId: routine.agentId,
         channelId: routine.channelId,

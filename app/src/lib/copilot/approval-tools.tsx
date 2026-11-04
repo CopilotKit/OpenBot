@@ -9,7 +9,7 @@ import { InlineApproval } from "@/components/approvals/inline-approval";
 import { threadAsksEveryStepQueryOptions } from "@/lib/approvals";
 import { tryClient } from "@/lib/client";
 import { failedComputerCall } from "@/lib/computers/call";
-import { useActiveBotHolder } from "./active-bot";
+import { useBotOfCall } from "./active-bot";
 import { frontendApprovalSnapshot } from "./approval-context";
 
 type RenderProps = { toolCallId: string; [key: string]: unknown };
@@ -86,7 +86,7 @@ export function useFrontendTool<T extends Record<string, unknown>>(
   const { copilotkit } = useCopilotKit();
   // Stable for the provider's life, so the SDK's once-registered handler may keep it.
   const queryClient = useQueryClient();
-  const bot = useActiveBotHolder();
+  const botOf = useBotOfCall();
   const render = tool.render;
   useSDKFrontendTool({
     ...tool,
@@ -133,8 +133,9 @@ export function useFrontendTool<T extends Record<string, unknown>>(
           }
           let response: Response;
           try {
+            // The gate of the Bot whose run this is, which the person may have navigated away from.
             response = await tryClient(
-              `/api/approvals/computer/${encodeURIComponent(bot.current)}`,
+              `/api/approvals/computer/${encodeURIComponent(botOf(context.agent))}`,
               { method: "POST", body: snapshot, signal: context.signal },
             );
           } catch (error) {

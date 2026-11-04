@@ -20,18 +20,17 @@ class RecordingRemote extends AbstractAgent {
   }
   run(input: RunAgentInput) {
     this.requests.push(input);
-    return of<BaseEvent>(
-      {
-        type: EventType.RUN_STARTED,
-        runId: input.runId,
-        threadId: input.threadId,
-      },
-      {
-        type: EventType.RUN_FINISHED,
-        runId: input.runId,
-        threadId: input.threadId,
-      },
-    );
+    const started: BaseEvent = {
+      type: EventType.RUN_STARTED,
+      runId: input.runId,
+      threadId: input.threadId,
+    } as BaseEvent;
+    const finished: BaseEvent = {
+      type: EventType.RUN_FINISHED,
+      runId: input.runId,
+      threadId: input.threadId,
+    } as BaseEvent;
+    return of(started, finished);
   }
   override clone() {
     return new RecordingRemote(this.requests);

@@ -46,7 +46,7 @@ export async function writeOutbox(
   kind: RecordKind,
   record: Record<string, unknown>,
   options: { computer?: string | null } = {},
-): Promise<void> {
+): Promise<{ id: string }> {
   const id = crypto.randomUUID();
   const computer = options.computer ?? null;
   await executor.execute(sql`
@@ -61,4 +61,6 @@ export async function writeOutbox(
       set last_active_at = greatest(computer_activity.last_active_at, excluded.last_active_at)
   `);
   announce();
+  // The row's identity, for whatever hears it once written: stable however often it is delivered.
+  return { id };
 }

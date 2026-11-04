@@ -20,6 +20,7 @@ import type { AcquireLearnedSkills } from "../learning/runtime";
 import type { LoadPersonalMemory } from "../memory/tools";
 import { NameContextMiddleware } from "../people/name-context";
 import { isProactiveInitiator } from "../proactive/initiator";
+import type { ProductTelemetry } from "../telemetry/product";
 import type { AgentActor } from "./profile-types";
 
 export type AgentResolutionContext = {
@@ -46,6 +47,7 @@ export type ActorAgentResolver = {
 };
 
 export type ActorAgentResolverDependencies = {
+  productTelemetry?: Pick<ProductTelemetry, "middleware">;
   loadNameForActor?: (actorId: string) => Promise<string | null>;
   loadAgents: LoadAgentsForActor;
   model: RuntimeModel;
@@ -171,6 +173,10 @@ export function createActorAgentResolver(
           );
         }
       }
+      if (deps.productTelemetry)
+        for (const agent of Object.values(agents)) {
+          agent.use(deps.productTelemetry.middleware(actor.id));
+        }
       return agents;
     });
   };

@@ -1,3 +1,4 @@
+import { currentApprovalContext } from "@openbot/toolkit/continuation";
 import type { AuditInitiator } from "@openbot/toolkit/initiator";
 import {
   AuditTrailClientError,
@@ -846,6 +847,12 @@ function initiatorColumns(initiator: AuditInitiator | undefined) {
 
 /** One row as written, handed to anything that streams the trail elsewhere. */
 export type AuditTapEvent = {
+  /** Persisted row identity, stable across analytics delivery attempts. */
+  id?: string;
+  createdAt?: Date;
+  /** Trusted native/headless action scope; never read from an analytics client. */
+  runId?: string;
+  threadId?: string;
   eventType: string;
   targetType: string;
   targetId?: string;
@@ -915,7 +922,7 @@ export function createAuditStore(database: Database): AuditStore {
         payload: redactAuditPayload(event.payload) as Record<string, unknown>,
       };
       // A blank id names nobody: Intelligence takes null for "none", and refuses a blank one.
-      await writeOutbox(
+      const written = await writeOutbox(
         database,
         "event",
         {
@@ -928,9 +935,16 @@ export function createAuditStore(database: Database): AuditStore {
         },
         { computer: computerOf(row.eventType, row.payload) },
       );
+      // What the taps are handed as the row's identity: the outbox row's, stable across deliveries.
+      const persisted = { id: written.id, createdAt: new Date() };
       for (const tap of auditTaps) {
         try {
-          tap(row);
+          const run = currentApprovalContext();
+          tap({
+            ...row,
+            ...persisted,
+            ...(run ? { runId: run.runId, threadId: run.threadId } : {}),
+          });
         } catch (error) {
           console.error(
             JSON.stringify({

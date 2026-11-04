@@ -8,12 +8,18 @@ import {
   isLearningContainerId,
   type LearningTarget,
 } from "@openbot/shared/learning";
+import { listenPort } from "@openbot/shared/listen-port";
 import {
   BROWSER_ABSENT_ENV,
   BROWSER_URL_ENV,
   type BrowserAbsence,
   isBrowserAbsence,
 } from "@openbot/shared/openbot-browser";
+import {
+  addressesBeyondThisMachine,
+  deploymentAddresses,
+  isLoopbackHost,
+} from "@openbot/shared/this-machine";
 import { singleUserEnabled, singleUserRequested } from "./auth/dev-actor";
 import { normalizeDomain } from "./auth/email-domain";
 import { organizationAuthority } from "./auth/organization";
@@ -223,6 +229,26 @@ export type HandoffCaps = {
   maxPerRun: number;
 };
 
+/**
+ * Which requests a single-user deployment admits as its one administrator.
+ *
+ * `thisMachineOnly` is true for a server running on the person's own machine (OpenBot Desktop,
+ * `scripts/start.sh`, `bun run dev`) with no address beyond it configured: only a caller connecting
+ * from this machine's loopback is the administrator. False in a container, where every caller arrives
+ * through the engine's network and none of them is on loopback, and wherever the operator named an
+ * address on their network, which is them saying other machines reach it.
+ *
+ * `hosts` are the names, besides this machine's loopback names, a request may be addressed to: the
+ * hosts of the configured URLs. A request addressed to any other name is a page whose name an attacker
+ * pointed at this machine (DNS rebinding), which is same-origin with itself and sends no telling
+ * `Origin`. Where `thisMachineOnly` is false, any IP address is accepted too: a name can be rebound,
+ * an address typed into the browser cannot.
+ */
+export type SingleUserAccess = {
+  thisMachineOnly: boolean;
+  hosts: string[];
+};
+
 export type DeploymentConfig = {
   /**
    * Browser extension ids OpenBot trusts as the Recorder besides its own fixed id, for a fork or a
@@ -381,6 +407,22 @@ export type DeploymentConfig = {
    * reaching somewhere other people can get to.
    */
   singleUser: boolean;
+  /**
+   * Which requests single-user mode admits as its administrator. Undefined unless {@link singleUser}.
+   *
+   * The flag says there is one person. It cannot say that every request is theirs, and before this,
+   * every request was: a page on any website could drive the install, anybody on the same network
+   * could reach it, and a name an attacker controls could be pointed at it. See `request-trust.ts`.
+   */
+  singleUserAccess?: SingleUserAccess;
+  /**
+   * The origins this deployment's own pages are served from, besides the server's own: the public URL,
+   * the app's URL, `TRUSTED_ORIGINS`, and in single-user mode the app's port on this machine's loopback
+   * names. A browser request from any other origin may read nothing and change nothing (`request-trust.ts`).
+   *
+   * Origins, not URLs: `scheme://host:port`, as a browser writes its `Origin` header.
+   */
+  browserOrigins: string[];
   /** Names OpenBot on the analytics the runtime already sends. Off with OPENBOT_ACCESSIBILITY_DISABLED. */
   accessibility: boolean;
   /**
@@ -630,6 +672,81 @@ function singleUserAllowed(
 }
 
 /**
+ * Which requests single-user mode admits. See {@link SingleUserAccess}.
+ *
+ * WHERE THE SERVER RUNS IS SAID BY THE IMAGE, NOT GUESSED. `OPENBOT_IN_CONTAINER=true` is set by both
+ * Dockerfiles that run this server (`server/Dockerfile`, used by Compose and the chart, and the
+ * one-container `Dockerfile`), so every container gets it without anybody writing it down, and every
+ * other way of starting the server (OpenBot Desktop, `scripts/start.sh`, `bun run dev`) does not.
+ * The default is the strict one: a server nobody said is in a container admits only this machine.
+ * Inside a container that would refuse everybody, because the engine's proxy is the peer of every
+ * request, which is the one place the flag is needed and the one place it is always present.
+ */
+function singleUserAccess(environment: Environment): SingleUserAccess {
+  const inContainer = optional(environment, "OPENBOT_IN_CONTAINER") === "true";
+  const hosts = new Set<string>();
+  for (const address of deploymentAddresses(environment)) {
+    try {
+      const { hostname } = new URL(address);
+      if (hostname) hosts.add(hostname.toLowerCase().replace(/\.+$/, ""));
+    } catch {
+      // singleUserAllowed has already refused an address that does not parse.
+    }
+  }
+  return {
+    thisMachineOnly:
+      !inContainer && addressesBeyondThisMachine(environment).length === 0,
+    hosts: [...hosts],
+  };
+}
+
+/**
+ * The origins this deployment's own pages are served from. See {@link DeploymentConfig.browserOrigins}.
+ *
+ * In single-user mode the app's port on all three loopback names as well, whatever else is configured,
+ * because that is where OpenBot Desktop and `scripts/start.sh` open it. The app's servers proxy API calls
+ * to this one, so the browser's `Origin` names the app's port and the request's `Host` this server's, and
+ * the socket the app opens in development goes straight to this port from the app's origin.
+ */
+function browserOrigins(
+  environment: Environment,
+  input: {
+    publicUrl: string | undefined;
+    appUrl: string | undefined;
+    auth: AuthConfig | undefined;
+    singleUser: boolean;
+  },
+): string[] {
+  const appPort = listenPort(environment.APP_PORT, 3010);
+  const port = appPort.ok ? appPort.port : 3010;
+  const named = [
+    input.publicUrl,
+    input.appUrl,
+    input.auth?.baseUrl,
+    ...commaSeparated(environment, "TRUSTED_ORIGINS"),
+    ...(input.auth?.trustedOrigins ?? []),
+    ...(input.singleUser
+      ? [
+          `http://127.0.0.1:${port}`,
+          `http://localhost:${port}`,
+          `http://[::1]:${port}`,
+        ]
+      : []),
+  ];
+  const origins = new Set<string>();
+  for (const value of named) {
+    if (!value) continue;
+    try {
+      const { origin } = new URL(value);
+      if (origin !== "null") origins.add(origin);
+    } catch {
+      // Not an origin anybody's browser could send.
+    }
+  }
+  return [...origins];
+}
+
+/**
  * How far an address reaches, which is the question `OPENBOT_SINGLE_USER` actually turns on.
  *
  * Not two answers but three, because the middle one is most of the deployments this flag exists
@@ -655,14 +772,9 @@ function reachOf(raw: string): Reach {
   bare = bare.replace(/^\[|\]$/g, "").replace(/\.+$/, "");
   if (!bare) return "public";
 
-  if (
-    bare === "localhost" ||
-    bare === "::1" ||
-    bare === "0:0:0:0:0:0:0:1" ||
-    /^127(\.\d{1,3}){3}$/.test(bare)
-  ) {
-    return "loopback";
-  }
+  // The one definition the app's own servers use too, so the address that decides whether this mode is
+  // allowed is the address that decides who it admits and where the app listens.
+  if (isLoopbackHost(bare)) return "loopback";
 
   if (bare.includes(":")) {
     // fc00::/7 is the unique local range and fe80::/10 the link-local one. Both are unroutable on
@@ -1603,8 +1715,14 @@ export function loadConfig(
     publicUrl,
     keyEncryptionKey: deploymentKey,
   });
+  const appUrl = (
+    optional(environment, "OPENBOT_APP_URL") ??
+    commaSeparated(environment, "TRUSTED_ORIGINS")[0] ??
+    optional(environment, "OPENBOT_PUBLIC_URL") ??
+    auth?.baseUrl
+  )?.replace(/\/+$/, "");
 
-  return {
+  const loaded = {
     port: serverPort(environment),
     transcription: transcriptionConfig(environment),
     voice: voiceConfig(environment),
@@ -1619,12 +1737,7 @@ export function loadConfig(
     arcadeApiKey: optional(environment, "ARCADE_API_KEY"),
     brokerProvider: brokerProvider(environment),
     publicUrl,
-    appUrl: (
-      optional(environment, "OPENBOT_APP_URL") ??
-      commaSeparated(environment, "TRUSTED_ORIGINS")[0] ??
-      optional(environment, "OPENBOT_PUBLIC_URL") ??
-      auth?.baseUrl
-    )?.replace(/\/+$/, ""),
+    appUrl,
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
@@ -1666,6 +1779,19 @@ export function loadConfig(
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }
       : {}),
     ...(workerSharedSecret ? { workerSharedSecret } : {}),
+  };
+  // Read once the rest has been, so a deployment missing something more basic is told that first.
+  return {
+    ...loaded,
+    ...(loaded.singleUser
+      ? { singleUserAccess: singleUserAccess(environment) }
+      : {}),
+    browserOrigins: browserOrigins(environment, {
+      publicUrl,
+      appUrl,
+      auth,
+      singleUser: loaded.singleUser,
+    }),
   };
 }
 

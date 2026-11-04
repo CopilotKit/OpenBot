@@ -24,6 +24,7 @@ import {
 import type { NetworkPolicyRow } from "../admin/settings-store";
 import type { WebBotAuth } from "../web-bot-auth";
 import { type ComputerSeat, computerKeyText, seatText } from "./computer-key";
+import { computerTokenOf } from "./computer-token";
 import type { ComputerLocation, ComputerProvider } from "./provider";
 
 export type { EgressPolicy, EgressRule };
@@ -110,6 +111,7 @@ async function botsOn(
  */
 export async function pushEgressPolicies(options: {
   provider: ComputerProvider;
+  /** The deployment's `COMPUTER_TOKEN`; each computer is sent its own (computer-token.ts). */
   token?: string;
   policyForBot: (botId: string) => Promise<EgressPolicy>;
   webBotAuth?: WebBotAuth;
@@ -121,10 +123,15 @@ export async function pushEgressPolicies(options: {
   const done = new Set<string>();
   for (const computer of computers) {
     if (computer.status !== "running" || !computer.url) continue;
+    const token = computerTokenOf(
+      options.provider,
+      computer.key,
+      options.token,
+    );
     let bots: string[];
     try {
       bots = await botsOn(computer, {
-        ...(options.token ? { token: options.token } : {}),
+        ...(token ? { token } : {}),
         fetchImpl,
       });
     } catch (error) {
@@ -141,7 +148,7 @@ export async function pushEgressPolicies(options: {
       try {
         const policy = await options.policyForBot(botId);
         await pushEgressPolicy(computer.url, botId, policy, {
-          ...(options.token ? { token: options.token } : {}),
+          ...(token ? { token } : {}),
           ...(options.webBotAuth ? { webBotAuth: options.webBotAuth } : {}),
           fetchImpl,
         });
@@ -211,6 +218,7 @@ export function policyPusher(options: {
   policyForBot: (
     botId: string,
   ) => Promise<EgressPolicy | undefined> | undefined;
+  /** The token of the Bot's computer (the gateway's `tokenFor`), never the deployment's own. */
   token?: string;
   webBotAuth?: WebBotAuth;
   fetchImpl?: typeof fetch;
@@ -249,6 +257,7 @@ export function withPolicyPushOnWake(
     policyForBot: (
       botId: string,
     ) => Promise<EgressPolicy | undefined> | undefined;
+    /** The deployment's `COMPUTER_TOKEN`; each computer is sent its own (computer-token.ts). */
     token?: string;
     webBotAuth?: WebBotAuth;
     fetchImpl?: typeof fetch;
@@ -276,8 +285,9 @@ export function withPolicyPushOnWake(
       // failed push rather than failing the action.
       const policy = await options.policyForBot(botId);
       if (!policy) return;
+      const token = computerTokenOf(provider, seat.key, options.token);
       await pushEgressPolicy(url, botId, policy, {
-        ...(options.token ? { token: options.token } : {}),
+        ...(token ? { token } : {}),
         ...(options.webBotAuth ? { webBotAuth: options.webBotAuth } : {}),
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       });

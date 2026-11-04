@@ -102,6 +102,7 @@ import { ApprovalRefusedError } from "./approvals/types";
 import { createServerApprovalService } from "./approvals/wiring";
 import {
   type AuditInitiator,
+  addAuditTap,
   auditSink,
   createAuditReader,
   createAuditStore,
@@ -380,6 +381,8 @@ import { createTaskRunner } from "./tasks/runner";
 import { createTaskStore } from "./tasks/store";
 import { createTaskTurn } from "./tasks/turn";
 import { createTeamBots } from "./team-bots/team-bots";
+import { createProductTelemetry } from "./telemetry/product";
+import { productHeadlessBoundary } from "./telemetry/product-boundaries";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -400,6 +403,12 @@ clearLearningRevisionFallback();
 // `serverPort` in config.ts for what `process.env.PORT ?? …` did with `PORT=` instead.
 const port = config.port;
 const database = createDatabase(config.databaseUrl);
+const productTelemetry = await createProductTelemetry({
+  privacyKey: config.keyEncryptionKey,
+  deploymentId: config.deploymentId,
+});
+addAuditTap(productTelemetry.recordAudit);
+const prepareProductRunInput = productHeadlessBoundary(productTelemetry);
 const profileStore = createProfileStore(database);
 // Every dispatch point asks whether its person paused the Bot, from the preferences this instance
 // holds of Intelligence's. See agents/lifecycle.ts.
@@ -2273,6 +2282,8 @@ const routineRunner = createRoutineRunner({
   routineStore,
   channelStore,
   runTurn: createTurnRunner({
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -2308,6 +2319,8 @@ const routineRunner = createRoutineRunner({
  */
 const subagents = createSubagents({
   turn: {
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -2340,6 +2353,7 @@ const subagents = createSubagents({
  * is talking to.
  */
 const actorAgentResolver = createActorAgentResolver({
+  productTelemetry,
   loadAgents: loadAgentsForActor,
   model: runtimeModel,
   resolveModelApiKey: resolveRuntimeModelApiKey,
@@ -2364,6 +2378,7 @@ const actorAgentResolver = createActorAgentResolver({
         actorId,
         botId,
         threadId: input.threadId,
+        runId: input.runId,
         initiator: initiator ?? PERSON_INITIATOR,
         ...(depth ? { depth } : {}),
       }),
@@ -2389,6 +2404,7 @@ const copilotRuntime = mountCopilotRuntime(
   identifyUser,
   identifyActor,
   {
+    productTelemetry,
     onRunBusy: (input) => {
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
@@ -2403,6 +2419,7 @@ const copilotRuntime = mountCopilotRuntime(
 );
 
 const responsibilityEngine = createServerResponsibilityEngine({
+  productTelemetry,
   database,
   responsibilityStore,
   routineIntelligence,
@@ -2444,6 +2461,8 @@ const responsibilityAnswerTurn = ({
     ...(responsibilityRunId ? { responsibilityRunId } : {}),
   });
   return createTurnRunner({
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -2528,6 +2547,8 @@ const executeApprovedAction = createApprovedActionExecutor({
   personInitiator: PERSON_INITIATOR,
 });
 const approvalContinuationRunner = createTurnRunner({
+  prepareRunInput: prepareProductRunInput,
+  onKnownStop: productTelemetry.stopKnown,
   admission: serverTurnAdmission,
   intelligence: routineIntelligence,
   runner: routineAgentRunner,
@@ -2560,6 +2581,8 @@ const groupConversations = createGroupConversations({
     return bots;
   },
   runTurn: createTurnRunner({
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -2757,6 +2780,8 @@ const proactiveEngine = createProactiveEngine({
   queue: createWorkQueue(database),
   owner: workOwner("proactive"),
   runTurn: createTurnRunner({
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -2811,6 +2836,8 @@ const wakeUpRunner = createWakeUpRunner({
   actorFor,
   channels: channelStore,
   runTurn: createTurnRunner({
+    prepareRunInput: prepareProductRunInput,
+    onKnownStop: productTelemetry.stopKnown,
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
@@ -2931,6 +2958,7 @@ let workOfferedListener: WorkOfferedListener | undefined;
 
 if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
   workOfferedListener = await startHandoffDelivery({
+    productTelemetry,
     config,
     database,
     bootAuditStore,
@@ -3244,6 +3272,7 @@ const app = createApp(
     inspect: copilotRuntime.learning?.inspect,
   },
   {
+    productTelemetry,
     approvals: approvalService,
     shared: { modes: accountModes, use: sharedUseStore },
     ...(signInService ? { passwords: signInService } : {}),
@@ -3254,22 +3283,20 @@ const app = createApp(
           botBrowser: {
             recorder: recorderExtension,
             openbotUrl: openbotAddress(config),
-            ...(config.computer?.token ? { token: config.computer.token } : {}),
             // The Bot's policy, which `botBrowserNetwork` widens while a recording runs, to the computer of the seat
-            // the recording is on: the person's own, or the isolated Bot's.
+            // the recording is on: the person's own, or the isolated Bot's. Under that computer's own token.
             pushPolicy: async (seat) => {
               const policy = await enterpriseControls()?.policyForBot(
                 seat.botId,
               );
               if (!policy) return;
+              const token = computerGateway.tokenFor(seat);
               await pushEgressPolicy(
                 await computerGateway.locate(seat),
                 seat.botId,
                 policy,
                 {
-                  ...(config.computer?.token
-                    ? { token: config.computer.token }
-                    : {}),
+                  ...(token ? { token } : {}),
                   ...(config.webBotAuth
                     ? { webBotAuth: config.webBotAuth }
                     : {}),
@@ -3305,9 +3332,6 @@ const app = createApp(
                         : {}),
                     }),
             }),
-            ...((config.computer?.token ?? config.browser?.token)
-              ? { token: config.computer?.token ?? config.browser?.token }
-              : {}),
             recorder: recorderExtension,
             openbotUrl: openbotAddress(config),
             // On a single-user OpenBot the person is its admin: a setup failure is theirs to see to.
@@ -3428,6 +3452,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     recorderExpirySweep.stop();
     for (const sweep of deliverySweeps) sweep.stop();
     void Promise.allSettled([
+      productTelemetry.flush(),
       channelActivityListener.stop(),
       policyListener.stop(),
       // Started only where handing work between Bots is switched on, so it is often not there.

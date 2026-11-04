@@ -505,12 +505,11 @@ args[34] = {
   botBrowser: {
     recorder,
     openbotUrl: openbotAddress(config),
-    token: COMPUTER_TOKEN,
-    // As index.ts pushes it: the Bot's policy, to the computer of the seat the recording is on.
+    // As index.ts pushes it: the Bot's policy, to the computer of the seat the recording is on, under its token.
     pushPolicy: async (seat) => {
       const policy = await policyForBot(seat.botId);
       await pushEgressPolicy(await gateway.locate(seat), seat.botId, policy, {
-        token: COMPUTER_TOKEN,
+        token: gateway.tokenFor(seat),
       });
     },
   },

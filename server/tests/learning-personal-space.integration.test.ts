@@ -206,7 +206,7 @@ test("a confirm that overlapped a forget does not stop the next confirm from wri
       intelligence.confirmPersonalSpace(userId, containerId),
     forgetPersonalSpace: async (userId) => {
       await held;
-      await intelligence.forgetPersonalSpace(userId);
+      return intelligence.forgetPersonalSpace(userId);
     },
   });
 
