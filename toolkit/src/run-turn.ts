@@ -68,7 +68,11 @@ import {
 import { sanitizeSeededHistory } from "./history-sanitize";
 import type { AuditInitiator } from "./initiator";
 import { keepLease } from "./lease";
-import { type StopRecorder, stopRecorder } from "./run-stop";
+import {
+  observeDetachedRun,
+  type StopRecorder,
+  stopRecorder,
+} from "./run-stop";
 import { TURN_LIMITS } from "./limits";
 import type { ComponentCatalog, TurnAdmission } from "./ports";
 import { historyOrEmpty } from "./thread-history";
@@ -800,6 +804,28 @@ export function createTurnRunner(options: {
       ...(depth ? { depth } : {}),
     });
     agent.threadId = threadId;
+    /*
+     * A Stop this turn did not make itself: a person pressing Stop on the thread, which Intelligence
+     * relays to the runner. Known here as a cancel, like the turn's own. A lost lock is the turn's
+     * own stop and is not reported as one.
+     */
+    let stoppingHere = false;
+    observeDetachedRun(
+      agent,
+      () => stoppingHere,
+      () => {
+        void options
+          .onKnownStop?.(ownerUserId, runId, "cancelled")
+          .catch(() => {
+            console.warn(
+              JSON.stringify({
+                type: "product-telemetry",
+                reason: "stop_observation_failed",
+              }),
+            );
+          });
+      },
+    );
     agent.setMessages(messages);
     if (continuation) agent.setState(continuation.snapshot.state);
     const headlessTools = [
@@ -903,6 +929,7 @@ export function createTurnRunner(options: {
 
     /** Stop this exact run, both ends: the agent's own abort and the runner's stop flag. */
     const stopTurn = () => {
+      stoppingHere = true;
       try {
         agent.abortRun();
       } catch {

@@ -15,7 +15,11 @@ import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
 import { THREAD_LOCK_TTL_SECONDS } from "@openbot/toolkit/copilotkit/thread-lock";
 import { keepLease } from "@openbot/toolkit/lease";
 import type { ThreadLock, TurnAdmission } from "@openbot/toolkit/ports";
-import type { PlatformRun, StopRecorder } from "@openbot/toolkit/run-stop";
+import {
+  observeDetachedRun,
+  type PlatformRun,
+  type StopRecorder,
+} from "@openbot/toolkit/run-stop";
 import type { Observable } from "rxjs";
 import type { AuditInitiator } from "../audit";
 import type { HandoffDelivery } from "./handoff-runner";
@@ -73,6 +77,12 @@ export function createHandoffDelivery(options: {
     run: PlatformRun,
     holdsLock: () => boolean,
   ) => StopRecorder | undefined;
+  /** A stop this delivery knows it made, a pause, or one Intelligence relayed. Never a lost lock. */
+  onKnownStop?: (
+    actorId: string,
+    runId: string,
+    reason: "cancelled",
+  ) => Promise<void>;
   analyticsContextFor?: (
     run: { threadId: string; runId: string },
     work: import("./handoff-runner").HandoffWork,
@@ -398,6 +408,20 @@ export function createHandoffDelivery(options: {
           onLost: (error) => lockLost.abort(error),
         });
 
+        let stoppingHere = false;
+        const knownStop = () => {
+          void options
+            .onKnownStop?.(work.actorId, runId, "cancelled")
+            .catch(() => {
+              console.warn(
+                JSON.stringify({
+                  type: "product-telemetry",
+                  reason: "stop_observation_failed",
+                }),
+              );
+            });
+        };
+        observeDetachedRun(agent, () => stoppingHere, knownStop);
         const recordStop = options.recordStopFor?.(
           {
             threadId: where.threadId,
@@ -464,10 +488,14 @@ export function createHandoffDelivery(options: {
             }),
             deadlineMs,
             AbortSignal.any([paused, lockLost.signal]),
-            () =>
-              runner
+            () => {
+              stoppingHere = true;
+              // A pause is a cancel. A lost lock is a failure, and is not reported as a stop.
+              if (!lockLost.signal.aborted) knownStop();
+              return runner
                 .stop?.({ threadId: where.threadId, runId })
-                .catch(() => undefined),
+                .catch(() => undefined);
+            },
             () =>
               `${work.toBotId} did not finish within ${Math.round(deadlineMs / 1000)}s ${
                 seen.count === 0

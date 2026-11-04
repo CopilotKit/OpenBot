@@ -320,6 +320,26 @@ export async function createProductTelemetry(options: {
   }
   const user = (actor: string) =>
     scopedProductUser(options.privacyKey, deploymentId, actor);
+  /*
+   * Runs this process knows were stopped, and why, until each run's terminal event reads it. Only
+   * the process running a run marks it (the stop reaches that run's own runner), so nothing here
+   * needs sharing. Bounded, since a stop can be marked for a run that never reports.
+   */
+  const stops = new Map<string, "cancelled" | "timeout">();
+  /** A known stop of a run. The first reason given stands: it is the one that stopped it. */
+  function markStopped(runId: string, reason: "cancelled" | "timeout") {
+    if (!enabled || stops.has(runId)) return;
+    if (stops.size >= 1024) {
+      const oldest = stops.keys().next().value;
+      if (oldest !== undefined) stops.delete(oldest);
+    }
+    stops.set(runId, reason);
+  }
+  function takeStop(runId: string) {
+    const reason = stops.get(runId);
+    stops.delete(runId);
+    return reason;
+  }
   function emit(
     name: string,
     key: string,
@@ -485,27 +505,46 @@ export async function createProductTelemetry(options: {
             },
           }),
           finalize(() => {
-            void emit(
-              "run_terminal",
-              `terminal:${context.user_id}:${input.threadId}:${input.runId}`,
-              {
-                ...context,
-                thread_id: input.threadId,
-                outcome,
-                failure_category: failure,
-                duration_ms: Math.max(0, now().getTime() - started.getTime()),
-                result_message_ids: [...messageIds],
-                is_root:
-                  context.parent_run_id ||
-                  context.trigger === "subagent" ||
-                  context.trigger === "followup"
-                    ? false
-                    : context.trigger === "human" ||
-                        context.trigger === "routine"
-                      ? true
-                      : null,
-              },
-            );
+            const observed = { outcome, failure };
+            const duration = Math.max(0, now().getTime() - started.getTime());
+            /*
+             * Decided a tick later, for a run OpenBot stopped. A stopped run's stream can end before
+             * the stop is known here: the runner aborts the agent, which can end its stream on the
+             * spot, and only then detaches it, which is what says it was a stop. A run that finished
+             * before it was stopped keeps its finish; a lost lock is never marked, and stays as seen.
+             */
+            const decided = new Promise<void>((resolve) => {
+              setTimeout(resolve, 0);
+            }).then(() => {
+              const stopped = takeStop(input.runId);
+              const ended =
+                stopped && observed.outcome !== "success"
+                  ? { outcome: stopped, failure: "none" }
+                  : observed;
+              return emit(
+                "run_terminal",
+                `terminal:${context.user_id}:${input.threadId}:${input.runId}`,
+                {
+                  ...context,
+                  thread_id: input.threadId,
+                  outcome: ended.outcome,
+                  failure_category: ended.failure,
+                  duration_ms: duration,
+                  result_message_ids: [...messageIds],
+                  is_root:
+                    context.parent_run_id ||
+                    context.trigger === "subagent" ||
+                    context.trigger === "followup"
+                      ? false
+                      : context.trigger === "human" ||
+                          context.trigger === "routine"
+                        ? true
+                        : null,
+                },
+              );
+            });
+            pending.add(decided);
+            void decided.finally(() => pending.delete(decided));
           }),
         );
       });
@@ -601,11 +640,14 @@ export async function createProductTelemetry(options: {
         },
       );
     },
+    markStopped,
     stopKnown: async (
       actor: string,
       runId: string,
       reason: "cancelled" | "timeout",
     ) => {
+      // Marked before anything is awaited: the run is stopped straight after this is called.
+      markStopped(runId, reason);
       if (boundedId.safeParse(runId).success)
         await emit(
           "run_stop_requested",

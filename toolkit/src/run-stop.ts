@@ -51,3 +51,25 @@ export function stopRecorder(
     await platform.ɵrecordRunStop?.({ ...run, signal });
   };
 }
+
+/**
+ * Tell `onStopped` when the runner detaches this agent's run for a stop the caller did not make.
+ *
+ * An Intelligence runner detaches the run's agent (`detachActiveRun`) only when it is asked to stop the
+ * run: a person's Stop that Intelligence relays to it, or the runtime's stop route. It does not detach
+ * on a lost lock or a broken socket, which only abort the agent. So a detach the caller did not ask
+ * for is somebody's Stop. `stoppedHere` says whether the caller is stopping the run itself, in which
+ * case it already knows why. The mark is made before the agent is detached.
+ */
+export function observeDetachedRun(
+  agent: { detachActiveRun?: () => Promise<void> },
+  stoppedHere: () => boolean,
+  onStopped: () => void,
+): void {
+  const detach = agent.detachActiveRun;
+  if (typeof detach !== "function") return;
+  agent.detachActiveRun = () => {
+    if (!stoppedHere()) onStopped();
+    return detach.call(agent);
+  };
+}

@@ -31,7 +31,11 @@ import {
   UnavailableAgent,
 } from "@openbot/toolkit/copilotkit/agents";
 import { createIntelligenceThreadLock } from "@openbot/toolkit/copilotkit/thread-lock";
-import { type PlatformRun, stopRecorder } from "@openbot/toolkit/run-stop";
+import {
+  observeDetachedRun,
+  type PlatformRun,
+  stopRecorder,
+} from "@openbot/toolkit/run-stop";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { parametersFor } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
@@ -2157,6 +2161,38 @@ export function mountCopilotRuntime(
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(identifyActor, resolver) as never,
   });
+
+  /*
+   * A person's Stop on a browser run, as this server learns of it: Intelligence relays the Stop to
+   * the runtime's runner, which detaches the run's agent. Marked, so the run's product terminal reads
+   * cancelled rather than as a run that ended with no outcome. The runtime builds its runner itself
+   * and starts a run through `runWithStartupBoundary` where the runner has it, `run` otherwise, so
+   * each run's agent is observed at both as the runner is handed it.
+   */
+  const productTelemetry = options.productTelemetry;
+  if (productTelemetry) {
+    type RunRequest = Parameters<typeof runtime.runner.run>[0];
+    const runner = runtime.runner as typeof runtime.runner & {
+      runWithStartupBoundary?: (request: RunRequest) => unknown;
+    };
+    const observed = (request: RunRequest) =>
+      observeDetachedRun(
+        request.agent,
+        () => false,
+        () => productTelemetry.markStopped(request.input.runId, "cancelled"),
+      );
+    const run = runner.run.bind(runner);
+    runner.run = (request) => {
+      observed(request);
+      return run(request);
+    };
+    const startup = runner.runWithStartupBoundary?.bind(runner);
+    if (startup)
+      runner.runWithStartupBoundary = (request) => {
+        observed(request);
+        return startup(request);
+      };
+  }
 
   return {
     handler: createCopilotHonoHandler({

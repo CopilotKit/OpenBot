@@ -79,6 +79,7 @@ export async function startHandoffDelivery(deps: {
                 work.actorId,
                 work.runId,
               ),
+            onKnownStop: productTelemetry.stopKnown,
             analyticsContextFor: (run, work) =>
               productHandoffAnalyticsContext(
                 productTelemetry,
