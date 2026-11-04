@@ -29,6 +29,7 @@ import { authKeys } from "@/lib/auth/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
@@ -179,6 +180,13 @@ function renderSidebar() {
     onboarding: null,
   });
   queryClient.setQueryData(agentKeys.list(false), []);
+  // Read once per page load in the app; the navigation entries depend on the edition.
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: false,
+    edition: "team",
+  });
   // The sidebar's attention list polls on its own schedule; this test counts channel requests only.
   queryClient.setQueryDefaults(botLifecycleKeys.attention, {
     staleTime: Number.POSITIVE_INFINITY,

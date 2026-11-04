@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { conversations } from "../conversations/directory";
 import { writeKey } from "../conversations/http";
 import type { AgentTask, ConversationDraft } from "../conversations/types";
@@ -304,6 +304,22 @@ export function createTaskStore(
       !(await client().tasks.resolve(id, resolvedAt, writeKey("task.resolve")))
     )
       throw new TaskNotFoundError();
+    /*
+     * Done with the task is done with what its Bot asked in it: the question stops waiting on the
+     * person too, rather than staying under Needs you with nothing left to answer it for.
+     */
+    if (resolved)
+      await database
+        .update(workItems)
+        .set({ finishedAt: sql`now()`, updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(workItems.kind, "person.question"),
+            isNull(workItems.finishedAt),
+            sql`${workItems.payload}->>'actorId' = ${owner}`,
+            sql`${workItems.payload}->>'channelId' = ${row.channelId}`,
+          ),
+        );
     return one(owner, id);
   }
 

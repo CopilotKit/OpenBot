@@ -59,6 +59,20 @@ export function appToolName(server: string, tool: string): ToolName {
       detail: connectorName(server),
     };
   }
+  /*
+   * A vendor that leads its own tool names with its name (`notion-fetch`) is named once, as the
+   * app, beside the action, the way a brokered app is: "Fetch" on Notion, not "Notion fetch notion".
+   */
+  const serverLead = wordsOf(server);
+  const toolLead = wordsOf(tool);
+  if (
+    toolLead.length > serverLead.length &&
+    serverLead.every((word, index) => toolLead[index] === word)
+  )
+    return {
+      label: humanise(toolLead.slice(serverLead.length).join(" ")),
+      detail: connectorName(server),
+    };
   const label = humanise(tool);
 
   /*

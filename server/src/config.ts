@@ -29,6 +29,7 @@ import {
   type TranscriptionConfig,
   transcriptionConfig,
 } from "./dictation/config";
+import { type Edition, parseEdition } from "./edition";
 import type { BrokerProvider } from "./plugins/access";
 import { type VoiceConfig, voiceConfig } from "./voice/config";
 import { type WebBotAuth, webBotAuthFromEnv } from "./web-bot-auth";
@@ -424,6 +425,8 @@ export type DeploymentConfig = {
    * Origins, not URLs: `scheme://host:port`, as a browser writes its `Origin` header.
    */
   browserOrigins: string[];
+  /** Which product this is. `personal` requires single-user mode and the one shared computer. */
+  edition: Edition;
   /** Names OpenBot on the analytics the runtime already sends. Off with OPENBOT_ACCESSIBILITY_DISABLED. */
   accessibility: boolean;
   /**
@@ -1731,6 +1734,9 @@ export function loadConfig(
     auth?.baseUrl
   )?.replace(/\/+$/, "");
 
+  const edition = parseEdition(optional(environment, "OPENBOT_EDITION"));
+
+  // Built first and checked after, so every refusal the team edition gives keeps its order.
   const loaded = {
     port: serverPort(environment),
     transcription: transcriptionConfig(environment),
@@ -1756,7 +1762,10 @@ export function loadConfig(
     ...learningSetupCredential(environment),
     memoryDefaults: {
       sources: switchedOn(environment, "OPENBOT_MEMORY_SOURCE_DEFAULTS"),
-      research: switchedOn(environment, "OPENBOT_PROACTIVE_DEFAULTS"),
+      // Off unless asked for: a Bot offers a check-in in the conversation instead (`offer_check_in`).
+      research: ["true", "1"].includes(
+        optional(environment, "OPENBOT_PROACTIVE_DEFAULTS") ?? "",
+      ),
     },
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
     auditRetentionDays: auditRetentionDays(environment),
@@ -1775,6 +1784,7 @@ export function loadConfig(
         configuredAuthProviders(auth).length > 0 ||
           auth?.copilotKit !== undefined,
       ),
+    edition,
     accessibility: accessibilityEnabled(environment),
     generativeUi: generativeUiEnabled(environment),
     selfHostBanner: selfHostBannerEnabled(environment),
@@ -1790,7 +1800,7 @@ export function loadConfig(
     ...(workerSharedSecret ? { workerSharedSecret } : {}),
   };
   // Read once the rest has been, so a deployment missing something more basic is told that first.
-  return {
+  const config: DeploymentConfig = {
     ...loaded,
     ...(loaded.singleUser
       ? { singleUserAccess: singleUserAccess(environment) }
@@ -1802,6 +1812,55 @@ export function loadConfig(
       singleUser: loaded.singleUser,
     }),
   };
+  if (edition === "personal") personalEditionRequirements(environment, config);
+  return config;
+}
+
+const PROVIDER_VARIABLE: Record<AuthProviderId, string> = {
+  google: "GOOGLE_OAUTH_CLIENT_ID",
+  microsoft: "MICROSOFT_OAUTH_CLIENT_ID",
+  okta: "OKTA_OAUTH_CLIENT_ID",
+};
+
+/**
+ * What the personal edition is: one person, nobody signing in, one computer.
+ *
+ * Checked in this order so the sentence names the variable somebody actually has to change. A team
+ * deployment's `.env` copied across carries a provider, and that would otherwise read as "single-user
+ * mode is off", which is true and not the fix.
+ */
+function personalEditionRequirements(
+  environment: Environment,
+  resolved: Pick<
+    DeploymentConfig,
+    "auth" | "organizationAuthUrl" | "singleUser" | "computer"
+  >,
+): void {
+  const providers = configuredAuthProviders(resolved.auth);
+  if (providers.length > 0) {
+    throw new Error(
+      `OPENBOT_EDITION=personal has nobody signing in, so remove ${providers.map((provider) => PROVIDER_VARIABLE[provider]).join(", ")} and the rest of that provider's settings.`,
+    );
+  }
+  if (resolved.organizationAuthUrl) {
+    throw new Error(
+      "OPENBOT_EDITION=personal has nobody signing in, so remove OPENBOT_ORGANIZATION_AUTH_URL.",
+    );
+  }
+  if (!resolved.singleUser) {
+    throw new Error("OPENBOT_EDITION=personal needs OPENBOT_SINGLE_USER=true.");
+  }
+  if (resolved.computer?.provider === "shared") return;
+  const named = optional(environment, "COMPUTER_SANDBOX_NAMESPACE")
+    ? "COMPUTER_SANDBOX_NAMESPACE"
+    : optional(environment, "COMPUTER_SUPERVISOR_URL")
+      ? "COMPUTER_SUPERVISOR_URL"
+      : undefined;
+  throw new Error(
+    named
+      ? `OPENBOT_EDITION=personal runs one computer, so remove ${named} and set AGENT_COMPUTER_URL instead.`
+      : "OPENBOT_EDITION=personal runs one computer. Set AGENT_COMPUTER_URL to its address.",
+  );
 }
 
 /**

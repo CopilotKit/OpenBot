@@ -18,6 +18,7 @@ import { people } from "../people/directory/directory";
 import { users } from "../db/schema";
 import { policy } from "../policy/cache";
 import type { PolicySettings, PolicySettingsPatch } from "../policy/types";
+import { currentEdition, PERSONAL_ENTERPRISE_SETTINGS } from "../edition";
 import type { CapabilityRow, Member } from "./capabilities";
 
 export type EnterpriseSettings = {
@@ -126,6 +127,8 @@ export function createEnterpriseStore(database: Database) {
   return {
     /** From memory: the policy every server holds and Intelligence keeps current. */
     async settings(): Promise<EnterpriseSettings> {
+      // Fixed for the personal edition: a value a team deployment left behind is not read.
+      if (currentEdition() === "personal") return PERSONAL_ENTERPRISE_SETTINGS;
       return enterpriseSettingsFrom(loadedPolicy().settings());
     },
 
@@ -141,6 +144,7 @@ export function createEnterpriseStore(database: Database) {
     },
 
     async capabilityRows(): Promise<CapabilityRow[]> {
+      if (currentEdition() === "personal") return [];
       return loadedPolicy()
         .capabilityRules()
         .map((rule) => ({
@@ -220,6 +224,8 @@ export function createEnterpriseStore(database: Database) {
     },
 
     async networkPolicies(): Promise<NetworkPolicyRow[]> {
+      // No screen edits these in the personal edition, so a team deployment's policy is not read.
+      if (currentEdition() === "personal") return [];
       return loadedPolicy()
         .networkRules()
         .map((row) => ({

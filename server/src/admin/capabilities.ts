@@ -15,6 +15,8 @@
  *   opened this screen working exactly as it did.
  */
 
+import { currentEdition, PERSONAL_CAPABILITIES } from "../edition";
+
 export const CAPABILITIES = [
   "useBots",
   "cloudBrowser",
@@ -143,6 +145,14 @@ export function resolveCapability(
   member: Member,
   capability: Capability,
 ): CapabilityAnswer {
+  if (currentEdition() === "personal") {
+    return {
+      allowed: PERSONAL_CAPABILITIES[capability],
+      decidedBy: "default",
+      scopeId: "",
+    };
+  }
+
   const forCapability = rows.filter((row) => row.capability === capability);
 
   const widening = forCapability.find(
@@ -194,5 +204,8 @@ export function resolveAllCapabilities(
 
 /** The sentence a refused person reads. */
 export function capabilityRefusal(capability: Capability): string {
+  // The person is the admin here, and nothing they can switch turns this on.
+  if (currentEdition() === "personal")
+    return `"${CAPABILITY_LABELS[capability].title}" isn't part of OpenBot Personal, so that wasn't done.`;
   return `An admin has turned off "${CAPABILITY_LABELS[capability].title}" for you, so that wasn't done.`;
 }

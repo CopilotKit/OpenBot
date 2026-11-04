@@ -81,6 +81,8 @@ async function checkInSetting(input: {
   return (await useTestSchedules()).create("check-in-settings", {
     agentId: bot,
     focus: "",
+    subject: "",
+    sourceLink: null,
     enabled: true,
     intervalMinutes: 60,
     nextRunAt: new Date(Date.now() + 3_600_000),

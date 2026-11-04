@@ -44,6 +44,8 @@ export function checkInCopySteps(database: Database): ScheduleCopyStep[] {
           channelId: row.channelId,
           threadId: row.threadId,
           focus: row.focus,
+          subject: row.subject,
+          sourceLink: row.sourceLink,
           enabled: row.enabled,
           intervalMinutes: row.intervalMinutes,
           nextRunAt: row.nextRunAt,

@@ -230,6 +230,8 @@ export async function settingWithItem(input: {
     channelId: input.channelId,
     threadId: input.threadId,
     focus: "",
+    subject: "",
+    sourceLink: null,
     enabled: true,
     intervalMinutes: 60,
     nextRunAt: new Date(Date.now() + 3_600_000),

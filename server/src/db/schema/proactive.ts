@@ -30,9 +30,11 @@ import { users } from "./core";
 /**
  * Background research by one of a person's Bots.
  *
- * On by default: OpenBot writes the row when a person first talks to the Bot in a conversation with
- * it alone (memory/defaults.ts), and never again once they turn it off (`enabled = false`) or remove
- * it (`default_opt_outs`). Bounded by `interval_minutes` (one to twenty-four hours) so a Bot never
+ * Asked for, never assumed. A Bot offers one in the conversation when the person has just looked at
+ * something that keeps changing (`offer_check_in`), and the row is written when they accept. A Bot
+ * can hold several, one per thing it watches (`subject`). Rows OpenBot wrote by itself before that,
+ * when a person first talked to a Bot alone (memory/defaults.ts, now only with
+ * OPENBOT_PROACTIVE_DEFAULTS=true), are left as they were. Bounded by `interval_minutes` (one to twenty-four hours) so a Bot never
  * reads a person's apps more often than they chose; hourly unless they chose otherwise. Rows written
  * while the default was four hours keep it, because a person's choice and the old default look the
  * same.
@@ -52,6 +54,14 @@ export const proactiveSettings = pgTable(
     channelId: text("channel_id").notNull(),
     threadId: text("thread_id").notNull(),
     focus: text("focus").notNull().default(""),
+    /**
+     * What this check-in watches, in a few words the person reads: "Launch brief in Notion", "Your
+     * Gmail inbox". Empty for one that watches everything the Bot can read, as every check-in did
+     * before a Bot could have several.
+     */
+    subject: text("subject").notNull().default(""),
+    /** The page or place it watches, where there is one to link to. */
+    sourceLink: text("source_link"),
     enabled: boolean("enabled").notNull().default(true),
     intervalMinutes: integer("interval_minutes").notNull().default(60),
     nextRunAt: timestamp("next_run_at", { withTimezone: true })
@@ -71,7 +81,8 @@ export const proactiveSettings = pgTable(
       .defaultNow(),
   },
   (table) => [
-    uniqueIndex("proactive_settings_owner_agent_idx").on(
+    // Not unique: a Bot can watch several things for one person, each a check-in of its own.
+    index("proactive_settings_owner_agent_idx").on(
       table.ownerUserId,
       table.agentId,
     ),

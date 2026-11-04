@@ -142,6 +142,8 @@ describe("the legacy check-in tables", () => {
         setting: claimed as NonNullable<typeof claimed>,
         trigger: "schedule",
         threadId: `run-thread-${suite}`,
+        // Room for every run this test starts: the daily cap is another test's subject.
+        dailyLimit: 1000,
       }),
     ).toBe(true);
     await store.recordRun(adopted.id, "running");

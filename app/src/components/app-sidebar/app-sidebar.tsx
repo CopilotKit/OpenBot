@@ -34,7 +34,7 @@ import {
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
-import { navigationFor } from "@/lib/navigation";
+import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
   type MessageListEmphasis,
@@ -42,6 +42,7 @@ import {
 } from "@/lib/settings/message-list";
 import { BotsNavBadge } from "../bot-profile/attention";
 import { BrowserNavItem } from "../browser/browser-nav-item";
+import { navigationRender } from "../edition/team-features-dialog";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -217,7 +218,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
    */
   const animateOrder =
     !searching && (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
-  const navigation = navigationFor(currentUser?.role);
+  const navigation = useNavigationItems();
 
   return (
     <Sidebar variant="inset" {...props}>
@@ -325,6 +326,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarFooter>
         <SidebarMenu className="gap-px">
           {navigation
+            .filter(isNavigationLink)
             .filter((item) => item.section === "primary")
             .map((item) => (
               <SidebarMenuItem key={item.id}>
@@ -373,7 +375,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     <DropdownMenuItem
                       className={userMenuItemClassName}
                       key={item.id}
-                      render={<Link to={item.to} />}
+                      nativeButton={item.kind === "dialog"}
+                      render={navigationRender(item)}
                     >
                       <item.icon />
                       {item.label}

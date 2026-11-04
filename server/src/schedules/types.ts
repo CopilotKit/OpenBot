@@ -51,6 +51,10 @@ export type CheckInSettingRecord = ScheduleRecordBase &
     channelId: string;
     threadId: string;
     focus: string;
+    /** What this check-in watches, in the person's words; empty for one that watches everything. */
+    subject: string;
+    /** The page or place it watches, where there is one to link to. */
+    sourceLink: string | null;
     enabled: boolean;
     intervalMinutes: number;
     nextRunAt: Date;

@@ -112,10 +112,10 @@ function item(
   };
 }
 
-test("a new setting checks in hourly unless the person chooses otherwise", async () => {
+test("a new check-in runs daily unless the person chooses otherwise", async () => {
   expect(
     (await client.get("check-in-settings", settingId))?.intervalMinutes,
-  ).toBe(60);
+  ).toBe(1440);
 });
 
 test("two open items with one normalized title cannot both stand for a person and Bot", async () => {

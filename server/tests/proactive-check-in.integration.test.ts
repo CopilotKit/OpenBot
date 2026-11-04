@@ -640,8 +640,8 @@ const askedOf = (request: RunAgentInput | undefined) =>
 
 describe("a check-in", () => {
   test("that finds nothing writes one quiet run row and nothing else: no item, no ping, no delivery, no second turn", async () => {
-    // Hourly unless the person chose otherwise.
-    expect(inbox.intervalMinutes).toBe(60);
+    // Daily unless the person chose otherwise.
+    expect(inbox.intervalMinutes).toBe(1440);
     await due(inbox);
     const { engine, requests, turns } = replica({ model: quiet });
     await engine.sweep();

@@ -881,6 +881,41 @@ describe("where a task stands", () => {
     });
   });
 
+  test("marked done while its Bot waits on a question reads done, and puts the question down", async () => {
+    const { owner, botId, item } = await seed();
+    script = (input) => reply(input, "Which launch date should I use?");
+    const task = await start(owner, item.id);
+    await tasks.idle();
+    const questionKey = `${prefix}-question-${randomUUID()}`;
+    await queue.offer({
+      kind: "person.question",
+      key: questionKey,
+      payload: {
+        actorId: owner.id,
+        botId,
+        channelId: task.channelId,
+        threadId: (await taskStore.get(owner.id, task.id)).threadId,
+        question: "Which launch date should I use?",
+      },
+    });
+    expect((await taskStore.get(owner.id, task.id)).status).toBe("needs_input");
+
+    const done = await (
+      await call(owner.id, `/${task.id}/resolve`, "POST")
+    ).json();
+    expect(done.task.status).toBe("resolved");
+    const [question] = await database
+      .select({ finishedAt: workItems.finishedAt })
+      .from(workItems)
+      .where(
+        and(
+          eq(workItems.kind, "person.question"),
+          eq(workItems.key, questionKey),
+        ),
+      );
+    expect(question?.finishedAt).not.toBeNull();
+  });
+
   test("marked done stays done when earlier work is said after it, and reopens when the person speaks there", async () => {
     const { owner, botId, item } = await seed();
     script = (input) => reply(input, "The reply to Sam is drafted.");

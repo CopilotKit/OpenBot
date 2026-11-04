@@ -174,6 +174,8 @@ export function settingOf(record: CheckInSettingRecord): ProactiveSetting {
     channelId: record.channelId,
     threadId: record.threadId,
     focus: record.focus,
+    subject: record.subject,
+    sourceLink: record.sourceLink,
     enabled: record.enabled,
     intervalMinutes: record.intervalMinutes,
     nextRunAt: record.nextRunAt,
@@ -502,6 +504,43 @@ export function createProactiveStore(database: Database) {
   }
   /** Intelligence itself, for the history, which no instance holds in memory. */
   const client = () => schedules().client;
+  /**
+   * Change a person's check-in. Turning one on that was off starts its clock an interval from now;
+   * a shorter interval brings the next run no later than one interval out.
+   */
+  async function update(owner: string, id: string, input: unknown) {
+    const patch = parseWith(proactiveSettingPatchSchema, input);
+    const known = await liveSetting(id);
+    if (!known || known.ownerUserId !== owner)
+      throw new ProactiveNotFoundError();
+    const changed = await changeSetting(id, (current) => {
+      const minutes = patch.intervalMinutes ?? current.intervalMinutes;
+      const oneIntervalOut = new Date(Date.now() + minutes * 60_000);
+      const kept =
+        patch.intervalMinutes === undefined ||
+        current.nextRunAt <= oneIntervalOut
+          ? current.nextRunAt
+          : oneIntervalOut;
+      return {
+        ...patch,
+        nextRunAt:
+          patch.enabled === true && !current.enabled ? oneIntervalOut : kept,
+      };
+    });
+    if (!changed) throw new ProactiveNotFoundError();
+    return settingOf(changed);
+  }
+  /** Every check-in this person's Bot ran in the last day, whichever it watches. Skipped ones cost nothing. */
+  async function runsToday(ownerUserId: string, agentId: string) {
+    return (
+      await client().all("check-in-runs", {
+        ownerUserId,
+        agentId,
+        outcome: ["running", "quiet", "raised", "failed"],
+        startedAfter: new Date(Date.now() - 86_400_000),
+      })
+    ).items.length;
+  }
   return {
     get,
     /** The person's hourly ping slot and the pings it lets through (`ping.ts`). */
@@ -536,8 +575,12 @@ export function createProactiveStore(database: Database) {
         .map(settingOf);
     },
     /**
-     * Check-ins turned on for a Bot. The first one runs an interval from now, as the default a first
-     * conversation writes does: turning them on is not asking for one now, which is Run now's job.
+     * A check-in on one thing for a Bot. The first one runs an interval from now: turning it on is
+     * not asking for one now, which is Run now's job.
+     *
+     * A Bot watches each thing once. Accepting an offer for something it already watches (the same
+     * link, or with no link the same subject) turns that one back on with the interval chosen now,
+     * rather than adding a second that reads the same page twice.
      */
     async create(
       owner: string,
@@ -545,27 +588,49 @@ export function createProactiveStore(database: Database) {
       threadId: string,
     ): Promise<ProactiveSetting> {
       const parsed = parseWith(proactiveSettingInputSchema, input);
-      try {
-        return settingOf(
-          await schedules().create("check-in-settings", {
-            id: randomUUID(),
-            ownerUserId: owner,
-            threadId,
-            ...parsed,
-            nextRunAt: new Date(Date.now() + parsed.intervalMinutes * 60_000),
-            lastRunAt: null,
-            lastStatus: "idle",
-            lastError: null,
-          }),
-        );
-      } catch (error) {
-        // Intelligence keeps one live setting per person and Bot.
-        if (error instanceof ScheduleConflictError)
-          throw new ProactiveRefusedError(
-            "Check-ins are already set up for this Bot.",
+      const sourceLink = parsed.sourceLink ?? null;
+      // Under the lease adoption and removal take, and read fresh from Intelligence: a Bot can hold
+      // several check-ins now, and nothing else stops a second one on the same thing.
+      return withResearchDefaultsLock(
+        database,
+        owner,
+        parsed.agentId,
+        async () => {
+          const same = (
+            await client().all("check-in-settings", {
+              ownerUserId: owner,
+              agentId: parsed.agentId,
+            })
+          ).items.find(
+            (record) =>
+              record.deletedAt === null &&
+              (sourceLink
+                ? record.sourceLink === sourceLink
+                : !record.sourceLink &&
+                  record.subject.toLowerCase() ===
+                    parsed.subject.toLowerCase()),
           );
-        throw error;
-      }
+          if (same)
+            return update(owner, same.id, {
+              enabled: true,
+              intervalMinutes: parsed.intervalMinutes,
+              ...(parsed.focus ? { focus: parsed.focus } : {}),
+            });
+          return settingOf(
+            await schedules().create("check-in-settings", {
+              id: randomUUID(),
+              ownerUserId: owner,
+              threadId,
+              ...parsed,
+              sourceLink,
+              nextRunAt: new Date(Date.now() + parsed.intervalMinutes * 60_000),
+              lastRunAt: null,
+              lastStatus: "idle",
+              lastError: null,
+            }),
+          );
+        },
+      );
     },
     /**
      * Change only what was sent. Off stays off until the person turns it on, whatever else they
@@ -576,28 +641,7 @@ export function createProactiveStore(database: Database) {
      * or the one it has); a new interval while on, no later than one new interval out, so going from
      * daily to hourly is felt within the hour; anything else, as it was.
      */
-    async update(owner: string, id: string, input: unknown) {
-      const patch = parseWith(proactiveSettingPatchSchema, input);
-      const known = await liveSetting(id);
-      if (!known || known.ownerUserId !== owner)
-        throw new ProactiveNotFoundError();
-      const changed = await changeSetting(id, (current) => {
-        const minutes = patch.intervalMinutes ?? current.intervalMinutes;
-        const oneIntervalOut = new Date(Date.now() + minutes * 60_000);
-        const kept =
-          patch.intervalMinutes === undefined ||
-          current.nextRunAt <= oneIntervalOut
-            ? current.nextRunAt
-            : oneIntervalOut;
-        return {
-          ...patch,
-          nextRunAt:
-            patch.enabled === true && !current.enabled ? oneIntervalOut : kept,
-        };
-      });
-      if (!changed) throw new ProactiveNotFoundError();
-      return settingOf(changed);
-    },
+    update,
     /**
      * Removing research is turning it down for this Bot: OpenBot never switches it back on. The
      * setting goes for good, its run ledger and its items with it, as the row and its cascade did.
@@ -827,36 +871,52 @@ export function createProactiveStore(database: Database) {
       }
     },
     /**
-     * Start a check-in: its `running` record. False when another is already running for this
-     * setting, on any replica, which Intelligence's one-running rule decides.
+     * Reserve a daily slot and start a check-in for this person and Bot: its `running` record.
+     * `capped` when their shared daily allowance is spent. False when another is already running
+     * for this setting, on any replica, which Intelligence's one-running rule decides.
      */
     async beginRun(input: {
       id: string;
       setting: Pick<ProactiveSetting, "id" | "ownerUserId" | "agentId">;
       trigger: ProactiveRunTrigger;
       threadId: string;
-    }): Promise<boolean> {
+      dailyLimit: number;
+    }): Promise<boolean | "capped"> {
       try {
-        await client().create(
-          "check-in-runs",
-          {
-            id: input.id,
-            settingId: input.setting.id,
-            ownerUserId: input.setting.ownerUserId,
-            agentId: input.setting.agentId,
-            threadId: input.threadId,
-            trigger: input.trigger,
-            outcome: "running",
-            skipReason: null,
-            itemsRaised: 0,
-            reads: 0,
-            error: null,
-            startedAt: new Date(),
-            finishedAt: null,
+        return await withResearchDefaultsLock(
+          database,
+          input.setting.ownerUserId,
+          input.setting.agentId,
+          async () => {
+            if (
+              (await runsToday(
+                input.setting.ownerUserId,
+                input.setting.agentId,
+              )) >= input.dailyLimit
+            )
+              return "capped" as const;
+            await client().create(
+              "check-in-runs",
+              {
+                id: input.id,
+                settingId: input.setting.id,
+                ownerUserId: input.setting.ownerUserId,
+                agentId: input.setting.agentId,
+                threadId: input.threadId,
+                trigger: input.trigger,
+                outcome: "running",
+                skipReason: null,
+                itemsRaised: 0,
+                reads: 0,
+                error: null,
+                startedAt: new Date(),
+                finishedAt: null,
+              },
+              `openbot:check-in-run:begin:${input.id}`,
+            );
+            return true;
           },
-          `openbot:check-in-run:begin:${input.id}`,
         );
-        return true;
       } catch (error) {
         if (error instanceof ScheduleConflictError) return false;
         // This run's own record, from a try whose answer was lost: run ids are new for every run.
@@ -975,16 +1035,9 @@ export function createProactiveStore(database: Database) {
         .limit(1);
       return Boolean(row);
     },
-    /** Check-ins this setting ran in the last day, for the daily cap. Skipped ones cost nothing. */
-    async runsToday(settingId: string): Promise<number> {
-      return (
-        await client().all("check-in-runs", {
-          settingId,
-          outcome: ["running", "quiet", "raised", "failed"],
-          startedAfter: new Date(Date.now() - 86_400_000),
-        })
-      ).items.length;
-    },
+    /** Every non-skipped check-in for this person and Bot in the last day. */
+    runsToday,
+
     /**
      * Drop what the ledger no longer needs, older than `days`: finished check-ins, and pings no open
      * item still names. An open item's ping is what keeps it from being pinged again, so that ping

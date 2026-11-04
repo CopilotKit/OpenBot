@@ -9,6 +9,7 @@ import {
   type LearningIntelligence,
   LearningVersionConflictError,
 } from "./intelligence";
+import { currentEdition } from "../edition";
 
 export type LearningSettingsStore = {
   read(): Promise<LearningSettings>;
@@ -230,9 +231,12 @@ export function createLearningSettingsStore(
       }
     },
     async read() {
-      if (!intelligence) return structuredClone(current);
-      await loaded();
-      return structuredClone(effective());
+      if (intelligence) await loaded();
+      const settings = structuredClone(intelligence ? effective() : current);
+      // The pause lives on an Admin screen the personal edition does not have, so it never applies.
+      return currentEdition() === "personal"
+        ? { ...settings, enabled: true }
+        : settings;
     },
     async snapshot() {
       if (!intelligence)

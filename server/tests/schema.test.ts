@@ -480,7 +480,7 @@ describe("OpenBot database schema", () => {
 
   test("drops the preference's foreign key to agents in the migration that moved Bots to Intelligence", async () => {
     const migration = await readFile(
-      new URL("../drizzle/0075_bots_in_intelligence.sql", import.meta.url),
+      new URL("../drizzle/0076_bots_in_intelligence.sql", import.meta.url),
       "utf8",
     );
     expect(migration).toContain(

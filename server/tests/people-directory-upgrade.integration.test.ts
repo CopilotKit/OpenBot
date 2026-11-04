@@ -186,7 +186,7 @@ async function seedPreviousRelease() {
   });
   // The migration's own role backfill, as a deployment runs it.
   const migration = readFileSync(
-    join(import.meta.dir, "..", "drizzle", "0076_data_in_intelligence.sql"),
+    join(import.meta.dir, "..", "drizzle", "0077_data_in_intelligence.sql"),
     "utf8",
   );
   const start = migration.indexOf('UPDATE "users"');

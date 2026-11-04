@@ -77,6 +77,9 @@ export type ProactiveSettingPayload = {
   channelId: string;
   threadId: string;
   focus: string;
+  /** What this check-in watches, in the person's words; empty for one that watches everything. */
+  subject: string;
+  sourceLink: string | null;
   enabled: boolean;
   intervalMinutes: number;
   nextRunAt: string;

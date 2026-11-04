@@ -1,6 +1,6 @@
 {
-  "id": "b616143a-7588-4849-b253-61300f93ac0b",
-  "prevId": "13bc559a-3ce1-40e4-8d71-95002e38cba6",
+  "id": "13bc559a-3ce1-40e4-8d71-95002e38cba6",
+  "prevId": "aa323cfd-01f2-4d18-a546-1bf361c7bc85",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -361,6 +361,19 @@
         }
       },
       "foreignKeys": {
+        "attachments_channel_id_channels_id_fk": {
+          "name": "attachments_channel_id_channels_id_fk",
+          "tableFrom": "attachments",
+          "tableTo": "channels",
+          "columnsFrom": [
+            "channel_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "attachments_uploaded_by_users_id_fk": {
           "name": "attachments_uploaded_by_users_id_fk",
           "tableFrom": "attachments",
@@ -852,7 +865,21 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "channels_package_id_deployment_packages_id_fk": {
+          "name": "channels_package_id_deployment_packages_id_fk",
+          "tableFrom": "channels",
+          "tableTo": "deployment_packages",
+          "columnsFrom": [
+            "package_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -1012,82 +1039,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.directory_binding": {
-      "name": "directory_binding",
-      "schema": "",
-      "columns": {
-        "singleton": {
-          "name": "singleton",
-          "type": "boolean",
-          "primaryKey": true,
-          "notNull": true,
-          "default": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bound_at": {
-          "name": "bound_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "directory_binding_singleton": {
-          "name": "directory_binding_singleton",
-          "value": "\"directory_binding\".\"singleton\""
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.directory_removal_reactions": {
-      "name": "directory_removal_reactions",
-      "schema": "",
-      "columns": {
-        "email": {
-          "name": "email",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "acted_at": {
-          "name": "acted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.intelligence_channel_mappings": {
       "name": "intelligence_channel_mappings",
       "schema": "",
@@ -1206,44 +1157,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.secret_leases": {
-      "name": "secret_leases",
-      "schema": "",
-      "columns": {
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "holder": {
-          "name": "holder",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -1597,26 +1510,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "role": {
-          "name": "role",
-          "type": "role",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "directory_version": {
-          "name": "directory_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "directory_pending": {
-          "name": "directory_pending",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
         },
         "created_at": {
           "name": "created_at",
@@ -2096,51 +1989,6 @@
         },
         "completed_at": {
           "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.intelligence_copy_progress": {
-      "name": "intelligence_copy_progress",
-      "schema": "",
-      "columns": {
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "after_created_at": {
-          "name": "after_created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "after_id": {
-          "name": "after_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "copied": {
-          "name": "copied",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "updated_at": {
-          "name": "updated_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
@@ -3241,50 +3089,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.mcp_tool_lists": {
-      "name": "mcp_tool_lists",
-      "schema": "",
-      "columns": {
-        "server_id": {
-          "name": "server_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "refreshed_at": {
-          "name": "refreshed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "skipped_tools": {
-          "name": "skipped_tools",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.mcp_tools": {
       "name": "mcp_tools",
       "schema": "",
@@ -3356,7 +3160,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "mcp_tools_server_id_mcp_servers_id_fk": {
+          "name": "mcp_tools_server_id_mcp_servers_id_fk",
+          "tableFrom": "mcp_tools",
+          "tableTo": "mcp_servers",
+          "columnsFrom": [
+            "server_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "mcp_tools_server_id_name_pk": {
           "name": "mcp_tools_server_id_name_pk",
@@ -3576,6 +3394,19 @@
           "tableTo": "users",
           "columnsFrom": [
             "actor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "pending_authorizations_server_id_mcp_servers_id_fk": {
+          "name": "pending_authorizations_server_id_mcp_servers_id_fk",
+          "tableFrom": "pending_authorizations",
+          "tableTo": "mcp_servers",
+          "columnsFrom": [
+            "server_id"
           ],
           "columnsTo": [
             "id"
@@ -4022,140 +3853,6 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.audit_outbox": {
-      "name": "audit_outbox",
-      "schema": "",
-      "columns": {
-        "seq": {
-          "name": "seq",
-          "type": "bigserial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "occurred_at": {
-          "name": "occurred_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "record": {
-          "name": "record",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "refused_at": {
-          "name": "refused_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "refusal": {
-          "name": "refusal",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "audit_outbox_pending_idx": {
-          "name": "audit_outbox_pending_idx",
-          "columns": [
-            {
-              "expression": "seq",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"audit_outbox\".\"refused_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "audit_outbox_kind_check": {
-          "name": "audit_outbox_kind_check",
-          "value": "\"audit_outbox\".\"kind\" IN ('event', 'action', 'usage')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.computer_activity": {
-      "name": "computer_activity",
-      "schema": "",
-      "columns": {
-        "computer": {
-          "name": "computer",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "last_active_at": {
-          "name": "last_active_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.local_locks": {
-      "name": "local_locks",
-      "schema": "",
-      "columns": {
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "holder": {
-          "name": "holder",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -5164,6 +4861,19 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "responsibility_source_bindings_credential_id_credentials_id_fk": {
+          "name": "responsibility_source_bindings_credential_id_credentials_id_fk",
+          "tableFrom": "responsibility_source_bindings",
+          "tableTo": "credentials",
+          "columnsFrom": [
+            "credential_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5306,6 +5016,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "responsibility_triggers_credential_id_credentials_id_fk": {
+          "name": "responsibility_triggers_credential_id_credentials_id_fk",
+          "tableFrom": "responsibility_triggers",
+          "tableTo": "credentials",
+          "columnsFrom": [
+            "credential_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -6781,6 +6504,19 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "source_link": {
+          "name": "source_link",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -6800,7 +6536,7 @@
               "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -7264,6 +7000,19 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "bot_tasks_suggestion_id_proactive_suggestions_id_fk": {
+          "name": "bot_tasks_suggestion_id_proactive_suggestions_id_fk",
+          "tableFrom": "bot_tasks",
+          "tableTo": "proactive_suggestions",
+          "columnsFrom": [
+            "suggestion_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -7547,6 +7296,19 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "delivery_bindings_channel_id_channels_id_fk": {
+          "name": "delivery_bindings_channel_id_channels_id_fk",
+          "tableFrom": "delivery_bindings",
+          "tableTo": "channels",
+          "columnsFrom": [
+            "channel_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -7629,6 +7391,19 @@
           "tableTo": "users",
           "columnsFrom": [
             "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "delivery_challenges_channel_id_channels_id_fk": {
+          "name": "delivery_challenges_channel_id_channels_id_fk",
+          "tableFrom": "delivery_challenges",
+          "tableTo": "channels",
+          "columnsFrom": [
+            "channel_id"
           ],
           "columnsTo": [
             "id"
@@ -7785,6 +7560,19 @@
           "tableTo": "users",
           "columnsFrom": [
             "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "delivery_inbox_channel_id_channels_id_fk": {
+          "name": "delivery_inbox_channel_id_channels_id_fk",
+          "tableFrom": "delivery_inbox",
+          "tableTo": "channels",
+          "columnsFrom": [
+            "channel_id"
           ],
           "columnsTo": [
             "id"
@@ -7953,6 +7741,19 @@
           "tableTo": "users",
           "columnsFrom": [
             "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "delivery_outbox_channel_id_channels_id_fk": {
+          "name": "delivery_outbox_channel_id_channels_id_fk",
+          "tableFrom": "delivery_outbox",
+          "tableTo": "channels",
+          "columnsFrom": [
+            "channel_id"
           ],
           "columnsTo": [
             "id"
@@ -10526,7 +10327,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "shared_use_approvals_server_id_mcp_servers_id_fk": {
+          "name": "shared_use_approvals_server_id_mcp_servers_id_fk",
+          "tableFrom": "shared_use_approvals",
+          "tableTo": "mcp_servers",
+          "columnsFrom": [
+            "server_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "shared_use_approvals_agent_id_server_id_pk": {
           "name": "shared_use_approvals_agent_id_server_id_pk",
@@ -10669,7 +10484,21 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "shared_use_requests_server_id_mcp_servers_id_fk": {
+          "name": "shared_use_requests_server_id_mcp_servers_id_fk",
+          "tableFrom": "shared_use_requests",
+          "tableTo": "mcp_servers",
+          "columnsFrom": [
+            "server_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -10909,7 +10738,21 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "identity_links_credential_id_credentials_id_fk": {
+          "name": "identity_links_credential_id_credentials_id_fk",
+          "tableFrom": "identity_links",
+          "tableTo": "credentials",
+          "columnsFrom": [
+            "credential_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

@@ -315,7 +315,7 @@ describe("pending_authorizations keys the people it names", () => {
    * adding one is a visible edit. `user_id` has no key (and no index) of its own; see the
    * user-is-actor cases below.
    *
-   * `server_id` lost its key when apps moved to Intelligence (0076): there is no `mcp_servers` row
+   * `server_id` lost its key when apps moved to Intelligence (0077): there is no `mcp_servers` row
    * to cascade from. Its index stays asked for by name, because the cascade is now run by hand
    * (`vault/local-rows.ts` deletes this table's rows by `server_id` when an app is removed), and
    * that delete scanning the table is the same cost the index was added to remove.

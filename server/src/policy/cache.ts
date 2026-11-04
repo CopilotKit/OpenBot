@@ -58,6 +58,7 @@ import {
   type PolicySettings,
   type PolicySettingsPatch,
 } from "./types";
+import { currentEdition } from "../edition";
 
 /** One record as held: what it is (null once deleted) and the ticket of the read or write that said so. */
 type Held<V> = { ticket: number; value: V | null };
@@ -414,11 +415,15 @@ export function createPolicyCache(options: {
       boundary.get(SINGLETON) ?? DEFAULT_ACTION_BOUNDARY_RECORD,
     capabilityRules: (): CapabilityRuleRecord[] => capabilities.values(),
     networkRules: (): NetworkRuleRecord[] => network.values(),
-    /** This person's preferences, or the defaults (version 0) when they never saved any. */
+    /**
+     * This person's preferences, or the defaults (version 0) when they never saved any. One person
+     * with no admin watching (the personal edition) is asked before a Bot acts until they say
+     * otherwise.
+     */
     approvalPreferences: (userId: string): ApprovalPreferencesRecord =>
       preferences.get(userId) ?? {
         userId,
-        enabled: false,
+        enabled: currentEdition() === "personal",
         autoReview: false,
         hostCommands: "ask",
         version: 0,

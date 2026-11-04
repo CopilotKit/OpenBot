@@ -8,11 +8,19 @@ import {
 } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BotOrb } from "@/components/agents/bot-orb";
+import {
+  answerMessage,
+  QuestionNotice,
+  shownAnswer,
+  useConversationQuestion,
+} from "@/components/approvals/question-notice";
 import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
+import { ProgressRow } from "@/components/channels/progress-row";
 import {
   seedMessage,
   takeFirstMessage,
@@ -21,6 +29,7 @@ import {
 import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { answerPersonQuestionMutationOptions } from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
   recordChannelActivityMutationOptions,
@@ -1045,6 +1054,35 @@ export function ChannelChat({
   }, [agent, runtimeAgentId]);
 
   /** Stable reference for effects and component callbacks. */
+  /*
+   * A question the Bot is waiting on in this conversation. While there is one, what the person sends
+   * is their answer to it: it goes through the answer path, which resumes the turn that asked (a
+   * routine's, with the routine's tools) and closes the question, rather than starting a new turn
+   * that leaves it open. Their words are drawn at once under the id the server stores them under;
+   * the Bot's reply arrives as any turn run away from this tab does, through the history read above.
+   */
+  const question = useConversationQuestion(channel.id, channel.threadId);
+  const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
+  const [answeredId, setAnsweredId] = useState<string | null>(null);
+  const answerTo = async (text: string) => {
+    if (!question) return;
+    await answer.mutateAsync({ id: question.id, response: text });
+    const sent = answerMessage(question, text);
+    setAnsweredId(sent.id);
+    agent.setMessages([...agent.messages, sent]);
+  };
+  // Until a Bot message lands after the answer, the Bot is reading it.
+  const answeredAt = answeredId
+    ? agent.messages.findIndex((message) => message.id === answeredId)
+    : -1;
+  const readingAnswer =
+    answeredAt !== -1 &&
+    !agent.messages
+      .slice(answeredAt + 1)
+      .some((message) => message.role === "assistant");
+  const botName = botProfile?.name ?? channel.name;
+  const botSeed = botProfile?.avatarSeed || runtimeAgentId;
+
   const sayRef = useRef(say);
   sayRef.current = say;
   const stopEpoch = useRef(0);
@@ -1159,9 +1197,19 @@ export function ChannelChat({
             // Readiness is handled by `say`; deletion is the only disabled-chat state.
             disabled={!channel.active}
             messages={withVoiceChats(
-              transcriptMessages(agent.messages, seed),
+              transcriptMessages(agent.messages, seed).map(shownAnswer),
               voiceArchive.entries,
             )}
+            attached={
+              question && channel.active ? (
+                <QuestionNotice
+                  avatarSeed={botSeed}
+                  botName={botName}
+                  onAnswered={answerTo}
+                  question={question}
+                />
+              ) : undefined
+            }
             notice={
               /*
                * Two things can be worth saying at once — a deleted coworker and a history with holes in
@@ -1204,6 +1252,11 @@ export function ChannelChat({
                     {historyNotice}
                   </p>
                 ) : null}
+                {answer.error ? (
+                  <p className="pb-2 text-sm text-destructive" role="alert">
+                    {answer.error.message}
+                  </p>
+                ) : null}
                 {channel.active ? null : (
                   <p
                     className="pb-2 text-sm text-muted-foreground"
@@ -1233,6 +1286,15 @@ export function ChannelChat({
                   Boolean(instruction),
                 );
 
+              // An answer is words only: a draft carrying files or a skill is sent as a turn.
+              if (
+                question &&
+                draft.attachments.length === 0 &&
+                skillInstructions.length === 0
+              ) {
+                await answerTo(draft.text);
+                return;
+              }
               await say(draft.text, skillInstructions, draft.attachments);
             }}
             /**
@@ -1281,12 +1343,20 @@ export function ChannelChat({
              */
             working={
               agent.isRunning || turnsInFlight > 0 ? null : (
-                <ChannelWorkRows
-                  botOf={(botId) =>
-                    agentProfiles?.find((profile) => profile.id === botId)
-                  }
-                  work={channel.work}
-                />
+                <>
+                  {readingAnswer ? (
+                    <ProgressRow
+                      label={`${botName} is reading your answer…`}
+                      media={<BotOrb name={botName} seed={botSeed} size={20} />}
+                    />
+                  ) : null}
+                  <ChannelWorkRows
+                    botOf={(botId) =>
+                      agentProfiles?.find((profile) => profile.id === botId)
+                    }
+                    work={channel.work}
+                  />
+                </>
               )
             }
           />

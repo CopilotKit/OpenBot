@@ -452,8 +452,10 @@ const disagreements = (sql: string, before: Snapshot, after: Snapshot) => {
       problems.push(
         `the migration creates index "${index}", the snapshot lacks it`,
       );
+  // A drop followed by a create of the same name is a rebuild — how drizzle turns a unique index
+  // into a plain one — and the snapshot rightly still has it.
   for (const index of indexesDropped)
-    if (indexes.has(index))
+    if (indexes.has(index) && !indexesCreated.includes(index))
       problems.push(
         `the migration drops index "${index}", the snapshot still has it`,
       );

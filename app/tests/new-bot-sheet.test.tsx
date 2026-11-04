@@ -25,6 +25,7 @@ import {
   ISOLATION_NOT_ALLOWED,
   ISOLATION_UNAVAILABLE,
 } from "@/lib/agents/isolation";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -124,10 +125,11 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-function draw(screen: ReactNode) {
+function draw(screen: ReactNode, edition: "team" | "personal" = "team") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  queryClient.setQueryData(deploymentKeys.capabilities(), { edition });
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: () => screen }),
@@ -439,4 +441,30 @@ test("custom-agent selection validates the name before advancing", async () => {
     view.getByRole("button", { name: /^Connect a custom agent/ }),
   );
   expect(await view.findByRole("button", { name: /LangGraph/ })).toBeTruthy();
+});
+
+test("personal Bot creation hides team visibility and isolation controls and links to Business", async () => {
+  const view = draw(
+    <NewBotSheet open onClose={() => {}} onCreated={() => {}} />,
+    "personal",
+  );
+  await view.findByLabelText("Name");
+  expect(view.queryByText("Who can see it")).toBeNull();
+  expect(view.queryByRole("checkbox", { name: "Isolated" })).toBeNull();
+  expect(
+    view
+      .getByRole("link", {
+        name: "Give each Bot its own computer with OpenBot for Business.",
+      })
+      .getAttribute("href"),
+  ).toBe("https://calendly.com/d/dwfr-k64-8d2/openbot-for-business");
+  const user = userEvent.setup({ document: view.baseElement.ownerDocument });
+  const name = view.getByLabelText("Name");
+  await user.type(name, "Personal Research");
+  await act(async () => {
+    fireEvent.keyDown(name, { key: "Enter", keyCode: 13 });
+  });
+  await view.findByText("Personal Research is ready");
+  expect(creates).toHaveLength(1);
+  expect(creates[0]).toMatchObject({ visibility: "private", isolated: false });
 });

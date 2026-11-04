@@ -56,7 +56,12 @@ type Sent = { method: string; url: string; body: unknown };
 function mounted(
   access: AppAccess,
   answer?: { status: number; body: unknown },
-  options: { admin?: boolean } = {},
+  options: {
+    admin?: boolean;
+    personal?: boolean;
+    /** Holds the connect route's answer until it settles, so a test can refetch first. */
+    connectGate?: Promise<void>;
+  } = {},
 ) {
   const sent: Sent[] = [];
   const opened: string[] = [];
@@ -82,12 +87,16 @@ function mounted(
     });
     if (options.admin && url === "/api/me")
       return Response.json({ user: { id: "usr_admin", role: "admin" } });
+    if (options.personal && url === "/api/capabilities")
+      return Response.json({ edition: "personal" });
     if (options.admin && url === "/api/agents/expenses")
       return Response.json({ agent: { id: "expenses", name: "Expenses" } });
     if (answer && method !== "GET")
       return Response.json(answer.body, { status: answer.status });
-    if (url.endsWith("/connect?returnTo=settings"))
+    if (url.endsWith("/connect?returnTo=settings")) {
+      await options.connectGate;
       return Response.json({ authorizationUrl: "https://gmail.test/consent" });
+    }
     return Response.json({ request: { id: "req_1" }, created: true });
   }) as unknown as typeof fetch;
 
@@ -117,13 +126,18 @@ function mounted(
     path: "/connections/$key",
     component: () => null,
   });
+  const directory = createRoute({
+    getParentRoute: () => root,
+    path: "/connections/browse/$provider",
+    component: () => null,
+  });
   const admin = createRoute({
     getParentRoute: () => root,
     path: "/admin/plugins/$key",
     component: () => null,
   });
   const router = createRouter({
-    routeTree: root.addChildren([page, settings, admin]),
+    routeTree: root.addChildren([page, settings, directory, admin]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   const view = render(
@@ -500,6 +514,98 @@ test.each([
     );
   },
 );
+
+test.each(["disabled", "not_granted"] as const)(
+  "in the personal edition, %s is one Connect: turn it on, then sign in in a new tab",
+  async (state) => {
+    const { view, sent, opened } = mounted(
+      appAccess({
+        state,
+        unavailable: state === "disabled" ? "absent" : null,
+      }),
+      undefined,
+      { admin: true, personal: true },
+    );
+    const button = await view.findByRole("button", { name: "Connect Gmail" });
+    expect(button.textContent).toBe("Connect");
+    fireEvent.click(button);
+    await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+    expect(
+      sent.filter((call) => call.method === "POST").map((call) => call.url),
+    ).toEqual([
+      "/api/plugins/for/expenses/apps/composio-gmail/approve",
+      "/api/plugins/servers/composio-gmail/connect?returnTo=settings",
+    ]);
+  },
+);
+
+test("in the personal edition, Connect still opens the sign-in when turning the app on swaps the button", async () => {
+  let release: () => void = () => {};
+  const connectGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { view, sent, opened, swap } = mounted(
+    appAccess({ state: "disabled", unavailable: "absent" }),
+    undefined,
+    { admin: true, personal: true, connectGate },
+  );
+  fireEvent.click(await view.findByRole("button", { name: "Connect Gmail" }));
+  await waitFor(() =>
+    expect(
+      sent.some((call) => call.url.endsWith("/connect?returnTo=settings")),
+    ).toBe(true),
+  );
+  // The refetch after turning it on: the app is on now, and only this person's sign-in is missing.
+  swap(appAccess({ state: "not_connected" }));
+  release();
+  await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+  expect(
+    (await view.findByRole("button", { name: "Waiting for Gmail…" }))
+      .textContent,
+  ).toBe("Waiting for Gmail…");
+});
+
+test("in the personal edition, an app that isn't set up says what is missing, not who to ask", () => {
+  expect(
+    appAccessSentence(
+      appAccess({ state: "disabled", unavailable: "composio_unconfigured" }),
+      undefined,
+      "personal",
+    ),
+  ).toBe("Gmail isn't set up yet. It needs your Composio key first.");
+  expect(
+    appAccessSentence(
+      appAccess({ state: "disabled", unavailable: "token_missing" }),
+      undefined,
+      "personal",
+    ),
+  ).toBe("Gmail isn't fully set up yet. Set it up to finish.");
+});
+
+test("in the personal edition, Set it up for an app with no broker key opens the broker's directory", async () => {
+  const { view } = mounted(
+    appAccess({
+      state: "disabled",
+      unavailable: "composio_unconfigured",
+      requestKind: "enable",
+    }),
+    undefined,
+    { admin: true, personal: true },
+  );
+  const link = await view.findByRole("button", { name: "Set up Gmail" });
+  expect(link.getAttribute("href")).toBe("/connections/browse/composio");
+});
+
+test("in the personal edition, the card says what is missing rather than who to ask", () => {
+  for (const state of ["disabled", "not_granted"] as const) {
+    const sentence = appAccessSentence(
+      appAccess({ state, unavailable: state === "disabled" ? "absent" : null }),
+      undefined,
+      "personal",
+    );
+    expect(sentence).toBe("Gmail isn't connected yet.");
+  }
+});
 
 test("an admin's press that cannot be carried out says what is missing", async () => {
   const { view } = mounted(

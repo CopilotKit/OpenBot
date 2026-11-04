@@ -19,6 +19,7 @@ import { PolicyAlreadyExistsError, policyFailure } from "../policy/client";
 import { policy } from "../policy/cache";
 import type { ApprovalRuleRecord } from "../policy/types";
 import { taskOrigin } from "../tasks/origin";
+import { currentEdition } from "../edition";
 import {
   type ApprovalAction,
   ApprovalNotFoundError,
@@ -88,6 +89,12 @@ const standsFor = (rule: ApprovalRuleRecord, action: ApprovalAction) =>
   rule.scope === action.scope &&
   rule.behaviour === "allow" &&
   rule.revokedAt === null;
+/** The team's approval settings when nobody saved any, and what the personal edition always reads. */
+const DEFAULT_TEAM: ApprovalTeamSettings = {
+  enforceAutoReview: false,
+  customRulesEnabled: true,
+  hostCommandsCap: "allow",
+};
 
 export function createApprovalStore(database: Database): ApprovalStore {
   const owned = (owner: string, id: string) =>
@@ -415,9 +422,11 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
       hostCommands: held.hostCommands,
     };
   };
-  const teamSettings = async (): Promise<ApprovalTeamSettings> => ({
-    ...policy().settings().approvals,
-  });
+  const teamSettings = async (): Promise<ApprovalTeamSettings> =>
+    // No team, and no screen for these: a team deployment's values are not read.
+    currentEdition() === "personal"
+      ? { ...DEFAULT_TEAM }
+      : { ...policy().settings().approvals };
   /** A team rule in force, from memory, read through on a miss. */
   const teamRule = async (id: string): Promise<ApprovalRuleRecord> => {
     const held =
@@ -474,6 +483,7 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
       return next;
     },
     async teamRules() {
+      if (currentEdition() === "personal") return [];
       return policy()
         .approvalRules({ ownerUserId: null })
         .map(teamRuleFrom)

@@ -151,6 +151,8 @@ describe("a lost announcement", () => {
       channelId: `channel-${otherBot}`,
       threadId: `thread-${randomUUID()}`,
       focus: "",
+      subject: "",
+      sourceLink: null,
       enabled: true,
       intervalMinutes: 60,
       nextRunAt: new Date(Date.now() - 1_000),
@@ -221,6 +223,8 @@ describe("a write whose answer was lost", () => {
         setting,
         trigger: "schedule",
         threadId: `thread-${randomUUID()}`,
+        // Room for every run this test starts: the daily cap is another test's subject.
+        dailyLimit: 1000,
       }),
     ).toBe(true);
     expect((await runsOf(setting.id)).map((run) => run.outcome)).toEqual([

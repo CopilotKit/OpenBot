@@ -183,7 +183,7 @@ test("a task that starts waiting on the person sends a browser notification, tho
   );
 });
 
-test("the badge counts check-in items and the tasks waiting on the person, each once", async () => {
+test("the badge counts what Bots are stopped on, each once, and not what check-ins found", async () => {
   serving([
     attention("expenses", {
       items: 2,
@@ -195,8 +195,18 @@ test("the badge counts check-in items and the tasks waiting on the person, each 
     attention("knowledge", { items: 1 }),
   ]);
   const { view } = draw();
-  const badge = await view.findByText("7");
-  expect(badge.getAttribute("aria-label")).toBe("7 things need you");
+  // One approval and three tasks; the three items check-ins found are listed, not counted.
+  const badge = await view.findByText("4");
+  expect(badge.getAttribute("aria-label")).toBe("4 things need you");
+});
+
+test("what check-ins found alone is a dot, not a number", async () => {
+  serving([attention("knowledge", { items: 2 })]);
+  const { view } = draw();
+  expect(
+    await view.findByRole("img", { name: "Your check-ins found something" }),
+  ).toBeTruthy();
+  expect(view.queryByText("2")).toBeNull();
 });
 
 test("a ping of three items sends one browser notification, and nothing more until the next ping", async () => {

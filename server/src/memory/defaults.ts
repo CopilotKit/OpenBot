@@ -4,9 +4,11 @@
  * Both used to start only when a person set them up by hand, one Bot and one app at a time, so on a
  * fresh deployment a Bot remembered what it was told and nothing else. Now:
  *
- * - A person who talks to one of their Bots in a conversation with that Bot alone gets check-ins
- *   from it: the same read-only run (`proactive/restriction.ts`), hourly, first run one interval
- *   after the conversation so it never races it. A Bot they never talked to alone stays quiet.
+ * - Only with OPENBOT_PROACTIVE_DEFAULTS=true: a person who talks to one of their Bots in a
+ *   conversation with that Bot alone gets check-ins from it: the same read-only run
+ *   (`proactive/restriction.ts`), hourly, first run one interval after the conversation so it never
+ *   races it. Otherwise a Bot offers a check-in on one thing in the conversation
+ *   (`proactive/offer-tool.ts`), and nothing runs until the person accepts.
  * - Each app the person connected in their own account, that the Bot can read, becomes a memory
  *   source for that Bot: one per app, read as the person, through the same authorization a source
  *   made by hand passes (`MemoryIngestion.defaultSourceCandidates`).
@@ -49,7 +51,6 @@ import { sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { botConfiguration } from "../configuration/directory";
 import type { DefaultFeature } from "../db/schema/defaults";
-import { ScheduleConflictError } from "../schedules/client";
 import { schedules } from "../schedules/directory";
 import {
   releaseLocalLock,
@@ -368,7 +369,15 @@ export function createMemoryDefaults(options: {
     try {
       if (
         declined(ownerUserId, agentId, "proactive_research").size === 0 &&
-        !has()
+        // One default per person and Bot: any check-in already there, on or off, is the person's
+        // choice. Read from Intelligence under the lease, since a Bot can now hold several and
+        // nothing else stops a second.
+        (
+          await schedules().client.all("check-in-settings", {
+            ownerUserId,
+            agentId,
+          })
+        ).items.length === 0
       ) {
         const id = randomUUID();
         await schedules().create("check-in-settings", {
@@ -378,6 +387,9 @@ export function createMemoryDefaults(options: {
           channelId,
           threadId: options.mintThreadId(),
           focus: "",
+          // Everything the Bot can read, as a check-in OpenBot switches on by itself always watched.
+          subject: "",
+          sourceLink: null,
           intervalMinutes: DEFAULT_RESEARCH_INTERVAL_MINUTES,
           enabled: true,
           nextRunAt: new Date(
@@ -389,9 +401,6 @@ export function createMemoryDefaults(options: {
         });
         adoptedId = id;
       }
-    } catch (error) {
-      // Another replica made it first: one per person and Bot.
-      if (!(error instanceof ScheduleConflictError)) throw error;
     } finally {
       await releaseLocalLock(options.database, lock, holder).catch(
         failed("research-lock"),

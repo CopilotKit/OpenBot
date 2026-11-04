@@ -1,9 +1,11 @@
+import { useQuery } from "@tanstack/react-query";
 import { BotOrb } from "@/components/agents/bot-orb";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
  * The top of a conversation with one Bot: its orb, its name, what it does, and who can see it.
  *
- * Drawn from the Bot's profile the conversation already holds, so it asks the server for nothing.
+ * Drawn from the Bot's profile, with visibility shown only in the team edition.
  * It is the first thing in the transcript's scroll content and scrolls away with it.
  *
  * The empty-state pattern sits behind the orb as a halo (`.orb-pattern` in styles.css), so it follows
@@ -21,6 +23,8 @@ export function ConversationIntro({
     visibility: "public" | "private";
   };
 }) {
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const about = [agent.title, agent.roleDescription]
     .filter((part): part is string => Boolean(part?.trim()))
     .join(" · ");
@@ -46,11 +50,13 @@ export function ConversationIntro({
             {about}
           </p>
         ) : null}
-        <div className="mt-3 flex flex-wrap gap-2">
-          <span className="inline-flex h-6.5 items-center rounded-lg bg-muted px-2.5 font-semibold text-[13px] text-muted-foreground">
-            {agent.visibility === "public" ? "Public" : "Private"}
-          </span>
-        </div>
+        {personal ? null : (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="inline-flex h-6.5 items-center rounded-lg bg-muted px-2.5 font-semibold text-[13px] text-muted-foreground">
+              {agent.visibility === "public" ? "Public" : "Private"}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
