@@ -27,6 +27,7 @@ import {
   CloningRemoteAgent,
   IntelligenceKnowingANewThread,
   isThreadTitleRun,
+  type LearningRefusal,
   RUNTIME_STATE_TOOLS,
   RunBuiltAgent,
   UnavailableAgent,
@@ -1941,6 +1942,26 @@ export type SignRun = (
   previousAssertion?: unknown,
 ) => string;
 
+/** When each container and reason was last logged as refused, so a refused container writes a line per window, not per run. */
+const learningRefusalsLogged = new Map<string, number>();
+const LEARNING_REFUSAL_LOG_MS = 10 * 60_000;
+
+/** A thread went on without the Learning container it named: one line for the operator, at most every ten minutes. */
+function warnLearningRefused(refusal: LearningRefusal): void {
+  const key = `${refusal.learningContainerId}\n${refusal.code}`;
+  if ((learningRefusalsLogged.get(key) ?? 0) > Date.now()) return;
+  learningRefusalsLogged.set(key, Date.now() + LEARNING_REFUSAL_LOG_MS);
+  console.warn(
+    JSON.stringify({
+      type: "learning-container-refused",
+      code: refusal.code,
+      containerId: refusal.learningContainerId,
+      message:
+        "Intelligence would not use this Learning container, so the conversation went on without Learning. Admin, Automatic learning shows why.",
+    }),
+  );
+}
+
 /** Who is asking. Agent visibility is decided per person, so a run has to know this first. */
 export type IdentifyActor = (request: Request) => Promise<AgentActor>;
 
@@ -2087,6 +2108,8 @@ export function mountCopilotRuntime(
                 trajectoryCapture.selectLearningContainers,
             }
           : {}),
+        // The conversation goes on without it. The admin sees why on the Learning page.
+        onLearningRefused: (refusal) => warnLearningRefused(refusal),
       }),
     );
 

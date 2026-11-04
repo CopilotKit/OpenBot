@@ -199,3 +199,35 @@ test("an administrator creates the container with the deployment's credential, s
     containerId: "openbot",
   });
 });
+
+test("the settings page lists the saved containers Intelligence won't use, and only admins see it", async () => {
+  const store = createLearningSettingsStore();
+  const actor =
+    (role: "admin" | "user"): MiddlewareHandler<{ Variables: AppVariables }> =>
+    async (context, next) => {
+      context.set("actor", { id: "person", email: "person@example.com", role });
+      await next();
+    };
+  const problems = async () => [
+    { containerId: "fernhill-shared", problem: "missing" as const },
+  ];
+  const admin = createLearningRoutes({ store, problems }, actor("admin"));
+  expect(await (await admin.request("/settings")).json()).toMatchObject({
+    problems: [{ containerId: "fernhill-shared", problem: "missing" }],
+  });
+  const member = createLearningRoutes({ store, problems }, actor("user"));
+  expect((await member.request("/settings")).status).toBe(403);
+  // A check that fails says nothing, and the page still loads.
+  const failing = createLearningRoutes(
+    {
+      store,
+      problems: async () => {
+        throw new Error("Intelligence unreachable");
+      },
+    },
+    actor("admin"),
+  );
+  const response = await failing.request("/settings");
+  expect(response.status).toBe(200);
+  expect(await response.json()).not.toHaveProperty("problems");
+});

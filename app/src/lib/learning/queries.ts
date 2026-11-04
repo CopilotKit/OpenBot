@@ -3,6 +3,7 @@ import type {
   LearningDeliveryStatus,
   LearningOverview,
   LearningSettings,
+  LearningTargetProblem,
   PersonalLearningSharing,
 } from "@openbot/shared/learning";
 import { queryOptions } from "@tanstack/react-query";
@@ -12,6 +13,7 @@ export const learningKeys = {
   all: ["learning"] as const,
   settings: ["learning", "settings"] as const,
   automatic: ["learning", "automatic"] as const,
+  problems: ["learning", "problems"] as const,
   personal: ["learning", "personal"] as const,
 };
 /**
@@ -50,6 +52,19 @@ export function learningAutomaticQueryOptions() {
         "automatic",
         { fallback: "Learning settings could not be loaded." },
       )) ?? null,
+  });
+}
+/** The saved containers Intelligence won't use, or an empty list when it said nothing about them. */
+export function learningProblemsQueryOptions() {
+  return queryOptions({
+    queryKey: learningKeys.problems,
+    retry: false,
+    queryFn: async (): Promise<LearningTargetProblem[]> =>
+      (await client<LearningTargetProblem[] | undefined>(
+        "/api/admin/learning/settings",
+        "problems",
+        { fallback: "Learning settings could not be loaded." },
+      )) ?? [],
   });
 }
 export function learningOverviewQueryOptions(agentId?: string) {

@@ -3269,6 +3269,7 @@ const app = createApp(
     store: learningSettings,
     autoAssign: learningAutoAssign,
     status: copilotRuntime.learning?.status,
+    problems: copilotRuntime.learning?.problems,
     inspect: copilotRuntime.learning?.inspect,
   },
   {

@@ -2,6 +2,7 @@ import type {
   LearningAutoAssignState,
   LearningSettings,
   LearningTarget,
+  LearningTargetProblem,
 } from "@openbot/shared/learning";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -16,6 +17,7 @@ import {
   learningDeliveryQueryOptions,
   learningKeys,
   learningOverviewQueryOptions,
+  learningProblemsQueryOptions,
   learningSettingsQueryOptions,
   saveLearningSettings,
 } from "@/lib/learning/queries";
@@ -43,6 +45,21 @@ function automaticMessage(
   if (automatic.state === "unavailable")
     return "Couldn't reach Intelligence to find this project's Learning container. OpenBot will try again.";
   return undefined;
+}
+
+/**
+ * What Intelligence says about the containers saved here, in words. Conversations keep working either way, so this is
+ * the only place anyone hears about it.
+ */
+function problemMessages(problems: readonly LearningTargetProblem[]): string[] {
+  if (problems.some((entry) => entry.problem === "learning_off"))
+    return [
+      "Learning isn't on for this Intelligence project, so nothing is learned and Bots get no learned skills. Conversations work as usual. Turn Learning on in Intelligence to start.",
+    ];
+  return problems.map(
+    (entry) =>
+      `This Intelligence project has no "${entry.containerId}" Learning container. Conversations that would use it go on without Learning. Create it in Intelligence, or choose another container.`,
+  );
 }
 
 function TargetFields({
@@ -150,6 +167,7 @@ export function LearningPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(learningSettingsQueryOptions());
   const automatic = useQuery(learningAutomaticQueryOptions());
+  const problems = useQuery(learningProblemsQueryOptions());
   const agents = useQuery(agentListQueryOptions());
   const hiddenAgents = useQuery(agentListQueryOptions(true));
   const roster = [...(agents.data ?? []), ...(hiddenAgents.data ?? [])];
@@ -237,6 +255,16 @@ export function LearningPage() {
                 {automaticNote}
               </p>
             )}
+            {!draft &&
+              problemMessages(problems.data ?? []).map((message) => (
+                <p
+                  key={message}
+                  role="alert"
+                  className="text-destructive text-sm"
+                >
+                  {message}
+                </p>
+              ))}
             {!draft && automatic.data?.state === "absent" && (
               <ContainerSetup automatic={automatic.data} />
             )}
