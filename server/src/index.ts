@@ -2800,22 +2800,20 @@ const app = createApp(
           botBrowser: {
             recorder: recorderExtension,
             openbotUrl: openbotAddress(config),
-            ...(config.computer?.token ? { token: config.computer.token } : {}),
             // The Bot's policy, which `botBrowserNetwork` widens while a recording runs, to the computer of the seat
-            // the recording is on: the person's own, or the isolated Bot's.
+            // the recording is on: the person's own, or the isolated Bot's. Under that computer's own token.
             pushPolicy: async (seat) => {
               const policy = await enterpriseControls()?.policyForBot(
                 seat.botId,
               );
               if (!policy) return;
+              const token = computerGateway.tokenFor(seat);
               await pushEgressPolicy(
                 await computerGateway.locate(seat),
                 seat.botId,
                 policy,
                 {
-                  ...(config.computer?.token
-                    ? { token: config.computer.token }
-                    : {}),
+                  ...(token ? { token } : {}),
                   ...(config.webBotAuth
                     ? { webBotAuth: config.webBotAuth }
                     : {}),
@@ -2851,9 +2849,6 @@ const app = createApp(
                         : {}),
                     }),
             }),
-            ...((config.computer?.token ?? config.browser?.token)
-              ? { token: config.computer?.token ?? config.browser?.token }
-              : {}),
             recorder: recorderExtension,
             openbotUrl: openbotAddress(config),
             // On a single-user OpenBot the person is its admin: a setup failure is theirs to see to.

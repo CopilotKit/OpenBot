@@ -185,26 +185,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `sudo` without a password, because a package manager that cannot install is not one, and "install a
 # tool then use it" is the whole point of giving a Bot a shell.
 #
-# THE PACKAGE MANAGERS, NOT ALL. This was `NOPASSWD: ALL`, and the comment below it explained what
-# that cost: a Bot could become root inside its container. It then named the two conditions that make
-# that acceptable — the container being one Bot's alone, and not holding a database — and this image
-# meets neither. The supervisor is deliberately not in it, so every Bot shares one computer, and
-# `EMBEDDED_POSTGRES=on` is a documented way to run it. So root here read another Bot's workspace, the
-# API's environment, and the audit database that records what it did.
+# ONE COMMAND, NOT THE PACKAGE MANAGERS. This was `NOPASSWD: ALL`, then the package managers by name:
+# apt-get, apt, dpkg, apt-key and apt-cache, with any arguments. The second read as a narrowing and
+# was not one. `sudo apt-get update -o APT::Update::Pre-Invoke::=<command>` runs that command as
+# root, and so do a `.deb` handed to dpkg and the pager `apt-get changelog` opens. Root here is not
+# a Bot's own business: the supervisor is deliberately not in this image, so every Bot shares one
+# computer, and `EMBEDDED_POSTGRES=on` is a documented way to run it. Root reads
+# /run/s6/container_environment, which holds BETTER_AUTH_SECRET, KEY_ENCRYPTION_KEY and the
+# database's password, and with those every credential, every session and the audit database.
 #
-# Naming the commands keeps the feature and removes that. `apt-get install` still works, which is what
-# the tool description tells a model to run. `sudo cat /proc/1/environ` does not.
+# So sudo now runs `openbot-apt` and nothing else. It takes `update`, or `install` and package
+# names, and refuses any other argument; `docker/openbot-apt` says what it refuses and why. Root's,
+# in a directory that is root's, so the Bot cannot change what sudo runs. `sudo openbot-apt install
+# jq` is what the tool description tells a model to run here. `sudo apt-get` is refused.
+#
+# The environment stays sudo's to reset (`env_reset` in Ubuntu's /etc/sudoers) and the helper
+# clears it again, so nothing the Bot exports reaches apt-get. DEBIAN_FRONTEND is set by the
+# helper rather than passed through.
 #
 # WHAT THIS IS NOT. It is a floor, not a boundary. Root is one CVE away and a shared container is not
 # an isolation story for code a model wrote: that needs a computer per Bot and a sandbox under it,
 # which is why per-Bot computers and gVisor are not optional extras next to this feature. Run the
-# image with `--security-opt no-new-privileges` where the platform allows, which turns setuid off
-# entirely for anything not named here.
+# image with `--security-opt no-new-privileges` where the platform allows and the Bots need not
+# install anything: it turns setuid off, sudo with it, so installing stops too.
+COPY docker/openbot-apt /usr/local/sbin/openbot-apt
 RUN apt-get update && apt-get install -y --no-install-recommends sudo \
   && rm -rf /var/lib/apt/lists/* \
+  && chown root:root /usr/local/sbin /usr/local/sbin/openbot-apt \
+  && chmod 0755 /usr/local/sbin /usr/local/sbin/openbot-apt \
   && printf '%s\n' \
-    'pwuser ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/dpkg, /usr/bin/apt-key, /usr/bin/apt-cache' \
-    'Defaults!/usr/bin/apt-get env_keep += "DEBIAN_FRONTEND"' \
+    'pwuser ALL=(root) NOPASSWD: /usr/local/sbin/openbot-apt' \
     > /etc/sudoers.d/pwuser \
   && chmod 0440 /etc/sudoers.d/pwuser \
   && visudo -cf /etc/sudoers.d/pwuser
@@ -245,15 +255,32 @@ ENV AGENT_COMPUTER_URL=http://127.0.0.1:4100
 #
 # The two directories the browser writes are its workspace and its profile, the second being what
 # keeps a Bot signed in between turns. Owned here, because a non-root process cannot create them at
-# the root of the filesystem and the failure surfaces as EACCES on the first navigation.
+# the root of the filesystem and the failure surfaces as EACCES on the first navigation. Its other
+# writes go to its home directory and /tmp, which it can write already.
+#
+# /APP STAYS ROOT'S. It was chowned to `pwuser` along with these two when the API ran as `pwuser`
+# too, and stayed that way after the API moved to `apiuser`. Owning it let a Bot's shell rewrite
+# the code the API runs on its next start, and `app/dist`, which the API serves from disk on every
+# request: a script added to `index.html` runs in the browser of every admin who opens the app.
+# Nothing either process runs writes under /app, so both read it and neither owns it.
+#
+# Root's is not yet read-only to everybody else. Bun's install leaves each package's executable
+# (`semver/bin/semver.js`, `typescript/bin/tsc`, fifty-odd of them) at mode 0777, so a Bot could
+# still rewrite those. Taking the write bit for group and others off is what makes "root's" true.
 RUN mkdir -p /workspace /profiles \
-  && chown -R pwuser:pwuser /workspace /profiles /app
+  && chown -R pwuser:pwuser /workspace /profiles \
+  && find /app -perm /022 ! -type l -exec chmod go-w {} +
 
 # Where the embedded database answers, when there is one. Overridden by whatever you set, so an
 # external database needs no special case: set DATABASE_URL and EMBEDDED_POSTGRES stays off.
 ENV EMBEDDED_POSTGRES=off
 ENV DATABASE_URL=postgres://openbot@127.0.0.1:5432/openbot
 
+# Where this server runs, said by the image so no deployment has to. On a single-user OpenBot outside a
+# container only callers on this machine are the administrator; in here every caller arrives through
+# the container engine's network, so that rule would refuse everybody. See `singleUserAccess` in
+# server/src/config.ts.
+ENV OPENBOT_IN_CONTAINER=true
 ENV NODE_ENV=production
 ENV PORT=3001
 EXPOSE 3001

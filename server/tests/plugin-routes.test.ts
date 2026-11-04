@@ -2204,7 +2204,9 @@ describe("connecting a brokered app", () => {
       {
         returnUrl: "https://evil.test/harvest",
         referer: "https://evil.test",
-        origin: "https://evil.test",
+        // The request's own origin, which is the only Origin a request that reaches the route can
+        // carry, and is not this deployment's address either.
+        origin: "http://openbot.test",
         "x-forwarded-host": "evil.test",
       },
     );
@@ -2213,6 +2215,14 @@ describe("connecting a brokered app", () => {
     expect(authorized).toEqual([
       { account: ADMIN_ACCOUNT, toolkit: "linear", returnUrl: RETURN_URL },
     ]);
+
+    // The same request carrying another site's Origin does not reach the route at all: a page on
+    // another website changes nothing here (request-trust.ts), so no link is minted for it.
+    const fromAnotherSite = await connect({}, "", {
+      origin: "https://evil.test",
+    });
+    expect(fromAnotherSite.status).toBe(403);
+    expect(authorized).toHaveLength(1);
   });
 
   test("an administrator who started on the app's own page is sent back to it", async () => {

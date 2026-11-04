@@ -318,7 +318,6 @@ function build(
         browserUrl: config.browser?.url,
         computers: () => gatewayBrowserComputers(gateway, config.browser?.url),
       }),
-      token: COMPUTER_TOKEN,
       recorder,
       openbotUrl: openbotAddress(config),
       singleUser: config.singleUser,

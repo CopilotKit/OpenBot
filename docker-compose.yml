@@ -367,7 +367,9 @@ services:
       # Defaulted for the same reason as agent-computer's above: so `docker compose up -d` by hand
       # configures the same stack scripts/start.sh does, rather than a silently unauthenticated one.
       SUPERVISOR_TOKEN: ${SUPERVISOR_TOKEN:-openbot-dev-supervisor-token}
-      # Handed to every computer this creates, so the server and the computers share one secret.
+      # Never handed to a computer as it is. Each computer this creates is given a token of its own,
+      # derived from this and whose computer it is, and the server derives the same one to call it
+      # (shared/computer-token.ts), so a Bot that reads its own computer's token opens no other.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
       # Forwarded into every per-Bot computer the supervisor creates. Headed, as above.
       COMPUTER_BROWSER_MODE: ${COMPUTER_BROWSER_MODE:-headed}
