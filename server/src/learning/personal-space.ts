@@ -71,6 +71,18 @@ export function createPersonSpaceStore(
   changes?: LearningChanges,
 ) {
   const seen = new Set<string>();
+  /*
+   * Forgets started per person and how many are still out. A read or confirm that ran while a forget was out proves
+   * nothing about where Intelligence ended (the forget may land after it), so it is not remembered as seen, and the
+   * next confirm writes.
+   */
+  const forgets = new Map<string, { started: number; out: number }>();
+  const settledSince = (userId: string) => {
+    const now = forgets.get(userId);
+    const started = now?.started ?? 0;
+    const clear = (now?.out ?? 0) === 0;
+    return () => clear && (forgets.get(userId)?.started ?? 0) === started;
+  };
   changes?.listen({
     onChange: (change) => {
       if (change.entity === "personal_space") seen.delete(change.appUserId);
@@ -80,20 +92,30 @@ export function createPersonSpaceStore(
   return {
     async confirmed(userId: string): Promise<boolean> {
       if (seen.has(userId)) return true;
+      const settled = settledSince(userId);
       const space = await intelligence.personalSpace(userId);
       if (space.learningContainerId === null) return false;
-      seen.add(userId);
+      if (settled()) seen.add(userId);
       return true;
     },
     /** Idempotent, so replicas confirming the same space at once all succeed. */
     async confirm(userId: string, containerId: string): Promise<void> {
       if (seen.has(userId)) return;
+      const settled = settledSince(userId);
       await intelligence.confirmPersonalSpace(userId, containerId);
-      seen.add(userId);
+      if (settled()) seen.add(userId);
     },
     async forget(userId: string): Promise<void> {
+      const forget = forgets.get(userId) ?? { started: 0, out: 0 };
+      forgets.set(userId, forget);
+      forget.started += 1;
+      forget.out += 1;
       seen.delete(userId);
-      await intelligence.forgetPersonalSpace(userId);
+      try {
+        await intelligence.forgetPersonalSpace(userId);
+      } finally {
+        forget.out -= 1;
+      }
     },
   };
 }

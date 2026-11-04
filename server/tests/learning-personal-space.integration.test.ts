@@ -32,6 +32,7 @@ const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const person = `personal-space-${randomUUID()}`;
 const SPACE = personalLearningContainerId(person);
 const latePerson = `personal-space-late-${randomUUID()}`;
+const overlapPerson = `personal-space-overlap-${randomUUID()}`;
 const API = "https://intelligence.customer.example";
 
 const containers = new Map<string, string>();
@@ -121,7 +122,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await removeLearningPeople([person, latePerson]);
+  await removeLearningPeople([person, latePerson, overlapPerson]);
   await database.delete(users).where(inArray(users.id, [person, latePerson]));
   await database.$client.close();
 });
@@ -185,4 +186,37 @@ test("a replica whose late reads still say missing confirms the space it just ma
   const space = await testLearningIntelligence().personalSpace(latePerson);
   expect(space.learningContainerId).toBe(lateSpace);
   expect(space.confirmedAt).not.toBeNull();
+});
+
+test("a confirm that overlapped a forget does not stop the next confirm from writing", async () => {
+  /*
+   * A caller forgets the space (its read said missing) while another confirms it, and the forget lands in Intelligence
+   * last. The confirm that came back during the forget proves nothing about where Intelligence ended, so the forgetting
+   * caller's own confirm afterwards must write rather than be skipped as already done.
+   */
+  const intelligence = testLearningIntelligence();
+  const space = personalLearningContainerId(overlapPerson);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const store = createPersonSpaceStore({
+    personalSpace: (userId) => intelligence.personalSpace(userId),
+    confirmPersonalSpace: (userId, containerId) =>
+      intelligence.confirmPersonalSpace(userId, containerId),
+    forgetPersonalSpace: async (userId) => {
+      await held;
+      await intelligence.forgetPersonalSpace(userId);
+    },
+  });
+
+  const forgetting = store.forget(overlapPerson);
+  await store.confirm(overlapPerson, space);
+  release();
+  await forgetting;
+  await store.confirm(overlapPerson, space);
+
+  expect(
+    (await intelligence.personalSpace(overlapPerson)).learningContainerId,
+  ).toBe(space);
 });
