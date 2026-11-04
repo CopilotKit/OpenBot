@@ -1,12 +1,11 @@
 name: Build signed desktop shell update artifacts
 
+# Dispatch from a release tag (Run workflow > Use workflow from > Tags). The run builds exactly
+# that ref. The desktop-shell-signing environment's deployment branch and tag rule is matched
+# against the dispatched ref (GITHUB_REF), so building any other ref would sign code the rule never
+# vetted: there is deliberately no input naming a ref.
 on:
   workflow_dispatch:
-    inputs:
-      source-ref:
-        description: Reviewed release tag or commit to build
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -16,8 +15,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release-tag:
+    name: Dispatched from a release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # No environment and no secrets: a branch dispatch stops here, before reviewers are asked.
+    steps:
+      - name: Require a tag
+        env:
+          DISPATCHED_REF: ${{ github.ref }}
+          DISPATCHED_REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$DISPATCHED_REF_TYPE" != "tag" ] || [ "${DISPATCHED_REF#refs/tags/}" = "$DISPATCHED_REF" ]; then
+            echo "::error::Signed shell updates are built only from a release tag. Run this workflow from a tag, not from $DISPATCHED_REF."
+            exit 1
+          fi
+          echo "Building ${DISPATCHED_REF#refs/tags/} at $GITHUB_SHA"
+
   signed-artifacts:
     name: Signed updater (${{ matrix.platform.name }})
+    needs: release-tag
     environment: desktop-shell-signing
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 60
@@ -46,7 +63,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.source-ref }}
+          # The dispatched tag's commit, the one the environment rule checked.
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:

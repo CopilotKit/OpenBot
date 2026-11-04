@@ -8,8 +8,24 @@ const calls: { command: string; args: unknown }[] = [];
 let permitted = true;
 let failure: string | null = null;
 let shellAvailable = false;
+let interrupted: {
+  fromVersion: string;
+  toVersion: string;
+  databaseMayHaveChanged: boolean;
+} | null = null;
 async function handle(command: string, args: unknown) {
+  // Read on every render of the panel; the tests below assert the actions a person takes.
+  if (command === "runtime_update_status") return interrupted;
   calls.push({ command, args });
+  if (command === "recover_runtime_update") {
+    const recovered = {
+      version: interrupted?.fromVersion,
+      accepted: false,
+      databaseRestored: interrupted?.databaseMayHaveChanged ?? false,
+    };
+    interrupted = null;
+    return recovered;
+  }
   if (failure) throw failure;
   if (command === "check_shell_update")
     return {
@@ -48,6 +64,7 @@ afterEach(() => {
   permitted = true;
   failure = null;
   shellAvailable = false;
+  interrupted = null;
 });
 afterAll(() => GlobalRegistrator.unregister());
 function setup() {
@@ -146,4 +163,66 @@ test("configured shell updates require explicit restart acknowledgment before in
     version: "0.3.0",
     restartAcknowledged: true,
   });
+});
+
+test("an unfinished update offers an explicit restore of the previous release", async () => {
+  interrupted = {
+    fromVersion: "v0.2.0",
+    toVersion: "v0.3.0",
+    databaseMayHaveChanged: true,
+  };
+  const { view } = setup();
+  const alert = await view.findByRole("alert");
+  expect(alert.textContent).toContain("v0.2.0 to v0.3.0 did not finish");
+  expect(alert.textContent).toContain("only if the database changed");
+  expect(
+    view.container
+      .querySelector("details.runtime-updates")
+      ?.hasAttribute("open"),
+  ).toBe(true);
+  // Nothing is restored until the person asks.
+  expect(calls).toEqual([]);
+  fireEvent.click(
+    view.getByRole("button", { name: "Restore previous release" }),
+  );
+  expect(
+    await view.findByText(
+      "v0.2.0 is back in place, with its database restored. Repair the installation, then start it.",
+    ),
+  ).toBeTruthy();
+  expect(calls).toEqual([
+    { command: "recover_runtime_update", args: { root: "/customer/openbot" } },
+  ]);
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
+test("a failed apply shows the restore the native side now requires", async () => {
+  const view = render(
+    createElement(RuntimeUpdates, {
+      root: "/customer/openbot",
+      onApply: async () => {
+        interrupted = {
+          fromVersion: "v0.2.0",
+          toVersion: "v0.3.0",
+          databaseMayHaveChanged: true,
+        };
+        throw { said: "The update did not finish starting." };
+      },
+    }),
+  );
+  expect(view.queryByRole("alert")).toBeNull();
+  await check(view);
+  fireEvent.click(
+    await view.findByRole("button", { name: "Stage runtime update" }),
+  );
+  fireEvent.click(await view.findByRole("checkbox"));
+  fireEvent.click(
+    view.getByRole("button", { name: "Apply update and restart" }),
+  );
+  expect(
+    await view.findByText("The update did not finish starting."),
+  ).toBeTruthy();
+  expect(
+    await view.findByRole("button", { name: "Restore previous release" }),
+  ).toBeTruthy();
 });

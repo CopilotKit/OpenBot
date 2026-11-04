@@ -510,9 +510,9 @@ fn windows_blocker_instruction(blocker: win::Blocker) -> String {
 /// nothing moving in it reads as a hang.
 /// Update work uses the existing startup/stop ownership, plus one session exclusion for the
 /// gaps between preparation and startup. It never creates another process supervisor.
-struct RuntimeUpdateGuard(tauri::AppHandle);
-impl RuntimeUpdateGuard {
-    fn begin(app: &tauri::AppHandle) -> Result<Self, Problem> {
+struct RuntimeUpdateGuard<R: tauri::Runtime>(tauri::AppHandle<R>);
+impl<R: tauri::Runtime> RuntimeUpdateGuard<R> {
+    fn begin(app: &tauri::AppHandle<R>) -> Result<Self, Problem> {
         let shell = app.state::<Shell>();
         let _startup = shell.startup.lock().unwrap();
         if shell.starting.load(std::sync::atomic::Ordering::SeqCst) {
@@ -535,7 +535,7 @@ impl RuntimeUpdateGuard {
         Ok(Self(app.clone()))
     }
 }
-impl Drop for RuntimeUpdateGuard {
+impl<R: tauri::Runtime> Drop for RuntimeUpdateGuard<R> {
     fn drop(&mut self) {
         self.0
             .state::<Shell>()
@@ -692,18 +692,20 @@ async fn apply_runtime_update(
         *shell.containers.lock().unwrap()=Some(ContainerDeployment{root:target.clone(),address:engine.clone()});
         if let Err(error)=stack::backup_runtime_database(&engine,&target,&secrets,&updates::database_backup_path(&journal),&database_identity) {
             let stopped=down_containers_with(&shell,&target,|root|down_owned_containers(&shell,root));
-            return Err(Problem::with("The database backup failed. OpenBot remains stopped; the update journal and previous source are retained.",format!("{error}; database stop: {stopped:?}")));
+            // Nothing is journaled before the first vendor write, so the installation is unchanged.
+            let discarded=updates::discard_unapplied(&target,&journal);
+            return Err(Problem::with("The database backup failed, so the update changed nothing. Start OpenBot to run the current release, or try the update again.",format!("{error}; database stop: {stopped:?}; backup folder: {discarded:?}")));
         }
         // Retire only the installation's own temporary backup database service, with no volumes.
         down_containers_with(&shell,&target,|root|down_owned_containers(&shell,root))?;
         if let Err(error)=updates::install_candidate(&target,&mut journal) {
             let rollback=updates::rollback_preparation(&target,&mut journal);
-            return Err(Problem::with("Candidate installation failed. Previous vendor restoration was attempted; inspect the update journal before continuing.",format!("{error}; restore: {rollback:?}")));
+            return Err(Problem::with(rolled_back_said("Installing the update's files failed.",&rollback),format!("{error}; restore: {rollback:?}")));
         }
         let candidate_identity=stack::runtime_update_identity(&engine,&target,&secrets);
         if candidate_identity.as_ref().ok()!=Some(&identity) {
-            updates::rollback_preparation(&target,&mut journal)?;
-            return Err(Problem::with("The candidate changes or cannot prove Compose project, volume or namespace identity. Previous source was restored.",format!("{candidate_identity:?}")));
+            let rollback=updates::rollback_preparation(&target,&mut journal);
+            return Err(Problem::with(rolled_back_said("The update changes or cannot prove the Compose project, volume or namespace identity.",&rollback),format!("{candidate_identity:?}; restore: {rollback:?}")));
         }
         Ok::<_,Problem>(journal)
     }).await.map_err(|e|Problem::from(e.to_string()))??;
@@ -712,8 +714,14 @@ async fn apply_runtime_update(
             .await
     {
         let stopped = stop_for_update(&app, &root);
-        let restored = updates::rollback_preparation(&root, &mut journal);
-        return Err(Problem::with("Update preparation failed. OpenBot is stopped; repair the previous accepted release after resolving the reported failure.",format!("{}; stop: {stopped:?}; vendor restore: {restored:?}",problem_detail(problem))));
+        let rollback = updates::rollback_preparation(&root, &mut journal);
+        return Err(Problem::with(
+            rolled_back_said("Preparing the update failed.", &rollback),
+            format!(
+                "{}; stop: {stopped:?}; vendor restore: {rollback:?}",
+                problem_detail(problem)
+            ),
+        ));
     }
     if app
         .state::<Shell>()
@@ -721,9 +729,10 @@ async fn apply_runtime_update(
         .load(std::sync::atomic::Ordering::SeqCst)
         != stopped_generation + 1
     {
-        updates::rollback_preparation(&root, &mut journal)?;
-        return Err(Problem::plain(
-            "Update was cancelled by Stop. Previous vendor files were restored.",
+        let rollback = updates::rollback_preparation(&root, &mut journal);
+        return Err(Problem::with(
+            rolled_back_said("The update was cancelled by Stop.", &rollback),
+            format!("restore: {rollback:?}"),
         ));
     }
     updates::mark_starting(&root, &mut journal)?;
@@ -739,8 +748,14 @@ async fn apply_runtime_update(
     )
     .await;
     if let Err(problem) = launched {
-        let stopped = stop_for_update(&app, &root);
-        return Err(Problem::with("The candidate did not complete migration/startup. OpenBot remains stopped. Keep the update journal and database backup; source rollback does not undo SQL.",format!("{}; stop: {stopped:?}; backup: {}",problem_detail(problem),updates::database_backup_path(&journal).display())));
+        return Err(after_failed_candidate(
+            &app,
+            &root,
+            &address,
+            "The update did not finish starting.",
+            problem_detail(problem),
+        )
+        .await);
     }
     let target = root.clone();
     let candidate = journal.candidate.clone();
@@ -768,23 +783,223 @@ async fn apply_runtime_update(
     .await
     .map_err(|e| Problem::from(e.to_string()))?;
     if let Err(error) = verified {
-        let stopped = stop_for_update(&app, &root);
-        return Err(Problem::with("Candidate release identity could not be verified. OpenBot remains stopped with its recovery journal and backup.",format!("{error}; stop: {stopped:?}")));
+        return Err(after_failed_candidate(
+            &app,
+            &root,
+            &address,
+            "The updated release could not be verified.",
+            error,
+        )
+        .await);
     }
-    let shell = app.state::<Shell>();
-    let _startup = shell.startup.lock().unwrap();
-    if shell.root.lock().unwrap().as_ref() != Some(&root) {
-        return Err(Problem::plain(
-            "The candidate stopped before acceptance. Its update journal remains for recovery.",
-        ));
+    let accepted = {
+        let shell = app.state::<Shell>();
+        let _startup = shell.startup.lock().unwrap();
+        if shell.root.lock().unwrap().as_ref() != Some(&root) {
+            Err("the updated release stopped before acceptance".to_string())
+        } else {
+            updates::accept(&root, &mut journal)
+        }
+    };
+    match accepted {
+        Ok(accepted) => Ok(accepted),
+        Err(error) => Err(after_failed_candidate(
+            &app,
+            &root,
+            &address,
+            "The updated release could not be accepted.",
+            error,
+        )
+        .await),
     }
-    let accepted = updates::accept(&root, &mut journal);
-    drop(_startup);
-    if let Err(error) = accepted {
-        let stopped = stop_for_update(&app, &root);
-        return Err(Problem::with("The verified runtime could not record final acceptance. It is stopped; retain the update journal and database backup for recovery.",format!("{error}; stop: {stopped:?}")));
+}
+
+/// What a person reads after an update was undone before its database migration.
+fn rolled_back_said(what: &str, rollback: &Result<(), String>) -> String {
+    match rollback {
+        Ok(()) => format!("{what} Nothing in the database had changed, and the previous release's files are back in place. Repair the installation, then start it."),
+        Err(_) => format!("{what} Its files could not be put back automatically. {}", updates::RESTORE_ACTION),
     }
-    accepted.map_err(Problem::from)
+}
+
+/// After the migration checkpoint. Stop the candidate, then return to the previous release on
+/// its own when the database still matches it, which is the case when startup failed before the
+/// migration ran (a port conflict, for example). A database that changed keeps the journal and
+/// backup, and the person is sent to the explicit restore, which is never run without asking.
+async fn after_failed_candidate(
+    app: &tauri::AppHandle,
+    root: &Path,
+    address: &engine::Address,
+    what: &str,
+    detail: String,
+) -> Problem {
+    let handle = app.clone();
+    let target = root.to_path_buf();
+    let engine = address.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let stopped = stop_for_update(&handle, &target);
+        let shell = handle.state::<Shell>();
+        let _startup = shell.startup.lock().unwrap();
+        let restored = restore_previous_release_owned(&shell, &engine, &target, false);
+        (stopped, restored)
+    })
+    .await;
+    let _ = app.emit("runtime:update-stopped", ());
+    match outcome {
+        Ok((stopped, Ok(updates::Restored::Done { .. }))) => Problem::with(
+            format!("{what} Its database had not changed, so the previous release's files are back in place. Repair the installation, then start it."),
+            format!("{detail}; stop: {stopped:?}"),
+        ),
+        Ok((stopped, Ok(updates::Restored::DatabaseChanged))) => Problem::with(
+            format!("{what} Its database migration ran, so OpenBot stays stopped. {}", updates::RESTORE_ACTION),
+            format!("{detail}; stop: {stopped:?}"),
+        ),
+        Ok((stopped, Err(error))) => Problem::with(
+            format!("{what} OpenBot stays stopped. {}", updates::RESTORE_ACTION),
+            format!("{detail}; stop: {stopped:?}; recovery: {error}"),
+        ),
+        Err(error) => Problem::with(
+            format!("{what} OpenBot stays stopped. {}", updates::RESTORE_ACTION),
+            format!("{detail}; recovery did not run: {error}"),
+        ),
+    }
+}
+
+/// Called under the startup lock with every application writer stopped. Owns the installation's
+/// Compose project for the Postgres the restore starts, and stops it again, without volumes.
+fn restore_previous_release_owned(
+    shell: &Shell,
+    engine: &engine::Address,
+    root: &Path,
+    restore_database: bool,
+) -> Result<updates::Restored, String> {
+    let secrets = openbot_desktop_lib::vault::already_given_no_ui(
+        root,
+        &root.join(".env"),
+        &openbot_env::MINTED[..],
+    )
+    .map_err(problem_detail)?;
+    *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+        root: root.to_path_buf(),
+        address: engine.clone(),
+    });
+    let restored = updates::restore_previous_release(engine, root, &secrets, restore_database);
+    let stopped = down_containers_with(shell, root, |root| down_owned_containers(shell, root));
+    match (restored, stopped) {
+        (Ok(restored), Ok(())) => Ok(restored),
+        (Ok(_), Err(error)) => Err(format!(
+            "the previous release is restored, but its database service did not stop: {error}"
+        )),
+        (Err(error), _) => Err(error),
+    }
+}
+
+#[tauri::command]
+async fn runtime_update_status(root: String) -> Result<Option<updates::Interruption>, Problem> {
+    updates::interruption(&stack::root_from(&root)).map_err(Problem::from)
+}
+
+/// The explicit action for an update that did not finish. Journals that need no engine are
+/// resolved from files; otherwise the runtime is stopped, the previous files come back, and the
+/// database is restored from the update's backup only if it no longer matches the previous release.
+#[tauri::command]
+async fn recover_runtime_update(
+    app: tauri::AppHandle,
+    root: String,
+) -> Result<serde_json::Value, Problem> {
+    let _update = RuntimeUpdateGuard::begin(&app)?;
+    let root = stack::root_from(&root);
+    require_update_root(&app.state::<Shell>(), &root)?;
+    let handle = app.clone();
+    let recovered = tauri::async_runtime::spawn_blocking(move || {
+        let interruption =
+            updates::interruption(&root)?.ok_or("No interrupted runtime update needs recovery.")?;
+        match updates::recover_without_engine(&root)? {
+            updates::Recovery::Nothing => {
+                return Err(Problem::plain(
+                    "No interrupted runtime update needs recovery.",
+                ))
+            }
+            updates::Recovery::RolledBack(_) => {
+                return Ok(serde_json::json!({
+                    "version": interruption.from_version,
+                    "accepted": false,
+                    "databaseRestored": false,
+                }))
+            }
+            updates::Recovery::Accepted(_) => {
+                return Ok(serde_json::json!({
+                    "version": interruption.to_version,
+                    "accepted": true,
+                    "databaseRestored": false,
+                }))
+            }
+            updates::Recovery::NeedsEngine => {}
+        }
+        let saved =
+            preparation::saved_engine(&root).ok_or("This installation has no saved engine.")?;
+        let found = engine::detect_saved(Some(saved));
+        let address = found
+            .address
+            .filter(|_| found.responding)
+            .ok_or("Start the installation's container engine, then restore again.")?
+            .pin()?;
+        let shell = handle.state::<Shell>();
+        {
+            // A candidate that outlived a closed window is this installation's own project.
+            let _startup = shell.startup.lock().unwrap();
+            *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+                root: root.clone(),
+                address: address.clone(),
+            });
+        }
+        stop_for_update(&handle, &root)?;
+        let _startup = shell.startup.lock().unwrap();
+        match restore_previous_release_owned(&shell, &address, &root, true)? {
+            updates::Restored::Done { database_restored } => Ok(serde_json::json!({
+                "version": interruption.from_version,
+                "accepted": false,
+                "databaseRestored": database_restored,
+            })),
+            updates::Restored::DatabaseChanged => Err(Problem::plain(
+                "The database differs from the previous release and was not restored.",
+            )),
+        }
+    })
+    .await
+    .map_err(|e| Problem::from(e.to_string()))?;
+    let _ = app.emit("runtime:update-stopped", ());
+    recovered
+}
+
+/// Start and Repair first resolve an update journal that needs no container engine: an update
+/// interrupted before its migration checkpoint is undone, and one interrupted after every check
+/// passed is accepted. Anything left (the database may have changed) is refused below, with the
+/// explicit restore named.
+async fn recover_update_before_start<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    root: &Path,
+) -> Result<Option<updates::Recovery>, Problem> {
+    if !root.join(updates::JOURNAL).exists() {
+        return Ok(None);
+    }
+    let _update = RuntimeUpdateGuard::begin(app)?;
+    let target = root.to_path_buf();
+    let recovered =
+        tauri::async_runtime::spawn_blocking(move || updates::recover_without_engine(&target))
+            .await
+            .map_err(|e| Problem::from(e.to_string()))?
+            .map_err(|error| {
+                Problem::with(
+                    format!(
+                        "An interrupted runtime update could not be undone automatically. {}",
+                        updates::RESTORE_ACTION
+                    ),
+                    error,
+                )
+            })?;
+    updates::require_no_interruption(root)?;
+    Ok(Some(recovered))
 }
 
 #[tauri::command]
@@ -897,7 +1112,10 @@ async fn prepare_installation(
             "A runtime update is in progress. Wait for it to finish before repairing.",
         ));
     }
-    updates::require_no_interruption(&stack::root_from(&root))?;
+    let selected = stack::root_from(&root);
+    // Repair after an undone update is exactly what the previous release needs next.
+    recover_update_before_start(&app, &selected).await?;
+    updates::require_no_interruption(&selected)?;
     prepare_installation_inner(app, root, harness).await
 }
 
@@ -1872,6 +2090,12 @@ async fn start_stack<R: tauri::Runtime>(
         ));
     }
     let root = stack::root_from(&root);
+    if let Some(updates::Recovery::RolledBack(_)) = recover_update_before_start(&app, &root).await?
+    {
+        return Err(Problem::plain(
+            "An update that did not finish was undone, and the previous release's files are back in place. Repair the installation, then start it.",
+        ));
+    }
     updates::require_no_interruption(&root)?;
     start_stack_inner(
         app,
@@ -4834,6 +5058,17 @@ fn main() {
             }
         });
     }
+    let context = tauri::generate_context!();
+    // The one place the updater plugin is registered, and only once its configuration exists.
+    #[cfg(feature = "shell-updater")]
+    let (context, shell_updater) = {
+        let mut context = context;
+        let register = shell_updates::configure_plugin(
+            &mut context.config_mut().plugins,
+            shell_updates::compiled_trust().ok().flatten().as_ref(),
+        );
+        (context, register)
+    };
     tauri::Builder::default()
         // A second launch is somebody looking for the window they already have, not a request for a
         // second stack. Without this both copies bind the same ports and the loser reports a
@@ -4858,6 +5093,8 @@ fn main() {
             stage_runtime_update,
             establish_runtime_baseline,
             apply_runtime_update,
+            runtime_update_status,
+            recover_runtime_update,
             start_stack,
             reset_leftover_database,
             stop_stack,
@@ -4909,10 +5146,12 @@ fn main() {
                 let _ = window.hide();
             }
         })
-        .setup(|app| {
+        .setup(move |app| {
             #[cfg(feature = "shell-updater")]
-            app.handle()
-                .plugin(tauri_plugin_updater::Builder::new().build())?;
+            if shell_updater {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
             desktop_telemetry::initialize(app.handle());
             if let Some(root) = app
                 .path()
@@ -5001,7 +5240,7 @@ fn main() {
             app.on_menu_event(|app, event| chose(app, event.id().as_ref()));
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("the OpenBot window could not be created")
         .run(|app, event| {
             match event {

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { asProblem, Failure, type Problem } from "./Problem";
 import { ShellUpdates } from "./ShellUpdates";
 
@@ -10,6 +10,18 @@ type UpdatePlan = {
   toVersion: string;
   requiresDowntime: boolean;
   recovery: "restart-previous" | "restore-backup";
+};
+
+/** An update that stopped partway, as the native side's journal records it. */
+type Interruption = {
+  fromVersion: string;
+  toVersion: string;
+  databaseMayHaveChanged: boolean;
+};
+type Recovered = {
+  version: string;
+  accepted: boolean;
+  databaseRestored: boolean;
 };
 
 /** Runtime updates are a separate, explicit action. A normal restart keeps its accepted pin. */
@@ -30,6 +42,22 @@ export function RuntimeUpdates({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState("");
+  const [interruption, setInterruption] = useState<Interruption | null>(null);
+
+  // Start and Repair refuse while an update is unfinished and send the person here.
+  const refreshInterruption = useCallback(async () => {
+    if (!root.trim()) return;
+    try {
+      setInterruption(
+        await invoke<Interruption | null>("runtime_update_status", { root }),
+      );
+    } catch {
+      setInterruption(null);
+    }
+  }, [root]);
+  useEffect(() => {
+    void refreshInterruption();
+  }, [refreshInterruption]);
 
   async function perform(action: () => Promise<void>) {
     setBusy(true);
@@ -46,8 +74,42 @@ export function RuntimeUpdates({
 
   if (!root.trim()) return null;
   return (
-    <details className="runtime-updates">
+    <details className="runtime-updates" open={interruption ? true : undefined}>
       <summary>Runtime updates</summary>
+      {interruption && (
+        <div role="alert">
+          <p>
+            The update from {interruption.fromVersion} to{" "}
+            {interruption.toVersion} did not finish, so OpenBot will not start
+            until it is resolved.
+          </p>
+          <p>
+            {interruption.databaseMayHaveChanged
+              ? `Its database migration may have run. Restoring puts ${interruption.fromVersion}'s files back, and restores the database from the backup taken before the update only if the database changed. Anything written after that backup is lost.`
+              : `Nothing in the database changed. Restoring puts ${interruption.fromVersion}'s files back.`}
+          </p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void perform(async () => {
+                const recovered = await invoke<Recovered>(
+                  "recover_runtime_update",
+                  { root },
+                );
+                setInterruption(null);
+                setNotice(
+                  recovered.accepted
+                    ? `The update to ${recovered.version} is accepted. Start OpenBot to run it.`
+                    : `${recovered.version} is back in place${recovered.databaseRestored ? ", with its database restored" : ""}. Repair the installation, then start it.`,
+                );
+              })
+            }
+          >
+            Restore previous release
+          </button>
+        </div>
+      )}
       <p>
         Choose a release from this installation’s configured distributor.
         Checking and staging leave the running installation in place. Applying
@@ -137,7 +199,11 @@ export function RuntimeUpdates({
                 disabled={busy || !acknowledged}
                 onClick={() =>
                   void perform(async () => {
-                    await onApply();
+                    try {
+                      await onApply();
+                    } finally {
+                      await refreshInterruption();
+                    }
                     setStaged(false);
                     setPlan(null);
                     setNotice(`${plan.toVersion} is running and accepted.`);

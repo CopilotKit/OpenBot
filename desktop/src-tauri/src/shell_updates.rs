@@ -42,6 +42,34 @@ pub fn compiled_trust() -> Result<Option<Trust>, String> {
         option_env!("OPENBOT_SHELL_UPDATE_ENDPOINT"),
     )
 }
+/// Whether to register the updater plugin, making sure the configuration it reads exists first.
+///
+/// Registering `tauri_plugin_updater` makes Tauri deserialize `plugins.updater` into the plugin's
+/// `Config`, which requires a `pubkey`. With no such block that is `null`, the registration fails,
+/// and the app panicked at launch. A bundled block (a distributor's `tauri.conf.json`) is used as
+/// it is; otherwise this build's compiled trust supplies one; with neither, the plugin is not
+/// registered and a check reports updates as not configured. One answer, so one registration.
+pub fn configure_plugin(
+    plugins: &mut tauri::utils::config::PluginConfig,
+    trust: Option<&Trust>,
+) -> bool {
+    if plugins
+        .0
+        .get("updater")
+        .is_some_and(|block| !block.is_null())
+    {
+        return true;
+    }
+    let Some(trust) = trust else {
+        return false;
+    };
+    plugins.0.insert(
+        "updater".into(),
+        json!({"pubkey": trust.public_key, "endpoints": [trust.endpoint.as_str()]}),
+    );
+    true
+}
+
 pub fn delivery_status() -> &'static str {
     if cfg!(feature = "shell-updater") && matches!(compiled_trust(), Ok(Some(_))) {
         "Signed desktop shell update support is configured; check application updates separately."
@@ -129,6 +157,82 @@ mod tests {
         .unwrap()
         .is_some());
     }
+    /// The `plugins` block a shell-updater build actually ships: `tauri.conf.json`, with
+    /// `tauri.updater.conf.json` merged over it the way `tauri build --config` does.
+    #[cfg(feature = "shell-updater")]
+    fn shipped_plugins() -> tauri::utils::config::PluginConfig {
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut plugins = serde_json::Map::new();
+        for file in ["tauri.conf.json", "tauri.updater.conf.json"] {
+            let config: Value =
+                serde_json::from_slice(&std::fs::read(directory.join(file)).unwrap()).unwrap();
+            if let Some(found) = config["plugins"].as_object() {
+                plugins.extend(found.clone());
+            }
+        }
+        serde_json::from_value(Value::Object(plugins)).unwrap()
+    }
+
+    #[test]
+    fn shell_updates_plugin_configuration_follows_bundle_then_compiled_trust() {
+        let trust = trust(
+            Some("synthetic-public-key"),
+            Some("https://updates.example/latest.json"),
+        )
+        .unwrap()
+        .unwrap();
+        let mut empty = tauri::utils::config::PluginConfig::default();
+        assert!(!configure_plugin(&mut empty, None));
+        assert!(empty.0.is_empty());
+        assert!(configure_plugin(&mut empty, Some(&trust)));
+        assert_eq!(
+            empty.0["updater"],
+            json!({"pubkey":"synthetic-public-key","endpoints":["https://updates.example/latest.json"]})
+        );
+        // A distributor's own block is kept as written, and still means one registration.
+        let bundled =
+            json!({"pubkey":"bundled-key","endpoints":["https://bundled.example/latest.json"]});
+        let mut configured = tauri::utils::config::PluginConfig::default();
+        configured.0.insert("updater".into(), bundled.clone());
+        assert!(configure_plugin(&mut configured, Some(&trust)));
+        assert!(configure_plugin(&mut configured, None));
+        assert_eq!(configured.0["updater"], bundled);
+    }
+
+    /// Every `shell-updater` build panicked at launch: the plugin was registered with no
+    /// `plugins.updater` block, so Tauri handed it `null` for a config that requires a `pubkey`.
+    /// This registers the real plugin on a real (mock-runtime) app with the shipped configuration,
+    /// exactly as `main` does, with and without compiled trust.
+    #[cfg(feature = "shell-updater")]
+    #[test]
+    fn shell_updates_plugin_registers_with_shipped_configuration() {
+        use tauri_plugin_updater::UpdaterExt;
+        let compiled = trust(
+            Some("synthetic-public-key"),
+            Some("https://updates.example/latest.json"),
+        )
+        .unwrap()
+        .unwrap();
+        for trust in [None, Some(compiled)] {
+            let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+            context.config_mut().plugins = shipped_plugins();
+            let register = configure_plugin(&mut context.config_mut().plugins, trust.as_ref());
+            let app = tauri::test::mock_builder().build(context).unwrap();
+            if register {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())
+                    .expect("the updater plugin initializes from the shipped configuration");
+                app.updater_builder()
+                    .build()
+                    .expect("the registered updater builds");
+            }
+            assert_eq!(
+                register,
+                trust.is_some() || shipped_plugins().0.contains_key("updater")
+            );
+        }
+    }
+
     #[test]
     fn shell_updates_do_not_accept_runtime_candidate_policy_as_shell_trust() {
         let distribution = crate::updates::compiled_distribution();

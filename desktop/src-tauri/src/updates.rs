@@ -504,11 +504,147 @@ fn baseline(root: &Path, manifest: &Value, preserved: &[PathBuf]) -> Result<Base
     Ok(saved)
 }
 
-pub fn require_no_interruption(root: &Path) -> Result<(), String> {
-    if root.join(JOURNAL).exists() {
-        return Err(format!("An interrupted runtime update requires recovery. Keep OpenBot stopped and inspect {}. Ordinary Start/Repair cannot overwrite it.",root.join(JOURNAL).display()));
+/// Phases after which the candidate may have migrated the database. Only an explicit restore, with
+/// the container engine, can leave them.
+const DATABASE_PHASES: &[&str] = &["migration-startup-verification", "restoring-previous"];
+/// Phases reached only after every runtime check passed; what remains is writing the promotion.
+const ACCEPTANCE_PHASES: &[&str] = &["verified", "accepted"];
+pub const RESTORE_ACTION: &str =
+    "Open Runtime updates and choose Restore previous release to return to it.";
+
+fn read_journal(root: &Path) -> Result<Option<Journal>, String> {
+    let path = root.join(JOURNAL);
+    match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|e| {
+            format!(
+                "An interrupted runtime update left a record OpenBot cannot read ({}): {e}",
+                path.display()
+            )
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
     }
-    Ok(())
+}
+
+/// Start, Repair, reopen and the tray all stop here while an update journal exists. Start and
+/// Repair first hand journals that need no engine to `recover_without_engine`, so for them what is
+/// left is a journal whose candidate may have changed the database. Passive paths never recover.
+pub fn require_no_interruption(root: &Path) -> Result<(), String> {
+    match read_journal(root)? {
+        None => Ok(()),
+        Some(journal) if DATABASE_PHASES.contains(&journal.phase.as_str()) => Err(format!(
+            "The interrupted runtime update to {} may have changed the database, so OpenBot will not start {} on it. {RESTORE_ACTION}",
+            journal.to_version, journal.from_version
+        )),
+        Some(journal) => Err(format!(
+            "The runtime update to {} did not finish. Start or Repair OpenBot to undo it, or {}",
+            journal.to_version,
+            RESTORE_ACTION.replacen("Open", "open", 1)
+        )),
+    }
+}
+
+/// What the Runtime updates screen shows about an update that did not finish.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Interruption {
+    pub from_version: String,
+    pub to_version: String,
+    pub database_may_have_changed: bool,
+}
+pub fn interruption(root: &Path) -> Result<Option<Interruption>, String> {
+    Ok(read_journal(root)?.map(|journal| Interruption {
+        database_may_have_changed: DATABASE_PHASES.contains(&journal.phase.as_str()),
+        from_version: journal.from_version,
+        to_version: journal.to_version,
+    }))
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Recovery {
+    /// No update journal exists.
+    Nothing,
+    /// An update interrupted before its migration checkpoint was undone from files alone. The
+    /// previous release's dependencies need installing again, so it needs Repair before Start.
+    RolledBack(Value),
+    /// An update interrupted after every runtime check passed had its acceptance finished.
+    Accepted(Value),
+    /// The candidate may have changed the database; recovery needs the container engine.
+    NeedsEngine,
+}
+
+/// Resolve every journal that can be resolved without the container engine. Before the
+/// candidate's migration checkpoint nothing in the database changed, so the previous vendor
+/// files come back from the backup. After every runtime check passed, acceptance is finished.
+pub fn recover_without_engine(root: &Path) -> Result<Recovery, String> {
+    let Some(mut journal) = read_journal(root)? else {
+        return Ok(Recovery::Nothing);
+    };
+    let phase = journal.phase.clone();
+    if DATABASE_PHASES.contains(&phase.as_str()) {
+        return Ok(Recovery::NeedsEngine);
+    }
+    if ACCEPTANCE_PHASES.contains(&phase.as_str()) {
+        return promote(root, &mut journal).map(Recovery::Accepted);
+    }
+    rollback_preparation(root, &mut journal)?;
+    Ok(Recovery::RolledBack(
+        json!({"version": journal.from_version, "databaseRestored": false}),
+    ))
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Restored {
+    Done {
+        database_restored: bool,
+    },
+    /// The database differs from the previous release and restoring it was not allowed.
+    DatabaseChanged,
+}
+
+/// Return an installation whose candidate may have migrated the database to its previous accepted
+/// release. Previous vendor files come back first, so Postgres starts with the previous release's
+/// own Compose file; then the database is compared with the previous migration journal. Only a
+/// database that differs is restored from the update's `postgres.dump`, and only when
+/// `restore_database` allows it. The journal stays until the database matches, so an interrupted
+/// or failed recovery is simply run again. The caller stops the Postgres this starts.
+pub fn restore_previous_release(
+    engine: &crate::engine::Address,
+    root: &Path,
+    secrets: &crate::stack::Secrets,
+    restore_database: bool,
+) -> Result<Restored, String> {
+    let mut journal = read_journal(root)?.ok_or("No interrupted runtime update needs recovery.")?;
+    if !DATABASE_PHASES.contains(&journal.phase.as_str()) {
+        return Err("This update did not reach its database migration; recover it without the container engine.".into());
+    }
+    // The accepted manifest is promoted last, so it still names the previous release.
+    let previous = current(root)?;
+    let previous_database = previous["compatibility"]["database"]["to"]
+        .as_str()
+        .ok_or("the previous release names no database identity")?
+        .to_string();
+    restore_previous_vendor(root, &journal)?;
+    checkpoint(root, &mut journal, "restoring-previous")?;
+    crate::stack::start_runtime_database(engine, root, secrets)?;
+    let mut database_restored = false;
+    if !crate::stack::runtime_database_matches(engine, root, secrets, &previous_database)? {
+        if !restore_database {
+            return Ok(Restored::DatabaseChanged);
+        }
+        crate::stack::restore_runtime_database(
+            engine,
+            root,
+            secrets,
+            &database_backup_path(&journal),
+        )?;
+        if !crate::stack::runtime_database_matches(engine, root, secrets, &previous_database)? {
+            return Err("The restored database still differs from the previous release. The update record and backup are kept.".into());
+        }
+        database_restored = true;
+    }
+    finish_rollback(root, &mut journal)?;
+    Ok(Restored::Done { database_restored })
 }
 fn current(root: &Path) -> Result<Value, String> {
     read_manifest(&root.join(RELEASE)).map_err(|e| format!("No verified accepted release: {e}. Legacy installs require explicit baseline establishment; updates cannot infer provenance."))
@@ -576,6 +712,66 @@ fn establish_baseline_bytes(
         Ok(json!({"version":manifest["version"],"baselineVerified":true}))
     })();
     std::fs::remove_dir_all(&scratch).map_err(io)?;
+    result
+}
+
+/// Lay the accepted release's managed paths out again at the same version, after an app that
+/// copies more than the one that laid this installation out (see `deployment::fetch_with`). The
+/// source is the accepted manifest's own checksum-verified artifact, so the bytes are the release's.
+/// Every managed file on disk must already be that release's: one that matches neither the
+/// baseline nor the archive is a fork's change, and the updater never overwrites one. Missing
+/// vendor files are restored, new paths are added, and the baseline grows to cover them.
+pub fn relay_accepted_release(root: &Path, get: deployment::Download) -> Result<(), String> {
+    require_no_interruption(root)?;
+    let manifest = current(root)?;
+    let saved: Baseline = serde_json::from_slice(&std::fs::read(root.join(BASELINE)).map_err(io)?)
+        .map_err(|e| e.to_string())?;
+    if manifest["artifacts"]["source"]["sha256"] != saved.source_sha256
+        || manifest["source"]["commit"] != saved.commit
+    {
+        return Err("accepted manifest and baseline identity differ".into());
+    }
+    let archive = get(manifest["artifacts"]["source"]["url"]
+        .as_str()
+        .ok_or("missing source URL")?)?;
+    if manifest["artifacts"]["source"]["sha256"] != digest(&archive) {
+        return Err("accepted release source SHA-256 mismatch; nothing was laid out".into());
+    }
+    let scratch = sibling(root, "relayout")?;
+    remove_folder(&scratch)?;
+    std::fs::create_dir(&scratch).map_err(io)?;
+    let result = (|| {
+        unpack_safe(&scratch, &archive)?;
+        source_database_identity(&scratch, &manifest)?;
+        let preserved = preserved_paths(root)?;
+        let previous = Baseline {
+            files: saved
+                .files
+                .iter()
+                .filter(|(path, _)| managed(Path::new(path), &preserved))
+                .map(|(path, hash)| (path.clone(), hash.clone()))
+                .collect(),
+            ..saved.clone()
+        };
+        let next = Baseline {
+            files: inventory(&scratch, &preserved)?,
+            ..saved.clone()
+        };
+        for (path, hash) in inventory(root, &preserved)? {
+            if previous.files.get(&path) != Some(&hash) && next.files.get(&path) != Some(&hash) {
+                return Err(format!("Managed source was modified or added ({path}). Integrate upstream changes before laying this fork out again."));
+            }
+        }
+        replace(root, &scratch, &previous, &next, &preserved)?;
+        let images: deployment::Images = serde_json::from_value(
+            json!({"version":manifest["version"],"images":manifest["artifacts"]["images"]}),
+        )
+        .map_err(|e| e.to_string())?;
+        deployment::pin(&images)?;
+        write_json(&deployment::images_path(root), &images)?;
+        write_json(&root.join(BASELINE), &next)
+    })();
+    remove_folder(&scratch)?;
     result
 }
 
@@ -667,9 +863,9 @@ fn stage_bytes(
         return Err("candidate source SHA-256 mismatch; active installation is unchanged".into());
     }
     let staged = stage_path(root)?;
-    if staged.exists() {
-        return Err(format!("A staged candidate already exists at {}. Inspect or remove that sibling directory before staging another.",staged.display()));
-    }
+    // No update journal exists (checked above), so nothing refers to an earlier stage. It holds
+    // only a checksum-verified archive's contents, so staging again replaces it.
+    remove_folder(&staged)?;
     std::fs::create_dir(&staged).map_err(io)?;
     let result = (|| {
         unpack_safe(&staged, archive)?;
@@ -908,9 +1104,9 @@ pub fn prepare_apply(root: &Path) -> Result<Journal, String> {
         return Err("staged candidate changed or is partial".into());
     }
     let backup = sibling(root, "backup")?;
-    if backup.exists() {
-        return Err(format!("Previous vendor backup exists at {}; preserve or archive it before applying another release.",backup.display()));
-    }
+    // With no journal, a backup folder belongs to an update that was accepted, rolled back, or
+    // stopped before it changed anything. Nothing can restore from it, and it would block this one.
+    remove_folder(&backup)?;
     Ok(Journal {
         phase: "planned".into(),
         from_version: current["version"].as_str().unwrap().into(),
@@ -922,8 +1118,11 @@ pub fn prepare_apply(root: &Path) -> Result<Journal, String> {
     })
 }
 
-/// Stop has completed before this function is called. Back up every replaced leaf first, then
-/// journal before the first vendor mutation. Customer files and directory identities never move.
+/// Stop has completed before this function is called. Back up every replaced leaf. Nothing is
+/// journaled yet: the source is unchanged until `install_candidate` writes the journal immediately
+/// before its first vendor write, so a failed database backup or a quit before that point leaves
+/// an installation that starts as it did. A backup folder left behind is unreferenced, and the
+/// next apply removes it.
 pub fn backup_vendor(root: &Path, journal: &mut Journal) -> Result<(), String> {
     let preserved = preserved_paths(root)?;
     baseline(root, &current(root)?, &preserved)?;
@@ -940,10 +1139,19 @@ pub fn backup_vendor(root: &Path, journal: &mut Journal) -> Result<(), String> {
     for path in ["container-images.json", ".openbot-deployment"] {
         copy_file(&root.join(path), &journal.backup.join(path))?;
     }
-    checkpoint(root, journal, "vendor-backed-up")
+    journal.phase = "vendor-backed-up".into();
+    Ok(())
 }
 pub fn database_backup_path(journal: &Journal) -> PathBuf {
     journal.backup.join("postgres.dump")
+}
+/// Give up an update before it changed anything: the database backup failed, or Stop arrived
+/// first. No journal exists yet; the backup folder goes, so the next apply is not refused.
+pub fn discard_unapplied(root: &Path, journal: &Journal) -> Result<(), String> {
+    if root.join(JOURNAL).exists() {
+        return Err("This update already changed the installation; recover it instead.".into());
+    }
+    remove_folder(&journal.backup)
 }
 pub fn install_candidate(root: &Path, journal: &mut Journal) -> Result<(), String> {
     if journal.phase == "planned" {
@@ -965,14 +1173,11 @@ pub fn install_candidate(root: &Path, journal: &mut Journal) -> Result<(), Strin
     checkpoint(root, journal, "preparing")
 }
 pub fn mark_starting(root: &Path, journal: &mut Journal) -> Result<(), String> {
-    // Existing Start runs SQL migrations. From this checkpoint onward no automatic file rollback
-    // claims to undo SQL; a failed or interrupted start stays stopped with its durable journal.
+    // Existing Start runs SQL migrations. From this checkpoint onward restoring source files
+    // alone cannot claim to undo SQL; `restore_previous_release` compares the database first.
     checkpoint(root, journal, "migration-startup-verification")
 }
-pub fn rollback_preparation(root: &Path, journal: &mut Journal) -> Result<(), String> {
-    if journal.phase == "migration-startup-verification" {
-        return Err("Migration may have run. Keep the runtime stopped and follow operator recovery; restoring source files cannot undo SQL.".into());
-    }
+fn restore_previous_vendor(root: &Path, journal: &Journal) -> Result<(), String> {
     let preserved = preserved_paths(root)?;
     replace(
         root,
@@ -984,27 +1189,60 @@ pub fn rollback_preparation(root: &Path, journal: &mut Journal) -> Result<(), St
     for path in ["container-images.json", ".openbot-deployment"] {
         copy_file(&journal.backup.join(path), &root.join(path))?;
     }
-    crate::preparation::invalidate(root).map_err(|p| p.said)?;
+    crate::preparation::invalidate(root).map_err(|p| p.said)
+}
+/// The previous release is back in force: its accepted manifest and baseline were never replaced.
+/// The backup holds nothing the installation needs any more, so it goes with the journal. The
+/// stage stays, so the same candidate can be applied again.
+fn finish_rollback(root: &Path, journal: &mut Journal) -> Result<(), String> {
     checkpoint(root, journal, "previous-vendor-restored")?;
-    // A completed restoration leaves the old accepted manifest and baseline in force. Repair can
-    // prepare the previous release again; the backup is retained for inspection.
-    std::fs::remove_file(root.join(JOURNAL)).map_err(io)
+    std::fs::remove_file(root.join(JOURNAL)).map_err(io)?;
+    remove_folder(&journal.backup)
+}
+pub fn rollback_preparation(root: &Path, journal: &mut Journal) -> Result<(), String> {
+    if DATABASE_PHASES.contains(&journal.phase.as_str()) {
+        return Err(format!("Migration may have run, and restoring source files alone cannot undo SQL. {RESTORE_ACTION}"));
+    }
+    restore_previous_vendor(root, journal)?;
+    finish_rollback(root, journal)
+}
+fn remove_folder(path: &Path) -> Result<(), String> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("could not remove {}: {e}", path.display())),
+    }
 }
 pub fn accept(root: &Path, journal: &mut Journal) -> Result<Value, String> {
-    let preserved = preserved_paths(root)?;
-    if inventory(root, &preserved)? != journal.next.files {
-        return Err("candidate source identity changed during startup".into());
+    promote(root, journal)
+}
+/// Accepted metadata is the final promotion, after owned startup and readiness succeeded. Each
+/// write is idempotent, so a journal left at `verified` by a quit is finished the same way.
+fn promote(root: &Path, journal: &mut Journal) -> Result<Value, String> {
+    if journal.phase != "accepted" {
+        let preserved = preserved_paths(root)?;
+        if inventory(root, &preserved)? != journal.next.files {
+            return Err("candidate source identity changed during startup".into());
+        }
+        checkpoint(root, journal, "verified")?;
+        deployment::record(root, &journal.to_version).map_err(io)?;
+        crate::preparation::rebind_after_runtime_update(root).map_err(|p| p.said)?;
+        write_json(&root.join(BASELINE), &journal.next)?;
+        write_json(&root.join(RELEASE), &journal.candidate)?;
+        checkpoint(root, journal, "accepted")?;
     }
-    checkpoint(root, journal, "verified")?;
-    // Accepted metadata is the final promotion, after owned startup and readiness succeeded.
-    deployment::record(root, &journal.to_version).map_err(io)?;
-    crate::preparation::rebind_after_runtime_update(root).map_err(|p| p.said)?;
-    write_json(&root.join(BASELINE), &journal.next)?;
-    write_json(&root.join(RELEASE), &journal.candidate)?;
-    checkpoint(root, journal, "accepted")?;
     std::fs::remove_file(root.join(JOURNAL)).map_err(io)?;
+    // The accepted release is verified and recorded; the stage and the backup describe a change
+    // that is finished. Left in place they refused the next stage and the next apply.
+    let mut leftover = Vec::new();
+    for folder in [stage_path(root)?, journal.backup.clone()] {
+        if let Err(error) = remove_folder(&folder) {
+            eprintln!("runtime update accepted, cleanup incomplete: {error}");
+            leftover.push(error);
+        }
+    }
     Ok(
-        json!({"version":journal.to_version,"root":root,"backupPath":journal.backup,"shellUpdate":crate::shell_updates::delivery_status()}),
+        json!({"version":journal.to_version,"root":root,"leftover":leftover,"shellUpdate":crate::shell_updates::delivery_status()}),
     )
 }
 
@@ -1211,6 +1449,8 @@ mod tests {
                 "{\"entries\":[{\"tag\":\"openbot-db-1\",\"when\":1}]}".into(),
             ),
             ("server/drizzle/openbot-db-1.sql", "select 1;".into()),
+            // A path an older app did not lay out (see `relay_accepted_release`).
+            ("extension/manifest.json", "{}".into()),
             (
                 "examples/fintech/custom.ts",
                 "vendor must not replace tenant".into(),
@@ -1406,7 +1646,9 @@ mod tests {
         let dump = i.root.join("fixture.dump");
         crate::stack::backup_runtime_database(&address, &i.root, &secrets, &dump, "openbot-db-1")
             .unwrap();
-        assert_eq!(std::fs::read(&dump).unwrap(), b"PGDMP-fixture-backup");
+        let mut archived = b"PGDMP".to_vec();
+        archived.extend(std::fs::read(i.root.join("fixture-journal.json")).unwrap());
+        assert_eq!(std::fs::read(&dump).unwrap(), archived);
         let commands = std::fs::read_to_string(i.root.join("fixture-commands.log")).unwrap();
         assert!(commands
             .contains("--no-deps --no-build --pull never --wait --wait-timeout 60 postgres"));
@@ -1551,6 +1793,401 @@ COMPOSE_PATH_SEPARATOR=:
         );
         assert_eq!(current(&i.root).unwrap()["version"], "v0.2.0");
         assert!(!i.root.join(JOURNAL).exists());
+    }
+
+    /// The compiled fake engine on PATH for this (isolated) test process. It resolves Compose
+    /// paths the way Compose does and holds the database's migrations table in
+    /// `fixture-journal.json`, which `pg_dump` archives and `pg_restore` puts back.
+    fn fake_engine(root: &Path) -> crate::engine::Address {
+        let tools = root.join("fixture-tools");
+        std::fs::create_dir(&tools).unwrap();
+        let binary = tools.join(format!("docker{}", std::env::consts::EXE_SUFFIX));
+        crate::test_support::compile_fixture(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("test-fixtures/updates-engine.rs"),
+            &binary,
+        );
+        std::env::set_var("PATH", &tools);
+        std::env::set_var("OPENBOT_UPDATE_ENGINE_FIXTURE", root);
+        crate::engine::Address::new(crate::engine::Engine::Docker, None)
+    }
+    fn previous_database() -> Value {
+        json!([{"hash":digest(b"select 1;"),"createdAt":1}])
+    }
+    fn database(root: &Path) -> Value {
+        serde_json::from_slice(&std::fs::read(root.join("fixture-journal.json")).unwrap()).unwrap()
+    }
+    /// The apply flow up to the migration checkpoint, as `apply_runtime_update` runs it.
+    fn apply_until_migration(
+        i: &Installation,
+        address: &crate::engine::Address,
+        secrets: &crate::stack::Secrets,
+    ) -> Journal {
+        write_json(&i.root.join("fixture-journal.json"), &previous_database()).unwrap();
+        stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
+        let mut journal = prepare_apply(&i.root).unwrap();
+        backup_vendor(&i.root, &mut journal).unwrap();
+        crate::stack::backup_runtime_database(
+            address,
+            &i.root,
+            secrets,
+            &database_backup_path(&journal),
+            &accepted_database_identity(&i.root).unwrap(),
+        )
+        .unwrap();
+        install_candidate(&i.root, &mut journal).unwrap();
+        mark_starting(&i.root, &mut journal).unwrap();
+        journal
+    }
+    fn assert_previous_release_in_force(i: &Installation) {
+        assert_eq!(
+            std::fs::read(i.root.join("server/src/main.ts")).unwrap(),
+            b"previous"
+        );
+        assert_eq!(current(&i.root).unwrap()["version"], "v0.2.0");
+        require_no_interruption(&i.root).unwrap();
+        assert!(!sibling(&i.root, "backup").unwrap().exists());
+        let preserved = preserved_paths(&i.root).unwrap();
+        baseline(&i.root, &current(&i.root).unwrap(), &preserved).unwrap();
+        assert_eq!(
+            std::fs::read(i.root.join("examples/fintech/custom.ts")).unwrap(),
+            b"customer tenant"
+        );
+    }
+
+    /// Finding: the journal was written before the database backup, so a failed `pg_dump` locked
+    /// Start, Repair and reopen with nothing changed. Now nothing is journaled before the first
+    /// vendor write, and the unreferenced backup folder goes.
+    #[test]
+    fn updates_failed_database_backup_changes_nothing_and_locks_nothing() {
+        if crate::test_support::isolated_process(
+            "updates::tests::updates_failed_database_backup_changes_nothing_and_locks_nothing",
+        ) {
+            return;
+        }
+        let i = installation();
+        let address = fake_engine(&i.root);
+        let secrets = crate::stack::Secrets::new();
+        write_json(&i.root.join("fixture-journal.json"), &previous_database()).unwrap();
+        write(&i.root, "fixture-dump-failure", b"1");
+        stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
+        let mut journal = prepare_apply(&i.root).unwrap();
+        backup_vendor(&i.root, &mut journal).unwrap();
+        assert!(crate::stack::backup_runtime_database(
+            &address,
+            &i.root,
+            &secrets,
+            &database_backup_path(&journal),
+            &accepted_database_identity(&i.root).unwrap(),
+        )
+        .is_err());
+        require_no_interruption(&i.root).expect("a failed backup must not lock Start");
+        discard_unapplied(&i.root, &journal).unwrap();
+        assert_previous_release_in_force(&i);
+        assert_eq!(recover_without_engine(&i.root).unwrap(), Recovery::Nothing);
+        // The same staged update can be applied again once the backup works.
+        std::fs::remove_file(i.root.join("fixture-dump-failure")).unwrap();
+        prepare_apply(&i.root).expect("nothing left behind refuses the next apply");
+    }
+
+    /// Finding: a quit or crash partway through left a journal no later launch handled. Before
+    /// the migration checkpoint nothing in the database changed, so Start and Repair undo it.
+    #[test]
+    fn updates_interrupted_before_migration_is_undone_without_the_engine() {
+        for interrupted in ["partial-copy", "preparing", "legacy-backed-up"] {
+            let i = installation();
+            stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
+            let mut journal = prepare_apply(&i.root).unwrap();
+            match interrupted {
+                "partial-copy" => {
+                    // A quit while vendor files are being replaced: some are, the journal says so.
+                    std::fs::remove_file(stage_path(&i.root).unwrap().join("worker/src/main.ts"))
+                        .unwrap();
+                    assert!(install_candidate(&i.root, &mut journal).is_err());
+                    assert_eq!(
+                        std::fs::read(i.root.join("server/src/main.ts")).unwrap(),
+                        b"candidate"
+                    );
+                }
+                "preparing" => install_candidate(&i.root, &mut journal).unwrap(),
+                _ => {
+                    // A journal an earlier build wrote right after its vendor backup.
+                    backup_vendor(&i.root, &mut journal).unwrap();
+                    checkpoint(&i.root, &mut journal, "vendor-backed-up").unwrap();
+                }
+            }
+            drop(journal);
+            assert!(require_no_interruption(&i.root).is_err(), "{interrupted}");
+            assert!(
+                matches!(
+                    recover_without_engine(&i.root).unwrap(),
+                    Recovery::RolledBack(_)
+                ),
+                "{interrupted}"
+            );
+            assert_previous_release_in_force(&i);
+            if interrupted == "partial-copy" {
+                // This test damaged that stage itself; staging again replaces it.
+                stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
+            }
+            prepare_apply(&i.root).expect("the kept stage applies again");
+        }
+    }
+
+    /// Finding: after the migration checkpoint (a port conflict at startup, a quit) the person had
+    /// to hand-edit the journal. The database is compared with the previous release: unchanged,
+    /// the previous files simply come back; changed, only the explicit restore puts the dump back.
+    #[test]
+    fn updates_migration_phase_restores_the_database_only_when_it_changed() {
+        if crate::test_support::isolated_process(
+            "updates::tests::updates_migration_phase_restores_the_database_only_when_it_changed",
+        ) {
+            return;
+        }
+        // Startup failed before the migration ran: nothing changed, so no restore is needed.
+        let i = installation();
+        let address = fake_engine(&i.root);
+        let secrets = crate::stack::Secrets::new();
+        apply_until_migration(&i, &address, &secrets);
+        assert_eq!(
+            recover_without_engine(&i.root).unwrap(),
+            Recovery::NeedsEngine
+        );
+        assert_eq!(
+            restore_previous_release(&address, &i.root, &secrets, false).unwrap(),
+            Restored::Done {
+                database_restored: false
+            }
+        );
+        assert_previous_release_in_force(&i);
+        assert_eq!(database(&i.root), previous_database());
+        drop(i);
+
+        // The candidate migrated, then the window was closed.
+        let i = installation();
+        let address = fake_engine(&i.root);
+        apply_until_migration(&i, &address, &secrets);
+        let migrated =
+            json!([{"hash":digest(b"select 1;"),"createdAt":1},{"hash":"candidate","createdAt":2}]);
+        write_json(&i.root.join("fixture-journal.json"), &migrated).unwrap();
+        let refused = require_no_interruption(&i.root).unwrap_err();
+        assert!(refused.contains("Restore previous release"), "{refused}");
+        // Without permission to restore, the changed database is reported and left alone.
+        assert_eq!(
+            restore_previous_release(&address, &i.root, &secrets, false).unwrap(),
+            Restored::DatabaseChanged
+        );
+        assert_eq!(database(&i.root), migrated);
+        assert!(require_no_interruption(&i.root).is_err());
+        assert!(database_backup_path(&read_journal(&i.root).unwrap().unwrap()).exists());
+        // A recovery that cannot start Postgres keeps the journal and backup, and is run again.
+        write(&i.root, "fixture-postgres-failure", b"1");
+        assert!(restore_previous_release(&address, &i.root, &secrets, true).is_err());
+        assert!(require_no_interruption(&i.root).is_err());
+        std::fs::remove_file(i.root.join("fixture-postgres-failure")).unwrap();
+        assert_eq!(
+            restore_previous_release(&address, &i.root, &secrets, true).unwrap(),
+            Restored::Done {
+                database_restored: true
+            }
+        );
+        assert_eq!(database(&i.root), previous_database());
+        assert_previous_release_in_force(&i);
+        let commands = std::fs::read_to_string(i.root.join("fixture-commands.log")).unwrap();
+        assert!(!commands.contains("--volumes") && !commands.contains(" -v"));
+        prepare_apply(&i.root).expect("the kept stage applies again");
+    }
+
+    /// A quit after every runtime check passed, while acceptance was being written down.
+    #[test]
+    fn updates_interrupted_acceptance_is_finished_on_the_next_start() {
+        let i = installation();
+        stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
+        let mut journal = prepare_apply(&i.root).unwrap();
+        install_candidate(&i.root, &mut journal).unwrap();
+        mark_starting(&i.root, &mut journal).unwrap();
+        checkpoint(&i.root, &mut journal, "verified").unwrap();
+        drop(journal);
+        assert!(matches!(
+            recover_without_engine(&i.root).unwrap(),
+            Recovery::Accepted(_)
+        ));
+        assert_eq!(current(&i.root).unwrap()["version"], "v0.3.0");
+        assert_eq!(deployment::installed(&i.root).unwrap().version, "v0.3.0");
+        require_no_interruption(&i.root).unwrap();
+        assert!(!stage_path(&i.root).unwrap().exists());
+        assert!(!sibling(&i.root, "backup").unwrap().exists());
+    }
+
+    /// Finding: the stage and backup folders outlived an accepted update, so the next stage and
+    /// the next apply refused until someone removed them by hand.
+    #[test]
+    fn updates_a_second_update_stages_and_applies_after_the_first_is_accepted() {
+        let i = installation();
+        stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
+        let mut journal = prepare_apply(&i.root).unwrap();
+        install_candidate(&i.root, &mut journal).unwrap();
+        mark_starting(&i.root, &mut journal).unwrap();
+        accept(&i.root, &mut journal).unwrap();
+        assert!(!stage_path(&i.root).unwrap().exists());
+        assert!(!sibling(&i.root, "backup").unwrap().exists());
+
+        let next_archive = archive("0.4.0", "next");
+        let mut next = i.candidate.clone();
+        next["version"] = json!("v0.4.0");
+        next["source"]["commit"] = json!("5".repeat(40));
+        next["artifacts"]["source"]["sha256"] = json!(digest(&next_archive));
+        next["upgrade"]["fromVersions"] = json!(["v0.3.0"]);
+        stage_bytes(&i.root, &next, &i.policy, &next_archive).expect("the second update stages");
+        let mut journal = prepare_apply(&i.root).expect("the second update applies");
+        install_candidate(&i.root, &mut journal).unwrap();
+        mark_starting(&i.root, &mut journal).unwrap();
+        accept(&i.root, &mut journal).unwrap();
+        assert_eq!(current(&i.root).unwrap()["version"], "v0.4.0");
+        assert_eq!(
+            std::fs::read(i.root.join("server/src/main.ts")).unwrap(),
+            b"next"
+        );
+    }
+
+    /// Finding (Windows): the staged configuration was resolved against the canonicalized root,
+    /// `\\?\C:\...`, while the active one used the directory Compose was started in, so every
+    /// relative bind mount compared unequal and every apply refused. The fake engine resolves
+    /// relative binds against the project directory exactly as Compose does (checked against
+    /// `docker compose config`), including Go's `$PWD` rule, so a root reached through a link
+    /// shows the same divergence on Unix.
+    #[test]
+    fn updates_staged_relative_mounts_resolve_like_the_active_configuration() {
+        if crate::test_support::isolated_process(
+            "updates::tests::updates_staged_relative_mounts_resolve_like_the_active_configuration",
+        ) {
+            return;
+        }
+        let i = installation();
+        stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
+        let address = fake_engine(&i.root);
+        let secrets = crate::stack::Secrets::new();
+        #[cfg(unix)]
+        let selected = {
+            // The installation reached through a link, with the window opened from that link.
+            let link = i.root.with_extension("link");
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(&i.root, &link).unwrap();
+            std::env::set_var("PWD", &link);
+            link
+        };
+        #[cfg(not(unix))]
+        let selected = i.root.clone();
+        let config = json!({"name":"customer-project","volumes":{"pgdata":{"name":"customer-project_pgdata"}},"services":{"postgres":{"volumes":[{"type":"volume","source":"pgdata","target":"/var/lib/postgresql/data"}]},"supervisor":{"environment":{"COMPUTER_NAMESPACE":"customer-namespace"}},"spire-server":{"volumes":[{"type":"bind","source":"./spire/server.conf","target":"/opt/spire/conf/server.conf"}]},"server":{"volumes":[{"type":"bind","source":"./.openbot","target":"/run/openbot"},{"type":"bind","source":"/customer/tenant","target":"/tenant"}]}}});
+        write_json(&i.root.join("fixture-config.json"), &config).unwrap();
+        write_json(&i.root.join("fixture-candidate-config.json"), &config).unwrap();
+        write(&i.root, "docker-compose.override.yml", b"services: {}\n");
+        write(
+            &i.root,
+            "fixture-compose-environment",
+            b"COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml\nCOMPOSE_PATH_SEPARATOR=:\n",
+        );
+        let identity =
+            crate::stack::runtime_update_identity(&address, &selected, &secrets).unwrap();
+        let source = identity["mounts"]["spire-server"]["/opt/spire/conf/server.conf"]["source"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(Path::new(&source).is_absolute(), "{source}");
+        crate::stack::verify_staged_runtime_identity(
+            &address,
+            &selected,
+            &stage_path(&selected).unwrap(),
+            &secrets,
+            &identity,
+        )
+        .expect("unchanged relative mounts are the same mounts");
+        // A relative mount the candidate really moves still refuses.
+        let mut moved = config.clone();
+        moved["services"]["spire-server"]["volumes"][0]["source"] = json!("./spire/other.conf");
+        write_json(&i.root.join("fixture-candidate-config.json"), &moved).unwrap();
+        assert!(crate::stack::verify_staged_runtime_identity(
+            &address,
+            &selected,
+            &stage_path(&selected).unwrap(),
+            &secrets,
+            &identity,
+        )
+        .is_err());
+        #[cfg(unix)]
+        std::fs::remove_file(&selected).unwrap();
+    }
+
+    /// Finding: `fetch` refused whenever the recorded layout differed, so an installation laid out
+    /// before a layout change could neither Start nor Install. One the updater has a baseline for
+    /// is laid out again from its accepted, checksum-verified release artifact.
+    #[test]
+    fn updates_same_version_fetch_lays_an_older_layout_out_again() {
+        let i = installation();
+        let previous_archive = archive("0.2.0", "previous");
+        let mut accepted = current(&i.root).unwrap();
+        accepted["artifacts"]["images"] = i.candidate["artifacts"]["images"].clone();
+        write_json(&i.root.join(RELEASE), &accepted).unwrap();
+        // An older app did not copy `extension`, and its baseline and stamp say so.
+        std::fs::remove_dir_all(i.root.join("extension")).unwrap();
+        let mut saved: Baseline =
+            serde_json::from_slice(&std::fs::read(i.root.join(BASELINE)).unwrap()).unwrap();
+        saved
+            .files
+            .retain(|path, _| !path.starts_with("extension/"));
+        write_json(&i.root.join(BASELINE), &saved).unwrap();
+        let mut older: Vec<&str> = deployment::REQUIRED
+            .iter()
+            .chain(deployment::ALSO_COPIED.iter())
+            .copied()
+            .filter(|entry| *entry != "extension")
+            .collect();
+        older.sort();
+        std::fs::write(
+            deployment::stamp_path(&i.root),
+            json!({"version":"v0.2.0","layout":older}).to_string(),
+        )
+        .unwrap();
+        assert!(deployment::needs_fetch(&i.root, "v0.2.0"));
+        let source_url = current(&i.root).unwrap()["artifacts"]["source"]["url"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let get = |url: &str| -> Result<Vec<u8>, String> {
+            if url == source_url {
+                Ok(previous_archive.clone())
+            } else {
+                Err(format!("unexpected download {url}"))
+            }
+        };
+
+        // A fork's own change is never laid over.
+        write(&i.root, "server/src/main.ts", b"fork");
+        assert!(deployment::fetch_with(&i.root, "v0.2.0", &get).is_err());
+        assert!(!i.root.join("extension").exists());
+        write(&i.root, "server/src/main.ts", b"previous");
+
+        deployment::fetch_with(&i.root, "v0.2.0", &get)
+            .expect("the older layout is laid out again");
+        assert_eq!(
+            std::fs::read(i.root.join("extension/manifest.json")).unwrap(),
+            b"{}"
+        );
+        assert!(!deployment::needs_fetch(&i.root, "v0.2.0"));
+        let preserved = preserved_paths(&i.root).unwrap();
+        let accepted = baseline(&i.root, &current(&i.root).unwrap(), &preserved)
+            .expect("the baseline covers what was laid out");
+        assert!(accepted.files.contains_key("extension/manifest.json"));
+        assert_eq!(
+            std::fs::read(i.root.join("examples/fintech/custom.ts")).unwrap(),
+            b"customer tenant"
+        );
+        assert_eq!(
+            std::fs::read(i.root.join(".env")).unwrap(),
+            b"TENANT_PACKAGE_DIR=../examples/fintech\nKEY_ENCRYPTION_KEY=customer-key\n"
+        );
+        // And the updater still works on it.
+        stage_bytes(&i.root, &i.candidate, &i.policy, &i.archive).unwrap();
+        prepare_apply(&i.root).unwrap();
     }
 
     #[test]

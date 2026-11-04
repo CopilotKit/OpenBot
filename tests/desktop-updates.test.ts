@@ -108,6 +108,69 @@ test("shell build entrypoint refuses absent trust before native work without exp
   );
 });
 
+type WorkflowStep = {
+  uses?: string;
+  run?: string;
+  with?: Record<string, string>;
+};
+type WorkflowJob = {
+  needs?: string | string[];
+  environment?: string;
+  steps: WorkflowStep[];
+};
+/*
+ * GitHub matches an environment's deployment branch and tag rule against the run's GITHUB_REF,
+ * which for workflow_dispatch is the ref the run was dispatched from. A free `source-ref` input
+ * let any branch dispatch sign any other code with the private key.
+ */
+test("signed shell builds sign only the dispatched tag the protected environment vetted", () => {
+  const source = readFileSync(
+    join(import.meta.dir, "../.github/workflows/desktop-shell-updates.yml"),
+    "utf8",
+  );
+  const workflow = Bun.YAML.parse(source) as {
+    on: { workflow_dispatch: { inputs?: unknown } | null };
+    jobs: Record<string, WorkflowJob>;
+  };
+  expect(workflow.on.workflow_dispatch?.inputs).toBeUndefined();
+  expect(source).not.toContain("inputs.");
+
+  const signing = workflow.jobs["signed-artifacts"];
+  expect(signing?.environment).toBe("desktop-shell-signing");
+  const checkouts = (signing?.steps ?? []).filter((step) =>
+    step.uses?.startsWith("actions/checkout@"),
+  );
+  expect(checkouts).toHaveLength(1);
+  for (const checkout of checkouts)
+    expect(checkout.with?.ref).toBe(["$", "{{ github.sha }}"].join(""));
+
+  // The tag check runs first, in a job that holds neither the environment nor its secrets.
+  const needs = [signing?.needs ?? []].flat();
+  expect(needs).toHaveLength(1);
+  const gate = workflow.jobs[needs[0] ?? ""];
+  expect(gate?.environment).toBeUndefined();
+  expect(JSON.stringify(gate)).not.toContain("secrets.");
+  const script = gate?.steps.find((step) => step.run)?.run ?? "";
+  for (const [ref, type, allowed] of [
+    ["refs/tags/v0.3.0", "tag", true],
+    ["refs/heads/main", "branch", false],
+    ["refs/heads/v0.3.0", "branch", false],
+    ["refs/pull/12/merge", "branch", false],
+  ] as const) {
+    const run = Bun.spawnSync(["bash", "-e", "-c", script], {
+      env: {
+        PATH: process.env.PATH ?? "",
+        DISPATCHED_REF: ref,
+        DISPATCHED_REF_TYPE: type,
+        GITHUB_SHA: "3333333333333333333333333333333333333333",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect({ ref, allowed: run.exitCode === 0 }).toEqual({ ref, allowed });
+  }
+});
+
 test("official and fork desktop identities conform to actual publisher defaults", () => {
   const root = join(import.meta.dir, "..");
   const commit = execFileSync("git", ["rev-parse", "HEAD"], {
