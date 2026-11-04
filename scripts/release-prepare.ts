@@ -102,7 +102,8 @@ export function prepareRelease(
   // The final release must bundle the CLI its candidate bundled. A candidate or beta whose
   // CLI names an npm dist-tag ("latest", "next", "alpha") would let the final pick up a newer
   // one, so they fix the tag to the exact version now. An exact version, and a pkg.pr.new URL
-  // (which names a commit), already cannot move. Stable and final never touch the file.
+  // (cli-bundle.ts builds only the form that names a commit), already cannot move. Stable and
+  // final never touch the file.
   if (kind === "rc" || kind === "beta") {
     const cliPath = join(root, "desktop/intelligence-cli.json");
     if (existsSync(cliPath)) {
@@ -118,8 +119,18 @@ export function prepareRelease(
         if (!exactVersion.test(cli)) {
           throw new Error(`copilotkit@${current} is not a version: '${cli}'.`);
         }
-        cliConfig.cli = cli;
-        writeFileSync(cliPath, `${JSON.stringify(cliConfig, null, 2)}\n`);
+        // Only the `cli` string is replaced in the text, so the rest of the file, the pinned Node
+        // version and its hashes, stays byte for byte as it was reviewed.
+        const text = readFileSync(cliPath, "utf8");
+        const updated = text.replace(
+          /("cli"\s*:\s*)"(?:[^"\\]|\\.)*"/,
+          (_, key: string) => key + JSON.stringify(cli),
+        );
+        const expected = JSON.stringify({ ...cliConfig, cli });
+        if (JSON.stringify(JSON.parse(updated)) !== expected) {
+          throw new Error(`Could not rewrite the cli field of ${cliPath}.`);
+        }
+        writeFileSync(cliPath, updated);
       }
     }
   }

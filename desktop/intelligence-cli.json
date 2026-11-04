@@ -1,1 +1,10 @@
-{ "cli": "latest", "node": "25.9.0" }
+{
+  "cli": "latest",
+  "node": {
+    "version": "26.13.0",
+    "sha256": {
+      "darwin-arm64": "d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6",
+      "win32-x64": "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5"
+    }
+  }
+}

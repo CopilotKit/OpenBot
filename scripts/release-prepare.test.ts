@@ -116,11 +116,30 @@ test("a missing Unreleased heading throws", () => {
 
 const cliPath = "desktop/intelligence-cli.json";
 
+// The shape intelligence-cli.json has: the CLI choice and the pinned Node, laid out the way
+// biome formats it.
+const node = {
+  version: "26.13.0",
+  sha256: {
+    "darwin-arm64":
+      "d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6",
+    "win32-x64":
+      "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5",
+  },
+};
+const nodeText = `"node": {
+    "version": "26.13.0",
+    "sha256": {
+      "darwin-arm64": "${node.sha256["darwin-arm64"]}",
+      "win32-x64": "${node.sha256["win32-x64"]}"
+    }
+  }`;
+
 function withCli(version: string, cli: string) {
   const { root, read } = fixture(version);
   writeFileSync(
     join(root, cliPath),
-    `${JSON.stringify({ cli, node: "25.9.0" }, null, 2)}\n`,
+    `{\n  "cli": ${JSON.stringify(cli)},\n  ${nodeText}\n}\n`,
   );
   return { root, read };
 }
@@ -135,8 +154,9 @@ test("a release candidate fixes a latest CLI to an exact version", () => {
     },
   });
   expect(specs).toEqual(["copilotkit@latest"]);
-  expect(JSON.parse(read(cliPath))).toEqual({ cli: "4.33.1", node: "25.9.0" });
-  expect(read(cliPath)).toContain('"cli": "4.33.1"');
+  expect(JSON.parse(read(cliPath))).toEqual({ cli: "4.33.1", node });
+  // Only the cli value changes: the pinned Node stays byte for byte.
+  expect(read(cliPath)).toBe(`{\n  "cli": "4.33.1",\n  ${nodeText}\n}\n`);
 });
 
 test("a release candidate with a fixed CLI leaves the file alone", () => {
@@ -160,16 +180,13 @@ test("a release candidate fixes any dist-tag CLI to an exact version", () => {
     },
   });
   expect(specs).toEqual(["copilotkit@next"]);
-  expect(JSON.parse(read(cliPath))).toEqual({
-    cli: "4.34.0-rc.2",
-    node: "25.9.0",
-  });
+  expect(read(cliPath)).toBe(`{\n  "cli": "4.34.0-rc.2",\n  ${nodeText}\n}\n`);
 });
 
 test("a release candidate leaves a pkg.pr.new CLI alone", () => {
   const { root, read } = withCli(
     "0.1.0",
-    "https://pkg.pr.new/CopilotKit/CopilotKit/copilotkit@abc1234",
+    "https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-pr@4dd2119",
   );
   const before = read(cliPath);
   prepareRelease(root, "minor", "rc", {

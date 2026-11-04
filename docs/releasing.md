@@ -60,18 +60,40 @@ The desktop installer bundles the Intelligence CLI and the Node runtime that run
 `desktop/intelligence-cli.json` chooses both:
 
 ```json
-{ "cli": "latest", "node": "25.9.0" }
+{
+  "cli": "latest",
+  "node": {
+    "version": "26.13.0",
+    "sha256": {
+      "darwin-arm64": "d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6",
+      "win32-x64": "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5"
+    }
+  }
+}
 ```
 
 `cli` is one of:
 
 - the `copilotkit` npm dist-tag `latest`, which is the default
 - any other npm version or dist-tag of `copilotkit`, such as `1.2.3` or `next`
-- a `https://pkg.pr.new/...` preview URL, such as
-  `https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-pr@<sha>`
+- a pkg.pr.new preview of one Intelligence commit:
+  `https://pkg.pr.new/CopilotKit/Intelligence/<package>@<commit>`, where `<package>` is
+  `copilotkit`, `copilotkit-pr` or `copilotkit-push` and `<commit>` is 7 to 40 lowercase hex
+  characters, such as `https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-pr@4dd2119`
 
-Any other URL is refused. `node` is an exact Node version. The download is checked against the
-SHA-256 that nodejs.org lists in `SHASUMS256.txt`, and a mismatch fails the build.
+pkg.pr.new also serves a preview by PR number (`copilotkit-pr@123`) or by branch
+(`copilotkit-pr@main`), and the bot comment on a PR links the PR-number form. Those move with every
+push, so they are refused: copy the commit form instead. Any other URL is refused too.
+
+`node` is the Node runtime: an exact version, which is the current LTS (Node 26), and the SHA-256
+of its download for each platform the installers are built for. The download must match both the
+pinned SHA-256 and the one nodejs.org lists in `SHASUMS256.txt`. Any difference fails the build, and
+so does a platform with no pinned SHA-256. Because the pin is reviewed here, a nodejs.org that
+served a different binary with a matching `SHASUMS256.txt` would still be refused.
+
+To move to another Node version, change `version`, open
+`https://nodejs.org/dist/v<version>/SHASUMS256.txt`, and copy the hashes on two of its lines:
+`node-v<version>-darwin-arm64.tar.gz` for `darwin-arm64`, and `win-x64/node.exe` for `win32-x64`.
 
 A version or URL that does not exist fails the build, because `npm pack` cannot fetch it. So does a
 package that does not ship `index.js` as its bin. Nothing falls back to a different CLI.
@@ -80,12 +102,19 @@ The build records what it actually bundled in `build-version.json`: the CLI's so
 exact version and integrity hash, and Node's exact version and SHA-256. A `latest` or a preview URL
 is therefore readable afterwards as the version it turned into.
 
+The CLI ships no lockfile, so `npm install` picks its dependencies when the installer is built, and
+two builds of the same choice can carry different dependency versions. The `package-lock.json` that
+npm writes stays in the bundled `cli/` folder, and `build-version.json` records its SHA-256 as
+`lockfileSha256` and the number of packages installed from it as `dependencies`. Two builds with the
+same `lockfileSha256` carry the same dependency tree.
+
 Cutting a release candidate or beta pins `cli` to an exact version when it names an npm dist-tag,
 whether `latest`, `next` or another. The tag is replaced with the version it resolves to at that
-moment. An exact version and a `https://pkg.pr.new/...` URL are left as they are, because neither
-can move. So the candidate and the release built from it carry the same CLI. A final release cannot
-change the file. The pin stays on the release branch: the merge-back PR keeps main's own choice, as
-described under [Finishing a candidate](#finishing-a-candidate).
+moment. An exact version and a pkg.pr.new URL are left as they are: a version cannot move, and the
+only pkg.pr.new URL a build accepts names a commit. So the candidate and the release built from it
+carry the same CLI. A final release cannot change the file. The pin stays on the release branch: the
+merge-back PR keeps main's own choice, as described under
+[Finishing a candidate](#finishing-a-candidate).
 
 To assemble the bundle locally, from the repository root:
 
@@ -212,6 +241,9 @@ own choice, such as `latest`. A push to `merge-back/vX.Y.Z` is not a release.
 
 A PR opened by a workflow does not start CI, so push an empty commit to `merge-back/vX.Y.Z` or close
 and reopen the PR before merging. If the merge conflicts, a person resolves it.
+
+Merge the merge-back PR with a merge commit, not a squash, so main keeps the release branch's
+history and the next merge-back does not conflict.
 
 ## What merging does
 

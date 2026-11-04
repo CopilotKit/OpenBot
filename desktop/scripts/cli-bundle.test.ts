@@ -1,11 +1,13 @@
-import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { afterEach, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,11 +16,27 @@ import {
   bundleCli,
   downloadNode,
   type Fetcher,
+  type NodeChoice,
   nodeAsset,
   packCli,
   type Runner,
+  realRun,
   resolveCliSource,
+  shasumFor,
 } from "./cli-bundle";
+
+// Every temp folder a test makes, removed after each test.
+const temps: string[] = [];
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  temps.push(dir);
+  return dir;
+}
+afterEach(() => {
+  for (const dir of temps.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("reads a dist-tag as an npm spec", () => {
   expect(resolveCliSource("latest")).toEqual({
@@ -34,10 +52,28 @@ test("reads a prerelease version as an npm spec", () => {
   });
 });
 
-test("reads a pkg.pr.new link as a preview URL", () => {
-  const url =
-    "https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-pr@4dd2119";
-  expect(resolveCliSource(url)).toEqual({ kind: "url", url });
+test("reads a commit-pinned pkg.pr.new link as a preview URL", () => {
+  for (const url of [
+    "https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-pr@4dd2119",
+    "https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-push@4dd2119",
+    `https://pkg.pr.new/CopilotKit/Intelligence/copilotkit@${"a".repeat(40)}`,
+  ]) {
+    expect(resolveCliSource(url)).toEqual({ kind: "url", url });
+  }
+});
+
+test("refuses a pkg.pr.new link that does not name one Intelligence commit", () => {
+  for (const url of [
+    // A PR number and a branch move with every push.
+    "https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-pr@123",
+    "https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-pr@main",
+    "https://pkg.pr.new/SomeoneElse/Intelligence/copilotkit-pr@4dd2119",
+    "https://pkg.pr.new/CopilotKit/Intelligence/left-pad@4dd2119",
+    "https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-pr@4DD2119",
+    "https://pkg.pr.new/CopilotKit/Intelligence/copilotkit-pr@4dd21",
+  ]) {
+    expect(() => resolveCliSource(url)).toThrow("copilotkit-pr@4dd2119");
+  }
 });
 
 test("refuses any other URL", () => {
@@ -50,29 +86,74 @@ test("refuses an empty choice", () => {
 });
 
 test("points a Windows build at the bare node.exe", () => {
-  const asset = nodeAsset("win32", "x64", "25.9.0");
-  expect(asset.url.endsWith("/v25.9.0/win-x64/node.exe")).toBe(true);
+  const asset = nodeAsset("win32", "x64", "26.13.0");
+  expect(asset.url.endsWith("/v26.13.0/win-x64/node.exe")).toBe(true);
   expect(asset.file).toBe("win-x64/node.exe");
   expect(asset.inArchive).toBe("");
+  expect(asset.key).toBe("win32-x64");
 });
 
 test("points a macOS build at the tarball and the node binary inside it", () => {
-  const asset = nodeAsset("darwin", "arm64", "25.9.0");
-  expect(asset.url.endsWith("/v25.9.0/node-v25.9.0-darwin-arm64.tar.gz")).toBe(
-    true,
-  );
-  expect(asset.inArchive).toBe("node-v25.9.0-darwin-arm64/bin/node");
+  const asset = nodeAsset("darwin", "arm64", "26.13.0");
+  expect(
+    asset.url.endsWith("/v26.13.0/node-v26.13.0-darwin-arm64.tar.gz"),
+  ).toBe(true);
+  expect(asset.inArchive).toBe("node-v26.13.0-darwin-arm64/bin/node");
 });
 
 test("refuses a Node version that is not exact", () => {
-  expect(() => nodeAsset("darwin", "arm64", "25")).toThrow();
-  expect(() => nodeAsset("darwin", "arm64", "v25.9.0")).toThrow();
+  expect(() => nodeAsset("darwin", "arm64", "26")).toThrow();
+  expect(() => nodeAsset("darwin", "arm64", "v26.13.0")).toThrow();
 });
 
 const sha = (bytes: Uint8Array) =>
   createHash("sha256").update(bytes).digest("hex");
 
 const noRun: Runner = () => ({ code: 0, stdout: "", stderr: "" });
+
+// Lines from the real https://nodejs.org/dist/v26.13.0/SHASUMS256.txt, with
+// the neighbours of the two files the installers use.
+const realSums = `a9d7e34eaeeadd4ecbd9f0795f49f9d2c2625e63fc4e2f77709f039497f57033  node-v26.13.0-arm64.msi
+d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6  node-v26.13.0-darwin-arm64.tar.gz
+6f5b3187d9df9fc007e881167905bc7d69ad26450ddc377c83d63256a2495b6e  node-v26.13.0-darwin-arm64.tar.xz
+525c9b29bb0263d687de60a4cec0e2a6db876a8eb032369e5795eca71e7c358e  node-v26.13.0-darwin-x64.tar.gz
+4c9baa047c4ae555050179f25a63153f1c962af32e2aad97735fb550750c5e7a  win-arm64/node.exe
+14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5  win-x64/node.exe
+caad0090dc3add94c06abd01e395e8ec0f1586c10071bda1f99480445d695f6f  win-x64/node.lib
+`;
+
+test("finds the installers' files in a real SHASUMS256.txt", () => {
+  const mac = nodeAsset("darwin", "arm64", "26.13.0");
+  const win = nodeAsset("win32", "x64", "26.13.0");
+  expect(shasumFor(realSums, mac.file)).toBe(
+    "d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6",
+  );
+  expect(shasumFor(realSums, win.file)).toBe(
+    "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5",
+  );
+  expect(shasumFor(realSums, "node-v26.13.0-darwin-arm64")).toBe("");
+});
+
+test("intelligence-cli.json pins the hashes nodejs.org lists", () => {
+  const choice = JSON.parse(
+    readFileSync(join(import.meta.dir, "..", "intelligence-cli.json"), "utf8"),
+  );
+  expect(choice.node.version).toBe("26.13.0");
+  for (const [platform, arch] of [
+    ["darwin", "arm64"],
+    ["win32", "x64"],
+  ] as const) {
+    const asset = nodeAsset(platform, arch, choice.node.version);
+    expect(choice.node.sha256[asset.key]).toBe(shasumFor(realSums, asset.file));
+  }
+});
+
+/** A Node choice whose pinned hash for `key` is `hash`. */
+function pin(key: string, hash: string): NodeChoice {
+  return { version: "26.13.0", sha256: { [key]: hash } };
+}
+
+const sumsUrl = "https://nodejs.org/dist/v26.13.0/SHASUMS256.txt";
 
 function fakeFetch(files: Record<string, Uint8Array | string>): Fetcher {
   return async (url) => {
@@ -83,48 +164,109 @@ function fakeFetch(files: Record<string, Uint8Array | string>): Fetcher {
 }
 
 test("downloads a win32 node.exe that matches SHASUMS256.txt", async () => {
-  const asset = nodeAsset("win32", "x64", "25.9.0");
+  const asset = nodeAsset("win32", "x64", "26.13.0");
   const bytes = new TextEncoder().encode("fake node.exe");
-  const dest = join(mkdtempSync(join(tmpdir(), "node-")), "bin", "node.exe");
-  const result = await downloadNode(asset, "25.9.0", dest, {
+  const dest = join(tempDir("node-"), "bin", "node.exe");
+  const result = await downloadNode(asset, pin(asset.key, sha(bytes)), dest, {
     fetch: fakeFetch({
-      "https://nodejs.org/dist/v25.9.0/SHASUMS256.txt": `${sha(bytes)}  ${asset.file}\n`,
+      [sumsUrl]: `${sha(bytes)}  ${asset.file}\n`,
       [asset.url]: bytes,
     }),
     run: noRun,
   });
-  expect(result).toEqual({ version: "25.9.0", sha256: sha(bytes) });
+  expect(result).toEqual({ version: "26.13.0", sha256: sha(bytes) });
   expect(readFileSync(dest)).toEqual(Buffer.from(bytes));
 });
 
-test("rejects a download whose hash differs from SHASUMS256.txt", async () => {
-  const asset = nodeAsset("win32", "x64", "25.9.0");
+test("rejects a download whose hash differs from the pin and SHASUMS256.txt", async () => {
+  const asset = nodeAsset("win32", "x64", "26.13.0");
   const bytes = new TextEncoder().encode("fake node.exe");
   const wrong = "0".repeat(64);
-  const dest = join(mkdtempSync(join(tmpdir(), "node-")), "node.exe");
+  const dest = join(tempDir("node-"), "node.exe");
   await expect(
-    downloadNode(asset, "25.9.0", dest, {
+    downloadNode(asset, pin(asset.key, wrong), dest, {
       fetch: fakeFetch({
-        "https://nodejs.org/dist/v25.9.0/SHASUMS256.txt": `${wrong}  ${asset.file}\n`,
+        [sumsUrl]: `${wrong}  ${asset.file}\n`,
         [asset.url]: bytes,
       }),
       run: noRun,
     }),
   ).rejects.toThrow(new RegExp(`${wrong}[\\s\\S]*${sha(bytes)}`));
+  expect(existsSync(dest)).toBe(false);
+});
+
+test("rejects a nodejs.org that serves another binary with a matching SHASUMS256.txt", async () => {
+  const asset = nodeAsset("win32", "x64", "26.13.0");
+  const swapped = new TextEncoder().encode("not the reviewed node.exe");
+  const pinned =
+    "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5";
+  const dest = join(tempDir("node-"), "node.exe");
+  await expect(
+    downloadNode(asset, pin(asset.key, pinned), dest, {
+      fetch: fakeFetch({
+        [sumsUrl]: `${sha(swapped)}  ${asset.file}\n`,
+        [asset.url]: swapped,
+      }),
+      run: noRun,
+    }),
+  ).rejects.toThrow(`intelligence-cli.json pins ${pinned}`);
+  expect(existsSync(dest)).toBe(false);
+});
+
+test("refuses a platform that has no pinned hash, before downloading", async () => {
+  const asset = nodeAsset("win32", "x64", "26.13.0");
+  const dest = join(tempDir("node-"), "node.exe");
+  for (const node of [
+    pin("darwin-arm64", "a".repeat(64)),
+    pin(asset.key, ""),
+    pin(asset.key, "not a hash"),
+  ]) {
+    await expect(
+      downloadNode(asset, node, dest, { fetch: fakeFetch({}), run: noRun }),
+    ).rejects.toThrow("pins no SHA-256 for Node 26.13.0 on win32-x64");
+  }
 });
 
 test("rejects when SHASUMS256.txt has no line for the file", async () => {
-  const asset = nodeAsset("win32", "x64", "25.9.0");
-  const dest = join(mkdtempSync(join(tmpdir(), "node-")), "node.exe");
+  const asset = nodeAsset("win32", "x64", "26.13.0");
+  const dest = join(tempDir("node-"), "node.exe");
   await expect(
-    downloadNode(asset, "25.9.0", dest, {
+    downloadNode(asset, pin(asset.key, "a".repeat(64)), dest, {
       fetch: fakeFetch({
-        "https://nodejs.org/dist/v25.9.0/SHASUMS256.txt": `${"a".repeat(64)}  other-file\n`,
+        [sumsUrl]: `${"a".repeat(64)}  other-file\n`,
         [asset.url]: "x",
       }),
       run: noRun,
     }),
-  ).rejects.toThrow();
+  ).rejects.toThrow("has no win-x64/node.exe");
+});
+
+test("unpacks node from a real darwin tarball with the real tar", async () => {
+  const asset = nodeAsset("darwin", "arm64", "26.13.0");
+  const build = tempDir("node-tarball-");
+  const binDir = join(build, "node-v26.13.0-darwin-arm64", "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(join(binDir, "node"), "#!/bin/sh\necho fake node\n");
+  writeFileSync(join(build, "node-v26.13.0-darwin-arm64", "README.md"), "");
+  const made = realRun(
+    ["tar", "-czf", asset.file, "node-v26.13.0-darwin-arm64"],
+    build,
+  );
+  expect(made.code).toBe(0);
+  const bytes = new Uint8Array(readFileSync(join(build, asset.file)));
+
+  const dest = join(tempDir("node-dest-"), "runtime", "node");
+  const result = await downloadNode(asset, pin(asset.key, sha(bytes)), dest, {
+    fetch: fakeFetch({
+      [sumsUrl]: `${"b".repeat(64)}  node-v26.13.0-darwin-x64.tar.gz\n${sha(bytes)}  ${asset.file}\n`,
+      [asset.url]: bytes,
+    }),
+    run: realRun,
+  });
+  expect(result).toEqual({ version: "26.13.0", sha256: sha(bytes) });
+  expect(readFileSync(dest, "utf8")).toBe("#!/bin/sh\necho fake node\n");
+  expect(statSync(dest).mode & 0o777).toBe(0o755);
+  expect(readdirSync(join(dest, ".."))).toEqual(["node"]);
 });
 
 /**
@@ -136,10 +278,22 @@ function fakePackRun(pkg: {
   version: string;
   bin: unknown;
   withIndex?: boolean;
+  withLockfile?: boolean;
 }) {
   const calls: { cmd: string[]; cwd: string }[] = [];
   const run: Runner = (cmd, cwd) => {
     calls.push({ cmd, cwd });
+    if (cmd[0] === "npm" && cmd[1] === "install") {
+      if (pkg.withLockfile === false) {
+        return { code: 0, stdout: "", stderr: "" };
+      }
+      // Two packages on disk, one dev package npm left out.
+      for (const dep of ["node_modules/a", "node_modules/a/node_modules/b"]) {
+        mkdirSync(join(cwd, dep), { recursive: true });
+      }
+      writeFileSync(join(cwd, "package-lock.json"), fixtureLock);
+      return { code: 0, stdout: "", stderr: "" };
+    }
     if (cmd[0] === "npm" && cmd[1] === "pack") {
       const out = JSON.stringify([
         { filename: `${pkg.name}-${pkg.version}.tgz`, integrity: "sha512-abc" },
@@ -164,8 +318,24 @@ function fakePackRun(pkg: {
   return { run, calls };
 }
 
+const fixtureLock = `${JSON.stringify(
+  {
+    name: "copilotkit",
+    lockfileVersion: 3,
+    packages: {
+      "": { name: "copilotkit" },
+      "node_modules/a": { version: "1.0.0" },
+      "node_modules/a/node_modules/b": { version: "2.0.0" },
+      "node_modules/dev-only": { version: "3.0.0", dev: true },
+    },
+  },
+  null,
+  2,
+)}\n`;
+const fixtureLockSha = sha(new TextEncoder().encode(fixtureLock));
+
 function packDirs() {
-  const root = mkdtempSync(join(tmpdir(), "pack-cli-"));
+  const root = tempDir("pack-cli-");
   return { workDir: join(root, "work"), cliDir: join(root, "cli") };
 }
 
@@ -185,6 +355,8 @@ test("packs a preview and reports the package's own name and version", () => {
     name: "copilotkit-pr",
     version: "4.33.1-pr.4dd2119",
     integrity: "sha512-abc",
+    lockfileSha256: fixtureLockSha,
+    dependencies: 2,
   });
   expect(calls[0].cmd).toEqual([
     "npm",
@@ -214,6 +386,23 @@ test("installs production dependencies in the CLI folder", () => {
     "--ignore-scripts",
   ]);
   expect(install.cwd).toBe(cliDir);
+  expect(readFileSync(join(cliDir, "package-lock.json"), "utf8")).toBe(
+    fixtureLock,
+  );
+});
+
+test("refuses a CLI when npm wrote no lockfile", () => {
+  const { workDir, cliDir } = packDirs();
+  mkdirSync(workDir, { recursive: true });
+  const { run } = fakePackRun({
+    name: "copilotkit",
+    version: "4.34.0",
+    bin: "index.js",
+    withLockfile: false,
+  });
+  expect(() =>
+    packCli({ kind: "npm", spec: "copilotkit@latest" }, workDir, cliDir, run),
+  ).toThrow("wrote no package-lock.json");
 });
 
 test("refuses a package whose bin is not index.js", () => {
@@ -252,9 +441,9 @@ test("throws with stderr when a command fails", () => {
 });
 
 test("assembles Node and the CLI under the target and leaves no work folder", async () => {
-  const asset = nodeAsset("win32", "x64", "25.9.0");
+  const asset = nodeAsset("win32", "x64", "26.13.0");
   const bytes = new TextEncoder().encode("fake node.exe");
-  const target = join(mkdtempSync(join(tmpdir(), "bundle-")), "out");
+  const target = join(tempDir("bundle-"), "out");
   mkdirSync(target, { recursive: true });
   writeFileSync(join(target, "stale.txt"), "old");
   const { run } = fakePackRun({
@@ -264,11 +453,11 @@ test("assembles Node and the CLI under the target and leaves no work folder", as
   });
   const result = await bundleCli(target, "win32", "x64", {
     fetch: fakeFetch({
-      "https://nodejs.org/dist/v25.9.0/SHASUMS256.txt": `${sha(bytes)}  ${asset.file}\n`,
+      [sumsUrl]: `${sha(bytes)}  ${asset.file}\n`,
       [asset.url]: bytes,
     }),
     run,
-    choice: { cli: "latest", node: "25.9.0" },
+    choice: { cli: "latest", node: pin(asset.key, sha(bytes)) },
   });
   expect(result).toEqual({
     cli: {
@@ -276,8 +465,10 @@ test("assembles Node and the CLI under the target and leaves no work folder", as
       name: "copilotkit-pr",
       version: "4.33.1-pr.4dd2119",
       integrity: "sha512-abc",
+      lockfileSha256: fixtureLockSha,
+      dependencies: 2,
     },
-    node: { version: "25.9.0", sha256: sha(bytes) },
+    node: { version: "26.13.0", sha256: sha(bytes) },
   });
   expect(readFileSync(join(target, "runtime", "node.exe"))).toEqual(
     Buffer.from(bytes),
