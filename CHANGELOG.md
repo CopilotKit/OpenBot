@@ -452,6 +452,29 @@ again when they come back to the end or press the arrow. A rail beside a convers
 per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
 changes for a deployment.
 
+### First run shows what OpenBot does, one step at a time
+
+- The looping intro is replaced by steps that show what OpenBot does (a browser and files of its
+  own, a team of Bots, and asking before it acts, with Ask before making changes offered right
+  there), then Check your setup, Connect your apps, Get notified, and the name step, whose Get
+  started opens the app. On a desktop each step's words sit beside a picture of it, under one line
+  saying where the person is ("Step 5 of 9") that opens the list of steps; on a phone they come one
+  at a time. A reload, browser Back and a connection's return all keep the person's place, which is
+  now saved as they go. A link on a step to another page moves on to the next step and opens that
+  page once onboarding is done.
+- Check your setup asks the new `GET /api/setup` whether Intelligence, the model key, the Bot computer,
+  more apps and Slack and Teams work, row by row. An admin, or somebody running OpenBot alone, is
+  shown the page or the variables that close a gap; everybody else only that their admin sets it up,
+  with no warning colours. An admin can reopen the same checklist afterwards in Settings → Setup, to
+  check again after setting a variable and restarting OpenBot.
+  Check again asks Intelligence and the model provider again, at most every 10 seconds. Reading the
+  checklist does the same once an answer has failed or is five minutes old, without waiting for it,
+  so the next read has the new answer. To check the Bot computer, the server sends each running
+  computer its network policy whenever it asks, and sees that it answers; it wakes none.
+- An app connected from Connect your apps comes back to that step from the app's own sign-in page,
+  whether it connected, failed or was cancelled there. A connection started from Connections or an
+  app's admin page comes back where it did before.
+
 ### Generated interfaces use A2UI 1.0
 
 With generative UI on, a Bot builds an interface from CopilotKit's standard catalog on A2UI 1.0

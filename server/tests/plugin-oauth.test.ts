@@ -5,6 +5,7 @@ import {
   authorizationUrlFor,
   challengeFor,
   connectedAccountsUrlFor,
+  connectOriginFrom,
   createVerifier,
   readConnectState,
   redeemAuthorizationCode,
@@ -60,6 +61,37 @@ describe("the state that travels through the vendor", () => {
       NOW,
     );
     expect((await readConnectState(sealed, KEY, NOW))?.returnTo).toBe("admin");
+  });
+
+  test("onboarding is a screen to return to as well", async () => {
+    const sealed = await sealConnectState(
+      {
+        userId: "user-1",
+        serverId: "notion",
+        verifier: "v-1",
+        returnTo: "onboarding",
+      },
+      KEY,
+      NOW,
+    );
+    expect((await readConnectState(sealed, KEY, NOW))?.returnTo).toBe(
+      "onboarding",
+    );
+  });
+
+  test("a returnTo from the query is narrowed to a known name", () => {
+    expect(connectOriginFrom("onboarding")).toBe("onboarding");
+    expect(connectOriginFrom("admin")).toBe("admin");
+    for (const hostile of [
+      undefined,
+      "",
+      "https://evil.test",
+      "/onboarding",
+      "ONBOARDING",
+      "onboarding-apps",
+    ]) {
+      expect(connectOriginFrom(hostile)).toBe("settings");
+    }
   });
 
   /*
@@ -419,6 +451,25 @@ describe("where the callback sends somebody afterwards", () => {
     expect(
       connectedAccountsUrlFor(undefined, { serverId: "google-drive" }),
     ).toBe("/connections/google-drive");
+  });
+
+  test("a connect started in onboarding returns to its Connect your apps step, either way", () => {
+    // Onboarding is the one page somebody who has not finished it may open, so both outcomes land
+    // there. Any other page would send them back to it without a word about the connection.
+    expect(
+      connectedAccountsUrlFor(
+        "http://localhost:3010",
+        { serverId: "notion" },
+        "onboarding",
+      ),
+    ).toBe("http://localhost:3010/onboarding?step=apps");
+    expect(
+      connectedAccountsUrlFor(
+        "http://localhost:3010",
+        { failed: true },
+        "onboarding",
+      ),
+    ).toBe("http://localhost:3010/onboarding?step=apps&connected=failed");
   });
 
   test("a connect started on the admin page returns to the admin page", () => {
