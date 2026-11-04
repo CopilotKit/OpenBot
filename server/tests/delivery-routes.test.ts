@@ -32,6 +32,10 @@ function fixture(
     converse?: ConverseResult;
     bound?: boolean;
     identity?: IdentityAdapter;
+    /** Makes every Reachability lookup throw, as a store that is down would. */
+    challengeError?: Error;
+    /** The transport the Reachability code was issued for. */
+    challengeTransport?: "slack" | "teams";
   } = {},
 ) {
   const calls: unknown[] = [];
@@ -72,18 +76,20 @@ function fixture(
       },
     },
     store: {
-      readChallenge: async (id: string) =>
-        id === "11111111-2222-4333-8444-555555555555"
+      readChallenge: async (id: string) => {
+        if (options.challengeError) throw options.challengeError;
+        return id === "11111111-2222-4333-8444-555555555555"
           ? {
               id,
               ownerUserId: "owner",
               channelId: "ch",
               agentId: "bot",
               threadId: "canonical",
-              transport: "slack",
+              transport: options.challengeTransport ?? "slack",
               address: null,
             }
-          : null,
+          : null;
+      },
       consumeChallenge: async (...input) => {
         consumed.push(input);
         return true;
@@ -362,6 +368,26 @@ test("a Reachability code in a direct message still links", async () => {
   expect(said(result.events)).toContain("Linked.");
   expect(f.calls).toHaveLength(1);
 });
+test("a Reachability code in a Teams personal chat still links", async () => {
+  // A Teams conversation id is never a Slack `D…` id, so the only thing that makes this chat
+  // private is its kind. Were `personal` not read as private, every Teams code would be spent.
+  const f = fixture({ bound: false, challengeTransport: "teams" });
+  const result = await run(f, {
+    context: [
+      sender("teams:tenant1:user1", {
+        id: "a:1aBcDeFgHiJkLmNoPqRsTuVwXyZ",
+        kind: "personal",
+      }),
+    ],
+    ...linkMessage(REACHABILITY_CODE),
+  });
+  expect(said(result.events)).toContain("Linked.");
+  expect(f.calls).toEqual([
+    {
+      bind: expect.objectContaining({ transport: "teams", identity: "user1" }),
+    },
+  ]);
+});
 const observedMessage = (content: string) => ({
   context: [
     {
@@ -412,6 +438,31 @@ test("a Reachability code pasted in a channel without a mention is cancelled qui
   expect(triggers).toHaveLength(1);
   expect(JSON.stringify(triggers[0]).toLowerCase()).not.toContain(
     REACHABILITY_CODE,
+  );
+});
+test("a Reachability store that fails still lets the account code with that value be cancelled", async () => {
+  const discarded: string[] = [];
+  const f = fixture({
+    bound: false,
+    challengeError: new Error("store is down"),
+    identity: {
+      redeem: async () => "linked",
+      discard: async (code) => {
+        discarded.push(code);
+        return true;
+      },
+    },
+  });
+  const result = await run(
+    f,
+    observedMessage(`here: link ${IDENTITY_CODE.toUpperCase()}`),
+  );
+  expect(said(result.events)).toBe("");
+  expect(discarded).toEqual([IDENTITY_CODE]);
+  const triggers = triggersOf(f);
+  expect(triggers).toHaveLength(1);
+  expect(JSON.stringify(triggers[0]).toLowerCase()).not.toContain(
+    IDENTITY_CODE,
   );
 });
 test("an ordinary observed channel message reaches triggers unchanged and discards nothing", async () => {

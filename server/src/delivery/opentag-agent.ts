@@ -130,20 +130,27 @@ async function withoutLinkCodes(
   if (!codes.length) return text;
   for (const code of codes) {
     if (!code) continue;
-    try {
-      await cancelReachabilityCode(deps, code);
-      if (sender.transport === "slack" && deps.identity)
-        await deps.identity.discard(code);
-    } catch (error) {
-      console.error(
-        JSON.stringify({
-          type: "opentag-link-code-discard-error",
-          errorType: error instanceof Error ? error.name : "UnknownError",
-        }),
-      );
-    }
+    // Each cancel is tried on its own: a store that fails to spend a Reachability code must not
+    // leave an account code with the same value live, and the other way round.
+    await logFailure(() => cancelReachabilityCode(deps, code));
+    const identity = deps.identity;
+    if (sender.transport === "slack" && identity)
+      await logFailure(() => identity.discard(code));
   }
   return text.replace(LINKS, "link [code removed]");
+}
+
+async function logFailure(cancel: () => Promise<unknown>) {
+  try {
+    await cancel();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "opentag-link-code-discard-error",
+        errorType: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+  }
 }
 
 /** Spends a live Reachability code without binding anyone; true when one was cancelled. */
