@@ -32,7 +32,7 @@ const ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const LEAKED_BEARER = "Bearer leak-me";
 
 /** The headers a Bot's endpoint saw, one entry per request, keyed by which Bot it was. */
-const seen: { bot: string; headers: Record<string, string> }[] = [];
+const seen: { bot: string; headers: Record<string, string | undefined> }[] = [];
 /** AG-UI events the runner delivered to the platform, so a run can be awaited to its end. */
 const delivered: { runId?: string; type?: string }[] = [];
 /** Anything the platform was asked that this fake does not answer: a hint, if a run stalls. */
@@ -244,19 +244,20 @@ test("a run sends a remote Bot its own key, and none of the request's headers", 
   const keyed = seen.filter((request) => request.bot === "keyed");
   expect(keyed).toHaveLength(1);
   expect(keyed[0]?.headers["x-api-key"]).toBe("the-bot's-own-key");
-  // Mapped rather than `keyed[0]?.`, so a request that never arrived fails here instead of passing.
-  expect(keyed.map((request) => request.headers.authorization)).toEqual([
-    undefined,
-  ]);
-  expect(keyed.map((request) => request.headers["x-leak"])).toEqual([
-    undefined,
+  // Mapped rather than `keyed[0]?.`, so a request that never arrived fails here instead of passing:
+  // no request is `[]`, a leaked header is its value, and only an absent header is `[null]`.
+  expect(keyed.map((request) => request.headers.authorization ?? null)).toEqual(
+    [null],
+  );
+  expect(keyed.map((request) => request.headers["x-leak"] ?? null)).toEqual([
+    null,
   ]);
 
   const bearer = seen.filter((request) => request.bot === "bearer");
   expect(bearer).toHaveLength(1);
   expect(bearer[0]?.headers.authorization).toBe("Bearer the-bot's-own-token");
-  expect(bearer.map((request) => request.headers["x-leak"])).toEqual([
-    undefined,
+  expect(bearer.map((request) => request.headers["x-leak"] ?? null)).toEqual([
+    null,
   ]);
 });
 
@@ -275,10 +276,10 @@ test("a suggestion sends a remote Bot its own key, and none of the request's hea
   const suggesting = seen.filter((request) => request.bot === "suggesting");
   expect(suggesting).toHaveLength(1);
   expect(suggesting[0]?.headers["x-api-key"]).toBe("the-bot's-own-key");
-  expect(suggesting.map((request) => request.headers.authorization)).toEqual([
-    undefined,
-  ]);
-  expect(suggesting.map((request) => request.headers["x-leak"])).toEqual([
-    undefined,
-  ]);
+  expect(
+    suggesting.map((request) => request.headers.authorization ?? null),
+  ).toEqual([null]);
+  expect(
+    suggesting.map((request) => request.headers["x-leak"] ?? null),
+  ).toEqual([null]);
 });
