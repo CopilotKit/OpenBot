@@ -2126,6 +2126,21 @@ export function mountCopilotRuntime(
      */
     ...(config.generativeUi ? { openGenerativeUI: true } : {}),
     ...generativeUiMiddlewares(config.generativeUi),
+    /*
+     * Nothing the person's request carried is passed on to a Bot.
+     *
+     * Left unset, the runtime copies `authorization` and every `x-*` header from the request that
+     * started a run onto the agent it runs, and a remote Bot's agent is a POST to whatever address
+     * its author registered. Anyone allowed to publish a Bot can register their own, so a colleague
+     * signed in with an Entra bearer would hand that author a token OpenBot itself accepts.
+     *
+     * No Bot reads anything from the person's request. A Bot's key and the deployment's token are
+     * the Bot's own headers, set on the server when the Bot is loaded, and the signed run travels in
+     * the body, so all three still go. `authorization` and `x-` together are every header the runtime
+     * would forward. This is a denylist because the runtime's allowlist cannot be empty: `allow: []`
+     * is read as no allowlist at all, and forwards both.
+     */
+    forwardHeaders: { deny: ["authorization"], denyPrefixes: ["x-"] },
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(identifyActor, resolver) as never,
