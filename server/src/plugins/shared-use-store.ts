@@ -6,11 +6,10 @@ import { createRoleRepository } from "../auth/guards";
 import type { OpenBotRole } from "../auth/roles";
 import type { Database } from "../db/client";
 import { bots } from "../agents/bot-registry/directory";
+import { schedules } from "../schedules/directory";
 import {
   mcpServers,
   pluginGrants,
-  responsibilities,
-  responsibilityTriggers,
   sharedUseApprovalMembers,
   sharedUseApprovals,
   sharedUseRequests,
@@ -454,31 +453,29 @@ export function createSharedUseStore(
     return [...new Set(withdrawn.map((row) => row.botId))];
   }
 
+  /*
+   * A responsibility's sources and Bot, from this instance's schedule directory: the gate asks on a
+   * tool call, which never waits on Intelligence. A responsibility this instance has not heard of is
+   * read through once.
+   */
   async function sourcesOf(responsibilityId: string): Promise<string[]> {
-    const [goal] = await database
-      .select({ subscriptions: responsibilities.subscriptions })
-      .from(responsibilities)
-      .where(eq(responsibilities.id, responsibilityId))
-      .limit(1);
-    const triggers = await database
-      .select({ kind: responsibilityTriggers.kind })
-      .from(responsibilityTriggers)
-      .where(eq(responsibilityTriggers.responsibilityId, responsibilityId));
+    const goal = await schedules().find("responsibilities", responsibilityId);
+    const triggers = schedules()
+      .live("responsibility-triggers")
+      .filter((trigger) => trigger.responsibilityId === responsibilityId);
     return [
-      ...triggers.map((row) => row.kind),
-      ...(goal?.subscriptions ?? []).map((row) => row.source),
+      ...triggers.map((trigger) => trigger.kind),
+      ...(goal && goal.deletedAt === null ? goal.subscriptions : []).map(
+        (row) => row.source,
+      ),
     ];
   }
 
   async function botForResponsibility(
     responsibilityId: string,
   ): Promise<string | null> {
-    const [goal] = await database
-      .select({ agentId: responsibilities.agentId })
-      .from(responsibilities)
-      .where(eq(responsibilities.id, responsibilityId))
-      .limit(1);
-    return goal?.agentId ?? null;
+    const goal = await schedules().find("responsibilities", responsibilityId);
+    return goal && goal.deletedAt === null ? goal.agentId : null;
   }
 
   async function botFacts(botId: string): Promise<BotFacts> {
@@ -502,10 +499,9 @@ export function createSharedUseStore(
       .select({ group: teamBotAssignments.groupName })
       .from(teamBotAssignments)
       .where(eq(teamBotAssignments.agentId, botId));
-    const goals = await database
-      .select({ id: responsibilities.id })
-      .from(responsibilities)
-      .where(eq(responsibilities.agentId, botId));
+    const goals = schedules()
+      .live("responsibilities")
+      .filter((goal) => goal.agentId === botId);
     const sources = (
       await Promise.all(goals.map((goal) => sourcesOf(goal.id)))
     ).flat();

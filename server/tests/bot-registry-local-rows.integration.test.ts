@@ -71,6 +71,7 @@ const MOVED_TO_INTELLIGENCE = new Set([
   "proactive_runs.agent_id",
   "proactive_settings.agent_id",
   "proactive_suggestions.agent_id",
+  "responsibilities.agent_id",
   "routines.agent_id",
 ]);
 

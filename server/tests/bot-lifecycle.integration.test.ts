@@ -30,13 +30,13 @@ import {
 } from "../src/db/schema/core";
 import { defaultOptOuts } from "../src/db/schema/defaults";
 import { memorySources, personalMemories } from "../src/db/schema/memory";
-import { responsibilities } from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createRoutineRunner } from "../src/routines/runner";
 import { removeBots, seedBot } from "./support/bots";
 import { itemsOf, purgeSchedulesOf } from "./support/check-ins";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import {
+  seedResponsibility,
   seedRoutine,
   testScheduleClient,
   useTestSchedules,
@@ -130,7 +130,7 @@ beforeAll(async () => {
       instruction: "Summarise the day",
       nextRunAt: new Date(Date.now() + 3_600_000),
     });
-    await database.insert(responsibilities).values({
+    await seedResponsibility({
       id: `${prefix}-goal-${person}`,
       ownerUserId: person,
       agentId: bot,
@@ -348,6 +348,58 @@ describe("Activity and attention", () => {
         (item) => item.kind === "handoff" && item.status === "failed",
       ),
     ).toBe(true);
+  });
+
+  test("a responsibility is standing work, and its run says what woke it", async () => {
+    const client = testScheduleClient();
+    const eventId = `${prefix}-event`;
+    await client.create("responsibility-events", {
+      id: eventId,
+      ownerUserId: owner,
+      source: "github",
+      externalId: `${prefix}-push`,
+      type: "push",
+      payload: {},
+    });
+    const runId = `${prefix}-goal-run`;
+    await client.create("responsibility-runs", {
+      id: runId,
+      responsibilityId: `${prefix}-goal-${owner}`,
+      eventId,
+      status: "queued",
+      replyText: null,
+      error: null,
+      waiting: null,
+      continuation: null,
+      startedAt: null,
+      finishedAt: null,
+    });
+    try {
+      const result = await activity.forBot(owner, bot);
+      expect(result.scheduled).toContainEqual(
+        expect.objectContaining({
+          id: `responsibility:${prefix}-goal-${owner}`,
+          kind: "responsibility",
+          status: "active",
+          channelId: direct,
+        }),
+      );
+      expect(result.scheduled).toContainEqual(
+        expect.objectContaining({
+          id: `responsibility-run:${runId}`,
+          status: "queued",
+          detail: "github/push",
+        }),
+      );
+      expect(
+        [...result.scheduled, ...result.inProgress, ...result.completed].some(
+          (item) => item.id === `responsibility:${prefix}-goal-${other}`,
+        ),
+      ).toBe(false);
+    } finally {
+      await client.purge("responsibility-runs", runId);
+      await client.purge("responsibility-events", eventId);
+    }
   });
 
   test("attention counts what waits on this person", async () => {

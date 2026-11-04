@@ -153,3 +153,94 @@ export async function seedRun(
     error: null,
   });
 }
+
+/**
+ * Make a responsibility in Intelligence directly, for a test that used to insert a
+ * `responsibilities` row: no Bot or channel check, active unless it says otherwise.
+ */
+export async function seedResponsibility(input: {
+  id?: string;
+  ownerUserId: string;
+  agentId: string;
+  channelId: string;
+  threadId: string;
+  title?: string;
+  instruction?: string;
+  successCriteria?: string;
+  status?: "active" | "paused" | "completed";
+  subscriptions?: { source: string; eventType: string }[];
+}) {
+  return (await useTestSchedules()).create("responsibilities", {
+    id: input.id ?? crypto.randomUUID(),
+    ownerUserId: input.ownerUserId,
+    agentId: input.agentId,
+    channelId: input.channelId,
+    threadId: input.threadId,
+    title: input.title ?? "Keep the build green",
+    instruction: input.instruction ?? "Watch CI",
+    successCriteria: input.successCriteria ?? "Green",
+    status: input.status ?? "active",
+    progress: "",
+    lastResult: null,
+    subscriptions: input.subscriptions ?? [],
+    completedAt: null,
+  });
+}
+
+/**
+ * Remove everything a person has in responsibilities for good, as test cleanup: their
+ * responsibilities (runs and triggers with them), events and bound repositories.
+ */
+export async function purgeResponsibilitiesOwnedBy(ownerUserId: string) {
+  const directory = await useTestSchedules();
+  for (const collection of [
+    "responsibilities",
+    "responsibility-source-bindings",
+  ] as const) {
+    const { items } = await directory.client.all(collection, {
+      ownerUserId,
+      includeDeleted: true,
+    });
+    for (const record of items) await directory.purge(collection, record.id);
+  }
+  const { items: events } = await directory.client.all(
+    "responsibility-events",
+    { ownerUserId },
+  );
+  for (const event of events)
+    await directory.client.purge("responsibility-events", event.id);
+}
+
+/** One responsibility run as Intelligence holds it, or undefined. */
+export async function storedResponsibilityRun(id: string) {
+  return (
+    (await (await useTestSchedules()).client.get("responsibility-runs", id)) ??
+    undefined
+  );
+}
+
+/** Every run of one responsibility, newest first. */
+export async function responsibilityRunsOf(responsibilityId: string) {
+  return (
+    await (
+      await useTestSchedules()
+    ).client.all("responsibility-runs", {
+      responsibilityId,
+    })
+  ).items;
+}
+
+/** The events a person's deliveries recorded under one source id. */
+export async function responsibilityEventsFor(
+  ownerUserId: string,
+  externalId: string,
+) {
+  return (
+    await (
+      await useTestSchedules()
+    ).client.all("responsibility-events", {
+      ownerUserId,
+      externalId,
+    })
+  ).items;
+}

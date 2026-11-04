@@ -1,6 +1,6 @@
 import { finishRoutineRunsWaitingOn } from "../routines/store";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { headlessTurnRefusal } from "../admin/controls";
 import type { AgentActor } from "../agents/profile-types";
@@ -8,8 +8,9 @@ import { PERSON_INITIATOR } from "../audit";
 import type { GroupConversations } from "../channels/group";
 import type { ChannelStore } from "../channels/routes";
 import type { Database } from "../db/client";
-import { intelligenceChannelMappings, responsibilityRuns } from "../db/schema";
+import { intelligenceChannelMappings } from "../db/schema";
 import type { DeliveryScope } from "../delivery/types";
+import { responsibilityRunWaitingOn } from "../responsibilities/store";
 import type { ResponsibilityStore } from "../responsibilities/types";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
 import type { ApprovalResumeDependencies, ApprovalService } from "./service";
@@ -86,20 +87,14 @@ export function createApprovalResumeTick(deps: {
             messageId,
             approvalId,
           }) => {
-            const [waitingRun] = await database
-              .select({ id: responsibilityRuns.id })
-              .from(responsibilityRuns)
-              .where(
-                and(
-                  eq(responsibilityRuns.status, "waiting"),
-                  sql`${responsibilityRuns.waiting}->>'approvalId' = ${approvalId}`,
-                ),
-              )
-              .limit(1);
+            const waitingRun = await responsibilityRunWaitingOn(
+              "approvalId",
+              approvalId,
+            );
             if (waitingRun) {
               await responsibilityStore.resumeWaiting(
                 input.ownerUserId,
-                waitingRun.id,
+                waitingRun,
                 result,
               );
               return;

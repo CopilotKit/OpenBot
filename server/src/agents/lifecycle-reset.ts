@@ -12,8 +12,9 @@
  *
  * Conversations go the way every other deletion of them does, soft, through the channel store, so
  * every open tab is told and the thread survives on the platform as it would for a manual delete.
- * Routines, responsibilities and memory sources are deleted, and their runs and imported memories
- * with them through the foreign keys that already cascade.
+ * Routines, responsibilities and memory sources are deleted for good: routines and responsibilities
+ * in Intelligence, which removes their runs (and a responsibility's triggers) with them, and memory
+ * sources here, with their imported memories through the foreign key.
  *
  * "STARTS FRESH" ALSO MEANS what the Bot learned and was allowed on its own: memories it formed for
  * this person, the background research it runs for them (its suggestions go with it, and any run
@@ -25,6 +26,10 @@
  * research they had turned off is recorded as turned down (`memory/defaults.ts`), so starting fresh
  * never switches back on what they switched off. What they left on comes back on by default.
  */
+import {
+  purgeResponsibilitiesOf,
+  responsibilitiesOf,
+} from "../responsibilities/store";
 import { purgeRoutinesOf, routinesOf } from "../routines/store";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
@@ -35,7 +40,6 @@ import {
   channels,
   memorySources,
   personalMemories,
-  responsibilities,
   workItems,
 } from "../db/schema";
 import { lockDefaults, recordOptOut, sourceServerId } from "../memory/defaults";
@@ -172,17 +176,7 @@ export function createBotReset(options: {
                 ),
             ),
       routines: (await routinesOf(ownerUserId, agentId)).length,
-      responsibilities: await count(
-        database
-          .select({ total })
-          .from(responsibilities)
-          .where(
-            and(
-              eq(responsibilities.ownerUserId, ownerUserId),
-              eq(responsibilities.agentId, agentId),
-            ),
-          ),
-      ),
+      responsibilities: (await responsibilitiesOf(ownerUserId, agentId)).length,
       followUps: await count(
         database
           .select({ total })
@@ -219,6 +213,8 @@ export function createBotReset(options: {
       // check-in's items) with them, as the reset always removed them.
       const deletedRoutines = await purgeRoutinesOf(ownerUserId, agentId);
       const research = await resetCheckInsOf(database, ownerUserId, agentId);
+      // Responsibilities likewise, their runs and triggers with them.
+      const deletedGoals = await purgeResponsibilitiesOf(ownerUserId, agentId);
 
       return database.transaction(async (transaction) => {
         // The lock defaults adoption takes, so no default is adopted between these reads and the deletes.
@@ -269,15 +265,6 @@ export function createBotReset(options: {
               eq(memorySources.agentId, agentId),
             ),
           );
-        const deletedGoals = await transaction
-          .delete(responsibilities)
-          .where(
-            and(
-              eq(responsibilities.ownerUserId, ownerUserId),
-              eq(responsibilities.agentId, agentId),
-            ),
-          )
-          .returning({ id: responsibilities.id });
         const followUps = await transaction
           .update(workItems)
           .set({
@@ -304,7 +291,7 @@ export function createBotReset(options: {
           memorySources: sources.length,
           memories: memories.length,
           routines: deletedRoutines,
-          responsibilities: deletedGoals.length,
+          responsibilities: deletedGoals,
           followUps: followUps.length,
           formedMemories: formed.length,
           backgroundResearch: research,

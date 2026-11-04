@@ -1,5 +1,13 @@
+/**
+ * A repository a person bound as a responsibility source, with the webhook secret GitHub signs with.
+ *
+ * The binding is a record in Intelligence's agent schedules (`responsibility-source-bindings`); the
+ * secret stays in this deployment's vault and the record names it by `credentialRef`, never holding
+ * it. The vault row is written first and retired again if Intelligence refuses the binding, so a
+ * refusal never leaves a live secret nobody can reach; deleting a binding retires its secret.
+ * An inbound GitHub delivery finds its binding in this instance's schedule directory.
+ */
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
 import {
   type CredentialSecretReader,
   type CredentialStore,
@@ -7,11 +15,20 @@ import {
   encryptSecret,
 } from "../credentials";
 import type { Database } from "../db/client";
-import { responsibilitySourceBindings } from "../db/schema/responsibilities";
+import { schedules } from "../schedules/directory";
+import type { ResponsibilitySourceBindingRecord } from "../schedules/types";
+import { withLocalLock } from "../work/local-lock";
 import {
   ResponsibilityNotFoundError,
   ResponsibilityRefusedError,
 } from "./types";
+
+const safe = (binding: ResponsibilitySourceBindingRecord) => ({
+  id: binding.id,
+  source: binding.source,
+  repository: binding.repository,
+  createdAt: binding.createdAt,
+});
 
 export function createResponsibilityBindingStore(
   database: Database,
@@ -21,18 +38,14 @@ export function createResponsibilityBindingStore(
     encryptionKey: string;
   },
 ) {
-  const safeColumns = {
-    id: responsibilitySourceBindings.id,
-    source: responsibilitySourceBindings.source,
-    repository: responsibilitySourceBindings.repository,
-    createdAt: responsibilitySourceBindings.createdAt,
-  };
   return {
-    list: (ownerUserId: string) =>
-      database
-        .select(safeColumns)
-        .from(responsibilitySourceBindings)
-        .where(eq(responsibilitySourceBindings.ownerUserId, ownerUserId)),
+    async list(ownerUserId: string) {
+      const { items } = await schedules().client.all(
+        "responsibility-source-bindings",
+        { ownerUserId },
+      );
+      return items.map(safe);
+    },
     async create(
       ownerUserId: string,
       input: { repository: string; secret: string },
@@ -51,58 +64,60 @@ export function createResponsibilityBindingStore(
         vault.encryptionKey,
         input.secret,
       );
-      return database.transaction(async (transaction) => {
-        const credential = await vault.store.create(
+      const credential = await vault.store.create({
+        kind: "connector",
+        provider: "github-webhook",
+        keyId: id,
+        metadata: { ownerUserId },
+        encryptedValue,
+      });
+      let binding: ResponsibilitySourceBindingRecord;
+      try {
+        binding = await schedules().create(
+          "responsibility-source-bindings",
           {
-            kind: "connector",
-            provider: "github-webhook",
-            keyId: id,
-            metadata: { ownerUserId },
-            encryptedValue,
-          },
-          transaction,
-        );
-        const [binding] = await transaction
-          .insert(responsibilitySourceBindings)
-          .values({
             id,
             ownerUserId,
             source: "github",
             repository,
-            credentialId: credential.id,
-          })
-          .returning(safeColumns);
-        if (!binding)
-          throw new Error("GitHub event binding creation returned no row.");
-        return { ...binding, webhookPath: `/api/events/github/${id}` };
-      });
+            credentialRef: credential.id,
+          },
+          `openbot:binding:${id}`,
+        );
+      } catch (error) {
+        // Refused, or not answered: the secret goes again rather than outliving a binding that is not there.
+        await vault.store.revoke(credential.id).catch(() => undefined);
+        throw error;
+      }
+      return { ...safe(binding), webhookPath: `/api/events/github/${id}` };
     },
     async remove(ownerUserId: string, id: string) {
-      await database.transaction(async (transaction) => {
-        const [binding] = await transaction
-          .select()
-          .from(responsibilitySourceBindings)
-          .where(
-            and(
-              eq(responsibilitySourceBindings.id, id),
-              eq(responsibilitySourceBindings.ownerUserId, ownerUserId),
-            ),
+      await withLocalLock(
+        database,
+        `responsibility-binding:${id}`,
+        async () => {
+          const binding = await schedules().refresh(
+            "responsibility-source-bindings",
+            id,
+          );
+          if (
+            !binding ||
+            binding.deletedAt !== null ||
+            binding.ownerUserId !== ownerUserId
           )
-          .for("update");
-        if (!binding) throw new ResponsibilityNotFoundError();
-        await vault.store.revoke(binding.credentialId, transaction);
-        await transaction
-          .delete(responsibilitySourceBindings)
-          .where(eq(responsibilitySourceBindings.id, id));
-      });
+            throw new ResponsibilityNotFoundError();
+          await schedules().remove("responsibility-source-bindings", id);
+          await vault.store.revoke(binding.credentialRef);
+        },
+      );
     },
     async githubBindingFor(id: string) {
-      const [binding] = await database
-        .select()
-        .from(responsibilitySourceBindings)
-        .where(eq(responsibilitySourceBindings.id, id));
-      if (!binding) return null;
-      const credential = await vault.reader.readSecret(binding.credentialId);
+      const binding = await schedules().find(
+        "responsibility-source-bindings",
+        id,
+      );
+      if (!binding || binding.deletedAt !== null) return null;
+      const credential = await vault.reader.readSecret(binding.credentialRef);
       if (!credential || credential.revokedAt) return null;
       return {
         ownerUserId: binding.ownerUserId,
