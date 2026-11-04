@@ -26,6 +26,7 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
+import { RuntimeUpdates } from "./RuntimeUpdates";
 import { Sections } from "./Sections";
 import { StartFresh } from "./StartFresh";
 import {
@@ -375,9 +376,13 @@ function Setup() {
         return next;
       });
     });
+    const updateStopped = listen<void>("runtime:update-stopped", () => {
+      if (active) setRunning(false);
+    });
     return () => {
       active = false;
       stop.then((unlisten) => unlisten());
+      updateStopped.then((unlisten) => unlisten());
     };
   }, [recoverFromStart]);
 
@@ -512,6 +517,54 @@ function Setup() {
       setBusy(false);
     }
   }
+
+  async function applyRuntimeUpdate() {
+    setBusy(true);
+    setFailure(null);
+    setSteps([]);
+    try {
+      const result = await invoke("apply_runtime_update", {
+        root: root.trim(),
+        // Intelligence's addresses are the ones this installation last started with; the native
+        // side reads them from its settings.
+        model,
+        harness,
+        backupAcknowledged: true,
+      });
+      setRunning(true);
+      setRecoveryFailure(null);
+      return result;
+    } catch (error) {
+      recoverFromStart(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function applyShellUpdate(version: string) {
+    setBusy(true);
+    setFailure(null);
+    try {
+      return await invoke("apply_shell_update", {
+        root: root.trim(),
+        version,
+        restartAcknowledged: true,
+      });
+    } catch (error) {
+      recoverFromStart(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+  const runtimeUpdates = (
+    <RuntimeUpdates
+      key={root}
+      root={root}
+      onApply={applyRuntimeUpdate}
+      onShellApply={applyShellUpdate}
+    />
+  );
 
   /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
   async function startFresh(volumes: string[], containers: string[]) {
@@ -780,6 +833,7 @@ function Setup() {
           }
           failure={displayedFailure && <Failure problem={displayedFailure} />}
         />
+        {runtimeUpdates}
       </main>
     );
   }
@@ -897,6 +951,7 @@ function Setup() {
                   </button>
                 )}
               </div>
+              {runtimeUpdates}
               <details>
                 <summary>Installation options</summary>
                 <button
@@ -972,6 +1027,7 @@ function Setup() {
   return (
     <main>
       <div className="sheet connection-sheet">
+        {returningToInstallation && runtimeUpdates}
         {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}

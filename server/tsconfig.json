@@ -39,6 +39,9 @@
     "src",
     "scripts",
     "../scripts/composio-smoke.ts",
+    // Laptop setup and its regression tests are checked explicitly; root scripts are not a workspace.
+    "../scripts/setup-composio.ts",
+    "../scripts/setup-composio.test.ts",
     "tests/store-provider-required.test.ts",
     // `tests/composio-grants-for.test.ts` FOR THE SAME REASON, one seam member along: its last
     // describe is a TYPE test. A broker literal omitting `authorizations` must not compile, and the

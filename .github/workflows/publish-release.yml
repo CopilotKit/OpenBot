@@ -15,6 +15,15 @@ on:
 permissions:
   contents: read
 
+# Identity belongs to this repository. Forks must explicitly declare their upstream baseline; never
+# inherit another publisher's registry. The compatibility and upgrade policy is not configuration:
+# it is release-policy.json in the release commit, reviewed with the release.
+env:
+  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
+  OPENBOT_UPSTREAM_REPOSITORY: ${{ vars.OPENBOT_UPSTREAM_REPOSITORY || 'CopilotKit/openbot' }}
+  OPENBOT_UPSTREAM_COMMIT: ${{ vars.OPENBOT_UPSTREAM_COMMIT }}
+  OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
+
 jobs:
   # Every push to main or a release branch runs this, and almost none of them are releases. This job
   # decides which, and it decides from the merged pull request rather than from the commit message,
@@ -116,13 +125,13 @@ jobs:
     outputs:
       becomes_latest: ${{ steps.latest.outputs.becomes_latest }}
     steps:
-      # A final cut from a candidate is compared with the candidate's tag below, so it needs the
-      # whole history and the tags. Every other release needs only the commit itself.
+      # The whole history: the release policy check below reads the source baseline from it. A
+      # final cut from a candidate is also compared with the candidate's tag, so it needs the tags.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: ${{ needs.metadata.outputs.final_from_candidate == 'true' && '0' || '1' }}
+          fetch-depth: 0
           fetch-tags: ${{ needs.metadata.outputs.final_from_candidate == 'true' }}
       # No cache. Nothing is installed here, so there is nothing to gain, and a cache that a
       # release branch can restore is one that a less careful branch could have written.
@@ -152,6 +161,12 @@ jobs:
               exit 1
             }
           fi
+      # release-policy.json must name this version. One left over from the previous release names
+      # that release, and is refused here, before anything is built or pushed.
+      - name: Validate release compatibility and source baseline
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: bun scripts/release-manifest.ts --validate-policy
       # A final ships what its candidates were tested as. Apart from the version and the changelog,
       # it must not differ from the last candidate, and this script says where it does.
       - if: needs.metadata.outputs.final_from_candidate == 'true'
@@ -258,13 +273,19 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       # No credential is left in the runner: the tag is created through the API below rather than
       # with `git push`, so nothing here needs one, and no later step or action can read one.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
       # The manifest the images above were recorded in, into the workspace, where the step below
       # attaches it to the release.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -276,6 +297,59 @@ jobs:
         with:
           pattern: openbot-desktop-*
           path: installers
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.19.0
+      - name: Package this release's chart
+        run: |
+          set -euo pipefail
+          helm dependency build charts/openbot
+          mkdir -p release-assets
+          helm package charts/openbot --destination release-assets
+          chart_version="$(helm show chart charts/openbot | sed -n 's/^version: //p')"
+          test -f "release-assets/openbot-$chart_version.tgz"
+          echo "OPENBOT_CHART_PATH=release-assets/openbot-$chart_version.tgz" >> "$GITHUB_ENV"
+          echo "OPENBOT_CHART_VERSION=$chart_version" >> "$GITHUB_ENV"
+      # A rerun of a half-published release. `helm package` stamps the time it ran and the provenance
+      # bundle is signed again on every run, so this run's bytes never equal the published ones even
+      # when nothing changed. What was published is fetched first; each asset this run produces is
+      # compared with it by content, and the published bytes are kept, so the manifest and the
+      # attestation below describe exactly what is downloadable. The installers are attached on
+      # their own below, and a rerun replaces them.
+      - name: Fetch what an earlier attempt already published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          published="$RUNNER_TEMP/published"
+          mkdir -p "$published"
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json assets > "$RUNNER_TEMP/existing-assets.json" 2>/dev/null; then
+            if [ "$(jq '.assets | length' "$RUNNER_TEMP/existing-assets.json")" -gt 0 ]; then
+              gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --dir "$published"
+            fi
+            echo "OPENBOT_PUBLISHED_ASSETS=$published" >> "$GITHUB_ENV"
+          fi
+      - name: Archive exact source and write release manifest
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: bun scripts/release-manifest.ts
+      - id: source-provenance
+        name: Authenticate release metadata and source archive
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            release-assets/release-manifest.json
+            release-assets/openbot-source.tar.gz
+            release-assets/openbot-*.tgz
+            container-images.json
+      - name: Save portable provenance bundle
+        env:
+          BUNDLE_PATH: ${{ steps.source-provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp "$BUNDLE_PATH" release-assets/release-provenance.sigstore.json
+          bun scripts/release-manifest.ts --adopt-provenance release-assets/release-provenance.sigstore.json
       - name: Tag and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -304,18 +378,38 @@ jobs:
           awk -v v="$section" '$0==v{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md > notes.md
           test -s notes.md
 
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" >/dev/null 2>&1; then
-            echo "$VERSION is already tagged; only refreshing the release."
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" > tag.json 2>/dev/null; then
+            test "$(jq -r .object.sha tag.json)" = "$GITHUB_SHA" || {
+              echo "::error::$VERSION already identifies another source commit."
+              exit 1
+            }
           else
             gh api "repos/$GITHUB_REPOSITORY/git/refs" \
               -f "ref=refs/tags/$VERSION" -f "sha=$GITHUB_SHA" >/dev/null
           fi
 
-          if gh release view "$VERSION" >/dev/null 2>&1; then
+          if [ -n "${OPENBOT_PUBLISHED_ASSETS:-}" ]; then
+            # Release-specific source/chart URLs are immutable after first publication. A rerun
+            # fills in what is missing. Every asset that was published already was compared by
+            # content and kept above, so it is byte-identical here. The one exception is the
+            # provenance bundle, replaced only when the published one attests assets that were
+            # never published.
             gh release edit "$VERSION" --title "$VERSION" --notes-file notes.md "${flags[@]}"
-            gh release upload "$VERSION" container-images.json --clobber
+            for artifact in container-images.json release-assets/*; do
+              name="$(basename "$artifact")"
+              published="$OPENBOT_PUBLISHED_ASSETS/$name"
+              if [ ! -e "$published" ]; then
+                gh release upload "$VERSION" "$artifact"
+              elif ! cmp -s "$artifact" "$published"; then
+                if [ "$name" != release-provenance.sigstore.json ]; then
+                  echo "::error::Published asset $name differs; publish a new release version."
+                  exit 1
+                fi
+                gh release upload "$VERSION" "$artifact" --clobber
+              fi
+            done
           else
-            gh release create "$VERSION" container-images.json \
+            gh release create "$VERSION" container-images.json release-assets/* \
               --title "$VERSION" --notes-file notes.md "${flags[@]}"
           fi
 

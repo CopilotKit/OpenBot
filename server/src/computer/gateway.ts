@@ -46,6 +46,7 @@ import {
   personSeat,
   seatText,
 } from "./computer-key";
+import { computerTokenOf } from "./computer-token";
 import { checkComputerAddress } from "./target";
 
 export {
@@ -141,7 +142,10 @@ export type ComputerGatewayOptions = {
   policy: () => ActionPolicy | undefined;
   /** True on a laptop, where browsing private network addresses is required. */
   allowPrivateHosts?: boolean;
-  /** The secret that agent-computer requires on each request. */
+  /**
+   * The deployment's `COMPUTER_TOKEN`. What a call carries is the token of the computer it goes to,
+   * which on a computer of one person's own is derived from this rather than this (computer-token.ts).
+   */
   token?: string;
   /** An injectable fetch implementation for focused gateway tests. */
   fetchImpl?: typeof fetch;
@@ -198,6 +202,12 @@ export interface ComputerGateway {
   seatFor(botId: string, personId: string): Promise<ComputerSeat>;
   /** What names this seat to the computer, for the live screen's socket. */
   addressOf(seat: ComputerSeat): { botId: string; personId?: string };
+  /**
+   * The token the computer this seat is on takes, for a call made to it outside the gateway (the live
+   * screen's socket, a browser's routes, a policy push). Never the deployment's own token where the
+   * computer holds one of its own.
+   */
+  tokenFor(seat: ComputerSeat): string | undefined;
   locate(seat: ComputerSeat): Promise<string>;
   status(seat: ComputerSeat): Promise<ComputerStatus>;
   screenshot(seat: ComputerSeat): Promise<ScreenshotResult>;
@@ -350,8 +360,11 @@ export function createComputerGateway(
   options: ComputerGatewayOptions,
 ): ComputerGateway {
   const { provider, auditStore } = options;
+  /*
+   * No token of its own: every call names its computer's (`at`), because a computer made for one
+   * person holds a token of its own and must never be sent the deployment's.
+   */
   const transport = createComputerTransport({
-    ...(options.token ? { token: options.token } : {}),
     ...(options.allowPrivateHosts !== undefined
       ? { allowPrivateHosts: options.allowPrivateHosts }
       : {}),
@@ -385,6 +398,20 @@ export function createComputerGateway(
     return provider.isolation === "shared" && seat.key.kind === "person"
       ? { botId: seat.botId, personId: seat.key.personId }
       : { botId: seat.botId };
+  }
+
+  /** The token of the computer this seat is on. See computer-token.ts. */
+  function tokenFor(seat: ComputerSeat): string | undefined {
+    return computerTokenOf(provider, seat.key, options.token);
+  }
+
+  /** The located computer at `url`, with the token it takes. */
+  function at(
+    seat: ComputerSeat,
+    url: string,
+  ): { url: string; token?: string } {
+    const token = tokenFor(seat);
+    return token ? { url, token } : { url };
   }
 
   /**
@@ -424,7 +451,7 @@ export function createComputerGateway(
     signal?: AbortSignal,
   ): Promise<T> {
     return transport.call<T>(
-      await locate(seat),
+      at(seat, await locate(seat)),
       addressOf(seat),
       path,
       undefined,
@@ -448,7 +475,7 @@ export function createComputerGateway(
     address?: string,
   ): Promise<T> {
     return transport.post<T>(
-      address ?? (await locate(seat)),
+      at(seat, address ?? (await locate(seat))),
       addressOf(seat),
       path,
       payload,
@@ -532,7 +559,7 @@ export function createComputerGateway(
      */
     const run = await sessionOf(seat);
     const result = await transport.call<SnapshotResult>(
-      base,
+      at(seat, base),
       addressOf(seat),
       "/snapshot",
       { method: "POST" },
@@ -943,6 +970,7 @@ export function createComputerGateway(
     seatFor: (botId: string, personId: string) =>
       seats.seatFor(botId, personId),
     addressOf,
+    tokenFor,
     locate,
     screenshot,
     snapshot,
@@ -1319,7 +1347,7 @@ export function createComputerGateway(
         { targetUrl: url },
         async () =>
           transport.navigate(
-            await locate(seat),
+            at(seat, await locate(seat)),
             addressOf(seat),
             url,
             toolCallId,
@@ -1366,7 +1394,7 @@ export function createComputerGateway(
           // since left is refused as stale rather than opened.
           async (address) =>
             transport.navigate(
-              address ?? (await locate(seat)),
+              at(seat, address ?? (await locate(seat))),
               addressOf(seat),
               follow.url,
               undefined,
@@ -1498,7 +1526,7 @@ export function createComputerGateway(
         { filePath: input.path, ...(signal ? { signal } : {}) },
         async () => {
           const download = await transport.download(
-            await locate(seat),
+            at(seat, await locate(seat)),
             addressOf(seat),
             `/files/download?path=${encodeURIComponent(input.path)}`,
             signal,

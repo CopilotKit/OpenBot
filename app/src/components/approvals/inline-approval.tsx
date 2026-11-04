@@ -8,6 +8,7 @@ import {
   approvalInboxOptions,
   decideApproval,
 } from "@/lib/approvals";
+import { noteWatched } from "@/lib/computers/activity";
 
 /**
  * A pending approval, drawn in the conversation where the action it holds would have been.
@@ -28,7 +29,11 @@ export function InlineApproval({
   const decision = useMutation({
     mutationFn: (choice: ApprovalDecision) =>
       decideApproval(request?.id ?? "", choice),
-    onSuccess: () => cache.invalidateQueries({ queryKey: ["approvals"] }),
+    onSuccess: () => {
+      // Answered here, so the step's entry in Activity says when, even on a page opened after it was asked.
+      if (toolCallId) noteWatched(toolCallId);
+      return cache.invalidateQueries({ queryKey: ["approvals"] });
+    },
   });
   const request = toolCallId
     ? inbox.data?.requests.find(

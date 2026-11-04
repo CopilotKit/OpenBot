@@ -19,9 +19,10 @@ import {
   passwordKeys,
   pendingSignInRequestsQueryOptions,
 } from "@/lib/passwords/queries";
-import { useActiveBotHolder } from "./active-bot";
+import { type ToolCallContext, useBotOfCall } from "./active-bot";
 import { useFrontendTool } from "./approval-tools";
-import { useComputerToolsOffered } from "./computer-available";
+import { type OfferRule, useOfferedTo } from "./bot-offer";
+import { offeredBrowser } from "./computer-available";
 
 /** How long the open chat waits for the person to answer. The server's request lasts as long. */
 const WAIT_MS = 15 * 60_000;
@@ -63,14 +64,17 @@ function parse(result: string | undefined): Outcome {
  * re-register it when it changes (see approval-tools.tsx), so the request id the handler used to put
  * in state never reached the card, and it waited with no way to open the form.
  */
+/** A sign-in is typed into the Bot's browser, so it is offered with the browser; see `bot-offer.ts`. */
+const OFFERED: Readonly<Record<string, OfferRule>> = {
+  computer_request_sign_in: offeredBrowser,
+};
+
 export function SignInTool() {
-  const bot = useActiveBotHolder();
+  const botOf = useBotOfCall();
   // Stable for the provider's life, so the SDK's once-registered handler may keep it.
   const queryClient = useQueryClient();
-  // A sign-in is typed into the Bot's browser; see computerToolsOffered.
-  const available = useComputerToolsOffered().browser;
+  useOfferedTo(OFFERED);
   useFrontendTool({
-    available,
     name: "computer_request_sign_in",
     description: DESCRIPTION,
     parameters: z.object({
@@ -84,14 +88,12 @@ export function SignInTool() {
     }),
     handler: async (
       input: { site: string; reason?: string },
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
+      { signal, toolCall, agent }: ToolCallContext = {},
     ) => {
       const asked = await requestSignIn(
         {
-          botId: bot.current,
+          // Into the browser of the Bot that asked, which need not be the one on screen.
+          botId: botOf(agent),
           site: input.site,
           ...(input.reason ? { reason: input.reason } : {}),
           ...(toolCall?.id ? { toolCallId: toolCall.id } : {}),

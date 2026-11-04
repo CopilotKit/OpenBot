@@ -1631,6 +1631,10 @@ fn configure_host_process_env(command: &mut Command, name: &str, secrets: &Secre
     command.envs(secrets);
     if name != "server" {
         command.env_remove("OPENBOT_DESKTOP_HOST_TOKEN");
+        // The app broker's keys belong to the server too.
+        for key in ["COMPOSIO_API_KEY", "ARCADE_API_KEY"] {
+            command.env_remove(key);
+        }
     }
 }
 
@@ -3975,6 +3979,391 @@ fn dirs_home() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
 }
 
+/// Project only persistent identity from the selected Compose configuration. Never retain its
+/// secret-bearing environment wholesale in an update journal or log.
+pub fn runtime_update_identity(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<serde_json::Value, String> {
+    let bytes = postgres_configuration(engine, root, secrets).map_err(|p| p.said)?;
+    let config: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    runtime_update_identity_config(&config)
+}
+
+fn runtime_update_identity_config(config: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let volumes = config["volumes"]
+        .as_object()
+        .ok_or("Compose configuration has no persistent volume identity")?;
+    let mut names = std::collections::BTreeMap::new();
+    for (key, value) in volumes {
+        names.insert(key, value["name"].clone());
+    }
+    let project = config["name"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or("Compose project identity is missing")?;
+    let services = config["services"]
+        .as_object()
+        .ok_or("Compose service configuration is missing")?;
+    let mut mounts = std::collections::BTreeMap::new();
+    for (service, value) in services {
+        let Some(volumes) = value.get("volumes") else {
+            continue;
+        };
+        let volumes = volumes
+            .as_array()
+            .ok_or("Compose service mounts are unreadable")?;
+        let mut destinations = std::collections::BTreeMap::new();
+        for mount in volumes {
+            let kind = mount["type"]
+                .as_str()
+                .ok_or("Compose mount type is missing")?;
+            if !matches!(kind, "volume" | "bind") {
+                continue;
+            }
+            let source = mount["source"]
+                .as_str()
+                .filter(|v| !v.is_empty())
+                .ok_or("Persistent mount source cannot be verified")?;
+            let target = mount["target"]
+                .as_str()
+                .filter(|v| !v.is_empty())
+                .ok_or("Persistent mount target cannot be verified")?;
+            if destinations
+                .insert(
+                    target,
+                    serde_json::json!({"type":kind,"source":source,"target":target}),
+                )
+                .is_some()
+            {
+                return Err("Compose service has duplicate persistent mount targets".into());
+            }
+        }
+        if !destinations.is_empty() {
+            mounts.insert(service, destinations);
+        }
+    }
+    Ok(
+        serde_json::json!({"project":project,"volumes":names,"namespace":config["services"]["supervisor"]["environment"]["COMPUTER_NAMESPACE"],"mounts":mounts}),
+    )
+}
+
+/// Resolve candidate Compose against the active project directory and customer-selected override
+/// files. Only the vendor base file comes from staging; config is read-only and no Stop/up occurs.
+///
+/// The project directory is `.`, which Compose resolves from the same working directory as the
+/// active configuration, by the same code. Every relative bind source in both configurations
+/// therefore starts from one spelling of the root. A canonicalized root does not: on Windows it
+/// carries the `\\?\` prefix the active configuration never sees, and on any platform it resolves
+/// links Compose keeps, so every relative mount compared unequal and every apply refused.
+pub fn verify_staged_runtime_identity(
+    engine: &Address,
+    root: &Path,
+    staged: &Path,
+    secrets: &Secrets,
+    expected: &serde_json::Value,
+) -> Result<(), String> {
+    let environment = compose_command(engine, root, secrets)
+        .args(["config", "--environment"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !environment.status.success() {
+        return Err("could not resolve active Compose file selection before update".into());
+    }
+    let environment = String::from_utf8(environment.stdout).map_err(|e| e.to_string())?;
+    let files = compose_files(root, &environment).map_err(|p| p.said)?;
+    // Canonical forms only identify which selected file is the vendor base file. What Compose is
+    // given keeps the active configuration's own spelling.
+    let active = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let mut command = compose_command(engine, root, secrets);
+    command.arg("--project-directory").arg(".");
+    for file in files {
+        let original = std::fs::canonicalize(root.join(&file)).map_err(|e| e.to_string())?;
+        if original.strip_prefix(&active).ok() == Some(Path::new("docker-compose.yml")) {
+            command.arg("-f").arg(staged.join("docker-compose.yml"));
+        } else {
+            command.arg("-f").arg(&file);
+        }
+    }
+    let output = command
+        .args(["config", "--format", "json"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(
+            "candidate Compose configuration could not be verified; no runtime was stopped".into(),
+        );
+    }
+    let config: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+    if &runtime_update_identity_config(&config)? != expected {
+        return Err("The candidate changes a persistent service mount, Compose project, volume or namespace. No runtime was stopped or modified.".into());
+    }
+    Ok(())
+}
+
+/// Called after all owned application writers stop. Bring up only the existing project's
+/// Postgres service, create a custom-format dump, and validate its table of contents. The caller
+/// retains Compose ownership and stops this service before preparation/startup continues.
+pub fn backup_runtime_database(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    destination: &Path,
+    expected_database: &str,
+) -> Result<(), String> {
+    start_runtime_database(engine, root, secrets)?;
+    verify_runtime_database_identity(engine, root, secrets, expected_database)?;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
+    }
+    let dump = compose_command(engine, root, secrets)
+        .args([
+            "exec",
+            "-T",
+            "postgres",
+            "sh",
+            "-c",
+            "exec pg_dump --format=custom --username=\"$POSTGRES_USER\" \"$POSTGRES_DB\"",
+        ])
+        .stdout(Stdio::from(file.try_clone().map_err(|e| e.to_string())?))
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    if !dump.status.success() {
+        return Err(format!("pg_dump failed: {}", command_said(&dump.stderr)));
+    }
+    let dump_file = std::fs::File::open(destination).map_err(|e| e.to_string())?;
+    if dump_file.metadata().map_err(|e| e.to_string())?.len() < 5 {
+        return Err("database backup is empty".into());
+    }
+    let checked = compose_command(engine, root, secrets)
+        .args(["exec", "-T", "postgres", "pg_restore", "--list"])
+        .stdin(Stdio::from(dump_file))
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !checked.status.success() {
+        return Err(format!(
+            "database archive validation failed: {}",
+            command_said(&checked.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Bring up only the selected project's Postgres, with no dependency, build or pull. Backup and
+/// recovery both work on the database alone while every application writer stays stopped.
+pub fn start_runtime_database(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<(), String> {
+    let status = compose_start_command(engine, root, secrets, std::env::consts::OS)
+        .map_err(|p| p.said)?
+        .args([
+            "up",
+            "-d",
+            "--no-deps",
+            "--no-build",
+            "--pull",
+            "never",
+            "--wait",
+            "--wait-timeout",
+            "60",
+            "postgres",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !status.status.success() {
+        return Err(format!(
+            "Postgres did not start on its own: {}",
+            command_said(&status.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Return the database to the dump taken before an update. `--clean --create` drops and recreates
+/// the database named in the archive, connecting to the `postgres` maintenance database to do it,
+/// so tables a candidate migration added do not survive. A connection still open to the database
+/// makes the `DROP DATABASE` fail before anything is removed, and that failure is reported.
+pub fn restore_runtime_database(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    dump: &Path,
+) -> Result<(), String> {
+    let file = std::fs::File::open(dump)
+        .map_err(|e| format!("the database backup {} cannot be read: {e}", dump.display()))?;
+    let restored = compose_command(engine, root, secrets)
+        .args([
+            "exec",
+            "-T",
+            "postgres",
+            "sh",
+            "-c",
+            "exec pg_restore --clean --if-exists --create --exit-on-error --username=\"$POSTGRES_USER\" --dbname=postgres",
+        ])
+        .stdin(Stdio::from(file))
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !restored.status.success() {
+        return Err(format!(
+            "the database backup could not be restored: {}",
+            command_said(&restored.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Check the running selected project's release-owned containers, using their actual image
+/// references rather than Compose's desired configuration. PostgreSQL is separately preserved.
+pub fn verify_runtime_update_images(
+    engine: &Address,
+    root: &Path,
+    candidate: &serde_json::Value,
+) -> Result<(), String> {
+    let listing = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "-q"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !listing.status.success() {
+        return Err("could not inspect candidate Compose containers".into());
+    }
+    let ids = String::from_utf8(listing.stdout).map_err(|e| e.to_string())?;
+    let ids: Vec<_> = ids.split_whitespace().collect();
+    if ids.is_empty() {
+        return Err("no candidate containers are running".into());
+    }
+    let inspected = engine
+        .command()
+        .current_dir(root)
+        .arg("inspect")
+        .args(ids)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !inspected.status.success() {
+        return Err("candidate container inspection failed".into());
+    }
+    let containers: Vec<serde_json::Value> =
+        serde_json::from_slice(&inspected.stdout).map_err(|e| e.to_string())?;
+    let references = crate::updates::candidate_images(candidate)?;
+    let mut verified = std::collections::BTreeSet::new();
+    for container in containers {
+        let service = container["Config"]["Labels"]["com.docker.compose.service"]
+            .as_str()
+            .ok_or("container has no Compose service identity")?;
+        if service == "postgres" {
+            continue;
+        }
+        let image = container["Config"]["Image"]
+            .as_str()
+            .ok_or("container has no actual image identity")?;
+        if !references.iter().any(|reference| reference == image) {
+            return Err(format!(
+                "running service {service} is not a pinned candidate image"
+            ));
+        }
+        if container["State"]["Running"] != true {
+            return Err(format!("candidate service {service} is not running"));
+        }
+        verified.insert(service.to_string());
+    }
+    for service in ["supervisor", "agent-computer"] {
+        if !verified.contains(service) {
+            return Err(format!("candidate {service} was not verified"));
+        }
+    }
+    Ok(())
+}
+
+/// Compare the database's actual migration hashes and timestamps with the accepted release's
+/// journal. A package version or an HTTP health response cannot establish database identity.
+pub fn verify_runtime_database_identity(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    expected_database: &str,
+) -> Result<(), String> {
+    if !runtime_database_matches(engine, root, secrets, expected_database)? {
+        return Err("actual database migration hashes/timestamps differ from the accepted release; integrate or repair the database explicitly before updating".into());
+    }
+    Ok(())
+}
+
+/// Whether the running database holds exactly the migrations of the source in `root`. An error
+/// means the comparison could not be made, which is not the same answer as "it differs".
+pub fn runtime_database_matches(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    expected_database: &str,
+) -> Result<bool, String> {
+    let journal: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.join("server/drizzle/meta/_journal.json"))
+            .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let entries = journal["entries"]
+        .as_array()
+        .ok_or("migration journal entries are missing")?;
+    if entries.last().and_then(|entry| entry["tag"].as_str()) != Some(expected_database) {
+        return Err("release database tag differs from local migration journal".into());
+    }
+    let mut expected = std::collections::BTreeMap::new();
+    use sha2::{Digest, Sha256};
+    for entry in entries {
+        let tag = entry["tag"].as_str().ok_or("invalid migration tag")?;
+        if tag.is_empty()
+            || !tag
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
+        {
+            return Err("unsafe migration tag".into());
+        }
+        let bytes = std::fs::read(root.join("server/drizzle").join(format!("{tag}.sql")))
+            .map_err(|e| e.to_string())?;
+        let when = entry["when"]
+            .as_u64()
+            .ok_or("invalid migration timestamp")?;
+        expected.insert(format!("{:x}", Sha256::digest(bytes)), when);
+    }
+    let output=compose_command(engine,root,secrets).args(["exec","-T","postgres","sh","-c","exec psql --no-psqlrc --tuples-only --no-align --set=ON_ERROR_STOP=1 --username=\"$POSTGRES_USER\" \"$POSTGRES_DB\" --command=\"select coalesce(json_agg(json_build_object('hash',hash,'createdAt',created_at)), '[]'::json)::text from drizzle.__drizzle_migrations\""])
+        .output().map_err(|e|e.to_string())?;
+    if !output.status.success() {
+        return Err(
+            "could not read the actual database migration journal; no release was accepted".into(),
+        );
+    }
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+    let mut actual = std::collections::BTreeMap::new();
+    for row in &rows {
+        let hash = row["hash"].as_str().ok_or("invalid migration hash")?;
+        let when = row["createdAt"]
+            .as_u64()
+            .ok_or("database migration has a missing timestamp")?;
+        if actual.insert(hash.to_string(), when).is_some() {
+            return Err("database migration journal has duplicate hashes".into());
+        }
+    }
+    Ok(actual == expected)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4836,6 +5225,11 @@ fn main() {
     let role = std::env::current_dir().unwrap().file_name().unwrap().to_string_lossy().into_owned();
     assert_eq!(std::env::var("APP_PORT").unwrap(), "52110");
     assert_eq!(std::env::var("SERVER_PORT").unwrap(), "52101");
+    if role == "server" {
+        assert_eq!(std::env::var("COMPOSIO_API_KEY").unwrap(), "fresh-project-key");
+    } else {
+        assert!(std::env::var("COMPOSIO_API_KEY").is_err());
+    }
     if role == "server" { assert_eq!(std::env::var("PORT").unwrap(), "52101"); }
 }
 "#,
@@ -4854,6 +5248,7 @@ fn main() {
         )
         .unwrap();
         let stale = Secrets::from([
+            ("COMPOSIO_API_KEY".into(), "fresh-project-key".into()),
             ("SERVER_PORT".into(), "3001".into()),
             ("APP_PORT".into(), "3010".into()),
             ("PORT".into(), "3001".into()),

@@ -23,10 +23,12 @@ pub mod recorder_external;
 pub mod recorder_host;
 pub mod recorder_install;
 pub mod saved_intent;
+pub mod shell_updates;
 pub mod stack;
 pub mod supervise;
 pub mod telemetry;
 pub mod tray;
+pub mod updates;
 pub mod vault;
 pub mod windows;
 

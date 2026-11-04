@@ -331,7 +331,51 @@ pub const ALSO_COPIED_FILES: [&str; 0] = [];
 /// The stamp is written last. Anything that fails before that leaves a directory without one, which
 /// `needs_fetch` treats as absent, so an interrupted download is retried rather than half-run.
 pub fn fetch(root: &Path, version: &str) -> Result<(), String> {
-    let body = get(&tarball_url(version)).map_err(|error| {
+    fetch_with(root, version, &get)
+}
+
+/// Downloads the URL it is given. A parameter so laying out real archives can run without a network.
+pub type Download<'a> = &'a dyn Fn(&str) -> Result<Vec<u8>, String>;
+
+/// [`fetch`], downloading through `get`.
+///
+/// An installed release changes only through the explicit runtime update controls. At the same
+/// version this still lays the deployment out again when the stamp shows an app that copied less
+/// (#858 grew `ALSO_COPIED`) or a required path is gone, which is what Install has always done:
+/// refusing it left every installation laid out before a layout change unable to Start or Install.
+pub fn fetch_with(root: &Path, version: &str, get: Download) -> Result<(), String> {
+    crate::updates::require_no_interruption(root)?;
+    let policy = crate::updates::distribution(root)?;
+    // A release from before the server and worker were Compose services cannot run in this app,
+    // and one a pinned build left behind is not the release this build follows, so
+    // `deployment_release` moves either to the latest release. That move is not a runtime update:
+    // it is the whole layout again, as for a new deployment.
+    let installed = installed(root).filter(|found| !found.pinned && !predates_containers(root));
+    if let Some(installed) = installed {
+        if installed.version != version {
+            return Err(
+                "Use the explicit runtime update controls to change an installed release".into(),
+            );
+        }
+        let laid_out =
+            installed.layout == layout() && REQUIRED.iter().all(|path| root.join(path).exists());
+        if laid_out {
+            return fetch_images(root, version, get);
+        }
+        // An installation the updater has a verified baseline for is laid out again from that
+        // release's checksum-verified source artifact, and its baseline grows to match. A plain
+        // installation takes the tag's tarball again, as it always has.
+        if root.join(crate::updates::BASELINE).exists() {
+            crate::updates::relay_accepted_release(root, get)?;
+            return record(root, version, false)
+                .map_err(|error| format!("could not record the version: {error}"));
+        }
+    }
+    let source_url = format!(
+        "https://github.com/{}/archive/refs/tags/{version}.tar.gz",
+        policy.repository
+    );
+    let body = get(&source_url).map_err(|error| {
         format!("could not fetch {version}: {error}. Is that a released version?")
     })?;
 
@@ -340,7 +384,7 @@ pub fn fetch(root: &Path, version: &str) -> Result<(), String> {
 
     unpack(root, &body)?;
 
-    fetch_images(root, version)?;
+    fetch_images(root, version, get)?;
 
     record(root, version, false).map_err(|error| format!("could not record the version: {error}"))
 }
@@ -472,8 +516,13 @@ pub fn unpack(root: &Path, body: &[u8]) -> Result<(), String> {
 ///
 /// Parsed here rather than at start-up so a release missing an image fails while the person is
 /// still looking at a screen that says what is being fetched, not later inside Compose's output.
-fn fetch_images(root: &Path, version: &str) -> Result<(), String> {
-    let body = get(&images_url(version))
+fn fetch_images(root: &Path, version: &str, get: Download) -> Result<(), String> {
+    let policy = crate::updates::distribution(root)?;
+    let url = format!(
+        "https://github.com/{}/releases/download/{version}/{IMAGES}",
+        policy.repository
+    );
+    let body = get(&url)
         .map_err(|error| format!("could not fetch the image list for {version}: {error}"))?;
     let manifest: Images = serde_json::from_slice(&body)
         .map_err(|error| format!("the image list for {version} is not readable: {error}"))?;
@@ -493,8 +542,8 @@ Start ("the download did not finish: error decoding response body"), though the 
 finished in under three seconds a minute later. So a failure that says nothing about the file is
 tried again after a short wait: the server could not be reached, the body did not all arrive, or the
 server answered 5xx or 429. Any other answer, a 404 in particular, means the file is not there, and
-is reported at once: the release lookups depend on seeing that promptly. A second attempt only
-replaces bytes that did not arrive, and `install.rs` still checks the digest of whatever does.
+is reported at once: the release lookups depend on seeing that promptly. A second attempt downloads
+the whole file again, and `install.rs` still checks the digest of the copy that is kept.
 */
 pub fn get(url: &str) -> Result<Vec<u8>, String> {
     get_with(url, IDLE_TIMEOUT, &RETRY_DELAYS)
@@ -817,6 +866,204 @@ mod tests {
         std::fs::write(images_path(&dir), "{}").unwrap();
         assert!(!needs_fetch(&dir, "v0.0.7"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Finding: #858 grew `ALSO_COPIED` from 9 to 11 entries, and `fetch` then refused every
+    /// installation whose stamp recorded the older layout, so none of them could Start or Install.
+    /// Install lays the same release out again, from GitHub's own tarball shape.
+    #[test]
+    fn an_installation_laid_out_before_a_layout_change_is_laid_out_again_at_its_version() {
+        let root = crate::test_support::temp_root("deployment-older-layout");
+        std::fs::create_dir_all(&root).unwrap();
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut tarball = tar::Builder::new(encoder);
+        for entry in REQUIRED.iter().chain(ALSO_COPIED.iter()) {
+            let body = format!("release {entry}");
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tarball
+                .append_data(
+                    &mut header,
+                    format!("OpenBot-0.0.7/{entry}/release.txt"),
+                    body.as_bytes(),
+                )
+                .unwrap();
+        }
+        let tarball = tarball.into_inner().unwrap().finish().unwrap();
+        unpack(&root, &tarball).unwrap();
+        // Laid out by the app before #858, which copied neither of these.
+        for added in ["patches", "extension"] {
+            std::fs::remove_dir_all(root.join(added)).unwrap();
+        }
+        let older: Vec<String> = layout()
+            .into_iter()
+            .filter(|entry| entry != "patches" && entry != "extension")
+            .collect();
+        std::fs::write(
+            stamp_path(&root),
+            serde_json::to_string(&Installed {
+                version: "v0.0.7".into(),
+                layout: older,
+                pinned: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(root.join(".env"), "KEY_ENCRYPTION_KEY=customer-key\n").unwrap();
+        let published: Vec<&str> = IMAGE_VARIABLES.iter().map(|(name, _)| *name).collect();
+        let images = serde_json::to_vec(&manifest(&published)).unwrap();
+        std::fs::write(images_path(&root), &images).unwrap();
+        assert!(needs_fetch(&root, "v0.0.7"));
+
+        let get = |url: &str| -> Result<Vec<u8>, String> {
+            match url {
+                "https://github.com/CopilotKit/OpenBot/archive/refs/tags/v0.0.7.tar.gz" => {
+                    Ok(tarball.clone())
+                }
+                "https://github.com/CopilotKit/OpenBot/releases/download/v0.0.7/container-images.json" => {
+                    Ok(images.clone())
+                }
+                other => Err(format!("unexpected download {other}")),
+            }
+        };
+        fetch_with(&root, "v0.0.7", &get).expect("Install lays the same release out again");
+        for added in ["patches", "extension"] {
+            assert_eq!(
+                std::fs::read_to_string(root.join(added).join("release.txt")).unwrap(),
+                format!("release {added}")
+            );
+        }
+        assert!(!needs_fetch(&root, "v0.0.7"));
+        assert_eq!(
+            std::fs::read_to_string(root.join(".env")).unwrap(),
+            "KEY_ENCRYPTION_KEY=customer-key\n"
+        );
+        // A different version still goes through the explicit update controls.
+        assert!(fetch_with(&root, "v0.0.8", &get).is_err());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A release from before the server was a container is moved to the latest release by
+    /// `deployment_release`. The runtime update guard must not refuse that move, or such an
+    /// installation could never Install or Start again.
+    #[test]
+    fn a_release_whose_server_ran_on_the_host_is_laid_out_at_the_latest_version() {
+        let root = crate::test_support::temp_root("deployment-host-server-move");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  postgres: {}\n  supervisor: {}\n",
+        )
+        .unwrap();
+        std::fs::write(images_path(&root), "{}").unwrap();
+        record(&root, "v0.0.15", false).unwrap();
+        assert!(predates_containers(&root));
+
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut tarball = tar::Builder::new(encoder);
+        for entry in REQUIRED.iter().chain(ALSO_COPIED.iter()) {
+            // The latest release's Compose file is a file, with the server and worker in it.
+            let (path, body) = if *entry == "docker-compose.yml" {
+                (
+                    format!("OpenBot-0.0.16/{entry}"),
+                    "services:\n  server: {}\n  worker: {}\n".to_string(),
+                )
+            } else {
+                (
+                    format!("OpenBot-0.0.16/{entry}/release.txt"),
+                    format!("release {entry}"),
+                )
+            };
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tarball
+                .append_data(&mut header, path, body.as_bytes())
+                .unwrap();
+        }
+        let tarball = tarball.into_inner().unwrap().finish().unwrap();
+        let published: Vec<&str> = IMAGE_VARIABLES.iter().map(|(name, _)| *name).collect();
+        let images = serde_json::to_vec(&manifest(&published)).unwrap();
+        let get = |url: &str| -> Result<Vec<u8>, String> {
+            match url {
+                "https://github.com/CopilotKit/OpenBot/archive/refs/tags/v0.0.16.tar.gz" => {
+                    Ok(tarball.clone())
+                }
+                "https://github.com/CopilotKit/OpenBot/releases/download/v0.0.16/container-images.json" => {
+                    Ok(images.clone())
+                }
+                other => Err(format!("unexpected download {other}")),
+            }
+        };
+        fetch_with(&root, "v0.0.16", &get).expect("a host-server release moves to latest");
+        assert_eq!(installed(&root).unwrap().version, "v0.0.16");
+        assert!(!predates_containers(&root));
+        assert!(!needs_fetch(&root, "v0.0.16"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A release a pinned build installed is not the one an unpinned build follows, so
+    /// `deployment_release` moves it to the latest release. The runtime update guard must not
+    /// refuse that move.
+    #[test]
+    fn a_release_a_pinned_build_left_behind_is_laid_out_at_the_latest_version() {
+        let root = crate::test_support::temp_root("deployment-pinned-leftover-move");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  server: {}\n  worker: {}\n",
+        )
+        .unwrap();
+        std::fs::write(images_path(&root), "{}").unwrap();
+        record(&root, "v0.0.15", true).unwrap();
+        assert!(!predates_containers(&root));
+
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut tarball = tar::Builder::new(encoder);
+        for entry in REQUIRED.iter().chain(ALSO_COPIED.iter()) {
+            // The latest release's Compose file is a file, with the server and worker in it.
+            let (path, body) = if *entry == "docker-compose.yml" {
+                (
+                    format!("OpenBot-0.0.16/{entry}"),
+                    "services:\n  server: {}\n  worker: {}\n".to_string(),
+                )
+            } else {
+                (
+                    format!("OpenBot-0.0.16/{entry}/release.txt"),
+                    format!("release {entry}"),
+                )
+            };
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tarball
+                .append_data(&mut header, path, body.as_bytes())
+                .unwrap();
+        }
+        let tarball = tarball.into_inner().unwrap().finish().unwrap();
+        let published: Vec<&str> = IMAGE_VARIABLES.iter().map(|(name, _)| *name).collect();
+        let images = serde_json::to_vec(&manifest(&published)).unwrap();
+        let get = |url: &str| -> Result<Vec<u8>, String> {
+            match url {
+                "https://github.com/CopilotKit/OpenBot/archive/refs/tags/v0.0.16.tar.gz" => {
+                    Ok(tarball.clone())
+                }
+                "https://github.com/CopilotKit/OpenBot/releases/download/v0.0.16/container-images.json" => {
+                    Ok(images.clone())
+                }
+                other => Err(format!("unexpected download {other}")),
+            }
+        };
+        fetch_with(&root, "v0.0.16", &get).expect("a pinned leftover moves to latest");
+        assert_eq!(installed(&root).unwrap().version, "v0.0.16");
+        assert!(!installed(&root).unwrap().pinned);
+        assert!(!predates_containers(&root));
+        assert!(!needs_fetch(&root, "v0.0.16"));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

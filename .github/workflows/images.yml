@@ -45,6 +45,7 @@ jobs:
     outputs:
       components: ${{ steps.components.outputs.components }}
       tags: ${{ steps.tags.outputs.tags }}
+      image_repository: ${{ steps.registry.outputs.repository }}
     steps:
       - name: Check the commit
         env:
@@ -102,6 +103,16 @@ jobs:
       # set that is tested and the set that is published cannot drift apart.
       - id: components
         run: echo "components=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
+      # Identity belongs to this repository: a fork publishes under its own namespace and never
+      # inherits another publisher's registry.
+      - id: registry
+        name: Resolve this distribution's registry namespace
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          repository="ghcr.io/$(tr '[:upper:]' '[:lower:]' <<< "$REPOSITORY")"
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
 
   # One image, built once. Everything downstream refers to it by digest, so what was tested is what
   # is deployed and there is no second build to disagree with the first.
@@ -135,7 +146,7 @@ jobs:
       - id: tags
         name: Write the image references
         env:
-          REPOSITORY: ghcr.io/copilotkit/openbot
+          REPOSITORY: ${{ needs.components.outputs.image_repository }}
           TAGS: ${{ needs.components.outputs.tags }}
         run: |
           set -euo pipefail
@@ -153,18 +164,24 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            OPENBOT_BUILD_VERSION=${{ inputs.manifest_version }}
+            OPENBOT_BUILD_COMMIT=${{ inputs.ref }}
+            OPENBOT_BUILD_DISTRIBUTION_ID=${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
+            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
+            OPENBOT_BUILD_CHANNEL=${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true
           sbom: true
       # BuildKit's own attestations above travel inside the image. This one is the record GitHub
-      # holds, and it is what `gh attestation verify oci://ghcr.io/copilotkit/openbot:vX.Y.Z
+      # holds, and it is what `gh attestation verify oci://ghcr.io/<owner>/<repo>:vX.Y.Z
       # -R CopilotKit/OpenBot` checks before anybody deploys it. Bound to the digest, never a tag,
       # because a tag can be moved to point at something else afterwards.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-name: ghcr.io/copilotkit/openbot
+          subject-name: ${{ needs.components.outputs.image_repository }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
@@ -227,10 +244,16 @@ jobs:
           context: .
           file: ${{ matrix.image }}/Dockerfile
           platforms: linux/${{ matrix.platform.arch }}
+          build-args: |
+            OPENBOT_BUILD_VERSION=${{ inputs.manifest_version }}
+            OPENBOT_BUILD_COMMIT=${{ inputs.ref }}
+            OPENBOT_BUILD_DISTRIBUTION_ID=${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
+            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
+            OPENBOT_BUILD_CHANNEL=${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
           # `oci-mediatypes=true` because zstd layers have no Docker-schema2 media type to be
           # described by. It is buildx's default for this exporter and is stated rather than
           # assumed, since the push fails without it and the reason would not be obvious.
-          outputs: type=image,name=ghcr.io/copilotkit/openbot-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,force-compression=true
+          outputs: type=image,name=${{ needs.components.outputs.image_repository }}-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,force-compression=true
           # Scoped per image and per architecture. One shared scope would have ten builds
           # overwriting each other's cache and none of them reading their own.
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
@@ -297,7 +320,7 @@ jobs:
       - id: tags
         name: Write the image references
         env:
-          REPOSITORY: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          REPOSITORY: ${{ needs.components.outputs.image_repository }}-${{ matrix.image }}
           TAGS: ${{ needs.components.outputs.tags }}
         run: |
           set -euo pipefail
@@ -313,7 +336,7 @@ jobs:
       - id: merge
         name: Write the tags over both architectures
         env:
-          REPOSITORY: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          REPOSITORY: ${{ needs.components.outputs.image_repository }}-${{ matrix.image }}
           COMMIT: ${{ inputs.ref }}
           TAGS: ${{ steps.tags.outputs.tags }}
         run: |
@@ -342,7 +365,7 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-name: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          subject-name: ${{ needs.components.outputs.image_repository }}-${{ matrix.image }}
           subject-digest: ${{ steps.merge.outputs.digest }}
           push-to-registry: true
       # For the same reason the digests above travel as files: a matrix cannot hand a value to a
@@ -350,7 +373,7 @@ jobs:
       - name: Record the manifest
         env:
           NAME: ${{ matrix.image }}
-          REPOSITORY: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          REPOSITORY: ${{ needs.components.outputs.image_repository }}-${{ matrix.image }}
           DIGEST: ${{ steps.merge.outputs.digest }}
         run: |
           set -euo pipefail
@@ -413,7 +436,7 @@ jobs:
             --arg version "$VERSION" \
             --arg digest "$DIGEST" \
             --arg commit "$COMMIT" \
-            --arg repository "ghcr.io/copilotkit/openbot" \
+            --arg repository "${{ needs.components.outputs.image_repository }}" \
             --argjson components "$components" \
             '{
               version: $version,

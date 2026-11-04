@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenBot release policy",
+  "description": "The reviewed compatibility and upgrade policy for one release, committed as release-policy.json at the repository root. Publishing reads it from the release commit and refuses it unless `version` is the release being published.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "compatibility", "upgrade"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "description": "The release this policy describes, for example v0.3.0.",
+      "type": "string",
+      "pattern": "^v\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9.-]+)?$"
+    },
+    "compatibility": {
+      "$ref": "release-manifest.schema.json#/properties/compatibility"
+    },
+    "upgrade": {
+      "allOf": [
+        {
+          "$ref": "release-manifest.schema.json#/properties/upgrade"
+        },
+        {
+          "properties": {
+            "fromVersions": {
+              "description": "Earlier releases an installation may upgrade from. Each must be earlier than `version`.",
+              "items": {
+                "pattern": "^v\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9.-]+)?$"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "release-manifest.schema.json#/allOf/0"
+    }
+  ]
+}
