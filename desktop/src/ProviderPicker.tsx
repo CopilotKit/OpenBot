@@ -23,6 +23,10 @@ export type Provider = {
 };
 
 /** What the flow carries forward once this screen is done. */
+/** The sentence `preparation::require` refuses a sign-in or start with when Install must run again. */
+export const INSTALL_REQUIRED =
+  "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.";
+
 export type ModelChoice = {
   provider: string;
   login: Login;
@@ -146,6 +150,7 @@ export function ProviderPicker({
   held,
   root,
   onChoose,
+  onInstallRequired,
   onBack,
   returning = false,
   busy: starting = false,
@@ -162,6 +167,11 @@ export function ProviderPicker({
   held: HeldConfiguration;
   root: string;
   onChoose: (choice: ModelChoice) => void;
+  /**
+   * A plan sign-in was refused because the installation no longer matches. The window goes back
+   * to Install, and the choice made here comes back with the person afterwards.
+   */
+  onInstallRequired?: (problem: Problem, choice: ModelChoice) => void;
   /** Without it there is no Back, as while local Intelligence sets up behind this screen. */
   onBack?: () => void;
   returning?: boolean;
@@ -359,7 +369,12 @@ export function ProviderPicker({
       }
     } catch (error) {
       if (stillCurrent()) {
-        setFailure(asProblem(error));
+        const problem = asProblem(error);
+        if (onInstallRequired && problem.said === INSTALL_REQUIRED) {
+          onInstallRequired(problem, { provider: providerId, login: "plan" });
+          return;
+        }
+        setFailure(problem);
         setSignInUrl(null);
       }
     } finally {

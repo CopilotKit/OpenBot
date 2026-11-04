@@ -709,6 +709,7 @@ function Setup() {
     const installationKey = installationKeyFor(root, nextHarness);
     setBusy(true);
     setFailure(null);
+    setRecoveryFailure(null);
     setSteps([
       {
         step: "engine",
@@ -1276,6 +1277,15 @@ function Setup() {
           busy={busy}
           local={localFlow}
           status={localFlow && <LocalStatus sequence={local} />}
+          onInstallRequired={(problem, choice) => {
+            // The record is from an earlier run. Install again, keeping the provider chosen.
+            localInstall.current = null;
+            setPreparation(null);
+            setSteps([]);
+            setModel(choice);
+            setRecoveryFailure(problem);
+            setStep("install");
+          }}
           onChoose={(choice) => {
             recordSetupEvent(modelChoiceEvent(choice));
             chosenModel.current = choice;
