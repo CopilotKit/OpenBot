@@ -170,6 +170,8 @@ export function createPersonalLearningSpaces(deps: {
   >();
   const creating = new Map<string, Promise<boolean>>();
   const retryAt = new Map<string, number>();
+  /** When a space made on this replica stops being taken as made without asking: the probe cache's lifetime. */
+  const madeUntil = new Map<string, number>();
 
   const probe = async (
     containerId: string,
@@ -204,6 +206,23 @@ export function createPersonalLearningSpaces(deps: {
   const create = (userId: string, containerId: string): Promise<boolean> => {
     const running = creating.get(userId);
     if (running) return running;
+    /*
+     * Made on this replica a moment ago. A caller whose read started before then still saw it missing and has just
+     * forgotten it, so it is confirmed again, not made twice: with the record in Intelligence that forget is a round
+     * trip, long enough for the attempt it raced to finish.
+     */
+    if ((madeUntil.get(userId) ?? 0) > now()) {
+      return deps.store.confirm(userId, containerId).then(
+        () => {
+          probes.set(containerId, {
+            expiresAt: now() + CACHE_MS,
+            state: "assigned",
+          });
+          return true;
+        },
+        () => false,
+      );
+    }
     const create = deps.create;
     if (!create || (retryAt.get(userId) ?? 0) > now()) {
       return Promise.resolve(false);
@@ -227,6 +246,7 @@ export function createPersonalLearningSpaces(deps: {
           expiresAt: now() + CACHE_MS,
           state: "assigned",
         });
+        madeUntil.set(userId, now() + CACHE_MS);
         retryAt.delete(userId);
         log({
           type: "learning-personal-space",

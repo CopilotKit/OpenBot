@@ -31,6 +31,7 @@ import {
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const person = `personal-space-${randomUUID()}`;
 const SPACE = personalLearningContainerId(person);
+const latePerson = `personal-space-late-${randomUUID()}`;
 const API = "https://intelligence.customer.example";
 
 const containers = new Map<string, string>();
@@ -75,24 +76,27 @@ const key: KeyIntelligence = {
   project: async () => undefined,
 };
 
-function replica() {
+/** The runtime key's skills read, which says whether a container exists: Intelligence as it answers. */
+const skillsRead = {
+  getLearnedSkillsSnapshot: async ({
+    containerId,
+  }: {
+    containerId: string;
+  }) => {
+    if (!containers.has(containerId))
+      throw new LearnedSkillsError("CONTAINER_NOT_FOUND", false);
+    return skillSnapshot();
+  },
+};
+
+function replica(snapshots: typeof skillsRead = skillsRead) {
   return createPersonalLearningSpaces({
     readSettings: async () => ({
       enabled: true,
       defaultTarget: null,
       agents: {},
     }),
-    snapshots: {
-      getLearnedSkillsSnapshot: async ({
-        containerId,
-      }: {
-        containerId: string;
-      }) => {
-        if (!containers.has(containerId))
-          throw new LearnedSkillsError("CONTAINER_NOT_FOUND", false);
-        return skillSnapshot();
-      },
-    } as never,
+    snapshots: snapshots as never,
     store: createPersonSpaceStore(testLearningIntelligence()),
     create: (container) =>
       createLearningContainer({
@@ -110,14 +114,15 @@ function replica() {
 }
 
 beforeAll(async () => {
-  await database
-    .insert(users)
-    .values({ id: person, email: `${person}@example.test` });
+  await database.insert(users).values([
+    { id: person, email: `${person}@example.test` },
+    { id: latePerson, email: `${latePerson}@example.test` },
+  ]);
 });
 
 afterAll(async () => {
-  await removeLearningPeople([person]);
-  await database.delete(users).where(inArray(users.id, [person]));
+  await removeLearningPeople([person, latePerson]);
+  await database.delete(users).where(inArray(users.id, [person, latePerson]));
   await database.$client.close();
 });
 
@@ -152,4 +157,32 @@ test("a replica that starts after the space exists never asks Intelligence to cr
     containerId: SPACE,
   });
   expect(posts.length).toBe(before);
+});
+
+test("a replica whose late reads still say missing confirms the space it just made, rather than making it again", async () => {
+  /*
+   * Reads that started before the space existed and answer after this replica made it, each later than the one
+   * before: what a slow Intelligence does to a replica's concurrent callers. Each of them forgets the space (it read
+   * as missing) and must leave it confirmed, without asking Intelligence to create it a second time.
+   */
+  const lateSpace = personalLearningContainerId(latePerson);
+  let misses = 0;
+  const spaces = replica({
+    getLearnedSkillsSnapshot: async ({ containerId }) => {
+      if (containers.has(containerId)) return skillSnapshot();
+      await new Promise((resolve) => setTimeout(resolve, 150 * misses++));
+      throw new LearnedSkillsError("CONTAINER_NOT_FOUND", false);
+    },
+  });
+
+  const answers = await Promise.all(
+    Array.from({ length: 4 }, () => spaces.state(latePerson)),
+  );
+
+  for (const answer of answers)
+    expect(answer).toEqual({ state: "assigned", containerId: lateSpace });
+  expect(posts.filter((post) => post.id === lateSpace)).toHaveLength(1);
+  const space = await testLearningIntelligence().personalSpace(latePerson);
+  expect(space.learningContainerId).toBe(lateSpace);
+  expect(space.confirmedAt).not.toBeNull();
 });
