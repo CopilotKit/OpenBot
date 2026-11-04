@@ -38,8 +38,8 @@ import { users } from "../src/db/schema";
 import {
   deleteBot,
   recordTestPackage,
-  removeTestPackages,
   removeBots,
+  removeTestPackages,
   seedBot,
   useTestBots,
 } from "./support/bots";
@@ -1686,8 +1686,9 @@ describe("channel store concurrency", () => {
    * exactly as one whose Bot was deleted a moment after it was made.
    *
    * The channel is written to Intelligence now, with no transaction here for a lock to hold open, so
-   * the creation is parked inside its check instead: after it has read the Bot as live, at its last
-   * step, which reads this person's preferences for that Bot. This connection holds that table
+   * the creation is parked inside its check instead: after it has read the Bot as live, at the one
+   * step of it that still reads this database, this person's groups on their `users` row (a person's
+   * preferences for the Bot are Intelligence's too now). This connection holds that table
    * exclusively, so the creation waits there; the Bot is deleted; and then the check finishes on the
    * Bot as it read it and the channel is written. A store of its own on one connection, so the wait
    * found below is this creation's and not another suite's on the same database.
@@ -1718,7 +1719,7 @@ describe("channel store concurrency", () => {
 
       await holder.transaction(async (transaction) => {
         await transaction.execute(
-          sql`lock table agent_preferences in access exclusive mode`,
+          sql`lock table users in access exclusive mode`,
         );
         outcome = store.create(owner, [agentId]).then(
           (created) => {
