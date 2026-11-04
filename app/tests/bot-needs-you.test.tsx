@@ -2,6 +2,13 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import {
   cleanup,
   fireEvent,
   render,
@@ -177,6 +184,53 @@ test("only what this Bot waits on is shown, and it can be decided here", async (
   expect(
     within(dialog).getByRole("button", { name: "Send answer" }),
   ).toBeTruthy();
+});
+
+test("a question is answered in the conversation it was asked in", async () => {
+  inbox = {
+    ...base,
+    requests: [],
+    questions: [
+      {
+        id: "q1",
+        botId: "expenses",
+        threadId: "thread",
+        channelId: "c1",
+        question: "Which card?",
+        createdAt: "2026-10-09T10:00:00Z",
+      },
+    ],
+  };
+  serving();
+  const root = createRootRoute();
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: root.addChildren([
+      createRoute({
+        getParentRoute: () => root,
+        path: "/",
+        component: () => <BotNeedsYou agentId="expenses" />,
+      }),
+      createRoute({
+        getParentRoute: () => root,
+        path: "/channel/$channelId",
+        component: () => <p>The conversation</p>,
+      }),
+    ]),
+  });
+  const view = render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(await view.findByRole("button", { name: "Answer" }));
+  await view.findByText("The conversation");
+  expect(router.state.location.pathname).toBe("/channel/c1");
+  expect(view.queryByRole("dialog")).toBeNull();
 });
 
 test("a question can be put down without answering it", async () => {

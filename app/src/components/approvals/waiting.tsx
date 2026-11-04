@@ -7,6 +7,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { PageRows } from "@/components/layout/page-shell";
@@ -263,8 +264,19 @@ export function useWaitingByBot(agentId: string | undefined) {
  * question, why the Bot stopped, and the box to answer in. A question can run to a paragraph, and a
  * dialog gives it room without stretching the list.
  */
+/**
+ * A question, answered in the conversation it was asked in: Answer and the row itself open it, where
+ * the question waits above the composer. A question with no conversation on record is answered in a
+ * dialog instead.
+ */
 function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
+  const navigate = useNavigate();
   const [answering, setAnswering] = useState(false);
+  const { channelId } = question;
+  const open = () =>
+    channelId
+      ? navigate({ to: "/channel/$channelId", params: { channelId } })
+      : setAnswering(true);
   const dismiss = useMutation(
     dismissPersonQuestionMutationOptions(queryClient),
   );
@@ -273,7 +285,7 @@ function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
       <BoardRow
         actions={
           <>
-            <Button onClick={() => setAnswering(true)} size="sm">
+            <Button onClick={open} size="sm">
               Answer
             </Button>
             {/* Put it down unanswered: the Bot is not resumed, and nothing is sent to it. */}
@@ -297,7 +309,7 @@ function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
             </span>
           ) : null,
         ]}
-        onSelect={() => setAnswering(true)}
+        onSelect={open}
         title={question.question}
         waiting
       />

@@ -67,6 +67,8 @@ export type ApprovalInboxData = {
     /** The Bot whose conversation this belongs to: for a hand-off, the Bot that handed it on. */
     conversationBotId?: string;
     threadId: string;
+    /** The conversation it was asked in, which is where it is answered. */
+    channelId?: string;
     question: string;
     why?: string;
     createdAt: string;

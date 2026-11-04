@@ -61,6 +61,8 @@ export function listedQuestion(row: {
         botId: value.data.botId,
         conversationBotId: questionConversationBot(value.data),
         threadId: value.data.threadId,
+        /** The conversation it was asked in, which is where it is answered. */
+        channelId: value.data.channelId,
         question: value.data.question,
         why: value.data.why,
         createdAt: row.createdAt,
