@@ -1,4 +1,5 @@
 import {
+  IconBrain,
   IconChartBar,
   IconChevronRight,
   IconDeviceDesktop,
@@ -473,10 +474,34 @@ function EnterpriseSections({
       </PageSection>
 
       <PageSection
-        description={`The built-in Bot runs on ${data.builtInModel ?? "the deployment's configured model"}. A remote Bot chooses its own, and the model it reports is recorded.`}
+        description={`Built-in Bots run on ${data.builtInModel ?? "the deployment's configured model"} unless a person picks another. A remote Bot chooses its own, and the model it reports is recorded.`}
         title="Models"
       >
         <PageRows>
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconBrain />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Let people choose a model</ItemTitle>
+              <ItemDescription>
+                {settings.modelSelection
+                  ? "People can pick a model for built-in Bots in each conversation."
+                  : "Off. Built-in Bots use the configured model."}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-label="Let people choose a model"
+                checked={settings.modelSelection}
+                disabled={saving}
+                onCheckedChange={(enabled) =>
+                  onSetting("modelSelection", enabled)
+                }
+              />
+            </ItemActions>
+          </Item>
+          <Separator />
           <Item size="sm">
             <ItemMedia variant="icon">
               <IconShieldLock />
