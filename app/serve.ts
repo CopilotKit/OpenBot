@@ -16,6 +16,7 @@
 import { join, normalize, sep } from "node:path";
 import { DICTATION_HTTP_IDLE_SECONDS } from "@openbot/shared/dictation";
 import { listenPort } from "@openbot/shared/listen-port";
+import { appListenHosts } from "@openbot/shared/this-machine";
 import { file, type ServerWebSocket } from "bun";
 
 const DIST = join(import.meta.dir, "dist");
@@ -192,85 +193,110 @@ function prepareWebSocketBridge(upstream: BunWebSocket, signal: AbortSignal) {
 }
 
 if (import.meta.main) {
-  Bun.serve<WebSocketBridge>({
-    port: PORT,
-    // Both loopbacks, which is what `::` gets you: a dual-stack socket answers on 127.0.0.1 and
-    // ::1 alike. Bound to one, whoever is told the URL has no way to know which they were given.
-    hostname: "::",
-    // `ws: true` on the old proxy was required for the live screen, so the upgrade is forwarded
-    // rather than answered with the app's HTML, which failed with an opaque socket error.
-    websocket: {
-      open(ws) {
-        ws.data.attach(ws);
-      },
-      message(ws, message) {
-        const { upstream } = ws.data;
-        if (upstream.readyState === BunWebSocket.OPEN) {
-          upstream.send(message);
-        } else {
-          ws.close(1011, "Upstream connection closed");
+  const serveOn = (hostname: string) =>
+    Bun.serve<WebSocketBridge>({
+      port: PORT,
+      hostname,
+      // `ws: true` on the old proxy was required for the live screen, so the upgrade is forwarded
+      // rather than answered with the app's HTML, which failed with an opaque socket error.
+      websocket: {
+        open(ws) {
+          ws.data.attach(ws);
+        },
+        message(ws, message) {
+          const { upstream } = ws.data;
+          if (upstream.readyState === BunWebSocket.OPEN) {
+            upstream.send(message);
+          } else {
+            ws.close(1011, "Upstream connection closed");
+            ws.data.dispose();
+          }
+        },
+        close(ws) {
           ws.data.dispose();
+        },
+      },
+      async fetch(request, server) {
+        const url = new URL(request.url);
+        if (url.pathname === "/api/audio/transcriptions") {
+          server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
         }
-      },
-      close(ws) {
-        ws.data.dispose();
-      },
-    },
-    async fetch(request, server) {
-      const url = new URL(request.url);
-      if (url.pathname === "/api/audio/transcriptions") {
-        server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
-      }
-      if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
-      if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
+        if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
+        if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
 
-      if (isApiCall(url.pathname)) {
-        const target = SERVER + url.pathname + url.search;
-        if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
-          const upstream = new BunWebSocket(target.replace(/^http/, "ws"), {
-            headers: upstreamWebSocketHeaders(request.headers),
-          });
-          const bridge = prepareWebSocketBridge(upstream, request.signal);
-          if (
-            !(await bridge.opened) ||
-            upstream.readyState !== BunWebSocket.OPEN
-          ) {
+        if (isApiCall(url.pathname)) {
+          const target = SERVER + url.pathname + url.search;
+          if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+            const upstream = new BunWebSocket(target.replace(/^http/, "ws"), {
+              headers: upstreamWebSocketHeaders(request.headers),
+            });
+            const bridge = prepareWebSocketBridge(upstream, request.signal);
+            if (
+              !(await bridge.opened) ||
+              upstream.readyState !== BunWebSocket.OPEN
+            ) {
+              bridge.data.dispose();
+              return new Response(
+                "Could not connect to the upstream WebSocket",
+                {
+                  status: bridge.failureStatus(),
+                },
+              );
+            }
+            if (server.upgrade(request, { data: bridge.data }))
+              return undefined;
             bridge.data.dispose();
-            return new Response("Could not connect to the upstream WebSocket", {
-              status: bridge.failureStatus(),
+            return new Response("expected a websocket upgrade", {
+              status: 400,
             });
           }
-          if (server.upgrade(request, { data: bridge.data })) return undefined;
-          bridge.data.dispose();
-          return new Response("expected a websocket upgrade", { status: 400 });
+          // The body is streamed rather than buffered, and redirects are left to the caller so a
+          // 302 from the server is not silently followed to a different origin.
+          return fetch(target, {
+            method: request.method,
+            headers: request.headers,
+            body: request.body,
+            redirect: "manual",
+            ...(url.pathname === "/api/audio/transcriptions" ||
+            url.pathname === "/api/voice/calls"
+              ? { signal: request.signal }
+              : {}),
+            // @ts-expect-error duplex is required by fetch for a streamed body and is not yet typed.
+            duplex: "half",
+          });
         }
-        // The body is streamed rather than buffered, and redirects are left to the caller so a
-        // 302 from the server is not silently followed to a different origin.
-        return fetch(target, {
-          method: request.method,
-          headers: request.headers,
-          body: request.body,
-          redirect: "manual",
-          ...(url.pathname === "/api/audio/transcriptions" ||
-          url.pathname === "/api/voice/calls"
-            ? { signal: request.signal }
-            : {}),
-          // @ts-expect-error duplex is required by fetch for a streamed body and is not yet typed.
-          duplex: "half",
-        });
-      }
 
-      const wanted = fileFor(url.pathname);
-      if (!wanted) return new Response("not found", { status: 404 });
+        const wanted = fileFor(url.pathname);
+        if (!wanted) return new Response("not found", { status: 404 });
 
-      const found = file(wanted);
-      if (await found.exists()) return new Response(found);
-      if (isClientRoute(url.pathname)) {
-        return new Response(file(join(DIST, "index.html")));
-      }
-      return new Response("not found", { status: 404 });
-    },
-  });
+        const found = file(wanted);
+        if (await found.exists()) return new Response(found);
+        if (isClientRoute(url.pathname)) {
+          return new Response(file(join(DIST, "index.html")));
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+
+  /*
+   * Both loopbacks, and only them, unless the deployment names an address beyond this machine
+   * (`appListenHosts`). Both, because whoever is told the URL has no way to know which they were
+   * given. Only them, because every `/api` call this passes on reaches the server from this machine,
+   * and a single-user server admits a caller from this machine as its administrator: listening on
+   * every interface handed that to anybody on the same network.
+   */
+  const hosts = appListenHosts(process.env);
+  for (const hostname of hosts) {
+    try {
+      serveOn(hostname);
+    } catch (error) {
+      // A machine with IPv6 switched off has no ::1 to listen on, and 127.0.0.1 is still there.
+      if (hostname !== "::1") throw error;
+      console.warn(
+        `OpenBot app is not answering on http://[::1]:${PORT}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   console.log(
     `OpenBot app on http://127.0.0.1:${PORT} and http://[::1]:${PORT}`,

@@ -254,6 +254,11 @@ RUN mkdir -p /workspace /profiles \
 ENV EMBEDDED_POSTGRES=off
 ENV DATABASE_URL=postgres://openbot@127.0.0.1:5432/openbot
 
+# Where this server runs, said by the image so no deployment has to. On a single-user OpenBot outside a
+# container only callers on this machine are the administrator; in here every caller arrives through
+# the container engine's network, so that rule would refuse everybody. See `singleUserAccess` in
+# server/src/config.ts.
+ENV OPENBOT_IN_CONTAINER=true
 ENV NODE_ENV=production
 ENV PORT=3001
 EXPOSE 3001

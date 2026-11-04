@@ -97,6 +97,7 @@ import {
   selectTools,
 } from "./plugins/selection";
 import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
+import { corsOrigin } from "./request-trust";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
 /**
@@ -2135,6 +2136,17 @@ export function mountCopilotRuntime(
     handler: createCopilotHonoHandler({
       runtime,
       basePath,
+      /*
+       * This deployment's own origins and the Recorder, and nobody else.
+       *
+       * Left out, the runtime answers `Access-Control-Allow-Origin: *` on every response and 204 to
+       * every preflight, so any website the person visited could read their threads and messages
+       * here. The app calls the runtime on its own origin and needs no CORS at all; the Recorder is
+       * an extension, which its host permission lets past CORS anyway, and is named so that stays
+       * true whatever Chrome decides. An origin it does not name gets no CORS headers and the
+       * browser keeps the answer from the page.
+       */
+      cors: { origin: corsOrigin(config) },
       hooks: {
         onBeforeHandler: async (context) => {
           const gated = await trajectoryCapture?.gate(context);
