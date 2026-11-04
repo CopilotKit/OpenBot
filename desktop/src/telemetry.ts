@@ -7,8 +7,7 @@ export type SetupStep =
   | "install"
   | "account"
   | "model"
-  | "connect"
-  | "ask";
+  | "connect";
 
 const HARNESSES = {
   crewai: "crewai",

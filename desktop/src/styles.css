@@ -374,8 +374,7 @@ button.quiet:active:not(:disabled) {
 }
 
 button.quiet:disabled,
-button.text-link:disabled,
-button.another-question:disabled {
+button.text-link:disabled {
   opacity: 0.5;
 }
 
@@ -400,36 +399,6 @@ button.text-link {
 button.text-link:hover:not(:disabled) {
   background: transparent;
   color: var(--text-primary);
-}
-
-/* The last screen's question box, with the button that swaps in another question beside it. */
-.field-with-action {
-  display: flex;
-  gap: 8px;
-}
-
-.field-with-action input {
-  flex: 1;
-  min-width: 0;
-}
-
-button.another-question {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  padding: 0;
-  background: var(--surface-container);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-container);
-  border-radius: var(--r-card);
-}
-
-button.another-question:hover:not(:disabled) {
-  background: var(--surface-hovered);
-  color: var(--text-primary);
-  border-color: var(--grey-600);
 }
 
 /*
@@ -1168,38 +1137,6 @@ a {
   color: var(--text-secondary);
   /* Monospace here is for machine output, which is what it is for. */
   font-family: var(--mono);
-}
-
-/*
- * The answer on the last screen. Given weight on purpose: it is the one piece of text in the whole
- * wizard that was produced rather than written, and it is the proof the install actually worked.
- */
-.answer {
-  margin: 24px 0 4px;
-  padding: 20px 24px;
-  border-radius: var(--r-card);
-  background: var(--surface-container);
-  border: 1px solid var(--border-default);
-  box-shadow: var(--elevation-sm);
-}
-
-.answer-from {
-  margin: 0 0 8px;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 12px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-.answer-text {
-  margin: 0;
-  font-size: 20px;
-  line-height: 28px;
-  color: var(--text-primary);
-  white-space: pre-wrap;
 }
 
 /* The tick beside "Signed in", for the moment before the screen moves on by itself. */

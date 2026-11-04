@@ -2248,6 +2248,10 @@ async fn start_stack<R: tauri::Runtime>(
     .await;
     // The menu bar says whether OpenBot is running.
     refresh_menus(&menus);
+    // Setup is done once OpenBot starts: the window hands over to it at once. Recorded once.
+    if started.is_ok() {
+        desktop_telemetry::record(&menus, telemetry::EventData::Activated);
+    }
     started
 }
 
@@ -4894,183 +4898,6 @@ fn selected_root(app: tauri::AppHandle) -> Option<String> {
 }
 
 /**
-Put the wizard's last question to the Bot, and hand back what it said.
-
-THE DEFINITION OF DONE FOR AN INSTALL. Everything before this proves that things started; only this
-proves the configuration works. See `ask` for why a run that says nothing is a failure rather than
-an empty answer, and why the harness's log is fetched to fill the developer half.
-
-The endpoint and the token come out of the `.env` this run just wrote, not from the window. They are
-facts about the deployment, and a window carrying them would be a second copy to keep in step.
-*/
-#[tauri::command]
-async fn ask_the_bot<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    root: String,
-    question: String,
-) -> Result<String, openbot_desktop_lib::problem::Problem> {
-    let result = ask_the_bot_inner(stack::root_from(&root), question).await;
-    if result.is_ok() {
-        desktop_telemetry::record(&app, telemetry::EventData::Activated);
-    } else {
-        desktop_telemetry::failure(&app, telemetry::SetupErrorClass::Unknown);
-    }
-    result
-}
-
-async fn ask_the_bot_inner(root: PathBuf, question: String) -> Result<String, Problem> {
-    // The addresses come from the file and the token from the credential store, which is where
-    // this run put it. Asked for together, because one without the other cannot ask anything.
-    let settings = ask_saved_settings(&root)?;
-    // The server's own address, so a picked Bot is asked through the runtime and the question is
-    // a thread in Intelligence. See `ask::ask_through_server`. Only a server this root's stack
-    // runs: whatever else answers on that port is not this deployment's. Checking asks the port,
-    // which blocks.
-    let checked = root.clone();
-    let server = tauri::async_runtime::spawn_blocking(move || {
-        openbot_env::Ports::read(&checked)
-            .ok()
-            .filter(|ports| {
-                already_running_on(&checked, ports.server, |root, port| {
-                    server_container_publishes(None, root, &[port])
-                })
-            })
-            .map(|ports| format!("http://127.0.0.1:{}", ports.server))
-    })
-    .await
-    .ok()
-    .flatten();
-    ask_the_bot_via(root, question, settings, server).await
-}
-
-fn ask_saved_settings(root: &Path) -> Result<std::collections::BTreeMap<String, String>, Problem> {
-    openbot_desktop_lib::vault::already_given_no_ui(
-        root,
-        &root.join(".env"),
-        &[
-            "PICKED_HARNESS_URL",
-            "PICKED_HARNESS_KIND",
-            "PICKED_HARNESS_SOURCE",
-            "PICKED_HARNESS_AGENT_ID",
-            "MANAGED_AGENT_AG_UI_URL",
-            "MANAGED_AGENT_TOKEN",
-        ],
-    )
-}
-
-/// `ask_the_bot_via` straight to the harness, with no server to record a thread.
-#[cfg(test)]
-async fn ask_the_bot_with_settings(
-    root: PathBuf,
-    question: String,
-    settings: std::collections::BTreeMap<String, String>,
-) -> Result<String, openbot_desktop_lib::problem::Problem> {
-    ask_the_bot_via(root, question, settings, None).await
-}
-
-async fn ask_the_bot_via(
-    root: PathBuf,
-    question: String,
-    settings: std::collections::BTreeMap<String, String>,
-    server: Option<String>,
-) -> Result<String, openbot_desktop_lib::problem::Problem> {
-    // The picked harness if there is one, and the Bot that ships with OpenBot if there is not.
-    // Both speak AG-UI at the same address shape, so this screen does not care which it got.
-    let picked_endpoint = settings
-        .get("PICKED_HARNESS_URL")
-        .filter(|url| !url.trim().is_empty());
-    let (endpoint, log_service, kind, agent_id) = match picked_endpoint {
-        Some(endpoint) => (
-            endpoint.clone(),
-            // Only a selection this install explicitly recorded as local can explain itself
-            // through Compose logs. Legacy/unknown provenance and stale IMAGE/PORT do not.
-            (settings.get("PICKED_HARNESS_SOURCE").map(String::as_str) == Some("installed"))
-                .then_some("agent-harness"),
-            settings.get("PICKED_HARNESS_KIND").cloned(),
-            settings.get("PICKED_HARNESS_AGENT_ID").cloned(),
-        ),
-        None => (
-            settings
-                .get("MANAGED_AGENT_AG_UI_URL")
-                .cloned()
-                .unwrap_or_default(),
-            Some("agent-langgraph"),
-            None,
-            None,
-        ),
-    };
-    let token = settings
-        .get("MANAGED_AGENT_TOKEN")
-        .cloned()
-        .unwrap_or_default();
-    if endpoint.trim().is_empty() || token.trim().is_empty() {
-        return Err(openbot_desktop_lib::problem::Problem::plain(
-            "OpenBot cannot find the Bot it just set up. Stop OpenBot and start it again.",
-        ));
-    }
-
-    let question = if question.trim().is_empty() {
-        openbot_desktop_lib::ask::SUGGESTED.to_string()
-    } else {
-        question
-    };
-
-    // A picked Bot is the server's `picked-harness`, asked through the runtime so the question and
-    // its answer are a thread in Intelligence. The Bot that ships with OpenBot is asked directly.
-    let through = server.filter(|_| picked_endpoint.is_some());
-    let asked = tauri::async_runtime::spawn_blocking(move || {
-        let answered = match &through {
-            Some(server) => openbot_desktop_lib::ask::ask_through_server(
-                server,
-                openbot_desktop_lib::ask::PICKED_HARNESS_AGENT,
-                &question,
-            ),
-            None => openbot_desktop_lib::ask::ask_harness(
-                &endpoint,
-                &token,
-                &question,
-                kind.as_deref(),
-                agent_id.as_deref(),
-            ),
-        };
-        match answered {
-            Ok(answer) => Ok(answer),
-            // An empty sentence carries no cause. Local logs can explain an installed Bot;
-            // they cannot explain a BYO endpoint, even when an old local harness still has logs.
-            Err(problem) if problem.said.is_empty() && log_service.is_none() => {
-                Err(Some(Problem::with(
-                    "The Bot at the selected endpoint returned no answer text. Check that endpoint's logs and ask again.",
-                    format!("endpoint {endpoint}\nThe run returned no answer text."),
-                )))
-            }
-            Err(problem) if problem.said.is_empty() => Err(None),
-            Err(problem) => Err(Some(problem)),
-        }
-    })
-    .await
-    .map_err(|error| {
-        openbot_desktop_lib::problem::Problem::plain(format!(
-            "The question could not be asked: {error}"
-        ))
-    })?;
-
-    match asked {
-        Ok(answer) => Ok(answer),
-        Err(Some(problem)) => Err(problem),
-        Err(None) => {
-            let log = log_service
-                .and_then(|service| {
-                    engine::detect_saved(preparation::saved_engine(&root))
-                        .address
-                        .map(|found| stack::service_log(&found, &root, service, 40))
-                })
-                .unwrap_or_default();
-            Err(openbot_desktop_lib::ask::why_nothing_came_back(&log))
-        }
-    }
-}
-
-/**
 What a previous run already wrote, so the wizard can arrive filled in.
 
 Returned to the window because that is where the fields are, and it is the same machine and the
@@ -6012,30 +5839,8 @@ fn cancel_local_eval(attempt: String) {
     local_eval::cancel(&attempt);
 }
 
-/**
-Open the recorded local stack's Intelligence dashboard, signed in, with no code to approve.
-
-`local login` opens the browser itself, so nothing here opens a second tab; once it has signed this
-stack in during this session the dashboard's address is opened directly (see `Dashboards`). The
-window gets nothing back but success or a fixed sentence; `attempt` lets `cancel_local_eval` stop
-the call.
-*/
-#[tauri::command]
-async fn open_local_intelligence(
-    app: tauri::AppHandle,
-    attempt: String,
-    root: String,
-) -> Result<(), Problem> {
-    let root = stack::root_from(&root);
-    tauri::async_runtime::spawn_blocking(move || {
-        open_dashboard_from(&app, &root, &attempt).map_err(|failure| failure.problem())
-    })
-    .await
-    .map_err(|_| DashboardFailure::Failed.problem())?
-}
-
 /// Why the dashboard did not open: a fixed category, which is all the OpenBot app's page is told,
-/// and one fixed sentence for each, which is all the setup window and the menu say.
+/// and one fixed sentence for each, which is all the menu says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum DashboardFailure {
@@ -6072,19 +5877,6 @@ impl DashboardFailure {
             DashboardFailure::Failed => "OpenBot could not open the Intelligence dashboard. Try again.",
         }
     }
-
-    fn problem(self) -> Problem {
-        Problem::plain(self.said())
-    }
-}
-
-/// `open_dashboard_at` with its sentence, as the setup window is told.
-#[cfg(test)]
-fn open_local_intelligence_at<L>(root: &Path, login: L) -> Result<(), Problem>
-where
-    L: FnOnce(&local_eval::StackId) -> Result<local_eval::SignIn, local_eval::Failure>,
-{
-    open_dashboard_at(root, login).map_err(DashboardFailure::problem)
 }
 
 /// `sign_in` for the stack recorded in `root`, and nothing for a root with no record.
@@ -7735,14 +7527,12 @@ fn main() {
             run_local_eval,
             list_local_eval,
             cancel_local_eval,
-            open_local_intelligence,
             offer_local_intelligence,
             set_up_local_eval,
             sign_in_to_copilotkit,
             local_eval_terms,
             connect_local_eval,
             last_local_eval_stop_failure,
-            ask_the_bot,
             quit_status,
             desktop_status,
             restart_openbot,
@@ -8911,7 +8701,7 @@ mod tests {
     }
 
     #[test]
-    fn start_and_ask_resolve_saved_secrets_from_the_selected_root() {
+    fn start_resolves_saved_secrets_from_the_selected_root() {
         let root_a = temp_root("selected-saved-root-a");
         let root_b = temp_root("selected-saved-root-b");
         for (root, label) in [(&root_a, "a"), (&root_b, "b")] {
@@ -8925,12 +8715,6 @@ mod tests {
                 root,
                 "OPENAI_API_KEY",
                 &format!("openai-{label}"),
-            )
-            .unwrap();
-            openbot_desktop_lib::vault::remember(
-                root,
-                "MANAGED_AGENT_TOKEN",
-                &format!("agent-{label}"),
             )
             .unwrap();
         }
@@ -8957,16 +8741,6 @@ mod tests {
             }
         );
 
-        let settings = ask_saved_settings(&root_b).unwrap();
-        assert_eq!(
-            settings.get("MANAGED_AGENT_AG_UI_URL").map(String::as_str),
-            Some("https://agent-b.example")
-        );
-        assert_eq!(
-            settings.get("MANAGED_AGENT_TOKEN").map(String::as_str),
-            Some("agent-b")
-        );
-
         std::fs::remove_dir_all(root_a).unwrap();
         std::fs::remove_dir_all(root_b).unwrap();
     }
@@ -8990,27 +8764,6 @@ mod tests {
             },
         )
         .expect_err("unreadable .env must stop saved-key resolution");
-
-        assert_eq!(problem.said, "OpenBot could not read its settings.");
-        assert!(
-            problem
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains(root.join(".env").to_string_lossy().as_ref())),
-            "{problem:?}"
-        );
-        assert!(root.join(".env").is_dir());
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn ask_reports_unreadable_env_before_store_resolution_or_http() {
-        let root = temp_root("ask-unreadable-env");
-        std::fs::create_dir_all(root.join(".env")).unwrap();
-
-        let problem =
-            tauri::async_runtime::block_on(ask_the_bot_inner(root.clone(), "hello".into()))
-                .expect_err("unreadable .env must stop Ask before transport");
 
         assert_eq!(problem.said, "OpenBot could not read its settings.");
         assert!(
@@ -10615,11 +10368,12 @@ mod tests {
     #[test]
     fn opening_intelligence_needs_a_recorded_stack_and_never_asks_the_cli_without_one() {
         let root = local_eval_root("openbot-open-intelligence-unrecorded", None);
-        let problem =
-            open_local_intelligence_at(&root, |_| panic!("login ran without a stack")).unwrap_err();
+        let failure =
+            open_dashboard_at(&root, |_| panic!("login ran without a stack")).unwrap_err();
+        assert_eq!(failure, DashboardFailure::NotSetUp);
         assert_eq!(
-            problem,
-            Problem::plain("Set up local Intelligence before opening its dashboard.")
+            failure.said(),
+            "Set up local Intelligence before opening its dashboard."
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -10631,7 +10385,7 @@ mod tests {
             Some(local_eval_state::Ownership::Shared),
         );
         let mut asked = None;
-        open_local_intelligence_at(&root, |stack| {
+        open_dashboard_at(&root, |stack| {
             asked = Some(stack.as_str().to_owned());
             signed_in(local_eval::Outcome::Completed, None)
         })
@@ -10683,9 +10437,8 @@ mod tests {
             (Err(Failure::InvalidJson), retry),
             (Err(Failure::Unverified), retry),
         ] {
-            let problem = open_local_intelligence_at(&root, |_| result).unwrap_err();
-            // Nothing but the sentence: no detail, so no CLI text can ride along.
-            assert_eq!(problem, Problem::plain(said));
+            // Nothing but a fixed category and its sentence, so no CLI text can ride along.
+            assert_eq!(open_dashboard_at(&root, |_| result).unwrap_err().said(), said);
         }
         let _ = std::fs::remove_dir_all(root);
     }
@@ -13473,7 +13226,7 @@ fn main() {
         }
         let app = tauri::test::mock_builder()
             .manage(Shell::default())
-            .invoke_handler(tauri::generate_handler![start_stack, ask_the_bot])
+            .invoke_handler(tauri::generate_handler![start_stack])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
         let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -13579,31 +13332,12 @@ fn main() {
                 .any(|service| service == "agent-langgraph"),
             "case={case}, persisted advertisement must match actual Start services"
         );
-        let mut asked = false;
         if case.starts_with("remote") || case == "compatible" {
             assert_eq!(settings.get("PICKED_HARNESS_URL"), Some(&remote));
             assert_eq!(
                 settings.get("PICKED_HARNESS_KIND").map(String::as_str),
                 Some("remote-ag-ui")
             );
-            let server = TestServer::from_listener(listener,
-                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
-                 data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"m1\",\"delta\":\"D53-BYO-REMOTE-ANSWER\"}\n\n\
-                 data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n");
-            let answer = invoke(
-                "ask_the_bot",
-                serde_json::json!({"root":root,"question":"D53 remote IPC question"}),
-            )
-            .unwrap();
-            let request = server.request();
-            assert_eq!(answer, "D53-BYO-REMOTE-ANSWER");
-            assert_eq!(request.path, "/ag-ui");
-            assert!(request.body.contains("D53 remote IPC question"));
-            assert!(request
-                .headers
-                .iter()
-                .any(|line| line.starts_with("x-openbot-agent-token: ")));
-            asked = true;
         } else if let Some(image) = expected_image {
             assert_eq!(
                 settings.get("PICKED_HARNESS_IMAGE"),
@@ -13618,17 +13352,16 @@ fn main() {
             serde_json::json!({
                 "case":case, "composeUp":up, "commands":commands, "intentionalMigrationBarrier":true,
                 "publicSettings":settings,
-                "defaultPackage":"../examples/fintech", "remoteEndpointPersistedAndConsumed":asked,
-                "actualAskIpcResponse":asked.then_some("D53-BYO-REMOTE-ANSWER"),
+                "defaultPackage":"../examples/fintech",
                 "noHostStartup":true, "nativeGui":false, "realEngineOrDatabase":false,
             })
         );
     }
 
     #[test]
-    fn remote_harness_start_ipc_skips_local_service_and_asks_persisted_endpoint() {
+    fn remote_harness_start_ipc_skips_local_service_and_persists_the_endpoint() {
         if crate::test_support::isolated_process(
-            "tests::remote_harness_start_ipc_skips_local_service_and_asks_persisted_endpoint",
+            "tests::remote_harness_start_ipc_skips_local_service_and_persists_the_endpoint",
         ) {
             return;
         }
@@ -13857,472 +13590,6 @@ fn main() {
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
     }
 
-    #[test]
-    fn ask_the_bot_uses_native_mastra_for_a_picked_mastra_harness() {
-        let server = TestServer::new(
-            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
-             data: {\"type\":\"text-delta\",\"payload\":{\"text\":\"391\"}}\n\n\
-             data: {\"type\":\"finish\",\"payload\":{\"stepResult\":{\"reason\":\"stop\"}}}\n\n",
-        );
-        let root = temp_root("openbot-mastra-ask");
-        let answer = tauri::async_runtime::block_on(ask_the_bot_with_settings(
-            root.clone(),
-            "What is 17 times 23?".to_string(),
-            std::collections::BTreeMap::from([
-                ("PICKED_HARNESS_URL".to_string(), server.url.clone()),
-                (
-                    "PICKED_HARNESS_KIND".to_string(),
-                    "remote-mastra".to_string(),
-                ),
-                ("PICKED_HARNESS_AGENT_ID".to_string(), "openbot".to_string()),
-                (
-                    "MANAGED_AGENT_TOKEN".to_string(),
-                    "managed-token".to_string(),
-                ),
-            ]),
-        ))
-        .expect("answer");
-
-        let request = server.request();
-        assert_eq!(answer, "391");
-        assert_eq!(request.path, "/api/agents/openbot/stream");
-        assert!(
-            request
-                .headers
-                .iter()
-                .any(|line| line == "x-openbot-agent-token: managed-token"),
-            "{:?}",
-            request.headers
-        );
-        let body: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
-        assert_eq!(
-            body.pointer("/messages/0/content").and_then(|v| v.as_str()),
-            Some("What is 17 times 23?")
-        );
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn ask_the_bot_uses_the_picked_byo_ag_ui_endpoint_before_managed_fallback() {
-        let server = TestServer::new(
-            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
-             data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"m1\",\"delta\":\"391\"}\n\n\
-             data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n",
-        );
-        let root = temp_root("openbot-byo-ask");
-        let answer = tauri::async_runtime::block_on(ask_the_bot_with_settings(
-            root.clone(),
-            "What is 17 times 23?".to_string(),
-            std::collections::BTreeMap::from([
-                ("PICKED_HARNESS_URL".to_string(), server.url.clone()),
-                (
-                    "PICKED_HARNESS_KIND".to_string(),
-                    "remote-ag-ui".to_string(),
-                ),
-                (
-                    "MANAGED_AGENT_AG_UI_URL".to_string(),
-                    "http://127.0.0.1:9/ag-ui".to_string(),
-                ),
-                (
-                    "MANAGED_AGENT_TOKEN".to_string(),
-                    "managed-token".to_string(),
-                ),
-            ]),
-        ))
-        .expect("answer");
-
-        let request = server.request();
-        assert_eq!(answer, "391");
-        assert_eq!(request.path, "/");
-        assert!(
-            request
-                .headers
-                .iter()
-                .any(|line| line == "x-openbot-agent-token: managed-token"),
-            "{:?}",
-            request.headers
-        );
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn ask_the_bot_keeps_body_read_errors_out_of_the_empty_answer_path() {
-        let body = "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"m1\",\"delta\":\"391";
-        let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-            body.len() + 64
-        );
-        let server = TestServer::new(response);
-        let root = temp_root("openbot-body-read-ask");
-
-        let problem = tauri::async_runtime::block_on(ask_the_bot_with_settings(
-            root.clone(),
-            "What is 17 times 23?".to_string(),
-            std::collections::BTreeMap::from([
-                ("PICKED_HARNESS_URL".to_string(), server.url.clone()),
-                (
-                    "PICKED_HARNESS_KIND".to_string(),
-                    "remote-ag-ui".to_string(),
-                ),
-                (
-                    "MANAGED_AGENT_TOKEN".to_string(),
-                    "managed-token".to_string(),
-                ),
-            ]),
-        ))
-        .expect_err("body read errors must propagate as real problems");
-
-        assert!(
-            problem
-                .said
-                .contains("The Bot started answering and then stopped"),
-            "{}",
-            problem.said
-        );
-        let detail = problem.detail.as_deref().expect("body read detail");
-        assert!(detail.contains("kind remote-ag-ui"), "{detail}");
-        assert!(detail.contains(&server.url), "{detail}");
-        assert!(detail.contains("HTTP 200 OK"), "{detail}");
-        assert!(
-            detail.contains("body") || detail.contains("error"),
-            "{detail}"
-        );
-        let _ = server.request();
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    /// Exercise the generated command and the settings writer/reader, with real loopback HTTP
-    /// and a disposable external Compose executable. No model, engine or native GUI is started.
-    #[test]
-    fn ask_command_attributes_empty_answers_to_the_selected_endpoint() {
-        const TEST: &str = "tests::ask_command_attributes_empty_answers_to_the_selected_endpoint";
-        if crate::test_support::isolated_process(TEST) {
-            return;
-        }
-        let path = SerializedPath::set_only_with("docker", "empty-answer");
-        let app = tauri::test::mock_builder()
-            .invoke_handler(tauri::generate_handler![ask_the_bot])
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .unwrap();
-        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .unwrap();
-        let mut failures = Vec::new();
-        for case in [
-            "byo",
-            "installed-to-byo",
-            "legacy",
-            "unknown",
-            "installed-ag-ui",
-            "installed-mastra",
-            "managed",
-        ] {
-            let root = temp_root(&format!("ask-provenance-{case}"));
-            std::fs::create_dir_all(&root).unwrap();
-            let record = root.join("commands.log");
-            std::fs::write(&record, "").unwrap();
-            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
-            let server = TestServer::new(
-                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
-                 data: {\"type\":\"RUN_STARTED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n\
-                 data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n",
-            );
-            let endpoint = format!("{}/ag-ui", server.url);
-            let installed = openbot_env::PickedHarness::Installed {
-                image: "localhost/synthetic-old-harness@sha256:00".into(),
-                port: test_server_port(&server),
-                name: "Installed fixture".into(),
-                mastra: case == "installed-mastra",
-                run_path: "/ag-ui".into(),
-                remote_agent_id: "fixture-agent".into(),
-            };
-            let byo = openbot_env::PickedHarness::RemoteAgUi {
-                url: format!("  {endpoint}  "),
-                name: "An agent you already run".into(),
-                remote_agent_id: String::new(),
-            };
-            let ports = openbot_env::Ports {
-                langgraph: test_server_port(&server),
-                ..Default::default()
-            };
-            let compose = |harness| {
-                openbot_env::compose(
-                    &openbot_env::Intelligence {
-                        api_url: "https://intelligence.example.test".into(),
-                        gateway_ws_url: "wss://gateway.example.test".into(),
-                        api_key: String::new(),
-                    },
-                    &openbot_env::Model {
-                        credential: openbot_env::ModelCredential::OpenAi {
-                            api_key: "synthetic-provider-key".into(),
-                        },
-                    },
-                    &engine::EngineStatus {
-                        engine: None,
-                        address: None,
-                        responding: false,
-                        engine_socket: None,
-                        detail: String::new(),
-                    },
-                    &ports,
-                    &[],
-                    harness,
-                    &std::collections::BTreeMap::from([(
-                        "MANAGED_AGENT_TOKEN".into(),
-                        "synthetic-ask-token".into(),
-                    )]),
-                )
-            };
-            let file = root.join(".env");
-            let write_settings = |values: &std::collections::BTreeMap<String, String>| {
-                openbot_env::write(&file, values, &Default::default()).unwrap();
-            };
-            if ["installed-to-byo", "legacy", "unknown"].contains(&case) {
-                write_settings(&compose(Some(&installed)));
-            }
-            write_settings(&compose(match case {
-                "managed" => None,
-                "installed-ag-ui" | "installed-mastra" => Some(&installed),
-                _ => Some(&byo),
-            }));
-            // Simulate older/unknown metadata only after the real installed -> BYO writes. The
-            // image/port remain stale, and KIND is the same as an installed AG-UI selection.
-            if case == "legacy" {
-                let text = std::fs::read_to_string(&file).unwrap();
-                std::fs::write(
-                    &file,
-                    text.lines()
-                        .filter(|line| !line.starts_with("PICKED_HARNESS_SOURCE="))
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
-                .unwrap();
-            } else if case == "unknown" {
-                write_settings(&std::collections::BTreeMap::from([(
-                    "PICKED_HARNESS_SOURCE".into(),
-                    "future-source".into(),
-                )]));
-            }
-            let public_settings = openbot_env::read_already_set(
-                &file,
-                &[
-                    "PICKED_HARNESS_URL",
-                    "PICKED_HARNESS_KIND",
-                    "PICKED_HARNESS_SOURCE",
-                    "PICKED_HARNESS_IMAGE",
-                    "PICKED_HARNESS_PORT",
-                    "MANAGED_AGENT_AG_UI_URL",
-                ],
-            )
-            .unwrap();
-            let result = tauri::test::get_ipc_response(
-                &window,
-                tauri::webview::InvokeRequest {
-                    cmd: "ask_the_bot".into(),
-                    callback: tauri::ipc::CallbackFn(0),
-                    error: tauri::ipc::CallbackFn(1),
-                    url: if cfg!(any(windows, target_os = "android")) {
-                        "http://tauri.localhost"
-                    } else {
-                        "tauri://localhost"
-                    }
-                    .parse()
-                    .unwrap(),
-                    body: tauri::ipc::InvokeBody::Json(
-                        serde_json::json!({"root":root,"question":"F5499 endpoint provenance question"}),
-                    ),
-                    headers: Default::default(),
-                    invoke_key: tauri::test::INVOKE_KEY.into(),
-                },
-            );
-            // Join the HTTP fixture and remove the private root before any result assertion.
-            let request = server.request();
-            let commands = std::fs::read_to_string(&record).unwrap();
-            let problem = result.expect_err("completed stream without text is a Problem");
-            let said = problem["said"].as_str().unwrap();
-            let detail = problem["detail"].as_str().unwrap_or("");
-            let local =
-                case.starts_with("installed-") && case != "installed-to-byo" || case == "managed";
-            let expected_service = if case == "managed" {
-                "agent-langgraph"
-            } else {
-                "agent-harness"
-            };
-            let correct = if local {
-                said.contains("That key was refused")
-                    && detail.contains(expected_service)
-                    && commands
-                        .lines()
-                        .filter(|line| line.contains("compose logs"))
-                        .count()
-                        == 1
-                    && commands.contains(&format!("\tcompose logs --tail 40 {expected_service}\n"))
-            } else {
-                said.contains("selected endpoint")
-                    && detail.contains(&endpoint)
-                    && !said.contains("key was refused")
-                    && !detail.contains("refused the key")
-                    && commands.is_empty()
-            };
-            let request_correct = request.path
-                == if case == "installed-mastra" {
-                    "/api/agents/fixture-agent/stream"
-                } else {
-                    "/ag-ui"
-                }
-                && request.body.contains("F5499 endpoint provenance question")
-                && request
-                    .headers
-                    .iter()
-                    .any(|header| header == "x-openbot-agent-token: synthetic-ask-token");
-            std::fs::remove_dir_all(&root).unwrap();
-            println!(
-                "F5499_ASK_IPC={}",
-                serde_json::json!({
-                    "case":case, "publicSettings":public_settings, "problem":problem, "commands":commands,
-                    "requestPath":request.path, "requestBody":request.body, "syntheticTokenHeaderCorrect":request_correct,
-                    "expectedBehavior":correct, "httpThreadJoined":true, "rootRemoved":!root.exists(),
-                })
-            );
-            if !correct || !request_correct {
-                failures.push(case);
-            }
-        }
-        std::fs::remove_dir_all(path.bin()).unwrap();
-        assert!(
-            failures.is_empty(),
-            "incorrect endpoint diagnostics: {failures:?}"
-        );
-    }
-
-    #[test]
-    fn ask_the_bot_uses_managed_log_for_managed_fallback_empty_answer() {
-        if crate::test_support::isolated_process(
-            "tests::ask_the_bot_uses_managed_log_for_managed_fallback_empty_answer",
-        ) {
-            return;
-        }
-        let _path = SerializedPath::set_with("docker", "empty-answer");
-        let record = temp_root("openbot-managed-empty-answer-record").join("commands.log");
-        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
-        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
-        let server = TestServer::new(
-            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
-             data: {\"type\":\"RUN_STARTED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n\
-             data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n",
-        );
-        let root = temp_root("openbot-managed-empty-answer");
-        std::fs::create_dir_all(&root).unwrap();
-
-        let problem = tauri::async_runtime::block_on(ask_the_bot_with_settings(
-            root.clone(),
-            "What is 17 times 23?".to_string(),
-            std::collections::BTreeMap::from([
-                ("MANAGED_AGENT_AG_UI_URL".to_string(), server.url.clone()),
-                (
-                    "MANAGED_AGENT_TOKEN".to_string(),
-                    "managed-token".to_string(),
-                ),
-            ]),
-        ))
-        .expect_err("empty managed answer must be diagnosed from managed Bot logs");
-
-        let request = server.request();
-        assert_eq!(request.path, "/");
-        assert!(
-            problem.said.contains("That key was refused"),
-            "{}",
-            problem.said
-        );
-        let detail = problem.detail.as_deref().expect("managed log detail");
-        assert!(
-            detail.contains("agent-langgraph refused the key"),
-            "{detail}"
-        );
-        let commands = std::fs::read_to_string(&record).expect("command record");
-        assert!(
-            commands
-                .lines()
-                .any(|line| line.ends_with("\tcompose logs --tail 40 agent-langgraph")),
-            "{commands}"
-        );
-        assert!(
-            !commands
-                .lines()
-                .any(|line| line.ends_with("\tcompose logs --tail 40 agent-harness")),
-            "{commands}"
-        );
-        let _ = std::fs::remove_dir_all(root);
-        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
-    }
-
-    #[test]
-    fn ask_the_bot_keeps_harness_log_for_picked_harness_empty_answer() {
-        if crate::test_support::isolated_process(
-            "tests::ask_the_bot_keeps_harness_log_for_picked_harness_empty_answer",
-        ) {
-            return;
-        }
-        let _path = SerializedPath::set_with("docker", "empty-answer");
-        let record = temp_root("openbot-picked-empty-answer-record").join("commands.log");
-        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
-        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
-        let server = TestServer::new(
-            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
-             data: {\"type\":\"RUN_STARTED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n\
-             data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n",
-        );
-        let root = temp_root("openbot-picked-empty-answer");
-        std::fs::create_dir_all(&root).unwrap();
-
-        let problem = tauri::async_runtime::block_on(ask_the_bot_with_settings(
-            root.clone(),
-            "What is 17 times 23?".to_string(),
-            std::collections::BTreeMap::from([
-                ("PICKED_HARNESS_URL".to_string(), server.url.clone()),
-                ("PICKED_HARNESS_SOURCE".to_string(), "installed".to_string()),
-                (
-                    "PICKED_HARNESS_KIND".to_string(),
-                    "remote-ag-ui".to_string(),
-                ),
-                (
-                    "MANAGED_AGENT_AG_UI_URL".to_string(),
-                    "http://127.0.0.1:9/ag-ui".to_string(),
-                ),
-                (
-                    "MANAGED_AGENT_TOKEN".to_string(),
-                    "managed-token".to_string(),
-                ),
-            ]),
-        ))
-        .expect_err("picked harness empty answer must still be diagnosed from harness logs");
-
-        let request = server.request();
-        assert_eq!(request.path, "/");
-        assert!(
-            problem.said.contains("That key was refused"),
-            "{}",
-            problem.said
-        );
-        let detail = problem.detail.as_deref().expect("harness log detail");
-        assert!(detail.contains("agent-harness refused the key"), "{detail}");
-        let commands = std::fs::read_to_string(&record).expect("command record");
-        assert!(
-            commands
-                .lines()
-                .any(|line| line.ends_with("\tcompose logs --tail 40 agent-harness")),
-            "{commands}"
-        );
-        assert!(
-            !commands
-                .lines()
-                .any(|line| line.ends_with("\tcompose logs --tail 40 agent-langgraph")),
-            "{commands}"
-        );
-        let _ = std::fs::remove_dir_all(root);
-        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
-    }
-
     /// A Compose file from a release that runs the server and worker as services.
     const INSTALLED_COMPOSE: &str = "services:\n  server: {}\n  worker: {}\n";
 
@@ -14398,8 +13665,6 @@ fn main() {
 
     struct TestRequest {
         path: String,
-        headers: Vec<String>,
-        body: String,
     }
 
     struct TestServer {
@@ -14447,26 +13712,13 @@ fn main() {
                     let read = stream.read(&mut buffer).expect("read body");
                     request.extend_from_slice(&buffer[..read]);
                 }
-                let mut lines = headers.lines();
-                let path = lines
+                let path = headers
+                    .lines()
                     .next()
                     .and_then(|line| line.split_whitespace().nth(1))
                     .expect("path")
                     .to_string();
-                let headers = lines
-                    .filter(|line| !line.trim().is_empty())
-                    .map(|line| line.to_ascii_lowercase())
-                    .collect();
-                let body =
-                    String::from_utf8_lossy(&request[header_end..header_end + content_length])
-                        .to_string();
-                sender
-                    .send(TestRequest {
-                        path,
-                        headers,
-                        body,
-                    })
-                    .expect("send request");
+                sender.send(TestRequest { path }).expect("send request");
                 stream
                     .write_all(response.as_bytes())
                     .expect("write response");
