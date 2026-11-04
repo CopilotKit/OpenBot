@@ -342,8 +342,12 @@ export function createProactiveStore(database: Database) {
         .orderBy(desc(proactiveSettings.createdAt));
     },
     /**
-     * Check-ins turned on for a Bot. The first one runs an interval from now, as the default a first
-     * conversation writes does: turning them on is not asking for one now, which is Run now's job.
+     * A check-in on one thing for a Bot. The first one runs an interval from now: turning it on is
+     * not asking for one now, which is Run now's job.
+     *
+     * A Bot watches each thing once. Accepting an offer for something it already watches (the same
+     * link, or with no link the same subject) turns that one back on with the interval chosen now,
+     * rather than adding a second that reads the same page twice.
      */
     async create(
       owner: string,
@@ -351,6 +355,29 @@ export function createProactiveStore(database: Database) {
       threadId: string,
     ): Promise<ProactiveSetting> {
       const parsed = parseWith(proactiveSettingInputSchema, input);
+      const sourceLink = parsed.sourceLink ?? null;
+      const same = (
+        await database
+          .select()
+          .from(proactiveSettings)
+          .where(
+            and(
+              eq(proactiveSettings.ownerUserId, owner),
+              eq(proactiveSettings.agentId, parsed.agentId),
+            ),
+          )
+      ).find((row) =>
+        sourceLink
+          ? row.sourceLink === sourceLink
+          : !row.sourceLink &&
+            row.subject.toLowerCase() === parsed.subject.toLowerCase(),
+      );
+      if (same)
+        return this.update(owner, same.id, {
+          enabled: true,
+          intervalMinutes: parsed.intervalMinutes,
+          ...(parsed.focus ? { focus: parsed.focus } : {}),
+        });
       const [row] = await database
         .insert(proactiveSettings)
         .values({
@@ -358,14 +385,12 @@ export function createProactiveStore(database: Database) {
           ownerUserId: owner,
           threadId,
           ...parsed,
+          sourceLink,
           nextRunAt: sql`now() + make_interval(mins => ${parsed.intervalMinutes}::int)`,
         })
-        .onConflictDoNothing()
         .returning();
       if (!row)
-        throw new ProactiveRefusedError(
-          "Check-ins are already set up for this Bot.",
-        );
+        throw new ProactiveRefusedError("Couldn't set up that check-in.");
       return row;
     },
     /**
