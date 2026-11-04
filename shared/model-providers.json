@@ -11,7 +11,7 @@
       "label": "Anthropic",
       "key_variable": "ANTHROPIC_API_KEY",
       "base_url_variable": "ANTHROPIC_BASE_URL",
-      "default_model": "claude-sonnet-4-5"
+      "default_model": "claude-sonnet-5-5"
     },
     "google": {
       "label": "Google",

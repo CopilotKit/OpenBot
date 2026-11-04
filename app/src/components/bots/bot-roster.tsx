@@ -35,6 +35,7 @@ import {
   type BotAttention,
   botAttentionQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
  * Every Bot the person can reach, in the one place they are listed: what needs the person first,
@@ -48,6 +49,8 @@ import {
  * This replaces three screens (Bots, Agents and Team Bots) that listed the same Bots three ways.
  */
 export function BotRoster() {
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const agents = useQuery(agentListQueryOptions());
   const hidden = useQuery(agentListQueryOptions(true));
   const attention = useQuery(botAttentionQueryOptions());
@@ -107,15 +110,19 @@ export function BotRoster() {
           </PageEmpty>
         )}
       </PageSection>
-      <PageSection title="Shared with you">
-        {shared.length ? (
-          <RosterRows agents={shared} byId={byId} />
-        ) : (
-          <PageEmpty icon={IconShare} title="Nothing shared yet">
-            Bots somebody shares with you show up here.
-          </PageEmpty>
-        )}
-      </PageSection>
+      {shared.length > 0 || !personal ? (
+        <PageSection
+          title={personal ? "Included with OpenBot" : "Shared with you"}
+        >
+          {shared.length ? (
+            <RosterRows agents={shared} byId={byId} />
+          ) : (
+            <PageEmpty icon={IconShare} title="Nothing shared yet">
+              Bots somebody shares with you show up here.
+            </PageEmpty>
+          )}
+        </PageSection>
+      ) : null}
       <DoneTasks done={list.done} />
       {hidden.data?.length ? (
         <HiddenSection agents={hidden.data} byId={byId} />

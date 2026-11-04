@@ -11,7 +11,6 @@ import { QueryClient } from "@tanstack/react-query";
 import { isRedirect } from "@tanstack/react-router";
 import { act, cleanup, render } from "@testing-library/react";
 import {
-  BUSINESS_URL,
   openTeamFeatures,
   TEAM_FEATURES,
   TeamFeaturesDialog,
@@ -40,7 +39,9 @@ describe("the team features dialog", () => {
     }
     const links = view.queryAllByRole("link");
     expect(links.map((link) => link.textContent)).toEqual(["Talk to us"]);
-    expect(links[0]?.getAttribute("href")).toBe(BUSINESS_URL);
+    expect(links[0]?.getAttribute("href")).toBe(
+      "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business",
+    );
     expect(links[0]?.getAttribute("target")).toBe("_blank");
     expect(
       view.queryAllByRole("button").map((button) => button.textContent),

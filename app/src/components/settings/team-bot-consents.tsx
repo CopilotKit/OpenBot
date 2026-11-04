@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,6 +8,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { clearTeamBotConsentsMutationOptions } from "@/lib/team-bots";
 
 /**
@@ -18,7 +19,10 @@ import { clearTeamBotConsentsMutationOptions } from "@/lib/team-bots";
  * which is the question every other row on Approvals answers, not a connection of its own.
  */
 export function TeamBotConsents() {
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const clear = useMutation(clearTeamBotConsentsMutationOptions());
+  if (personal) return null;
   return (
     <PageSection
       description="A Bot shared with you uses its owner's apps. It uses yours only where you said yes in a conversation."

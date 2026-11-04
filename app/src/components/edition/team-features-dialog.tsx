@@ -62,14 +62,15 @@ export const TEAM_FEATURE_GROUPS: readonly {
         icon: IconAdjustments,
       },
       { title: "Rules every Bot follows", icon: IconListCheck },
-      { title: "Approval rules for everyone", icon: IconChecks },
+      { title: "Governance for everyone", icon: IconChecks },
       { title: "A full audit trail, with export", icon: IconHistory },
     ],
   },
 ];
 
-/** Where Talk to us goes, until there is a page of its own for it. */
-export const BUSINESS_URL = "https://openbot.co";
+/** Book a conversation about OpenBot for Business. */
+export const BUSINESS_URL =
+  "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business";
 
 export const TEAM_FEATURES = TEAM_FEATURE_GROUPS.flatMap(
   (group) => group.features,
@@ -141,6 +142,7 @@ export function TeamFeaturesDialog() {
                 </ul>
               </section>
             ))}
+            <p className="text-muted-foreground text-sm">And tons more…</p>
             {/* An anchor, not Button: Base UI gives a rendered anchor role="button", and this is a link. */}
             <a
               className={cn(buttonVariants(), "mt-2 w-full")}
@@ -220,5 +222,19 @@ export function NavigationTarget({
   }
   return (
     <Link {...props} activeProps={activeProps} onClick={onClick} to={item.to} />
+  );
+}
+
+/** The personal edition's way to learn about a computer for each Bot. */
+export function BusinessComputerLink() {
+  return (
+    <a
+      className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+      href={BUSINESS_URL}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      Give each Bot its own computer with OpenBot for Business.
+    </a>
   );
 }

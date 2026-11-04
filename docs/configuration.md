@@ -60,7 +60,7 @@ at `agent-langgraph` on a laptop.
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
 | `GOOGLE_API_KEY`     | unset                              | Google key when `BOT_PROVIDER=google`.                              |
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
-| `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-4-5`, and `gemini-2.5-flash`. |
+| `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-2.5-flash`. |
 | `AGENT_BOT_MODEL`    | `gpt-5.5`                          | Model for the proof-of-concept Bot (`agent-bot`), kept separate because it speaks `/v1/chat/completions` directly and refuses a model it cannot use. |
 | `BOT_RESPONSES_API`  | `false`                            | Makes `agent-langgraph` use the OpenAI Responses API.               |
 | `BOT_REASONING_EFFORT` | unset (provider default)         | OpenAI and the Responses API only: one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. `agent-langgraph` refuses to start on any other value, on a non-`openai` provider, or without the Responses API. |
@@ -73,6 +73,7 @@ at `agent-langgraph` on a laptop.
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
 | `OPENBOT_ACCESSIBILITY_DISABLED` | unset | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
 | `COMPOSIO_API_KEY`   | provisioned during desktop sign-in or local setup when no broker is configured | One project key for the whole deployment. Desktop sign-in saves a provisioned key in native protected storage and supplies it on Start/restart. A key in `.env` or the environment always wins and is never moved. `start.sh` / `bun run setup:composio` uses the existing CLI login; supplied keys and Arcade are preserved. Direct server/container launches still need the prepared key. See [Composio](plugins/composio.md). |
+| `COMPOSIO_<SLUG>_CLIENT_ID`, `COMPOSIO_<SLUG>_CLIENT_SECRET` | unset | This deployment's own OAuth client for one Composio app that connects with a server-to-server grant (`S2S_OAUTH2`), such as `COMPOSIO_SHOPIFY_CLIENT_ID`. Both or neither. Set, the app can be enabled and connected as one shared account; unset, it stays hidden. Read only when the app is enabled; see [rotating the client](#rotating-a-composio-apps-own-client). See [Composio](plugins/composio.md#the-56-that-are-not-offered). |
 | `OPENBOT_INSTALLATION_ID` | a fresh private UUID in `.env.openbot-installation-id` | Stable Composio provisioning identity, persisted before a request. Optional explicit UUID for first setup; later values must match the saved file. Retain it for retries and restarts, and generate a fresh identity for a new installation. It never falls back to `DEPLOYMENT_ID`. |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
@@ -152,6 +153,30 @@ where the worker runs rather than a fact about the deployment `loadConfig` descr
 it at the server's own port on a laptop; the Helm chart's routines CronJob points it at the server's
 in-cluster Service address.
 
+### Rotating a Composio app's own client
+
+`COMPOSIO_<SLUG>_CLIENT_ID` and `COMPOSIO_<SLUG>_CLIENT_SECRET` are read when an administrator
+enables the app. Enabling creates an authorization config at Composio named after the app with
+`(OpenBot)` at the end, such as `Shopify (OpenBot)`, and saves the client on it. Composio then uses
+that saved client for every token. While that config stands, enabling never replaces it, so changing
+either variable later and restarting changes nothing at Composio.
+
+To rotate the secret, do one of these:
+
+- **Update the config at Composio.** In the Composio dashboard, under Auth Configs, open the
+  `(OpenBot)` config for the app and replace the client secret. The shared account, its grants and
+  every Bot that uses it stay as they are. Set the new value in the environment as well, so a config
+  created later carries it.
+- **Turn the app off and on again.** Set the new values, restart, then on the app's Plugins page
+  turn **Enable for this deployment** off and back on. Turning it off deletes the config at Composio
+  and ends the shared account and every Bot's grant on the app. Turning it on creates a new config
+  with the new client. Then make the app shared, connect the team account and grant it to Bots again.
+
+An app on its own client connects only as one shared account. Because the credential is this
+deployment's client, a personal account would give anyone who can see the app its full access, so
+**Connect** refuses one and the screens don't offer it. Make the app shared on its Plugins page, and
+an administrator connects it there.
+
 ## The provider spec file
 
 `shared/model-providers.json` is one file, and every language in the box reads it: the TypeScript
@@ -194,7 +219,7 @@ when nobody chose a model. API keys never appear in the file: they arrive in the
 under the `key_variable` the provider row names.
 
 Adding a Bot in any language is adding one `bots` entry — `"agent-java": { "provider":
-"anthropic", "model": "claude-sonnet-4-5" }` — after which that Bot resolves its model the same
+"anthropic", "model": "claude-sonnet-5-5" }` — after which that Bot resolves its model the same
 way everything else does. A row that names a provider no `providers` entry exists for, or leaves a
 field empty, stops every Bot at startup with the path of the key that is wrong, rather than at the
 first model call.
@@ -606,7 +631,8 @@ Slack app of its own.
 
 Point OpenTag's `AGENT_URL` at `<public URL>/api/delivery/webhooks/opentag/agent`. A person links
 their Slack or Teams identity from a Bot's page, under **Reaching you**: OpenBot shows a one-time `link <code>` message,
-valid for ten minutes, which they send to the OpenTag app. After that, only that person's messages
+valid for ten minutes, which they send to the OpenTag app in a direct message. On Slack, a code posted
+in a shared channel is cancelled, because whoever sends it first is linked to that Bot. After that, only that person's messages
 reach their chosen Bot, in their own OpenBot conversation, with learning, governance, approvals and
 audit on every turn. Anyone unlinked is told how to link and nothing runs. Approval requests appear
 as OpenTag approval cards (allow once, always allow, cancel) and are decided through the approvals
@@ -1143,6 +1169,26 @@ useful answer is that the image could not be fetched. Somewhere that must never 
 
 `docs/releasing.md` shows reading the digests straight out of a release's `container-images.json`.
 
+## Setup checklist
+
+**Settings → Setup** shows admins one row each for
+CopilotKit Intelligence, the AI model, the Bot computer, more apps (Composio or Arcade) and Slack and
+Teams. They are read from `GET /api/setup`, and `POST /api/setup/check` asks again.
+
+- **Ready means it works.** Intelligence is read from its own entitlement answer and the model from
+  the provider's answer for the key in use now. A computer is Ready when every running one took its
+  network policy; with none running it reads "not checked". More apps and Slack and Teams read Ready
+  when they are configured.
+- **Who reads it decides what it says.** An admin, and somebody running OpenBot alone
+  (`OPENBOT_SINGLE_USER`), is shown the page or the variable that closes each gap. Everybody else sees
+  whether it works and "Your admin sets this up.", and their response carries no variable name.
+  Only those who can act on it get the Settings page.
+- **What it costs.** Both routes need a signed-in person. Answers from Intelligence, the provider and
+  the computers are kept for five minutes. A read asks again sooner only when one of them could not
+  be had (Intelligence did not answer, or the provider was never asked about the key in use); a
+  refusal waits for Check again or for the five minutes. Asking again, by a read or by Check again,
+  happens at most once every ten seconds for the whole server, and never wakes a stopped computer.
+
 ## Ports
 
 | Service           | Default port               | Setting           |
@@ -1337,7 +1383,7 @@ model:
 
 `provider` must be `openai` or `anthropic`. `credential_secret_ref` is a reference to a stored credential, not a credential value. `default_model` is passed through as written, so an OpenAI-compatible endpoint reached through `OPENAI_BASE_URL` takes the name that endpoint publishes.
 
-At start-up the server asks OpenAI or Anthropic, once, whether the configured key can call `default_model`. A key that cannot (a project key whose model allowlist leaves it out, say) would otherwise fail at the first message; instead the log says `model-unavailable`, naming the model and the fix. A rejected key logs `model-credential-rejected`. Nothing is asked with no key configured yet, or of an endpoint set by `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`, and start-up never waits for the answer.
+At start-up the server asks OpenAI or Anthropic, once, whether the configured key can call `default_model`. A key that cannot (a project key whose model allowlist leaves it out, say) would otherwise fail at the first message; instead the log says `model-unavailable`, naming the model and the fix. A rejected key logs `model-credential-rejected`. Nothing is asked with no key configured yet, or of an endpoint set by `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL` to another host. A base URL that is the provider's own API written out (`https://api.openai.com/v1`, say) is still asked. Start-up never waits for the answer, which the [setup checklist](#setup-checklist) also shows.
 
 ### `knowledge.yaml`
 

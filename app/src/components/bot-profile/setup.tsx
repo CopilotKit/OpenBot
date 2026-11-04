@@ -12,6 +12,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import type { ZodType } from "zod";
 import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
+import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -129,7 +130,16 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
               </Item>
             </Fragment>
           ))}
-          {personal ? null : (
+          {personal ? (
+            <>
+              <Separator />
+              <Item size="sm">
+                <ItemContent>
+                  <BusinessComputerLink />
+                </ItemContent>
+              </Item>
+            </>
+          ) : (
             <>
               <Separator />
               <VisibilityRow

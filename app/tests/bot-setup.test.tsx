@@ -210,6 +210,13 @@ test("the personal edition's Setup has no Visibility or Isolated: one person, on
   serve(MANAGED);
   const view = draw("personal");
   expect(await view.findByRole("button", { name: /^Name/ })).toBeTruthy();
+  expect(
+    view
+      .getByRole("link", {
+        name: "Give each Bot its own computer with OpenBot for Business.",
+      })
+      .getAttribute("href"),
+  ).toBe("https://calendly.com/d/dwfr-k64-8d2/openbot-for-business");
   expect(view.queryByText("Visibility")).toBeNull();
   expect(view.queryByText("Isolated")).toBeNull();
 });

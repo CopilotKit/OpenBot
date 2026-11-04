@@ -8,6 +8,7 @@ import {
   IconHistory,
   IconKey,
   IconLayoutGrid,
+  IconListCheck,
   IconLock,
   IconSchool,
   IconSettings,
@@ -21,11 +22,14 @@ import {
   SidebarGroup,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
@@ -40,6 +44,7 @@ type SettingsSidebarItem = {
   icon: React.ComponentType<{ className?: string }>;
   linkOptions: LinkOptions;
   title: string;
+  setup?: boolean;
 };
 
 export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
@@ -73,6 +78,13 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     title: "Learning",
     icon: IconSchool,
     linkOptions: { to: "/settings/learning" },
+  },
+  {
+    /* What the deployment has and still needs: onboarding's checklist, to come back to. */
+    title: "Setup",
+    icon: IconListCheck,
+    linkOptions: { to: "/settings/setup" },
+    setup: true,
   },
   {
     /* Logins saved from a Bot's private sign-in form. */
@@ -139,8 +151,25 @@ export function settingsSidebarItems(
 export function SettingsSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
-  const { data } = useQuery(deploymentCapabilitiesQueryOptions());
-  const items = settingsSidebarItems(data?.edition ?? "team");
+  const user = useQuery(currentUserQueryOptions()).data;
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions()).data;
+  const canSetUp = mayOpenSetup(user, capabilities);
+  /*
+   * What an admin can act on, counted beside Setup: rows that need setup and say how. Onboarding
+   * leaves the checklist out, so this is where an admin learns something is waiting on them. Never
+   * asked for anybody else, who could not fix any of it.
+   */
+  const checklist = useQuery({
+    ...setupChecklistQueryOptions(),
+    enabled: canSetUp,
+  }).data;
+  const toFix =
+    checklist?.audience === "admin"
+      ? checklist.rows.filter(
+          (row) => row.status === "needs_setup" && row.fix !== null,
+        ).length
+      : 0;
+  const items = settingsSidebarItems(capabilities?.edition ?? "team");
   return (
     <Sidebar variant="inset" {...props}>
       {/* Matched to the app sidebar's header, as Admin's is. See admin-sidebar.tsx. */}
@@ -165,23 +194,35 @@ export function SettingsSidebar({
          */}
         <SidebarGroup>
           <SidebarMenu className="gap-px">
-            {items.map((option) => (
-              <SidebarMenuItem key={option.title}>
-                <SidebarMenuButton
-                  render={(props) => (
-                    <Link
-                      {...option.linkOptions}
-                      activeOptions={{ exact: option.exact ?? false }}
-                      activeProps={{ className: "bg-foreground/5" }}
-                      {...props}
-                    >
-                      <option.icon className="mr-2 h-4 w-4" />
-                      {option.title}
-                    </Link>
-                  )}
-                />
-              </SidebarMenuItem>
-            ))}
+            {items
+              .filter((option) => !option.setup || canSetUp)
+              .map((option) => (
+                <SidebarMenuItem key={option.title}>
+                  <SidebarMenuButton
+                    render={(props) => (
+                      <Link
+                        {...option.linkOptions}
+                        activeOptions={{ exact: option.exact ?? false }}
+                        activeProps={{ className: "bg-foreground/5" }}
+                        {...props}
+                      >
+                        <option.icon className="mr-2 h-4 w-4" />
+                        {option.title}
+                        {option.setup && toFix > 0 ? (
+                          <span className="sr-only">
+                            , {toFix} {toFix === 1 ? "needs" : "need"} setup
+                          </span>
+                        ) : null}
+                      </Link>
+                    )}
+                  />
+                  {option.setup && toFix > 0 ? (
+                    <SidebarMenuBadge aria-hidden="true">
+                      {toFix}
+                    </SidebarMenuBadge>
+                  ) : null}
+                </SidebarMenuItem>
+              ))}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

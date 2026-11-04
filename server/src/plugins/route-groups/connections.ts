@@ -17,6 +17,10 @@ import {
 } from "../broker";
 import { catalogueEntry } from "../catalogue";
 import {
+  sharedAccountOnly,
+  sharedAccountOnlySentence,
+} from "../deployment-clients";
+import {
   authorizationUrlFor,
   type ConnectOrigin,
   challengeFor,
@@ -212,6 +216,22 @@ export function mountConnectionRoutes({
         );
       }
       const { account } = resolved;
+
+      /*
+       * AN APP ON THE DEPLOYMENT'S OWN CLIENT IS NEVER ONE PERSON'S ACCOUNT, AND IS REFUSED BEFORE
+       * THE FORM IS EVEN ASKED FOR. What such a person would type is a store subdomain; what
+       * Composio would exchange is the client whoever runs this deployment registered, so a
+       * personal account here is the organization's access under one person's name, granted by
+       * nobody (see `sharedAccountOnly`). A Shared app's account is the deployment's and is let
+       * through: only an administrator reaches it, decided by the resolver above. 403, because the
+       * person pressing Connect cannot make this request succeed by changing what they send.
+       */
+      if (account.holder === "person" && sharedAccountOnly(row.authScheme)) {
+        return context.json(
+          { error: sharedAccountOnlySentence(row.title) },
+          403,
+        );
+      }
 
       /*
        * `composio` IS CHECKED AGAIN HERE FOR `tsc`'S BENEFIT AND NOT FOR THE REFUSAL. The function
