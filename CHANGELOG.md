@@ -338,6 +338,20 @@ can also call OpenBot's API with a person's Entra token; a token issued to any o
 Migration `0073_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
 without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
 
+### Shopify and other Composio apps on a server-to-server grant can be connected
+
+Composio publishes some apps, Shopify among them, with only `OAUTH2` and `S2S_OAUTH2` and nothing
+it manages, so they were hidden from the picker and refused at enable. Set
+`COMPOSIO_<SLUG>_CLIENT_ID` and `COMPOSIO_<SLUG>_CLIENT_SECRET` (for Shopify,
+`COMPOSIO_SHOPIFY_CLIENT_ID` and `COMPOSIO_SHOPIFY_CLIENT_SECRET`) to the OAuth client you
+registered with the vendor, and the app can be enabled and connected: Composio exchanges that client
+for the token, and the connect form asks only for what the connection needs, such as the store
+subdomain. Because the credential is the deployment's, such an app connects only as one shared
+account: an administrator makes it shared, connects it and grants it to Bots, and a personal
+Connect is refused and not offered. The client is saved on the app's config at Composio when it is
+enabled; see [rotating the client](docs/configuration.md#rotating-a-composio-apps-own-client).
+Unset, nothing changes.
+
 ### A Bot sees the images its tools return
 
 An image a tool returned, such as a Gmail attachment fetched through Composio, reached the model as

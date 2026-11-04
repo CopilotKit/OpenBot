@@ -72,6 +72,7 @@ at `agent-langgraph` on a laptop.
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
 | `OPENBOT_ACCESSIBILITY_DISABLED` | unset | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
 | `COMPOSIO_API_KEY`   | provisioned during desktop sign-in or local setup when no broker is configured | One project key for the whole deployment. Desktop sign-in saves a provisioned key in native protected storage and supplies it on Start/restart. A key in `.env` or the environment always wins and is never moved. `start.sh` / `bun run setup:composio` uses the existing CLI login; supplied keys and Arcade are preserved. Direct server/container launches still need the prepared key. See [Composio](plugins/composio.md). |
+| `COMPOSIO_<SLUG>_CLIENT_ID`, `COMPOSIO_<SLUG>_CLIENT_SECRET` | unset | This deployment's own OAuth client for one Composio app that connects with a server-to-server grant (`S2S_OAUTH2`), such as `COMPOSIO_SHOPIFY_CLIENT_ID`. Both or neither. Set, the app can be enabled and connected as one shared account; unset, it stays hidden. Read only when the app is enabled; see [rotating the client](#rotating-a-composio-apps-own-client). See [Composio](plugins/composio.md#the-56-that-are-not-offered). |
 | `OPENBOT_INSTALLATION_ID` | a fresh private UUID in `.env.openbot-installation-id` | Stable Composio provisioning identity, persisted before a request. Optional explicit UUID for first setup; later values must match the saved file. Retain it for retries and restarts, and generate a fresh identity for a new installation. It never falls back to `DEPLOYMENT_ID`. |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
@@ -150,6 +151,30 @@ above: it says where the worker's own process can reach this deployment's API, w
 where the worker runs rather than a fact about the deployment `loadConfig` describes. `start.sh` points
 it at the server's own port on a laptop; the Helm chart's routines CronJob points it at the server's
 in-cluster Service address.
+
+### Rotating a Composio app's own client
+
+`COMPOSIO_<SLUG>_CLIENT_ID` and `COMPOSIO_<SLUG>_CLIENT_SECRET` are read when an administrator
+enables the app. Enabling creates an authorization config at Composio named after the app with
+`(OpenBot)` at the end, such as `Shopify (OpenBot)`, and saves the client on it. Composio then uses
+that saved client for every token. While that config stands, enabling never replaces it, so changing
+either variable later and restarting changes nothing at Composio.
+
+To rotate the secret, do one of these:
+
+- **Update the config at Composio.** In the Composio dashboard, under Auth Configs, open the
+  `(OpenBot)` config for the app and replace the client secret. The shared account, its grants and
+  every Bot that uses it stay as they are. Set the new value in the environment as well, so a config
+  created later carries it.
+- **Turn the app off and on again.** Set the new values, restart, then on the app's Plugins page
+  turn **Enable for this deployment** off and back on. Turning it off deletes the config at Composio
+  and ends the shared account and every Bot's grant on the app. Turning it on creates a new config
+  with the new client. Then make the app shared, connect the team account and grant it to Bots again.
+
+An app on its own client connects only as one shared account. Because the credential is this
+deployment's client, a personal account would give anyone who can see the app its full access, so
+**Connect** refuses one and the screens don't offer it. Make the app shared on its Plugins page, and
+an administrator connects it there.
 
 ## The provider spec file
 

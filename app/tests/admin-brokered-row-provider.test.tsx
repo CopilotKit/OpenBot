@@ -91,10 +91,11 @@ function install(setup: {
   provider: Provider;
   shared: boolean;
   configured: boolean;
+  overrides?: Partial<PluginServer>;
 }) {
   const page: PluginsPage = {
     catalogue: [],
-    servers: [server(setup.provider, setup.shared)],
+    servers: [{ ...server(setup.provider, setup.shared), ...setup.overrides }],
     skills: [],
     botsMayCallBack: true,
     redirectUri: null,
@@ -193,3 +194,39 @@ for (const shared of [false, true]) {
     expect(view.container.textContent).toContain(COMPOSIO_KEY_MISSING);
   });
 }
+
+/*
+ * AN APP THAT CAN ONLY HOLD A SHARED ACCOUNT (it signs in with the deployment's own client) is
+ * offered no personal Connect, and once Shared no way back to Personal. Read off `sharedOnly` on
+ * the listing, never off the app's name; the server refuses a personal connect whatever is drawn.
+ */
+const SHARED_ONLY = {
+  authScheme: "S2S_OAUTH2",
+  sharedOnly: true,
+  title: "Store",
+} as const;
+
+test("an app that can only hold a shared account offers no personal Connect, only the switch to shared", async () => {
+  install({
+    provider: "composio",
+    shared: false,
+    configured: true,
+    overrides: { ...SHARED_ONLY, accountMode: "personal" },
+  });
+  const view = renderScreen();
+  await view.findByText(/connects only as one shared account/);
+  expect(view.queryByRole("button", { name: /^Connect/ })).toBeNull();
+  expect(view.getByRole("button", { name: "Make shared" })).toBeTruthy();
+});
+
+test("an app that can only hold a shared account, once shared, cannot be made personal", async () => {
+  install({
+    provider: "composio",
+    shared: true,
+    configured: true,
+    overrides: SHARED_ONLY,
+  });
+  const view = renderScreen();
+  await view.findByText(/so it can't be made personal/);
+  expect(view.queryByRole("button", { name: "Make personal" })).toBeNull();
+});

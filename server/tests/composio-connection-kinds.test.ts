@@ -602,10 +602,24 @@ const NO_PROBE_APP = {
 const botId = `agent_kinds_${suite}`;
 const admin = "admin@openbot.local";
 
-const APP_IDS = [...Object.values(APP).map((app) => app.id), NO_PROBE_APP.id];
+/**
+ * A KEY-KIND APP ON THE DEPLOYMENT'S OWN CLIENT (`S2S_OAUTH2`), which may only hold a shared
+ * account. Seeded by the one test about it, not by `beforeEach`, so no cell above meets it.
+ */
+const S2S_APP = {
+  slug: `kinds-s2s-${suite}`,
+  id: `composio-kinds-s2s-${suite}`,
+};
+
+const APP_IDS = [
+  ...Object.values(APP).map((app) => app.id),
+  NO_PROBE_APP.id,
+  S2S_APP.id,
+];
 const TOOLKITS = [
   ...Object.values(APP).map((app) => app.slug),
   NO_PROBE_APP.slug,
+  S2S_APP.slug,
 ];
 
 /** The one action the key app publishes, which is what a probe may be spent on. */
@@ -2042,6 +2056,30 @@ describe("what a brokered connection writes into the append-only trail", () => {
       ...new Set([...byConsent, ...byFields].map((payload) => payload.scope)),
     ]).toEqual([""]);
   });
+});
+
+/**
+ * CONNECT ON THE DEPLOYMENT'S OWN CLIENT, PRESSED BY A PERSON ON A PERSONAL APP.
+ *
+ * CRITERION. Both presses — the first, asking for the form, and one carrying values — answer 403
+ * with the sentence naming the shared account, and Composio is asked nothing.
+ *
+ * REASON. The person would type a store subdomain and the credential would be the deployment's
+ * client, so a personal account here is the organization's access under their name. Refused before
+ * the form is asked for, so nobody is drawn a form whose submission could only be refused.
+ */
+test("a person pressing Connect on an app on the deployment's own client is refused, and Composio is asked nothing", async () => {
+  await seedApp(S2S_APP.id, S2S_APP.slug, "S2S_OAUTH2");
+
+  for (const body of [undefined, { values: { subdomain: "acme" } }]) {
+    const pressed = await connectPress(S2S_APP.id, body);
+    expect(pressed.status).toBe(403);
+    expect(String(pressed.payload.error)).toContain(
+      "connects only as one shared account",
+    );
+  }
+  expect(brokerAsks).toEqual([]);
+  expect(await recordedHere()).toEqual([]);
 });
 
 afterAll(async () => {
