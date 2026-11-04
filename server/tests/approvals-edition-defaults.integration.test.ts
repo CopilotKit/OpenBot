@@ -32,30 +32,31 @@ afterAll(async () => {
   await database.$client.close();
 });
 
-test("the personal edition asks first for somebody who has chosen nothing", async () => {
+// Only what the safety policy names asks first (approvals/policy.ts); ordinary changes just happen.
+test("the personal edition does not ask before ordinary changes for somebody who has chosen nothing", async () => {
   setEdition("personal");
   expect(await policy.preferences(fresh)).toEqual({
-    enabled: true,
+    enabled: false,
     autoReview: false,
     hostCommands: "ask",
   });
 });
 
-test("the team edition does not", async () => {
+test("nor does the team edition", async () => {
   expect((await policy.preferences(fresh)).enabled).toBe(false);
 });
 
 test("a saved choice beats the personal edition's default", async () => {
   setEdition("personal");
-  await policy.setPreferences(chose, { enabled: false });
-  expect((await policy.preferences(chose)).enabled).toBe(false);
-  expect(await store.enabled(chose)).toBe(false);
+  await policy.setPreferences(chose, { enabled: true });
+  expect((await policy.preferences(chose)).enabled).toBe(true);
+  expect(await store.enabled(chose)).toBe(true);
 });
 
 // The switch on Settings → Approvals reads this; it must say what the policy above decides.
-test("the personal edition's switch shows asking first as on for somebody who chose nothing", async () => {
+test("the personal edition's switch shows asking first as off for somebody who chose nothing", async () => {
   setEdition("personal");
-  expect(await store.enabled(fresh)).toBe(true);
+  expect(await store.enabled(fresh)).toBe(false);
   setEdition("team");
   expect(await store.enabled(fresh)).toBe(false);
 });

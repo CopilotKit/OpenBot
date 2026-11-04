@@ -54,7 +54,7 @@ settings and team rules, and a paused Automatic Learning.
 | --- | --- |
 | Use Bots, cloud browser, network and computer, custom rules, password manager, apps a Bot uses as you, check-ins | On |
 | Local computer access, Slack and Teams, Team Bots, Isolated Bots | Off |
-| Ask before acting | On for anybody who has not chosen otherwise |
+| Ask before making changes | Off for anybody who has not chosen otherwise. Paying, deleting, sending, sharing and posting ask anyway. See [Approvals](approvals.md) |
 | Stop idle computers | Never: there is one |
 | Check-ins per Bot per day | 24, as in the team edition |
 | SSO, action recording, model and MCP allowlists, skill sharing | Off |
@@ -81,9 +81,11 @@ account are the same decision when one person makes both:
   client typed first wait behind **Show apps that need setup**, and a search finds them too. With a
   broker set up, the last tile browses its directory of more apps.
 - Connecting an app gives **every Bot every tool** it lists, including the ones that change things.
-  What stands in front of a write is Ask before acting (Allow once, Always allow here, or Deny, in the
-  conversation). An app can't be taken from one Bot; turning it off takes it from all of them. See
-  `server/src/plugins/personal-defaults.ts`.
+  Ordinary changes just happen. Deleting, sending, sharing and posting ask first in the
+  conversation (Allow once or Deny), and paying or buying is handed to you. Turn on **Ask before
+  making changes** in Settings → Approvals to be asked about every change. See
+  [Approvals](approvals.md). An app can't be taken from one Bot; turning it off takes it from all of
+  them. See `server/src/plugins/personal-defaults.ts`.
 - A connected tile opens `/connections/<app>`: its tools, your account, and turning it off.
 - **Sign-ins and keys**, below the grid, links to saved website logins and API keys, which live under
   Settings.
