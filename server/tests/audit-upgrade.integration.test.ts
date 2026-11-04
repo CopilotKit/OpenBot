@@ -231,7 +231,9 @@ describe("copying an upgraded deployment's trail into Intelligence", () => {
   });
 
   test("a copy cut off part-way resumes from its bookmark rather than starting over", async () => {
-    await seedPreviousRelease();
+    // More rows than the first attempt gets through, whatever else this database holds: a test run
+    // alone, or after one that took old rows out, finds fewer than that already there.
+    while ((await localCount("audit_events")) <= 6) await seedPreviousRelease();
     const local = await localCount("audit_events");
     expect(local).toBeGreaterThan(6);
 
