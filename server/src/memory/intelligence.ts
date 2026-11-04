@@ -38,6 +38,12 @@ export type WireMemory = {
   enabled: boolean;
   provenance: string | null;
   formedBy: "person" | "import" | "agent" | null;
+  /**
+   * The Bot that formed it. Where it came from, not who may see it: a Bot-formed memory is for every
+   * agent in Intelligence (`agentId` null), so once the person confirms it every other app on the
+   * project reads it, as the mirror gave them before; OpenBot itself gives it only to this Bot.
+   */
+  formedByAgentId?: string | null;
   sourceId: string | null;
   externalId: string | null;
   contentDigest: string | null;
@@ -79,6 +85,7 @@ export type MemoryWriteFields = {
   enabled?: boolean;
   provenance?: string | null;
   formedBy?: "person" | "import" | "agent" | null;
+  formedByAgentId?: string | null;
   sourceId?: string | null;
   externalId?: string | null;
   contentDigest?: string | null;

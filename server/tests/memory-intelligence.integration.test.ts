@@ -132,28 +132,65 @@ test("an edit reaches other apps, and pausing or forgetting takes it from them",
   expect(await seenByOtherApps(ada)).not.toContain("Lives in Porto");
 });
 
-test("a Bot-formed memory reaches no other reader, and once confirmed only its own Bot's recall", async () => {
+test("a Bot-formed memory is seen exactly as before: its own Bot inside OpenBot, and once confirmed every other app", async () => {
+  /*
+   * What the mirror gave before this moved: an unreviewed Bot-formed memory stayed in OpenBot; once the
+   * person confirmed it, it was mirrored as the person's own, so every other app on the project read it
+   * and recalled it; pausing or forgetting it took it back. Inside OpenBot it only ever reached the Bot
+   * that formed it (and only while it held the app it was read from).
+   */
+  const held = { botId: bot, heldServerIds: new Set(["linear"]) };
+  const other = { botId: otherBot, heldServerIds: new Set(["linear"]) };
+  const contents = async (formedFor: typeof held) =>
+    (await store.retrieve(ada, [], "", formedFor)).map((m) => m.content);
+  const recalledByOtherApps = async (query: string) =>
+    (
+      (await otherApp("POST", "/api/memories/recall", ada, { query })).body as {
+        memories: { content: string }[];
+      }
+    ).memories.map((memory) => memory.content);
+
   const formed = await store.formMemory(ada, {
     agentId: bot,
     content: "Owns the billing migration",
     sourceApp: "Linear",
+    sourceRef: "linear/get_issue",
   });
+  // Awaiting review: its own Bot only.
+  expect(await contents(held)).toContain("Owns the billing migration");
+  expect(await contents(other)).not.toContain("Owns the billing migration");
   expect(await seenByOtherApps(ada)).not.toContain(
     "Owns the billing migration",
   );
+
+  // Confirmed: still its own Bot only inside OpenBot, and now every other app on the project.
   await store.update(ada, formed.id, { reviewState: "confirmed" });
-  // Scoped to the Bot that formed it: Intelligence recalls it for that Bot, never for anyone else.
-  const forBot = await intelligence.recall(ada, "billing", {
-    limit: 5,
-    agentId: bot,
-  });
-  expect(forBot.memories.map((memory) => memory.id)).toEqual([formed.id]);
-  const forAnyone = await intelligence.recall(ada, "billing", { limit: 5 });
-  expect(forAnyone.memories).toEqual([]);
+  expect(await contents(held)).toContain("Owns the billing migration");
+  expect(await contents(other)).not.toContain("Owns the billing migration");
+  expect(await seenByOtherApps(ada)).toContain("Owns the billing migration");
+  expect(await recalledByOtherApps("billing")).toContain(
+    "Owns the billing migration",
+  );
+  // Its Bot no longer holding the app withdraws it from that Bot, not from the other apps.
+  expect(
+    await contents({ botId: bot, heldServerIds: new Set<string>() }),
+  ).not.toContain("Owns the billing migration");
+  expect(await seenByOtherApps(ada)).toContain("Owns the billing migration");
+
+  // Paused, then forgotten: gone from every other app again.
+  await store.update(ada, formed.id, { enabled: false });
   expect(await seenByOtherApps(ada)).not.toContain(
     "Owns the billing migration",
   );
+  await store.update(ada, formed.id, { enabled: true });
+  expect(await seenByOtherApps(ada)).toContain("Owns the billing migration");
   await store.remove(ada, formed.id);
+  expect(await seenByOtherApps(ada)).not.toContain(
+    "Owns the billing migration",
+  );
+  expect(await recalledByOtherApps("billing")).not.toContain(
+    "Owns the billing migration",
+  );
 });
 
 test("without semantic memory, memory is stored and a search is the word match it always was", async () => {

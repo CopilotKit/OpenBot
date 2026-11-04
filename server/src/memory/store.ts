@@ -85,7 +85,8 @@ export function toMemoryRecord(
     enabled: otherApps ? true : memory.enabled,
     reviewState: otherApps ? "confirmed" : memory.reviewState,
     formedBy,
-    formedByAgentId: formedBy === "bot" ? memory.agentId : null,
+    formedByAgentId:
+      formedBy === "bot" ? (memory.formedByAgentId ?? memory.agentId) : null,
     sourceId: memory.sourceId,
     externalId: memory.externalId,
     importDigest: memory.contentDigest,
@@ -327,7 +328,9 @@ export function createMemoryStore(
             ),
           reviewState: "unreviewed",
           formedBy: "agent",
-          agentId: input.agentId,
+          // Who formed it, not who may see it: OpenBot keeps it to this Bot (`eligible`), and once the
+          // person confirms it every other app on the project reads it, as the mirror gave them before.
+          formedByAgentId: input.agentId,
           contentDigest: digest,
           sourceApp: parsed.data.sourceApp,
           sourceRef: input.sourceRef ?? null,
@@ -738,7 +741,7 @@ export function createMemoryStore(
           .filter(
             (memory) =>
               memory.formedBy === "agent" &&
-              memory.agentId === agentId &&
+              (memory.formedByAgentId ?? memory.agentId) === agentId &&
               memory.sourceId === null &&
               !memory.invalidatedAt,
           )

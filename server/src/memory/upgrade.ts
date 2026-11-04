@@ -75,7 +75,9 @@ function metadataOf(row: MemoryRow): MemoryWriteFields {
         ? "import"
         : "person";
   return {
-    agentId: row.formedBy === "bot" ? row.formedByAgentId : null,
+    // For every agent, as the mirror kept a confirmed one; the Bot that formed it is where it came from.
+    agentId: null,
+    formedByAgentId: row.formedBy === "bot" ? row.formedByAgentId : null,
     reviewState: row.reviewState,
     enabled: row.deletedAt ? false : row.enabled,
     provenance: row.provenance.slice(0, 1000),

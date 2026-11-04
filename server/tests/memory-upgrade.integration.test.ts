@@ -279,9 +279,11 @@ test("sources and memories move with their ids, states and times; mirrored ones 
     agentId: null,
     observedAt: "2026-10-01T09:00:00.000Z",
   });
+  // Formed by the Bot, for every agent in Intelligence: once confirmed, other apps read it, as the mirror gave them.
   expect(held.get(ids.formed)).toMatchObject({
     formedBy: "agent",
-    agentId: bot,
+    formedByAgentId: bot,
+    agentId: null,
     contentDigest: "digest-billing",
     sourceApp: "Linear",
     sourceRef: "linear/search",
@@ -299,7 +301,7 @@ test("sources and memories move with their ids, states and times; mirrored ones 
   const again = await intelligence.createMemory(ada, {
     content: "Forgotten fact",
     formedBy: "agent",
-    agentId: `${bot}-another`,
+    formedByAgentId: `${bot}-another`,
     contentDigest: "digest-forgotten",
   });
   expect(again).toMatchObject({ id: ids.forgotten, duplicate: true });

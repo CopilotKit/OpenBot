@@ -490,8 +490,8 @@ test("resetting one Bot leaves another Bot's copy of the same fact", async () =>
     await reset.execute({ id: owner, role: "user" }, bot);
     const rows = (await held())
       .filter((memory) => memory.content === content)
-      .map((memory) => ({ id: memory.id, agentId: memory.agentId }));
-    expect(rows).toEqual([{ id: kept.id, agentId: otherBot }]);
+      .map((memory) => ({ id: memory.id, formedBy: memory.formedByAgentId }));
+    expect(rows).toEqual([{ id: kept.id, formedBy: otherBot }]);
   } finally {
     for (const memory of await held())
       if (memory.content === content)
