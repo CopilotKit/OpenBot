@@ -14,7 +14,7 @@
  * before: one setting per person and Bot, one running check-in per setting, one open item per title.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { createAuditReader } from "../audit";
 import type { Database } from "../db/client";
 import { users } from "../db/schema/core";
