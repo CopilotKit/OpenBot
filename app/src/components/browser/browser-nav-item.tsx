@@ -1,6 +1,6 @@
 import type { RealBrowser } from "@openbot/shared/openbot-browser";
 import type { RecorderActivity } from "@openbot/shared/recorder-api";
-import { IconSchool } from "@tabler/icons-react";
+import { IconChalkboardTeacher } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -97,7 +97,7 @@ function BrowserLabel({ children }: { children?: ReactNode }) {
   return (
     <>
       <div className="size-[28px] flex items-center justify-center">
-        <IconSchool />
+        <IconChalkboardTeacher />
       </div>
       <span className="text-sm">{TEACH_A_BOT}</span>
       {children}
