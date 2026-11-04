@@ -31,7 +31,8 @@ use authenticated Intelligence administration to create a container and assign i
 There is no managed licence step. Then add `OPENAI_API_KEY`.
 
 The same CLI sign-in also prepares Composio on the first `bash scripts/start.sh`;
-`bun run setup:composio` runs that step alone, independently of Learning. A supplied
+`bun run setup:composio` runs that step alone, independently of Learning. A failure
+does not stop the start: OpenBot runs with apps unavailable until a retry succeeds. A supplied
 `COMPOSIO_API_KEY`, an explicit Arcade selection, or an Arcade-only key is preserved.
 The helper saves a stable installation UUID privately before any provisioning request,
 then the CLI saves this installation's Composio project key in `.env`. Keep
