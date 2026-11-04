@@ -20,17 +20,13 @@ import {
   DirectoryProjectMismatchError,
   type PeopleDirectory,
 } from "../src/people/directory/directory";
-import { testIntelligence } from "./support/bots";
+import { secondTestProject, testIntelligence } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { uniqueEmail } from "./support/directory";
 
+/** A project of its own: this suite starts a people directory, which reads its whole project into the database. */
 function secondProjectKey(): string {
-  const key = process.env.TEST_INTELLIGENCE_API_KEY_2?.trim();
-  if (!key)
-    throw new Error(
-      "TEST_INTELLIGENCE_API_KEY_2 must name a second project of the test Intelligence: this suite starts a people directory, which reads its whole project into the database.",
-    );
-  return key;
+  return secondTestProject().apiKey;
 }
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);

@@ -34,17 +34,13 @@ import {
   PEOPLE_COPY_NAME,
 } from "../src/people/directory/upgrade";
 import { registerScimConnection } from "../src/auth/scim";
-import { testIntelligence } from "./support/bots";
+import { secondTestProject, testIntelligence } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { uniqueEmail } from "./support/directory";
 
+/** A project of its own: the upgrade copy writes a whole deployment's people into its project. */
 function secondProjectKey(): string {
-  const key = process.env.TEST_INTELLIGENCE_API_KEY_2?.trim();
-  if (!key)
-    throw new Error(
-      "TEST_INTELLIGENCE_API_KEY_2 must name a second project of the test Intelligence: the upgrade copy writes a whole deployment's people into its project.",
-    );
-  return key;
+  return secondTestProject().apiKey;
 }
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);

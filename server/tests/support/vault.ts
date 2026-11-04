@@ -36,7 +36,10 @@ import {
 } from "../../src/vault/directory";
 import { brokeredId, grantId, identityId } from "../../src/vault/ids";
 import { removeServerLocalRows } from "../../src/vault/local-rows";
-import { testIntelligence, useTestBots } from "./bots";
+import { secondTestProject, testIntelligence, useTestBots } from "./bots";
+
+// Where it always was for the files that import it from here; it lives beside `testIntelligence`.
+export { secondTestProject };
 import { testDatabaseUrl } from "./database";
 
 let started: Promise<ConnectionsDirectory> | undefined;
@@ -84,24 +87,6 @@ export async function anotherReplica(
   });
   await directory.start();
   return directory;
-}
-
-/**
- * A second Intelligence project in the test organization: ANOTHER DEPLOYMENT's vault, apps and
- * connections, for a test about two deployments that must not see each other's. Same API and gateway
- * as the first project; its key is `TEST_INTELLIGENCE_API_KEY_2`, failing by name when missing.
- */
-export function secondTestProject(
-  environment: Record<string, string | undefined> = process.env,
-): ReturnType<typeof testIntelligence> {
-  const first = testIntelligence(environment);
-  const apiKey = environment.TEST_INTELLIGENCE_API_KEY_2?.trim();
-  if (!apiKey || apiKey === first.apiKey) {
-    throw new Error(
-      "TEST_INTELLIGENCE_API_KEY_2 must name a second project in the test Intelligence, other than TEST_INTELLIGENCE_API_KEY's. A deployment's apps and connections are its project's, so two deployments need two. See server/tests/support/vault.ts.",
-    );
-  }
-  return { ...first, apiKey };
 }
 
 /**

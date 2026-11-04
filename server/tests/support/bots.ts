@@ -8,8 +8,9 @@
 //
 // WHICH INTELLIGENCE. `TEST_INTELLIGENCE_API_URL`, `TEST_INTELLIGENCE_API_KEY` and
 // `TEST_INTELLIGENCE_GATEWAY_WS_URL` name it: a local self-hosted Intelligence with its agent
-// registry, on loopback. Missing, every test that touches a Bot fails here and says so, rather than
-// skipping and reporting a pass for a suite that never ran.
+// registry, on loopback. `TEST_INTELLIGENCE_API_KEY_2` names a second project in it, for the tests
+// that run another deployment beside the first (`secondTestProject`). Missing, every test that needs
+// one fails here and says so, rather than skipping and reporting a pass for a suite that never ran.
 import { randomUUID } from "node:crypto";
 import { createAgentRegistryClient } from "../../src/agents/bot-registry/client";
 import {
@@ -65,6 +66,25 @@ export function testIntelligence(
     );
   }
   return { apiUrl, apiKey, gatewayWsUrl };
+}
+
+/**
+ * A second Intelligence project in the test organization: ANOTHER DEPLOYMENT, for a test about two
+ * deployments that must not see each other's vault, apps, connections or people, or one that fills a
+ * project of its own. Same API and gateway
+ * as the first project; its key is `TEST_INTELLIGENCE_API_KEY_2`, failing by name when missing.
+ */
+export function secondTestProject(
+  environment: Record<string, string | undefined> = process.env,
+): ReturnType<typeof testIntelligence> {
+  const first = testIntelligence(environment);
+  const apiKey = environment.TEST_INTELLIGENCE_API_KEY_2?.trim();
+  if (!apiKey || apiKey === first.apiKey) {
+    throw new Error(
+      "TEST_INTELLIGENCE_API_KEY_2 must name a second project in the test Intelligence, other than TEST_INTELLIGENCE_API_KEY's. A deployment's data is its project's, so two deployments need two. See server/tests/support/bots.ts.",
+    );
+  }
+  return { ...first, apiKey };
 }
 
 let started: Promise<BotDirectory> | undefined;
