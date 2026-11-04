@@ -133,8 +133,10 @@ impl SigningInToIntelligence {
                 .collect()
         };
         let callback = format!("http://127.0.0.1:{port}/callback");
+        // `source=cli&mode=openbot` makes the hosted sign-in page show its OpenBot copy. The pair
+        // is an allowlist key the page checks; the words themselves live in the page.
         let url = format!(
-            "{OPS_FRONTEND}/cli-auth?callback={}&state={state}",
+            "{OPS_FRONTEND}/cli-auth?callback={}&state={state}&source=cli&mode=openbot",
             urlencode(&callback)
         );
         Ok((
@@ -1137,6 +1139,16 @@ mod tests {
         assert!(url.contains("127.0.0.1"), "{url}");
         assert!(!url.contains("localhost"), "{url}");
         assert!(signing.port() > 0);
+    }
+
+    /// The pair `source=cli` and `mode=openbot` makes the hosted sign-in page show its OpenBot
+    /// copy. The pair is an allowlist key the page checks; the words themselves live in the page,
+    /// never in this URL.
+    #[test]
+    fn the_url_names_the_openbot_handoff_context() {
+        let (_signing, url) = SigningInToIntelligence::begin().expect("it did not start");
+        assert!(url.contains("source=cli"), "{url}");
+        assert!(url.contains("mode=openbot"), "{url}");
     }
 
     /// Apps cannot fail CopilotKit sign-in. Composio provisioning sat in front of the credential,
