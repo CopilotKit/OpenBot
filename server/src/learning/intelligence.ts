@@ -286,13 +286,23 @@ export function createLearningIntelligence(
         agentId: string;
         learningContainerId: string | null;
         assignmentsVersion?: number;
+        /** When it was first decided, for an upgrade copying the assignments it already made. */
+        createdAt?: Date;
       },
       key = learningIdempotencyKey("thread"),
     ): Promise<ThreadAssignment> {
       const response = await request(
         "POST",
         "/api/v1/learning/thread-assignments",
-        { body: input, idempotencyKey: key },
+        {
+          body: {
+            ...input,
+            ...(input.createdAt
+              ? { createdAt: input.createdAt.toISOString() }
+              : {}),
+          },
+          idempotencyKey: key,
+        },
       );
       if (
         response.status === 412 &&

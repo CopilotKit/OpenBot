@@ -168,12 +168,14 @@ export async function copyLocalLearningToIntelligence(
             appUserId: row.userId,
             agentId: row.agentId,
             learningContainerId: row.containerId,
+            createdAt: row.createdAt,
           },
           upgradeKey("thread", [
             row.userId,
             row.threadId,
             row.agentId,
             row.containerId,
+            row.createdAt.toISOString(),
           ]),
         );
       },

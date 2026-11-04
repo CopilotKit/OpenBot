@@ -115,6 +115,7 @@ async function seed(database: Database) {
       threadId: randomUUID(),
       agentId: "support",
       containerId: "support",
+      createdAt: new Date("2026-05-20T09:15:00.000Z"),
     },
     {
       userId: ada,
@@ -207,6 +208,13 @@ describe("the Learning upgrade copy", () => {
         }),
       ).toBe(thread.containerId);
     }
+    // And keeps when it was first decided.
+    const [first] = local.threads;
+    expect(
+      (await intelligence.threadAssignments(local.ada)).find(
+        (row) => row.threadId === first?.threadId,
+      )?.createdAt,
+    ).toBe("2026-05-20T09:15:00.000Z");
     // Spaces seen to exist, with when they were first seen.
     const adaSpace = await intelligence.personalSpace(local.ada);
     expect(adaSpace.learningContainerId).toBe(`user-${local.ada.slice(-12)}`);
