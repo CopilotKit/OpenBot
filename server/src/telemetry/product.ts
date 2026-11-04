@@ -395,29 +395,23 @@ export async function createProductTelemetry(options: {
       purpose: input.purpose ?? "ordinary",
     };
   }
+  /*
+   * Only a run this deployment stated as work is counted: a person's, a routine's, a subagent's, a
+   * hop's. A run with no context of its own is one the runtime makes for itself on the agent, such
+   * as naming a new conversation or offering suggestions, and is not work anybody asked for.
+   */
   function middleware(actorUserId: string): MiddlewareFunction {
     return (input, next) =>
       defer(async () => {
         const parsed = contextSchema.safeParse(
           input.forwardedProps?.openbotTelemetry,
         );
-        const supplied =
-          parsed.success &&
+        return parsed.success &&
           parsed.data.user_id === user(actorUserId) &&
           parsed.data.deployment_id === deploymentId &&
           parsed.data.run_id === input.runId
-            ? parsed.data
-            : undefined;
-        const context =
-          supplied ??
-          (await prepare({
-            actorUserId,
-            threadId: input.threadId,
-            runId: input.runId,
-            trigger: "unknown",
-            surface: "unknown",
-          }));
-        return context;
+          ? parsed.data
+          : undefined;
       }).pipe(switchToRun(input, next));
     function switchToRun(
       input: RunAgentInput,
@@ -556,28 +550,34 @@ export async function createProductTelemetry(options: {
     });
   }
   /**
-   * The root task of the run whose forwardedProps these are, when this deployment stated it there
-   * for this same person. Read from `openbotTelemetry`, which stays on the run's input wherever the
-   * run goes; the analytics key is taken off before the agent sees it.
+   * The root task and surface of the run whose forwardedProps these are, when this deployment stated
+   * them there for this same person: what a subagent or a resumed turn carries on. Read from
+   * `openbotTelemetry`, which stays on the run's input wherever the run goes; the analytics key is
+   * taken off before the agent sees it.
    */
-  function rootTaskOf(
+  function lineageOf(
     actorUserId: string,
     forwardedProps: unknown,
-  ): string | undefined {
-    if (!enabled || !isRecord(forwardedProps)) return;
+  ): { rootTaskId?: string; surface?: ProductSurface } {
+    if (!enabled || !isRecord(forwardedProps)) return {};
     const parsed = contextSchema.safeParse(forwardedProps.openbotTelemetry);
     if (
       !parsed.success ||
       parsed.data.user_id !== user(actorUserId) ||
       parsed.data.deployment_id !== deploymentId
     )
-      return;
+      return {};
     const root = parsed.data.root_task_id;
-    return root && taskHash.test(root) ? root : undefined;
+    return {
+      ...(root && taskHash.test(root) ? { rootTaskId: root } : {}),
+      ...(parsed.data.surface !== "unknown"
+        ? { surface: parsed.data.surface }
+        : {}),
+    };
   }
   return {
     prepare,
-    rootTaskOf,
+    lineageOf,
     middleware,
     recordAudit,
     enabled: () => enabled,

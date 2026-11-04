@@ -92,10 +92,10 @@ export function productHeadlessBoundary(
       // A resumed turn carries on the task the interrupted run was part of.
       inheritedRootTaskId:
         lineage?.inheritedRootTaskId ??
-        telemetry.rootTaskOf(
+        telemetry.lineageOf(
           turn.ownerUserId,
           turn.continuation?.snapshot.forwardedProps,
-        ),
+        ).rootTaskId,
       parentRunId: lineage?.parentRunId ?? turn.continuation?.snapshot.runId,
       attempt: lineage?.attempt,
     });

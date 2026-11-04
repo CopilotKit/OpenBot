@@ -455,56 +455,86 @@ describe("a run tells Intelligence its context, under the contract key", () => {
     expect(props.openbotTelemetry).toMatchObject({ trigger: "routine" });
   });
 
-  test("a subagent sends it with its parent run and its parent's root task", async () => {
+  test("a subagent sends it with its parent run, and its parent's root task and surface", async () => {
     const product = await telemetry();
     const { client, lockCalls } = intelligence();
-    const parent = await browserRun(product, {
+    // A person's run in the web app, and one from the native app, each starting a subagent.
+    const web = await browserRun(product, {
       threadId: "thread-parent",
       runId: "run-parent",
       askId: "ask-parent",
     });
-    const parentContext = parent[ANALYTICS] as Record<string, unknown>;
-    const options = turnOptions(product, client);
+    const mobile = (
+      await boundaries.productHeadlessBoundary(product)(
+        {
+          threadId: "thread-mobile",
+          runId: "inbox-mobile",
+          messages: [],
+          tools: [],
+          context: [],
+          state: {},
+          forwardedProps: {},
+        },
+        {
+          ownerUserId: ACTOR,
+          routineId: "delivery:inbox-mobile",
+          agentId: "bot_helper",
+          threadId: "thread-mobile",
+          instruction: "What is on my calendar?",
+          telemetry: boundaries.deliveryLineage("native", "inbox-mobile"),
+        },
+      )
+    ).forwardedProps as Record<string, unknown>;
+    const parents = [
+      { threadId: "thread-parent", runId: "run-parent", props: web },
+      { threadId: "thread-mobile", runId: "inbox-mobile", props: mobile },
+    ];
     const subagents = createSubagents({
-      turn: options,
+      turn: turnOptions(product, client),
       buildAgentFor,
       withdrawApprovals: async () => undefined,
     });
-    // As index.ts offers the tool to a run: the run's own input names its root task.
-    const tool = subagents.toolForRun({
-      actorId: ACTOR,
-      botId: "bot_helper",
-      threadId: "thread-parent",
-      runId: "run-parent",
-      rootTaskId: product.rootTaskOf(ACTOR, parent),
-      initiator: PERSON_INITIATOR,
-    });
-    const answer = JSON.parse(
-      String(
-        await tool.execute?.(
-          { task: "Count the open tickets.", answer: "A number." },
-          { toolCallId: "call-1" } as never,
+    const threads: string[] = [];
+    for (const parent of parents) {
+      // As index.ts offers the tool to a run: the run's own input names its task and surface.
+      const tool = subagents.toolForRun({
+        actorId: ACTOR,
+        botId: "bot_helper",
+        threadId: parent.threadId,
+        runId: parent.runId,
+        ...product.lineageOf(ACTOR, parent.props),
+        initiator: PERSON_INITIATOR,
+      });
+      const answer = JSON.parse(
+        String(
+          await tool.execute?.(
+            { task: "Count the open tickets.", answer: "A number." },
+            { toolCallId: `call-${parent.runId}` } as never,
+          ),
         ),
-      ),
-    ) as { answer?: string; threadId: string };
-    expect(answer.answer).toBe("Done.");
+      ) as { answer?: string; threadId: string };
+      expect(answer.answer).toBe("Done.");
+      threads.push(answer.threadId);
+    }
 
-    const expected = {
+    const expected = parents.map((parent) => ({
       app_context_version: 1,
       app_id: "openbot",
       deployment_id: DEPLOYMENT,
       app_user_hash: appUserHash(ACTOR),
       trigger: "subagent",
-      surface: "unknown",
+      surface: parent.props === web ? "web" : "mobile",
       environment: "test",
       purpose: "ordinary",
-      root_task_id: parentContext.root_task_id,
-      parent_run_id: "run-parent",
+      root_task_id: (parent.props[ANALYTICS] as Record<string, unknown>)
+        .root_task_id,
+      parent_run_id: parent.runId,
       attempt: null,
-    };
-    expect(lockCalls.map((call) => call.analyticsContext)).toEqual([expected]);
-    expect(contractProblems(expected)).toEqual([]);
-    expect(onTheWire(answer.threadId)).toEqual(forwards ? expected : null);
+    }));
+    expect(lockCalls.map((call) => call.analyticsContext)).toEqual(expected);
+    for (const context of expected)
+      expect(contractProblems(context)).toEqual([]);
+    expect(threads.map(onTheWire)).toEqual(forwards ? expected : [null, null]);
   });
 
   test("a task's retry shares its first run's root task, as attempt 2", async () => {

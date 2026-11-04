@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot's product run counts no longer include the run the CopilotKit runtime makes to name each new conversation, or its suggestion runs: only work a person, routine, subagent or hop started is counted. A subagent's runs now report the surface of the run that started it instead of `unknown`.
 - A headless turn or a Bot-to-Bot hop that OpenBot stops (a cancel, a pause, the turn's deadline) is recorded with Intelligence as stopped before its run ends, so Intelligence reports it as cancelled rather than finished. This takes a CopilotKit runtime that can record a stop; on `@copilotkit/runtime` 1.83.0 nothing is recorded and stops work as before. A paused hop now waits for its run to close on the platform before it gives up, where it used to leave that run without an end.
 - With product telemetry on, each run now also tells Intelligence which OpenBot deployment, scoped user, trigger, surface and task it belongs to, as the shared analytics context (version 1) on the run's thread lock. It reaches Intelligence once OpenBot runs a CopilotKit runtime that forwards it; `@copilotkit/runtime` 1.83.0 drops it. With telemetry off nothing is sent, and a value a browser sent under the same key is removed.
 - Choosing Anthropic in the Desktop setup screen, or setting `BOT_PROVIDER=anthropic` without a `BOT_MODEL`, now runs `claude-sonnet-5-5` instead of `claude-sonnet-4-5`, which Anthropic retires on 2026-11-30. A deployment that pins `BOT_MODEL` is unaffected.

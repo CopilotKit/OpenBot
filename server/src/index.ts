@@ -1958,7 +1958,8 @@ const actorAgentResolver = createActorAgentResolver({
         botId,
         threadId: input.threadId,
         runId: input.runId,
-        rootTaskId: productTelemetry.rootTaskOf(actorId, input.forwardedProps),
+        // The subagent carries on the asking run's task, on the asking run's surface.
+        ...productTelemetry.lineageOf(actorId, input.forwardedProps),
         initiator: initiator ?? PERSON_INITIATOR,
         ...(depth ? { depth } : {}),
       }),
