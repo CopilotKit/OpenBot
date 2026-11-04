@@ -1005,10 +1005,10 @@ test("on OpenBot Desktop the narration row says what the Recorder hears, as it r
     }) satisfies BrowserApiState["recorder"];
   state = { ...nativeState(), recorder: recorder("off") };
   const view = draw(<BrowserPage />);
-  // While nothing records, the row is the person's choice.
+  // While nothing records, the row is the person's choice, and its sentence stays the same.
   expect(
     await view.findByText(
-      "On. The Recorder in your browser listens to your microphone while you record, and turns your speech into text on your computer.",
+      "Talk through the task as you do it, and what you say is added to the recording.",
     ),
   ).toBeTruthy();
   for (const [voice, sentence] of [
@@ -1072,7 +1072,7 @@ test("Record asks whether to narrate before the first recording, keeps the answe
   const user = userEvent.setup({ document });
   expect(
     await view.findByText(
-      "Not chosen yet. Record asks before your first recording, and the microphone stays closed until you say yes.",
+      "Talk through the task as you do it, and what you say is added to the recording.",
     ),
   ).toBeTruthy();
   await user.type(
