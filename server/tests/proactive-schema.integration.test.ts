@@ -208,9 +208,9 @@ test("a ping is the person's, and its items outlive it", async () => {
 test("starting an item opens one task, in a conversation of its own", async () => {
   const started = item({ status: "started", resolvedAt: new Date() });
   await database.insert(proactiveSuggestions).values(started);
-  const [first, second] = [next(), next()];
+  const [first, second, third] = [next(), next(), next()];
   await database.insert(channels).values(
-    [first, second].map((id) => ({
+    [first, second, third].map((id) => ({
       id,
       name: "Reply to Dana",
       description: "",
@@ -236,11 +236,21 @@ test("starting an item opens one task, in a conversation of its own", async () =
     database.insert(botTasks).values(task(first, null)),
     /bot_tasks_channel_idx/,
   );
+  // A task is started from an item or asked for; nothing else.
   await rejects(
     database
       .insert(botTasks)
-      .values({ ...task(second, null), origin: "asked" as never }),
+      .values({ ...task(second, null), origin: "suggestion" as never }),
     /bot_tasks_origin_check/,
+  );
+  // An asked task has no item, and the same Start sent twice opens one.
+  const asked = { ...task(second, null), origin: "asked" as const };
+  await database.insert(botTasks).values({ ...asked, clientId: "start-1" });
+  await rejects(
+    database
+      .insert(botTasks)
+      .values({ ...asked, id: next(), channelId: third, clientId: "start-1" }),
+    /bot_tasks_owner_client_idx/,
   );
   // The item going away leaves its task, unlinked.
   await database
@@ -251,5 +261,7 @@ test("starting an item opens one task, in a conversation of its own", async () =
     .from(botTasks)
     .where(eq(botTasks.channelId, first));
   expect(row).toEqual({ suggestionId: null });
-  await database.delete(channels).where(inArray(channels.id, [first, second]));
+  await database
+    .delete(channels)
+    .where(inArray(channels.id, [first, second, third]));
 });

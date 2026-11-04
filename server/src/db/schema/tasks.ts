@@ -10,8 +10,11 @@ import {
 import { agents, channels, users } from "./core";
 import { proactiveSuggestions } from "./proactive";
 
-/** How a task began. Only from a check-in's item for now, so the check keeps it to that. */
-export type BotTaskOrigin = "check_in";
+/**
+ * How a task began: from a check-in's item the person started, or asked for in so many words, by
+ * `start_task` in a conversation or the + on Tasks (`POST /api/tasks`).
+ */
+export type BotTaskOrigin = "check_in" | "asked";
 
 /**
  * Work a Bot does for a person in a conversation of its own. Written when the person starts an item a
@@ -25,6 +28,9 @@ export type BotTaskOrigin = "check_in";
  * `channel_id` is the task's own conversation, made with it, one task per conversation. Starting an
  * item opens one task: the unique index on `suggestion_id` makes a second Start find the first. An
  * item deleted later leaves its task, unlinked.
+ *
+ * `client_id` is the id the browser made for a Start on Tasks. The unique index on it, per person,
+ * makes the same Start sent twice open one task: the second finds the first.
  */
 export const botTasks = pgTable(
   "bot_tasks",
@@ -48,6 +54,7 @@ export const botTasks = pgTable(
     sourceApp: text("source_app"),
     sourceLink: text("source_link"),
     origin: text("origin").$type<BotTaskOrigin>().notNull(),
+    clientId: text("client_id"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -61,6 +68,14 @@ export const botTasks = pgTable(
     uniqueIndex("bot_tasks_channel_idx").on(table.channelId),
     // An item is started once, so it opens one task. Postgres keeps any number of nulls apart.
     uniqueIndex("bot_tasks_suggestion_idx").on(table.suggestionId),
-    check("bot_tasks_origin_check", sql`${table.origin} IN ('check_in')`),
+    // A Start sent twice opens one task. Postgres keeps any number of nulls apart.
+    uniqueIndex("bot_tasks_owner_client_idx").on(
+      table.ownerUserId,
+      table.clientId,
+    ),
+    check(
+      "bot_tasks_origin_check",
+      sql`${table.origin} IN ('check_in', 'asked')`,
+    ),
   ],
 );

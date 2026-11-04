@@ -288,8 +288,12 @@ import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
 import { createSelfHostBanner } from "./self-host-banner";
+import { createContinuationRunner } from "./tasks/continuation";
+import { createTaskReplyContext } from "./tasks/reply-context";
+import { createTaskReportReader, intelligenceHistory } from "./tasks/report";
 import { createTaskRunner } from "./tasks/runner";
 import { createTaskStore } from "./tasks/store";
+import { builtInBots, taskTools } from "./tasks/tools";
 import { createTaskTurn } from "./tasks/turn";
 import { createTeamBots } from "./team-bots/team-bots";
 import { createProductTelemetry } from "./telemetry/product";
@@ -975,7 +979,7 @@ const signInService = computerGateway
           resumeResponsibility: (owner, runId, result) =>
             responsibilityStore.resumeWaiting(owner, runId, result),
           continueTurn: ({ ownerUserId, botId, snapshot, result, messageId }) =>
-            approvalContinuationRunner({
+            continuationRunner({
               ownerUserId,
               routineId: "sign-in",
               agentId: botId,
@@ -1481,8 +1485,10 @@ const memoryDefaults = createMemoryDefaults({
     (await channelStore.get(await actorFor(ownerUserId), channelId))
       ?.agentIds ?? null,
   // The same rule research delivery uses, read when a person speaks (long after it is defined).
+  // Never a task's own conversation: research writes to the person, and a task's turn works for them.
   canDeliver: async (ownerUserId, channelId, agentId) =>
-    (await deliveryScopeFor(ownerUserId, channelId, agentId)) !== null,
+    (await deliveryScopeFor(ownerUserId, channelId, agentId)) !== null &&
+    !(await channelStore.get(await actorFor(ownerUserId), channelId))?.taskId,
   mintThreadId: () => threadIdentity.mint(),
   // Read when a Bot turn starts, long after `teamBots` below is defined.
   publishedByAnother: (ownerUserId, agentId) =>
@@ -1525,9 +1531,28 @@ const memorySweep = repeatAfterEach(async () => {
 // Follow-ups a Bot schedules for itself, on the shared work queue. See agents/wake-up.ts.
 const wakeUpStore = createWakeUpStore(database, { auditStore: bootAuditStore });
 
+/** Whether OpenBot runs a Bot itself: only those are offered `start_task`. See tasks/tools.ts. */
+const isBuiltInBot = builtInBots(database);
+
 const loadToolsForActor =
-  (actorId: string, initiator: AuditInitiator = PERSON_INITIATOR) =>
+  (
+    actorId: string,
+    initiator: AuditInitiator = PERSON_INITIATOR,
+    turn: { task?: boolean } = {},
+  ) =>
   async (botId: string) => [
+    // Hands bigger work to a task of its own. Read when a turn is built, long after the runner is.
+    ...(await taskTools({
+      actorId,
+      agentId: botId,
+      initiator,
+      start: ({ ownerUserId, agentId, task }) =>
+        taskRunner.startAsked(ownerUserId, agentId, task),
+      builtIn: isBuiltInBot,
+      inTask: turn.task === true,
+      isTaskThread: (ownerUserId, threadId) =>
+        taskStore.isTaskThread(ownerUserId, threadId),
+    })),
     ...wakeUpTools({
       store: wakeUpStore,
       ownerUserId: actorId,
@@ -1798,6 +1823,7 @@ const buildAgentFor = async ({
   initiator,
   depth,
   subagent,
+  task,
 }: {
   ownerUserId: string;
   agentId: string;
@@ -1805,6 +1831,8 @@ const buildAgentFor = async ({
   depth?: number;
   /** A subagent's run: the same Bot with no coordination. See agents/subagent.ts. */
   subagent?: boolean;
+  /** A task's own turn. See `AgentResolutionContext.task`. */
+  task?: boolean;
 }) => {
   const actor = await actorFor(ownerUserId);
   let agent: AbstractAgent | undefined;
@@ -1813,6 +1841,7 @@ const buildAgentFor = async ({
       initiator,
       depth,
       ...(subagent ? { subagent } : {}),
+      ...(task ? { task } : {}),
     });
   } catch (error) {
     if (!(error instanceof CoworkerUnavailableError)) throw error;
@@ -1918,11 +1947,11 @@ const actorAgentResolver = createActorAgentResolver({
   model: runtimeModel,
   resolveModelApiKey: resolveRuntimeModelApiKey,
   stallGuard,
-  loadToolsForActor: (actorId, initiator) =>
+  loadToolsForActor: (actorId, initiator, turn) =>
     restrictToolsForRun(
       initiator,
       actorId,
-      loadToolsForActor(actorId, initiator),
+      loadToolsForActor(actorId, initiator, turn),
       checkInScope,
     ),
   signRunForActor,
@@ -2112,6 +2141,33 @@ const approvalContinuationRunner = createTurnRunner({
     Promise.resolve(undefined),
 });
 /**
+ * A task's own turns: the same runner, with the Bot built for a task's turn, so it is not offered
+ * `start_task` there (see tasks/tools.ts).
+ */
+const taskTurnRunner = createTurnRunner({
+  admission: serverTurnAdmission,
+  intelligence: routineIntelligence,
+  runner: routineAgentRunner,
+  components: componentCatalog,
+  buildAgentFor: (input) => buildAgentFor({ ...input, task: true }),
+  toolsForTurn: async ({ ownerUserId, agentId, initiator }) =>
+    approvalComputerTools(ownerUserId, agentId, initiator),
+  learningContainerForThread: (input) =>
+    copilotRuntime.learning?.containerForThread(input) ??
+    Promise.resolve(undefined),
+});
+/**
+ * Turns carried on after waiting on the person: Allow once, a question card's answer, a sign-in.
+ * One in a task's own conversation is the task's turn, built by `taskTurnRunner`. Read when a turn
+ * is carried on, long after `taskStore` below is made.
+ */
+const continuationRunner = createContinuationRunner({
+  isTaskThread: (ownerUserId, threadId) =>
+    taskStore.isTaskThread(ownerUserId, threadId),
+  taskTurn: taskTurnRunner,
+  otherwise: approvalContinuationRunner,
+});
+/**
  * Conversations with several Bots. Each Bot turn is an ordinary headless AG-UI turn into that Bot's
  * own group thread, built exactly as a routine's is, so governance, learning and the computer tools
  * apply unchanged; Bots answering each other reuse the handoff desk's grant and caps.
@@ -2196,7 +2252,7 @@ const approvalSweep = repeatAfterEach(
     database,
     responsibilityStore,
     groupConversations,
-    approvalContinuationRunner,
+    approvalContinuationRunner: continuationRunner,
     channelStore,
     actorFor,
     // Assigned further down, once delivery is wired.
@@ -2290,6 +2346,22 @@ deliveryNotifications = (scope, input) => deliveryRouter.notify(scope, input);
  * so every send or change meets the approval gate. See tasks/runner.ts.
  */
 const taskStore = createTaskStore(database);
+// The files and skills a reply in a task's conversation names, checked as a conversation checks them.
+const taskReplyContext = createTaskReplyContext({
+  load: (scope, id) =>
+    loadAttachmentForTurn(
+      database,
+      { actorId: scope.ownerUserId, threadId: scope.threadId },
+      id,
+    ),
+  markSent: (scope, ids) =>
+    markAttachmentsSent(
+      database,
+      { actorId: scope.ownerUserId, threadId: scope.threadId },
+      ids,
+    ),
+  skillsFor: (agentId) => pluginStore.listForAgent(agentId),
+});
 const taskRunner = createTaskRunner({
   database,
   store: taskStore,
@@ -2301,8 +2373,11 @@ const taskRunner = createTaskRunner({
   runTask: createTaskTurn({
     channels: channelStore,
     actorFor,
-    runTurn: approvalContinuationRunner,
+    runTurn: taskTurnRunner,
+    replyContext: taskReplyContext,
   }),
+  questions: taskStore,
+  replyContext: taskReplyContext,
 });
 // The backstop for a task's turn a crash or a restart left behind; Start runs one at once.
 const taskSweep = repeatAfterEach(async () => {
@@ -2469,7 +2544,7 @@ const personResponseSweep = repeatAfterEach(
     approvalQueue,
     personResponseOwner,
     authoriseQuestion,
-    approvalContinuationRunner,
+    approvalContinuationRunner: continuationRunner,
     responsibilityStore,
     responsibilityAnswerTurn,
     sourceForCoordinationRun,
@@ -2892,7 +2967,15 @@ const app = createApp(
     },
     memory: { store: personalMemoryStore, ingestion: memoryIngestion },
     proactive: { store: proactiveStore, engine: proactiveEngine },
-    tasks: { store: taskStore, runner: taskRunner },
+    tasks: {
+      store: taskStore,
+      runner: taskRunner,
+      // A task's report reads its conversation through the client every headless turn reads with.
+      report: createTaskReportReader({
+        database,
+        history: intelligenceHistory(routineIntelligence),
+      }),
+    },
     responsibilities: {
       store: responsibilityStore,
       engine: responsibilityEngine,

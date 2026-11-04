@@ -9,7 +9,7 @@ import {
   workItems,
 } from "../db/schema";
 import type { TaskStatus } from "../proactive/contracts";
-import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
+import { DEFAULT_MAX_ATTEMPTS, type SerialOrder } from "../work/queue";
 
 /*
  * WHAT A TASK IS DOING IS READ, NEVER STORED. The work queue already knows whether the task's turn is
@@ -24,13 +24,19 @@ import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
  * queue unfinished, with its count and its last error, which is the queue's own terminal state
  * (work/queue.ts). That row is the failure and its reason; nothing else records it.
  *
- * Ported from OpenDuet's task store, less what OpenBot does differently: a person replies in a
- * task's conversation as an ordinary chat turn, not as a queued turn of the task's, so nothing here
- * reads queued replies or answers to question cards.
+ * A PERSON'S REPLY IS A TURN OF THE TASK'S. Sent through `POST /api/tasks/:id/reply`, it is queued
+ * as a task's turn before it is answered, so it survives a restart and waits its turn behind one still
+ * running (`TASK_TURN_ORDER`). While it waits it is one of the task's `queuedReplies`, and the
+ * questions waiting when it was taken are answered by it (`answeredQuestionIds`). A reply typed as an
+ * ordinary chat turn in the conversation still counts as the person carrying it on.
  */
 
 /** The work queue kind a task's turn is queued as. */
 export const PROACTIVE_TASK_KIND = "proactive.task";
+/** The answer to a question card, carried on by the person-response sweep. */
+export const PERSON_RESPONSE_KIND = "person.response";
+/** A decided approval, carried out and its turn carried on by the approval resume sweep. */
+export const APPROVAL_RESUME_KIND = "approval.resume";
 
 /**
  * How many times a task's turn runs: once, and once more when the first run threw or a restart cut
@@ -38,6 +44,58 @@ export const PROACTIVE_TASK_KIND = "proactive.task";
  * with its count and its reason, which is what reads as Failed.
  */
 export const TASK_RUNS = 2;
+
+/**
+ * One task's conversation takes one turn at a time, in the order the person gave them: its own
+ * turns, the person's replies, the answers to question cards its Bot asked there, and the turns
+ * Allow once carries on. Claimed under this by the task runner (tasks/runner.ts), the
+ * person-response sweep (approvals/person-response-sweep.ts) and the approval resume sweep
+ * (approvals/resume-sweep.ts). Named for the turns it orders, apart from the app's `TASK_ORDER`,
+ * which is the order Tasks lists statuses in.
+ *
+ * Three kinds share the order. A task's turn names its task in its payload. An answer names only the
+ * question it answers, which names the thread it was asked in, so its task is the one whose
+ * conversation that thread is, read the way the task's status reads it: the person's own mapping,
+ * the person's own task, and the question's channel when it names one. An approval's resume names
+ * only the approval, which names the thread its turn stopped in, and its task is found the same way.
+ * An answer or an approval anywhere else is in no task, and runs as it always has.
+ *
+ * A turn stopped for Allow once has finished, so without the resume in the order a reply sent before
+ * the person allowed it could run after the resume, or one sent after it before, and the resume
+ * carries on from the conversation as it was when the turn stopped.
+ *
+ * Each kind has the attempt cap its worker claims at: a task's turn runs `TASK_RUNS` times, an
+ * answer once, and a resume as many times as the queue's default allows.
+ */
+export const TASK_TURN_ORDER: SerialOrder = {
+  name: PROACTIVE_TASK_KIND,
+  kinds: {
+    [PROACTIVE_TASK_KIND]: TASK_RUNS,
+    [PERSON_RESPONSE_KIND]: 1,
+    [APPROVAL_RESUME_KIND]: DEFAULT_MAX_ATTEMPTS,
+  },
+  groupOf: (row) => sql`case when ${row}.kind = ${PERSON_RESPONSE_KIND} then (
+      select task.id from "bot_tasks" as task
+      inner join "intelligence_channel_mappings" as mapping
+        on mapping.channel_id = task.channel_id
+      where task.owner_user_id = ${row}.payload->>'ownerUserId'
+        and mapping.user_id = task.owner_user_id
+        and ${row}.payload->'question'->>'actorId' = task.owner_user_id
+        and mapping.thread_id = ${row}.payload->'question'->>'threadId'
+        and (${row}.payload->'question'->>'channelId' is null
+          or ${row}.payload->'question'->>'channelId' = task.channel_id)
+    ) when ${row}.kind = ${APPROVAL_RESUME_KIND} then (
+      select task.id from "approval_requests" as approval
+      inner join "intelligence_channel_mappings" as mapping
+        on mapping.user_id = approval.owner_user_id
+        and mapping.thread_id = approval.action->>'threadId'
+      inner join "bot_tasks" as task
+        on task.channel_id = mapping.channel_id
+        and task.owner_user_id = approval.owner_user_id
+      where approval.id = ${row}.payload->>'approvalId'
+        and approval.owner_user_id = ${row}.payload->>'ownerUserId'
+    ) else ${row}.payload->>'taskId' end`,
+};
 
 /** The rule above, on its own, so it can be read and tested without a database. */
 export function taskStatus(state: {
@@ -51,6 +109,26 @@ export function taskStatus(state: {
   if (state.resolved) return "resolved";
   if (state.failed) return "failed";
   return "ready_for_review";
+}
+
+/**
+ * The longest a task's turn may take, start to finish, before it is given up on. The turn runner
+ * stops the model's run at five minutes (`TURN_LIMITS.turnTimeoutMs`), but not the steps around it:
+ * reading the conversation, taking its lock, giving the lock back. One of those never answering
+ * kept the turn's lease renewing for as long as it waited, so the task read Working for a quarter
+ * of an hour. Seven minutes leaves room for the runner's own stop and its wind-down.
+ */
+export const TASK_TURN_MS = 7 * 60_000;
+
+/**
+ * A task's turn ran past `TASK_TURN_MS`. Its message names the limit in the words `plainFailure`
+ * reads ("stopped after Ns"), so the task says it took too long rather than that it was cut off.
+ */
+export class TaskTurnTimeoutError extends Error {
+  override name = "TaskTurnTimeoutError";
+  constructor(limitMs: number) {
+    super(`The task's turn was stopped after ${Math.round(limitMs / 1000)}s.`);
+  }
 }
 
 /** How long a task with no turn on the queue yet still reads as just started. */
@@ -82,7 +160,10 @@ export function plainFailure(error: string | null | undefined): string {
     [/before (it|retries) could/i, "it failed before it could be tried again"],
     [/\bpaused\b/i, "work is paused"],
     [/allowed model/i, "the model isn't allowed here"],
-    [/lock/i, "the conversation was busy with another reply"],
+    [
+      /lock|busy with another turn/i,
+      "the conversation was busy with another reply",
+    ],
     [/cancel|abort/i, "the run was stopped"],
     [
       /\b40[13]\b|authentication|api.?key/i,
@@ -118,6 +199,19 @@ const FOOTNOTE = /^(?:sources?|references?|citations?)\s*[:：\-–]/i;
 /** What can trail a question and still leave it one: closing quotes, brackets, emoji, spaces. */
 const TRAILING = /(?:[\s"”'’)\]}»\p{Extended_Pictographic}]|️|‍)+$/u;
 
+/**
+ * A closing sentence that only says nothing waits on the person. It reports no work, and it would
+ * stand on Tasks as the next step of a finished task, so it is set aside. Matched whole, so a
+ * finding such as "Nothing in your inbox needs a reply from you" is kept.
+ */
+const NOTHING_WAITING = [
+  /^(?:there(?:'s|’s| is) )?nothing(?: else)?(?: is| 's|’s)? (?:waiting on|waiting for|needed from|required from|needs|pending (?:on|from)) you(?: right now| now| for now| at the moment)?[.!]?$/i,
+  /^no (?:further |other )?(?:action|input) (?:is )?(?:needed|required)(?: from you)?(?: right now| now| for now)?[.!]?$/i,
+  /^you don['’]t need to do anything(?: else)?(?: right now| now| for now)?[.!]?$/i,
+];
+const waitsOnNothing = (sentence: string) =>
+  NOTHING_WAITING.some((pattern) => pattern.test(sentence));
+
 /** Whether a sentence asks something, once what trails its question mark is set aside. */
 const asksIn = (sentence: string) =>
   sentence.replace(TRAILING, "").endsWith("?");
@@ -129,49 +223,74 @@ const plain = (line: string) =>
     .trim();
 
 /**
- * How a reply ends: the sentence to show as the task's next step, and whether it asks the person
- * something.
- *
- * A Bot ends a turn on what comes next, in the last paragraph it writes to the person. Lists and
- * drafts that close a reply are what it prepared, not what it says, and a line citing its source is
- * a footnote to it, so they are set aside. Within that last paragraph its last question is the next
- * step, even with a remark after it; without one, its last sentence is. A short closing sentence keeps the one before it, so "Do you want me
- * to?" never stands alone. Null when there is nothing to say.
+ * What the Bot says to the person in a reply, as the sentences of each paragraph it writes to them.
+ * Lists and drafts that close a reply are what it prepared, not what it says, and a line citing its
+ * source is a footnote to it, so they are set aside, and so is a sentence that only says nothing
+ * waits on the person. With nothing else to read, the reply's last paragraph is kept, less any such
+ * sentence. `spoken` is false then.
  */
-export function replyEnding(reply: string | null | undefined): {
-  tail: string | null;
-  asks: boolean;
+function spokenParagraphs(reply: string | null | undefined): {
+  paragraphs: string[][];
+  spoken: boolean;
 } {
   const paragraphs = (reply ?? "")
     .split(/\n\s*\n/)
     .map((paragraph) => paragraph.trim())
     .filter((paragraph) => /[\p{L}\p{N}]/u.test(paragraph));
-  const footnote = (line: string) => FOOTNOTE.test(plain(line));
-  const spoken = paragraphs.filter((paragraph) => {
-    const lines = paragraph.split("\n").filter((line) => line.trim());
-    return !(
-      lines.every((line) => LIST_ITEM.test(line)) ||
-      DRAFT.test(paragraph) ||
-      // "Sources:" and the list under it.
-      (lines[0] !== undefined && footnote(lines[0]))
-    );
-  });
-  const kept = spoken.length ? spoken : paragraphs.slice(-1);
-  const sentencesOf = (paragraph: string | undefined) =>
-    (paragraph ?? "")
-      .split("\n")
-      .filter((line) => !footnote(line))
-      .map(plain)
-      .flatMap((line) => line.split(/(?<=[.!?][\s"”'’)\]]*)\s+(?=\S)/))
-      .map((sentence) => sentence.trim())
-      .filter((sentence) => /[\p{L}\p{N}]/u.test(sentence));
-  const sentences = sentencesOf(kept.at(-1));
+  const spoken = paragraphs
+    .filter((paragraph) => {
+      const lines = paragraph.split("\n").filter((line) => line.trim());
+      return !(
+        lines.every((line) => LIST_ITEM.test(line)) ||
+        DRAFT.test(paragraph) ||
+        // "Sources:" and the list under it.
+        (lines[0] !== undefined && footnote(lines[0]))
+      );
+    })
+    .map((paragraph) =>
+      sentencesOf(paragraph).filter((sentence) => !waitsOnNothing(sentence)),
+    )
+    .filter((sentences) => sentences.length > 0);
+  if (spoken.length) return { paragraphs: spoken, spoken: true };
+  const last = sentencesOf(paragraphs.at(-1)).filter(
+    (sentence) => !waitsOnNothing(sentence),
+  );
+  return { paragraphs: last.length ? [last] : [], spoken: false };
+}
+
+const footnote = (line: string) => FOOTNOTE.test(plain(line));
+
+function sentencesOf(paragraph: string | undefined): string[] {
+  return (paragraph ?? "")
+    .split("\n")
+    .filter((line) => !footnote(line))
+    .map(plain)
+    .flatMap((line) => line.split(/(?<=[.!?][\s"”'’)\]]*)\s+(?=\S)/))
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => /[\p{L}\p{N}]/u.test(sentence));
+}
+
+/**
+ * How a reply ends: the sentence to show as the task's next step, and whether it asks the person
+ * something.
+ *
+ * A Bot ends a turn on what comes next, in the last paragraph it writes to the person
+ * (`spokenParagraphs`). Within that last paragraph its last question is the next step, even with a
+ * remark after it; without one, its last sentence is. A short closing sentence keeps the one before
+ * it, so "Do you want me to?" never stands alone. Null when there is nothing to say.
+ */
+export function replyEnding(reply: string | null | undefined): {
+  tail: string | null;
+  asks: boolean;
+} {
+  const { paragraphs, spoken } = spokenParagraphs(reply);
+  const sentences = paragraphs.at(-1) ?? [];
   const question = sentences.findLastIndex(asksIn);
   const at = question >= 0 ? question : sentences.length - 1;
   const chosen = sentences[at];
   if (!chosen) return { tail: null, asks: false };
   // A paragraph of its own still leans on the paragraph before it.
-  const before = sentences[at - 1] ?? sentencesOf(kept.at(-2)).at(-1);
+  const before = sentences[at - 1] ?? paragraphs.at(-2)?.at(-1);
   const sentence =
     chosen.length < SHORT_SENTENCE && before ? `${before} ${chosen}` : chosen;
   return {
@@ -181,14 +300,33 @@ export function replyEnding(reply: string | null | undefined): {
             .slice(0, REPLY_TAIL_MAX - 1)
             .join("")}…`
         : sentence,
-    asks: spoken.length > 0 && question >= 0,
+    asks: spoken && question >= 0,
   };
+}
+
+/**
+ * The reply's conclusion: the whole last paragraph the Bot wrote to the person, on one line. A
+ * reply often opens on a preamble ("Here's a thoughtful plan") and ends on what was done or found,
+ * so this, not its first sentence, is what a task's report says the turn did. Null when there is
+ * nothing to say.
+ */
+export function replyConclusion(
+  reply: string | null | undefined,
+): string | null {
+  return spokenParagraphs(reply).paragraphs.at(-1)?.join(" ") || null;
 }
 
 /** The sentence `replyEnding` would show, alone. */
 export function replyTail(reply: string | null | undefined): string | null {
   return replyEnding(reply).tail;
 }
+
+/**
+ * A task the person marked done has no next step of the Bot's: what it said last is about the work,
+ * and a closing question there would read as still waiting on them. Tasks shows when from
+ * `resolvedAt`.
+ */
+export const MARKED_DONE = "Marked done by you";
 
 /** How long a question the Bot asked may run as a task's next step. */
 const QUOTE_MAX = 120;
@@ -250,10 +388,38 @@ export type TaskState = {
   failedAt: Date | null;
   /** One line on what comes next, from the last thing said in its conversation. */
   next: string | null;
+  /** The person's replies still waiting their turn, oldest first. */
+  queuedReplies: { messageId: string; text: string }[];
+  /** Questions a reply the person sent answers, from the moment it was taken. */
+  answeredQuestionIds: Set<string>;
 };
+
+/**
+ * How a task's turn ended, kept on its work item as `ending` when it finishes: the id its reply was
+ * recorded under in the task's conversation, and whether that reply, read whole, asked the person
+ * something. The conversation keeps only a short line of the reply, where a long closing question
+ * loses its question mark.
+ */
+export type TaskTurnEnding = { messageId: string; asks: boolean };
+
+function endingOf(value: unknown): TaskTurnEnding | null {
+  const ending = value as Partial<TaskTurnEnding> | null | undefined;
+  return typeof ending?.messageId === "string" &&
+    ending.messageId &&
+    typeof ending.asks === "boolean"
+    ? { messageId: ending.messageId, asks: ending.asks }
+    : null;
+}
 
 /** A JSON field of a work item's payload, as text. */
 const payload = (field: string) => sql<string>`${workItems.payload}->>${field}`;
+/*
+ * The same expressions as `work_items_owner_task_idx`, so the reads use it however their statement
+ * is planned. Through `payload` the field is a parameter, which a plan made once for every value
+ * cannot match to the index. See work.ts.
+ */
+const workOwner = sql<string>`(${workItems.payload}->>'ownerUserId')`;
+const turnTask = sql<string>`(${workItems.payload}->>'taskId')`;
 /** The conversation an approval was raised in, as text. */
 const approvalThread = sql<string>`${approvalRequests.action}->>'threadId'`;
 /** The conversation the question a person.response answers was asked in, as text. */
@@ -282,6 +448,8 @@ export async function readTaskStates(
         failure: null,
         failedAt: null,
         next: null,
+        queuedReplies: [],
+        answeredQuestionIds: new Set<string>(),
       },
     ]),
   );
@@ -300,8 +468,11 @@ export async function readTaskStates(
         lastMessageAt: channels.lastMessageAt,
         byBot: sql<boolean>`${channels.lastMessageAgentId} is not null`,
         sourceId: channels.lastMessageSourceId,
+        // Said after the person's "done", or never marked done.
+        afterResolution: sql<boolean>`coalesce(${channels.lastMessageAt} > ${botTasks.resolvedAt}, true)`,
       })
       .from(channels)
+      .innerJoin(botTasks, eq(botTasks.channelId, channels.id))
       .where(inArray(channels.id, channelIds)),
     database
       .select({
@@ -369,6 +540,7 @@ export async function readTaskStates(
     // Or a question its Bot asked them, in its conversation or its thread.
     database
       .select({
+        key: workItems.key,
         channelId: payload("channelId"),
         threadId: payload("threadId"),
         question: payload("question"),
@@ -414,13 +586,19 @@ export async function readTaskStates(
         claimed: sql<boolean>`${workItems.claimedBy} is not null`,
         updatedAt: workItems.updatedAt,
         leaseUntil: workItems.leaseUntil,
+        reply: payload("reply"),
+        followup: payload("followup"),
+        questionIds: sql<string[] | null>`${workItems.payload}->'questionIds'`,
+        messageId: payload("messageId"),
       })
       .from(workItems)
-      .innerJoin(botTasks, eq(botTasks.id, payload("taskId")))
+      .innerJoin(botTasks, eq(botTasks.id, turnTask))
       .where(
         and(
           eq(workItems.kind, PROACTIVE_TASK_KIND),
-          inArray(payload("taskId"), taskIds),
+          // Every task turn names the person it runs as: the index's first two columns.
+          eq(workOwner, owner),
+          inArray(turnTask, taskIds),
         ),
       )
       .orderBy(desc(workItems.createdAt), desc(workItems.key)),
@@ -453,7 +631,7 @@ export async function readTaskStates(
           and(
             eq(workItems.kind, "person.response"),
             isNull(workItems.finishedAt),
-            sql`${payload("ownerUserId")} = ${owner}`,
+            eq(workOwner, owner),
             inThreads(answeredThread),
             sql`(${workItems.attempts} < ${DEFAULT_MAX_ATTEMPTS} or ${workItems.leaseUntil} > now())`,
           ),
@@ -471,12 +649,45 @@ export async function readTaskStates(
         handOff: row.handOff,
       }),
     );
-  for (const question of questions)
+
+  // Whether a turn's reply asked, read whole as it finished, by the id it was recorded under.
+  const replyAsks = new Map<string, boolean>();
+  for (const turn of turns) {
+    const ending = endingOf(turn.input?.ending);
+    if (ending) replyAsks.set(ending.messageId, ending.asks);
+    const entry = state.get(turn.taskId);
+    if (!entry) continue;
+    /*
+     * A reply answers the questions waiting when it was taken, from that moment, even if its turn
+     * later fails: the person said what they had to say.
+     */
+    if (turn.followup === "true")
+      for (const id of turn.questionIds ?? [])
+        entry.answeredQuestionIds.add(id);
+    // Taken and not yet running, with its turn still to come: waiting behind another.
+    if (
+      turn.reply &&
+      turn.messageId &&
+      !turn.finished &&
+      !turn.live &&
+      turn.attempts < TASK_RUNS
+    )
+      entry.queuedReplies.unshift({
+        messageId: turn.messageId,
+        text: turn.reply,
+      });
+  }
+  for (const question of questions) {
+    const channelId =
+      question.channelId ?? channelOfThread.get(question.threadId ?? "");
+    if (entryOfChannel(channelId)?.answeredQuestionIds.has(question.key))
+      continue;
     waitsFor(
-      question.channelId ?? channelOfThread.get(question.threadId ?? ""),
+      channelId,
       question.createdAt,
       waitingLine({ kind: "question", question: question.question ?? "" }),
     );
+  }
 
   const latestOutcome = new Map<string, (typeof turns)[number]>();
   const unfinished = new Map<string, (typeof turns)[number]>();
@@ -563,6 +774,28 @@ export async function readTaskStates(
   }
   for (const row of carriedOn)
     mark(channelOfThread.get(row.threadId), "working");
+  for (const row of rows) {
+    const entry = state.get(row.id);
+    const said = saidIn.get(row.channelId);
+    if (!entry || !said?.byBot) continue;
+    /*
+     * The Bot ended on a question: the task waits on the person's answer. The line its conversation
+     * keeps is cut short, so a long closing question loses its question mark there; a task's turn
+     * says whether its reply asked (`TaskTurnEnding`). Anything else said there, and a reply from a
+     * turn that never said, is read from the line.
+     */
+    const asks =
+      replyAsks.get(said.sourceId ?? "") ?? replyEnding(said.lastMessage).asks;
+    if (
+      asks &&
+      !entry.working &&
+      !entry.failure &&
+      !entry.resolvedAt &&
+      // Work after the "done" must not bring back a closing question the person put away.
+      said.afterResolution
+    )
+      entry.needsInput = true;
+  }
   for (const [entry, waiting] of waitingFor) entry.next = waiting.line;
   return state;
 }

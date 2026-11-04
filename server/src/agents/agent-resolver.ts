@@ -31,6 +31,8 @@ export type AgentResolutionContext = {
    * neither start a subagent of its own nor reach past itself to another Bot or a person.
    */
   subagent?: boolean;
+  /** A task's own turn, which does the work rather than handing it to another task. */
+  task?: boolean;
 };
 
 export class CoworkerUnavailableError extends Error {}
@@ -56,6 +58,8 @@ export type ActorAgentResolverDependencies = {
   loadToolsForActor?: (
     actorId: string,
     initiator?: AuditInitiator,
+    /** Set for a task's own turn and a subagent's: neither hands work to a task. */
+    turn?: { task?: boolean },
   ) => LoadToolsForBot;
   signRunForActor?: (
     actorId: string,
@@ -136,7 +140,11 @@ export function createActorAgentResolver(
       deps.model,
       deps.resolveModelApiKey,
       deps.stallGuard,
-      deps.loadToolsForActor?.(actor.id, context?.initiator),
+      deps.loadToolsForActor?.(
+        actor.id,
+        context?.initiator,
+        context?.task || context?.subagent ? { task: true } : undefined,
+      ),
       deps.signRunForActor?.(actor.id, context?.initiator, context?.depth),
       deps.computerGuidance,
       deps.loadVendors,

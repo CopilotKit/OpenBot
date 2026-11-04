@@ -19,7 +19,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 - OpenBot can record scoped run outcomes, capability use and observed result consumption through its existing telemetry sink. Self-hosted servers opt in with `OPENBOT_PRODUCT_TELEMETRY=1`; desktop honors its existing telemetry disclosure and opt-out. First observed success and duplicate-event handling are computed in PostHog; no telemetry database or migration is added. See [telemetry coverage and delivery limits](docs/TELEMETRY.md).
 
-**Before upgrading.** Twenty things change for an existing deployment:
+**Before upgrading.** Twenty-one things change for an existing deployment:
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -104,6 +104,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   neither broker can move a connection to another user id. Nothing is ended at Composio or Arcade,
   since other OpenBots on the same key may be using those accounts. Deployments that sign people in
   keep their ids.
+- Migration `0075_asked_tasks` lets a task be asked for as well as started from a check-in's item
+  (`bot_tasks.origin` takes `'asked'`), adds `bot_tasks.client_id` with a unique index per person,
+  and adds one index to `work_items` by kind, person and task. Existing rows are kept as they are.
 - On Arcade, a Bot's call now needs the person's connection recorded in OpenBot, as on Composio, on
   every deployment including those that sign people in. A consent finished through OpenBot was
   always recorded. One that exists only at Arcade is recorded, with no new consent, the next time
@@ -149,6 +152,19 @@ so a question that needs several lookups makes more model calls than before. A s
 on the person: an action that needs approval is handed back, and the Bot asks in the conversation.
 Each subagent shows in the conversation as a subtask with its steps as they happen and its answer.
 OpenBot runs the tool itself, so a remote agent needs no change.
+
+### Ask a Bot for work that runs as a task of its own
+
+A Bot OpenBot runs itself now hands clearly multi-step or long-running work asked for in a
+conversation to a task of its own (`start_task`), and answers "On it. I'll put the result in
+Tasks." where it was asked. `POST /api/tasks` starts one with any of the person's Bots; a Start sent
+twice with the same `clientId` opens one task. Like a check-in's, an asked task asks before every
+send or change. A reply sent with `POST /api/tasks/:id/reply` is queued before it is answered and
+runs in the task's order, behind its turn still running there, an answer to a question card, or
+Allow once carrying a step on. At most three of one person's task turns run at once, and a turn
+stops at seven minutes. `GET /api/tasks/:id/report` reads a task back as what was asked, what the
+person decided, and what each turn did. A task whose Bot ended by asking the person reads as Needs
+you, and a channel read says which task it is the conversation of (`taskId`).
 
 ### Bots tell you when something needs you
 

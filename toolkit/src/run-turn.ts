@@ -67,12 +67,15 @@ import {
 } from "./headless-tools";
 import { sanitizeSeededHistory } from "./history-sanitize";
 import type { AuditInitiator } from "./initiator";
-import { keepLease } from "./lease";
+import { isLockConflict, keepLease, ThreadLockBusyError } from "./lease";
 import { TURN_LIMITS } from "./limits";
 import type { ComponentCatalog, TurnAdmission } from "./ports";
 import { historyOrEmpty } from "./thread-history";
 
 /** Everything a headless turn needs, injectable so tests never dial a model. */
+/** What a suspended turn says when whatever stopped it gave no words of its own. */
+export const HEADLESS_WAITING_FALLBACK = "The turn is waiting for human input.";
+
 export type TurnRunner = (input: {
   ownerUserId: string; // the actor the run asserts — grants and connections resolve to them
   routineId: string; // what the trail names as having started this turn, rather than the owner
@@ -87,6 +90,15 @@ export type TurnRunner = (input: {
     messageId: string;
   };
   userMessage?: Message;
+  /**
+   * Instructions the server resolved for this turn, such as the skills a person picked for a reply
+   * to a task. Kept as rows of the turn's history and given to the model as context. Never from the
+   * browser: only what the server itself looked up and checked belongs here.
+   *
+   * Each is named to the model by its `description`, which stays off the history row. Without one
+   * it is a skill the person picked, "Selected skill N".
+   */
+  systemMessages?: TurnSystemMessage[];
   /** Durable inbound delivery id; reused by lock, runner and emitted events. */
   runId?: string;
   /** How deep in a Bot-to-Bot chain this turn is. Absent is a person's own turn, depth zero. */
@@ -102,6 +114,11 @@ export type TurnRunner = (input: {
   /** The reply so far, each time more of it arrives, for a surface that shows a turn in progress. */
   onText?: (text: string) => void;
 }) => Promise<{ replyText: string; components?: DrawnComponent[] }>;
+
+/** An instruction for one turn, and what the model is told it is. See `systemMessages`. */
+export type TurnSystemMessage = Extract<Message, { role: "system" }> & {
+  description?: string;
+};
 
 /** A display component the Bot drew in a turn and the server allowed, with the props it drew. */
 export type DrawnComponent = { name: string; args: Record<string, unknown> };
@@ -298,12 +315,20 @@ export function turnMessages(input: {
   historicIds: ReadonlySet<string>;
   /** This turn's own message; ignored for a continuation. */
   turn: Message;
+  systemMessages?: Parameters<TurnRunner>[0]["systemMessages"];
   continuation?: Parameters<TurnRunner>[0]["continuation"];
 }): { messages: Message[]; persistedInputMessages: Message[] } {
-  const { seeded, historicIds, turn, continuation } = input;
+  const {
+    seeded,
+    historicIds,
+    turn,
+    continuation,
+    systemMessages = [],
+  } = input;
   /*
    * A turn whose message the thread already holds is a retry of it, which a failed run that got as
-   * far as persisting its input leaves behind: the message is there once, never sent twice.
+   * far as persisting its input leaves behind: the message is there once, never sent twice, and so
+   * are the instructions persisted before it.
    */
   const messages: Message[] = continuation
     ? sanitizeSeededHistory([
@@ -317,13 +342,31 @@ export function turnMessages(input: {
       ])
     : seeded.some((message) => message.id === turn.id)
       ? seeded
-      : [...seeded, turn];
+      : [
+          ...seeded,
+          ...systemMessages
+            .filter((message) => !historicIds.has(message.id))
+            .map(({ description, ...message }) => message),
+          turn,
+        ];
   return {
     messages,
     persistedInputMessages: messages.filter(
       (message) => !historicIds.has(message.id),
     ),
   };
+}
+
+/** This turn's instructions as context: a described one by its description, a skill by its number. */
+function contextOf(systemMessages: readonly TurnSystemMessage[]) {
+  let skills = 0;
+  return systemMessages.map((message) => {
+    if (message.description === undefined) skills += 1;
+    return {
+      description: message.description ?? `Selected skill ${skills}`,
+      value: message.content,
+    };
+  });
 }
 
 /** The run's input: this run's id, the conversation, the tools it is offered, and any resume. */
@@ -333,16 +376,33 @@ export function turnInput(input: {
   messages: Message[];
   state: unknown;
   tools: readonly HeadlessTool[];
+  systemMessages?: Parameters<TurnRunner>[0]["systemMessages"];
   continuation?: Parameters<TurnRunner>[0]["continuation"];
 }): RunAgentInput {
-  const { threadId, runId, messages, state, tools, continuation } = input;
+  const {
+    threadId,
+    runId,
+    messages,
+    state,
+    tools,
+    systemMessages = [],
+    continuation,
+  } = input;
   return {
     threadId,
     runId,
     messages,
     state,
     tools: tools.filter((tool) => !tool.hidden).map((tool) => tool.definition),
-    context: continuation?.snapshot.context ?? [],
+    /*
+     * A built-in Bot's model leaves system rows of the history out, so the instructions resolved for
+     * this turn go to it as context too. Only those: never a system row from the history, and never
+     * one a browser wrote. A continuation keeps the context it was captured with.
+     *
+     * Each under its own description. Called "Selected skill N" whatever it was, a task's
+     * instruction on how to end its reply reached the model as a skill the person had picked.
+     */
+    context: continuation?.snapshot.context ?? contextOf(systemMessages),
     forwardedProps: continuation?.snapshot.forwardedProps,
     ...(continuation
       ? {
@@ -400,14 +460,24 @@ async function takeLease(input: {
     heartbeatMs,
     onLost,
   } = input;
-  await intelligence.ɵacquireThreadLock({
-    threadId,
-    runId,
-    userId,
-    agentId,
-    ttlSeconds,
-    ...(learningContainerId ? { learningContainerId } : {}),
-  });
+  try {
+    await intelligence.ɵacquireThreadLock({
+      threadId,
+      runId,
+      userId,
+      agentId,
+      ttlSeconds,
+      ...(learningContainerId ? { learningContainerId } : {}),
+    });
+  } catch (error) {
+    /*
+     * Refused on the first ask, the turn has not run, so this one conflict is safe to put back on
+     * a queue without counting it. The same 409 later in the run, or on a renewal, may follow a
+     * tool call or a model's spend, and is raised as it comes.
+     */
+    if (isLockConflict(error)) throw new ThreadLockBusyError(error);
+    throw error;
+  }
 
   const heartbeat = keepLease({
     renew: () => intelligence.ɵrenewThreadLock({ threadId, runId, ttlSeconds }),
@@ -501,7 +571,7 @@ export function settle(evidence: TurnEvidence): TurnOutcome {
     return {
       kind: "suspended",
       suspension: new HeadlessToolSuspension(
-        carried.message ?? "The turn is waiting for human input.",
+        carried.message ?? HEADLESS_WAITING_FALLBACK,
         carried,
       ),
     };
@@ -638,6 +708,7 @@ export function createTurnRunner(options: {
       continuation,
       signal,
       userMessage,
+      systemMessages,
       runId: suppliedRunId,
       depth,
       onText,
@@ -722,6 +793,7 @@ export function createTurnRunner(options: {
       seeded,
       historicIds: new Set(history.messages.map((message) => message.id)),
       turn,
+      systemMessages,
       ...(continuation ? { continuation } : {}),
     });
 
@@ -771,6 +843,7 @@ export function createTurnRunner(options: {
       messages,
       state: agent.state,
       tools: headlessTools,
+      systemMessages,
       ...(continuation ? { continuation } : {}),
     });
 
@@ -908,7 +981,7 @@ export function createTurnRunner(options: {
                   message?: string;
                 };
                 waiting = new HeadlessToolSuspension(
-                  value.message ?? "The turn is waiting for human input.",
+                  value.message ?? HEADLESS_WAITING_FALLBACK,
                   value,
                 );
               }

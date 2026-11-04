@@ -256,10 +256,12 @@ export function createApprovalStore(database: Database): ApprovalStore {
     },
     policy: createPolicyStore(database),
     /*
-     * A check-in task's conversation, found by the thread an action names: the task's own turn, the
-     * turn an approval carries on, and the person replying there all run in that thread. Started from
-     * a check-in, so it is work the person did not write out themselves, and every step in it asks
-     * but a read of their own connected app (see `gate` in approvals/service.ts).
+     * A task's conversation, found by the thread an action names: the task's own turn, the turn an
+     * approval carries on, and the person replying there all run in that thread. Every step in it
+     * asks but a read of their own connected app (see `gate` in approvals/service.ts), whether the
+     * task was started from a check-in or asked for: a check-in's is work the person did not write
+     * out themselves, and an asked one's ask is the Bot's restatement of theirs, made in a turn that
+     * may have read anything, and run with nobody watching.
      */
     async asksEveryChange(owner, threadId) {
       const [row] = await database
@@ -275,7 +277,6 @@ export function createApprovalStore(database: Database): ApprovalStore {
         .where(
           and(
             eq(botTasks.ownerUserId, owner),
-            eq(botTasks.origin, "check_in"),
             eq(intelligenceChannelMappings.threadId, threadId),
           ),
         )

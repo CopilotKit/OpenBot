@@ -248,6 +248,7 @@ describe("channel activity", () => {
         pinned: false,
         lastReadAt: null,
         task: false,
+        taskId: null,
       },
     ]);
   });

@@ -234,8 +234,8 @@ export type ApprovalStore = {
   rules(ownerUserId: string): Promise<ApprovalRule[]>;
   revoke(ownerUserId: string, id: string): Promise<void>;
   /**
-   * Whether this thread is the conversation of a task the person started from a check-in item,
-   * where every change asks first. Absent where there are no tasks.
+   * Whether this thread is the conversation of one of the person's tasks, started from a check-in
+   * item or asked for, where every change asks first. Absent where there are no tasks.
    */
   asksEveryChange?(ownerUserId: string, threadId: string): Promise<boolean>;
   policy?: ApprovalPolicyStore;

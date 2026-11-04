@@ -152,8 +152,10 @@ export type DismissSuggestionResponse = { suggestion: SuggestionPayload };
 /**
  * Where a task stands, read on every request from the work queue, the approval inbox and the
  * questions its Bot asked, never stored. First match wins, in this order:
- * - `needs_input`: an approval or a question in its conversation waits on the person;
- * - `working`: its turn is queued, running, or due its one retry;
+ * - `needs_input`: an approval or a question in its conversation waits on the person, or the Bot's
+ *   last reply there ended by asking them something;
+ * - `working`: its turn or a reply of the person's is queued, running, or due its one retry, or an
+ *   answered approval or question is being carried on;
  * - `resolved`: the person marked it done, and no turn was accepted after;
  * - `failed`: its turn ran out of runs, and nothing was said in its conversation since;
  * - `ready_for_review`: its turn finished and the Bot replied.
@@ -183,8 +185,15 @@ export type TaskPayload = {
   /** Why its turn couldn't finish, in plain words, while `failed`. Null otherwise. */
   failure: string | null;
   failedAt: string | null;
-  /** One line on what comes next, from the last thing said in its conversation. */
+  /**
+   * One line on what comes next, from the last thing said in its conversation. "Marked done by
+   * you" once the person marked it done.
+   */
   next: string | null;
+  /** The person's replies still waiting their turn, oldest first (`POST /api/tasks/:id/reply`). */
+  queuedReplies: { messageId: string; text: string }[];
+  /** Questions in its conversation a reply the person sent already answers, even if its turn failed. */
+  answeredQuestionIds: string[];
   resolvedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -193,7 +202,10 @@ export type TaskPayload = {
 /** `GET /api/tasks`: open tasks, and resolved ones for 7 days after. */
 export type TasksResponse = { tasks: TaskPayload[] };
 
-/** `GET /api/tasks/:id`, and `POST /api/tasks/:id/resolve`, `/reopen` and `/again`. */
+/**
+ * `GET /api/tasks/:id`, `POST /api/tasks` (201), and `POST /api/tasks/:id/resolve`, `/reopen`,
+ * `/again` and `/reply` (202).
+ */
 export type TaskResponse = { task: TaskPayload };
 
 /** What a person's tasks from one Bot need from them, for the "Needs you" counts. */

@@ -1,3 +1,4 @@
+import { TASK_ENDING, TASK_FRAME } from "@openbot/shared/task-brief";
 import { afterAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
@@ -495,7 +496,14 @@ describe("Start on an item", () => {
       role: "user",
       content: ask,
     });
+    // Told it is a task, and how to end its reply, as instructions of their own, never in the ask.
     expect(persisted.at(-1)).toEqual([
+      {
+        id: "task:frame",
+        role: "system",
+        content: TASK_FRAME.join("\n"),
+      },
+      { id: "task:ending", role: "system", content: TASK_ENDING },
       { id: `task-${task.id}`, role: "user", content: ask },
     ]);
     expect(initiators.at(-1)).toEqual({ kind: "person" });
@@ -506,8 +514,9 @@ describe("Start on an item", () => {
     });
 
     const listed = await taskStore.get(owner.id, task.id);
+    // The reply ends by asking the person, so the task waits on their answer.
     expect(listed).toMatchObject({
-      status: "ready_for_review",
+      status: "needs_input",
       next: "Here is a reply that gives Friday as the date. Shall I send it?",
       failure: null,
     });
