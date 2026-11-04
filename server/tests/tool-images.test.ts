@@ -99,6 +99,20 @@ test("the image is added straight after the tool result as a picture, typed by i
   });
 });
 
+test("a Gmail attachment on the bucket Composio really answers with is fetched", async () => {
+  // The shape a live GMAIL_GET_ATTACHMENT returned: a presigned link on Composio's R2 bucket, not
+  // on storage.composio.dev. With only the client's host listed, every Gmail picture was refused.
+  const url =
+    "https://temp.4d4f16c61d89ec64e760039c4ec50717.r2.cloudflarestorage.com/project_scope/pr_test/gmail/img.png?X-Amz-Signature=s";
+  const { asked, download } = fakeDownload();
+  const out = await inlineToolImages(
+    history(attachmentResult(url, "image/png")),
+    { download },
+  );
+  expect(asked).toEqual([url]);
+  const parts = out[3]?.content as Part[];
+  expect(parts[1]?.type).toBe("image");
+});
 test("a link off Composio's storage host, or over http, is never fetched, and says so", async () => {
   for (const url of [
     // Any text a tool returns can carry this shape: an email body, a web page.
@@ -106,6 +120,9 @@ test("a link off Composio's storage host, or over http, is never fetched, and sa
     "https://169.254.169.254.nip.io/latest/meta-data",
     "https://bucket.s3.amazonaws.com/a.png",
     "https://storage.composio.dev.attacker.example/a.png",
+    // Another R2 bucket, and Composio's own bucket name under another account: not Composio's.
+    "https://attacker.r2.cloudflarestorage.com/a.png",
+    "https://temp.00000000000000000000000000000000.r2.cloudflarestorage.com/a.png",
     "https://127.0.0.1/secret.png",
     "https://169.254.169.254/latest/meta-data",
     "https://localhost/a.png",

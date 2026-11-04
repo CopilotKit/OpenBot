@@ -40,13 +40,19 @@ const MAX_IMAGES_PER_RUN = 4;
 const FETCH_TIMEOUT_MS = 15_000;
 
 /**
- * The hosts a tool's image link may be on: where Composio stages the files its tools return. The
- * one host here is the one `@composio/client` gives for its presigned file links
- * (`resources/files.d.ts`: `https://storage.composio.dev/projects/…`). Exact names only, no
- * wildcards. A link anywhere else is never fetched and the model is told so. Add a host here only
- * from a link a Composio tool really returned.
+ * The hosts a tool's image link may be on: where Composio stages the files its tools return.
+ * `storage.composio.dev` is the one `@composio/client` gives for its presigned file links
+ * (`resources/files.d.ts`: `https://storage.composio.dev/projects/…`). The Cloudflare R2 name is
+ * where a real `GMAIL_GET_ATTACHMENT` put its `s3url` on 2026-11-04 (`…/project_scope/…`): the
+ * client's host alone refused every Gmail attachment. Exact names only, no wildcards: any R2
+ * customer can serve `*.r2.cloudflarestorage.com`, so a wildcard would let a planted link choose
+ * what this server fetches again. A link anywhere else is never fetched and the model is told so.
+ * Add a host here only from a link a Composio tool really returned.
  */
-export const TOOL_IMAGE_HOSTS: readonly string[] = ["storage.composio.dev"];
+export const TOOL_IMAGE_HOSTS: readonly string[] = [
+  "storage.composio.dev",
+  "temp.4d4f16c61d89ec64e760039c4ec50717.r2.cloudflarestorage.com",
+];
 
 /** Fetches one link, or throws. A seam for tests; the default is {@link safeDownload}. */
 export type ToolImageDownload = (url: URL) => Promise<{ data: Uint8Array }>;
