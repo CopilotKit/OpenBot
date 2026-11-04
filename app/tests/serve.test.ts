@@ -457,7 +457,7 @@ async function waitForHandshake(
 }
 
 describe("api proxy", () => {
-  test("keeps upstream websocket forwarding to session and origin headers", () => {
+  test("keeps upstream websocket forwarding to session, origin and host headers", () => {
     const headers = upstreamWebSocketHeaders(
       new Headers({
         Authorization: "Bearer app-session",
@@ -473,8 +473,51 @@ describe("api proxy", () => {
     expect(Object.fromEntries(headers)).toEqual({
       authorization: "Bearer app-session",
       cookie: "openbot_session=valid",
+      host: "127.0.0.1:3010",
       origin: "http://openbot.local",
     });
+  });
+
+  test("a socket reaches the server addressed as the browser addressed it, as a call does", async () => {
+    // The server takes a page's socket as its own when Origin names the Host it was opened to, so a
+    // bridge that swapped in its own address made the app's socket another site's.
+    const seen: { socket: boolean; host: string | null }[] = [];
+    const upstream = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(request, server) {
+        const socket =
+          request.headers.get("upgrade")?.toLowerCase() === "websocket";
+        seen.push({ socket, host: request.headers.get("host") });
+        if (socket && server.upgrade(request)) return undefined;
+        return new Response("answered");
+      },
+      websocket: { message() {} },
+    });
+    if (upstream.port === undefined) {
+      upstream.stop(true);
+      throw new Error("The test upstream did not bind a TCP port");
+    }
+    const proxy = await startProxy(upstream.port);
+    const host = `192.168.1.10:${proxy.port}`;
+    try {
+      const call = await fetch(`http://127.0.0.1:${proxy.port}/api/events`, {
+        headers: { host, origin: `http://${host}` },
+      });
+      expect(await call.text()).toBe("answered");
+      const socket = await connectWebSocket(
+        `ws://127.0.0.1:${proxy.port}/api/events`,
+        { host, origin: `http://${host}` },
+      );
+      socket.close();
+      expect(seen).toEqual([
+        { socket: false, host },
+        { socket: true, host },
+      ]);
+    } finally {
+      await proxy.stop();
+      upstream.stop(true);
+    }
   });
 
   test("forwards session headers to authenticated upstream websocket handshakes", async () => {
