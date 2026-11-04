@@ -360,6 +360,7 @@ describe("reading a conversation's computer calls", () => {
           subject: "rm -f notes.md",
           output: "You declined it.",
           refused: true,
+          declined: true,
         },
       },
     ]);

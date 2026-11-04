@@ -107,7 +107,7 @@ describe("deployment API-key provider selection", () => {
         BOT_PROVIDER: "anthropic",
         BOT_MODEL: "",
       }),
-    ).toEqual(anthropicModel);
+    ).toEqual({ provider: "anthropic", defaultModel: "claude-sonnet-5-5" });
   });
 
   test("an unset choice preserves the package while an empty desktop provider selects OpenAI", () => {

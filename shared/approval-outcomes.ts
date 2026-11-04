@@ -92,6 +92,14 @@ export function doneByPerson(text: string): boolean {
   return text.trim() === HANDLED_BY_PERSON;
 }
 
+/**
+ * Whether a step's answer says the person declined it. Refused like a boundary's no, but the
+ * person's own decision, so it is said as theirs.
+ */
+export function declinedByPerson(text: string): boolean {
+  return text.trim() === DECLINED_BY_PERSON;
+}
+
 /** Where the first sentence ends: a full stop followed by a space, outside any parentheses. */
 function firstSentenceEnd(text: string): number {
   let depth = 0;
