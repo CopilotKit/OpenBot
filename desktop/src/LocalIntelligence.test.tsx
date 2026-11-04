@@ -159,7 +159,7 @@ function row(screen: ReturnType<typeof view>, name: string) {
   return screen.getByRole("listitem", { name });
 }
 
-const SETUP = "Setting up Intelligence";
+const SETUP = "Setting up OpenBot";
 const CONNECT = "Connecting OpenBot";
 const WAIT = "Waiting for Intelligence";
 const START = "Starting OpenBot";
@@ -277,7 +277,7 @@ test("setup that needs the agreement shows it, and only Accept sets up again wit
   });
   const screen = view();
   await screen.findByText(
-    "To run Intelligence on this computer, accept the CopilotKit Intelligence evaluation agreement for Acme.",
+    "To run Intelligence on this computer, accept the CopilotKit Intelligence license agreement for Acme.",
   );
   expect(screen.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
   // Nothing is accepted until the person clicks Accept.

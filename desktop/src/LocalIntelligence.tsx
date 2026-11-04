@@ -37,7 +37,7 @@ const unreadable: Problem = {
 type Phase = "setup" | "connect" | "wait" | "start";
 
 const PHASES: [Phase, string][] = [
-  ["setup", "Setting up Intelligence"],
+  ["setup", "Setting up OpenBot"],
   ["connect", "Connecting OpenBot"],
   ["wait", "Waiting for Intelligence"],
   ["start", "Starting OpenBot"],
@@ -627,7 +627,7 @@ function AcceptTerms({
     return (
       <div className="local-needs">
         <p className="footnote">
-          The evaluation agreement could not be shown. Try again.
+          The license agreement could not be shown. Try again.
         </p>
         <div className="row">
           <button type="button" onClick={onRetry}>
@@ -637,7 +637,7 @@ function AcceptTerms({
       </div>
     );
   if (terms?.status !== "required")
-    return <StatusLine>Getting the evaluation agreement…</StatusLine>;
+    return <StatusLine>Getting the license agreement…</StatusLine>;
   if (terms.version === refused)
     return (
       <div className="local-needs">
@@ -657,7 +657,7 @@ function AcceptTerms({
     <div className="local-needs">
       <p>
         To run Intelligence on this computer, accept the CopilotKit Intelligence
-        evaluation agreement for {terms.organizationName}.
+        license agreement for {terms.organizationName}.
       </p>
       <p className="footnote">
         <ExternalLink href={terms.url}>Read the agreement</ExternalLink> (

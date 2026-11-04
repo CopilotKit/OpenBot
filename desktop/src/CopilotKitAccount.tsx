@@ -71,7 +71,7 @@ export function CopilotKitAccount({
         else if (terms.status === "unavailable")
           setSeen({
             at: "failed",
-            said: "The evaluation agreement isn’t available right now. Try again later.",
+            said: "The license agreement isn’t available right now. Try again later.",
           });
         // Accepted already, or none needed: nothing to do here.
         else if (terms.status === "required" || terms.status === "not-required")
@@ -121,15 +121,19 @@ export function CopilotKitAccount({
           CopilotKit is named where that is true: the account and the agreement's own title. */}
       <Sections at="Account" />
       <h1>
-        {agreement
-          ? "Accept the evaluation agreement"
-          : "Sign in to CopilotKit"}
+        {agreement ? "Accept the license agreement" : "Sign in to CopilotKit"}
       </h1>
       <p className="lede">
         {agreement
-          ? `To run OpenBot on this computer, accept the CopilotKit Intelligence evaluation agreement for ${agreement.organizationName}.`
-          : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the evaluation agreement."}
+          ? `To run OpenBot on this computer, accept the CopilotKit Intelligence license agreement for ${agreement.organizationName}.`
+          : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
       </p>
+      {!agreement && (
+        <p className="footnote">
+          Your conversations and files are stored on this computer. Signing in
+          does not send them to CopilotKit.
+        </p>
+      )}
 
       {seen.at === "checking" && (
         <StatusLine>Checking your CopilotKit account…</StatusLine>
