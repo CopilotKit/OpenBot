@@ -59,6 +59,14 @@ export function createHandoffDelivery(options: {
     work: import("./handoff-runner").HandoffWork,
   ) => Promise<unknown>;
   /**
+   * The hop's analytics context, for the thread lock alone. Asked for before the lock, since the
+   * lock is what starts the run on the platform; the run input never carries it.
+   */
+  analyticsContextFor?: (
+    run: { threadId: string; runId: string },
+    work: import("./handoff-runner").HandoffWork,
+  ) => Promise<Record<string, unknown> | undefined>;
+  /**
    * The addressed Bot, built for the person whose conversation this is.
    *
    * Built per hop and for that person, because a Bot's tools are resolved against their grants: the
@@ -305,11 +313,23 @@ export function createHandoffDelivery(options: {
          * gateway will check every streamed event against, so using the local one would be claiming to
          * be a run that does not exist.
          */
+        const requested = { threadId: where.threadId, runId: newRunId() };
+        const analyticsContext = await options
+          .analyticsContextFor?.(requested, work)
+          .catch(() => {
+            console.warn(
+              JSON.stringify({
+                type: "product-telemetry",
+                reason: "handoff_context_failed",
+              }),
+            );
+            return undefined;
+          });
         const held = await lock.acquire({
-          threadId: where.threadId,
-          runId: newRunId(),
+          ...requested,
           userId: work.actorId,
           agentId: work.toBotId,
+          ...(analyticsContext ? { analyticsContext } : {}),
         });
         if (!held) {
           /*

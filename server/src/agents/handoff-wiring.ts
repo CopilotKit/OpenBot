@@ -1,4 +1,7 @@
-import { productHandoffInput } from "../telemetry/product-boundaries";
+import {
+  productHandoffAnalyticsContext,
+  productHandoffInput,
+} from "../telemetry/product-boundaries";
 import type { ProductTelemetry } from "../telemetry/product";
 import { randomUUID } from "node:crypto";
 import { IntelligenceAgentRunner } from "@copilotkit/runtime/v2";
@@ -73,6 +76,13 @@ export async function startHandoffDelivery(deps: {
               productHandoffInput(
                 productTelemetry,
                 input,
+                work.actorId,
+                work.runId,
+              ),
+            analyticsContextFor: (run, work) =>
+              productHandoffAnalyticsContext(
+                productTelemetry,
+                run,
                 work.actorId,
                 work.runId,
               ),

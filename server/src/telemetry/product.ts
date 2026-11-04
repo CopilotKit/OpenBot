@@ -42,17 +42,50 @@ export type ProductRunContext = {
   environment: "production" | "development" | "test" | "unknown";
   purpose: "ordinary" | "setup" | "unknown";
 };
+/**
+ * What Intelligence is told about a run: the shared contract, version 1 ("OpenBot telemetry:
+ * Intelligence build" in Notion). Only these fields, and only pseudonyms: no name, prompt, URL or
+ * raw identifier of a person or a task.
+ */
+export type AppAnalyticsContext = {
+  app_context_version: 1;
+  app_id: "openbot";
+  deployment_id: string;
+  app_user_hash: string;
+  trigger: ProductTrigger;
+  surface: ProductSurface;
+  environment: ProductRunContext["environment"];
+  purpose: ProductRunContext["purpose"];
+  root_task_id: string | null;
+  parent_run_id?: string;
+  attempt: number | null;
+};
+/**
+ * Where CopilotKit's runtime looks for an app's analytics context. It takes it off the run's
+ * forwardedProps and sends it, as `analyticsContext`, on the request that locks the run's thread.
+ */
+export const ANALYTICS_CONTEXT_KEY = "__copilotkitAnalyticsContext";
 export type RunPreparation = {
   actorUserId: string;
   threadId: string;
   runId: string;
   rootTaskId?: string;
+  /**
+   * The root task of the run this one continues or works for, as already derived (64 hex). Carried
+   * unchanged by a subagent or a followup, so a request with ten subagent runs stays one root task.
+   */
+  inheritedRootTaskId?: string;
   parentRunId?: string;
   attempt?: number;
   trigger: ProductTrigger;
   surface: ProductSurface;
   purpose?: ProductRunContext["purpose"];
 };
+const taskHash = /^[0-9a-f]{64}$/;
+const contractDeploymentId = /^[A-Za-z0-9_:.-]{1,128}$/;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 const boundedId = z
   .string()
   .min(1)
@@ -341,7 +374,10 @@ export async function createProductTelemetry(options: {
       root_task_id:
         input.trigger === "human" || input.trigger === "routine"
           ? stableId(`${userId}:${input.rootTaskId ?? input.runId}`)
-          : null,
+          : input.inheritedRootTaskId &&
+              taskHash.test(input.inheritedRootTaskId)
+            ? input.inheritedRootTaskId
+            : null,
       run_id: input.runId,
       ...(input.parentRunId && boundedId.safeParse(input.parentRunId).success
         ? { parent_run_id: input.parentRunId }
@@ -519,8 +555,29 @@ export async function createProductTelemetry(options: {
         : {}),
     });
   }
+  /**
+   * The root task of the run whose forwardedProps these are, when this deployment stated it there
+   * for this same person. Read from `openbotTelemetry`, which stays on the run's input wherever the
+   * run goes; the analytics key is taken off before the agent sees it.
+   */
+  function rootTaskOf(
+    actorUserId: string,
+    forwardedProps: unknown,
+  ): string | undefined {
+    if (!enabled || !isRecord(forwardedProps)) return;
+    const parsed = contextSchema.safeParse(forwardedProps.openbotTelemetry);
+    if (
+      !parsed.success ||
+      parsed.data.user_id !== user(actorUserId) ||
+      parsed.data.deployment_id !== deploymentId
+    )
+      return;
+    const root = parsed.data.root_task_id;
+    return root && taskHash.test(root) ? root : undefined;
+  }
   return {
     prepare,
+    rootTaskOf,
     middleware,
     recordAudit,
     enabled: () => enabled,
@@ -558,11 +615,47 @@ export async function createProductTelemetry(options: {
     },
   };
 }
+/** The contract's projection of a prepared run. Nothing outside the contract is carried. */
+export function appAnalyticsContext(
+  context: ProductRunContext | undefined,
+): AppAnalyticsContext | undefined {
+  if (!context) return;
+  return {
+    app_context_version: 1,
+    app_id: context.app_id,
+    deployment_id: contractDeploymentId.test(context.deployment_id)
+      ? context.deployment_id
+      : "unknown",
+    app_user_hash: context.user_id,
+    trigger: context.trigger,
+    surface: context.surface,
+    environment: context.environment,
+    purpose: context.purpose,
+    root_task_id: context.root_task_id,
+    ...(context.parent_run_id ? { parent_run_id: context.parent_run_id } : {}),
+    attempt: context.attempt,
+  };
+}
+/**
+ * A run's forwardedProps carrying this deployment's own context, and nothing a client sent under
+ * the same two keys. `openbotTelemetry` is read back by the product middleware; the analytics key
+ * is for the thread lock. With telemetry off there is no context, and neither key is present.
+ */
 export function productRunForwardedProps(
-  input: RunAgentInput,
-  context: unknown,
-) {
-  return { ...input.forwardedProps, openbotTelemetry: context };
+  forwardedProps: unknown,
+  context: ProductRunContext | undefined,
+): Record<string, unknown> {
+  const own = Object.fromEntries(
+    Object.entries(isRecord(forwardedProps) ? forwardedProps : {}).filter(
+      ([key]) => key !== "openbotTelemetry" && key !== ANALYTICS_CONTEXT_KEY,
+    ),
+  );
+  const analytics = appAnalyticsContext(context);
+  return {
+    ...own,
+    ...(context ? { openbotTelemetry: context } : {}),
+    ...(analytics ? { [ANALYTICS_CONTEXT_KEY]: analytics } : {}),
+  };
 }
 export function triggerForInitiator(
   initiator?: AuditInitiator,

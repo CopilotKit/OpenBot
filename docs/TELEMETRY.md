@@ -10,6 +10,12 @@ Set `OPENBOT_PRODUCT_TELEMETRY=1` to opt in on self-hosted, organization-hosted 
 
 The runtime retains `app_id=openbot`. OpenBot adds current execution context at its authenticated run boundary; it does not invent Intelligence project/tenant attribution. Intelligence must independently validate, persist and export matching context before cross-repository joins can be claimed complete.
 
+## Intelligence run context
+
+With product telemetry on, every run also states the shared Intelligence analytics context, version 1: `app_context_version`, `app_id=openbot`, `deployment_id` (or `unknown` when it does not fit `^[A-Za-z0-9_:.-]{1,128}$`), `app_user_hash` (the `user_id` pseudonym above), `trigger`, `surface`, `environment`, `purpose`, `root_task_id`, `parent_run_id` when known and `attempt`. Nothing else: no name, prompt, URL or raw identifier. A browser run carries it in `forwardedProps.__copilotkitAnalyticsContext`, which the CopilotKit runtime sends as `analyticsContext` on the thread lock. A headless turn and a Bot-to-Bot hop take the lock themselves and send it there, and never hand it to the agent. Whatever a browser sent under that key is replaced; with telemetry off it is removed and nothing is sent. `@copilotkit/runtime` 1.83.0 does not forward the field, so it reaches Intelligence once OpenBot runs a runtime release that does.
+
+Browser runs are `web`, or `desktop` in the desktop distribution; the native app's messages are `mobile`; Slack, Teams and SMS are `external_channel`; other headless turns are `unknown`. A subagent and a resumed turn carry the root task of the run they work for; a task's retry shares its first run's root with its own `attempt`. `purpose` is `ordinary` for every run the server sees: the desktop setup screen's question goes straight to the harness and never reaches the runtime.
+
 ## Events and interpretation
 
 The event names are `oss.runtime.openbot.run_accepted`, `.run_terminal`, `.run_stop_requested`, `.capability`, `.result_viewed` and `.result_copied`. Common properties include `schema_version`, `app_id`, `event_id`, `occurred_at`, `deployment_id`, `user_id` and `environment`. Run events carry known thread/run/root/parent IDs, `attempt_id=run_id`, a numeric `attempt` only when available, `trigger`, `surface` and `purpose`. Unknown linkage stays unknown.

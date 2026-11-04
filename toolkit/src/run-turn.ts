@@ -96,6 +96,8 @@ export type TurnRunner = (input: {
     trigger: "human" | "routine" | "followup" | "subagent" | "unknown";
     surface?: "web" | "desktop" | "mobile" | "external_channel" | "unknown";
     rootTaskId?: string;
+    /** The root task this turn works for, as its parent run's context already states it. */
+    inheritedRootTaskId?: string;
     parentRunId?: string;
     attempt?: number;
   };
@@ -145,6 +147,11 @@ export type IntelligenceLike = {
     agentId: string;
     ttlSeconds?: number;
     learningContainerId?: string;
+    /**
+     * The run's analytics context, which the platform records with the run. Sent on the wire only
+     * by a runtime that knows the field; `@copilotkit/runtime` 1.83.0 drops it and locks as before.
+     */
+    analyticsContext?: Record<string, unknown>;
   }): Promise<unknown>;
   /** NOTE: no `userId` and no `agentId` — renew is identified by the thread and the run alone. */
   ɵrenewThreadLock(params: {
@@ -359,6 +366,40 @@ export function turnInput(input: {
 }
 
 /**
+ * Where a host leaves a run's analytics context: the forwardedProps key CopilotKit's runtime reads
+ * for a browser run and sends, as `analyticsContext`, on the thread lock. This file is that engine
+ * for a turn with no browser, so it reads the same key.
+ */
+const ANALYTICS_CONTEXT = "__copilotkitAnalyticsContext";
+
+/** The run's input without the analytics context, and the context when it is an object. */
+function takeAnalyticsContext(input: RunAgentInput): {
+  input: RunAgentInput;
+  analyticsContext?: Record<string, unknown>;
+} {
+  const props: unknown = input.forwardedProps;
+  if (
+    typeof props !== "object" ||
+    props === null ||
+    Array.isArray(props) ||
+    !Object.hasOwn(props, ANALYTICS_CONTEXT)
+  )
+    return { input };
+  const { [ANALYTICS_CONTEXT]: context, ...rest } = props as Record<
+    string,
+    unknown
+  >;
+  return {
+    input: { ...input, forwardedProps: rest },
+    ...(typeof context === "object" &&
+    context !== null &&
+    !Array.isArray(context)
+      ? { analyticsContext: context as Record<string, unknown> }
+      : {}),
+  };
+}
+
+/**
  * The thread's lock for one run, held until it is released.
  *
  * Acquired with this run's own id and renewed on a heartbeat with the same id, so the lock the
@@ -386,6 +427,7 @@ async function takeLease(input: {
   agentId: string;
   ttlSeconds: number;
   learningContainerId?: string;
+  analyticsContext?: Record<string, unknown>;
   heartbeatMs: number;
   onLost: (error: unknown) => void;
 }): Promise<Lease> {
@@ -397,6 +439,7 @@ async function takeLease(input: {
     agentId,
     ttlSeconds,
     learningContainerId,
+    analyticsContext,
     heartbeatMs,
     onLost,
   } = input;
@@ -407,6 +450,7 @@ async function takeLease(input: {
     agentId,
     ttlSeconds,
     ...(learningContainerId ? { learningContainerId } : {}),
+    ...(analyticsContext ? { analyticsContext } : {}),
   });
 
   const heartbeat = keepLease({
@@ -774,9 +818,11 @@ export function createTurnRunner(options: {
       ...(continuation ? { continuation } : {}),
     });
 
+    let stated = false;
     if (options.prepareRunInput) {
       try {
         input = await options.prepareRunInput(input, hostTurn);
+        stated = true;
       } catch {
         console.warn(
           JSON.stringify({
@@ -786,6 +832,14 @@ export function createTurnRunner(options: {
         );
       }
     }
+    /*
+     * The analytics context goes on the lock and nowhere else, as the runtime does for a browser
+     * run: the agent and the run's stored events never see it. Only a context the host stated for
+     * THIS turn is sent; one left in a resumed run's forwardedProps is dropped with the key.
+     */
+    const taken = takeAnalyticsContext(input);
+    input = taken.input;
+    const analyticsContext = stated ? taken.analyticsContext : undefined;
 
     /*
      * The reply is recovered by diffing the agent, because the runner throws away what `runAgent`
@@ -856,6 +910,7 @@ export function createTurnRunner(options: {
       agentId,
       ttlSeconds: lockTtlSeconds,
       ...(learningContainerId ? { learningContainerId } : {}),
+      ...(analyticsContext ? { analyticsContext } : {}),
       heartbeatMs,
       /*
        * A lock we no longer hold means somebody else is in this thread — the person, most likely,
