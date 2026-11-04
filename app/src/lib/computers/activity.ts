@@ -1,4 +1,5 @@
 import {
+  DECLINED_BY_PERSON,
   doneByPerson,
   outcomeForPerson,
 } from "@openbot/shared/approval-outcomes";
@@ -38,9 +39,9 @@ export type ComputerActivity = {
   /** The tool call it was. A call read again is this same entry, never a second one. */
   id: string;
   /**
-   * When it finished, for the timestamp beside it. Only for a call this page saw asked and then
-   * answered. One already done when its conversation was opened says what was done, not when: the
-   * time the page was opened would be a guess drawn as a fact.
+   * When it finished, for the timestamp beside it. Only for a call this page watched: one it started
+   * running, or one the person answered here. One already done when its conversation was opened says
+   * what was done, not when: the time the page read it would be a guess drawn as a fact.
    */
   at?: number;
   kind: "command" | "read_file" | "write_file" | "list_files";
@@ -84,24 +85,41 @@ const byComputer = new Map<string, ComputerActivity[]>();
  */
 const taken = new Map<string, Set<string>>();
 /**
- * The calls each computer had run when it was last wiped, kept in `localStorage` as well as here.
+ * The last wipe of each computer, kept in `localStorage` as well as here.
  *
  * Kept in the page alone, a wipe lasted until the next reload: the conversation still holds every
  * call the deleted machine ran, and a page opened afresh, or another tab, read them all back. Kept
  * where every page on this browser reads it, a wiped call stays gone wherever the conversation opens.
  *
  * The server knows a wipe only as a row in the audit trail, which a member's page cannot read, and
- * a conversation's calls carry no time to compare one against. So a wipe is kept as the calls it
- * took with it, and in each conversation everything up to the last of them is from before it: what
- * ran before a wiped call ran on the wiped machine too.
+ * a conversation's calls carry no time to compare one against. So a wipe is kept as what this
+ * browser can say about it: when it happened, the calls the wiping page had read (they and
+ * everything before them in their conversation ran on the wiped machine), and the calls a page here
+ * watched run after it (they and everything after them ran on the new one).
+ *
+ * NOT ONLY THE CALLS THE WIPING PAGE HAD READ. That was all a wipe kept, and the page that wipes is
+ * Admin, which reads no conversation: opened on its own, it had read nothing, kept nothing, and a
+ * reload brought every command from the deleted machine back. A conversation with neither kind of
+ * call in it is now from before the wipe, all of it, until a page here watches a call run in it.
  */
-const wipedCalls = new Map<string, Set<string>>();
+type Wipe = {
+  /** When, by this browser's clock. Absent for one kept before wipes had a time. */
+  at?: number;
+  before: Set<string>;
+  after: Set<string>;
+};
+const wipes = new Map<string, Wipe | null>();
 const WIPED = "openbot:computer-activity-wiped:";
-/** How many wiped calls are kept per computer. Only the latest of each conversation is needed. */
+/** How many calls a wipe keeps of each kind. Only the latest before it and the first after it in each conversation are needed. */
 const WIPED_KEPT = 1000;
 /**
- * Calls this page watched being made, so their answer can say when it came: ones this page started
- * running, and ones it saw in a conversation still waiting for an answer.
+ * Calls this page watched, so their answer can say when it came: ones this page started running,
+ * and ones the person answered here.
+ *
+ * NOT CALLS IT SAW WAITING FOR AN ANSWER. Opening a conversation replays it run by run, and a call's
+ * answer arrives with the next run, so between the two every call in the history waits for an
+ * answer for a moment. A render that caught one there took the history as live work, and the entry
+ * was stamped with the time the page was loaded, a different one on each reload.
  */
 const asked = new Set<string>();
 const listeners = new Set<() => void>();
@@ -126,50 +144,113 @@ function sameDetails(entry: ComputerActivity, details: ActivityDetails) {
   );
 }
 
-function idsIn(text: string | null | undefined): string[] {
-  if (!text) return [];
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return Array.isArray(parsed)
-      ? parsed.filter((id): id is string => typeof id === "string")
-      : [];
-  } catch {
-    return [];
-  }
+function idsIn(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string")
+    : [];
 }
 
-/** This computer's wiped calls, read from `localStorage` the first time they are asked for. */
-function wipedOn(computerId: string): Set<string> {
-  let wiped = wipedCalls.get(computerId);
-  if (wiped) return wiped;
+/** A wipe as `localStorage` holds it, or null when there is none to read. */
+function wipeIn(text: string | null | undefined): Wipe | null {
+  if (!text) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  // The first shape a wipe was kept in: the calls it took, and no time.
+  if (Array.isArray(parsed))
+    return { before: new Set(idsIn(parsed)), after: new Set() };
+  if (!parsed || typeof parsed !== "object") return null;
+  const { at, before, after } = parsed as Record<string, unknown>;
+  return {
+    ...(typeof at === "number" ? { at } : {}),
+    before: new Set(idsIn(before)),
+    after: new Set(idsIn(after)),
+  };
+}
+
+/** This computer's last wipe, read from `localStorage` the first time it is asked for. */
+function wipeOf(computerId: string): Wipe | null {
+  const known = wipes.get(computerId);
+  if (known !== undefined) return known;
   let stored: string | null = null;
   try {
     stored = window.localStorage.getItem(WIPED + computerId);
   } catch {
     // A browser that refuses storage (a private window, a policy) still keeps the wipe for this page.
   }
-  wiped = new Set(idsIn(stored));
-  wipedCalls.set(computerId, wiped);
-  return wiped;
+  const wipe = wipeIn(stored);
+  wipes.set(computerId, wipe);
+  return wipe;
+}
+
+function keepWipe(computerId: string, wipe: Wipe): void {
+  wipes.set(computerId, wipe);
+  try {
+    window.localStorage.setItem(
+      WIPED + computerId,
+      JSON.stringify({
+        ...(wipe.at === undefined ? {} : { at: wipe.at }),
+        before: [...wipe.before].slice(-WIPED_KEPT),
+        after: [...wipe.after].slice(-WIPED_KEPT),
+      }),
+    );
+  } catch {
+    // Kept for this page all the same: see `wipeOf`.
+  }
 }
 
 /*
  * Another tab wiping a computer drops what this one shows of it too. The browser tells every other
- * page on this origin when `localStorage` changes, never the page that changed it.
+ * page on this origin when `localStorage` changes, never the page that changed it. A change that is
+ * the same wipe (another tab noting a call it watched run after it) only adds what it learnt.
  */
 if (typeof window !== "undefined")
   window.addEventListener("storage", (event) => {
     if (!event.key?.startsWith(WIPED)) return;
     const computerId = event.key.slice(WIPED.length);
-    const wiped = wipedOn(computerId);
-    for (const id of idsIn(event.newValue)) wiped.add(id);
+    const wipe = wipeIn(event.newValue);
+    if (!wipe) return;
+    // What this page knew, not what storage holds now: that is already the new value.
+    const previous = wipes.get(computerId);
+    wipes.set(computerId, wipe);
+    if (previous && previous.at === wipe.at) {
+      for (const id of previous.before) wipe.before.add(id);
+      for (const id of previous.after) wipe.after.add(id);
+      return;
+    }
     const current = byComputer.get(computerId);
     if (!current) return;
-    const kept = current.filter((entry) => !wiped.has(entry.id));
+    const kept = current.filter((entry) =>
+      wipe.at === undefined
+        ? !wipe.before.has(entry.id)
+        : entry.at !== undefined && entry.at >= wipe.at,
+    );
     if (kept.length === current.length) return;
     byComputer.set(computerId, kept);
     notify();
   });
+
+/**
+ * Where a conversation's calls from after the wipe begin: after the last one the wiping page had
+ * read, or at the first one a page here watched run after it. Null when the conversation says
+ * neither, and then only a call this page watches is from after it.
+ */
+function afterWipe(
+  calls: readonly ConversationCall[],
+  wipe: Wipe | null,
+): number | null {
+  if (!wipe) return 0;
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    const call = calls[index];
+    if (call && wipe.before.has(call.id)) return index + 1;
+  }
+  const first = calls.findIndex((call) => wipe.after.has(call.id));
+  if (first !== -1) return first;
+  return wipe.at === undefined ? 0 : null;
+}
 
 /**
  * Take in one conversation's computer calls, in the order they were made.
@@ -188,26 +269,16 @@ export function recordActivity(
   const current = byComputer.get(computerId) ?? NONE;
   const had = taken.get(computerId) ?? new Set<string>();
   const present = new Map(current.map((entry) => [entry.id, entry]));
-  // The last call of this conversation that was wiped with the computer: it and everything before it ran there.
-  const wiped = wipedOn(computerId);
-  let since = 0;
-  for (let index = calls.length - 1; index >= 0; index -= 1) {
-    const call = calls[index];
-    if (call && wiped.has(call.id)) {
-      since = index + 1;
-      break;
-    }
-  }
+  const wipe = wipeOf(computerId);
+  // Where this conversation's calls from after the last wipe begin, if it can be told.
+  const since = afterWipe(calls, wipe);
   let next: ComputerActivity[] | null = null;
+  let watchedSinceWipe = false;
   // The nearest later call of this conversation that the pane holds, which a new one goes before.
   let after: string | undefined;
-  for (let index = calls.length - 1; index >= since; index -= 1) {
+  for (let index = calls.length - 1; index >= (since ?? 0); index -= 1) {
     const call = calls[index];
-    if (!call) continue;
-    if (!call.did) {
-      if (!had.has(call.id)) asked.add(call.id);
-      continue;
-    }
+    if (!call?.did) continue;
     const existing = present.get(call.id);
     if (existing) {
       if (!sameDetails(existing, call.did)) {
@@ -224,11 +295,14 @@ export function recordActivity(
     }
     // Wiped, or aged out past the limit.
     if (had.has(call.id)) continue;
+    // A conversation that cannot place the wipe: only what this page watched is from after it.
+    if (since === null && !asked.has(call.id)) continue;
     next ??= [...current];
+    const at = asked.delete(call.id) ? Date.now() : undefined;
     const entry: ComputerActivity = {
       ...call.did,
       id: call.id,
-      ...(asked.delete(call.id) ? { at: Date.now() } : {}),
+      ...(at === undefined ? {} : { at }),
     };
     const before =
       after === undefined
@@ -237,11 +311,25 @@ export function recordActivity(
     next.splice(before === -1 ? next.length : before, 0, entry);
     had.add(call.id);
     after = call.id;
+    // Watched after the wipe, so it places the wipe in its conversation for every page from now on.
+    if (wipe?.at !== undefined && at !== undefined && at >= wipe.at) {
+      wipe.after.add(call.id);
+      watchedSinceWipe = true;
+    }
   }
+  if (wipe && watchedSinceWipe) keepWipe(computerId, wipe);
   if (!next) return;
   taken.set(computerId, had);
   byComputer.set(computerId, next.slice(-LIMIT));
   notify();
+}
+
+/**
+ * A call this page watched: it started running here, or the person answered it here, which a step
+ * held for them before a reload is. Its answer comes once it has run, so its entry says when.
+ */
+export function noteWatched(toolCallId: string): void {
+  asked.add(toolCallId);
 }
 
 export function activityFor(computerId: string): ComputerActivity[] {
@@ -470,8 +558,63 @@ export function detailsOf(
 }
 
 /**
+ * The approval card a Bot asks with before a step it would rather not take unasked (`askApproval`,
+ * `components/gallery/decisions.tsx`).
+ *
+ * Asked before deleting a file, a person said no, and the Bot never called the command: the
+ * conversation held the card and its answer and nothing else, so Activity never listed the step.
+ * A card that names the command it asks about is that step. Declined, it is listed as one the person
+ * declined, in the words a declined command uses. Allowed, it is not listed at all: the command the
+ * Bot runs next is the step, and it is listed once, with what it printed.
+ */
+const ASK_APPROVAL = "askApproval";
+
+const approvals = new Map<string, { args: string; command: string | null }>();
+
+/** The command an approval card asks about, or null when it names none. Read once per call's arguments. */
+function commandAskedAbout(call: {
+  id: string;
+  function: { arguments: string };
+}): string | null {
+  const known = approvals.get(call.id);
+  if (known && known.args === call.function.arguments) return known.command;
+  const command = argumentsOf(call.function.arguments).command;
+  return remember(approvals, call.id, {
+    args: call.function.arguments,
+    command:
+      typeof command === "string" && command.trim() ? command.trim() : null,
+  }).command;
+}
+
+/** What the person answered on an approval card: its `{ decision }`, or null when it is not an answer. */
+function decisionIn(content: unknown): "approved" | "declined" | null {
+  if (typeof content !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(content);
+    const decision =
+      parsed && typeof parsed === "object"
+        ? (parsed as { decision?: unknown }).decision
+        : undefined;
+    return decision === "approved" || decision === "declined" ? decision : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A step the person declined before the Bot took it, as the pane draws one. */
+function declinedCommand(command: string): ActivityDetails {
+  return {
+    kind: "command",
+    subject: command,
+    output: outcomeForPerson(DECLINED_BY_PERSON),
+    refused: true,
+  };
+}
+
+/**
  * The computer calls a conversation holds, in the order they were made, each with what it did, or
- * null while it waits for its answer.
+ * null while it waits for its answer. An approval card that names a command counts as one until the
+ * person allows it (see `ASK_APPROVAL`).
  *
  * The answers are gathered first, from anywhere in the conversation: a stored thread can hold a
  * result ahead of its own call (see `repair-history.ts`). The last real answer to a call is the one
@@ -482,23 +625,44 @@ export function conversationActivity(
   messages: readonly Message[],
 ): ConversationCall[] {
   const computerCalls = new Set<string>();
+  const askingAbout = new Map<string, string>();
   for (const message of messages) {
     if (message.role !== "assistant") continue;
-    for (const call of message.toolCalls ?? [])
+    for (const call of message.toolCalls ?? []) {
       if (KINDS[call.function.name]) computerCalls.add(call.id);
+      else if (call.function.name === ASK_APPROVAL) {
+        const command = commandAskedAbout(call);
+        if (command) askingAbout.set(call.id, command);
+      }
+    }
   }
-  // Only the computer's answers: another tool's can be long, and nothing here reads it.
+  // Only the computer's answers, and the person's on those cards: another tool's can be long, and nothing here reads it.
   const answered = new Map<string, ToolOutcome>();
+  const decided = new Map<string, "approved" | "declined">();
   for (const message of messages) {
-    if (message.role !== "tool" || !computerCalls.has(message.toolCallId))
-      continue;
-    const answer = answerOf(message);
-    if (answer) answered.set(message.toolCallId, answer);
+    if (message.role !== "tool") continue;
+    if (computerCalls.has(message.toolCallId)) {
+      const answer = answerOf(message);
+      if (answer) answered.set(message.toolCallId, answer);
+    } else if (askingAbout.has(message.toolCallId)) {
+      const decision = decisionIn(message.content);
+      if (decision) decided.set(message.toolCallId, decision);
+    }
   }
   const calls: ConversationCall[] = [];
   for (const message of messages) {
     if (message.role !== "assistant") continue;
     for (const call of message.toolCalls ?? []) {
+      const command = askingAbout.get(call.id);
+      if (command !== undefined) {
+        const decision = decided.get(call.id);
+        if (decision === "approved") continue;
+        calls.push({
+          id: call.id,
+          did: decision === "declined" ? declinedCommand(command) : null,
+        });
+        continue;
+      }
       const kind = KINDS[call.function.name];
       if (!kind) continue;
       const answer = answered.get(call.id);
@@ -520,10 +684,11 @@ export function conversationActivity(
  * each render keeps the pane exactly as current as the transcript beside it, for one pass over the
  * messages with each answer parsed once.
  *
- * A call this page starts running is marked as watched when it starts, not when a render happens to
- * catch it unanswered: a quick answer can land before the conversation is drawn again, and the entry
- * would then lose its time for no reason. That covers all three ways a call runs, since the browser
- * starts every one of them, including those it hands to the gate.
+ * A call this page starts running is marked as watched when it starts, and only then: a quick answer
+ * can land before the conversation is drawn again, and a render that catches a call unanswered may
+ * be catching history as it is replayed (see `asked`). That covers all three ways a call runs, since
+ * the browser starts every one of them, including those it hands to the gate. A step held for the
+ * person before a reload is marked when they answer it here (`noteWatched`).
  */
 export function useConversationActivity(
   computerId: string,
@@ -534,7 +699,9 @@ export function useConversationActivity(
     () =>
       copilotkit.subscribe({
         onToolExecutionStart: ({ toolCallId, toolName }) => {
-          if (KINDS[toolName]) asked.add(toolCallId);
+          // A card's handler starts when it is drawn to be answered, here.
+          if (KINDS[toolName] || toolName === ASK_APPROVAL)
+            noteWatched(toolCallId);
         },
       }).unsubscribe,
     [copilotkit],
@@ -576,20 +743,18 @@ export function subscribeToActivity(listener: () => void): () => void {
  *
  * Wiping a computer deletes the machine those commands ran on, so leaving them on screen would
  * describe something that no longer exists. They stay forgotten when the conversation is read again,
- * after a reload and in another tab as well (see `wipedCalls`); what the Bot does from here on still
- * appears.
+ * after a reload and in another tab as well, whether or not this page had read the conversation (see
+ * `wipes`); what the Bot does from here on still appears.
  */
 export function clearActivity(computerId: string): void {
-  const wiped = wipedOn(computerId);
-  for (const id of taken.get(computerId) ?? []) wiped.add(id);
-  const kept = [...wiped].slice(-WIPED_KEPT);
-  wipedCalls.set(computerId, new Set(kept));
-  try {
-    if (kept.length > 0)
-      window.localStorage.setItem(WIPED + computerId, JSON.stringify(kept));
-  } catch {
-    // Kept for this page all the same: see `wipedOn`.
-  }
+  const previous = wipeOf(computerId);
+  // Everything known about the machine before this wipe ran on it, the last wipe's newer calls too.
+  const before = new Set([
+    ...(previous?.before ?? []),
+    ...(previous?.after ?? []),
+    ...(taken.get(computerId) ?? []),
+  ]);
+  keepWipe(computerId, { at: Date.now(), before, after: new Set() });
   byComputer.delete(computerId);
   browsed.delete(computerId);
   notify();

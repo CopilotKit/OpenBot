@@ -5,6 +5,7 @@ import {
   activityFor,
   clearActivity,
   conversationActivity,
+  noteWatched,
   outputOf,
   recordActivity,
 } from "../src/lib/computers/activity";
@@ -84,27 +85,35 @@ function ran(command: string, output = ""): ActivityDetails {
 }
 
 describe("the activity a pane shows", () => {
+  /*
+   * A computer of its own for each case. Wiping one is a real event now, with a time every later
+   * read is compared against, so it is not a way to start a case from nothing.
+   */
+  let computers = 0;
+  let bot = "";
+  let other = "";
   beforeEach(() => {
-    clearActivity("bot-1");
-    clearActivity("bot-2");
+    computers += 1;
+    bot = `pane-bot-${computers}`;
+    other = `pane-other-${computers}`;
   });
 
   test("keeps what a Bot ran, in the order it ran it", () => {
-    recordActivity("bot-1", [
+    recordActivity(bot, [
       { id: "a-1", did: ran("ls", "a\nb") },
       { id: "a-2", did: ran("pwd", "/workspace") },
     ]);
 
-    expect(activityFor("bot-1").map((entry) => entry.subject)).toEqual([
+    expect(activityFor(bot).map((entry) => entry.subject)).toEqual([
       "ls",
       "pwd",
     ]);
   });
 
   test("keeps one Bot's work out of another's", () => {
-    recordActivity("bot-1", [{ id: "b-1", did: ran("ls") }]);
+    recordActivity(bot, [{ id: "b-1", did: ran("ls") }]);
 
-    expect(activityFor("bot-2")).toEqual([]);
+    expect(activityFor(other)).toEqual([]);
   });
 
   test("a computer nothing has happened on is empty rather than undefined", () => {
@@ -117,44 +126,70 @@ describe("the activity a pane shows", () => {
       { id: "c-1", did: ran("ls") },
       { id: "c-2", did: ran("ls") },
     ];
-    for (let read = 0; read < 5; read += 1) recordActivity("bot-1", calls);
+    for (let read = 0; read < 5; read += 1) recordActivity(bot, calls);
 
     // Two calls of the same command are two entries; five reads of them are still two.
-    expect(activityFor("bot-1").map((entry) => entry.id)).toEqual([
-      "c-1",
-      "c-2",
-    ]);
+    expect(activityFor(bot).map((entry) => entry.id)).toEqual(["c-1", "c-2"]);
   });
 
   test("history read after the latest turns still lists in the order things ran", () => {
     // A conversation opens on its latest turns, and its stored history merges in ahead of them.
-    recordActivity("bot-1", [{ id: "d-3", did: ran("date") }]);
-    recordActivity("bot-1", [
+    recordActivity(bot, [{ id: "d-3", did: ran("date") }]);
+    recordActivity(bot, [
       { id: "d-1", did: ran("uname -a") },
       { id: "d-2", did: ran("df -h") },
       { id: "d-3", did: ran("date") },
     ]);
 
-    expect(activityFor("bot-1").map((entry) => entry.subject)).toEqual([
+    expect(activityFor(bot).map((entry) => entry.subject)).toEqual([
       "uname -a",
       "df -h",
       "date",
     ]);
   });
 
-  test("a call still waiting is not drawn, and is timed once its answer comes", () => {
-    recordActivity("bot-1", [{ id: "e-1", did: null }]);
-    expect(activityFor("bot-1")).toEqual([]);
+  test("a call this page watched is timed once its answer comes", () => {
+    // Started here (the SDK's onToolExecutionStart), or answered here on its approval card.
+    noteWatched("e-1");
+    recordActivity(bot, [{ id: "e-1", did: null }]);
+    expect(activityFor(bot)).toEqual([]);
 
-    recordActivity("bot-1", [{ id: "e-1", did: ran("date") }]);
-    expect(activityFor("bot-1")[0]?.at).toBeNumber();
+    recordActivity(bot, [{ id: "e-1", did: ran("date") }]);
+    expect(activityFor(bot)[0]?.at).toBeNumber();
+  });
+
+  test("a call seen waiting while its conversation is replayed is not timed with the moment it was read", () => {
+    /*
+     * Opening a conversation replays it run by run, and a call's answer comes with the run after it,
+     * so for a moment every call in the history waits for an answer. A read that caught one there
+     * took it as live work and stamped it with the page's load time: a save that ran at 9:31:53 PM
+     * showed 9:32:45 PM after one reload and 9:33:53 PM after the next.
+     */
+    recordActivity(bot, [{ id: "e-2", did: null }]);
+    recordActivity(bot, [
+      { id: "e-2", did: ran("uname -a") },
+      { id: "e-3", did: null },
+    ]);
+    recordActivity(bot, [
+      { id: "e-2", did: ran("uname -a") },
+      { id: "e-3", did: ran("date") },
+    ]);
+
+    expect(activityFor(bot).map((entry) => entry.subject)).toEqual([
+      "uname -a",
+      "date",
+    ]);
+    expect(activityFor(bot).map((entry) => entry.at)).toEqual([
+      undefined,
+      undefined,
+    ]);
   });
 
   test("a call already answered when its conversation opened says what, not when", () => {
-    recordActivity("bot-1", [{ id: "f-1", did: ran("date") }]);
+    recordActivity(bot, [{ id: "f-1", did: ran("date") }]);
 
     // The entry has to be there for its missing time to mean anything.
-    const [entry] = activityFor("bot-1");
+    const [entry] = activityFor(bot);
     if (!entry) throw new Error("The call was not recorded.");
     expect(entry.subject).toBe("date");
     expect(entry.at).toBeUndefined();
@@ -164,14 +199,14 @@ describe("the activity a pane shows", () => {
     // Reset deletes the machine those commands ran on, so leaving them on screen would describe
     // something that no longer exists. The conversation still holds them and is read on every change.
     const before = [{ id: "g-1", did: ran("ls") }];
-    recordActivity("bot-1", before);
-    clearActivity("bot-1");
-    recordActivity("bot-1", before);
-    expect(activityFor("bot-1")).toEqual([]);
+    recordActivity(bot, before);
+    clearActivity(bot);
+    recordActivity(bot, before);
+    expect(activityFor(bot)).toEqual([]);
 
     // What the Bot does after the wipe still appears.
-    recordActivity("bot-1", [...before, { id: "g-2", did: ran("pwd") }]);
-    expect(activityFor("bot-1").map((entry) => entry.subject)).toEqual(["pwd"]);
+    recordActivity(bot, [...before, { id: "g-2", did: ran("pwd") }]);
+    expect(activityFor(bot).map((entry) => entry.subject)).toEqual(["pwd"]);
   });
 
   test("stops growing, because this is a pane and not an archive", () => {
@@ -179,11 +214,11 @@ describe("the activity a pane shows", () => {
       id: `h-${index}`,
       did: ran(`command-${index}`),
     }));
-    recordActivity("bot-1", calls);
+    recordActivity(bot, calls);
     // Read again, the ones that aged out stay out.
-    recordActivity("bot-1", calls);
+    recordActivity(bot, calls);
 
-    const kept = activityFor("bot-1");
+    const kept = activityFor(bot);
     expect(kept).toHaveLength(200);
     // The oldest go first: what somebody watching wants is what just happened.
     expect(kept[0]?.subject).toBe("command-50");
@@ -300,6 +335,64 @@ describe("reading a conversation's computer calls", () => {
         "The person declined this action when you asked for their approval, so it was not done.",
       refused: true,
     });
+  });
+
+  test("a command declined on the Bot's approval card is listed as declined, and one allowed is left to the command it runs", () => {
+    // Asked before deleting a file, declined, and never called: the card and its answer are all the conversation holds.
+    const card = {
+      title: "Delete notes.md",
+      summary: "This will permanently remove notes.md from my workspace.",
+      details: [{ label: "Command", value: "rm -f notes.md" }],
+      command: "rm -f notes.md",
+      approveLabel: "Delete file",
+      rejectLabel: "Keep file",
+    };
+    expect(
+      conversationActivity([
+        call("ask-1", "askApproval", card),
+        answer("ask-1", JSON.stringify({ decision: "declined" })),
+      ]),
+    ).toEqual([
+      {
+        id: "ask-1",
+        did: {
+          kind: "command",
+          subject: "rm -f notes.md",
+          output: "You declined it.",
+          refused: true,
+        },
+      },
+    ]);
+    // Allowed, the command the Bot then runs is the step: listed once, as what it printed.
+    expect(
+      conversationActivity([
+        call("ask-2", "askApproval", card),
+        answer("ask-2", JSON.stringify({ decision: "approved" })),
+        call("rm-2", "computer_run_command", { command: "rm -f notes.md" }),
+        answer(
+          "rm-2",
+          JSON.stringify({ ok: true, exitCode: 0, stdout: "", stderr: "" }),
+        ),
+      ]),
+    ).toEqual([
+      {
+        id: "rm-2",
+        did: {
+          kind: "command",
+          subject: "rm -f notes.md",
+          output: "",
+          exitCode: 0,
+        },
+      },
+    ]);
+    // Waiting on the person, it is a step not answered yet. A card that names no command is not the computer's.
+    expect(
+      conversationActivity([
+        call("ask-3", "askApproval", card),
+        call("ask-4", "askApproval", { title: "Refund this order?" }),
+        answer("ask-4", JSON.stringify({ decision: "declined" })),
+      ]),
+    ).toEqual([{ id: "ask-3", did: null }]);
   });
 
   test("an answer stored ahead of its own call still answers it, and other tools are not the computer's", () => {

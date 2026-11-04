@@ -19,6 +19,7 @@ import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { ActivityLog } from "@/components/computer/activity-log";
+import { GALLERY as DECISIONS } from "@/components/gallery/decisions";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -28,6 +29,8 @@ import {
 import { applyChannelEvent } from "@/lib/channels/use-channel-events";
 import { ActiveBotProvider } from "@/lib/copilot/active-bot";
 import { ComputerTools } from "@/lib/copilot/computer-tools";
+import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
+import { GalleryTools } from "@/lib/copilot/gallery-tools";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
@@ -57,6 +60,12 @@ let channel: AgentChannel;
 
 /** The thread as the runtime has stored it. */
 let stored: Message[] = [];
+/**
+ * How the gateway replays the thread when a conversation is opened: run by run, each run's own
+ * events with its input, as Intelligence's realtime socket does, with a beat between runs. Unset,
+ * it answers with one snapshot.
+ */
+let replay: unknown[][] | null = null;
 let runs: RunAgentInput[] = [];
 /** What the Bot does on each of its runs, in order: call one tool, or answer in words. */
 type Turn =
@@ -99,6 +108,34 @@ function sse(events: unknown[]) {
     { headers: { "content-type": "text/event-stream" } },
   );
 }
+
+/** A stream that sends each run's events, then waits a beat before the next, as a replay arrives. */
+function replayed(runs: unknown[][]) {
+  const encoder = new TextEncoder();
+  return new NativeResponse(
+    new ReadableStream({
+      async start(controller) {
+        for (const events of runs) {
+          for (const event of events)
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
+            );
+          await new Promise((resolve) => setTimeout(resolve, 40));
+        }
+        controller.close();
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+/** The Bot's approval card, registered as Vite would have registered it. */
+function theApprovalCard() {
+  const spec = DECISIONS.find((candidate) => candidate.name === "askApproval");
+  if (!spec) throw new Error("The approval card is not in the gallery.");
+  return spec;
+}
+const APPROVAL = theApprovalCard();
 
 /** One assistant turn that calls one tool, as the runtime streams it and stores it. */
 function calling(
@@ -194,6 +231,8 @@ function runEvents(input: RunAgentInput): unknown[] {
 }
 
 beforeAll(() => {
+  // `import.meta.glob` is Vite's, so under `bun test` the registry finds no gallery modules. Taken off in `afterAll`.
+  GALLERY_COMPONENTS.push(APPROVAL);
   /*
    * At an address, as the app always is. With happy-dom's default `about:blank` the page has no
    * origin, and the SDK's stop request, which the gate's 202 makes, cannot build its URL.
@@ -220,12 +259,14 @@ beforeAll(() => {
           mode: "sse",
           telemetryDisabled: true,
         });
-      if (url.pathname.endsWith("/connect"))
+      if (url.pathname.endsWith("/connect")) {
+        if (replay) return replayed(replay);
         return sse([
           { type: "RUN_STARTED", threadId: channel.threadId, runId: "join" },
           { type: "MESSAGES_SNAPSHOT", messages: stored },
           { type: "RUN_FINISHED", threadId: channel.threadId, runId: "join" },
         ]);
+      }
       if (url.pathname.endsWith("/run")) {
         const body = RunAgentInputSchema.parse(await request.json());
         runs.push(body);
@@ -288,6 +329,15 @@ beforeAll(() => {
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
         return new NativeResponse(null, { status: 204 });
+      // The Bot holds the approval card, as `server/src/components/routes.ts` answers for a granted one.
+      if (url.pathname === "/api/components/catalogue")
+        return NativeResponse.json({ added: [] });
+      if (url.pathname === `/api/components/for-agent/${bot}`)
+        return NativeResponse.json({
+          components: [
+            { name: "askApproval", description: APPROVAL.description },
+          ],
+        });
       // Grants, capabilities, profiles: none of them decides anything here, and the app reads none as a refusal.
       return NativeResponse.json({ error: "Not found" }, { status: 404 });
     },
@@ -307,6 +357,7 @@ beforeEach(() => {
     lastMessageAt: SINCE,
   };
   stored = [];
+  replay = null;
   runs = [];
   turns = [];
   gated = [];
@@ -340,6 +391,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 afterAll(async () => {
   await settleReactWork();
+  GALLERY_COMPONENTS.splice(GALLERY_COMPONENTS.indexOf(APPROVAL), 1);
   globalThis.fetch = originalFetch;
   globalThis.WebSocket = originalSocket;
   GlobalRegistrator.unregister();
@@ -352,6 +404,7 @@ function app() {
       <CopilotKitProvider runtimeUrl="http://localhost/api/copilotkit">
         <ActiveBotProvider>
           <ComputerTools />
+          <GalleryTools />
           <ChannelChat channel={channel} runtimeAgentId={bot} />
           <section aria-label="Activity">
             <ActivityLog computerId={bot} />
@@ -840,4 +893,329 @@ test("reopening a conversation shows what was already done, once each, without c
   await new Promise((resolve) => setTimeout(resolve, 300));
   expect(entries(again)).toHaveLength(2);
   expect(runs).toHaveLength(0);
+});
+
+/** What the Bot asked with before deleting a file, as it asked on the stack it was found on. */
+const DELETE_CARD = {
+  title: "Delete notes.md",
+  summary:
+    "This will permanently remove `notes.md` from my workspace using `rm -f notes.md`.",
+  details: [
+    { label: "Command", value: "rm -f notes.md" },
+    {
+      label: "Effect",
+      value:
+        "Deletes the workspace file; it cannot be recovered through this action.",
+    },
+  ],
+  command: "rm -f notes.md",
+  approveLabel: "Delete file",
+  rejectLabel: "Keep file",
+};
+
+test("a command the person declines on the Bot's own approval card is listed once in Activity, as declined, with when", async () => {
+  // The Bot asks first, the person keeps the file, and the command is never called.
+  turns = [
+    { call: { id: "call-ask-rm", name: "askApproval", args: DELETE_CARD } },
+    { reply: "I did not run the command because you declined." },
+  ];
+  const view = render(app());
+  const user = await ask(
+    view,
+    "Run the command rm -f notes.md in your workspace.",
+  );
+
+  await user.click(
+    await view.findByRole("button", { name: "Keep file" }, { timeout: 5000 }),
+  );
+  expect(
+    await view.findByText(
+      "I did not run the command because you declined.",
+      {},
+      { timeout: 5000 },
+    ),
+  ).toBeTruthy();
+
+  const pane = activityOf(view);
+  expect(
+    await pane.findByText("rm -f notes.md", {}, { timeout: 3000 }),
+  ).toBeTruthy();
+  expect(pane.getByText("You declined it.")).toBeTruthy();
+  expect(entries(view)).toHaveLength(1);
+  // Declined here, so it says when.
+  expect(
+    view.getByRole("region", { name: "Activity" }).querySelectorAll("time"),
+  ).toHaveLength(1);
+  // Nothing reached the computer or its gate.
+  expect(gated).toEqual([]);
+  expect(direct.filter((route) => route === "/exec")).toEqual([]);
+  // The card says the same: declined, the command shown once.
+  expect(view.getByText("Declined")).toBeTruthy();
+  expect(
+    view.container.querySelectorAll("code").length -
+      view.getByRole("region", { name: "Activity" }).querySelectorAll("code")
+        .length,
+  ).toBe(1);
+});
+
+test("a command allowed on the Bot's own approval card is listed once, as the command it ran, with what it printed", async () => {
+  turns = [
+    { call: { id: "call-ask-rm-2", name: "askApproval", args: DELETE_CARD } },
+    {
+      call: {
+        id: "call-rm-2",
+        name: "computer_run_command",
+        args: { command: "rm -f notes.md" },
+      },
+    },
+    { reply: "Deleted notes.md." },
+  ];
+  gate = () =>
+    NativeResponse.json({
+      result: commandResult("rm -f notes.md", "removed 'notes.md'\n", 0),
+    });
+  const view = render(app());
+  const user = await ask(
+    view,
+    "Run the command rm -f notes.md in your workspace.",
+  );
+
+  await user.click(
+    await view.findByRole("button", { name: "Delete file" }, { timeout: 5000 }),
+  );
+  expect(
+    await view.findByText("Deleted notes.md.", {}, { timeout: 5000 }),
+  ).toBeTruthy();
+
+  const pane = activityOf(view);
+  expect(
+    await pane.findByText("removed 'notes.md'", {}, { timeout: 3000 }),
+  ).toBeTruthy();
+  // Once: the card is not a second entry for the command it allowed.
+  expect(entries(view)).toHaveLength(1);
+  expect(entries(view)[0]).toContain("rm -f notes.md");
+  expect(view.container.textContent).not.toContain("You declined it.");
+  expect(gated.map((step) => step.args.command)).toEqual(["rm -f notes.md"]);
+});
+
+test("reopened, a command declined on an approval card is still listed, once, without claiming when", async () => {
+  // As the thread held it on the stack it was found on: the card, the person's answer, and the Bot's reply.
+  stored = [
+    {
+      id: "user-rm",
+      role: "user",
+      content: "Run the command rm -f notes.md in your workspace.",
+    },
+    calling("call-ask-rm-3", "askApproval", DELETE_CARD),
+    answering("call-ask-rm-3", { decision: "declined" }),
+    {
+      id: "reply-rm",
+      role: "assistant",
+      content:
+        "I did not run the command because approval to permanently delete `notes.md` was declined.",
+    },
+  ];
+  const view = render(app());
+  const pane = activityOf(view);
+  expect(
+    await pane.findByText("rm -f notes.md", {}, { timeout: 5000 }),
+  ).toBeTruthy();
+  expect(pane.getByText("You declined it.")).toBeTruthy();
+  expect(entries(view)).toHaveLength(1);
+  expect(
+    view.getByRole("region", { name: "Activity" }).querySelectorAll("time"),
+  ).toHaveLength(0);
+  expect(runs).toHaveLength(0);
+});
+
+/** One run of a stored thread as the gateway replays it: its input, then what the Bot did in it. */
+function replayedRun(
+  runId: string,
+  input: Message[],
+  did:
+    | { call: { id: string; name: string; args: Record<string, unknown> } }
+    | { reply: string },
+): unknown[] {
+  const started = {
+    type: "RUN_STARTED",
+    threadId: channel.threadId,
+    runId,
+    input: {
+      threadId: channel.threadId,
+      runId,
+      messages: input,
+      tools: [],
+      context: [],
+      state: {},
+      forwardedProps: {},
+    },
+  };
+  const finished = { type: "RUN_FINISHED", threadId: channel.threadId, runId };
+  if ("call" in did) {
+    const { id, name, args } = did.call;
+    return [
+      started,
+      {
+        type: "TOOL_CALL_START",
+        toolCallId: id,
+        toolCallName: name,
+        parentMessageId: `assistant-${id}`,
+      },
+      { type: "TOOL_CALL_ARGS", toolCallId: id, delta: JSON.stringify(args) },
+      { type: "TOOL_CALL_END", toolCallId: id },
+      finished,
+    ];
+  }
+  const id = `reply-${runId}`;
+  return [
+    started,
+    { type: "TEXT_MESSAGE_START", messageId: id, role: "assistant" },
+    { type: "TEXT_MESSAGE_CONTENT", messageId: id, delta: did.reply },
+    { type: "TEXT_MESSAGE_END", messageId: id },
+    finished,
+  ];
+}
+
+test("a conversation replayed run by run on opening lists what was done without stamping it with when the page read it", async () => {
+  /*
+   * A call's answer comes with the run after it, so between the two runs every call in the history
+   * waits for an answer. A read that caught one there took it for live work and stamped it with the
+   * page's load time: a save that ran at 9:31:53 PM showed 9:32:45 PM after one reload and 9:33:53 PM
+   * after the next, and a different entry each time.
+   */
+  const user = {
+    id: "user-replay",
+    role: "user",
+    content: "Run date, then save hello to notes.md",
+  } as Message;
+  const date = calling("call-replay-date", "computer_run_command", {
+    command: "date",
+  });
+  const dateAnswer = answering(
+    "call-replay-date",
+    commandResult("date", "Wed Nov  4 05:31:25 UTC 2026\n", 0),
+  );
+  const save = calling("call-replay-save", "computer_write_file", {
+    path: "notes.md",
+    contents: "hello",
+  });
+  const saveAnswer = answering("call-replay-save", {
+    ok: true,
+    path: "notes.md",
+    bytes: 5,
+    appended: false,
+  });
+  // The id the third run streams it under, so the stored thread and the replay agree on it.
+  const reply = {
+    id: "reply-replay-3",
+    role: "assistant",
+    content: "Saved hello to notes.md.",
+  } as Message;
+  stored = [user, date, dateAnswer, save, saveAnswer, reply];
+  replay = [
+    replayedRun("replay-1", [user], {
+      call: {
+        id: "call-replay-date",
+        name: "computer_run_command",
+        args: { command: "date" },
+      },
+    }),
+    replayedRun("replay-2", [user, date, dateAnswer], {
+      call: {
+        id: "call-replay-save",
+        name: "computer_write_file",
+        args: { path: "notes.md", contents: "hello" },
+      },
+    }),
+    replayedRun("replay-3", [user, date, dateAnswer, save, saveAnswer], {
+      reply: "Saved hello to notes.md.",
+    }),
+  ];
+  const view = render(app());
+  expect(
+    await view.findByText("Saved hello to notes.md.", {}, { timeout: 5000 }),
+  ).toBeTruthy();
+  await waitFor(() => expect(entries(view)).toHaveLength(2), {
+    timeout: 3000,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const [saved, ran] = entries(view);
+  expect(saved).toContain("notes.md");
+  expect(ran).toContain("Wed Nov  4 05:31:25 UTC 2026");
+  // Done before this page was opened: when is not known, so no time is given, and never the load time.
+  expect(
+    view.getByRole("region", { name: "Activity" }).querySelectorAll("time"),
+  ).toHaveLength(0);
+  expect(runs).toHaveLength(0);
+});
+
+test("a step held for the person before a reload, allowed on the opened page, says when it ran", async () => {
+  // Asked on an earlier visit and still waiting: this page never started it, it only shows its card.
+  stored = [
+    {
+      id: "user-held",
+      role: "user",
+      content: "What's the date on my computer?",
+    },
+    calling("call-held-date", "computer_run_command", { command: "date" }),
+  ];
+  inbox = [
+    {
+      id: "approval-held",
+      status: "pending",
+      action: {
+        botId: bot,
+        toolRef: "computer_run_command",
+        effect: "write",
+        scope: "workspace",
+        threadId: channel.threadId,
+        toolCallId: "call-held-date",
+        args: { command: "date" },
+        target: {},
+      },
+    },
+  ];
+  const reply = "It is Wednesday, 4 November.";
+  onDecision = () => {
+    inbox = inbox.map((request) => ({ ...request, status: "completed" }));
+    stored = [
+      ...stored,
+      answering(
+        "call-held-date",
+        commandResult("date", "Wed Nov  4 06:01:02 UTC 2026\n", 0),
+      ),
+      { id: "reply-held", role: "assistant", content: reply },
+    ];
+  };
+  const view = render(app());
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(
+    await view.findByRole("button", { name: "Allow once" }, { timeout: 5000 }),
+  );
+  act(() => {
+    queryClient.setQueryData<InfiniteData<ChannelPage>>(
+      channelKeys.list(),
+      (data) => {
+        if (!data) return data;
+        const next = applyChannelEvent(data, {
+          channelId: channel.id,
+          lastMessage: reply,
+          lastMessageAt: "2026-11-04T06:01:03.000Z",
+          lastMessageAgentId: bot,
+        });
+        return next === "unknown" ? data : next;
+      },
+    );
+  });
+  expect(await view.findByText(reply, {}, { timeout: 5000 })).toBeTruthy();
+
+  const pane = activityOf(view);
+  expect(
+    await pane.findByText("Wed Nov 4 06:01:02 UTC 2026", {}, { timeout: 3000 }),
+  ).toBeTruthy();
+  expect(entries(view)).toHaveLength(1);
+  // Allowed here, so this page knows when it ran.
+  expect(
+    view.getByRole("region", { name: "Activity" }).querySelectorAll("time"),
+  ).toHaveLength(1);
 });

@@ -1,6 +1,10 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient } from "@tanstack/react-query";
+import { type AgentProfile, agentKeys } from "../src/lib/agents/queries";
+import { authKeys } from "../src/lib/auth/queries";
 import type { ActivityDetails } from "../src/lib/computers/activity";
+import { setComputerStateMutationOptions } from "../src/lib/computers/mutations";
 
 /**
  * Wiping a computer forgets what ran on it, and a reload or another tab does not bring it back.
@@ -42,15 +46,54 @@ function conversation(...commands: [string, string][]) {
 
 const BOT = "wiped-bot";
 
+const realFetch = globalThis.fetch;
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://127.0.0.1/" });
 });
 afterEach(() => {
   window.localStorage.clear();
+  globalThis.fetch = realFetch;
 });
 afterAll(() => {
   GlobalRegistrator.unregister();
 });
+
+/**
+ * Admin, Computers, Reset, Reset it: the real mutation, from a page that has opened no conversation.
+ * The computer answers the reset with a 200, as the fleet route does.
+ */
+async function resetFromAdmin(target: { computer: string; botId?: string }) {
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ cleared: true }), {
+      status: 200,
+    })) as unknown as typeof fetch;
+  const queryClient = new QueryClient();
+  queryClient.setQueryData(authKeys.currentUser(), {
+    id: "dev-local-user",
+    email: "dev@openbot.local",
+    role: "admin",
+    onboarding: null,
+  });
+  queryClient.setQueryData(agentKeys.list(false), [
+    { id: ADMIN_BOT, isolated: false, isolationActive: false } as AgentProfile,
+  ]);
+  queryClient.setQueryData(agentKeys.list(true), []);
+  const options = setComputerStateMutationOptions(queryClient);
+  const variables = { action: "reset" as const, ...target };
+  await options.mutationFn?.(variables, {
+    client: queryClient,
+    meta: undefined,
+  });
+  await options.onSuccess?.(
+    undefined as never,
+    variables,
+    undefined as never,
+    undefined as never,
+  );
+}
+/** A Bot no page in this file has read a conversation of, as Admin has read none. */
+let adminBots = 0;
+let ADMIN_BOT = "";
 
 test("after a reload, what the wiped computer ran stays gone and what runs next still shows", async () => {
   const before = conversation(["w-1", "uname -a"], ["w-2", "rm -rf build"]);
@@ -134,3 +177,67 @@ test("another computer's history is not touched by the wipe", async () => {
   reloaded.recordActivity("other-bot", conversation(["o-2", "ls"]));
   expect(reloaded.activityFor("other-bot")).toHaveLength(1);
 });
+
+for (const [row, target] of [
+  [
+    "one Bot's seat, as a shared computer lists it",
+    () => ({ computer: "person:dev-local-user", botId: ADMIN_BOT }),
+  ],
+  [
+    "the person's whole computer",
+    () => ({ computer: "person:dev-local-user" }),
+  ],
+] as const)
+  test(`a reset of ${row} from Admin, which read none of the conversation, keeps what ran gone after every reload`, async () => {
+    adminBots += 1;
+    ADMIN_BOT = `admin-reset-bot-${adminBots}`;
+    const history = conversation(
+      [`${ADMIN_BOT}-1`, "uname -a"],
+      [`${ADMIN_BOT}-2`, "date"],
+    );
+    // The conversation is open in a tab of its own while Admin resets the computer.
+    const open = await openPage();
+    open.recordActivity(ADMIN_BOT, history);
+    expect(open.activityFor(ADMIN_BOT)).toHaveLength(2);
+
+    // Admin had nothing in memory to wipe. It kept nothing, and a reload brought every command back.
+    await resetFromAdmin(target());
+    const key = `openbot:computer-activity-wiped:${ADMIN_BOT}`;
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key,
+        newValue: window.localStorage.getItem(key),
+      }),
+    );
+    expect(open.activityFor(ADMIN_BOT)).toEqual([]);
+
+    const reloaded = await openPage();
+    reloaded.recordActivity(ADMIN_BOT, history);
+    expect(reloaded.activityFor(ADMIN_BOT)).toEqual([]);
+
+    // The next command, watched as it runs on the new computer, appears with when it ran.
+    const next = `${ADMIN_BOT}-3`;
+    reloaded.noteWatched(next);
+    reloaded.recordActivity(ADMIN_BOT, [...history, { id: next, did: null }]);
+    reloaded.recordActivity(ADMIN_BOT, [
+      ...history,
+      ...conversation([next, "pwd"]),
+    ]);
+    expect(
+      reloaded.activityFor(ADMIN_BOT).map((entry) => entry.subject),
+    ).toEqual(["pwd"]);
+    expect(reloaded.activityFor(ADMIN_BOT)[0]?.at).toBeNumber();
+
+    // Reloaded again, and again: only what ran after the reset, and no time the page cannot know.
+    for (let reload = 0; reload < 2; reload += 1) {
+      const again = await openPage();
+      again.recordActivity(ADMIN_BOT, [
+        ...history,
+        ...conversation([next, "pwd"]),
+      ]);
+      expect(
+        again.activityFor(ADMIN_BOT).map((entry) => entry.subject),
+      ).toEqual(["pwd"]);
+      expect(again.activityFor(ADMIN_BOT)[0]?.at).toBeUndefined();
+    }
+  });
