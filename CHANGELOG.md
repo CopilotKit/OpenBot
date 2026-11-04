@@ -326,7 +326,11 @@ it manages, so they were hidden from the picker and refused at enable. Set
 `COMPOSIO_SHOPIFY_CLIENT_ID` and `COMPOSIO_SHOPIFY_CLIENT_SECRET`) to the OAuth client you
 registered with the vendor, and the app can be enabled and connected: Composio exchanges that client
 for the token, and the connect form asks only for what the connection needs, such as the store
-subdomain. Unset, nothing changes.
+subdomain. Because the credential is the deployment's, such an app connects only as one shared
+account: an administrator makes it shared, connects it and grants it to Bots, and a personal
+Connect is refused and not offered. The client is saved on the app's config at Composio when it is
+enabled; see [rotating the client](docs/configuration.md#rotating-a-composio-apps-own-client).
+Unset, nothing changes.
 
 ### An unreconciled app authorization always reaches the audit trail
 

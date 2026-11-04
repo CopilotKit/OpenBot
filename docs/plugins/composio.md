@@ -471,7 +471,15 @@ like a key app: enabling it creates its authorization config with that client, a
 only for the fields Composio publishes for the connection, such as Shopify's store subdomain. Both
 variables or neither: one alone is no client, and the app stays hidden. An app that also accepts a
 plain key still asks for the key. Where the variables are missing, the refusal for such an app names
-them.
+them, and an enable that finds them gone is refused rather than creating a config with no client.
+
+Such an app connects only as one [shared account](#shared-apps). The person connecting types only
+what the connection names, such as Shopify's store subdomain, and the credential is the deployment's
+client, so a personal account would give anyone who can see the app the organization's full
+access. **Connect** refuses a personal account, and the Connections page and the app's Plugins page
+don't offer one: an administrator makes the app shared, connects the team account, and grants it to
+Bots. To change the client later, see
+[rotating the client](../configuration.md#rotating-a-composio-apps-own-client).
 
 ## Shared apps
 

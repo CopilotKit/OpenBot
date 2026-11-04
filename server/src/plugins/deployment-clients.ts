@@ -34,3 +34,23 @@ export function deploymentClientOf(
   const secret = env[names.secret]?.trim();
   return id && secret ? { client_id: id, client_secret: secret } : null;
 }
+
+/**
+ * Whether an app connected under this scheme may only hold the deployment's one shared account.
+ *
+ * A PERSONAL ACCOUNT ON THE DEPLOYMENT'S CLIENT WOULD BE THE ORGANIZATION'S ACCESS UNDER ONE
+ * PERSON'S NAME. Somebody connecting a server-to-server app types only what the connection names,
+ * a store subdomain, and the credential Composio exchanges is the client above, so whoever could
+ * see the app enabled could hold the store's full access as "their own" account, granted by nobody
+ * and attributed to them on the trail. So the account is a Shared one: an administrator connects
+ * it once and grants it to Bots the usual way. Read by the connect route and the store before
+ * anything is sent, and by the screens through `sharedOnly` on the listing.
+ */
+export function sharedAccountOnly(authScheme: string | null): boolean {
+  return authScheme === DEPLOYMENT_CLIENT_SCHEME;
+}
+
+/** The refusal a personal connect to such an app meets, in one place for both readers of it. */
+export function sharedAccountOnlySentence(title: string): string {
+  return `${title} connects only as one shared account, because it signs in with this deployment's own client rather than anything of yours, so no account was made. Ask an admin to make it shared on its Plugins page and connect it there.`;
+}

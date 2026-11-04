@@ -2025,6 +2025,44 @@ describe("the config each kind of app is enabled with", () => {
     ]);
   });
 
+  test("a server-to-server app whose client is missing at enable is refused, and nothing is created", async () => {
+    /*
+     * THE VARIABLES CAN GO BETWEEN THE DIRECTORY READ AND THE ENABLE. `connectionOf` offered the
+     * scheme while they were set; created now, the config would carry no client, Composio would
+     * accept it, and every connect against it would fail. So the enable is refused by name.
+     */
+    const created: unknown[] = [];
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        authConfigs: {
+          list: configsOf("shopify", []),
+          create: async (...call: unknown[]) => {
+            created.push(call);
+            return CREATED;
+          },
+        },
+      }),
+    );
+
+    delete process.env.COMPOSIO_SHOPIFY_CLIENT_ID;
+    process.env.COMPOSIO_SHOPIFY_CLIENT_SECRET = "deployment-client-secret";
+    try {
+      await expect(
+        broker.ensureAuthConfig({
+          toolkit: "shopify",
+          name: "Shopify",
+          connection: { kind: "fields", authScheme: "S2S_OAUTH2" },
+        }),
+      ).rejects.toThrow(
+        "Set COMPOSIO_SHOPIFY_CLIENT_ID and COMPOSIO_SHOPIFY_CLIENT_SECRET on this deployment and enable it again.",
+      );
+    } finally {
+      delete process.env.COMPOSIO_SHOPIFY_CLIENT_SECRET;
+    }
+
+    expect(created).toEqual([]);
+  });
+
   test("a no-auth app gets no config at all, because Composio refuses one", async () => {
     let listed = false;
     const { broker } = buildComposioClient(
@@ -8401,11 +8439,8 @@ describe("connecting one person with the secret they typed", () => {
 
     expect(
       await broker.connectWithFields({
-        account: {
-          holder: "person",
-          userId: "user_1",
-          vendorUserId: VENDOR_USER,
-        },
+        // The deployment's shared account: a person's own is refused one layer up, in the store.
+        account: { holder: "deployment", vendorUserId: VENDOR_USER },
         toolkit: "shopify",
         authScheme: "S2S_OAUTH2",
         values: { subdomain: "acme-dev", status: "ACTIVE" },
