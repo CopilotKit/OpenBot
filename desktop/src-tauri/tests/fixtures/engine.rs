@@ -116,17 +116,6 @@ fn main() {
         println!("1.44");
         return;
     }
-    if SCENARIO == "empty-answer" {
-        if args.get(1).map(String::as_str) == Some("logs") {
-            if let Some(service) = args
-                .last()
-                .filter(|s| ["agent-langgraph", "agent-harness"].contains(&s.as_str()))
-            {
-                println!("OpenAIAuthenticationError: 401 {service} refused the key");
-            }
-        }
-        return;
-    }
     match joined.as_str() {
         "compose version" => println!("Docker Compose synthetic"),
         "compose ps --format {{.Ports}}" => {

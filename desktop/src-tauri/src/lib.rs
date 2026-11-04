@@ -1,6 +1,5 @@
 //! The parts of the shell that are worth testing without a window around them.
 pub mod acquire;
-pub mod ask;
 pub mod deployment;
 pub mod deployment_release;
 pub mod docker_desktop;

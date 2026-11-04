@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Ask } from "./Ask";
 import { CopilotKitAccount } from "./CopilotKitAccount";
 import { useWindowFitsContent } from "./fitWindow";
 import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
@@ -16,7 +15,6 @@ import {
 import {
   intelligenceStopProblem,
   offerLocalIntelligence,
-  openLocalIntelligence,
   splitStopFailure,
 } from "./localEvalCli";
 import { asProblem, Failure, type Problem } from "./Problem";
@@ -156,9 +154,7 @@ function Setup() {
   const returningToInstallation = savedLaunch.current === installationKey;
   const [running, setRunning] = useState(false);
   const visibleSetupStep =
-    checkingResume || blockerFailure || blocker || (running && step !== "ask")
-      ? null
-      : step;
+    checkingResume || blockerFailure || blocker || running ? null : step;
   const lastViewedStep = useRef<SetupStep | null>(null);
   useEffect(() => {
     if (visibleSetupStep === lastViewedStep.current) return;
@@ -491,24 +487,12 @@ function Setup() {
       setSteps((current) => settleProgress(current));
       setRunning(true);
       setRecoveryFailure(null);
-      // Refreshing a connection does not turn an existing installation into a first run. A first
-      // run asks its question: Intelligence reporting ready says nothing about the model.
-      if (savedLaunch.current === installationKey) {
-        setStep("connect");
-        setRefreshIntelligence(false);
-        await invoke("show_openbot");
-        return true;
-      }
-      /*
-       * One screen short of the handover, on purpose.
-       *
-       * The window used to become OpenBot here, the moment the stack was up. But up is not the
-       * same as working: a refused key or a lapsed plan gives a stack that starts clean and a Bot
-       * that cannot answer, and handing over at this point means somebody discovers that inside
-       * the product with no idea which of their answers caused it. So the last screen asks a
-       * question, and the handover waits for an answer to come back.
-       */
-      setStep("ask");
+      // The handover, on a first run as on a return: the window becomes OpenBot the moment the
+      // stack is up. Recorded first, so a later Start of this installation reads as a return.
+      savedLaunch.current = installationKey;
+      setStep("connect");
+      setRefreshIntelligence(false);
+      await invoke("show_openbot");
       return true;
     } catch (error) {
       recoverFromStart(error);
@@ -657,21 +641,6 @@ function Setup() {
     }
   }
 
-  async function changeModelAfterAskFailure() {
-    setBusy(true);
-    setFailure(null);
-    try {
-      if (await stopStack()) {
-        local.reset();
-        setRunning(false);
-        setRecoveryFailure(null);
-        setStep("model");
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
   /*
    * Starts local Intelligence without a click: a recorded stack on a first run that was not
    * interrupted, or a connected one on relaunch with auto-start on. Never after Stop OpenBot.
@@ -803,37 +772,6 @@ function Setup() {
             </div>
           )}
         </div>
-      </main>
-    );
-  }
-
-  /*
-   * Shown while the stack is running, which every other screen is skipped for. This is the one
-   * screen that needs a running stack: it is the proof, and there is nothing to ask before there
-   * is something to ask.
-   */
-  if (step === "ask") {
-    return (
-      <main>
-        <Ask
-          onAsk={(question) =>
-            invoke<string>("ask_the_bot", { root, question })
-          }
-          onOpen={() => {
-            savedLaunch.current = installationKey;
-            return invoke<void>("show_openbot").catch((error) =>
-              recoverFromStart(error),
-            );
-          }}
-          onBack={changeModelAfterAskFailure}
-          onViewIntelligence={
-            intelligenceOffered
-              ? () => openLocalIntelligence(root).opened
-              : undefined
-          }
-          failure={displayedFailure && <Failure problem={displayedFailure} />}
-        />
-        {runtimeUpdates}
       </main>
     );
   }
@@ -1052,7 +990,7 @@ function Setup() {
              * nothing to show" when the app host process is not up, and this button dropped it on
              * the floor. Clicking it then did nothing at all, on a screen headed "OpenBot is
              * running", which is the worst of both: a true sentence was available and the window
-             * threw it away. The Ask screen's copy of this call always showed it.
+             * threw it away.
              */
             onClick={showOpenBot}
             disabled={busy || showing}

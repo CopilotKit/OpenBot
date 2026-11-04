@@ -53,7 +53,7 @@ gave them two containers that died on startup and two red lines on the setup scr
 never chose.
 
 Started when a key exists and left alone when it does not. The Bot the person actually picked speaks
-its plan and answers either way, which is what the last screen proves.
+its plan and answers either way.
 */
 const AGENT_BOT: &str = "agent-bot";
 const AGENT_LANGGRAPH: &str = "agent-langgraph";
@@ -3263,7 +3263,7 @@ The tail of one service's log.
 
 For the case where the wire says nothing. A framework that catches its own exception and ends the
 stream leaves the cause here and nowhere else, so this is not a debugging convenience: without it
-the developer half of that failure would be empty. See `ask::why_nothing_came_back`.
+the developer half of that failure would be empty.
 
 An engine that cannot be asked returns nothing rather than failing. This is only ever called to
 explain a failure that has already happened, and a second failure on top of it helps nobody.

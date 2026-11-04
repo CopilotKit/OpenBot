@@ -386,35 +386,6 @@ button.text-link:hover:not(:disabled) {
   text-decoration-color: currentColor;
 }
 
-/* The last screen's question box, with the button that swaps in another question beside it. */
-.field-with-action {
-  display: flex;
-  gap: 8px;
-}
-
-.field-with-action input {
-  flex: 1;
-  min-width: 0;
-}
-
-button.another-question {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  padding: 0;
-  background: var(--background);
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-}
-
-button.another-question:hover:not(:disabled) {
-  background: var(--muted);
-  color: var(--text-primary);
-}
-
 /*
  * Intelligence stopped while another screen is in front: a card that interrupts on purpose. The
  * ring's tint when it is waiting on the person, the destructive tint when it failed.
@@ -1262,34 +1233,6 @@ a:hover {
   font-family: var(--mono);
 }
 
-/*
- * The answer on the last screen. Given weight on purpose: it is the one piece of text in the whole
- * wizard that was produced rather than written, and it is the proof the install actually worked.
- */
-.answer {
-  margin: 20px 0 4px;
-  padding: 16px 20px;
-  border-radius: var(--r-card);
-  background: color-mix(in srgb, var(--muted) 45%, var(--card));
-  border: 1px solid var(--border);
-}
-
-.answer-from {
-  margin: 0 0 6px;
-  font-size: var(--text-xs);
-  line-height: 16px;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.answer-text {
-  margin: 0;
-  font-size: var(--text-lg);
-  line-height: 26px;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-}
-
 /* The tick beside "Signed in", for the moment before the screen moves on by itself. */
 .signed-in-mark {
   color: var(--good);
@@ -1446,14 +1389,12 @@ a:hover {
   }
 
   /* The app's dark `outline` button: `dark:bg-input/30`, a shade above the card. */
-  button.quiet,
-  button.another-question {
+  button.quiet {
     background: color-mix(in srgb, var(--input) 30%, transparent);
     border-color: var(--input);
   }
 
-  button.quiet:hover:not(:disabled),
-  button.another-question:hover:not(:disabled) {
+  button.quiet:hover:not(:disabled) {
     background: color-mix(in srgb, var(--input) 50%, transparent);
   }
 
