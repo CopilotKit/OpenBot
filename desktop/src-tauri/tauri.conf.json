@@ -59,11 +59,5 @@
     "category": "DeveloperTool",
     "shortDescription": "Run OpenBot on your own machine",
     "longDescription": "OpenBot Desktop installs the container engine, raises the stack, and keeps it running."
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "REPLACE_WITH_UPDATER_PUBKEY",
-      "endpoints": ["https://copilotkit.ai/openbot/desktop/latest.json"]
-    }
   }
 }

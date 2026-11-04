@@ -4407,11 +4407,6 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        // A signed Mac build updates itself. The window asks once at launch and installs only if
-        // the person says yes; the plugin refuses anything whose minisign signature does not match
-        // the public key compiled in from `tauri.conf.json`, so the endpoint is a place to look
-        // rather than something to trust.
-        .plugin(tauri_plugin_updater::Builder::new().build())
         // Only so the window can restart into what the updater wrote.
         .plugin(tauri_plugin_process::init())
         .manage(Shell::default())
@@ -4474,6 +4469,20 @@ fn main() {
             }
         })
         .setup(|app| {
+            // A signed Mac build updates itself. The window asks once at launch and installs only
+            // if the person says yes; the plugin refuses anything whose minisign signature does not
+            // match the public key compiled in from `tauri.macos-signing.conf.json`, so the
+            // endpoint is a place to look rather than something to trust. Only that overlay carries
+            // `plugins.updater`, so every other build (desktop CI, local, the unsigned release
+            // installers) has no updater: it cannot verify anything, and offering an update it
+            // would then refuse is worse than offering none. The window's check finds no plugin
+            // and stays silent.
+            if app.config().plugins.0.contains_key("updater") {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            } else {
+                eprintln!("[updater] not configured in this build; no update check");
+            }
             desktop_telemetry::initialize(app.handle());
             if let Some(root) = app
                 .path()

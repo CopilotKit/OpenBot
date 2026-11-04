@@ -3,5 +3,13 @@
   "bundle": {
     "targets": ["app", "dmg"],
     "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_UPDATER_PUBKEY",
+      "endpoints": [
+        "https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

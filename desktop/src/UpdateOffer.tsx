@@ -12,7 +12,9 @@ import { useCallback, useEffect, useState } from "react";
  *
  * A failed check is silent. The endpoint can be unreachable because the machine is on a plane, on
  * a captive portal, or behind a proxy that does not like it, and none of those are things the
- * person opening the setup window can do anything about. A failed *install* is not silent: by then
+ * person opening the setup window can do anything about. A build that is not signed has no updater
+ * registered at all, and its check is refused the same way and just as quietly. A failed *install*
+ * is not silent: by then
  * they asked for something and it did not happen.
  *
  * Nothing here decides whether the download is genuine. `tauri-plugin-updater` verifies the

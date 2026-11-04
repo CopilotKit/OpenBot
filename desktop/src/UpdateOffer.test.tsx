@@ -72,6 +72,17 @@ test("an unreachable update endpoint says nothing", async () => {
   expect(view.queryByRole("alert")).toBeNull();
 });
 
+// Unsigned builds do not register the updater plugin at all, so `check()` is refused by Tauri
+// rather than by the network. That build has nothing it could verify, so it offers nothing.
+test("a build without the updater says nothing", async () => {
+  checkFailure = "plugin updater not found";
+  const view = render(<UpdateOffer />);
+
+  await waitFor(() => expect(checks).toBeGreaterThan(0));
+  expect(view.container.textContent).toBe("");
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
 test("no newer version says nothing", async () => {
   const view = render(<UpdateOffer />);
 

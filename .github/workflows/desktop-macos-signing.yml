@@ -49,8 +49,9 @@ concurrency:
 jobs:
   # Everything about the updater that can be checked without a certificate, checked on every push.
   # The wiring is four files that have to agree — the plugin in Cargo.toml, the plugin registered in
-  # main.rs, the permissions in the capability, and the endpoint and public key in the config — and
-  # three of the four fail silently at runtime rather than at build time if they drift apart.
+  # main.rs, the permissions in the capability, and the endpoint and public key in the signing
+  # overlay — and three of the four fail silently at runtime rather than at build time if they drift
+  # apart.
   checks:
     name: Updater regressions (no Apple access)
     runs-on: macos-15
@@ -81,11 +82,16 @@ jobs:
           # without `TAURI_SIGNING_PRIVATE_KEY`, so this setting in the base config breaks ordinary
           # desktop CI and the local build in docs/releasing.md on all three platforms.
           test "$(jq -r '.bundle.createUpdaterArtifacts // false' "$config")" = 'false'
-          test "$(jq -r '.plugins.updater.endpoints[0]' "$config")" \
-            = 'https://copilotkit.ai/openbot/desktop/latest.json'
-          test "$(jq -r '.plugins.updater.pubkey | length > 0' "$config")" = 'true'
+          # The updater lives in the overlay too. main.rs registers the plugin only when the config
+          # carries `plugins.updater`, so every build without the overlay (desktop CI, local, the
+          # unsigned release installers) has no updater to offer an update it would then refuse.
+          test "$(jq -r '.plugins.updater // empty' "$config")" = ''
+          test "$(jq -r '.plugins.updater.endpoints[0]' "$overlay")" \
+            = 'https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json'
+          test "$(jq -r '.plugins.updater.pubkey | length > 0' "$overlay")" = 'true'
           grep -q 'tauri-plugin-updater' desktop/src-tauri/Cargo.toml
           grep -q 'tauri_plugin_updater::Builder::new().build()' desktop/src-tauri/src/main.rs
+          grep -q 'contains_key("updater")' desktop/src-tauri/src/main.rs
           grep -q 'tauri_plugin_process::init()' desktop/src-tauri/src/main.rs
           jq -e '.permissions | index("updater:default")' \
             desktop/src-tauri/capabilities/default.json > /dev/null
@@ -142,9 +148,9 @@ jobs:
           # The placeholder shipped with the pull request that added this lane. An app built with it
           # installs nothing: every update it is offered fails signature verification. Refusing here
           # is the difference between noticing on the first signing run and noticing in the field.
-          pubkey="$(jq -r '.plugins.updater.pubkey' desktop/src-tauri/tauri.conf.json)"
+          pubkey="$(jq -r '.plugins.updater.pubkey' desktop/src-tauri/tauri.macos-signing.conf.json)"
           if [ "$pubkey" = 'REPLACE_WITH_UPDATER_PUBKEY' ]; then
-            echo '::error::tauri.conf.json still holds the updater public key placeholder.'
+            echo '::error::tauri.macos-signing.conf.json still holds the updater public key placeholder.'
             exit 1
           fi
       - name: Import the Developer ID certificate into a temporary keychain
@@ -368,3 +374,29 @@ jobs:
             artifacts/OpenBot-darwin-aarch64.app.tar.gz.sig \
             artifacts/OpenBot-darwin-x86_64.app.tar.gz \
             artifacts/OpenBot-darwin-x86_64.app.tar.gz.sig --clobber
+      # Read back what installed apps will read: the endpoint compiled into them, fetched the way
+      # they fetch it, redirects and all. An endpoint that answers with a web page, or a Latest
+      # release that is not this one, fails here instead of failing silently in every app.
+      - name: Check the update feed the apps read
+        run: |
+          set -euo pipefail
+          endpoint="$(jq -r '.plugins.updater.endpoints[0]' desktop/src-tauri/tauri.macos-signing.conf.json)"
+          expected="${RELEASE_TAG#v}"
+          # The asset was uploaded seconds ago; give the download redirect a moment to catch up.
+          for attempt in 1 2 3 4 5; do
+            if curl -fsSL --retry 3 "$endpoint" -o feed.json &&
+              jq -e --arg version "$expected" '
+                .version == $version and
+                ([.platforms // {} | to_entries[]
+                  | select(.key | startswith("darwin-"))
+                  | select((.value.url | type) == "string" and (.value.signature | type) == "string")]
+                  | length > 0)
+              ' feed.json > /dev/null 2>&1; then
+              echo "$endpoint serves latest.json for $expected."
+              exit 0
+            fi
+            if [ "$attempt" -lt 5 ]; then sleep 15; fi
+          done
+          echo "::error::$endpoint does not serve a latest.json with version $expected and a darwin-* platform."
+          head -c 500 feed.json 2>/dev/null || true
+          exit 1
