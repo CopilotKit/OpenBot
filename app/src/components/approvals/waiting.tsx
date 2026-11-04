@@ -8,15 +8,14 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
+import { BotOrb } from "@/components/agents/bot-orb";
 import { PageRows } from "@/components/layout/page-shell";
 import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
-  DialogBody,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -44,6 +43,7 @@ import {
   decideApprovalMutationOptions,
   dismissPersonQuestionMutationOptions,
 } from "@/lib/approvals";
+import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
 
 type WaitingQuestion = ApprovalInboxData["questions"][number];
@@ -303,6 +303,16 @@ function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
   );
 }
 
+/**
+ * Answering a Bot's question, laid out as a reply: who asked and when, the question itself as the
+ * heading with the Bot's reason under it, and one box to answer in with Send in its corner. ⌘↵ or
+ * Ctrl↵ sends; Escape or the close button puts it away with nothing sent.
+ */
+/** Whether the send shortcut is ⌘ or Ctrl, as the person's keyboard says it. */
+const MAC =
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad/.test(navigator.platform);
+
 function AnswerDialog({
   question,
   open,
@@ -316,59 +326,69 @@ function AnswerDialog({
   const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
   const agents = useQuery(agentListQueryOptions());
   const asker = question.conversationBotId ?? question.botId;
-  const name =
-    agents.data?.find((agent) => agent.id === asker)?.name ?? "Your Bot";
+  const bot = agents.data?.find((agent) => agent.id === asker);
+  const name = bot?.name ?? "Your Bot";
+  const ready = text.trim().length > 0 && !answer.isPending;
+  const send = () => {
+    if (!ready) return;
+    answer.mutate(
+      { id: question.id, response: text },
+      { onSuccess: () => onOpenChange(false) },
+    );
+  };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{name} asks</DialogTitle>
-          <DialogDescription>
-            It stopped until you answer, and carries on with what you say.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody className="flex flex-col gap-3">
-          <p className="whitespace-pre-wrap text-sm">{question.question}</p>
+      <DialogContent className="gap-5 sm:max-w-xl">
+        <DialogHeader className="gap-3">
+          <div className="flex items-center gap-2 text-muted-foreground text-xs">
+            <BotOrb name={name} seed={bot?.avatarSeed || asker} size={20} />
+            <span className="font-medium text-foreground">{name}</span>
+            <span aria-hidden>·</span>
+            <span>asked {relativeTime(question.createdAt)}</span>
+          </div>
+          <DialogTitle className="whitespace-pre-wrap font-medium text-base leading-snug">
+            {question.question}
+          </DialogTitle>
           {question.why ? (
-            <p className="whitespace-pre-wrap text-muted-foreground text-sm">
+            <DialogDescription className="whitespace-pre-wrap">
               {question.why}
-            </p>
-          ) : null}
+            </DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">
+              {name} stopped until you answer.
+            </DialogDescription>
+          )}
+        </DialogHeader>
+        <div className="rounded-lg border border-border bg-card focus-within:ring-2 focus-within:ring-ring/40">
           <Textarea
             aria-label="Your answer"
             autoFocus
+            className="min-h-28 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
             onChange={(event) => setText(event.target.value)}
-            placeholder="Your answer"
-            rows={4}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                send();
+              }
+            }}
+            placeholder={`Reply to ${name}`}
             value={text}
           />
-          {answer.error ? (
-            <p className="text-destructive text-sm" role="alert">
-              {answer.error.message}
-            </p>
-          ) : null}
-        </DialogBody>
-        <DialogFooter>
-          <Button
-            onClick={() => onOpenChange(false)}
-            size="sm"
-            variant="outline"
-          >
-            Cancel
-          </Button>
-          <Button
-            disabled={answer.isPending || !text.trim()}
-            onClick={() =>
-              answer.mutate(
-                { id: question.id, response: text },
-                { onSuccess: () => onOpenChange(false) },
-              )
-            }
-            size="sm"
-          >
-            {answer.isPending ? "Sending…" : "Send answer"}
-          </Button>
-        </DialogFooter>
+          <div className="flex items-center justify-between gap-3 px-3 pb-3">
+            <span className="text-muted-foreground text-xs">
+              {answer.error ? (
+                <span className="text-destructive" role="alert">
+                  {answer.error.message}
+                </span>
+              ) : (
+                `${MAC ? "⌘" : "Ctrl"}↵ to send`
+              )}
+            </span>
+            <Button disabled={!ready} onClick={send}>
+              {answer.isPending ? "Sending…" : "Send answer"}
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
