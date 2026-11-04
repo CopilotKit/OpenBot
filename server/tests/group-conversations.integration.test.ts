@@ -26,6 +26,10 @@ import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
 import { users, workItems } from "../src/db/schema";
+import { createDeliveryScopeAuthoriser } from "../src/delivery/authorise";
+import { createDeliveryRouter } from "../src/delivery/router";
+import { createDeliveryStore } from "../src/delivery/store";
+import type { DeliveryScope } from "../src/delivery/types";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { createWorkQueue } from "../src/work/queue";
@@ -577,6 +581,112 @@ describe("group conversations in PostgreSQL", () => {
       status: "completed",
       text: "From your notes: the launch slipped.",
     });
+  });
+  /*
+   * FOUND IN THE BROWSER: a group of two people and two Bots. Once the second person joined, every
+   * Bot failed with "Conversation access has been revoked." The owner's permission to share is an
+   * approval, and opening one tells the owner on the thread the run is on, which in a group is the
+   * Bot's own thread. Delivery only allowed the conversation's thread, so it refused the notice and
+   * the turn failed with it.
+   */
+  test("with another person in the group, the owner is told of the share approval on the Bot's own thread", async () => {
+    const owner = await person();
+    const teammate = await person();
+    const ada = await bot(owner, "Ada");
+    const grace = await bot(owner, "Grace");
+    // The server's delivery rule (index.ts `deliveryScopeFor`), over the real channel and profile stores.
+    const scopeFor = async (
+      ownerUserId: string,
+      channelId: string,
+      agentId: string,
+    ): Promise<DeliveryScope | null> => {
+      const actor: AgentActor = { id: ownerUserId, role: "user" };
+      const [channel, profile] = await Promise.all([
+        channelStore.get(actor, channelId),
+        profileStore.get(actor, agentId),
+      ]);
+      return channel?.active && profile && channel.agentIds.includes(agentId)
+        ? { ownerUserId, channelId, agentId, threadId: channel.threadId }
+        : null;
+    };
+    const authorise = createDeliveryScopeAuthoriser(scopeFor);
+    const router = createDeliveryRouter({
+      store: createDeliveryStore(database),
+      queue: createWorkQueue(database),
+      owner: `${prefix}-delivery`,
+      authoriseScope: authorise,
+      scopeFor,
+      runTurn: async () => ({ replyText: "" }),
+      providers: {},
+    });
+    const told: DeliveryScope[] = [];
+    const privateShare = createPrivateShareCheck({
+      approvals: {
+        // What approvals/wiring.ts does on opening one: tell the owner, in the conversation the run is from.
+        open: async (action) => {
+          const source = await groupSourceForRun({
+            threadId: action.threadId,
+            actorId: action.actorId,
+            botId: action.botId,
+          });
+          if (!source || !action.threadId)
+            throw new Error("the run's conversation was not found");
+          const scope = {
+            ownerUserId: action.actorId,
+            channelId: source.channelId,
+            agentId: source.botId,
+            threadId: action.threadId,
+          };
+          await router.notify(scope, {
+            id: `${prefix}-share-notice`,
+            kind: "approval",
+            requestId: `${prefix}-share-notice`,
+            text: "Ada asks for approval to share with this group.",
+          });
+          told.push(scope);
+          return { id: `${prefix}-share-notice`, status: "pending" } as never;
+        },
+        list: async () => [],
+        rules: async () => [],
+      },
+    });
+    const { conversations } = service({
+      replies: { [ada]: () => "From your notes: the launch slipped." },
+      privateShare,
+    });
+    const channel = await conversations.create(owner.id, {
+      agentIds: [ada, grace],
+    });
+    const [row] = await database
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, teammate.id));
+    await conversations.addMember(owner.id, channel.id, { email: row?.email });
+    await conversations.send(owner.id, channel.id, {
+      id: `${prefix}-share-notice-send`,
+      text: "status for everyone?",
+      agentId: ada,
+    });
+    await drain(conversations);
+
+    // The reply waits for the owner, who was told; it did not fail.
+    const seen = await conversations.list(teammate.id, channel.id);
+    expect(seen.messages.at(-1)).toMatchObject({
+      agentId: ada,
+      status: "waiting",
+    });
+    expect(JSON.stringify(seen)).not.toContain("revoked");
+    expect(told).toHaveLength(1);
+    const [scope] = told;
+    if (!scope) throw new Error("Expected the owner to be told");
+    // The Bot's own thread, not the conversation's.
+    expect(scope.threadId).not.toBe(
+      (await channelStore.get(owner, channel.id))?.threadId,
+    );
+
+    // Only that owner, for that Bot, on that Bot's thread: the rule is no wider than it was.
+    expect(await authorise({ ...scope, ownerUserId: teammate.id })).toBe(false);
+    expect(await authorise({ ...scope, agentId: grace })).toBe(false);
   });
   test("a reply held for the owner's permission still hands off to the Bot it names", async () => {
     const owner = await person();

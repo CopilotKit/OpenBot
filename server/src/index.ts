@@ -54,30 +54,6 @@ import {
   createBotLifecycleStore,
 } from "./agents/lifecycle";
 import { createBotReset } from "./agents/lifecycle-reset";
-import { createConfigurationClient } from "./configuration/client";
-import {
-  createBotConfiguration,
-  installBotConfiguration,
-} from "./configuration/directory";
-import {
-  sweepRemovedPeople,
-  sweepRemovedPeopleEvery,
-} from "./configuration/people-sweep";
-import { copyLocalConfigurationToIntelligence } from "./configuration/upgrade";
-import { removeBotPolicy, sweepPurgedBotPolicy } from "./policy/bot-rows";
-import { createPolicyCache, installPolicyCache } from "./policy/cache";
-import { createOrgPolicyClient } from "./policy/client";
-import { copyLocalPolicyToIntelligence } from "./policy/upgrade";
-import { createVaultClient } from "./vault/client";
-import {
-  createConnectionsDirectory,
-  installConnectionsDirectory,
-} from "./vault/directory";
-import {
-  removeServerLocalRows,
-  sweepRemovedServerRows,
-} from "./vault/local-rows";
-import { copyLocalVaultToIntelligence } from "./vault/upgrade";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
@@ -117,7 +93,6 @@ import { startAuditRetentionSync } from "./audit-trail/retention";
 import { installAuditTrail } from "./audit-trail/trail";
 import { startAuditHistoryCopy } from "./audit-trail/upgrade";
 import { createAuth, sessionLifetimeMs } from "./auth";
-import { copySignInSecretsToVault } from "./auth/sign-in-secrets-upgrade";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createEntra, withEntraBearer } from "./auth/entra";
 import type { AuthService } from "./auth/guards";
@@ -127,6 +102,7 @@ import { createOrganizationAuth } from "./auth/organization";
 import { organizationUserStore } from "./auth/organization-store";
 import { roleForEmail } from "./auth/roles";
 import { registerScimConnection } from "./auth/scim";
+import { copySignInSecretsToVault } from "./auth/sign-in-secrets-upgrade";
 import { openbotAddress } from "./browser/address";
 import { botBrowserNetwork } from "./browser/bot-browser";
 import { personBrowserEgressPolicy } from "./browser/egress";
@@ -186,15 +162,25 @@ import {
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
+import { createConfigurationClient } from "./configuration/client";
+import {
+  createBotConfiguration,
+  installBotConfiguration,
+} from "./configuration/directory";
+import {
+  sweepRemovedPeople,
+  sweepRemovedPeopleEvery,
+} from "./configuration/people-sweep";
+import { copyLocalConfigurationToIntelligence } from "./configuration/upgrade";
+import {
+  forgetPurgedBot,
+  sweepPurgedBotReferences,
+} from "./conversations/bot-purge";
 import { createConversationClient } from "./conversations/client";
 import {
   createConversationDirectory,
   installConversationDirectory,
 } from "./conversations/directory";
-import {
-  forgetPurgedBot,
-  sweepPurgedBotReferences,
-} from "./conversations/bot-purge";
 import { copyLocalConversationsToIntelligence } from "./conversations/upgrade";
 import {
   chooseOpenAIApi,
@@ -203,13 +189,14 @@ import {
   runtimeModelForEnvironment,
   type ToolSelection,
 } from "./copilot";
-import { mcpToolLists, users } from "./db/schema";
 import {
   createCredentialAdminService,
   createCredentialStore,
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { mcpToolLists, users } from "./db/schema";
+import { createDeliveryScopeAuthoriser } from "./delivery/authorise";
 import {
   createDeliveryBindingsClient,
   createDeliveryDirectory,
@@ -223,12 +210,12 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
+import { copyLocalDeliveryToIntelligence } from "./delivery/upgrade";
 import { createFilesClient, installFilesClient } from "./files/client";
 import {
   copyLocalAttachmentsToIntelligence,
   copyLocalPageFramesToIntelligence,
 } from "./files/upgrade";
-import { copyLocalDeliveryToIntelligence } from "./delivery/upgrade";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -272,13 +259,13 @@ import {
   createOpenSkillIndex,
 } from "./learning/sharing";
 import { copyLocalLearningToIntelligence } from "./learning/upgrade";
+import { createMemoryCache } from "./memory/cache";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
-import { createMemoryCache } from "./memory/cache";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
-import { copyLocalMemoryToIntelligence } from "./memory/upgrade";
 import { memoryTools } from "./memory/tools";
+import { copyLocalMemoryToIntelligence } from "./memory/upgrade";
 import { reportModelAvailability } from "./model-availability-check";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
@@ -309,6 +296,7 @@ import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
 import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
+import { allBrokered } from "./plugins/plugin-store/records";
 import {
   arcadeVerifierNotice,
   selectProviderWiring,
@@ -318,7 +306,6 @@ import {
   createSharedUseGate,
   createSharedUseStore,
 } from "./plugins/shared-use-store";
-import { allBrokered } from "./plugins/plugin-store/records";
 import { ensureSingleUserIdentity } from "./plugins/single-user-identity";
 import { createPluginStore } from "./plugins/store";
 import {
@@ -327,6 +314,10 @@ import {
   REFUSAL_MARKER,
   vendorAnswer,
 } from "./plugins/tools";
+import { removeBotPolicy, sweepPurgedBotPolicy } from "./policy/bot-rows";
+import { createPolicyCache, installPolicyCache } from "./policy/cache";
+import { createOrgPolicyClient } from "./policy/client";
+import { copyLocalPolicyToIntelligence } from "./policy/upgrade";
 import { createProactiveEngine } from "./proactive/engine";
 import {
   createPrivateShareCheck,
@@ -390,6 +381,16 @@ import {
 } from "./tenant-package";
 import { createUserInstructionsStore } from "./user-instructions";
 import { createUserPreferencesStore } from "./user-preferences";
+import { createVaultClient } from "./vault/client";
+import {
+  createConnectionsDirectory,
+  installConnectionsDirectory,
+} from "./vault/directory";
+import {
+  removeServerLocalRows,
+  sweepRemovedServerRows,
+} from "./vault/local-rows";
+import { copyLocalVaultToIntelligence } from "./vault/upgrade";
 import { createVoiceSessionStore } from "./voice/sessions";
 import { createVoiceSummarizer } from "./voice/summary";
 import { repeatAfterEach } from "./work/loop";
@@ -2662,9 +2663,8 @@ useSlackChannelMembership((input) =>
     ? deliveryProviders.slack.isMember(input)
     : Promise.resolve(false),
 );
-const authoriseDeliveryScope = async (scope: DeliveryScope) =>
-  (await deliveryScopeFor(scope.ownerUserId, scope.channelId, scope.agentId))
-    ?.threadId === scope.threadId;
+// The conversation's own thread, or the owner's Bot's own thread in a group. See delivery/authorise.ts.
+const authoriseDeliveryScope = createDeliveryScopeAuthoriser(deliveryScopeFor);
 const deliveryRouter = createDeliveryRouter({
   store: deliveryStore,
   queue: createWorkQueue(database),
