@@ -383,6 +383,18 @@ address and a `.local` name are what this flag is mostly used for, and anybody o
 the administrator. A value that cannot be parsed as a URL counts as public, because nobody checked
 it.
 
+**And only to this machine, unless you name more.** The administrator is admitted only for a request
+addressed to one of this machine's own names (`localhost`, `127.0.0.1`, `[::1]`) or the host of a
+configured URL, so a web page whose name was pointed at your machine is not it. Where the server runs
+on your own machine (OpenBot Desktop, `scripts/start.sh`, `bun run dev`) and no address beyond it is
+configured, it is admitted only for a caller on this machine, and the app's own servers
+(`app/serve.ts`, the Vite dev server) answer only this machine too. To open it from another machine
+on your network, set `OPENBOT_APP_URL` (or `TRUSTED_ORIGINS`) to the address they use. OpenBot's
+container images set `OPENBOT_IN_CONTAINER=true`, because there every caller arrives through the
+container engine; set it yourself only for a container of your own that runs this server. Routes
+that containers and services call back on (Bots' tool calls, the model proxy, the routines worker)
+prove themselves with their own secrets and are not affected.
+
 **A single-user deployment has its own identity at Composio or Arcade.** Both keep accounts apart
 by a user id OpenBot sends, and the one person of every single-user deployment is `dev-local-user`,
 so two of them on the same `COMPOSIO_API_KEY` or `ARCADE_API_KEY` used to share one set of
@@ -742,7 +754,7 @@ is still the record.
 | Variable                             | Meaning                                                                                   |
 | ------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `AGENT_COMPUTER_URL`                 | Shared computer URL. If absent, computer routes are not mounted.                          |
-| `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
+| `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it. The shared computer holds it as it is. A computer the supervisor or a Sandbox makes for one person or one isolated Bot is given its own token instead, derived from this one and whose computer it is, so a Bot that reads its computer's token cannot open anybody else's. |
 | `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. A person's browser in a native window (OpenBot Desktop) counts toward it and is closed only when no Bot's browser is left to close; a person's cloud browser is ranked by use like a Bot's. |
 | `COMPUTER_SEPARATE_WORKSPACES`       | `on` gives each Bot its own folder of files on a computer many Bots share, with its shell starting there. On for Helm's `shared` computer and the docker-compose `agent-computer`; off elsewhere. Files saved before it was on stay at the root of the volume. Commands can still read other folders: use `computers.mode: sandbox` to keep people apart. |
 | `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident. A person's cloud browser takes the same rule: the Browser page touches it every second while it is open, so it closes once nobody is on that page. A person's native window (OpenBot Desktop) is never closed for being idle. |

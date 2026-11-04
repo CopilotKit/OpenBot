@@ -76,6 +76,8 @@ startup.
 
 `agent-computer` requires `COMPUTER_TOKEN` and permits only `/health` without it. Docker Compose binds it to `127.0.0.1:4100`.
 
+A computer made for one person or one isolated Bot, by the supervisor or as a Sandbox, never holds the deployment's `COMPUTER_TOKEN`. It holds its own, `HMAC-SHA256(COMPUTER_TOKEN, "openbot computer token v1\n<kind>:<id>")` for whose computer it is, and the server derives the same value whenever it calls that computer. A Bot can run anything on its own person's computer, root included, and can read the token that computer was started with; that token opens that computer and no other. A computer created before this, holding the deployment's token, is replaced with its volumes kept the next time it is used. The one shared computer is not a boundary between people and keeps the deployment's token.
+
 Compose puts it on a different network from PostgreSQL. A Bot has a shell, and a shell reaches whatever its container reaches, so the database is on a `data` network carrying only itself and `migrate`, and everything else is on `default`. A deployment that runs the API server inside Compose rather than on the host joins it to both, which is the one place the two meet.
 
 With `COMPUTER_SUPERVISOR_URL`, each person gets a computer container of their own, and every Bot they use has its own folder and browser profile in it; a Bot marked Isolated gets a container of its own instead. Without it, all Bots share `AGENT_COMPUTER_URL`, still with a profile and folder for each person and Bot.
