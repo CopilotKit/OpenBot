@@ -338,6 +338,16 @@ can also call OpenBot's API with a person's Entra token; a token issued to any o
 Migration `0073_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
 without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
 
+### A Bot sees the images its tools return
+
+An image a tool returned, such as a Gmail attachment fetched through Composio, reached the model as
+a storage link it could not open, so "look at the photo the customer attached" could not work. The
+server now downloads it and puts the picture in front of the model on the next step, beside the
+tool's answer: https only, only from Composio's file storage host, never from a name that resolves
+to a private, loopback or metadata address, at most 8 MB each and the newest four in a run. A picture that cannot be downloaded, including one whose link has expired by
+a later turn, is replaced by a sentence telling the model it is not there. Each picture is sent to
+the model provider on every later step of the conversation, so expect more input tokens there.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
