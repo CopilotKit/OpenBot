@@ -703,6 +703,11 @@ export async function buildAgents(
   loadPersonalMemory?: LoadPersonalMemory,
   /** How a run refused for holding too many tools is put on record. Absent writes no row. */
   recordToolLimitRefusal?: RecordToolLimitRefusal,
+  /**
+   * Which runs on these Bots may hold their tools. Absent means every run does, which is right for
+   * every Bot this deployment runs itself; the runtime's own map passes {@link isAskedRun}.
+   */
+  holdsTools?: HoldsTools,
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -760,6 +765,7 @@ export async function buildAgents(
           markAttachmentsSent,
           acquireLearnedSkills,
           recordToolLimitRefusal,
+          holdsTools,
         );
         if (loadPersonalMemory)
           built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
@@ -1024,6 +1030,8 @@ async function buildAgent(
   acquireLearnedSkills?: AcquireLearnedSkills,
   /** How a run refused by `admitTools` below is put on record. See {@link buildAgents}. */
   recordToolLimitRefusal?: RecordToolLimitRefusal,
+  /** Which runs may hold the Bot's tools. See {@link buildAgents}. */
+  holdsTools?: HoldsTools,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -1137,6 +1145,7 @@ async function buildAgent(
       acquireLearnedSkills,
       handoff,
       initiator,
+      holdsTools,
     );
   }
 
@@ -1272,6 +1281,7 @@ async function buildAgent(
     !handoff &&
     !model.plan &&
     !acquireLearnedSkills &&
+    !holdsTools &&
     !granted.some((tool) => tool.searchable)
   )
     return whole;
@@ -1280,6 +1290,12 @@ async function buildAgent(
     { agentId: agent.id, description: agent.name },
     whole,
     async (input, signal) => {
+      /*
+       * A run the runtime makes for itself holds nothing of the Bot's: no grant, no subagent, no
+       * handoff, no learned Skill. Built again with none, rather than told not to call them, so a
+       * model that asks for one anyway asks for a tool this run does not have. See `isAskedRun`.
+       */
+      if (holdsTools && !holdsTools(input)) return withTools([], input, signal);
       const learnedSkills = await acquireLearnedSkills?.(agent.id, signal);
       signal.throwIfAborted();
       if (
@@ -1539,7 +1555,10 @@ function remoteAgentWithStandingRole(
   acquireLearnedSkills?: AcquireLearnedSkills,
   coordination?: HandoffForRun,
   initiator?: AuditInitiator,
+  /** Which runs may hold the Bot's tools. See {@link buildAgents}. */
+  holdsTools?: HoldsTools,
 ) {
+  const holds = (input: RunAgentInput) => !holdsTools || holdsTools(input);
   /*
    * What this Bot holds, as a second standing message.
    *
@@ -1572,14 +1591,20 @@ function remoteAgentWithStandingRole(
     next: AbstractAgent,
   ) => {
     const holdingsMessage = holdingsMessageFor(tools);
-    const runAssertion = signRun
-      ? signRun(
-          agent.id,
-          input.runId,
-          input.threadId,
-          input.forwardedProps?.openbotRun,
-        )
-      : undefined;
+    /*
+     * Not signed for a run the runtime makes for itself: the statement is what the Bot hands back to
+     * call a tool here, and that run holds none. See `isAskedRun`.
+     */
+    const held = holds(input);
+    const runAssertion =
+      signRun && held
+        ? signRun(
+            agent.id,
+            input.runId,
+            input.threadId,
+            input.forwardedProps?.openbotRun,
+          )
+        : undefined;
     // Governed vendor/host calls use the actual AG-UI client lifecycle, so approvals capture
     // the provider's toolCallId, messages and state. Coordination retains its signed callback.
     const clientTools = tools.filter(
@@ -1623,6 +1648,8 @@ function remoteAgentWithStandingRole(
            */
           {}),
     };
+    // Nor one it carried in: a statement copied from another run would still be accepted.
+    if (!held) delete forwardedProps.openbotRun;
     /*
      * The same guard a built-in Bot gets in `BuiltInAgentWithSaneHistory`, applied here because a
      * remote Bot never passes through it: this middleware is the last thing between the browser's
@@ -1738,13 +1765,16 @@ function remoteAgentWithStandingRole(
     target.use((input, next) => {
       const stream = defer(() =>
         from(
-          Promise.all([
-            narrow ? narrow(input) : Promise.resolve(tools),
-            coordination?.(agent.id, input) ?? Promise.resolve([]),
-          ]).then(([offered, coordinationTools]) => [
-            ...offered,
-            ...coordinationTools,
-          ]),
+          holds(input)
+            ? Promise.all([
+                narrow ? narrow(input) : Promise.resolve(tools),
+                coordination?.(agent.id, input) ?? Promise.resolve([]),
+              ]).then(([offered, coordinationTools]) => [
+                ...offered,
+                ...coordinationTools,
+              ])
+            : // A run the runtime makes for itself is offered none of them. See `isAskedRun`.
+              Promise.resolve([]),
         ).pipe(switchMap((offered) => runWith(offered, input, next))),
       );
       const owned =
@@ -1760,10 +1790,18 @@ function remoteAgentWithStandingRole(
         );
       return owned ? observeModelConnection(stream) : stream;
     });
-    if (acquireLearnedSkills)
-      target.use(
-        new RemoteLearnedSkillsMiddleware(agent.id, acquireLearnedSkills),
+    if (acquireLearnedSkills) {
+      const learned = new RemoteLearnedSkillsMiddleware(
+        agent.id,
+        acquireLearnedSkills,
       );
+      target.use(
+        holdsTools
+          ? (input, next) =>
+              holdsTools(input) ? learned.run(input, next) : next.run(input)
+          : learned,
+      );
+    }
   });
 }
 
@@ -1874,6 +1912,8 @@ export async function resolveRuntimeAgents(
   loadPersonalMemory?: LoadPersonalMemory,
   /** Appended after `loadPersonalMemory`, for the positional reason `loadInstructions` gives. */
   recordToolLimitRefusal?: RecordToolLimitRefusal,
+  /** Appended last, for the same positional reason. See {@link buildAgents}. */
+  holdsTools?: HoldsTools,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -1911,6 +1951,7 @@ export async function resolveRuntimeAgents(
     acquireLearnedSkills,
     loadPersonalMemory,
     recordToolLimitRefusal,
+    holdsTools,
   );
 }
 
@@ -1951,19 +1992,90 @@ export type LoadAgentsForActor = (
   actor: AgentActor,
 ) => Promise<RegisteredAgent[]>;
 
+/** Whether one run on a Bot may hold the Bot's tools. See {@link isAskedRun}. */
+export type HoldsTools = (input: RunAgentInput) => boolean;
+
+/**
+ * Where a run says somebody asked for it: on its forwardedProps, written by {@link markAskedRun}.
+ *
+ * The CopilotKit runtime also runs a Bot for itself, on the same agents. It names a new conversation
+ * by building the conversation's Bot again and running it in-process on a title prompt, with
+ * forwardedProps of its own making (`{}`), and it answers `agent/<id>/suggest` by running the Bot on
+ * whatever the caller sent. Nobody asked for either run and nobody sees either, so neither may hold
+ * the Bot's tools. Holding them, a naming run was seen to start a subagent, which acts with every
+ * permission the Bot has, and to keep it writing after the person had pressed Stop.
+ *
+ * A mark this deployment writes on the runs it accepted, not a shape of the runtime's own runs
+ * recognised, so it fails closed: a run the runtime starts for some reason added later holds nothing
+ * either. And always written, unlike the product telemetry context a run may also carry, which is
+ * absent whenever that telemetry is off.
+ */
+export const ASKED_RUN = "openbotAskedRun";
+
+/** A run somebody asked for, as {@link ASKED_RUN} says. No other run holds the Bot's tools. */
+export function isAskedRun(input: RunAgentInput): boolean {
+  return (
+    isPlainObject(input.forwardedProps) &&
+    input.forwardedProps[ASKED_RUN] === true
+  );
+}
+
+/**
+ * The runtime's run route, marked as a run somebody asked for, and a suggestion's claim to be one
+ * taken off. Those two are the routes that run a Bot on a body the caller wrote. The mark is set
+ * whatever the caller sent under it, so only this deployment ever writes it; the runtime's own runs
+ * build their input themselves and never carry it. Undefined leaves the request as it came.
+ */
+export async function markAskedRun(
+  request: Request,
+  route: { method: string },
+): Promise<Request | undefined> {
+  const run = route.method === "agent/run";
+  if (!run && route.method !== "agent/suggest") return;
+  let body: unknown;
+  try {
+    body = await request.clone().json();
+  } catch {
+    // Not a body the runtime can run, so there is no run to mark: it is refused as it is.
+    return;
+  }
+  if (!isPlainObject(body)) return;
+  const { [ASKED_RUN]: claimed, ...forwardedProps } = isPlainObject(
+    body.forwardedProps,
+  )
+    ? body.forwardedProps
+    : {};
+  if (!run && claimed === undefined) return;
+  return new Request(request, {
+    body: JSON.stringify({
+      ...body,
+      forwardedProps: run
+        ? { ...forwardedProps, [ASKED_RUN]: true }
+        : forwardedProps,
+    }),
+  });
+}
+
 /**
  * Build the runtime's per-request agent factory.
  *
  * Resolution is per request, not per boot, because who may run a coworker is a property of the
  * person asking: a private coworker must be absent for everybody else, and a role edited a moment
  * ago must apply to the next run without a restart. Both fall out of rebuilding the map here.
+ *
+ * The runtime runs what this returns for the person's request and for itself (see
+ * {@link isAskedRun}), so only a run somebody asked for holds the Bot's tools. Every other way this
+ * deployment builds a Bot, a headless turn, a hop, a routine, a subagent, runs only what it asked for
+ * and is built without that condition.
  */
 export function createRequestAgents(
   identifyActor: IdentifyActor,
   resolver: ActorAgentResolver,
 ) {
   return async ({ request }: { request: Request }) =>
-    resolver.resolveAgentsForActor(await identifyActor(request));
+    resolver.resolveAgentsForActor(await identifyActor(request), {
+      holdsTools: isAskedRun,
+    });
 }
 
 /**
@@ -2175,12 +2287,16 @@ export function mountCopilotRuntime(
       hooks: {
         onBeforeHandler: async (context) => {
           const gated = await trajectoryCapture?.gate(context);
-          if (!options.productTelemetry) return gated;
+          const prepared = options.productTelemetry
+            ? ((await productRuntimeHook(
+                options.productTelemetry,
+                identifyActor,
+              )({ ...context, request: gated ?? context.request })) ?? gated)
+            : gated;
+          // Last, so nothing after it can drop the mark. See `isAskedRun`.
           return (
-            (await productRuntimeHook(
-              options.productTelemetry,
-              identifyActor,
-            )({ ...context, request: gated ?? context.request })) ?? gated
+            (await markAskedRun(prepared ?? context.request, context.route)) ??
+            prepared
           );
         },
       },

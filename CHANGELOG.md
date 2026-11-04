@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Naming a new conversation, and the runtime's suggestions route, now run the Bot with none of its
+  tools. The CopilotKit runtime names a conversation by running its Bot again on a title prompt;
+  since every Bot could start subagents, that hidden run sometimes started one, which acted with all
+  the Bot's permissions, out of sight, and kept going after Stop. A person's own runs, the subagents
+  they start, headless turns and hops keep every tool as before. A remote Bot's naming run is also
+  sent no signed run, so a callback from it is refused.
 - The sign-in page the Desktop app opens now explains OpenBot setup — you are setting up a
   CopilotKit account for the personal edition of OpenBot, and your data stays on your computer —
   instead of the generic CopilotKit pitch. The app adds `mode=openbot` to the sign-in URL it opens;
