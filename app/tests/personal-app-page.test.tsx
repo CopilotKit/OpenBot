@@ -17,7 +17,10 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type * as React from "react";
+import { PluginBotPage } from "@/components/manage/plugin-bot-page";
 import { PluginPage } from "@/components/manage/plugin-page";
+import { PluginToolPage } from "@/components/manage/plugin-tool-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import {
@@ -113,6 +116,8 @@ function draw(
   edition: "team" | "personal",
   drawn: PluginServer[],
   pluginKey = "notion",
+  page: () => React.ReactNode = () => <PluginPage pluginKey={pluginKey} />,
+  bots: unknown[] = [],
 ) {
   servers = drawn;
   const client = new QueryClient({
@@ -126,12 +131,12 @@ function draw(
   });
   client.setQueryData(pluginKeys.page(), pageWith(drawn));
   client.setQueryData(pluginKeys.connections(), { connections: [] });
-  client.setQueryData(agentKeys.list(false), []);
-  client.setQueryData(agentKeys.list(true), []);
+  client.setQueryData(agentKeys.list(false), bots);
+  client.setQueryData(agentKeys.list(true), bots);
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({
-      component: () => <PluginPage pluginKey={pluginKey} />,
+      component: page,
     }),
   });
   return render(
@@ -204,6 +209,38 @@ test("the team edition's page is unchanged", async () => {
   const view = draw("team", [notionServer]);
   expect(await view.findByText("Enable for this deployment")).toBeTruthy();
   expect(view.getByText("Bot owners can give it to their Bots")).toBeTruthy();
+});
+
+test("Routines' tool and per-Bot pages say always on, rather than offer a switch the server refuses", async () => {
+  const routines = {
+    ...notionServer,
+    id: "routines",
+    title: "Routines",
+    url: "builtin://routines/",
+    dynamicClient: false,
+    tools: [
+      {
+        name: "schedule",
+        ref: "routines/schedule",
+        description: "Schedule work.",
+        serverId: "routines",
+        inputSchema: {},
+        effect: "write",
+        destructive: false,
+        grantedTo: ["bot-1"],
+      },
+    ],
+  } as unknown as PluginServer;
+  const bots = [{ id: "bot-1", name: "Expenses", hidden: false }];
+  for (const page of [
+    () => <PluginToolPage pluginKey="routines" toolName="schedule" />,
+    () => <PluginBotPage agentId="bot-1" pluginKey="routines" />,
+  ]) {
+    const view = draw("team", [routines], "routines", page, bots);
+    expect(await view.findByText("Always on")).toBeTruthy();
+    expect(view.queryByRole("switch")).toBeNull();
+    cleanup();
+  }
 });
 
 test("Routines is always on in the team edition too, with no switch to turn it off", async () => {

@@ -40,6 +40,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   grantPlugin,
@@ -99,6 +100,8 @@ export function PluginBotPage({
   pluginKey: string;
   agentId: string;
 }) {
+  // Routines is every Bot's, in every edition: there is no switch to take it from one.
+  const alwaysOn = key === ALWAYS_ON_APP;
   const paths = useManagePaths();
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
@@ -367,44 +370,49 @@ export function PluginBotPage({
                * here is switched on by default, and nothing is proposed pre-switched. Disabled only
                * while its own write is in flight, so switching one action does not freeze the list.
                */}
-              <Switch
-                aria-label={`Let ${botName} call ${tool.name}`}
-                checked={held(tool)}
-                disabled={
-                  granting !== null ||
-                  pendingGrant?.ref === tool.ref ||
-                  (setGrant.isPending && setGrant.variables?.ref === tool.ref)
-                }
-                onCheckedChange={(next) => {
-                  setError(null);
-                  /*
-                   * A Shared app has one account behind every action on it, so switching one on is
-                   * consent for what that account can do, not just for this row — and that consent
-                   * is asked for once per app, not once per action. Already held for this app (an
-                   * approval `exposure` already carries) takes the switch straight through below; not
-                   * yet held — including while `exposure` is still loading, which is exactly when a
-                   * stale "no approval yet" must not be trusted as the final answer — stops here and
-                   * asks first.
-                   */
-                  if (next && shared && !sharedApp?.approval) {
-                    setPendingGrant({ ref: tool.ref });
-                    setApproval(
-                      sharedApp?.needed ?? {
-                        audience: "team",
-                        outsideInput: false,
-                        members: [],
-                      },
-                    );
-                    return;
+              {alwaysOn ? (
+                // Refused one Bot at a time by the server: Routines is every Bot's.
+                <span className="text-muted-foreground text-xs">Always on</span>
+              ) : (
+                <Switch
+                  aria-label={`Let ${botName} call ${tool.name}`}
+                  checked={held(tool)}
+                  disabled={
+                    granting !== null ||
+                    pendingGrant?.ref === tool.ref ||
+                    (setGrant.isPending && setGrant.variables?.ref === tool.ref)
                   }
-                  setGrant.mutate({
-                    agentId,
-                    granted: next,
-                    kind: "mcp",
-                    ref: tool.ref,
-                  });
-                }}
-              />
+                  onCheckedChange={(next) => {
+                    setError(null);
+                    /*
+                     * A Shared app has one account behind every action on it, so switching one on is
+                     * consent for what that account can do, not just for this row — and that consent
+                     * is asked for once per app, not once per action. Already held for this app (an
+                     * approval `exposure` already carries) takes the switch straight through below; not
+                     * yet held — including while `exposure` is still loading, which is exactly when a
+                     * stale "no approval yet" must not be trusted as the final answer — stops here and
+                     * asks first.
+                     */
+                    if (next && shared && !sharedApp?.approval) {
+                      setPendingGrant({ ref: tool.ref });
+                      setApproval(
+                        sharedApp?.needed ?? {
+                          audience: "team",
+                          outsideInput: false,
+                          members: [],
+                        },
+                      );
+                      return;
+                    }
+                    setGrant.mutate({
+                      agentId,
+                      granted: next,
+                      kind: "mcp",
+                      ref: tool.ref,
+                    });
+                  }}
+                />
+              )}
             </ItemActions>
           </Item>
           {index !== tools.length - 1 && <Separator />}

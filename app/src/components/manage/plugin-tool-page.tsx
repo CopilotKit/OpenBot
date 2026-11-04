@@ -18,6 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
@@ -41,6 +42,8 @@ export function PluginToolPage({
   pluginKey: string;
   toolName: string;
 }) {
+  // Routines is every Bot's, in every edition: there is no switch to take it from one.
+  const alwaysOn = key === ALWAYS_ON_APP;
   const paths = useManagePaths();
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
@@ -216,23 +219,30 @@ export function PluginToolPage({
                        * switched and there is no save. Disabled only while its own write is in
                        * flight, so switching one Bot does not freeze the rest of the list.
                        */}
-                      <Switch
-                        aria-label={`Let ${bot.name} call ${toolName}`}
-                        checked={held}
-                        disabled={
-                          setGrant.isPending &&
-                          setGrant.variables?.agentId === bot.id
-                        }
-                        onCheckedChange={(next) => {
-                          setError(null);
-                          setGrant.mutate({
-                            agentId: bot.id,
-                            granted: next,
-                            kind: "mcp",
-                            ref: tool.ref,
-                          });
-                        }}
-                      />
+                      {alwaysOn ? (
+                        // Refused one Bot at a time by the server: Routines is every Bot's.
+                        <span className="text-muted-foreground text-xs">
+                          Always on
+                        </span>
+                      ) : (
+                        <Switch
+                          aria-label={`Let ${bot.name} call ${toolName}`}
+                          checked={held}
+                          disabled={
+                            setGrant.isPending &&
+                            setGrant.variables?.agentId === bot.id
+                          }
+                          onCheckedChange={(next) => {
+                            setError(null);
+                            setGrant.mutate({
+                              agentId: bot.id,
+                              granted: next,
+                              kind: "mcp",
+                              ref: tool.ref,
+                            });
+                          }}
+                        />
+                      )}
                     </ItemActions>
                   </Item>
                   {index !== bots.length - 1 && <Separator />}
