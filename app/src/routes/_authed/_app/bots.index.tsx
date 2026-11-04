@@ -54,7 +54,11 @@ function BotsPage() {
           New Bot
         </Button>
       }
-      description="Manage your Bots and access those shared with you."
+      description={
+        personal
+          ? "Your Bots for everyday work."
+          : "Manage your Bots and access those shared with you."
+      }
       title="Bots"
     >
       <BotRoster />

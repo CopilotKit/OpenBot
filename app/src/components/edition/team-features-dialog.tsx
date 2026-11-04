@@ -68,8 +68,9 @@ export const TEAM_FEATURE_GROUPS: readonly {
   },
 ];
 
-/** Where Talk to us goes, until there is a page of its own for it. */
-export const BUSINESS_URL = "https://openbot.co";
+/** Book a conversation about OpenBot for Business. */
+export const BUSINESS_URL =
+  "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business";
 
 export const TEAM_FEATURES = TEAM_FEATURE_GROUPS.flatMap(
   (group) => group.features,
@@ -221,5 +222,19 @@ export function NavigationTarget({
   }
   return (
     <Link {...props} activeProps={activeProps} onClick={onClick} to={item.to} />
+  );
+}
+
+/** The personal edition's way to learn about a computer for each Bot. */
+export function BusinessComputerLink() {
+  return (
+    <a
+      className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+      href={BUSINESS_URL}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      Give each Bot its own computer with OpenBot for Business.
+    </a>
   );
 }

@@ -18,6 +18,7 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { BotRoster } from "@/components/bots/bot-roster";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -258,4 +259,20 @@ test("a Bot's check-in items are counted in the words the badge and Needs you us
   const view = draw();
   expect(await view.findByText("2 things need you")).toBeTruthy();
   expect(view.container.textContent).not.toContain("suggestion");
+});
+
+test("personal edition labels starter Bots as included with OpenBot", async () => {
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    edition: "personal",
+  });
+  serving(
+    [bot({ id: "starter", name: "Starter", mine: false, systemOwned: true })],
+    [],
+  );
+  const view = draw();
+  await view.findByText("Starter");
+  expect(
+    view.getByRole("heading", { name: "Included with OpenBot" }),
+  ).toBeTruthy();
+  expect(view.queryByText("Shared with you")).toBeNull();
 });
