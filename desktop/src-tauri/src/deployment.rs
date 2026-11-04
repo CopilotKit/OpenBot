@@ -231,21 +231,40 @@ pub const ALSO_COPIED_FILES: [&str; 0] = [];
 /// The stamp is written last. Anything that fails before that leaves a directory without one, which
 /// `needs_fetch` treats as absent, so an interrupted download is retried rather than half-run.
 pub fn fetch(root: &Path, version: &str) -> Result<(), String> {
+    fetch_with(root, version, &get)
+}
+
+/// Downloads the URL it is given. A parameter so laying out real archives can run without a network.
+pub type Download<'a> = &'a dyn Fn(&str) -> Result<Vec<u8>, String>;
+
+/// [`fetch`], downloading through `get`.
+///
+/// An installed release changes only through the explicit runtime update controls. At the same
+/// version this still lays the deployment out again when the stamp shows an app that copied less
+/// (#858 grew `ALSO_COPIED`) or a required path is gone, which is what Install has always done:
+/// refusing it left every installation laid out before a layout change unable to Start or Install.
+pub fn fetch_with(root: &Path, version: &str, get: Download) -> Result<(), String> {
     crate::updates::require_no_interruption(root)?;
     let policy = crate::updates::distribution(root)?;
-    // Repair never lays a new source archive over an established active root. Missing image
-    // metadata can be repaired at the existing pin; source changes require explicit staging.
     if let Some(installed) = installed(root) {
         if installed.version != version {
             return Err(
                 "Use the explicit runtime update controls to change an installed release".into(),
             );
         }
-        if installed.layout != layout() || REQUIRED.iter().any(|path| !root.join(path).exists()) {
-            return Err("This installation needs source repair. Preserve its customer files and establish a verified baseline before explicit source replacement; automatic repair will not overwrite the active tree.".into());
+        let laid_out =
+            installed.layout == layout() && REQUIRED.iter().all(|path| root.join(path).exists());
+        if laid_out {
+            return fetch_images(root, version, get);
         }
-        fetch_images(root, version)?;
-        return Ok(());
+        // An installation the updater has a verified baseline for is laid out again from that
+        // release's checksum-verified source artifact, and its baseline grows to match. A plain
+        // installation takes the tag's tarball again, as it always has.
+        if root.join(crate::updates::BASELINE).exists() {
+            crate::updates::relay_accepted_release(root, get)?;
+            return record(root, version)
+                .map_err(|error| format!("could not record the version: {error}"));
+        }
     }
     let source_url = format!(
         "https://github.com/{}/archive/refs/tags/{version}.tar.gz",
@@ -260,7 +279,7 @@ pub fn fetch(root: &Path, version: &str) -> Result<(), String> {
 
     unpack(root, &body)?;
 
-    fetch_images(root, version)?;
+    fetch_images(root, version, get)?;
 
     record(root, version).map_err(|error| format!("could not record the version: {error}"))
 }
@@ -348,7 +367,7 @@ pub fn unpack(root: &Path, body: &[u8]) -> Result<(), String> {
 ///
 /// Parsed here rather than at start-up so a release missing an image fails while the person is
 /// still looking at a screen that says what is being fetched, not later inside Compose's output.
-fn fetch_images(root: &Path, version: &str) -> Result<(), String> {
+fn fetch_images(root: &Path, version: &str, get: Download) -> Result<(), String> {
     let policy = crate::updates::distribution(root)?;
     let url = format!(
         "https://github.com/{}/releases/download/{version}/{IMAGES}",
@@ -485,6 +504,82 @@ mod tests {
         std::fs::write(images_path(&dir), "{}").unwrap();
         assert!(!needs_fetch(&dir, "v0.0.7"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Finding: #858 grew `ALSO_COPIED` from 9 to 11 entries, and `fetch` then refused every
+    /// installation whose stamp recorded the older layout, so none of them could Start or Install.
+    /// Install lays the same release out again, from GitHub's own tarball shape.
+    #[test]
+    fn an_installation_laid_out_before_a_layout_change_is_laid_out_again_at_its_version() {
+        let root = crate::test_support::temp_root("deployment-older-layout");
+        std::fs::create_dir_all(&root).unwrap();
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut tarball = tar::Builder::new(encoder);
+        for entry in REQUIRED.iter().chain(ALSO_COPIED.iter()) {
+            let body = format!("release {entry}");
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tarball
+                .append_data(
+                    &mut header,
+                    format!("OpenBot-0.0.7/{entry}/release.txt"),
+                    body.as_bytes(),
+                )
+                .unwrap();
+        }
+        let tarball = tarball.into_inner().unwrap().finish().unwrap();
+        unpack(&root, &tarball).unwrap();
+        // Laid out by the app before #858, which copied neither of these.
+        for added in ["patches", "extension"] {
+            std::fs::remove_dir_all(root.join(added)).unwrap();
+        }
+        let older: Vec<String> = layout()
+            .into_iter()
+            .filter(|entry| entry != "patches" && entry != "extension")
+            .collect();
+        std::fs::write(
+            stamp_path(&root),
+            serde_json::to_string(&Installed {
+                version: "v0.0.7".into(),
+                layout: older,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(root.join(".env"), "KEY_ENCRYPTION_KEY=customer-key\n").unwrap();
+        let published: Vec<&str> = IMAGE_VARIABLES.iter().map(|(name, _)| *name).collect();
+        let images = serde_json::to_vec(&manifest(&published)).unwrap();
+        std::fs::write(images_path(&root), &images).unwrap();
+        assert!(needs_fetch(&root, "v0.0.7"));
+
+        let get = |url: &str| -> Result<Vec<u8>, String> {
+            match url {
+                "https://github.com/CopilotKit/OpenBot/archive/refs/tags/v0.0.7.tar.gz" => {
+                    Ok(tarball.clone())
+                }
+                "https://github.com/CopilotKit/OpenBot/releases/download/v0.0.7/container-images.json" => {
+                    Ok(images.clone())
+                }
+                other => Err(format!("unexpected download {other}")),
+            }
+        };
+        fetch_with(&root, "v0.0.7", &get).expect("Install lays the same release out again");
+        for added in ["patches", "extension"] {
+            assert_eq!(
+                std::fs::read_to_string(root.join(added).join("release.txt")).unwrap(),
+                format!("release {added}")
+            );
+        }
+        assert!(!needs_fetch(&root, "v0.0.7"));
+        assert_eq!(
+            std::fs::read_to_string(root.join(".env")).unwrap(),
+            "KEY_ENCRYPTION_KEY=customer-key\n"
+        );
+        // A different version still goes through the explicit update controls.
+        assert!(fetch_with(&root, "v0.0.8", &get).is_err());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
