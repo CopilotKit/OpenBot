@@ -65,6 +65,7 @@ import type {
 import { createWorkQueue } from "../src/work/queue";
 import { removeBots, seedBot } from "./support/bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { useTestPeople } from "./support/directory";
 
 /*
  * The admin's say over check-ins, through the real path: real Postgres, the real enterprise controls
@@ -74,6 +75,8 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+// The groups a directory provisioned are Intelligence's organization directory's.
+useTestPeople();
 const auditStore = createAuditStore(database);
 const suite = randomUUID().slice(0, 8);
 const admin = { id: `ci-admin-${suite}`, email: `ci-admin-${suite}@acme.test` };

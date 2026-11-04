@@ -562,7 +562,7 @@ export function createPeopleDirectory(options: {
     client,
 
     async start() {
-      await bindToProject(database, await client.scope());
+      await bindToProject(database, () => client.scope());
       if (options.gatewayWsUrl) {
         subscription = (options.subscribe ?? subscribeToDirectoryChanges)({
           client,
@@ -714,23 +714,30 @@ export class DirectoryProjectMismatchError extends Error {
  */
 export async function bindToProject(
   database: Database,
-  scope: { organizationId: string; projectId: string },
+  scope: () => Promise<{ organizationId: string; projectId: string }>,
 ): Promise<void> {
-  await database
-    .insert(directoryBinding)
-    .values({
-      organizationId: scope.organizationId,
-      projectId: scope.projectId,
-    })
-    .onConflictDoNothing();
-  const [bound] = await database.select().from(directoryBinding).limit(1);
+  // This database first, then Intelligence: the binding is the database's to remember.
+  const [held] = await database.select().from(directoryBinding).limit(1);
+  const configured = await scope();
+  if (!held) {
+    await database
+      .insert(directoryBinding)
+      .values({
+        organizationId: configured.organizationId,
+        projectId: configured.projectId,
+      })
+      .onConflictDoNothing();
+  }
+  const [bound] = held
+    ? [held]
+    : await database.select().from(directoryBinding).limit(1);
   if (
     bound &&
-    (bound.organizationId !== scope.organizationId ||
-      bound.projectId !== scope.projectId)
+    (bound.organizationId !== configured.organizationId ||
+      bound.projectId !== configured.projectId)
   ) {
     throw new DirectoryProjectMismatchError(
-      `This database's people belong to Intelligence project ${bound.projectId} of organization ${bound.organizationId}, but INTELLIGENCE_API_KEY is a key for project ${scope.projectId} of organization ${scope.organizationId}. Starting would take every person here for one deleted in that project and remove them, so the server has stopped and nothing was changed. Set INTELLIGENCE_API_KEY to a key for project ${bound.projectId}, or start this deployment on an empty database.`,
+      `This database's people belong to Intelligence project ${bound.projectId} of organization ${bound.organizationId}, but INTELLIGENCE_API_KEY is a key for project ${configured.projectId} of organization ${configured.organizationId}. Starting would take every person here for one deleted in that project and remove them, so the server has stopped and nothing was changed. Set INTELLIGENCE_API_KEY to a key for project ${bound.projectId}, or start this deployment on an empty database.`,
     );
   }
 }
