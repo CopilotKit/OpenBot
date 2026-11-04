@@ -41,6 +41,12 @@ type StreamData = {
 type ChannelSocket = Parameters<typeof channelSocket.open>[0];
 type SocketData = StreamData | ChannelSocket["data"];
 
+/** How every screencast frame from the computer starts: `JSON.stringify({ type: "frame", ... })`. */
+const FRAME_PREFIX = '{"type":"frame"';
+
+/** How much may sit unsent to a person's browser before a new frame is dropped: about one frame. */
+const STREAM_BUFFER_LIMIT = 128 * 1024;
+
 export function startHttpServer(deps: {
   port: number;
   config: DeploymentConfig;
@@ -219,11 +225,20 @@ export function startHttpServer(deps: {
         const stream = ws.data;
         const inward = new WebSocket(stream.upstream);
         stream.inward = inward;
-        // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
-        // should be dropped, not queued, because a stale frame is worse than a missing one.
+        // Frames outward, input inward. A frame the browser is too slow for is dropped, not queued,
+        // because a stale frame is worse than a missing one. Bun queues whatever `send` cannot write
+        // yet, so the drop has to be decided here: while the frames before it are still going out, a
+        // new one is let go and the next one Chrome sends, the page as it is by then, takes its place.
+        // Anything that is not a frame, such as an error the person has to read, always goes.
         inward.onmessage = (event) => {
+          const message = String(event.data);
+          if (
+            message.startsWith(FRAME_PREFIX) &&
+            ws.getBufferedAmount() > STREAM_BUFFER_LIMIT
+          )
+            return;
           try {
-            ws.send(String(event.data));
+            ws.send(message);
           } catch {
             inward.close();
           }

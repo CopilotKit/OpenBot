@@ -35,6 +35,7 @@ import {
 import { handleEgressPolicyRequest, startEgressFilter } from "./egress";
 import { enterText, FieldValueError } from "./enter-text";
 import { identity } from "./identity";
+import { createInputQueue, type InputQueue } from "./input-queue";
 import {
   assertPageAccess,
   navigateWebPage,
@@ -740,9 +741,24 @@ async function notePersonFilled(
 /** What a live-screen socket carries: the Bot whose screen it is showing. */
 type StreamData = {
   botId: string;
-  /** The person's input so far, applied one message after another. */
-  inputs?: Promise<void>;
+  /** The person's input so far, applied one message after another. See input-queue.ts. */
+  inputs?: InputQueue;
+  /** Frames waiting for the connection to drain before Chrome is asked for the next one. */
+  drained?: Array<() => void>;
 };
+
+/**
+ * How much may sit unsent on a live-screen socket before the cast waits for it: about one frame.
+ * More than that and the person is watching the past; see the ack in screencast.ts.
+ */
+const STREAM_BUFFER_LIMIT = 128 * 1024;
+
+/** Let every frame waiting on this socket go. */
+function wakeDrained(ws: ServerWebSocket<StreamData>) {
+  const waiting = ws.data.drained;
+  ws.data.drained = undefined;
+  for (const wake of waiting ?? []) wake();
+}
 
 /**
  * Apply one thing the person did on the live screen, after asking whether the screen is theirs and
@@ -864,13 +880,19 @@ serve<StreamData>({
         }
       });
       try {
-        const send = (frame: unknown) => {
+        const send = (frame: unknown): void | Promise<void> => {
           // A closed socket starts a fresh cast on the next connection.
           try {
             ws.send(JSON.stringify(frame));
           } catch {
             void session.viewer.release(ws);
+            return;
           }
+          // Still sending the frames before this one: the next waits until they are out.
+          if (ws.getBufferedAmount() <= STREAM_BUFFER_LIMIT) return;
+          return new Promise<void>((resolve) => {
+            ws.data.drained = [...(ws.data.drained ?? []), resolve];
+          });
         };
 
         /*
@@ -914,23 +936,30 @@ serve<StreamData>({
      * One message at a time, in the order the person sent them. Applying one is a trip to the
      * browser, and a message whose trip is shorter than the one before it must still land after it:
      * applied as each was ready, a key came up before it went down (every key up of a word before
-     * any of its key downs, measured with a page busy 20 ms per key down). Nothing else here holds a
-     * message, and a message refused or failed says so and lets the next one through.
+     * any of its key downs, measured with a page busy 20 ms per key down). A move or a scroll still
+     * waiting is folded into the next one of its kind (input-queue.ts); nothing else is held, and a
+     * message refused or failed says so and lets the next one through.
      */
     message(ws, raw) {
-      ws.data.inputs = (ws.data.inputs ?? Promise.resolve())
-        .then(() => applyInput(ws, raw))
-        .catch((error: unknown) => {
+      ws.data.inputs ??= createInputQueue(
+        (input) => applyInput(ws, input),
+        (error) =>
           console.error(
             JSON.stringify({
               type: "screencast-input-error",
               error: String(error),
             }),
-          );
-        });
+          ),
+      );
+      ws.data.inputs.push(String(raw));
+    },
+
+    drain(ws) {
+      wakeDrained(ws);
     },
 
     async close(ws) {
+      wakeDrained(ws);
       // Names the socket, so it can only ever give up its own screen. A superseded socket closing
       // after its replacement has started releases nothing; see viewer.ts.
       //

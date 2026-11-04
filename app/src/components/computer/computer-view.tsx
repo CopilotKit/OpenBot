@@ -403,6 +403,18 @@ export function ComputerView({
   const watchUntil = useRef(0);
 
   const visualVisible = pageVisible && (expanded || previewIntersecting);
+  /**
+   * The full-size view is showing the live stream, which is the screen as it is, frame by frame.
+   *
+   * The screenshot poll stops then. It went on underneath, once a second: a full-size PNG taken in the
+   * same browser the person was driving, and a re-render of this whole view, which showed as a hitch
+   * every second and a caret that blinked out. Worked out the same way `showLiveScreen` is below.
+   */
+  const liveStreamOpen =
+    expanded &&
+    !settled &&
+    (driving || (shot !== null && !isBlankBrowser(shot)));
+  const polling = visualVisible && !liveStreamOpen;
 
   /*
    * The frame this turn's page was showing, fetched once and then kept.
@@ -443,7 +455,7 @@ export function ComputerView({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `secretPending` intentionally restarts settled polling.
   useEffect(() => {
     if (settled) return;
-    if (!visualVisible) return;
+    if (!polling) return;
     const mine = ++generation.current;
     let timer: ReturnType<typeof setTimeout>;
     // Consecutive identical frames observed during post-action settling.
@@ -510,7 +522,7 @@ export function ComputerView({
       generation.current++;
       clearTimeout(timer);
     };
-  }, [computerId, active, intervalMs, secretPending, settled, visualVisible]);
+  }, [computerId, active, intervalMs, secretPending, settled, polling]);
 
   /*
    * Where the computer is in its life, until there is a picture to show.
