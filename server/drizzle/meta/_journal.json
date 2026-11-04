@@ -537,8 +537,8 @@
     {
       "idx": 76,
       "version": "7",
-      "when": 1793746358800,
-      "tag": "0076_bot_configuration_in_intelligence",
+      "when": 1793755711400,
+      "tag": "0076_data_in_intelligence",
       "breakpoints": true
     }
   ]
