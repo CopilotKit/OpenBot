@@ -1,0 +1,21 @@
+# Test build only (never merged): every published image, both architectures, from this branch,
+# for the pinned test installers. Uses the same reusable images workflow a release would.
+name: test images (main merged)
+on:
+  push:
+    branches: ['dustywusty/test-images-*']
+permissions:
+  contents: read
+jobs:
+  images:
+    uses: ./.github/workflows/images.yml
+    with:
+      ref: ${{ github.sha }}
+      tags: ""
+      latest: false
+      manifest_version: test-${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
