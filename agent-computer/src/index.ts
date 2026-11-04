@@ -752,7 +752,55 @@ type StreamData = {
   inputs?: InputQueue;
   /** Frames waiting for the connection to drain before Chrome is asked for the next one. */
   drained?: Array<() => void>;
+  /** The viewer says when each frame reached it. See `FRAME_RECEIVED`. */
+  confirms?: boolean;
+  /** Frames sent that the viewer has not yet said it received. */
+  unconfirmed?: number;
+  /** The newest frame not sent yet, because the viewer had enough on its way. */
+  heldFrame?: string;
+  /** Sends `heldFrame` anyway when no confirmation comes back in time. */
+  heldTimer?: ReturnType<typeof setTimeout>;
 };
+
+/**
+ * What the screen sends back as each frame reaches it, once this computer has said (`HELLO`) that it
+ * listens for it.
+ *
+ * Waiting only for this socket's own buffer to empty is not enough: the operating system takes bytes
+ * off it long before they reach the person, and on a slow link seconds of frames sat in between,
+ * measured at 400 KB/s as frames still arriving seven seconds after the page stopped moving. Counting
+ * what the viewer has actually received bounds that to `FRAMES_IN_FLIGHT`. A newer frame is held
+ * rather than queued while that many are on their way, and sent the moment one arrives.
+ */
+const FRAME_RECEIVED = '{"type":"frame-received"}';
+const HELLO = JSON.stringify({ type: "hello", confirmFrames: true });
+const FRAMES_IN_FLIGHT = 2;
+/** How long a frame may go unconfirmed before it is taken as lost and the held one sent anyway. */
+const CONFIRM_LIMIT_MS = 2_000;
+
+/** Send the held frame, if there is one and room for it. */
+function sendHeldFrame(ws: ServerWebSocket<StreamData>) {
+  const held = ws.data.heldFrame;
+  if (held === undefined || (ws.data.unconfirmed ?? 0) >= FRAMES_IN_FLIGHT)
+    return;
+  clearTimeout(ws.data.heldTimer);
+  ws.data.heldTimer = undefined;
+  ws.data.heldFrame = undefined;
+  ws.data.unconfirmed = (ws.data.unconfirmed ?? 0) + 1;
+  try {
+    ws.send(held);
+  } catch {
+    // Gone. Its close tears the cast down.
+  }
+}
+
+/** One frame reached the viewer: room for the next. */
+function frameReceived(ws: ServerWebSocket<StreamData>) {
+  ws.data.confirms = true;
+  ws.data.unconfirmed = Math.max(0, (ws.data.unconfirmed ?? 0) - 1);
+  sendHeldFrame(ws);
+  wakeDrained(ws);
+}
 
 /**
  * How much may sit unsent on a live-screen socket before the cast waits for it: about one frame.
@@ -889,12 +937,38 @@ serve<StreamData>({
         }
       });
       try {
+        // Says this computer listens for `FRAME_RECEIVED`. A screen from before it ignores a message it
+        // does not know, and a screen that does know sends confirmations only after hearing this, so
+        // neither side ever sends the other something it would refuse.
+        ws.send(HELLO);
         const send = (frame: unknown): void | Promise<void> => {
+          const text = JSON.stringify(frame);
+          if (
+            ws.data.confirms &&
+            (ws.data.unconfirmed ?? 0) >= FRAMES_IN_FLIGHT
+          ) {
+            // Enough on its way. This one replaces any frame already held, and waits for room.
+            ws.data.heldFrame = text;
+            ws.data.heldTimer ??= setTimeout(() => {
+              ws.data.heldTimer = undefined;
+              // Nothing came back: those frames are taken as lost, so the screen is not left stale.
+              ws.data.unconfirmed = 0;
+              sendHeldFrame(ws);
+              wakeDrained(ws);
+            }, CONFIRM_LIMIT_MS);
+            return new Promise<void>((resolve) => {
+              ws.data.drained = [...(ws.data.drained ?? []), resolve];
+            });
+          }
           // A closed socket starts a fresh cast on the next connection.
           try {
-            ws.send(JSON.stringify(frame));
+            ws.send(text);
           } catch {
             void session.viewer.release(ws);
+            return;
+          }
+          if (ws.data.confirms) {
+            ws.data.unconfirmed = (ws.data.unconfirmed ?? 0) + 1;
             return;
           }
           // Still sending the frames before this one: the next waits until they are out.
@@ -950,6 +1024,11 @@ serve<StreamData>({
      * message refused or failed says so and lets the next one through.
      */
     message(ws, raw) {
+      // Not input: the screen saying a frame reached it, which goes nowhere near the input queue.
+      if (raw === FRAME_RECEIVED) {
+        frameReceived(ws);
+        return;
+      }
       ws.data.inputs ??= createInputQueue(
         (input) => applyInput(ws, input),
         (error) =>
@@ -968,6 +1047,8 @@ serve<StreamData>({
     },
 
     async close(ws) {
+      clearTimeout(ws.data.heldTimer);
+      ws.data.heldFrame = undefined;
       wakeDrained(ws);
       // Names the socket, so it can only ever give up its own screen. A superseded socket closing
       // after its replacement has started releases nothing; see viewer.ts.

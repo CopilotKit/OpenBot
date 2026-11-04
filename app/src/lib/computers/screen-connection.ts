@@ -3,6 +3,9 @@
 /** How every frame the computer sends starts: `JSON.stringify({ type: "frame", ... })`. */
 export const FRAME_PREFIX = '{"type":"frame"';
 
+/** What the screen sends back as each frame reaches it, when the computer has asked for it. */
+export const FRAME_RECEIVED = '{"type":"frame-received"}';
+
 export type ScreenSocket = {
   onopen: (() => void | Promise<void>) | null;
   onclose: (() => void) | null;

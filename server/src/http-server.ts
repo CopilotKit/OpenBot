@@ -32,6 +32,8 @@ type StreamData = {
   inward?: WebSocket;
   /** Input that arrived before the socket to the computer had opened, sent once it does. */
   early?: string[];
+  /** The computer counts the frames the screen confirms. */
+  confirms?: boolean;
 };
 
 /**
@@ -45,6 +47,9 @@ type SocketData = StreamData | ChannelSocket["data"];
 
 /** How every screencast frame from the computer starts: `JSON.stringify({ type: "frame", ... })`. */
 const FRAME_PREFIX = '{"type":"frame"';
+
+/** What a person's screen sends as a frame reaches it; the proxy says it for a frame it dropped. */
+const FRAME_RECEIVED = '{"type":"frame-received"}';
 
 /** How many inputs are held while the socket to the computer opens. A person, not a script, fills it. */
 const EARLY_INPUT_LIMIT = 256;
@@ -237,11 +242,19 @@ export function startHttpServer(deps: {
         // Anything that is not a frame, such as an error the person has to read, always goes.
         inward.onmessage = (event) => {
           const message = String(event.data);
+          // Only a computer that said it counts confirmations is sent one for a dropped frame.
+          if (message.startsWith('{"type":"hello"'))
+            stream.confirms = message.includes('"confirmFrames":true');
           if (
             message.startsWith(FRAME_PREFIX) &&
             ws.getBufferedAmount() > STREAM_BUFFER_LIMIT
-          )
+          ) {
+            // Said as received, so a computer counting the frames on their way does not wait on one
+            // that is never coming. A computer that is not counting ignores it.
+            if (stream.confirms && inward.readyState === WebSocket.OPEN)
+              inward.send(FRAME_RECEIVED);
             return;
+          }
           try {
             ws.send(message);
           } catch {

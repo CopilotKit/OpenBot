@@ -10,6 +10,7 @@ import { readControl } from "@/lib/computers/control";
 import {
   connectScreen,
   FRAME_PREFIX,
+  FRAME_RECEIVED,
   type ScreenSocket,
 } from "@/lib/computers/screen-connection";
 import { keyOf } from "@/lib/hotkeys/hotkeys";
@@ -259,13 +260,25 @@ export function LiveScreen({
 
     /** The newest frame that arrived while the tab was hidden, not even parsed. See `onMessage`. */
     let hiddenFrame: string | null = null;
+    /**
+     * Whether the computer has said it wants to hear as each frame arrives. It then keeps no more than
+     * a couple on their way, so on a slow link the screen shows the page as it is, not seconds ago.
+     * Only once it has said so: a computer from before this would refuse a message it does not know.
+     */
+    let confirmFrames = false;
+    const confirmFrame = () => {
+      const socket = socketRef.current;
+      if (confirmFrames && socket?.readyState === WebSocket.OPEN)
+        socket.send(FRAME_RECEIVED);
+    };
 
     const drawLatestFrame = () => {
       if (!currentPageVisible()) return;
       if (hiddenFrame !== null) {
         const raw = hiddenFrame;
         hiddenFrame = null;
-        onMessage({ data: raw });
+        // Already confirmed when it arrived.
+        onMessage({ data: raw }, { replay: true });
         return;
       }
       const frame = latestFrame.current;
@@ -273,15 +286,18 @@ export function LiveScreen({
       void show(frame, latestFrameId.current);
     };
 
-    const onMessage = (event: { data: unknown }) => {
+    const onMessage = (
+      event: { data: unknown },
+      { replay = false }: { replay?: boolean } = {},
+    ) => {
+      const isFrame =
+        typeof event.data === "string" && event.data.startsWith(FRAME_PREFIX);
+      // On arrival, before any decoding: what the computer is pacing itself by is the link.
+      if (isFrame && !replay) confirmFrame();
       // A hidden tab keeps only the newest frame, as it arrived. Parsing every frame nobody can see
       // was the main cost of a live screen in a background tab.
-      if (
-        !currentPageVisible() &&
-        typeof event.data === "string" &&
-        event.data.startsWith(FRAME_PREFIX)
-      ) {
-        hiddenFrame = event.data;
+      if (isFrame && !currentPageVisible()) {
+        hiddenFrame = event.data as string;
         return;
       }
       let parsed: unknown;
@@ -308,6 +324,11 @@ export function LiveScreen({
         error?: string;
       };
       if (typeof message.type !== "string") return;
+      if (message.type === "hello") {
+        confirmFrames =
+          (message as { confirmFrames?: unknown }).confirmFrames === true;
+        return;
+      }
       if (message.type === "error") {
         onProblem?.(message.error ?? "Couldn't show the screen.");
         return;
@@ -395,6 +416,8 @@ export function LiveScreen({
       onProblem: (problem) => onProblem?.(problem),
       onReconnecting: (reconnecting) => onReconnecting?.(reconnecting),
       onDisconnect: () => {
+        // A new connection says again whether it wants confirmations.
+        confirmFrames = false;
         frameSize.current = null;
         latestFrame.current = null;
         hiddenFrame = null;

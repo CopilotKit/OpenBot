@@ -318,3 +318,21 @@ test("a wheel that counts in lines, as Firefox's does, scrolls by pixels", async
   await nextFrame();
   expect(socket.sent).toMatchObject([{ type: "wheel", deltaY: 120 }]);
 });
+
+test("each frame is confirmed on arrival, but only once the computer asks", async () => {
+  // A computer from before confirmations would refuse a message it does not know, so none is sent
+  // until it says it wants them.
+  const { socket } = await liveCanvas();
+  socket.onmessage?.({
+    data: JSON.stringify({ type: "frame", data: "AAAA", ...FRAME }),
+  });
+  expect(socket.sent).toEqual([]);
+
+  socket.onmessage?.({
+    data: JSON.stringify({ type: "hello", confirmFrames: true }),
+  });
+  socket.onmessage?.({
+    data: JSON.stringify({ type: "frame", data: "AAAA", ...FRAME }),
+  });
+  expect(socket.sent).toEqual([{ type: "frame-received" }]);
+});
