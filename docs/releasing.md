@@ -44,7 +44,99 @@ contain the release number. The protected signing job checks both embedded strin
 
 Ad-hoc signed Mac builds require the first-open exception described in
 [Apple's instructions](https://support.apple.com/en-us/102445). They are for internal testing
-and are not Apple-notarized. See [Windows signing](windows-signing.md) for signed NSIS builds.
+and are not Apple-notarized. See [signed Mac builds](#signed-mac-builds-and-the-updater) for the
+ones people install, and [Windows signing](windows-signing.md) for signed NSIS builds.
+
+## Signed Mac builds and the updater
+
+[Desktop macOS signing](../.github/workflows/desktop-macos-signing.yml) builds OpenBot with the
+Developer ID certificate, notarizes and staples both the `.app` and the `.dmg`, and produces the
+archive the in-app updater installs. It runs one native runner per architecture (`macos-15` for
+Apple silicon, `macos-15-intel` for Intel) and fails unless each build passes all three of:
+
+```sh
+codesign --verify --deep --strict --verbose=2 OpenBot.app
+spctl -a -t exec -vv OpenBot.app
+xcrun stapler validate OpenBot.app
+```
+
+An ad-hoc build fails every one of them, which is why it needs "Open Anyway".
+
+When it runs:
+
+- pull requests and pushes to `main` that touch the desktop run only **Updater regressions
+  (no Apple access)**. It holds no secrets.
+- every release starts it. After `publish-release.yml` creates the tag and the release, it
+  dispatches this workflow on the tag with `signing-mode: developer-id` and `release-tag` set to
+  that version. The tag alone would not start it, because GitHub starts no workflow from a push
+  made with `GITHUB_TOKEN`; a `workflow_dispatch` is the exception. The run still waits for a
+  required reviewer of the `macos-signing` environment to approve it.
+- **Actions → Desktop macOS signing → Run workflow** with `signing-mode: developer-id` signs any
+  ref and keeps the results as Actions artifacts for 14 days. Set `release-tag` to an existing
+  release, e.g. `v0.2.1`, to also attach the `.dmg` files, the updater archives and their `.sig`
+  files, and `latest.json` to it. Run it on the release tag (**Use workflow from** → the tag) so
+  the build carries the release version. This is how to re-sign a release by hand.
+- a `v*` tag pushed by a person does the same thing automatically.
+
+Signing imports the certificate into a temporary keychain made for the run, and always deletes
+that keychain afterwards, even when an earlier step failed.
+
+Only the signing job produces updater artifacts. `bundle.createUpdaterArtifacts` lives in
+`desktop/src-tauri/tauri.macos-signing.conf.json`, which that job alone passes to Tauri, because
+Tauri refuses to finish any bundle that asks for updater artifacts without
+`TAURI_SIGNING_PRIVATE_KEY`. In the base config it would break ordinary desktop CI and the local
+build above. Do not rename the overlay `tauri.macos.conf.json`: Tauri merges that filename into
+every Mac build automatically.
+
+The overlay also holds the updater itself, `plugins.updater` with its endpoint and public key.
+The app registers the updater plugin only when its config has that block, so desktop CI, local
+builds and the unsigned release installers have no updater. They never offer an update and never
+show an update error, because they could not verify one.
+
+### The updater
+
+A signed app checks `https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json`
+once at launch. If a newer version is listed, the window offers **Update and restart**. Nothing
+installs without that click. GitHub redirects that address to the `latest.json` attached to the
+release marked Latest, so the newest non-draft, non-prerelease release is always the one offered.
+
+After it attaches `latest.json`, the signing workflow fetches that address the way the app does,
+following redirects, and fails unless the answer is JSON whose `version` is the release version and
+which has a `darwin-*` platform with a URL and signature. A release that is not marked Latest fails
+this check, because the apps would not see it.
+
+`latest.json` names a version and, for `darwin-aarch64` and `darwin-x86_64`, an archive URL and
+that archive's minisign signature. The app verifies the signature against the public key in
+`plugins.updater.pubkey` in `tauri.macos-signing.conf.json` and refuses any archive that does not
+match. That key pair is the Tauri updater key. It is not the Developer ID certificate, and it is
+not the Windows Key Vault certificate. Losing the private key means installed apps can never update
+again, so keep it in 1Password as well as in the environment.
+
+A failed check says nothing, because an offline laptop is not a problem to report. A failed
+install shows its error.
+
+### One-time setup
+
+Create the protected GitHub environment `macos-signing` with required reviewers, and add these
+environment **secrets**:
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_CERTIFICATE` | The Developer ID Application certificate and private key, exported as `.p12`, base64-encoded |
+| `APPLE_CERTIFICATE_PASSWORD` | The `.p12` export password |
+| `APPLE_SIGNING_IDENTITY` | The identity name, e.g. `Developer ID Application: <Company> (<TEAMID>)` |
+| `APPLE_API_ISSUER` | App Store Connect API issuer ID |
+| `APPLE_API_KEY` | App Store Connect API key ID |
+| `APPLE_API_KEY_P8` | The contents of that key's `AuthKey_<id>.p8`. The job writes it to a temporary file and sets `APPLE_API_KEY_PATH` |
+| `TAURI_SIGNING_PRIVATE_KEY` | The Tauri updater private key (`tauri signer generate`) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | That key's password |
+
+The job also reads the existing `OPENBOT_GOOGLE_MODEL_OAUTH_*` variables and secret, as the other
+desktop builds do.
+
+Put the matching updater **public** key in `plugins.updater.pubkey` in
+`desktop/src-tauri/tauri.macos-signing.conf.json`. The signing job refuses to run while that field
+still holds `REPLACE_WITH_UPDATER_PUBKEY`.
 
 ## What merging does
 
@@ -68,6 +160,9 @@ Then, in order:
   every one of them
 - the commit is tagged and a GitHub Release is created, carrying the changelog section as its notes
   and `container-images.json` as an asset
+- [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag. It waits
+  for a `macos-signing` reviewer, then attaches the signed `.dmg` files, the updater archives and
+  `latest.json` to the release
 
 ## Deploying a release
 
@@ -142,6 +237,8 @@ not matter: a pull request opened by a workflow does not trigger them.
 
 **No secrets are required to release.** CI and both release workflows use only the built-in
 `GITHUB_TOKEN`. The desktop build workflows also read `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET`.
+Signed desktop builds are the exception: they read the `macos-signing` and `windows-signing`
+environments described above and in [Windows signing](windows-signing.md).
 
 ## The one thing CI cannot do
 
