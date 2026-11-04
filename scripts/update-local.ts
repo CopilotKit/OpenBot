@@ -31,6 +31,8 @@ export interface CommandOptions {
   env?: NodeJS.ProcessEnv;
   stdoutFile?: string;
   stdinFile?: string;
+  /** A kill deadline, only where the caller states one. Absent means the command runs to its end:
+   * a migration, backup, pull or startup cut off partway is worse than one that takes long. */
   timeoutMs?: number;
   acceptExitCodes?: number[];
 }
@@ -56,7 +58,7 @@ export const runCommand: CommandRunner = async (command, options) => {
       stdin: input ?? "ignore",
       stdout: output ?? "pipe",
       stderr: "pipe",
-      timeout: options.timeoutMs ?? 300_000,
+      timeout: options.timeoutMs,
     });
     const text =
       child.stdout instanceof ReadableStream
@@ -106,6 +108,8 @@ export interface LocalUpdatePlan extends UpgradePlan {
   targetCommit: string;
   composeProject: string;
   protectedPaths: string[];
+  /** The image each candidate service resolves to under the candidate's own Compose file. */
+  candidateImages: Record<string, string>;
 }
 export interface UpdateJournal {
   operation: string;
@@ -144,6 +148,13 @@ interface ComposeConfiguration {
 const ACCEPTED = ".openbot-release.json";
 const JOURNAL = ".openbot-update-journal.json";
 const LOCK = ".openbot-update.lock";
+/** Asks a server for its release from inside its own container. `/release` answers only a loopback
+ * peer, and a published port or a Service reaches the server from somewhere else. */
+export const RELEASE_FROM_INSIDE = [
+  "bun",
+  "-e",
+  "const r=await fetch('http://127.0.0.1:'+(process.env.PORT||process.env.SERVER_PORT||3001)+'/release'); if(!r.ok)process.exit(1); console.log(JSON.stringify(await r.json()));",
+];
 const IMAGE_VARIABLES: Record<string, string> = {
   server: "SERVER_IMAGE",
   supervisor: "SUPERVISOR_IMAGE",
@@ -197,22 +208,113 @@ export function acceptedBuildEnvironment(root: string): Record<string, string> {
     OPENBOT_BUILD_CHANNEL: manifest.distribution.channel,
   };
 }
-function imagesEnvironment(
+/** What the candidate runs with. A host install builds its own images from the checked-out source
+ * (`start.sh` runs `up --build`), and Docker refuses to tag a build with a digest reference, so only
+ * image topology names the release's pinned images. */
+function candidateEnvironment(
+  topology: "host" | "image",
   manifest: ReleaseManifest,
   env: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {
     ...env,
-    IMAGE_PULL_POLICY: "never",
     OPENBOT_BUILD_VERSION: manifest.version,
     OPENBOT_BUILD_COMMIT: manifest.source.commit,
     OPENBOT_BUILD_DISTRIBUTION_ID: manifest.distribution.id,
     OPENBOT_BUILD_REPOSITORY: manifest.distribution.repository,
     OPENBOT_BUILD_CHANNEL: manifest.distribution.channel,
   };
+  if (topology === "host") return result;
+  // `missing`, not `never`: `docker compose pull` skips a service whose policy is `never`, so the
+  // pull below would fetch nothing. Every later step passes `--no-build`, so nothing is built.
+  result.IMAGE_PULL_POLICY = "missing";
   for (const [name, variable] of Object.entries(IMAGE_VARIABLES)) {
     const image = manifest.artifacts.images[name];
     if (image) result[variable] = image.reference;
+  }
+  return result;
+}
+
+/** libpq URI query keys and the environment variable that carries each one (PostgreSQL's "Environment
+ * Variables" page). Anything else in the query is refused rather than passed on unread. */
+const LIBPQ_QUERY_VARIABLES: Record<string, string> = {
+  host: "PGHOST",
+  hostaddr: "PGHOSTADDR",
+  port: "PGPORT",
+  dbname: "PGDATABASE",
+  user: "PGUSER",
+  password: "PGPASSWORD",
+  passfile: "PGPASSFILE",
+  service: "PGSERVICE",
+  options: "PGOPTIONS",
+  application_name: "PGAPPNAME",
+  connect_timeout: "PGCONNECT_TIMEOUT",
+  target_session_attrs: "PGTARGETSESSIONATTRS",
+  load_balance_hosts: "PGLOADBALANCEHOSTS",
+  require_auth: "PGREQUIREAUTH",
+  channel_binding: "PGCHANNELBINDING",
+  sslmode: "PGSSLMODE",
+  sslnegotiation: "PGSSLNEGOTIATION",
+  sslcompression: "PGSSLCOMPRESSION",
+  sslcert: "PGSSLCERT",
+  sslkey: "PGSSLKEY",
+  sslrootcert: "PGSSLROOTCERT",
+  sslcrl: "PGSSLCRL",
+  sslcrldir: "PGSSLCRLDIR",
+  sslsni: "PGSSLSNI",
+  ssl_min_protocol_version: "PGSSLMINPROTOCOLVERSION",
+  ssl_max_protocol_version: "PGSSLMAXPROTOCOLVERSION",
+  requirepeer: "PGREQUIREPEER",
+  gssencmode: "PGGSSENCMODE",
+  krbsrvname: "PGKRBSRVNAME",
+  gsslib: "PGGSSLIB",
+  gssdelegation: "PGGSSDELEGATION",
+};
+/** The environment `pg_dump` connects with for a DATABASE_URL. libpq reads a URI only from the
+ * `dbname` argument, never from PGDATABASE, so the URL is split into the variables it stands for.
+ * The password goes in PGPASSWORD rather than argv, where `ps` would show it. Inherited libpq
+ * variables are dropped so the URL is the only thing that picks the target. */
+export function libpqEnvironment(
+  databaseUrl: string | undefined,
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  if (!databaseUrl || databaseUrl.includes("${"))
+    throw new Error(
+      "A fully resolved DATABASE_URL is required for a host backup",
+    );
+  let url: URL;
+  try {
+    url = new URL(databaseUrl);
+  } catch {
+    throw new Error(
+      "DATABASE_URL is not a single-host postgres:// URL this backup can read; configure a reviewed backup path before upgrading",
+    );
+  }
+  if (
+    (url.protocol !== "postgres:" && url.protocol !== "postgresql:") ||
+    url.host.includes(",")
+  )
+    throw new Error(
+      "DATABASE_URL is not a single-host postgres:// URL this backup can read; configure a reviewed backup path before upgrading",
+    );
+  const result: NodeJS.ProcessEnv = { ...env };
+  for (const variable of Object.values(LIBPQ_QUERY_VARIABLES))
+    if (variable !== "PGPASSFILE") delete result[variable];
+  delete result.PGSERVICEFILE;
+  const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (host) result.PGHOST = decodeURIComponent(host);
+  if (url.port) result.PGPORT = url.port;
+  if (url.username) result.PGUSER = decodeURIComponent(url.username);
+  if (url.password) result.PGPASSWORD = decodeURIComponent(url.password);
+  const database = decodeURIComponent(url.pathname.replace(/^\//, ""));
+  if (database) result.PGDATABASE = database;
+  for (const [key, value] of url.searchParams) {
+    const variable = LIBPQ_QUERY_VARIABLES[key];
+    if (!variable)
+      throw new Error(
+        `DATABASE_URL option "${key}" has no libpq equivalent this backup can pass on; configure a reviewed backup path before upgrading`,
+      );
+    result[variable] = value;
   }
   return result;
 }
@@ -337,12 +439,15 @@ async function fileSha256(path: string) {
   for await (const chunk of createReadStream(path)) digest.update(chunk);
   return digest.digest("hex");
 }
-async function candidateConfiguration(
+/** Runs `use` with the Compose arguments that select the candidate's own docker-compose.yml under
+ * the original project directory, name and override, before that source is checked out. */
+async function withCandidateCompose<T>(
   root: string,
   commit: string,
   project: string,
-  env: NodeJS.ProcessEnv,
   run: CommandRunner,
+  env: NodeJS.ProcessEnv,
+  use: (compose: string[]) => Promise<T>,
 ) {
   if (env.COMPOSE_FILE || env.COMPOSE_ENV_FILES)
     throw new Error(
@@ -365,7 +470,7 @@ async function candidateConfiguration(
         "Ambiguous Compose override files require explicit integration",
       );
     for (const path of overrides) files.push("--file", join(root, path));
-    const args = [
+    return await use([
       "docker",
       "compose",
       "--project-directory",
@@ -376,13 +481,60 @@ async function candidateConfiguration(
         ? ["--env-file", join(root, ".env")]
         : []),
       ...files,
-      "config",
-      "--format",
-      "json",
-    ];
-    return readConfiguration(await run(args, { cwd: root, env }));
+    ]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+}
+function candidateConfiguration(
+  root: string,
+  commit: string,
+  project: string,
+  env: NodeJS.ProcessEnv,
+  run: CommandRunner,
+) {
+  return withCandidateCompose(root, commit, project, run, env, async (args) =>
+    readConfiguration(
+      await run([...args, "config", "--format", "json"], { cwd: root, env }),
+    ),
+  );
+}
+/** Pulls what the candidate's server, worker and migrate services name, then proves each pinned
+ * reference is in this engine. Compose reports a failed pull of a service that also has a `build`
+ * section as a warning and still exits 0, so the exit status alone proves nothing. */
+async function pullCandidateImages(
+  root: string,
+  commit: string,
+  project: string,
+  env: NodeJS.ProcessEnv,
+  run: CommandRunner,
+  references: string[],
+) {
+  try {
+    await withCandidateCompose(root, commit, project, run, env, (args) =>
+      run([...args, "pull", "server", "worker", "migrate"], {
+        cwd: root,
+        env,
+      }),
+    );
+  } catch (error) {
+    throw new Error(
+      `Pulling the candidate's pinned images failed (${error instanceof Error ? error.message : String(error)}); nothing was stopped`,
+    );
+  }
+  for (const reference of new Set(references)) {
+    try {
+      await run(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", reference],
+        {
+          cwd: root,
+        },
+      );
+    } catch {
+      throw new Error(
+        `Pinned candidate image ${reference} is not in this Docker engine after pulling; nothing was stopped`,
+      );
+    }
   }
 }
 async function hostStopped(
@@ -533,6 +685,7 @@ async function inspect(
     currentCommit: current.source.commit,
     targetCommit: candidate.source.commit,
     composeProject: "",
+    candidateImages: {},
     protectedPaths: protectedPaths(root, env, options.customerPaths ?? []),
   };
   try {
@@ -612,7 +765,7 @@ async function inspect(
       root,
       candidate.source.commit,
       before.name,
-      imagesEnvironment(candidate, env),
+      candidateEnvironment(options.topology, candidate, env),
       run,
     );
     if (!preservedState(before, after))
@@ -646,8 +799,12 @@ async function inspect(
         );
       requireBundledBackupTarget(before, database);
       requireBundledBackupTarget(after, database);
-    }
+      if (new URL(database).hostname !== "postgres")
+        libpqEnvironment(database, env);
+    } else libpqEnvironment(env.DATABASE_URL, env);
     plan.composeProject = before.name;
+    for (const [name, service] of Object.entries(after.services))
+      if (service.image) plan.candidateImages[name] = service.image;
     if (options.topology === "host") await hostStopped(root, env, run);
     else if ((await ownedHostProcesses(root, env, run)).length)
       throw new Error(
@@ -666,7 +823,11 @@ export function planLocalUpdate(options: LocalUpdateOptions) {
 async function waitForReadiness(
   options: LocalUpdateOptions,
   env: NodeJS.ProcessEnv,
+  candidateEnv: NodeJS.ProcessEnv,
+  root: string,
+  project: string,
 ) {
+  const run = options.run ?? runCommand;
   const probe =
     options.probe ??
     (async (url: string): Promise<ProbeResponse | undefined> => {
@@ -684,7 +845,10 @@ async function waitForReadiness(
   while (Date.now() < deadline) {
     const base = `http://127.0.0.1:${env.SERVER_PORT ?? "3001"}`;
     const health = await probe(`${base}/health`);
-    const release = await probe(`${base}/release`);
+    const release =
+      options.topology === "host"
+        ? await probe(`${base}/release`)
+        : await releaseFromContainer(root, project, candidateEnv, run);
     const expected = options.candidate;
     if (
       health?.status === "ok" &&
@@ -702,6 +866,28 @@ async function waitForReadiness(
   );
 }
 
+async function releaseFromContainer(
+  root: string,
+  project: string,
+  env: NodeJS.ProcessEnv,
+  run: CommandRunner,
+): Promise<ProbeResponse | undefined> {
+  try {
+    return JSON.parse(
+      await run(
+        compose(
+          ["exec", "-T", "server", ...RELEASE_FROM_INSIDE],
+          root,
+          project,
+        ),
+        { cwd: root, env, timeoutMs: 15_000 },
+      ),
+    );
+  } catch {
+    return;
+  }
+}
+
 /** Caller authenticates candidate metadata. Apply supports a clean, known Git baseline only. */
 export async function applyLocalUpdate(
   options: LocalUpdateOptions,
@@ -716,7 +902,11 @@ export async function applyLocalUpdate(
   mkdirSync(join(root, LOCK), { mode: 0o700 });
   const run = options.run ?? runCommand;
   const env = environment(root);
-  const candidateEnv = imagesEnvironment(options.candidate, env);
+  const candidateEnv = candidateEnvironment(
+    options.topology,
+    options.candidate,
+    env,
+  );
   const operation = randomUUID();
   candidateEnv.OPENBOT_UPDATE_OPERATION = operation;
   const backupDirectory = resolve(options.backupDirectory, operation);
@@ -795,6 +985,17 @@ export async function applyLocalUpdate(
         ],
         { cwd: root },
       );
+    if (options.topology === "image")
+      await pullCandidateImages(
+        root,
+        initial.targetCommit,
+        initial.composeProject,
+        candidateEnv,
+        run,
+        ["server", "worker", "migrate"].map(
+          (service) => verified.candidateImages[service] ?? "",
+        ),
+      );
     phase("stopping");
     if (options.topology === "image")
       await run(
@@ -836,13 +1037,9 @@ export async function applyLocalUpdate(
         options.topology === "host"
           ? env.DATABASE_URL
           : originalConfiguration.services.server?.environment?.DATABASE_URL;
-      if (!databaseUrl || databaseUrl.includes("${"))
-        throw new Error(
-          "A fully resolved DATABASE_URL is required for a host backup",
-        );
       await run(["pg_dump", "--format=custom"], {
         cwd: root,
-        env: { ...env, PGDATABASE: databaseUrl },
+        env: libpqEnvironment(databaseUrl, env),
         stdoutFile: dump,
       });
     }
@@ -884,20 +1081,12 @@ export async function applyLocalUpdate(
       throw new Error(
         "Activated source changed Compose state identities; migration was not started",
       );
+    // Image topology pulled and verified its pinned images before anything was stopped.
     if (options.topology === "host")
       await run(["bun", "install", "--frozen-lockfile"], {
         cwd: root,
         env: candidateEnv,
       });
-    else
-      await run(
-        compose(
-          ["pull", "server", "worker", "migrate"],
-          root,
-          initial.composeProject,
-        ),
-        { cwd: root, env: candidateEnv },
-      );
     journal.databaseMayHaveChanged = true;
     phase("migrating");
     if (options.topology === "host")
@@ -927,7 +1116,13 @@ export async function applyLocalUpdate(
         { cwd: root, env: candidateEnv },
       );
     phase("verifying");
-    await waitForReadiness(options, env);
+    await waitForReadiness(
+      options,
+      env,
+      candidateEnv,
+      root,
+      initial.composeProject,
+    );
     if (
       (await run(["git", "rev-parse", "HEAD"], { cwd: root })).trim() !==
       initial.targetCommit
