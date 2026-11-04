@@ -3,7 +3,7 @@ name = "openbot-desktop"
 version = "0.2.0"
 description = "OpenBot Desktop"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.90"
 
 [lib]
 name = "openbot_desktop_lib"
