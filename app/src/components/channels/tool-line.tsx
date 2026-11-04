@@ -10,6 +10,9 @@ import type { ReactNode } from "react";
  * While it is still running the text shimmers, which is the only signal that the Bot is working on
  * something with nothing to show yet.
  */
+/** A label this short stays on one line: "Asked you", "Searched the web", "Fetch". */
+const SHORT_LABEL = 32;
+
 export function ToolLine({
   icon,
   label,
@@ -69,9 +72,15 @@ export function ToolLine({
       {/*
        * Free to shrink, so a long label (a folded run's "Read 1 file, searched for 2 patterns and
        * listed 1 directory") wraps in a phone-width column instead of running past it. The detail
-       * shrinks a hundred times faster, so it is truncated away before the label wraps.
+       * shrinks a hundred times faster, but even a hundred times faster still took a few pixels from
+       * the label, enough to break "Asked you" over two lines beside a long question. So a label of a
+       * few words never shrinks at all, and only a long one is left free to wrap.
        */}
-      <span className="min-w-0">
+      <span
+        className={
+          label.length <= SHORT_LABEL ? "shrink-0 whitespace-nowrap" : "min-w-0"
+        }
+      >
         {refused
           ? `Blocked: ${label}`
           : failed
