@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A relative time in the app that rounds up to the end of its unit now reads in the next unit: 59.7 seconds ago is "1 minute ago" and 23 hours 45 minutes ago is "yesterday", where they read "60 seconds ago" and "24 hours ago".
 - With OpenBot's product telemetry off, CopilotKit's own runtime events no longer carry the deployment's ID. They still carry `app_id=openbot`. With it on, nothing changes.
 - A run OpenBot stops now ends as `cancelled` in its product telemetry, matching Intelligence: a person's Stop, a stop that reaches a subagent, a cancelled or paused headless turn, and a paused Bot-to-Bot hop. A headless turn stopped at its deadline ends as `timeout`. These used to read `unknown` with `missing_terminal`, which still describes a run that ends with neither a terminal event nor a stop. A lost lock is not counted as a stop.
 - OpenBot's product run counts no longer include the run the CopilotKit runtime makes to name each new conversation, or its suggestion runs: only work a person, routine, subagent or hop started is counted. A subagent's runs now report the surface of the run that started it instead of `unknown`.
