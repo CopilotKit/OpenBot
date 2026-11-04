@@ -85,6 +85,10 @@ function Entry({ entry }: { entry: ComputerActivity }) {
         <p className="mt-1 pl-5 text-destructive text-xs">
           {entry.output || "A boundary refused it."}
         </p>
+      ) : entry.doneByPerson === true ? (
+        <p className="mt-1 pl-5 text-muted-foreground text-xs">
+          {entry.output || "You did it yourself."}
+        </p>
       ) : (
         <div className="mt-1 max-h-64 overflow-auto pl-5">
           <CommandOutput

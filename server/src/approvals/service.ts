@@ -4,6 +4,11 @@ import { isDeepStrictEqual } from "node:util";
 import {
   ALREADY_WAITING,
   DECLINED_BY_PERSON,
+  HANDLED_BY_PERSON,
+  NOT_DONE,
+  notCarriedOut,
+  notDoneOnRecheck,
+  OUTCOME_UNKNOWN,
   WITHDRAWN_APPROVALS_OFF,
   WITHDRAWN_RULE_ALLOWS,
 } from "@openbot/shared/approval-outcomes";
@@ -38,11 +43,13 @@ import {
   withApprovalContext,
 } from "./types";
 
-// The sentences a Bot is told about a step that was not done live with their person-facing
+// The sentences a Bot is told about a step it did not carry out live with their person-facing
 // versions (shared/approval-outcomes.ts), so the app translates exactly what is sent here.
 export {
   ALREADY_WAITING,
   DECLINED_BY_PERSON,
+  HANDLED_BY_PERSON,
+  OUTCOME_UNKNOWN,
   WITHDRAWN_APPROVALS_OFF,
   WITHDRAWN_RULE_ALLOWS,
 };
@@ -83,10 +90,6 @@ export function equivalenceOf(candidate: ApprovalCandidate): string {
 const userTurnsOf = (continuation: ApprovalContinuation | undefined) =>
   (continuation?.messages ?? []).filter((message) => message.role === "user")
     .length;
-
-/** What a hand-off answers the Bot with once the person has done it themselves. */
-export const HANDLED_BY_PERSON =
-  "The person did this themselves. Do not repeat it; continue from what they have done.";
 
 const executionAuthority = new AsyncLocalStorage<{
   approvalId: string;
@@ -589,8 +592,7 @@ export function createApprovalService(
          * could do it twice, and refusing to answer left the conversation waiting forever, so the
          * Bot is told. Only the process that saves this answer continues the conversation.
          */
-        const reason =
-          "This action was started but its outcome is unknown. It was not repeated. Check whether it happened before asking the person again.";
+        const reason = OUTCOME_UNKNOWN;
         if (
           !(await store.saveResult(ownerUserId, id, {
             content: reason,
@@ -634,14 +636,14 @@ export function createApprovalService(
           } catch (error) {
             if (!(error instanceof ApprovalRefusedError) && !isPermanent(error))
               throw error;
-            refusal = `Not done: ${
+            refusal = notDoneOnRecheck(
               error instanceof ApprovalRefusedError
                 ? error.message
-                : permanentReason(error)
-            } Ask the person again if it is still needed.`;
+                : permanentReason(error),
+            );
           }
           if (refusal !== undefined || !current) {
-            const reason = refusal ?? "Not done.";
+            const reason = refusal ?? NOT_DONE;
             result = { content: reason, error: reason };
           } else {
             const approved = current;
@@ -696,7 +698,7 @@ export function createApprovalService(
       const continuation = request.action.continuation;
       let result = request.result;
       if (!result) {
-        const text = `Not done: this action could not be carried out (${reason.slice(0, 300)}). Check whether it happened before asking the person again.`;
+        const text = notCarriedOut(reason);
         if (
           !(await store.saveResult(ownerUserId, id, {
             content: text,

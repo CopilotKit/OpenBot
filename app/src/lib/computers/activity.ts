@@ -1,4 +1,7 @@
-import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
+import {
+  doneByPerson,
+  outcomeForPerson,
+} from "@openbot/shared/approval-outcomes";
 import type { Message } from "@ag-ui/core";
 import { useCopilotKit } from "@copilotkit/react-core/v2";
 import { useEffect } from "react";
@@ -49,6 +52,11 @@ export type ComputerActivity = {
   exitCode?: number;
   /** A boundary refused it, or it was not carried out. Drawn differently from a command that ran and failed. */
   refused?: boolean;
+  /**
+   * It was handed to the person and they did it themselves. Done, so not drawn as refused, and
+   * nothing ran on the computer for it, so not drawn as a command that printed nothing either.
+   */
+  doneByPerson?: boolean;
   /** The far side cut the output short, or stopped the command. Said out loud rather than implied. */
   truncated?: boolean;
   timedOut?: boolean;
@@ -76,6 +84,22 @@ const byComputer = new Map<string, ComputerActivity[]>();
  */
 const taken = new Map<string, Set<string>>();
 /**
+ * The calls each computer had run when it was last wiped, kept in `localStorage` as well as here.
+ *
+ * Kept in the page alone, a wipe lasted until the next reload: the conversation still holds every
+ * call the deleted machine ran, and a page opened afresh, or another tab, read them all back. Kept
+ * where every page on this browser reads it, a wiped call stays gone wherever the conversation opens.
+ *
+ * The server knows a wipe only as a row in the audit trail, which a member's page cannot read, and
+ * a conversation's calls carry no time to compare one against. So a wipe is kept as the calls it
+ * took with it, and in each conversation everything up to the last of them is from before it: what
+ * ran before a wiped call ran on the wiped machine too.
+ */
+const wipedCalls = new Map<string, Set<string>>();
+const WIPED = "openbot:computer-activity-wiped:";
+/** How many wiped calls are kept per computer. Only the latest of each conversation is needed. */
+const WIPED_KEPT = 1000;
+/**
  * Calls this page watched being made, so their answer can say when it came: ones this page started
  * running, and ones it saw in a conversation still waiting for an answer.
  */
@@ -96,10 +120,56 @@ function sameDetails(entry: ComputerActivity, details: ActivityDetails) {
     entry.output === details.output &&
     entry.exitCode === details.exitCode &&
     entry.refused === details.refused &&
+    entry.doneByPerson === details.doneByPerson &&
     entry.truncated === details.truncated &&
     entry.timedOut === details.timedOut
   );
 }
+
+function idsIn(text: string | null | undefined): string[] {
+  if (!text) return [];
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** This computer's wiped calls, read from `localStorage` the first time they are asked for. */
+function wipedOn(computerId: string): Set<string> {
+  let wiped = wipedCalls.get(computerId);
+  if (wiped) return wiped;
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem(WIPED + computerId);
+  } catch {
+    // A browser that refuses storage (a private window, a policy) still keeps the wipe for this page.
+  }
+  wiped = new Set(idsIn(stored));
+  wipedCalls.set(computerId, wiped);
+  return wiped;
+}
+
+/*
+ * Another tab wiping a computer drops what this one shows of it too. The browser tells every other
+ * page on this origin when `localStorage` changes, never the page that changed it.
+ */
+if (typeof window !== "undefined")
+  window.addEventListener("storage", (event) => {
+    if (!event.key?.startsWith(WIPED)) return;
+    const computerId = event.key.slice(WIPED.length);
+    const wiped = wipedOn(computerId);
+    for (const id of idsIn(event.newValue)) wiped.add(id);
+    const current = byComputer.get(computerId);
+    if (!current) return;
+    const kept = current.filter((entry) => !wiped.has(entry.id));
+    if (kept.length === current.length) return;
+    byComputer.set(computerId, kept);
+    notify();
+  });
 
 /**
  * Take in one conversation's computer calls, in the order they were made.
@@ -118,10 +188,20 @@ export function recordActivity(
   const current = byComputer.get(computerId) ?? NONE;
   const had = taken.get(computerId) ?? new Set<string>();
   const present = new Map(current.map((entry) => [entry.id, entry]));
+  // The last call of this conversation that was wiped with the computer: it and everything before it ran there.
+  const wiped = wipedOn(computerId);
+  let since = 0;
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    const call = calls[index];
+    if (call && wiped.has(call.id)) {
+      since = index + 1;
+      break;
+    }
+  }
   let next: ComputerActivity[] | null = null;
   // The nearest later call of this conversation that the pane holds, which a new one goes before.
   let after: string | undefined;
-  for (let index = calls.length - 1; index >= 0; index -= 1) {
+  for (let index = calls.length - 1; index >= since; index -= 1) {
     const call = calls[index];
     if (!call) continue;
     if (!call.did) {
@@ -180,18 +260,24 @@ const KINDS: Record<string, ComputerActivity["kind"]> = {
 const FORWARDED_TO_CLIENT = "Forwarded to client";
 
 /**
- * A tool message's content, read as the outcome of a computer call, or null when it is not one yet.
+ * A computer call's result, as the transcript's line and the Activity pane both read it, or null
+ * when it is not one yet.
  *
  * Three shapes reach a computer call's result. The computer's own answer, as JSON: from the
  * browser's handler, or the gate's `{ result }`, or the server's continuation after a decision, which
  * stores the same object. A placeholder while the answer is on its way: `{ waiting: true }`, which
  * the browser's handler returns when the gate holds the step for a person, and CopilotKit's own. And
- * a sentence instead of an answer: the server's, for a step that was not carried out (declined,
- * refused when it was checked again, or its outcome unknown), or the SDK's `Error: <message>` for a
- * handler that threw. A sentence is drawn as not done, with the sentence as its reason, because a
- * step that did not run must never be drawn as one that ran and printed nothing.
+ * a sentence instead of an answer: the server's, for a step the Bot did not carry out (declined,
+ * refused when it was checked again, its outcome unknown, or done by the person themselves), or the
+ * SDK's `Error: <message>` for a handler that threw. A sentence is drawn as not done, with the
+ * sentence as its reason, because a step that did not run must never be drawn as one that ran and
+ * printed nothing. The one exception is the person having done it: that was done, so it is read as
+ * done, by them, and still with its sentence.
+ *
+ * One reader for both, because two drifted: the transcript read a sentence as an empty success, and
+ * said "It printed nothing" about a command the person had just declined, beside a pane that said so.
  */
-function outcomeOf(content: unknown): ToolOutcome | null {
+export function readOutcome(content: unknown): ToolOutcome | null {
   if (typeof content !== "string") return null;
   const text = content.trim();
   if (!text || text === FORWARDED_TO_CLIENT) return null;
@@ -206,27 +292,74 @@ function outcomeOf(content: unknown): ToolOutcome | null {
     if (outcome.waiting === true) return null;
     return { ...outcome, ok: outcome.ok !== false };
   }
+  if (doneByPerson(text)) return { ok: true, doneByPerson: true, reason: text };
   return text.startsWith("Error:")
     ? { ok: false, reason: text.slice("Error:".length).trim() }
     : { ok: false, refused: true, reason: text };
 }
 
 /**
- * Each answer parsed once. A conversation is read on every change, and a command's output can be
- * long; parsing every result again on every streamed word of the reply after it is not free. Keyed by
- * the message, with its content, because a message the SDK fills in is a new object or new content.
+ * Remember a value in a cache that keeps its most recent entries only. Long enough for every
+ * computer call of the conversations a person has open; short of holding a session's output for ever.
  */
-const outcomes = new WeakMap<
-  object,
+const CACHED = 1000;
+function remember<V>(cache: Map<string, V>, key: string, value: V): V {
+  cache.delete(key);
+  cache.set(key, value);
+  if (cache.size > CACHED) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  return value;
+}
+
+/**
+ * Each answer parsed once, and each call's arguments too: a file save's carry the whole file.
+ *
+ * A conversation is read on every change, which while a reply streams is every word of it, and the
+ * SDK hands over a fresh copy of every message each time (`structuredClone` in `@ag-ui/client`), so
+ * nothing can be remembered by the message object. Kept by id instead: the tool message's for an
+ * answer, the call's for what it did. An id with new content (an answer the SDK fills in, arguments
+ * still streaming) is read again.
+ */
+const answers = new Map<
+  string,
   { content: unknown; outcome: ToolOutcome | null }
 >();
+const done = new Map<
+  string,
+  { args: string; answer: ToolOutcome; did: ActivityDetails }
+>();
 
-function answerOf(message: { content?: unknown }): ToolOutcome | null {
-  const known = outcomes.get(message);
+function answerOf(message: {
+  id: string;
+  content?: unknown;
+}): ToolOutcome | null {
+  const known = answers.get(message.id);
   if (known && known.content === message.content) return known.outcome;
-  const outcome = outcomeOf(message.content);
-  outcomes.set(message, { content: message.content, outcome });
-  return outcome;
+  return remember(answers, message.id, {
+    content: message.content,
+    outcome: readOutcome(message.content),
+  }).outcome;
+}
+
+function didOf(
+  kind: ComputerActivity["kind"],
+  call: { id: string; function: { arguments: string } },
+  answer: ToolOutcome,
+): ActivityDetails {
+  const known = done.get(call.id);
+  if (
+    known &&
+    known.answer === answer &&
+    known.args === call.function.arguments
+  )
+    return known.did;
+  return remember(done, call.id, {
+    args: call.function.arguments,
+    answer,
+    did: detailsOf(kind, argumentsOf(call.function.arguments), answer),
+  }).did;
 }
 
 function argumentsOf(text: string): Record<string, unknown> {
@@ -251,7 +384,11 @@ function argumentsOf(text: string): Record<string, unknown> {
  * call printed nothing rather than inventing a summary.
  */
 export function outputOf(result: ToolOutcome): string {
-  if (result.refused === true || result.ok === false) {
+  if (
+    result.refused === true ||
+    result.ok === false ||
+    result.doneByPerson === true
+  ) {
     // The reason was written to the Bot ("Do not try this action ... again"); a person reads theirs.
     return typeof result.reason === "string"
       ? outcomeForPerson(result.reason)
@@ -289,7 +426,11 @@ export function detailsOf(
   args: Record<string, unknown>,
   result: ToolOutcome,
 ): ActivityDetails {
-  const refused = result.refused === true ? { refused: true } : {};
+  // Who did it, when the Bot did not: refused, or done by the person.
+  const notTheBot = {
+    ...(result.refused === true ? { refused: true } : {}),
+    ...(result.doneByPerson === true ? { doneByPerson: true } : {}),
+  };
   const path = typeof args.path === "string" ? args.path : "";
   if (kind === "command")
     return {
@@ -299,7 +440,7 @@ export function detailsOf(
       ...(typeof result.exitCode === "number"
         ? { exitCode: result.exitCode }
         : {}),
-      ...refused,
+      ...notTheBot,
       ...(result.truncated === true ? { truncated: true } : {}),
       ...(result.timedOut === true ? { timedOut: true } : {}),
     };
@@ -313,18 +454,18 @@ export function detailsOf(
        * in a pane would undo that. The arguments carry the contents, and they are not read here.
        */
       output:
-        result.ok === false
+        result.ok === false || result.doneByPerson === true
           ? outputOf(result)
           : typeof result.bytes === "number"
             ? `${result.bytes} bytes${args.append === true ? ", appended" : ""}`
             : "",
-      ...refused,
+      ...notTheBot,
     };
   return {
     kind,
     subject: kind === "list_files" ? path || "the workspace" : path,
     output: outputOf(result),
-    ...refused,
+    ...notTheBot,
   };
 }
 
@@ -340,11 +481,19 @@ export function detailsOf(
 export function conversationActivity(
   messages: readonly Message[],
 ): ConversationCall[] {
-  const answers = new Map<string, ToolOutcome>();
+  const computerCalls = new Set<string>();
   for (const message of messages) {
-    if (message.role !== "tool") continue;
+    if (message.role !== "assistant") continue;
+    for (const call of message.toolCalls ?? [])
+      if (KINDS[call.function.name]) computerCalls.add(call.id);
+  }
+  // Only the computer's answers: another tool's can be long, and nothing here reads it.
+  const answered = new Map<string, ToolOutcome>();
+  for (const message of messages) {
+    if (message.role !== "tool" || !computerCalls.has(message.toolCallId))
+      continue;
     const answer = answerOf(message);
-    if (answer) answers.set(message.toolCallId, answer);
+    if (answer) answered.set(message.toolCallId, answer);
   }
   const calls: ConversationCall[] = [];
   for (const message of messages) {
@@ -352,12 +501,10 @@ export function conversationActivity(
     for (const call of message.toolCalls ?? []) {
       const kind = KINDS[call.function.name];
       if (!kind) continue;
-      const answer = answers.get(call.id);
+      const answer = answered.get(call.id);
       calls.push({
         id: call.id,
-        did: answer
-          ? detailsOf(kind, argumentsOf(call.function.arguments), answer)
-          : null,
+        did: answer ? didOf(kind, call, answer) : null,
       });
     }
   }
@@ -428,10 +575,21 @@ export function subscribeToActivity(listener: () => void): () => void {
  * Forget one computer's activity.
  *
  * Wiping a computer deletes the machine those commands ran on, so leaving them on screen would
- * describe something that no longer exists. They stay forgotten when the conversation is read again
- * (see `taken`); what the Bot does from here on still appears.
+ * describe something that no longer exists. They stay forgotten when the conversation is read again,
+ * after a reload and in another tab as well (see `wipedCalls`); what the Bot does from here on still
+ * appears.
  */
 export function clearActivity(computerId: string): void {
+  const wiped = wipedOn(computerId);
+  for (const id of taken.get(computerId) ?? []) wiped.add(id);
+  const kept = [...wiped].slice(-WIPED_KEPT);
+  wipedCalls.set(computerId, new Set(kept));
+  try {
+    if (kept.length > 0)
+      window.localStorage.setItem(WIPED + computerId, JSON.stringify(kept));
+  } catch {
+    // Kept for this page all the same: see `wipedOn`.
+  }
   byComputer.delete(computerId);
   browsed.delete(computerId);
   notify();

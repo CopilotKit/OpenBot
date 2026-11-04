@@ -5,7 +5,7 @@ import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
 import { HelpRequestCard } from "@/components/computer/help-request-card";
 import { tryClient } from "@/lib/client";
-import { noteBrowsed, outputOf } from "@/lib/computers/activity";
+import { noteBrowsed, outputOf, readOutcome } from "@/lib/computers/activity";
 import { callComputer, type ToolOutcome } from "@/lib/computers/call";
 import { type ControlState, readControl } from "@/lib/computers/control";
 import {
@@ -68,6 +68,8 @@ type ComputerOutcome = {
   humanHasControl?: boolean;
   entries?: unknown[];
   refused?: boolean;
+  /** Handed to the person, who did it themselves. Done, and not by the Bot. */
+  doneByPerson?: boolean;
   reason?: string;
   staleRefs?: boolean;
   /** The computer was still starting and the call was not performed. */
@@ -91,21 +93,15 @@ type ComputerOutcome = {
 };
 
 /**
- * Parse the SDK-render result string so the transcript can distinguish success, refusal, and failure.
+ * Read the SDK-render result string so the transcript can distinguish success, refusal, failure and
+ * a step the person did themselves.
+ *
+ * The Activity pane's reader, so the line and the pane beside it say the same thing. This one read a
+ * sentence (the server's answer for a step that was declined or not carried out) as an empty success,
+ * and the line said "Ran a command ... It printed nothing." beside a pane that said "You declined it."
  */
 function outcomeOf(result: string | undefined): ComputerOutcome {
-  if (!result) return {};
-  try {
-    const parsed = JSON.parse(result) as unknown;
-    return parsed && typeof parsed === "object"
-      ? (parsed as ComputerOutcome)
-      : {};
-  } catch {
-    // Runtime stringifies thrown handlers as "Error: <message>".
-    return result.startsWith("Error:")
-      ? { ok: false, reason: result.slice("Error:".length).trim() }
-      : {};
-  }
+  return (readOutcome(result) ?? {}) as ComputerOutcome;
 }
 
 /**
@@ -132,6 +128,7 @@ function ActionLine({
   refused,
   failed,
   notYet,
+  byYou,
 }: {
   label: string;
   detail?: string;
@@ -142,9 +139,12 @@ function ActionLine({
   failed?: boolean;
   /** The computer was still starting, so nothing was done yet. See `stillStarting`. */
   notYet?: boolean;
+  /** It was handed to the person, who did it themselves. See `ToolLine`. */
+  byYou?: boolean;
 }) {
   return (
     <ToolLine
+      byYou={byYou}
       detail={notYet ? STILL_STARTING_DETAIL : detail}
       failed={failed}
       label={label}
@@ -176,6 +176,11 @@ function didNotWork(outcome: ComputerOutcome): boolean {
  */
 function stillStarting(outcome: ComputerOutcome): boolean {
   return outcome.ok === false && outcome.starting === true;
+}
+
+/** Whether the step was handed to the person and they did it themselves, so the Bot did not. */
+function byPerson(outcome: ComputerOutcome): boolean {
+  return outcome.doneByPerson === true;
 }
 
 /**
@@ -368,6 +373,7 @@ export function ComputerTools() {
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
         notYet={stillStarting(outcomeOf(result))}
+        byYou={byPerson(outcomeOf(result))}
       />
     ),
   });
@@ -414,6 +420,7 @@ export function ComputerTools() {
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
           notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -457,6 +464,7 @@ export function ComputerTools() {
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
         notYet={stillStarting(outcomeOf(result))}
+        byYou={byPerson(outcomeOf(result))}
       />
     ),
   });
@@ -620,13 +628,16 @@ export function ComputerTools() {
           detail={
             outcome.refused === true || didNotWork(outcome)
               ? outcomeForPerson(String(outcome.reason ?? ""))
-              : entries.length
-                ? `${entries.length} item${entries.length === 1 ? "" : "s"} in the workspace`
-                : "nothing saved yet"
+              : byPerson(outcome)
+                ? undefined
+                : entries.length
+                  ? `${entries.length} item${entries.length === 1 ? "" : "s"} in the workspace`
+                  : "nothing saved yet"
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
           notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -664,6 +675,7 @@ export function ComputerTools() {
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
           notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -718,10 +730,13 @@ export function ComputerTools() {
        */
       const printed = outputOf(outcome as ToolOutcome);
       const exit = typeof outcome.exitCode === "number" ? outcome.exitCode : 0;
+      // Nothing ran on the computer for a step the person did themselves, so there is no output to show.
+      const byYou = byPerson(outcome);
       return (
         <ToolLine
           running={status !== "complete"}
           label="Ran a command"
+          byYou={byYou}
           detail={
             outcome.refused === true
               ? outcomeForPerson(String(outcome.reason ?? ""))
@@ -733,7 +748,7 @@ export function ComputerTools() {
           failed={didNotWork(outcome) || exit !== 0}
           notYet={stillStarting(outcome)}
         >
-          {status === "complete" ? (
+          {status === "complete" && !byYou ? (
             <CommandOutput
               output={printed}
               exitCode={exit}
@@ -793,6 +808,7 @@ export function ComputerTools() {
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
           notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -828,6 +844,7 @@ export function ComputerTools() {
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
         notYet={stillStarting(outcomeOf(result))}
+        byYou={byPerson(outcomeOf(result))}
       />
     ),
   });

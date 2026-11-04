@@ -318,3 +318,69 @@ describe("reading a conversation's computer calls", () => {
     ]);
   });
 });
+
+describe("reading a conversation again while a reply streams", () => {
+  /** Count the JSON parses `read` makes. */
+  function parsesIn(read: () => void): number {
+    const parse = JSON.parse;
+    let parses = 0;
+    JSON.parse = ((...input: Parameters<typeof JSON.parse>) => {
+      parses += 1;
+      return parse(...input);
+    }) as typeof JSON.parse;
+    try {
+      read();
+    } finally {
+      JSON.parse = parse;
+    }
+    return parses;
+  }
+
+  test("parses each call's arguments and answer once, though every read is a fresh copy", () => {
+    /*
+     * It is read on every streamed word of the reply after the calls, and the SDK hands over a new
+     * copy of every message each time (`structuredClone` in `@ag-ui/client`). Every call's arguments
+     * were parsed again on each read, and a file save's arguments carry the whole file.
+     */
+    const file = "line of a long report\n".repeat(5_000);
+    const messages: Message[] = [
+      call("big-save", "computer_write_file", {
+        path: "report.md",
+        contents: file,
+      }),
+      answer(
+        "big-save",
+        JSON.stringify({ ok: true, path: "report.md", bytes: file.length }),
+      ),
+      call("big-run", "computer_run_command", { command: "wc -l report.md" }),
+      answer(
+        "big-run",
+        JSON.stringify({ ok: true, exitCode: 0, stdout: "5000 report.md\n" }),
+      ),
+      { id: "reply", role: "assistant", content: "Saved it" },
+    ];
+    const first = conversationActivity(structuredClone(messages));
+
+    let again: ReturnType<typeof conversationActivity> = [];
+    expect(
+      parsesIn(() => {
+        again = conversationActivity(structuredClone(messages));
+      }),
+    ).toBe(0);
+    expect(again).toEqual(first);
+    expect(again[0]?.did?.output).toBe(`${file.length} bytes`);
+
+    // An answer that changes under the same call is read again, not served stale.
+    const changed = structuredClone(messages);
+    changed[3] = answer(
+      "big-run",
+      JSON.stringify({ ok: true, exitCode: 1, stdout: "", stderr: "no file" }),
+    );
+    expect(conversationActivity(changed)[1]?.did).toEqual({
+      kind: "command",
+      subject: "wc -l report.md",
+      output: "no file",
+      exitCode: 1,
+    });
+  });
+});

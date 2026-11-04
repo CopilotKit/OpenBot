@@ -8,7 +8,10 @@ import {
 } from "bun:test";
 import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
-import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
+import {
+  DECLINED_BY_PERSON,
+  HANDLED_BY_PERSON,
+} from "@openbot/shared/approval-outcomes";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
@@ -363,6 +366,14 @@ function activityOf(view: ReturnType<typeof render>) {
   return within(view.getByRole("region", { name: "Activity" }));
 }
 
+/** The transcript's line for each tool call, as its text: everything drawn outside the Activity pane. */
+function transcriptLines(view: ReturnType<typeof render>): string[] {
+  const pane = view.getByRole("region", { name: "Activity" });
+  return Array.from(view.container.querySelectorAll("details, div.my-1\\.5"))
+    .filter((line) => !pane.contains(line))
+    .map((line) => line.textContent ?? "");
+}
+
 /** Each entry in the pane, newest first, as its text. */
 function entries(view: ReturnType<typeof render>): string[] {
   return Array.from(
@@ -620,6 +631,125 @@ test("a command the person declines shows as declined in their words, not in the
   // The sentence written to the model never reaches the person, in the pane or in the transcript.
   expect(view.container.textContent).not.toContain("Do not try this action");
   expect(entries(view)).toHaveLength(1);
+
+  /*
+   * And the transcript's line says the same as the pane. It read the sentence as an empty success,
+   * and said "Ran a command  rm -rf build ▸ It printed nothing." beside a pane saying it was declined.
+   */
+  const line = transcriptLines(view).find((text) =>
+    text.includes("Ran a command"),
+  );
+  expect(line).toContain("Blocked: Ran a command");
+  expect(line).toContain("You declined it.");
+  expect(view.container.textContent).not.toContain("It printed nothing.");
+});
+
+test("a command the person did themselves shows as done by them, not as refused, in the transcript and in Activity", async () => {
+  turns = [
+    {
+      call: {
+        id: "call-passwd",
+        name: "computer_run_command",
+        args: { command: "passwd" },
+      },
+    },
+  ];
+  gate = (step) => {
+    // A safety rule hands this to the person: "I did it myself" or "Don't do it".
+    inbox = [
+      {
+        id: "approval-3",
+        status: "pending",
+        action: {
+          botId: bot,
+          toolRef: "computer_run_command",
+          effect: "write",
+          scope: "workspace",
+          threadId: channel.threadId,
+          toolCallId: step.toolCallId,
+          args: step.args,
+          target: {},
+          policy: {
+            behaviour: "hand_off",
+            source: "safety",
+            reason:
+              "Changing a password, passcode, two-factor setting, recovery code or other credential is always done by the person.",
+          },
+        },
+      },
+    ];
+    return NativeResponse.json(
+      {
+        waiting: true,
+        approvalId: "approval-3",
+        reason: "This action needs you.",
+      },
+      { status: 202 },
+    );
+  };
+  const reply = "Thanks, I'll carry on from your new password.";
+  onDecision = () => {
+    // The server answers the Bot that the person did it, and continues the conversation.
+    inbox = inbox.map((request) => ({ ...request, status: "completed" }));
+    stored = [
+      ...stored,
+      {
+        id: "result-call-passwd",
+        role: "tool",
+        toolCallId: "call-passwd",
+        content: HANDLED_BY_PERSON,
+      },
+      { id: "reply-after-handled", role: "assistant", content: reply },
+    ];
+  };
+  const view = render(app());
+  const user = await ask(view, "Change my computer's password.");
+
+  await user.click(
+    await view.findByRole(
+      "button",
+      { name: "I did it myself" },
+      { timeout: 5000 },
+    ),
+  );
+  act(() => {
+    queryClient.setQueryData<InfiniteData<ChannelPage>>(
+      channelKeys.list(),
+      (data) => {
+        if (!data) return data;
+        const next = applyChannelEvent(data, {
+          channelId: channel.id,
+          lastMessage: reply,
+          lastMessageAt: "2026-11-03T09:03:03.000Z",
+          lastMessageAgentId: bot,
+        });
+        return next === "unknown" ? data : next;
+      },
+    );
+  });
+  expect(await view.findByText(reply, {}, { timeout: 5000 })).toBeTruthy();
+
+  const pane = activityOf(view);
+  expect(await pane.findByText("passwd", {}, { timeout: 3000 })).toBeTruthy();
+  expect(pane.getByText("You did it yourself.")).toBeTruthy();
+  expect(entries(view)).toHaveLength(1);
+  // Done, so nothing in the entry is drawn as a refusal or a failure.
+  expect(
+    view
+      .getByRole("region", { name: "Activity" })
+      .querySelectorAll(".text-destructive"),
+  ).toHaveLength(0);
+
+  const line = transcriptLines(view).find((text) =>
+    text.includes("Ran a command"),
+  );
+  expect(line).toContain("Ran a command, done by you");
+  expect(line).toContain("passwd");
+  expect(line).not.toContain("Blocked");
+  // Nothing ran on the computer, so nothing claims it printed nothing.
+  expect(view.container.textContent).not.toContain("It printed nothing.");
+  // The sentence written to the model never reaches the person.
+  expect(view.container.textContent).not.toContain("Do not repeat it");
 });
 
 test("a file the Bot saves shows its path and size, never its contents, beside a file it reads", async () => {
