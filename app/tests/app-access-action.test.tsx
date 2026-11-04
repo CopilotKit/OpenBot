@@ -126,13 +126,18 @@ function mounted(
     path: "/connections/$key",
     component: () => null,
   });
+  const directory = createRoute({
+    getParentRoute: () => root,
+    path: "/connections/browse/$provider",
+    component: () => null,
+  });
   const admin = createRoute({
     getParentRoute: () => root,
     path: "/admin/plugins/$key",
     component: () => null,
   });
   const router = createRouter({
-    routeTree: root.addChildren([page, settings, admin]),
+    routeTree: root.addChildren([page, settings, directory, admin]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   const view = render(
@@ -558,6 +563,37 @@ test("in the personal edition, Connect still opens the sign-in when turning the 
     (await view.findByRole("button", { name: "Waiting for Gmail…" }))
       .textContent,
   ).toBe("Waiting for Gmail…");
+});
+
+test("in the personal edition, an app that isn't set up says what is missing, not who to ask", () => {
+  expect(
+    appAccessSentence(
+      appAccess({ state: "disabled", unavailable: "composio_unconfigured" }),
+      undefined,
+      "personal",
+    ),
+  ).toBe("Gmail isn't set up yet. It needs your Composio key first.");
+  expect(
+    appAccessSentence(
+      appAccess({ state: "disabled", unavailable: "token_missing" }),
+      undefined,
+      "personal",
+    ),
+  ).toBe("Gmail isn't fully set up yet. Set it up to finish.");
+});
+
+test("in the personal edition, Set it up for an app with no broker key opens the broker's directory", async () => {
+  const { view } = mounted(
+    appAccess({
+      state: "disabled",
+      unavailable: "composio_unconfigured",
+      requestKind: "enable",
+    }),
+    undefined,
+    { admin: true, personal: true },
+  );
+  const link = await view.findByRole("button", { name: "Set up Gmail" });
+  expect(link.getAttribute("href")).toBe("/connections/browse/composio");
 });
 
 test("in the personal edition, the card says what is missing rather than who to ask", () => {

@@ -545,10 +545,12 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
     return (
       <PageShell
         backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
-        title="Plugins"
+        title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load plugins. Reload the page.
+          {personal
+            ? "Couldn't load your apps. Reload the page."
+            : "Couldn't load plugins. Reload the page."}
         </p>
       </PageShell>
     );
@@ -557,10 +559,17 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
     return (
       <PageShell
         backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
-        description="There is no plugin with that name, here or in the catalogue."
-        title="Not a plugin"
+        description={
+          personal
+            ? "There is no app with that name."
+            : "There is no plugin with that name, here or in the catalogue."
+        }
+        title={personal ? "Not an app" : "Not a plugin"}
       >
-        <PageEmpty icon={IconPuzzle} title="Plugin not found">
+        <PageEmpty
+          icon={IconPuzzle}
+          title={personal ? "App not found" : "Plugin not found"}
+        >
           Nothing to configure.
         </PageEmpty>
       </PageShell>

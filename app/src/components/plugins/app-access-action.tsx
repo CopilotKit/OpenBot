@@ -81,7 +81,7 @@ export function appAccessSentence(
     case "shared_not_approved":
       return `This Bot reaches more people than an admin approved for your organisation's ${name} account. Only an admin can approve it.`;
     case "disabled":
-      return disabledSentence(access);
+      return disabledSentence(access, edition);
     case "not_granted":
       return `This Bot hasn't been given ${name}. Only an admin can give it.`;
     case "owner_grantable": {
@@ -98,8 +98,17 @@ export function appAccessSentence(
  * The unconfigured-broker case says what the app's page under Connections says about the same app,
  * so the two screens never disagree about it.
  */
-function disabledSentence(access: AppAccess): string {
+function disabledSentence(
+  access: AppAccess,
+  edition: "team" | "personal",
+): string {
   const name = access.displayName;
+  // Nobody else to ask in the personal edition: the person is told what is missing, and Set it up
+  // beside the sentence goes to where it is fixed.
+  if (edition === "personal")
+    return access.unavailable === "composio_unconfigured"
+      ? `${name} isn't set up yet. It needs your ${access.provider === "arcade" ? "Arcade" : "Composio"} key first.`
+      : `${name} isn't fully set up yet. Set it up to finish.`;
   switch (access.unavailable) {
     case "composio_unconfigured":
       return `${name} isn't set up yet. An admin has to turn it on.`;
@@ -251,9 +260,18 @@ function AdminAction({
       : access.requestKind
         ? ["Connect the team account", `Connect the team ${name} account`]
         : ["Reconnect the team account", `Reconnect the team ${name} account`];
+  /*
+   * A broker with no key is set up on its directory, which is a page of its own in the personal
+   * edition. There `/connections/composio` would read as an app called "composio" and say there is
+   * none; the team edition's `/admin/plugins/composio` happens to be that directory already.
+   */
+  const target =
+    page === "composio" || page === "arcade"
+      ? paths.brokerDirectory(page)
+      : paths.plugin(page);
   return (
     <Button
-      render={<Link {...paths.plugin(page)} rel="noreferrer" target="_blank" />}
+      render={<Link {...target} rel="noreferrer" target="_blank" />}
       aria-label={spoken}
       size="sm"
     >
