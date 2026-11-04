@@ -89,6 +89,8 @@ account are the same decision when one person makes both:
   Settings.
 - **Routines is always on**, here as in the team edition: every Bot has all of its tools, and it
   can't be turned off. See [Routines](routines.md).
+- **Parallel Search is on from the start**, and can be turned off. See
+  [Web search is on from the start](#web-search-is-on-from-the-start).
 
 **In a conversation**, when a Bot needs an app that isn't connected, it shows a card with
 **Connect**: one press turns the app on and opens its sign-in in a new tab, and the conversation
@@ -106,3 +108,19 @@ all about other people, other computers or Slack and Teams.
 The server answers `404` for the API behind the team-only screens: people, identity providers,
 enterprise controls (except `/api/admin/enterprise/me`, which any page may ask), the admin learning
 and check-in settings, and SCIM and SSO registration. See `server/src/edition-routes.ts`.
+
+## Web search is on from the start
+
+The first time the server starts, it turns on **Parallel Search**, Parallel's free web search that
+needs no key, so every Bot can search the web and read pages with nothing set up. Every Bot gets its
+`web_search` and `web_fetch` tools, including Bots made later.
+
+What a Bot searches for goes to Parallel: the search queries and the addresses of the pages it asks
+to read, and a session identifier for the conversation. Full conversations are not sent. See
+[Public-web research](web-research.md#choice-and-controls).
+
+It is turned on once. Turn it off on its Connections page and it stays off: the server writes down
+that it turned it on (`personal_default_apps` in `enterprise_settings`) and never does it again.
+Starting offline doesn't stop the server. Parallel is turned on without its tools, and the server
+asks for them again in the background, and on every start, until Parallel answers, so nobody has to
+press Refresh. See `ensurePersonalDefaultApps` in `server/src/plugins/personal-defaults.ts`.
