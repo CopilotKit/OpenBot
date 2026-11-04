@@ -35,6 +35,8 @@ pub fn is_secret(key: &str) -> bool {
             | "OPENAI_API_KEY"
             | "ANTHROPIC_API_KEY"
             | "CLAUDE_CODE_OAUTH_TOKEN"
+            | "COMPOSIO_API_KEY"
+            | "ARCADE_API_KEY"
             // Retired, and still swept up: a machine that ran an older version has one of these.
             | "CHATGPT_OAUTH_TOKEN"
             // Generated here, and no less a credential for it. These are what the services prove

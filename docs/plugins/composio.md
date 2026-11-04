@@ -37,6 +37,16 @@ reachable from another's.
 
 ### Automatic project setup
 
+In OpenBot Desktop, signing in to CopilotKit also prepares this installation's apps. The native
+app uses the same sign-in session to create or reuse its isolated Composio project, saves the
+project key in protected local storage, and supplies it to the server when you start or restart
+OpenBot. No terminal, CLI installation, or key copying is needed. A failed preparation stays in
+the normal sign-in flow so you can sign in again and retry. Individual apps still require their
+own account consent after an administrator enables them.
+
+Desktop requires the deployed Ops provisioning backend and an updated desktop release. The
+source-checkout flow below additionally requires a compatible published CopilotKit CLI.
+
 After `npx --yes copilotkit@latest login`, `bash scripts/start.sh` provisions Composio before
 starting services. To prepare only this connection, run:
 
@@ -65,8 +75,8 @@ runtime receives only the provisioned project's key. That key is still deploymen
 not create a separate Composio project for each OpenBot organization or person. Enabling an app
 continues to create or reuse that project's app authorization config.
 
-**Launch dependency:** publish a CopilotKit CLI supporting `integrations composio provision` and
-enable its authenticated hosted provisioning service before releasing this default startup flow.
+**Source-checkout launch dependency:** publish a CopilotKit CLI supporting `integrations composio
+provision` and deploy its authenticated Ops provisioning backend before releasing this startup flow.
 Missing `npx`, an older CLI, expired sign-in, unavailable provisioning, or network errors stop local
 startup with a sanitized action to take. Sign in again and rerun `bun run setup:composio`; the saved
 identity is retained. Preparing `.env` with your own project key remains supported.

@@ -68,8 +68,14 @@ struct Shell {
     /// A verified down allows a following Stop/Quit to be an idempotent no-op.
     stopped_container_root: Mutex<Option<PathBuf>>,
     /// An Intelligence sign-in waiting for its loopback callback.
-    signing_in_to_intelligence:
-        Mutex<Option<openbot_desktop_lib::intelligence::SigningInToIntelligence>>,
+    signing_in_to_intelligence: Mutex<
+        Option<(
+            PathBuf,
+            u64,
+            openbot_desktop_lib::intelligence::SigningInToIntelligence,
+        )>,
+    >,
+    intelligence_sign_in_generation: std::sync::atomic::AtomicU64,
     /// The credential that sign-in produced, held so a project can be chosen with it.
     intelligence_credential: Mutex<Option<String>>,
     /// Proof that this runtime key's project has the default Learning container.
@@ -1677,11 +1683,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
 
         let api_key = intelligence_key_for_start(&root, api_key, saved_secret)?;
-        let existing_secrets = openbot_desktop_lib::vault::already_given_no_ui(
+        let mut existing_secrets = openbot_desktop_lib::vault::already_given_no_ui(
             &root,
             &root.join(".env"),
             &openbot_env::MINTED[..],
         )?;
+        existing_secrets.extend(openbot_desktop_lib::composio::configured(&root)?);
         require_existing_encryption_key_with_recovery(
             &root,
             &existing_secrets,
@@ -1797,11 +1804,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         report(&app, "env", true, "settings written, credentials stored");
         // Compose gives inherited environment precedence over .env. Pin this run's chosen ports.
         secrets.extend(ports.settings());
-        for key in ["PICKED_HARNESS_PORT", "OPENBOT_TOOL_URL"] {
-            if let Some(value) = settings.get(key) {
-                secrets.insert(key.into(), value.clone());
-            }
-        }
+        pin_runtime_settings(&settings, &mut secrets);
         // Set before Bun imports the runtime, and retained for supervised restarts.
         secrets.extend(desktop_telemetry::runtime_env(&app));
 
@@ -2397,6 +2400,21 @@ fn require_no_exited_compose_services(
         "Part of OpenBot stopped during startup.",
         detail,
     ))
+}
+
+fn pin_runtime_settings(
+    settings: &std::collections::BTreeMap<String, String>,
+    secrets: &mut stack::Secrets,
+) {
+    for key in [
+        "PICKED_HARNESS_PORT",
+        "OPENBOT_TOOL_URL",
+        "OPENBOT_BROKER_PROVIDER",
+    ] {
+        if let Some(value) = settings.get(key) {
+            secrets.insert(key.into(), value.clone());
+        }
+    }
 }
 
 fn cleanup_before_start<R, C>(
@@ -3580,12 +3598,24 @@ async fn cancel_self_hosted_intelligence_sign_in(app: tauri::AppHandle) -> Resul
 
 /// Start signing in to Intelligence and return the address a browser has to open.
 #[tauri::command]
-async fn begin_intelligence_sign_in(app: tauri::AppHandle) -> Result<String, String> {
+async fn begin_intelligence_sign_in(app: tauri::AppHandle, root: String) -> Result<String, String> {
+    let root = stack::root_from(&root);
+    if !root.is_absolute() {
+        return Err("Choose where OpenBot lives before signing in.".into());
+    }
     let (signing, url) = openbot_desktop_lib::intelligence::SigningInToIntelligence::begin()?;
+    let shell = app.state::<Shell>();
+    let mut credential = shell.intelligence_credential.lock().unwrap();
+    let generation = shell
+        .intelligence_sign_in_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1;
+    *credential = None;
+    drop(credential);
     *app.state::<Shell>()
         .signing_in_to_intelligence
         .lock()
-        .unwrap() = Some(signing);
+        .unwrap() = Some((root, generation, signing));
     let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
     Ok(url)
 }
@@ -3595,11 +3625,12 @@ async fn begin_intelligence_sign_in(app: tauri::AppHandle) -> Result<String, Str
 /// The credential is kept on this side rather than handed to the window: the window's business is
 /// which project, and a credential it never holds is one it cannot leak into a log or a screenshot.
 #[tauri::command]
-async fn finish_intelligence_sign_in(
-    app: tauri::AppHandle,
+async fn finish_intelligence_sign_in<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: String,
 ) -> Result<Vec<openbot_desktop_lib::intelligence::Project>, openbot_desktop_lib::problem::Problem>
 {
-    let signing = app
+    let (bound_root, generation, signing) = app
         .state::<Shell>()
         .signing_in_to_intelligence
         .lock()
@@ -3610,15 +3641,40 @@ async fn finish_intelligence_sign_in(
                 "That sign-in is no longer running. Start it again.",
             )
         })?;
-    let (credential, projects) = tauri::async_runtime::spawn_blocking(move || signing.finish())
-        .await
-        .map_err(|error| {
-            openbot_desktop_lib::problem::Problem::plain(format!(
-                "The sign-in did not finish: {error}"
-            ))
-        })??;
-    *app.state::<Shell>().intelligence_credential.lock().unwrap() = Some(credential);
+    if stack::root_from(&root) != bound_root {
+        return Err(Problem::plain(
+            "Where OpenBot lives changed. Sign in again for this folder.",
+        ));
+    }
+    let (credential, projects) =
+        tauri::async_runtime::spawn_blocking(move || signing.finish(&bound_root))
+            .await
+            .map_err(|_| {
+                openbot_desktop_lib::problem::Problem::plain(
+                    "The sign-in did not finish. Try signing in again.",
+                )
+            })??;
+    publish_intelligence_credential(&app.state::<Shell>(), generation, credential)?;
     Ok(projects)
+}
+
+fn publish_intelligence_credential(
+    shell: &Shell,
+    generation: u64,
+    credential: String,
+) -> Result<(), Problem> {
+    let mut held = shell.intelligence_credential.lock().unwrap();
+    if shell
+        .intelligence_sign_in_generation
+        .load(std::sync::atomic::Ordering::SeqCst)
+        != generation
+    {
+        return Err(Problem::plain(
+            "A newer sign-in was started. Finish that sign-in instead.",
+        ));
+    }
+    *held = Some(credential);
+    Ok(())
 }
 
 /// Create a project using the account already signed in, without exposing its credential to the UI.
@@ -4626,6 +4682,7 @@ mod tests {
     use std::io::{Read, Write};
 
     include!("stop_ipc_tests.rs");
+    include!("composio_ipc_tests.rs");
 
     // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
     #[cfg(debug_assertions)]

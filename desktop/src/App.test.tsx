@@ -2001,6 +2001,41 @@ async function enterProjectSelection() {
   return view;
 }
 
+test("managed sign-in prepares apps natively for the selected installation and retries a safe failure", async () => {
+  const view = await enterProjectSelection();
+  expect(
+    invokeCalls.find((call) => call.command === "begin_intelligence_sign_in")
+      ?.args,
+  ).toEqual({ root: "/tmp/create-project" });
+  expect(
+    invokeCalls.find((call) => call.command === "finish_intelligence_sign_in")
+      ?.args,
+  ).toEqual({ root: "/tmp/create-project" });
+  let attempts = 0;
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "finish_intelligence_sign_in") {
+      attempts += 1;
+      if (attempts === 1)
+        throw {
+          said: "OpenBot could not prepare your apps. Check your connection and try signing in again.",
+        };
+      return [{ id: "project-1", name: "Project One" }];
+    }
+    return previous(command, args);
+  };
+  await userEvent.click(view.getByRole("button", { name: "Sign in again" }));
+  expect(
+    await view.findByText(
+      "OpenBot could not prepare your apps. Check your connection and try signing in again.",
+    ),
+  ).toBeTruthy();
+  await userEvent.click(view.getByRole("button", { name: "Sign in again" }));
+  expect(await view.findByRole("button", { name: "Project One" })).toBeTruthy();
+  expect(attempts).toBe(2);
+  expect(view.queryByLabelText(/Composio.*key/i)).toBeNull();
+});
+
 test("creating a named project connects it only after the user submits", async () => {
   const view = await enterProjectSelection();
   const creation = deferred<{ id: string; name: string }>();

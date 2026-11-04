@@ -164,25 +164,33 @@ export function App() {
    * out at all.
    */
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
+  const managedAttempt = useRef(0);
 
   async function signInToCopilotKit() {
     await cancelSelfHostedSignIn();
+    const attempt = ++managedAttempt.current;
     setIntelligenceSignInKind("managed");
     setSigningIn(true);
     setFailure(null);
     setSignInUrl(null);
     try {
-      setSignInUrl(await invoke<string>("begin_intelligence_sign_in"));
-      setProjects(
-        await invoke<{ id: string; name: string }[]>(
-          "finish_intelligence_sign_in",
-        ),
+      const url = await invoke<string>("begin_intelligence_sign_in", {
+        root: root.trim(),
+      });
+      if (managedAttempt.current !== attempt) return;
+      setSignInUrl(url);
+      const available = await invoke<{ id: string; name: string }[]>(
+        "finish_intelligence_sign_in",
+        { root: root.trim() },
       );
+      if (managedAttempt.current === attempt) setProjects(available);
     } catch (error) {
-      setFailure(asProblem(error));
+      if (managedAttempt.current === attempt) setFailure(asProblem(error));
     } finally {
-      setSigningIn(false);
-      setSignInUrl(null);
+      if (managedAttempt.current === attempt) {
+        setSigningIn(false);
+        setSignInUrl(null);
+      }
     }
   }
 
@@ -819,6 +827,9 @@ export function App() {
               value={root}
               onChange={(event) => {
                 configuredRunRef.current += 1;
+                managedAttempt.current += 1;
+                setSigningIn(false);
+                setSignInUrl(null);
                 setRoot(event.target.value);
                 setModel(null);
                 setPreparation(null);

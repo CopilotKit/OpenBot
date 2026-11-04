@@ -1586,6 +1586,9 @@ fn configure_host_process_env(command: &mut Command, name: &str, secrets: &Secre
     command.envs(secrets);
     if name != "server" {
         command.env_remove("OPENBOT_DESKTOP_HOST_TOKEN");
+        for key in crate::composio::BROKER_KEYS {
+            command.env_remove(key);
+        }
     }
 }
 
@@ -4557,6 +4560,11 @@ fn main() {
     let role = std::env::current_dir().unwrap().file_name().unwrap().to_string_lossy().into_owned();
     assert_eq!(std::env::var("APP_PORT").unwrap(), "52110");
     assert_eq!(std::env::var("SERVER_PORT").unwrap(), "52101");
+    if role == "server" {
+        assert_eq!(std::env::var("COMPOSIO_API_KEY").unwrap(), "fresh-project-key");
+    } else {
+        assert!(std::env::var("COMPOSIO_API_KEY").is_err());
+    }
     if role == "server" { assert_eq!(std::env::var("PORT").unwrap(), "52101"); }
 }
 "#,
@@ -4575,6 +4583,7 @@ fn main() {
         )
         .unwrap();
         let stale = Secrets::from([
+            ("COMPOSIO_API_KEY".into(), "fresh-project-key".into()),
             ("SERVER_PORT".into(), "3001".into()),
             ("APP_PORT".into(), "3010".into()),
             ("PORT".into(), "3001".into()),

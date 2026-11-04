@@ -20,7 +20,7 @@ use serde::Deserialize;
 
 /// Where the sign-in page and the CLI API live.
 const OPS_FRONTEND: &str = "https://dashboard.operations.copilotkit.ai";
-const OPS_API: &str = "https://api.operations.copilotkit.ai";
+pub(crate) const OPS_API: &str = "https://api.operations.copilotkit.ai";
 /// Where projects and their keys live.
 const PRODUCT_API: &str = "https://api.intelligence.copilotkit.ai";
 
@@ -127,9 +127,14 @@ impl SigningInToIntelligence {
     }
 
     /// Wait for the browser, then turn what it brings into a project key.
-    pub fn finish(self) -> Result<(String, Vec<Project>), crate::problem::Problem> {
+    pub fn finish(
+        self,
+        root: &std::path::Path,
+    ) -> Result<(String, Vec<Project>), crate::problem::Problem> {
         let token = self.wait_for_token()?;
         let session = exchange(&token)?;
+        // The short-lived Ops session stays native. Only the broker's project key is persisted.
+        crate::composio::ensure(root, &session)?;
         let product = product_credential(&session)?;
         let projects = list_projects(&product)?;
         Ok((product, projects))
@@ -936,48 +941,7 @@ mod tests {
         }
     }
 
-    type CapturedRequests = Vec<(String, Vec<u8>)>;
-
-    fn response_server(
-        responses: Vec<(&'static str, &'static str)>,
-    ) -> (String, std::thread::JoinHandle<CapturedRequests>) {
-        use std::io::{BufRead, Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let request = std::thread::spawn(move || {
-            let mut requests = Vec::new();
-            for (status, body) in responses {
-                let (stream, _) = listener.accept().unwrap();
-                stream
-                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                    .unwrap();
-                let mut reader = std::io::BufReader::new(stream);
-                let mut headers = String::new();
-                loop {
-                    let mut line = String::new();
-                    assert!(reader.read_line(&mut line).unwrap() > 0);
-                    headers.push_str(&line);
-                    if line == "\r\n" {
-                        break;
-                    }
-                }
-                let length: usize = headers
-                    .lines()
-                    .find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse().unwrap())
-                    })
-                    .unwrap_or(0);
-                let mut request_body = vec![0; length];
-                reader.read_exact(&mut request_body).unwrap();
-                write!(reader.get_mut(), "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
-                requests.push((headers, request_body));
-            }
-            requests
-        });
-        (url, request)
-    }
+    use crate::http_test_support::response_server;
     /// The field name that broke a whole sign-in, read off the real response.
     #[test]
     fn the_session_is_read_from_the_name_the_endpoint_uses() {
