@@ -629,6 +629,9 @@ async fn prepare_installation(
         if saved.is_none() {
             preparation::save_engine(&root, address.engine)?;
         }
+        // And the Compose project it runs as, decided once on that engine and recorded beside it,
+        // before anything is created under it. See `stack::project`.
+        stack::project(&address, &root)?;
         let picked = harness::picked(harness.as_ref(), &root).map_err(Problem::from)?;
         let handle = app.clone();
         let _startup = attempt.lock_current()?;
@@ -1799,6 +1802,10 @@ async fn start_stack_inner<R: tauri::Runtime>(
             return Err(status.detail.into());
         };
         let found = found.pin()?;
+        // Decided here, before anything below runs Compose, so a project that cannot be decided
+        // stops Start with the reason instead of starting under a name. Never the folder's name
+        // alone: a source checkout called `openbot` runs as that too. See `stack::project`.
+        stack::project(&found, &root)?;
         // Intelligence runs on the engine OpenBot is about to run on. See `local_eval::use_engine`.
         local_eval::use_engine(&found);
         #[cfg(target_os = "linux")]
@@ -1944,11 +1951,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
          * The supervisor publishes a computer on a loopback port of the host unless this names a
          * network to attach it to instead, and a loopback port on the host is not one the server
          * container can open. `default` is the network the server shares with the Bots, under the
-         * project name Compose is about to give it. See `stack::project_name`.
+         * project this installation runs as. See `stack::project`.
          */
         settings.insert(
             "COMPUTER_NETWORK".into(),
-            format!("{}_default", stack::project_name(&root)),
+            format!("{}_default", stack::project(&found, &root)?),
         );
         /*
          * On Linux the server runs as the person, not as the image's user.
@@ -3811,7 +3818,13 @@ fn read_desktop_status<R: tauri::Runtime>(
                 .filter(|output| output.status.success())
                 .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
                 .unwrap_or_default();
-            desktop_status::containers(&stats, stack_id.as_deref())
+            // Status only reads, and has no engine address to decide a project with: the recorded
+            // one, else what an earlier app's installation here ran as. See `stack::recorded_project`.
+            desktop_status::containers(
+                &stats,
+                &stack::container_prefixes(&stack::recorded_project(&root)),
+                stack_id.as_deref(),
+            )
         }
         None => (Vec::new(), Vec::new()),
     };
@@ -8812,6 +8825,13 @@ mod tests {
                 .as_nanos()
         );
         let volume = format!("{project}_postgres-data");
+        // Recorded as this root's project, which every Compose command the app runs is given and
+        // which outranks the file's `name:`. See `stack::project`.
+        std::fs::write(
+            root.join(stack::PROJECT_FILE),
+            serde_json::json!({ "project": project }).to_string(),
+        )
+        .unwrap();
         std::fs::write(
             root.join("docker-compose.yml"),
             format!(
@@ -11635,6 +11655,7 @@ fn main() {
         ["compose","config","--environment"] => (),
         ["compose","config","--format","json"] => println!("{{\"services\":{{\"postgres\":{{\"volumes\":[{{\"type\":\"volume\",\"source\":\"postgres-data\",\"target\":\"/var/lib/postgresql/data\"}}]}}}},\"volumes\":{{\"postgres-data\":{{\"name\":\"fixture_postgres-data\"}}}}}}"),
         ["volume","ls","--format","{{.Name}}"] => (),
+        ["ps","--all","--quiet","--no-trunc","--filter",_] => (),
         ["compose","ps","--format",_] => (),
         ["compose","up",..] => {
             fs::write(cwd.join("fixture-containers-running"),&identity).unwrap();
@@ -12689,7 +12710,7 @@ fn main() {
             openbot_env::read_already_set(&root.join(".env"), &["COMPUTER_NETWORK"])
                 .unwrap()
                 .get("COMPUTER_NETWORK"),
-            Some(&format!("{}_default", stack::project_name(&root)))
+            Some(&format!("{}_default", stack::DESKTOP_PROJECT))
         );
         let settings = openbot_env::read_already_set(
             &root.join(".env"),
@@ -13520,6 +13541,13 @@ fn main() {
         )
         .unwrap();
         deployment::record(root, DEPLOYMENT_VERSION, false).unwrap();
+        // Installed by this app, so its Compose project is decided and recorded already. Choosing
+        // one is `stack::project`'s, tested in `stack`.
+        std::fs::write(
+            root.join(stack::PROJECT_FILE),
+            serde_json::json!({ "project": stack::DESKTOP_PROJECT }).to_string(),
+        )
+        .unwrap();
         for package in ["", "server", "worker", "shared", "toolkit", "extension"] {
             std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
         }

@@ -220,9 +220,20 @@ what it gave is one prompt and one failure point, where reading it per command i
 */
 pub type Secrets = std::collections::BTreeMap<String, String>;
 
+/// Every Compose command for the installation, run as its own project (see `project`).
+///
+/// Named through the environment, which Compose ranks above `.env` and the folder's name and
+/// below only `-p`, so every caller's arguments stay exactly as they were. A project that could not
+/// be decided, because the engine could not be asked, is `DESKTOP_PROJECT`: never the folder's
+/// name, which would be adopting whatever else runs under it.
 fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
+    let project = project(engine, root).unwrap_or_else(|_| DESKTOP_PROJECT.to_owned());
     let mut command = engine.command();
     command.current_dir(root).args(["compose"]).envs(secrets);
+    command.env("COMPOSE_PROJECT_NAME", &project);
+    if let Some(namespace) = computer_namespace_for(&project) {
+        command.env("COMPUTER_NAMESPACE", namespace);
+    }
     command
 }
 
@@ -3450,13 +3461,16 @@ pub fn restart_openbot(engine: &Address, root: &Path) -> Result<(), String> {
 }
 
 /**
-The name Compose gives this deployment's project, and so the prefix of its networks.
+The name Compose gave an installation made by an earlier app, which ran Compose with no project.
 
-The desktop runs Compose from the deployment folder with no `-p` and the file names no `name:`, so
-the project is the folder's own name as Compose normalises it: lower case, with everything but
-`a-z`, `0-9`, `_` and `-` dropped, then any leading `_` or `-` trimmed. Worked out here rather than
-asked of Compose, because the answer is wanted before `up`, to tell the supervisor which network to
-put each Bot's computer on, and it has to match what `up` is about to create.
+Those apps ran Compose from the deployment folder with no `-p` and the file names no `name:`, so
+the project was the folder's own name as Compose normalises it: lower case, with everything but
+`a-z`, `0-9`, `_` and `-` dropped, then any leading `_` or `-` trimmed. `~/OpenBot` is `openbot`.
+
+ONLY A LEGACY NAME NOW, NEVER ONE TO ADOPT. A developer who runs OpenBot from a source checkout
+called `openbot` gets Compose project `openbot` too, and on such a machine an installation that
+named itself after its folder took the developer's containers and data for its own previous
+installation and refused to start over them. See `project` for the name an installation runs as.
 */
 pub fn project_name(root: &Path) -> String {
     let base = root
@@ -3468,6 +3482,192 @@ pub fn project_name(root: &Path) -> String {
         .collect::<String>()
         .trim_start_matches(['_', '-'])
         .to_string()
+}
+
+/// Written beside the other `.openbot-*` records: the Compose project this installation runs as.
+pub const PROJECT_FILE: &str = ".openbot-project.json";
+
+/// The Compose project every installation this app makes runs as.
+///
+/// Not the folder's name, because a folder name is not ours: a source checkout called `openbot`
+/// runs as `openbot` too, and Compose treats every container and volume labelled with a project as
+/// that project's whoever made it. Fixed rather than random so a person reading `docker ps` can
+/// tell which containers are the app's.
+pub const DESKTOP_PROJECT: &str = "openbot-desktop";
+
+/// The namespace the supervisor names Bots' computers and their volumes under when nothing sets
+/// one. See `DEFAULT_NAMESPACE` in supervisor/src/names.ts.
+const DEFAULT_COMPUTER_NAMESPACE: &str = "openbot";
+
+#[derive(Serialize, Deserialize)]
+struct SavedProject {
+    project: String,
+}
+
+/// What Compose accepts as a project name: lower-case letters, digits, `_` and `-`, starting with a
+/// letter or digit. A record holding anything else is damaged and reads as absent.
+fn compose_project_name(name: &str) -> bool {
+    name.as_bytes()
+        .first()
+        .is_some_and(|first| first.is_ascii_lowercase() || first.is_ascii_digit())
+        && name.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
+        })
+}
+
+/// The project this installation recorded, or `None` when it has recorded none yet.
+pub fn saved_project(root: &Path) -> Option<String> {
+    let record: SavedProject =
+        serde_json::from_slice(&std::fs::read(root.join(PROJECT_FILE)).ok()?).ok()?;
+    compose_project_name(&record.project).then_some(record.project)
+}
+
+/**
+The Compose project this installation runs as, decided once and then read from its record.
+
+Every Compose command for the installation is given it (see `compose_command`), so Install, Start,
+Stop, the cleanup at Quit, status and Start fresh all name the same project, and none of them can
+name one that is not the installation's own.
+
+A new installation runs as `DESKTOP_PROJECT`. One made by an earlier app ran as its folder's name
+(`project_name`), and keeps it ONLY when the engine holds containers of that project that Compose
+ran from this very folder: Compose labels each container with the folder it ran from, which is
+the one thing a folder-named project cannot fake. Any other answer is `DESKTOP_PROJECT`. A tester's
+`~/OpenBot` found a developer's checkout called `openbot` running as `openbot`, adopted its
+containers and its database as a previous installation's, and stopped on a key that was never
+its own; this is what keeps that from happening again.
+
+The cost is deliberate: an earlier installation whose containers are all gone (Stop takes them
+down) has nothing left that proves the project was its own, so it starts fresh under
+`DESKTOP_PROJECT`. Its old volumes are left exactly where they are, never deleted or renamed.
+Volumes do not carry the folder Compose ran from, so they cannot prove it either.
+*/
+pub fn project(engine: &Address, root: &Path) -> Result<String, Problem> {
+    project_choosing(engine, root, &project_name(root))
+}
+
+/// `project`, with the legacy name to consider given rather than derived from the folder.
+pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<String, Problem> {
+    if let Some(saved) = saved_project(root) {
+        return Ok(saved);
+    }
+    // No folder, no installation: nothing to decide for, and nowhere to record it.
+    if !root.is_dir() {
+        return Ok(DESKTOP_PROJECT.to_owned());
+    }
+    let chosen = if legacy != DESKTOP_PROJECT
+        && compose_project_name(legacy)
+        && project_ran_from(engine, root, legacy)?
+    {
+        legacy.to_owned()
+    } else {
+        DESKTOP_PROJECT.to_owned()
+    };
+    crate::preparation::write_checkpoint(
+        root,
+        PROJECT_FILE,
+        &SavedProject {
+            project: chosen.clone(),
+        },
+    )
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not record which containers belong to this installation.",
+            error,
+        )
+    })?;
+    Ok(chosen)
+}
+
+fn project_choice_problem(detail: impl Into<String>) -> Problem {
+    Problem::with(
+        "OpenBot could not tell which containers belong to this installation. Nothing was changed. Check the selected container engine, then try again.",
+        detail,
+    )
+}
+
+/// Whether any container of Compose project `legacy` was run from `root`. Only reads: lists and
+/// inspects, and never stops, removes or takes down anything, whoever's it is.
+fn project_ran_from(engine: &Address, root: &Path, legacy: &str) -> Result<bool, Problem> {
+    let listed = engine
+        .command()
+        .current_dir(root)
+        .args(["ps", "--all", "--quiet", "--no-trunc", "--filter"])
+        .arg(format!("label=com.docker.compose.project={legacy}"))
+        .output()
+        .map_err(|error| project_choice_problem(format!("Could not list containers: {error}")))?;
+    if !listed.status.success() {
+        return Err(project_choice_problem(format!(
+            "Container listing exited with {}.",
+            listed.status
+        )));
+    }
+    let here = canonical(root);
+    for id in String::from_utf8_lossy(&listed.stdout).split_whitespace() {
+        let inspect = engine
+            .command()
+            .current_dir(root)
+            .args(["container", "inspect", id])
+            .output()
+            .map_err(|error| {
+                project_choice_problem(format!("Could not inspect container {id}: {error}"))
+            })?;
+        // Gone since it was listed: nothing left of it to prove anything.
+        if !inspect.status.success() {
+            continue;
+        }
+        let inspected: serde_json::Value =
+            serde_json::from_slice(&inspect.stdout).map_err(|_| {
+                project_choice_problem(format!(
+                    "Inspection of container {id} did not return valid JSON."
+                ))
+            })?;
+        let ran_here = inspected.as_array().into_iter().flatten().any(|container| {
+            let labels = &container["Config"]["Labels"];
+            labels["com.docker.compose.project"].as_str() == Some(legacy)
+                && labels["com.docker.compose.project.working_dir"]
+                    .as_str()
+                    .is_some_and(|folder| canonical(Path::new(folder)) == here)
+        });
+        if ran_here {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The folder as the file system resolves it, so `/var` and `/private/var`, or `..` in a label,
+/// compare equal. A folder that no longer exists compares as written.
+fn canonical(folder: &Path) -> PathBuf {
+    std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf())
+}
+
+/// The namespace the supervisor gives this installation's Bots' computers and volumes, when the
+/// installation has to say: `None` leaves it what earlier apps always ran with.
+///
+/// `DESKTOP_PROJECT`'s own, so a new installation's `<namespace>-computer-…`, `-profile-…` and
+/// `-workspace-…` cannot be a source checkout's either. A legacy installation keeps the default its
+/// Bots' computers and volumes were made under, or it would lose them.
+pub fn computer_namespace_for(project: &str) -> Option<&str> {
+    (project == DESKTOP_PROJECT).then_some(DESKTOP_PROJECT)
+}
+
+/// The prefixes of the container names that are this project's: Compose's `<project>-<service>-<n>`
+/// and the supervisor's `<namespace>-computer-…`.
+pub fn container_prefixes(project: &str) -> Vec<String> {
+    let namespace = computer_namespace_for(project).unwrap_or(DEFAULT_COMPUTER_NAMESPACE);
+    let mut prefixes = vec![format!("{project}-")];
+    let computers = format!("{namespace}-computer-");
+    if !computers.starts_with(&prefixes[0]) {
+        prefixes.push(computers);
+    }
+    prefixes
+}
+
+/// For reading only, where no engine is at hand to decide with: the recorded project, else the
+/// name an earlier app's installation in this folder ran as. Never used to run Compose.
+pub fn recorded_project(root: &Path) -> String {
+    saved_project(root).unwrap_or_else(|| project_name(root))
 }
 
 /**
@@ -3902,6 +4102,7 @@ mod tests {
                 .bin
                 .join(format!("{}-deployment", address.engine.binary()));
             std::fs::create_dir(&root).unwrap();
+            project_decided(&root);
             let record = root.join("commands.log");
             std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
             std::fs::write(
@@ -6120,6 +6321,11 @@ use std::io::Write;
 /// `.fixture-containers`: one container per line, `id<TAB>name<TAB>status<TAB>k=v,k=v<TAB>volume,volume`.
 struct FixtureContainer { id: String, name: String, status: String, labels: Vec<(String, String)>, mounts: Vec<String> }
 
+/// A JSON string, so a Windows path in a label stays valid JSON.
+fn serde_json_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 fn fixture_containers() -> Vec<FixtureContainer> {
     let Ok(listing) = std::fs::read_to_string(".fixture-containers") else { return Vec::new() };
     listing.lines().filter(|line| !line.is_empty()).map(|line| {
@@ -6200,7 +6406,7 @@ fn main() {
             };
             // Docker reports names with a leading slash; Podman does not.
             let slash = if args.first().map(String::as_str) == Some("--connection") { "" } else { "/" };
-            let labels: Vec<String> = container.labels.iter().map(|(k, v)| format!("\"{k}\":\"{v}\"")).collect();
+            let labels: Vec<String> = container.labels.iter().map(|(k, v)| format!("\"{k}\":{}", serde_json_string(v))).collect();
             let mounts: Vec<String> = container.mounts.iter().map(|m| format!("{{\"Type\":\"volume\",\"Name\":\"{m}\"}}")).collect();
             print!(
                 "[{{\"Id\":\"{}\",\"Name\":\"{slash}{}\",\"State\":{{\"Status\":\"{}\",\"Running\":{}}},\"Config\":{{\"Labels\":{{{}}}}},\"Mounts\":[{}]}}]",
@@ -8659,9 +8865,23 @@ fn main() {
         std::fs::create_dir(&root).unwrap();
         std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
         std::fs::write(root.join(".fixture-config"), config).unwrap();
+        project_decided(&root);
         let record = path.bin.join(format!("{label}.log"));
         std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
         (root, record)
+    }
+
+    /// An installation whose Compose project is already recorded, so the command traces below are
+    /// only the commands under test. Choosing one is `project`'s, tested on its own.
+    fn project_decided(root: &Path) {
+        crate::preparation::write_checkpoint(
+            root,
+            PROJECT_FILE,
+            &SavedProject {
+                project: DESKTOP_PROJECT.into(),
+            },
+        )
+        .unwrap();
     }
 
     fn resolved_namespace_fixture(namespace: &str) -> String {
@@ -9131,8 +9351,11 @@ fn main() {
         );
     }
 
+    /// The folder-derived name is now only the name an earlier app's installation ran as, which
+    /// is why it is still worked out exactly as Compose would: a legacy installation is recognised
+    /// by it. It is never the name a new installation runs as.
     #[test]
-    fn project_name_is_the_folder_name_as_compose_normalises_it() {
+    fn legacy_project_name_is_the_folder_name_as_compose_normalises_it() {
         assert_eq!(project_name(Path::new("/Users/someone/OpenBot")), "openbot");
         assert_eq!(
             project_name(Path::new("/home/someone/My OpenBot!")),
@@ -9143,6 +9366,190 @@ fn main() {
         assert_eq!(
             project_name(Path::new("C:/Users/someone/ÖpenBot")),
             "penbot"
+        );
+    }
+
+    /// A folder named the way the default one is, so its legacy (folder-derived) project is
+    /// `openbot`: the name a developer's source checkout called `openbot` also runs as.
+    fn project_choice_root(path: &PathFixture, label: &str) -> (PathBuf, PathBuf) {
+        let root = path.bin.join(label).join("OpenBot");
+        std::fs::create_dir_all(&root).unwrap();
+        let record = path.bin.join(format!("{label}.log"));
+        std::fs::write(&record, "").unwrap();
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        (root, record)
+    }
+
+    /// One `.fixture-containers` row for a Compose container of `project` run from `working_dir`.
+    fn compose_container_row(id: &str, service: &str, project: &str, working_dir: &Path) -> String {
+        format!(
+            "{id}\t{project}-{service}-1\trunning\tcom.docker.compose.project={project},com.docker.compose.project.working_dir={}\t\n",
+            working_dir.display()
+        )
+    }
+
+    /// The project and computer namespace every Compose command for `root` is given.
+    fn compose_names(engine: &Address, root: &Path) -> (Option<String>, Option<String>) {
+        let command = compose_command(engine, root, &Secrets::new());
+        let named = |wanted: &str| {
+            command
+                .get_envs()
+                .find(|(key, _)| *key == wanted)
+                .and_then(|(_, value)| value)
+                .map(|value| value.to_string_lossy().into_owned())
+        };
+        (named("COMPOSE_PROJECT_NAME"), named("COMPUTER_NAMESPACE"))
+    }
+
+    #[test]
+    fn a_new_folder_records_and_runs_as_its_own_project() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_new_folder_records_and_runs_as_its_own_project",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        let (root, _) = project_choice_root(&path, "fresh");
+        assert_eq!(saved_project(&root), None, "nothing recorded yet");
+        assert_eq!(project(&docker, &root).unwrap(), DESKTOP_PROJECT);
+        assert_eq!(saved_project(&root).as_deref(), Some(DESKTOP_PROJECT));
+        assert!(root.join(PROJECT_FILE).is_file());
+        // Its Bots' computers and volumes are named under it too, not under `openbot`.
+        assert_eq!(
+            compose_names(&docker, &root),
+            (
+                Some(DESKTOP_PROJECT.to_owned()),
+                Some(DESKTOP_PROJECT.to_owned())
+            )
+        );
+    }
+
+    #[test]
+    fn a_recorded_project_is_reused_without_asking_the_engine() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_recorded_project_is_reused_without_asking_the_engine",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        for (label, recorded) in [
+            ("kept-legacy", "openbot"),
+            ("kept-desktop", DESKTOP_PROJECT),
+        ] {
+            let (root, record) = project_choice_root(&path, label);
+            crate::preparation::write_checkpoint(
+                &root,
+                PROJECT_FILE,
+                &serde_json::json!({ "project": recorded }),
+            )
+            .unwrap();
+            // What the engine holds says the opposite of the record, and is never consulted.
+            let elsewhere = path.bin.join(label).join("elsewhere");
+            let working_dir = if recorded == DESKTOP_PROJECT {
+                &root
+            } else {
+                &elsewhere
+            };
+            std::fs::write(
+                root.join(".fixture-containers"),
+                compose_container_row("c1", "postgres", "openbot", working_dir),
+            )
+            .unwrap();
+            assert_eq!(project(&docker, &root).unwrap(), recorded, "{label}");
+            assert_eq!(
+                compose_names(&docker, &root).0.as_deref(),
+                Some(recorded),
+                "{label}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&record).unwrap(),
+                "",
+                "{label}: a recorded project is decided already"
+            );
+        }
+    }
+
+    #[test]
+    fn a_legacy_folder_whose_own_containers_run_as_openbot_keeps_openbot() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_legacy_folder_whose_own_containers_run_as_openbot_keeps_openbot",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        let (root, record) = project_choice_root(&path, "legacy-own");
+        // Made by an earlier app: a stamp, and no project record.
+        crate::deployment::record(&root, "v0.2.0").unwrap();
+        // Compose labels the folder as given, which need not be its canonical spelling.
+        let spelled = root.join("..").join("OpenBot");
+        std::fs::write(
+            root.join(".fixture-containers"),
+            compose_container_row("c1", "postgres", "openbot", &spelled),
+        )
+        .unwrap();
+        assert_eq!(project(&docker, &root).unwrap(), "openbot");
+        assert_eq!(saved_project(&root).as_deref(), Some("openbot"));
+        // The namespace its Bots' computers were made under stays what it was.
+        assert_eq!(
+            compose_names(&docker, &root),
+            (Some("openbot".into()), None)
+        );
+        let log = std::fs::read_to_string(&record).unwrap();
+        assert!(
+            log.contains(
+                "ps --all --quiet --no-trunc --filter label=com.docker.compose.project=openbot"
+            ),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn a_legacy_folder_never_adopts_a_source_checkouts_openbot_containers() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_legacy_folder_never_adopts_a_source_checkouts_openbot_containers",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        let (root, record) = project_choice_root(&path, "legacy-collision");
+        crate::deployment::record(&root, "v0.2.0").unwrap();
+        // A developer's source checkout called `openbot`, running as Compose project `openbot`.
+        let checkout = path.bin.join("src").join("openbot");
+        std::fs::create_dir_all(&checkout).unwrap();
+        let containers: String = ["postgres", "supervisor", "agent-bot"]
+            .iter()
+            .enumerate()
+            .map(|(n, service)| {
+                compose_container_row(&format!("dev{n}"), service, "openbot", &checkout)
+            })
+            .collect();
+        std::fs::write(root.join(".fixture-containers"), &containers).unwrap();
+        assert_eq!(project(&docker, &root).unwrap(), DESKTOP_PROJECT);
+        assert_eq!(saved_project(&root).as_deref(), Some(DESKTOP_PROJECT));
+        assert_eq!(
+            compose_names(&docker, &root),
+            (
+                Some(DESKTOP_PROJECT.to_owned()),
+                Some(DESKTOP_PROJECT.to_owned())
+            )
+        );
+        // Only looked at: listed and inspected, never stopped, removed or taken down.
+        let log = std::fs::read_to_string(&record).unwrap();
+        for line in log.lines() {
+            let command = line.split_once('\t').unwrap().1;
+            assert!(
+                command.starts_with("ps --all --quiet --no-trunc ")
+                    || command.starts_with("container inspect dev"),
+                "unexpected engine command for another project's containers: {command}"
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join(".fixture-containers")).unwrap(),
+            containers
         );
     }
 
