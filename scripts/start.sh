@@ -337,7 +337,10 @@ green "  coworker tables migrated"
 # pipeline, and `set -e` then aborts the assignment before the check below could say why. The same
 # grep survives inside `setting()` only because `local v="$(...)"` takes `local`'s own exit status
 # and masks it. So: report what was resolved, and do not re-read the file.
-green "  managed coworker endpoint: ${MANAGED_AGENT_AG_UI_URL:-none (the personal edition's Bot runs in the server)}"
+# The fallback stays outside the expansion: inside "${VAR:-...}" bash reads an apostrophe as an opening
+# quote, which swallowed the script up to the next one and ran the words in later comments.
+MANAGED_ENDPOINT_LINE="none (the personal edition's Bot runs in the server)"
+green "  managed coworker endpoint: ${MANAGED_AGENT_AG_UI_URL:-$MANAGED_ENDPOINT_LINE}"
 
 # Automatic Learning collects nothing until a container is assigned. The server assigns this
 # project's `openbot` container on its own once it exists (server/src/learning/auto-assign.ts), but
