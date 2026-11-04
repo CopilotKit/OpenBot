@@ -356,6 +356,43 @@ if [ -z "$LEARNING_CONTAINER" ] && [ "$LEARNING_AUTO_ASSIGN" != "false" ] \
   info "  ${LEARNING_LINE:-Automatic Learning: the container check did not run. Log: $LOGS/learning-setup.log}"
 fi
 
+# The personal edition's own browser: the person's installed Chrome or Edge, as a window on their
+# desktop with the Recorder in it, as OpenBot Desktop gives the team edition (docs/configuration.md,
+# "OpenBot Desktop runs it for the person"). Its Bots share one computer, which is no place for a
+# browser of the person's own, so this one runs on the host and runs nobody else's
+# (`COMPUTER_PEOPLE_ONLY=on`). The server finds it through `OPENBOT_BROWSER_URL`, exported so the
+# server started below reads it over .env. Never fatal: without Chrome or Edge, or with a Recorder
+# that will not build, OpenBot starts without the person's browser and the line says why.
+if [ "$EDITION" = "personal" ]; then
+  BROWSER_PORT="$(setting BROWSER_PORT 4101)"
+  if [ ! -f extension/dist/manifest.json ]; then
+    info "  building the Recorder for your browser"
+    (cd extension && bun install --frozen-lockfile && bun scripts/build.ts) >"$LOGS/recorder-build.log" 2>&1 \
+      || red "  Recorder: the build failed. Log: $LOGS/recorder-build.log"
+  fi
+  if [ ! -f extension/dist/manifest.json ]; then
+    :
+  elif identifies_as_openbot "$BROWSER_PORT" browser; then
+    info "  your browser: already up on $BROWSER_PORT"
+  else
+    (cd "$ROOT" && COMPUTER_TOKEN="$COMPUTER_TOKEN" \
+      COMPUTER_PEOPLE_ONLY=on \
+      OPENBOT_RECORDER_DIR="$ROOT/extension/dist" \
+      PORT="$BROWSER_PORT" \
+      bun scripts/start-local-chrome-computer.ts >"$LOGS/browser.log" 2>&1 &)
+    for _ in $(seq 1 20); do
+      identifies_as_openbot "$BROWSER_PORT" browser && break
+      sleep 1
+    done
+  fi
+  if identifies_as_openbot "$BROWSER_PORT" browser; then
+    export OPENBOT_BROWSER_URL="http://127.0.0.1:$BROWSER_PORT"
+    green "  your browser: Chrome or Edge on this computer, with the Recorder"
+  else
+    red "  your browser: did not start, so Browser is hidden. Log: $LOGS/browser.log"
+  fi
+fi
+
 info "2/4  Server"
 require_free_or_ours "$SERVER_PORT" server
 #
@@ -403,6 +440,17 @@ if identifies_as_openbot "$SERVER_PORT" server; then
       sleep 1
       ;;
   esac
+  # A personal edition server started before the browser of its person was: it has no address for
+  # it, and says so by offering no browser. The edition is single-user, so this answers without
+  # signing in. (No apostrophe in this comment: bash 3.2 misreads one in a comment after esac.)
+  if [ -n "${OPENBOT_BROWSER_URL:-}" ]; then
+    OFFERED="$(curl -fsS --max-time 3 "http://localhost:$SERVER_PORT/api/browser" 2>/dev/null || true)"
+    if ! printf '%s' "$OFFERED" | grep -q '"available":true'; then
+      info "  server: up, but without your browser, so it is restarted to pick it up"
+      stop_server_processes_for_restart
+      sleep 1
+    fi
+  fi
 fi
 if ! identifies_as_openbot "$SERVER_PORT" server; then
   if [ "$ONE_COMPUTER_EACH" = "true" ]; then

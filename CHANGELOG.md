@@ -128,7 +128,11 @@ is the one place for apps, saved logins and keys, and every Bot can use every ap
 Admin is replaced by a short list of what OpenBot for Business adds. See `docs/personal-edition.md`.
 Deployments that do not set it behave as before.
 
-You can record a task in a Bot's browser in the personal edition: take control of its screen and
+`scripts/start.sh` starts your own browser in the personal edition: your installed Chrome or Edge,
+as a window on your desktop with the Recorder in it, as OpenBot Desktop does for the team edition.
+**Browser** in the sidebar opens it. `scripts/stop.sh` stops it.
+
+You can also record a task in a Bot's browser in the personal edition: take control of its screen and
 press Record. Its one computer carries only your Bots, so `scripts/start.sh` starts it as yours
 (`COMPUTER_PERSON_ID`), and the server allows Record there. Every other OpenBot whose Bots share one
 computer still refuses it.

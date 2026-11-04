@@ -22,6 +22,17 @@ bash scripts/start.sh
 because the Personal Assistant runs inside the server on the model in
 [`examples/personal/model.yaml`](../examples/personal/model.yaml).
 
+It also starts your own browser, as OpenBot Desktop does for the team edition: your installed Google
+Chrome, or Microsoft Edge, as a window on your desktop with the OpenBot Recorder in it. It builds the
+Recorder (`extension/dist`) if it isn't built, runs `scripts/start-local-chrome-computer.ts` on port
+`BROWSER_PORT` (4101) with `COMPUTER_PEOPLE_ONLY=on`, and points the server at it with
+`OPENBOT_BROWSER_URL`. **Browser** in the sidebar opens or brings forward that window, and Record
+there goes to your own Learning space. Its profile is kept under
+`~/Library/Application Support/OpenBot/local-computer` on macOS (see
+[configuration](configuration.md#openbot-desktop-runs-it-for-the-person) for the other systems).
+Without Chrome or Edge, OpenBot starts without it and `start.sh` says why. `scripts/stop.sh` stops it
+with the rest.
+
 ## What the server requires
 
 The server refuses to start in the personal edition unless all of these hold, and says which
@@ -51,11 +62,11 @@ settings and team rules, and a paused Automatic Learning.
 The password manager uses a saved login only after the person picks it in the private sign-in
 form, and taking over the browser is always offered.
 
-To teach a Bot a task, take control of its browser and press **Record**. The recording goes to your
+You can also teach a Bot a task in its own browser: take control of it and press **Record**. The recording goes to your
 own Learning space. The team edition refuses Record on a computer its Bots share, because another
 Bot's shell could read the Recorder's connection there. Here every Bot on the one computer is yours,
-so `scripts/start.sh` starts it as yours (`COMPUTER_PERSON_ID`) and the server allows Record. There
-is no browser of your own on the server: that still needs a computer no Bot runs on.
+so `scripts/start.sh` starts it as yours (`COMPUTER_PERSON_ID`) and the server allows Record. Your
+own browser never runs on that computer: it is the window on your desktop above.
 
 ## What the app shows
 
