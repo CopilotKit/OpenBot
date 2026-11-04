@@ -75,6 +75,7 @@ import {
 } from "./window";
 
 export { PROACTIVE_RUN_KIND };
+
 /**
  * How long a check-in may hold its queue item and its `running` row. A turn is cut off at three
  * minutes, so anything still running at ten belongs to a replica that stopped.
@@ -504,7 +505,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       return { skip: "paused" };
     if (!(await allowed(setting.ownerUserId))) return { skip: "off_admin" };
     if (
-      (await deps.store.runsToday(setting.id)) >=
+      (await deps.store.runsToday(setting.ownerUserId, setting.agentId)) >=
       (await dailyRuns(setting.agentId))
     )
       return { skip: "capped" };
@@ -551,8 +552,20 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     // Read before this run is in the ledger, so the window opens at a check-in before it.
     const lastRead = await deps.store.windowStart(setting.id);
     const threadId = deps.mintThreadId();
-    if (!(await deps.store.beginRun({ id: runId, setting, trigger, threadId })))
-      return skip(setting, runId, trigger, "busy");
+    const admitted = await deps.store.beginRun({
+      id: runId,
+      setting,
+      trigger,
+      threadId,
+      dailyLimit: await dailyRuns(setting.agentId),
+    });
+    if (admitted !== true)
+      return skip(
+        setting,
+        runId,
+        trigger,
+        admitted === "capped" ? "capped" : "busy",
+      );
     /*
      * FROM HERE THE RUN IS IN THE LEDGER AS RUNNING, and every step until it is closed can fail on
      * its own: a database call that drops its connection is enough. Left running, the row would make
