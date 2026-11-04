@@ -1,0 +1,93 @@
+#!/bin/sh
+# The one thing a Bot's shell may run as root in this image: install a package, by name, from the
+# archives the image already trusts.
+#
+#   sudo openbot-apt update
+#   sudo openbot-apt install <package>...
+#
+# sudo lets `pwuser` run this and nothing else, so this is the boundary, and it is written as one.
+# It accepts those two forms and refuses everything else, rather than passing arguments on to
+# apt-get and trying to make them safe there. apt-get will run any command as root when asked
+# properly (`-o APT::Update::Pre-Invoke::=`, `-c` with a config of the caller's, a local `.deb`
+# whose maintainer scripts run as root, the pager `changelog` opens), and every one of those asks
+# with an argument this refuses.
+#
+# A PACKAGE IS A DEBIAN PACKAGE NAME. Lowercase letters, digits, `+`, `-` and `.`, starting with a
+# letter or a digit, two characters at least (Debian Policy 5.6.1). That shuts out each route by
+# its first character: an option starts with `-`, and a file apt-get would install starts with `.`
+# or `/`. Three more things a name may carry in apt-get are refused with it:
+#   - a version (`jq=1.6`), because it lets a Bot pick an older, vulnerable build over the one the
+#     archive serves now;
+#   - a release (`jq/noble`) or an architecture (`jq:amd64`), which are the same choice made
+#     another way and which nothing here needs;
+#   - a trailing `-`, because apt-get reads `install name-` as "remove name", and this installs.
+#
+# THE REST IS apt-get AS A PERSON AT A ROOT PROMPT WOULD RUN IT, with nothing of the caller's. No
+# environment: sudo resets it, and `env -i` means that does not depend on sudoers staying the way
+# it is. Not the caller's working directory. `--` before the names, so none is read as an option.
+# `--no-remove`, so a package that conflicts with something installed cannot take it out.
+# `APT::Cmd::Pattern-Only`, so a name is only ever a name: without it apt-get reads a name holding
+# a `.` that matches no package as a regular expression, and `install lib.` installs every package
+# whose name has "lib" followed by anything.
+#
+# `dpkg --configure -a` first, because a command that runs too long is stopped, and an install
+# stopped halfway leaves dpkg refusing every later one until it is finished. With sudo for dpkg
+# itself gone, this is the only way it gets finished.
+#
+# `-y` (or `--yes`, `--assume-yes`) is accepted and dropped, because a model writes
+# `install -y <package>` out of habit, and this always answers yes anyway. It is matched whole,
+# so it changes nothing about what else an option may be: every other one is still refused.
+set -eu
+
+refuse() {
+  printf 'openbot-apt: %s\n' "$1" >&2
+  printf 'usage: sudo openbot-apt update\n       sudo openbot-apt install <package>...\n' >&2
+  exit 2
+}
+
+clean() {
+  /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin DEBIAN_FRONTEND=noninteractive "$@"
+}
+
+cd /
+
+[ "$#" -ge 1 ] || refuse "say update or install"
+action=$1
+shift
+
+# The yes flags out, everything else kept in order. `for` walks the list as it was when it started,
+# so rebuilding it with `set --` as it goes is safe.
+for arg do
+  shift
+  case $arg in
+    -y | --yes | --assume-yes) ;;
+    *) set -- "$@" "$arg" ;;
+  esac
+done
+
+case $action in
+  update)
+    [ "$#" -eq 0 ] || refuse "update takes nothing after it"
+    clean /usr/bin/apt-get update
+    ;;
+  install)
+    [ "$#" -ge 1 ] || refuse "name the package to install"
+    # Spelled out rather than `a-z`, because a range in a pattern can follow the locale, and sudo
+    # passes the caller's locale through.
+    for name in "$@"; do
+      case $name in
+        [abcdefghijklmnopqrstuvwxyz0123456789]?*) ;;
+        *) refuse "not a package name: $name" ;;
+      esac
+      case $name in
+        *[!abcdefghijklmnopqrstuvwxyz0123456789+.-]* | *-) refuse "not a package name: $name" ;;
+      esac
+    done
+    clean /usr/bin/dpkg --configure -a
+    clean /usr/bin/apt-get install -y --no-install-recommends --no-remove \
+      -o APT::Cmd::Pattern-Only=true -- "$@"
+    ;;
+  *)
+    refuse "only update and install are allowed"
+    ;;
+esac

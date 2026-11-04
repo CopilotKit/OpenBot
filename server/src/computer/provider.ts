@@ -4,6 +4,7 @@ import {
   type ComputerSeat,
   computerKeyText,
 } from "./computer-key";
+import { ownComputerToken } from "./computer-token";
 import {
   createSandboxComputerProvider,
   inClusterConfig,
@@ -154,6 +155,16 @@ export interface ComputerProvider {
    * exactly as it was before any of this existed.
    */
   sessionOf?(seat: ComputerSeat): Promise<string | undefined>;
+  /**
+   * The token the computer `key` names checks its callers against, given the deployment's
+   * `COMPUTER_TOKEN`. Every call to that computer carries this (computer-token.ts `computerTokenOf`).
+   *
+   * A provider that makes computers gives each one its own, derived from the deployment's token and
+   * whose computer it is, because the deployment's token handed to a computer is readable by any Bot
+   * on it and opens every other computer. Absent means the deployment's token itself, which is what
+   * the one computer everybody shares holds, and which only ever goes to that computer.
+   */
+  tokenFor?(key: ComputerKey, deploymentToken: string): string;
 }
 
 export type SharedComputerProviderOptions = {
@@ -465,6 +476,7 @@ function createLazySandboxProvider(
         apiServer: cluster.apiServer,
         token: cluster.token,
         ca: cluster.ca,
+        ...(config.token ? { computerToken: config.token } : {}),
       });
     })().catch((error: unknown) => {
       built = undefined;
@@ -489,5 +501,7 @@ function createLazySandboxProvider(
       return built.update(key);
     },
     sessionOf: async (seat) => (await provider()).sessionOf?.(seat),
+    // Synchronous and needing no cluster, so answered here rather than after the credentials are read.
+    tokenFor: (key, deploymentToken) => ownComputerToken(deploymentToken, key),
   };
 }

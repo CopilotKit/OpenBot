@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "distribution": {
+    "id": "acme.openbot",
+    "repository": "acme/openbot",
+    "channel": "stable"
+  },
+  "version": "v0.2.0",
+  "source": {
+    "commit": "1111111111111111111111111111111111111111",
+    "upstreamRepository": "CopilotKit/openbot",
+    "upstreamCommit": "2222222222222222222222222222222222222222",
+    "modified": true
+  },
+  "artifacts": {
+    "source": {
+      "url": "https://github.com/acme/openbot/releases/download/v0.2.0/openbot-source.tar.gz",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "images": {
+      "server": {
+        "reference": "ghcr.io/acme/openbot-server@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "agent-computer": {
+        "reference": "ghcr.io/acme/openbot-agent-computer@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    }
+  },
+  "compatibility": {
+    "launcherApi": 1,
+    "configSchema": 1,
+    "extensionApi": 1,
+    "database": {
+      "from": ["openbot-db-1"],
+      "to": "openbot-db-1",
+      "rollbackCompatible": true
+    },
+    "intelligenceCapabilities": ["conversations.v1"]
+  },
+  "upgrade": {
+    "fromVersions": ["v0.2.0"],
+    "requiresDowntime": true,
+    "recovery": "restart-previous"
+  }
+}

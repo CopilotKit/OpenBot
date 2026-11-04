@@ -21,6 +21,7 @@ import {
   type ComputerSeat,
   computerKeyText,
 } from "./computer-key";
+import { ownComputerToken } from "./computer-token";
 import type {
   ComputerLocation,
   ComputerProvider,
@@ -111,11 +112,20 @@ export function imagesOf(podTemplate: unknown): string {
  * it is (`COMPUTER_PERSON_ID`, so Record runs in its Bots' browsers), and gives each Bot a folder of its own
  * (`COMPUTER_SEPARATE_WORKSPACES=on`), as each has a browser profile of its own.
  *
+ * EVERY COMPUTER IS GIVEN ITS OWN TOKEN (`token`, computer-token.ts), and never the deployment's: whatever token the
+ * template carried, a value or a reference to the deployment's Secret, is taken out. A Bot can read what its computer's
+ * process was started with, and the deployment's token opens every other person's computer. The value is written into
+ * the Sandbox itself rather than into a Secret of its own: a reference cannot reach a Secret in another namespace, which
+ * is where computers can live (`computers.sandbox.namespace`), and writing one per computer would give the server
+ * permission to create Secrets there, which it does not otherwise need. The value opens that one computer and nothing
+ * else.
+ *
  * The template itself is left as it was, since every computer is cut from it.
  */
 export function podTemplateFor(
   podTemplate: unknown,
   key: ComputerKey,
+  token?: string,
 ): unknown {
   const template = podTemplate as
     | { spec?: { containers?: Record<string, unknown>[] } }
@@ -142,13 +152,43 @@ export function podTemplateFor(
               (variable) =>
                 variable.name !== "COMPUTER_BOT_ID" &&
                 variable.name !== "COMPUTER_PERSON_ID" &&
-                variable.name !== "COMPUTER_SEPARATE_WORKSPACES",
+                variable.name !== "COMPUTER_SEPARATE_WORKSPACES" &&
+                variable.name !== COMPUTER_TOKEN,
             )
           : [];
-        return { ...container, env: [...env, ...told] };
+        return {
+          ...container,
+          env: [
+            ...env,
+            ...told,
+            ...(token ? [{ name: COMPUTER_TOKEN, value: token }] : []),
+          ],
+        };
       }),
     },
   };
+}
+
+const COMPUTER_TOKEN = "COMPUTER_TOKEN";
+
+/**
+ * Whether every container of a Sandbox's pod template holds `token`, the computer's own.
+ *
+ * A Sandbox created before computers had tokens of their own references the deployment's Secret instead, so it holds a
+ * token the server no longer sends: every call to it is refused, and it carries the key to every other computer.
+ */
+function holdsToken(podTemplate: unknown, token: string): boolean {
+  const containers =
+    (podTemplate as { spec?: { containers?: { env?: unknown }[] } } | undefined)
+      ?.spec?.containers ?? [];
+  return containers.every((container) =>
+    (Array.isArray(container.env) ? container.env : []).some(
+      (variable: { name?: unknown; value?: unknown; valueFrom?: unknown }) =>
+        variable.name === COMPUTER_TOKEN &&
+        variable.value === token &&
+        variable.valueFrom === undefined,
+    ),
+  );
 }
 
 export type SandboxProviderOptions = {
@@ -178,6 +218,11 @@ export type SandboxProviderOptions = {
   token?: string | (() => Promise<string>);
   ca?: string;
   fetchImpl?: typeof fetch;
+  /**
+   * The deployment's `COMPUTER_TOKEN`, from which each computer's own token is derived and written into its Sandbox.
+   * Never written into one itself. Absent, a computer is given no token, and refuses to start, as without a token at all.
+   */
+  computerToken?: string;
   /** How long a computer is waited on to come back, by `update`'s restart and at most by `locate`. */
   resumeTimeoutMs?: number;
   /**
@@ -396,6 +441,22 @@ export function createSandboxComputerProvider(
   const read = (key: ComputerKey) =>
     call(`/${sandboxNameFor(key)}`) as Promise<Sandbox | undefined>;
 
+  /** This computer's own token, or none where the deployment set none. */
+  const tokenOf = (key: ComputerKey) =>
+    options.computerToken
+      ? ownComputerToken(options.computerToken, key)
+      : undefined;
+
+  /** The pod template for this computer, cut from the mounted one. */
+  const templateFor = (key: ComputerKey) =>
+    podTemplateFor(options.template.podTemplate, key, tokenOf(key));
+
+  /** Whether this Sandbox holds the token the server sends it. See {@link holdsToken}. */
+  function holdsOwnToken(sandbox: Sandbox, key: ComputerKey): boolean {
+    const token = tokenOf(key);
+    return token === undefined || holdsToken(sandbox.spec?.podTemplate, token);
+  }
+
   /** The desired body for a computer. Created once, then only ever patched. */
   function desired(key: ComputerKey): Record<string, unknown> {
     return {
@@ -426,7 +487,7 @@ export function createSandboxComputerProvider(
         // `podTemplate` is required and `volumeClaimTemplates` is what makes a suspend worth doing,
         // and both arrive together from the mounted template.
         ...options.template,
-        podTemplate: podTemplateFor(options.template.podTemplate, key),
+        podTemplate: templateFor(key),
       },
     };
   }
@@ -461,11 +522,14 @@ export function createSandboxComputerProvider(
     }
   }
 
-  /** Whether this computer runs a different image from the one a new computer would get. */
-  function isOutOfDate(sandbox: Sandbox): boolean {
+  /**
+   * Whether this computer runs a different image from the one a new computer would get, or holds a token other than
+   * its own (one from before computers had their own, which the server no longer sends).
+   */
+  function isOutOfDate(sandbox: Sandbox, key: ComputerKey): boolean {
     return (
       imagesOf(sandbox.spec?.podTemplate) !==
-      imagesOf(options.template.podTemplate)
+        imagesOf(options.template.podTemplate) || !holdsOwnToken(sandbox, key)
     );
   }
 
@@ -494,7 +558,7 @@ export function createSandboxComputerProvider(
         {
           op: "replace",
           path: "/spec/podTemplate",
-          value: podTemplateFor(options.template.podTemplate, key),
+          value: templateFor(key),
         },
         { op: "add", path: "/spec/operatingMode", value: operatingMode },
       ]),
@@ -511,11 +575,12 @@ export function createSandboxComputerProvider(
   async function waitForSuspended(
     key: ComputerKey,
     generation: number | undefined,
-  ): Promise<void> {
-    const deadline = Date.now() + resumeTimeoutMs;
+    budgetMs: number = resumeTimeoutMs,
+  ): Promise<boolean> {
+    const deadline = Date.now() + budgetMs;
     for (;;) {
       const sandbox = await read(key);
-      if (!sandbox) return;
+      if (!sandbox) return true;
       const suspended = sandbox.status?.conditions?.find(
         (condition) => condition.type === "Suspended",
       );
@@ -524,20 +589,118 @@ export function createSandboxComputerProvider(
         (generation === undefined ||
           (suspended.observedGeneration ?? 0) >= generation)
       ) {
-        return;
+        return true;
       }
-      if (Date.now() >= deadline) {
+      // Not a verdict here: whoever asked says what running out of time means.
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+
+  /**
+   * Whether a Sandbox being suspended has lost its pod yet: its Suspended condition, at the generation it is now.
+   *
+   * Only asked of one whose spec says Suspended. One whose spec says Running is not being suspended, whatever an old
+   * condition says, and a Sandbox whose controller reports no Suspended condition at all says nothing either way: both
+   * are taken as they were before this was asked.
+   */
+  function suspendSettled(sandbox: Sandbox): boolean {
+    if (sandbox.spec?.operatingMode !== "Suspended") return true;
+    const suspended = sandbox.status?.conditions?.find(
+      (condition) => condition.type === "Suspended",
+    );
+    if (!suspended) return true;
+    const generation = sandbox.metadata?.generation;
+    return (
+      suspended.status === "True" &&
+      (generation === undefined ||
+        (suspended.observedGeneration ?? 0) >= generation)
+    );
+  }
+
+  /** The caller is told the computer is still starting, as `waitForReady` does when its wait runs out. */
+  function stillStarting(key: ComputerKey, waitedMs: number): never {
+    console.warn(
+      JSON.stringify({
+        type: "computer-sandbox-still-starting",
+        computer: computerKeyText(key),
+        waitedMs,
+      }),
+    );
+    throw new ComputerStillStartingError();
+  }
+
+  /** `work`, or the still-starting answer once `budgetMs` has passed. `work` goes on either way. */
+  async function within<T>(
+    key: ComputerKey,
+    work: Promise<T>,
+    budgetMs: number,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), budgetMs);
+    });
+    try {
+      const outcome = await Promise.race([work, late]);
+      if (outcome === "late") return stillStarting(key, budgetMs);
+      return outcome as T;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Bring a Sandbox whose template was just replaced with `operatingMode: Suspended` back up on it: wait for the old
+   * pod to be gone, resume, and wait for the new one. The only way the controller replaces a pod (`replaceTemplate`).
+   *
+   * Remembered per computer until it finishes, so a `locate` meanwhile waits for it rather than resuming the Sandbox
+   * under it, which would leave the old pod, on its old template, running. A failure is logged here: the computer is
+   * on its new template and suspended, and the next action wakes it as it wakes an idle one.
+   */
+  function restart(
+    key: ComputerKey,
+    generation: number | undefined,
+  ): Promise<void> {
+    const id = computerKeyText(key);
+    const restarted = (async () => {
+      if (!(await waitForSuspended(key, generation))) {
         throw new SandboxError(
           `The computer for ${computerKeyText(key)} did not stop within ${Math.round(resumeTimeoutMs / 1000)}s to take its new image.`,
         );
       }
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-    }
+      // Reset while it was stopping: there is nothing left to bring back.
+      if (!(await read(key))) return;
+      await call(`/${sandboxNameFor(key)}`, {
+        method: "PATCH",
+        contentType: "application/merge-patch+json",
+        body: JSON.stringify({ spec: { operatingMode: "Running" } }),
+      });
+      await waitForReady(key);
+    })();
+    lastRestart.set(id, restarted);
+    restarted
+      .catch((error: unknown) => {
+        console.error(
+          JSON.stringify({
+            type: "computer-sandbox-update-resume-failed",
+            computer: id,
+            reason: error instanceof Error ? error.message : String(error),
+            note: "The computer is on its new image and suspended; the next action wakes it.",
+          }),
+        );
+      })
+      .finally(() => {
+        if (lastRestart.get(id) === restarted) lastRestart.delete(id);
+      });
+    return restarted;
   }
 
   return {
     name: "sandbox",
     isolation: "per-person",
+
+    /** The token written into this computer's Sandbox: its own, never the deployment's. See `podTemplateFor`. */
+    tokenFor: (key, deploymentToken) => ownComputerToken(deploymentToken, key),
 
     /**
      * The computer this seat is on, creating or waking it.
@@ -550,6 +713,12 @@ export function createSandboxComputerProvider(
      */
     async locate(seat: ComputerSeat): Promise<string> {
       const key = seat.key;
+      // One budget for every wait below, so the person's request is answered inside it (`locateWaitMs`).
+      const deadline = Date.now() + locateWaitMs;
+      const left = () => Math.max(0, deadline - Date.now());
+      // A restart already under way is finished first, never resumed under (see `restart`).
+      const pending = lastRestart.get(computerKeyText(key));
+      if (pending) await within(key, pending, left());
       const existing = await read(key);
       if (!existing) {
         await call("", {
@@ -558,6 +727,17 @@ export function createSandboxComputerProvider(
           body: JSON.stringify(desired(key)),
         });
       } else if (isSuspended(existing)) {
+        /*
+         * Its old pod gone first, when it is still going: suspended by a restart on another server, or by the culler a
+         * moment ago. Resumed before that, the controller keeps the pod it has, cut from the template it had, and a new
+         * template (a new image, the computer's own token) would never reach it.
+         */
+        if (
+          !suspendSettled(existing) &&
+          !(await waitForSuspended(key, existing.metadata?.generation, left()))
+        ) {
+          stillStarting(key, locateWaitMs);
+        }
         /*
          * Woken, because somebody is asking for it.
          *
@@ -570,14 +750,15 @@ export function createSandboxComputerProvider(
          * says now, and the volumes are the Sandbox's own and are not in the patch. A computer woken
          * without this runs the image it was first created with for ever.
          */
-        if (isOutOfDate(existing)) {
+        if (isOutOfDate(existing, key)) {
           await replaceTemplate(key, "Running");
           console.info(
             JSON.stringify({
               type: "computer-sandbox-updated",
               computer: computerKeyText(key),
-              reason:
-                "it was woken, and its image differed from the current one",
+              reason: holdsOwnToken(existing, key)
+                ? "it was woken, and its image differed from the current one"
+                : "it was woken, and it held a token other than its own",
               from: imagesOf(existing.spec?.podTemplate),
               to: imagesOf(options.template.podTemplate),
             }),
@@ -589,11 +770,27 @@ export function createSandboxComputerProvider(
             body: JSON.stringify({ spec: { operatingMode: "Running" } }),
           });
         }
+      } else if (!holdsOwnToken(existing, key)) {
+        /*
+         * RUNNING, AND HOLDING A TOKEN OTHER THAN ITS OWN: made before computers had their own, so it holds the
+         * deployment's. Every call the server makes to it is refused, so leaving it is not leaving a working computer
+         * alone, and it carries the key to every other person's computer to whatever runs on it. Restarted onto its own
+         * token the way `update` restarts one onto a new image, which keeps its volumes, its files and its sign-ins.
+         */
+        const patched = await replaceTemplate(key, "Suspended");
+        console.info(
+          JSON.stringify({
+            type: "computer-sandbox-updated",
+            computer: computerKeyText(key),
+            reason: "it held a token other than its own",
+          }),
+        );
+        await within(key, restart(key, patched?.metadata?.generation), left());
       }
       // A computer that is running on an older image is left alone here. It may be in the middle of
       // a task, and restarting it under the Bot is the person's decision, which is `update`.
 
-      const ready = await waitForReady(key, locateWaitMs);
+      const ready = await waitForReady(key, left());
       const fqdn = ready.status?.serviceFQDN;
       if (!fqdn) {
         throw new SandboxError(
@@ -665,12 +862,11 @@ export function createSandboxComputerProvider(
      * new image, and the next action wakes it exactly as it wakes an idle one.
      */
     async update(key: ComputerKey) {
-      const id = computerKeyText(key);
       const sandbox = await read(key);
       if (!sandbox) return { updated: false, wasRunning: false };
       const from = imagesOf(sandbox.spec?.podTemplate);
       const to = imagesOf(options.template.podTemplate);
-      if (!isOutOfDate(sandbox)) {
+      if (!isOutOfDate(sandbox, key)) {
         return { updated: false, wasRunning: !isSuspended(sandbox), from, to };
       }
       if (isSuspended(sandbox)) {
@@ -678,32 +874,8 @@ export function createSandboxComputerProvider(
         return { updated: true, wasRunning: false, from, to };
       }
       const patched = await replaceTemplate(key, "Suspended");
-      const restarted = (async () => {
-        await waitForSuspended(key, patched?.metadata?.generation);
-        // Reset while it was stopping: there is nothing left to bring back.
-        if (!(await read(key))) return;
-        await call(`/${sandboxNameFor(key)}`, {
-          method: "PATCH",
-          contentType: "application/merge-patch+json",
-          body: JSON.stringify({ spec: { operatingMode: "Running" } }),
-        });
-        await waitForReady(key);
-      })();
-      lastRestart.set(id, restarted);
-      restarted
-        .catch((error: unknown) => {
-          console.error(
-            JSON.stringify({
-              type: "computer-sandbox-update-resume-failed",
-              computer: id,
-              reason: error instanceof Error ? error.message : String(error),
-              note: "The computer is on its new image and suspended; the next action wakes it.",
-            }),
-          );
-        })
-        .finally(() => {
-          if (lastRestart.get(id) === restarted) lastRestart.delete(id);
-        });
+      // Not awaited: see above. Its failure is logged by `restart`.
+      void restart(key, patched?.metadata?.generation).catch(() => undefined);
       return { updated: true, wasRunning: true, from, to };
     },
 
@@ -719,7 +891,7 @@ export function createSandboxComputerProvider(
           key: keyOfSandbox(sandbox),
           status:
             isSuspended(sandbox) || !isReady(sandbox) ? "stopped" : "running",
-          updateAvailable: isOutOfDate(sandbox),
+          updateAvailable: isOutOfDate(sandbox, keyOfSandbox(sandbox)),
           url: sandbox.status?.serviceFQDN
             ? `http://${sandbox.status.serviceFQDN}:4100`
             : "",
