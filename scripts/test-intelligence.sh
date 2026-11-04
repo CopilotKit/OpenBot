@@ -35,8 +35,10 @@
 set -euo pipefail
 
 # The Intelligence OpenBot's tests and CI run against, by digest. It must serve every capability in
-# CAPABILITIES below; the release that adds them replaces this pin.
-DEFAULT_IMAGE="ghcr.io/copilotkit/intelligence/composite:0.15.1@sha256:cda42551222782133e9e4647ed0981180e9cd101df44a84f1040062467e6cf50"
+# CAPABILITIES below. This is a release-validation build of CopilotKit/Intelligence#2210, not a
+# release: repin it to the Intelligence release that contains #2210 before CopilotKit/OpenBot#987
+# merges.
+DEFAULT_IMAGE="ghcr.io/copilotkit/intelligence/composite:0.15.2-validation.c2e70fa5fda4@sha256:3659cf2c3a5c481e571484931203c390f5e8115ea07879a14eb4c98c8c69a098"
 INTELLIGENCE_IMAGE="${INTELLIGENCE_IMAGE:-$DEFAULT_IMAGE}"
 NAME="${TEST_INTELLIGENCE_NAME:-openbot-test-intelligence}"
 PORT="${TEST_INTELLIGENCE_PORT:-7480}"
