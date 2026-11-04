@@ -24,8 +24,8 @@ export function Welcome({
       </div>
       <h1>Set up OpenBot</h1>
       <p className="lede big">
-        Installs OpenBot and CopilotKit Intelligence on this computer. The first
-        setup takes about 10 minutes.
+        Installs the OpenBot app and backend on this computer. The first setup
+        takes about 10 minutes.
       </p>
       <div className="row">
         <button type="button" onClick={onInstall}>

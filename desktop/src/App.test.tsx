@@ -623,7 +623,7 @@ test("with a CLI, the first screen is Install, local by default with nothing to 
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
   expect(
     view.getByText(
-      "Installs OpenBot and CopilotKit Intelligence on this computer. The first setup takes about 10 minutes.",
+      "Installs the OpenBot app and backend on this computer. The first setup takes about 10 minutes.",
     ),
   ).toBeTruthy();
   expect(buttons(view)).toEqual(["Install", HOSTED_LINK]);
@@ -808,6 +808,11 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
   // of Intelligence's runs before the agreement.
   await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  expect(
+    view.getByText(
+      "Your conversations and files are stored on this computer. Signing in does not send them to CopilotKit.",
+    ),
+  ).toBeTruthy();
   expect(stepLabel(view)).toBe("Account");
   await waitFor(() =>
     expect(installationCalls().map((call) => call.command)).toEqual([
@@ -818,10 +823,10 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await userEvent.click(
     view.getByRole("button", { name: "Sign in to CopilotKit" }),
   );
-  await view.findByRole("heading", { name: "Accept the evaluation agreement" });
+  await view.findByRole("heading", { name: "Accept the license agreement" });
   expect(
     view.getByText(
-      "To run OpenBot on this computer, accept the CopilotKit Intelligence evaluation agreement for Acme.",
+      "To run OpenBot on this computer, accept the CopilotKit Intelligence license agreement for Acme.",
     ),
   ).toBeTruthy();
   expect(view.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
@@ -891,7 +896,7 @@ test("the local sequence starts when installation completes and survives the pro
     invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
   ).toMatchObject({ root: "/tmp/local-eval-overlap" });
   // Working behind this screen says nothing on it: its progress has its own step.
-  expect(view.queryByText(/Setting up Intelligence/)).toBeNull();
+  expect(view.queryByText(/Setting up OpenBot/)).toBeNull();
   expect(view.queryByRole("alert", { name: "Intelligence" })).toBeNull();
   // A local first run has nothing behind this screen to go back to.
   expect(view.queryByRole("button", { name: "Back" })).toBeNull();
@@ -925,7 +930,7 @@ test("Continue during setup shows Getting ready, which starts and opens OpenBot 
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Getting ready" });
   expect(stepLabel(view)).toBe("Start");
-  const row = view.getByRole("listitem", { name: "Setting up Intelligence" });
+  const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
   expect(row.textContent).toContain("In progress");
   expectPlain(view);
   await act(async () => setUp.resolve(localStatus("starting", "valid")));
@@ -1138,7 +1143,7 @@ test("while a CLI step runs only Cancel is offered, and Cancel stops the call an
   ).toEqual({
     attempt: (setup?.args as { attempt: string } | undefined)?.attempt,
   });
-  const row = view.getByRole("listitem", { name: "Setting up Intelligence" });
+  const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
   await waitFor(() =>
     expect(row.textContent).toContain(
       "Stopped at your request before it finished.",
@@ -1184,7 +1189,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   await view.findByRole("heading", { name: "Getting ready" });
   // Continue does not retry a blocked step: Retry does.
   expect(setups).toBe(1);
-  const row = view.getByRole("listitem", { name: "Setting up Intelligence" });
+  const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
   expect(row.textContent).toContain(
     "Intelligence cannot start until the software it runs on is running.",
   );
