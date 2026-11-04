@@ -7,7 +7,7 @@
     "extensionApi": 1,
     "database": {
       "from": ["0053_identity_links"],
-      "to": "0074_single_user_identity",
+      "to": "0075_individual_check_ins",
       "rollbackCompatible": false
     },
     "intelligenceCapabilities": []
