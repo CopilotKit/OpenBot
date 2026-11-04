@@ -13,6 +13,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - OpenBot's product run counts no longer include the run the CopilotKit runtime makes to name each new conversation, or its suggestion runs: only work a person, routine, subagent or hop started is counted. A subagent's runs now report the surface of the run that started it instead of `unknown`.
 - A headless turn or a Bot-to-Bot hop that OpenBot stops (a cancel, a pause, the turn's deadline) is recorded with Intelligence as stopped before its run ends, so Intelligence reports it as cancelled rather than finished. This takes a CopilotKit runtime that can record a stop; on `@copilotkit/runtime` 1.83.0 nothing is recorded and stops work as before. A paused hop now waits for its run to close on the platform before it gives up, where it used to leave that run without an end.
 - With product telemetry on, each run now also tells Intelligence which OpenBot deployment, scoped user, trigger, surface and task it belongs to, as the shared analytics context (version 1) on the run's thread lock. It reaches Intelligence once OpenBot runs a CopilotKit runtime that forwards it; `@copilotkit/runtime` 1.83.0 drops it. With telemetry off nothing is sent, and a value a browser sent under the same key is removed.
+- Naming a new conversation, and the runtime's suggestions route, now run the Bot with none of its
+  tools. The CopilotKit runtime names a conversation by running its Bot again on a title prompt;
+  since every Bot could start subagents, that hidden run sometimes started one, which acted with all
+  the Bot's permissions, out of sight, and kept going after Stop. A person's own runs, the subagents
+  they start, headless turns and hops keep every tool as before. A remote Bot's naming run is also
+  sent no signed run, so a callback from it is refused.
 - The sign-in page the Desktop app opens now explains OpenBot setup — you are setting up a
   CopilotKit account for the personal edition of OpenBot, and your data stays on your computer —
   instead of the generic CopilotKit pitch. The app adds `mode=openbot` to the sign-in URL it opens;

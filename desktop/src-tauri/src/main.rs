@@ -5205,15 +5205,16 @@ fn main() {
         });
     }
     let context = tauri::generate_context!();
-    // The one place the updater plugin is registered, and only once its configuration exists.
+    // A `shell-updater` build with compiled trust supplies `plugins.updater` when no bundled block
+    // (such as the signed Mac overlay) already does. Registration itself happens once, in `setup`.
     #[cfg(feature = "shell-updater")]
-    let (context, shell_updater) = {
+    let context = {
         let mut context = context;
-        let register = shell_updates::configure_plugin(
+        shell_updates::configure_plugin(
             &mut context.config_mut().plugins,
             shell_updates::compiled_trust().ok().flatten().as_ref(),
         );
-        (context, register)
+        context
     };
     tauri::Builder::default()
         // A second launch is somebody looking for the window they already have, not a request for a
@@ -5225,6 +5226,8 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Only so the window can restart into what the updater wrote.
+        .plugin(tauri_plugin_process::init())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
@@ -5293,11 +5296,22 @@ fn main() {
                 let _ = window.hide();
             }
         })
-        .setup(move |app| {
-            #[cfg(feature = "shell-updater")]
-            if shell_updater {
+        .setup(|app| {
+            // A signed Mac build updates itself. The window asks once at launch and installs only
+            // if the person says yes; the plugin refuses anything whose minisign signature does not
+            // match the public key compiled in from `tauri.macos-signing.conf.json`, so the
+            // endpoint is a place to look rather than something to trust. Only that overlay carries
+            // `plugins.updater`, so every other build (desktop CI, local, the unsigned release
+            // installers) has no updater: it cannot verify anything, and offering an update it
+            // would then refuse is worse than offering none. The window's check finds no plugin
+            // and stays silent. A `shell-updater` build may also have filled the block in from its
+            // compiled trust before the app was built (see above); either way the block decides,
+            // and this is the one place the plugin is registered.
+            if app.config().plugins.0.contains_key("updater") {
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
+            } else {
+                eprintln!("[updater] not configured in this build; no update check");
             }
             desktop_telemetry::initialize(app.handle());
             if let Some(root) = app
