@@ -364,6 +364,118 @@ describe("copying an existing deployment's vault, apps and connections into Inte
     );
   }, 60_000);
 
+  test("every app id the previous release could mint, at its widest, crosses whole with its connections", async () => {
+    const database = await freshDeployment();
+    const person = `copy-wide-${suite}`;
+    await database
+      .insert(users)
+      .values({ id: person, email: `${person}@example.test`, name: "Wide" });
+    /*
+     * The widest of each path that ever wrote mcp_servers. Added by address: `^[a-z0-9][a-z0-9-]{0,38}
+     * [a-z0-9]$` since the first release, so 40 characters. Brokered: `composio-` or `arcade-` before
+     * the vendor's own `[A-Za-z0-9_-]+` slug, whose length nothing here ever bounded, so one at the
+     * 1024 characters Intelligence takes. Catalogue keys are a fixed set, all shorter.
+     */
+    const byAddress = `a${suite}${"-0".repeat(15)}z`;
+    const slug = `Google_Calendar-v2_${suite}_`.padEnd(
+      1024 - "composio-".length,
+      "x",
+    );
+    const brokered = `composio-${slug}`;
+    const arcade = `arcade-Google_Calendar_${suite}`;
+    expect(byAddress).toMatch(/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/);
+    expect(byAddress).toHaveLength(40);
+    expect(brokered).toHaveLength(1024);
+    const token = randomUUID();
+    await database.insert(credentials).values({
+      id: token,
+      kind: "mcp_user_token",
+      provider: byAddress,
+      keyId: person,
+      metadata: { server: byAddress, scope: "read" },
+      encryptedValue: await encryptSecret(KEY, "wide-token"),
+    });
+    await database.insert(mcpServers).values([
+      {
+        id: byAddress,
+        // Typed by an administrator, and never bounded.
+        title: `Wide app ${"t".repeat(5000)}`,
+        vendor: "mcp.example.com",
+        url: `https://mcp.example.com/${"p".repeat(5000)}`,
+        entraScope: `api://${"s".repeat(2000)}/.default`,
+        addedBy: person,
+      },
+      {
+        id: brokered,
+        title: "Google Calendar",
+        // Composio may publish an empty logo, and the release before this one stored it.
+        logo: "",
+        vendor: "composio",
+        url: `composio://${slug}`,
+        provenance: "composio",
+        authScheme: "OAUTH2",
+        accountMode: "personal",
+      },
+      {
+        id: arcade,
+        title: "Google Calendar",
+        vendor: "arcade",
+        url: `arcade://Google_Calendar_${suite}`,
+        provenance: "arcade",
+        accountMode: "personal",
+      },
+    ]);
+    await database.insert(mcpUserCredentials).values({
+      serverId: byAddress,
+      userId: person,
+      credentialId: token,
+      scope: "read",
+    });
+    await database.insert(brokeredConnections).values({
+      provider: "composio",
+      app: slug,
+      holder: "person",
+      userId: person,
+      vendorUserId: person,
+    });
+    const directory = await replica();
+    cleanup.push(async () => {
+      const after = await replica();
+      for (const id of [byAddress, brokered, arcade])
+        if (await after.findServer(id)) await after.removeServer(id);
+      await after.removeConnection(
+        brokeredId("composio", slug, "person", person),
+      );
+      await after.purgeSecret(token);
+    });
+
+    const outcome = await copyLocalVaultToIntelligence(
+      database,
+      directory,
+      KEY,
+    );
+    expect(outcome.connections).toMatchObject({
+      kind: "copied",
+      servers: 3,
+      connections: 2,
+    });
+    const client = directory.client;
+    for (const id of [byAddress, brokered, arcade])
+      expect((await client.toolServers.get(id))?.id).toBe(id);
+    expect((await client.toolServers.get(brokered))?.logo).toBe("");
+    expect((await client.toolServers.get(byAddress))?.title).toHaveLength(
+      "Wide app ".length + 5000,
+    );
+    expect(
+      await client.connections.get(grantId(byAddress, person)),
+    ).toMatchObject({ kind: "grant", credentialId: token });
+    expect(
+      await client.connections.get(
+        brokeredId("composio", slug, "person", person),
+      ),
+    ).toMatchObject({ kind: "brokered", app: slug });
+  }, 60_000);
+
   test("a secret the local key cannot decrypt stops the boot, names it, and records nothing", async () => {
     const database = await freshDeployment();
     const broken = randomUUID();
