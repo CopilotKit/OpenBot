@@ -302,7 +302,10 @@ import { createTaskStore } from "./tasks/store";
 import { createTaskTurn } from "./tasks/turn";
 import { createTeamBots } from "./team-bots/team-bots";
 import { createProductTelemetry } from "./telemetry/product";
-import { productHeadlessBoundary } from "./telemetry/product-boundaries";
+import {
+  deliveryLineage,
+  productHeadlessBoundary,
+} from "./telemetry/product-boundaries";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -1986,6 +1989,8 @@ const actorAgentResolver = createActorAgentResolver({
         botId,
         threadId: input.threadId,
         runId: input.runId,
+        // The subagent carries on the asking run's task, on the asking run's surface.
+        ...productTelemetry.lineageOf(actorId, input.forwardedProps),
         initiator: initiator ?? PERSON_INITIATOR,
         ...(depth ? { depth } : {}),
       }),
@@ -2298,6 +2303,7 @@ const deliveryRouter = createDeliveryRouter({
           content: input.text,
         },
         initiator: PERSON_INITIATOR,
+        telemetry: deliveryLineage(input.source, input.runId),
         signal: input.signal,
       });
       if (result.replyText)
