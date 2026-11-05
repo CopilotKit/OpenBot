@@ -126,15 +126,15 @@ jobs:
       becomes_latest: ${{ steps.latest.outputs.becomes_latest }}
       image_repository: ${{ steps.registry.outputs.repository }}
     steps:
-      # A final cut from a candidate is compared with the candidate's tag below, so it needs the
-      # whole history and the tags. Every other release needs only the commit itself.
+      # The whole history and the tags: the policy check reads the database of each release it
+      # upgrades from at that release's tag, and a final cut from a candidate is compared with the
+      # candidate's tag.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
-          fetch-depth: ${{ needs.metadata.outputs.final_from_candidate == 'true' && '0' || '1' }}
-          fetch-tags: ${{ needs.metadata.outputs.final_from_candidate == 'true' }}
       # No cache. Nothing is installed here, so there is nothing to gain, and a cache that a
       # release branch can restore is one that a less careful branch could have written.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
