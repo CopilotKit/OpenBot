@@ -86,7 +86,9 @@ import {
   WorkspaceFileTooLargeError,
   WorkspacePathError,
 } from "./workspace";
-import { createWorkspaces } from "./workspaces";
+import type { ViewerHandle } from "./live-shell";
+import { parseTerminalMessage, TERMINAL_UNAVAILABLE } from "./terminal-socket";
+import { createWorkspaces, type Shell } from "./workspaces";
 
 /**
  * The Bot's computer: one long-lived browser, reachable over HTTP.
@@ -737,12 +739,87 @@ async function notePersonFilled(
   }
 }
 
-/** What a live-screen socket carries: the Bot whose screen it is showing. */
+/** What a live-screen or terminal socket carries: the Bot whose screen or shell it is showing. */
 type StreamData = {
   botId: string;
   /** The person's input so far, applied one message after another. */
   inputs?: Promise<void>;
+  /** A terminal rather than the screen. */
+  kind?: "terminal";
+  /** Why this computer shows no terminal, said once the socket opens. */
+  refused?: string;
+  /** The shell a terminal socket watches, and its place among the viewers. */
+  shell?: Shell;
+  viewer?: ViewerHandle;
+  closed?: boolean;
 };
+
+/**
+ * Watch the seat's live shell: the screen as it is, then every byte as it arrives (live-shell.ts).
+ *
+ * Watching needs nothing more than the socket. Typing needs the wheel, asked of the control state on
+ * every message, the same question the live screen asks.
+ */
+async function openTerminal(ws: ServerWebSocket<StreamData>): Promise<void> {
+  if (ws.data.refused) {
+    ws.send(
+      JSON.stringify({ type: "error", error: ws.data.refused, fatal: true }),
+    );
+    ws.close();
+    return;
+  }
+  try {
+    const { shell } = await workspaces.for(ws.data.botId);
+    if (ws.data.closed) return;
+    ws.data.shell = shell;
+    ws.data.viewer = shell.terminal.attach({
+      binary: (bytes) => {
+        // Bun answers 0 for a message it dropped because the socket has gone.
+        if (ws.send(bytes) === 0 && bytes.byteLength > 0)
+          throw new Error("The socket is closed.");
+      },
+      text: (message) => {
+        ws.send(JSON.stringify(message));
+      },
+    });
+  } catch (error) {
+    ws.send(
+      JSON.stringify({
+        type: "error",
+        error: describe(error, "The terminal could not be started."),
+      }),
+    );
+    ws.close();
+  }
+}
+
+function applyTerminalMessage(
+  ws: ServerWebSocket<StreamData>,
+  raw: string | Buffer,
+): void {
+  const parsed = parseTerminalMessage(raw);
+  if (!parsed.ok) {
+    ws.send(JSON.stringify({ type: "error", error: parsed.error }));
+    return;
+  }
+  const { message } = parsed;
+  const shell = ws.data.shell;
+  if (!shell) return;
+  if (message.type === "ack") {
+    ws.data.viewer?.ack(message.bytes);
+    return;
+  }
+  if (message.type === "resize") {
+    shell.terminal.resize(message.cols, message.rows);
+    return;
+  }
+  // The person's own keystrokes, only while they hold the wheel. Never a Bot's action, so never audited as one.
+  if (!sessions.for(ws.data.botId).control.humanMayDrive()) {
+    ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
+    return;
+  }
+  shell.terminal.input(message.data);
+}
 
 /**
  * Apply one thing the person did on the live screen, after asking whether the screen is theirs and
@@ -844,6 +921,7 @@ serve<StreamData>({
    */
   websocket: {
     async open(ws) {
+      if (ws.data.kind === "terminal") return openTerminal(ws);
       const session = sessions.for(ws.data.botId);
       /*
        * Claimed before anything is awaited, and that order is the fix.
@@ -918,6 +996,10 @@ serve<StreamData>({
      * message, and a message refused or failed says so and lets the next one through.
      */
     message(ws, raw) {
+      if (ws.data.kind === "terminal") {
+        applyTerminalMessage(ws, raw);
+        return;
+      }
       ws.data.inputs = (ws.data.inputs ?? Promise.resolve())
         .then(() => applyInput(ws, raw))
         .catch((error: unknown) => {
@@ -931,6 +1013,11 @@ serve<StreamData>({
     },
 
     async close(ws) {
+      if (ws.data.kind === "terminal") {
+        ws.data.closed = true;
+        ws.data.viewer?.detach();
+        return;
+      }
       // Names the socket, so it can only ever give up its own screen. A superseded socket closing
       // after its replacement has started releases nothing; see viewer.ts.
       //
@@ -987,7 +1074,7 @@ serve<StreamData>({
       ? null
       : refusedHere(
           OWNER,
-          url.pathname === "/stream"
+          url.pathname === "/stream" || url.pathname === "/terminal"
             ? seatOf(request, url.searchParams).bot
             : requestBot,
         );
@@ -1045,6 +1132,30 @@ serve<StreamData>({
           return json({ error: "That is not a usable bot id." }, 400);
         }
         if (server.upgrade(request, { data: { botId: streamBotId } }))
+          return undefined as unknown as Response;
+        return json({ error: "Expected a WebSocket upgrade." }, 400);
+      }
+
+      /*
+       * The seat's live shell, as a terminal (live-shell.ts). Named in the query for the reason the
+       * stream is. A person's own browser has no shell, so its id is refused here. Where commands are
+       * turned off the socket still opens, to say so, which a refused upgrade could not.
+       */
+      if (url.pathname === "/terminal") {
+        const named = seatOf(request, url.searchParams);
+        if (named.seat === undefined)
+          return json({ error: "That is not a usable bot id." }, 400);
+        if (isPersonBrowserId(named.bot))
+          return json({ error: PERSONS_OWN_BROWSER }, 403);
+        if (
+          server.upgrade(request, {
+            data: {
+              botId: named.seat,
+              kind: "terminal" as const,
+              ...(RUNTIME.allowExec ? {} : { refused: TERMINAL_UNAVAILABLE }),
+            },
+          })
+        )
           return undefined as unknown as Response;
         return json({ error: "Expected a WebSocket upgrade." }, 400);
       }
@@ -1351,6 +1462,12 @@ serve<StreamData>({
         session.control.interrupt(
           "The computer stopped; the previous task was interrupted.",
         );
+        // Its shell too: stopping a computer stops what it was running.
+        workspaces
+          .existingShell(botId)
+          ?.terminal.restart(
+            "The computer stopped, so the shell ended. A new one starts when it's next used.",
+          );
         await botBrowser.settled(botId);
         return json({ stopped: true, wasRunning });
       }
@@ -1390,6 +1507,11 @@ serve<StreamData>({
         session.control.interrupt(
           "The computer was reset; the previous task was interrupted.",
         );
+        workspaces
+          .existingShell(botId)
+          ?.terminal.restart(
+            "The computer was reset, so the shell ended. A new one starts when it's next used.",
+          );
         await botBrowser.settled(botId);
         /*
          * And a new run, because the browser this session described is gone.
