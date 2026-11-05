@@ -147,3 +147,20 @@ test("who holds the wheel is saved with it, a state saved before it loads, and a
   writeFileSync(path, JSON.stringify({ ...saved, heldBy: "user-1" }));
   expect(() => createControl(undefined, { store })).toThrow();
 });
+
+test("a challenge on a long address is recorded, and later requests still save", () => {
+  const { control } = fixture();
+  const next = `https://shop.example.com/${"a/".repeat(500)}`;
+  const url = `https://shop.example.com/login?next=${next}&__cf_chl_rt_tk=abc`;
+  const first = control.requestHelp(
+    "Complete the challenge.",
+    "call-1",
+    "cloudflare",
+    url,
+  ).request!;
+  expect(first.url).toBe(`https://shop.example.com/login?next=${next}`);
+  expect(
+    control.requestHelp("Sign in", "call-2", "model", "https://example.com/")
+      .request,
+  ).toBeDefined();
+});

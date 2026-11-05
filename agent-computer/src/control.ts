@@ -67,9 +67,15 @@ export function pageWorthKeeping(url: unknown): string | undefined {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
       return undefined;
-    for (const name of [...parsed.searchParams.keys()])
-      if (name.startsWith("__cf_chl_")) parsed.searchParams.delete(name);
-    return parsed.toString();
+    // Filter the query as written: rewriting it through `searchParams` re-encodes every value, so a
+    // kept address could outgrow MAX_REQUEST_URL, which the store refuses to save.
+    const kept = parsed.search
+      .slice(1)
+      .split("&")
+      .filter((pair) => !pair.startsWith("__cf_chl_"));
+    parsed.search = kept.join("&");
+    const page = parsed.toString();
+    return page.length > MAX_REQUEST_URL ? undefined : page;
   } catch {
     return undefined;
   }

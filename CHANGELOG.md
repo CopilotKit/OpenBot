@@ -145,6 +145,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   its tools to every Bot, including Bots made later. It can no longer be removed, and a Bot's
   Routines tools can no longer be taken away.
 
+### A Cloudflare challenge on a long address no longer stops a Bot's computer
+
+When a Bot met a Cloudflare challenge, the computer kept the page's address without the challenge's one-time `__cf_chl_*` tokens. Removing them rewrote the rest of the query, so characters such as `:` and `/` came back as `%3A` and `%2F`, and an address that fit the 2,048-character limit could grow past it. The computer then could not save the request, and from then on refused every action from that Bot with "The handoff state could not be saved". The tokens are now removed from the query as it was written, and an address still too long is not kept.
+
 ### A personal edition for one person on one computer
 
 Set `OPENBOT_EDITION=personal`, with single-user mode and one computer, for an OpenBot without the

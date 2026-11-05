@@ -6,7 +6,7 @@ import {
   HELP_REQUEST_TTL_MS,
   pageWorthKeeping,
 } from "../src/control";
-import type { StoredControl } from "../src/control-store";
+import { MAX_REQUEST_URL, type StoredControl } from "../src/control-store";
 import { createSessions } from "../src/sessions";
 
 /** A store that survives "restarts": a new control built on it is the computer coming back up. */
@@ -284,6 +284,15 @@ describe("only a real page is worth keeping", () => {
         "https://chatgpt.com/share/abc?__cf_chl_tk=x&ref=mail&__cf_chl_f_tk=y",
       ),
     ).toBe("https://chatgpt.com/share/abc?ref=mail");
+  });
+
+  test("dropping a challenge token leaves the rest of the query as it was written", () => {
+    const next = `https://shop.example.com/${"a/".repeat(500)}`;
+    const url = `https://shop.example.com/login?next=${next}&flag&__cf_chl_rt_tk=abc`;
+    expect(url.length).toBeLessThan(MAX_REQUEST_URL);
+    expect(pageWorthKeeping(url)).toBe(
+      `https://shop.example.com/login?next=${next}&flag`,
+    );
   });
 });
 
