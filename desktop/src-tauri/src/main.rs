@@ -4559,13 +4559,14 @@ fn read_desktop_status<R: tauri::Runtime>(
                 .filter(|output| output.status.success())
                 .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
                 .unwrap_or_default();
-            // Status only reads, and has no engine address to decide a project with: the recorded
-            // one, else what an earlier app's installation here ran as. See `stack::recorded_project`.
-            desktop_status::containers(
-                &stats,
-                &stack::container_prefixes(&stack::recorded_project(&root)),
-                stack_id.as_deref(),
-            )
+            // This installation's own, by their Compose project label, never by a name prefix
+            // another project can share. See `stack::running_containers_of`.
+            let owned = found
+                .address
+                .as_ref()
+                .map(|address| stack::running_containers_of(address, &root))
+                .unwrap_or_default();
+            desktop_status::containers(&stats, &owned, stack_id.as_deref())
         }
         None => (Vec::new(), Vec::new()),
     };

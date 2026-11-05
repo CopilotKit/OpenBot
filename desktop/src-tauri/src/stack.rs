@@ -3500,10 +3500,6 @@ pub const PROJECT_FILE: &str = ".openbot-project.json";
 /// tell which containers are the app's.
 pub const DESKTOP_PROJECT: &str = "openbot-desktop";
 
-/// The namespace the supervisor names Bots' computers and their volumes under when nothing sets
-/// one. See `DEFAULT_NAMESPACE` in supervisor/src/names.ts.
-const DEFAULT_COMPUTER_NAMESPACE: &str = "openbot";
-
 #[derive(Serialize, Deserialize)]
 struct SavedProject {
     project: String,
@@ -3736,16 +3732,51 @@ pub fn computer_namespace_for(project: &str) -> Option<&str> {
     (project == DESKTOP_PROJECT).then_some(DESKTOP_PROJECT)
 }
 
-/// The prefixes of the container names that are this project's: Compose's `<project>-<service>-<n>`
-/// and the supervisor's `<namespace>-computer-…`.
-pub fn container_prefixes(project: &str) -> Vec<String> {
-    let namespace = computer_namespace_for(project).unwrap_or(DEFAULT_COMPUTER_NAMESPACE);
-    let mut prefixes = vec![format!("{project}-")];
-    let computers = format!("{namespace}-computer-");
-    if !computers.starts_with(&prefixes[0]) {
-        prefixes.push(computers);
+/**
+The running containers that are this installation's, by name, for the Status listing. Only reads.
+
+By the Compose project label, which Compose puts on its own containers and the supervisor on the
+Bots' computers, and not by name: an installation running as `openbot` would otherwise claim every
+`openbot-…` container on the engine, another project's `openbot-kite-demo-…` among them.
+*/
+pub fn running_containers_of(engine: &Address, root: &Path) -> Vec<String> {
+    let project = recorded_project(root);
+    let listed = engine
+        .command()
+        .current_dir(root)
+        .args(["ps", "--all", "--quiet", "--no-trunc", "--filter"])
+        .arg(format!("label=com.docker.compose.project={project}"))
+        .output();
+    let Ok(listed) = listed.map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+    else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for id in listed.split_whitespace() {
+        let Ok(inspect) = engine
+            .command()
+            .current_dir(root)
+            .args(["container", "inspect", id])
+            .output()
+        else {
+            continue;
+        };
+        let inspected: serde_json::Value =
+            serde_json::from_slice(&inspect.stdout).unwrap_or_default();
+        for container in inspected.as_array().into_iter().flatten() {
+            let name = container["Name"]
+                .as_str()
+                .unwrap_or_default()
+                .trim_start_matches('/');
+            if container["State"]["Running"].as_bool() == Some(true)
+                && container["Config"]["Labels"]["com.docker.compose.project"].as_str()
+                    == Some(project.as_str())
+            {
+                names.push(name.to_owned());
+            }
+        }
     }
-    prefixes
+    names
 }
 
 /// For reading only, where no engine is at hand to decide with: the recorded project, else the
@@ -10083,6 +10114,38 @@ fn main() {
         earlier_installation(&root);
         std::fs::remove_file(root.join(crate::preparation::FILE)).unwrap();
         assert_eq!(project(&docker, &root).unwrap(), DESKTOP_PROJECT);
+    }
+
+    /// The Status listing after an upgrade: the installation runs as `openbot`, and another
+    /// Compose project on the engine is called `openbot-kite-demo`. Its containers were listed as
+    /// the installation's, memory and all, because their names start with `openbot-`.
+    #[test]
+    fn status_lists_only_the_installations_own_containers() {
+        if crate::test_support::isolated_process(
+            "stack::tests::status_lists_only_the_installations_own_containers",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        let (root, _) = project_choice_root(&path, "status-names");
+        std::fs::write(root.join(PROJECT_FILE), r#"{"project":"openbot"}"#).unwrap();
+        let elsewhere = path.bin.join("src").join("demo");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let rows = [
+            compose_container_row("own1", "postgres", "openbot", &root),
+            compose_container_row("own2", "server", "openbot", &root),
+            compose_container_row("dem1", "postgres", "openbot-kite-demo", &elsewhere),
+            compose_container_row("dem2", "supervisor", "openbot-kite-demo", &elsewhere),
+        ]
+        .concat()
+        // The rows name containers `<project>-<service>-1`; the computer is the supervisor's.
+        .replace("own2\topenbot-server-1", "own2\topenbot-computer-person-me");
+        std::fs::write(root.join(".fixture-containers"), rows).unwrap();
+        assert_eq!(
+            running_containers_of(&docker, &root),
+            ["openbot-postgres-1", "openbot-computer-person-me"]
+        );
     }
 
     #[test]

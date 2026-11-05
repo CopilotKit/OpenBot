@@ -1,10 +1,10 @@
 //! What the Status window says about what OpenBot is running, and how much memory it takes.
 //!
-//! Containers are told apart by the names their owners give them: Compose names OpenBot's
-//! `<project>-<service>-<n>` and the supervisor its Bots' computers `<namespace>-computer-…` (see
-//! `stack::container_prefixes`), and k3d names an Intelligence stack's `k3d-<stack id>-<role>`.
-//! Not every `openbot-` container: a source checkout called `openbot` names its own that way. Memory is Docker's own figure for each container, OpenBot's own server
-//! and worker among them, so the total is what the machine is actually spending.
+//! OpenBot's containers are the ones that carry this installation's Compose project label, its Bots'
+//! computers among them (see `stack::running_containers_of`), and k3d names an Intelligence stack's
+//! `k3d-<stack id>-<role>`. Not every `openbot-` container: another project, or a source checkout
+//! called `openbot`, names its own that way. Memory is Docker's own figure for each container,
+//! OpenBot's own server and worker among them, so the total is what the machine is actually spending.
 
 use serde::Serialize;
 
@@ -37,8 +37,8 @@ pub fn memory_in_use(column: &str) -> Option<u64> {
 }
 
 /// `docker stats --no-stream --format '{{.Name}}\t{{.MemUsage}}'`, split into OpenBot's containers,
-/// those named with one of `owned` prefixes, and those of the Intelligence stack `stack`. Anybody
-/// else's containers are left out.
+/// the ones named in `owned`, and those of the Intelligence stack `stack`. Anybody else's containers
+/// are left out.
 pub fn containers(stats: &str, owned: &[String], stack: Option<&str>) -> (Vec<Part>, Vec<Part>) {
     let mut openbot = Vec::new();
     let mut intelligence = Vec::new();
@@ -52,7 +52,7 @@ pub fn containers(stats: &str, owned: &[String], stack: Option<&str>) -> (Vec<Pa
             name: name.to_owned(),
             memory_bytes: memory_in_use(usage),
         };
-        if owned.iter().any(|prefix| name.starts_with(prefix.as_str())) {
+        if owned.iter().any(|own| own == name) {
             openbot.push(part);
         } else if intelligence_prefix
             .as_deref()
@@ -86,7 +86,10 @@ mod tests {
                      k3d-local-other-server-0\t2GiB / 8GiB\n\
                      buildx_buildkit_x\t50MiB / 8GiB\n\
                      /openbot-supervisor-1\t--\n";
-        let legacy = crate::stack::container_prefixes("openbot");
+        let legacy = [
+            "openbot-postgres-1".to_owned(),
+            "openbot-supervisor-1".to_owned(),
+        ];
         let (openbot, intelligence) = containers(stats, &legacy, Some("local-abc"));
         assert_eq!(
             openbot,
@@ -111,27 +114,23 @@ mod tests {
         assert!(containers(stats, &legacy, None).1.is_empty());
     }
 
-    /// A source checkout called `openbot` names its containers `openbot-…` and its Bots' computers
-    /// `openbot-computer-…`; an installation running as `openbot-desktop` lists none of them.
+    /// Another project's containers can share the `openbot-` prefix; only the ones named as this
+    /// installation's own are listed.
     #[test]
-    fn a_source_checkouts_openbot_containers_are_not_the_installations() {
+    fn containers_named_like_openbots_but_not_its_own_are_left_out() {
         let stats = "openbot-postgres-1\t1GiB / 8GiB\n\
-                     openbot-computer-person-dev-local-user\t1GiB / 8GiB\n\
-                     openbot-desktop-postgres-1\t100MiB / 8GiB\n\
-                     openbot-desktop-computer-person-someone\t200MiB / 8GiB\n";
-        let owned = crate::stack::container_prefixes(crate::stack::DESKTOP_PROJECT);
+                     openbot-kite-demo-postgres-1\t1GiB / 8GiB\n\
+                     openbot-computer-person-me\t200MiB / 8GiB\n";
+        let owned = [
+            "openbot-postgres-1".to_owned(),
+            "openbot-computer-person-me".to_owned(),
+        ];
         let names: Vec<String> = containers(stats, &owned, None)
             .0
             .into_iter()
             .map(|part| part.name)
             .collect();
-        assert_eq!(
-            names,
-            [
-                "openbot-desktop-postgres-1",
-                "openbot-desktop-computer-person-someone"
-            ]
-        );
+        assert_eq!(names, ["openbot-postgres-1", "openbot-computer-person-me"]);
     }
 
     #[test]
@@ -139,7 +138,7 @@ mod tests {
         let listing = "openbot-postgres-1\t\nk3d-local-abc-server-0\t\n";
         let (openbot, intelligence) = containers(
             listing,
-            &crate::stack::container_prefixes("openbot"),
+            &["openbot-postgres-1".to_owned()],
             Some("local-abc"),
         );
         assert_eq!(
