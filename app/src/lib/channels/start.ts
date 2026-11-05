@@ -9,6 +9,7 @@ import {
   createGroupMutationOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
+import { saveConversationModel } from "@/lib/models/mutations";
 import { newId } from "@/lib/new-id";
 import {
   createChannelMutationOptions,
@@ -76,6 +77,33 @@ export async function startGroupWith(input: {
 }
 
 /**
+ * Create a conversation, save the model picked for it, then open it with its first message.
+ *
+ * The pick is saved before the conversation opens, because opening it is what sends the first
+ * message, and that message must not run on a model other than the one picked. A pick that cannot
+ * be saved discards the conversation, which exists only to hold that message, and the save's own
+ * error is what the caller sees, so the composer keeps the draft. Pure so the order can be tested.
+ */
+export async function startWithModel(input: {
+  model: string | null;
+  create: () => Promise<{ id: string }>;
+  save: (channelId: string, model: string) => Promise<unknown>;
+  discard: (channelId: string) => Promise<void>;
+  open: (channelId: string) => Promise<void>;
+}): Promise<void> {
+  const channel = await input.create();
+  if (input.model) {
+    try {
+      await input.save(channel.id, input.model);
+    } catch (error) {
+      await input.discard(channel.id).catch(() => undefined);
+      throw error;
+    }
+  }
+  await input.open(channel.id);
+}
+
+/**
  * Start a channel from a just-submitted first message, then navigate there.
  *
  * Ordering matters: create, seed the channel cache, stash the first message, then navigate. That
@@ -88,20 +116,34 @@ export function useStartChannel() {
   const createGroup = useMutation(createGroupMutationOptions(queryClient));
   const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
 
-  const start = async (
+  const start = (
     agentId: string,
     text: string,
+    /** The first message's `/` skills; see `FirstMessage`. */
     skillInstructions: readonly string[] = [],
-  ) => {
-    const channel = await createChannel.mutateAsync([agentId]);
-    queryClient.setQueryData(channelKeys.detail(channel.id), channel);
-    stashFirstMessage(channel.id, text, skillInstructions);
-    await navigate({
-      params: { channelId: channel.id },
-      replace: true,
-      to: "/channel/$channelId",
+    /** A model picked before the conversation existed, saved before its first message runs. */
+    model?: string | null,
+  ) =>
+    startWithModel({
+      model: model ?? null,
+      create: async () => {
+        const channel = await createChannel.mutateAsync([agentId]);
+        queryClient.setQueryData(channelKeys.detail(channel.id), channel);
+        return channel;
+      },
+      save: saveConversationModel,
+      discard: async (channelId) => {
+        await deleteChannel.mutateAsync(channelId);
+      },
+      open: async (channelId) => {
+        stashFirstMessage(channelId, text, skillInstructions);
+        await navigate({
+          params: { channelId },
+          replace: true,
+          to: "/channel/$channelId",
+        });
+      },
     });
-  };
 
   const startGroup = (agentIds: string[], text: string) =>
     startGroupWith({
@@ -140,13 +182,14 @@ export function useStartChannel() {
       agentId: string,
       text: string,
       skillInstructions: readonly string[] = [],
+      model?: string | null,
     ) =>
       startWithChosen({
         agentId,
         text,
         skillInstructions,
         record: routeMessage,
-        start,
+        start: (id, message, skills) => start(id, message, skills, model),
       }),
   };
 }

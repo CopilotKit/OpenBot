@@ -8,6 +8,39 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's work in a conversation reads as one line. A subtask is a step in the same line as the
+  searches and pages beside it ("Searched the web, read 5 pages and ran 2 subtasks"), and opens to
+  its task, its answer and its steps. A subtask that stopped before an action needing approval says
+  "Handed back" instead of showing a "Needs your approval" badge with nothing to press.
+- Built-in Bots are told today's date (UTC), so "this quarter" or "last week" no longer starts a
+  guess or a `date` command that waits for approval. They use subtasks only for requests that split
+  into several independent parts, not for one question or one search, and draw a table or chart
+  once, with the result.
+- A built-in Bot's run always ends with an answer. Its last allowed step is sent without tools, so a
+  Bot that spent its steps searching answers from what it found instead of stopping in silence
+  ("the turn finished without saying anything").
+
+- People can pick the model a built-in Bot answers on, per conversation, from a brain icon in the
+  composer, including before the first message. The list is read from the model provider, or from
+  the gateway in `OPENAI_BASE_URL`, filtered to chat models and to the model allowlist. The pick is
+  kept per person and conversation, and every run there uses it, including routines. Off by default
+  in the team edition: an admin turns it on under Admin, Providers, "Let people choose a model".
+  Turning it off puts every run back on the configured model and keeps the saved
+  picks. Always on in the personal edition. Adds a nullable column (migration
+  `0076_model_selection`). Bots on their own framework, plans, and groups keep their own model.
+- Admin's Enterprise controls page is gone. Each of its sections now sits on the page it governs:
+  what people may do is on the new **Permissions** page; the model switch, the model allowlist and
+  model usage are on the new **Providers** page, beside the provider that serves the models; Require
+  SSO and SCIM are on Identity providers; the network policy and stopping idle computers are on
+  Computers; the MCP server allowlist is on Plugins; Skill sharing is on Automatic learning; and
+  Action Recording and the OpenTelemetry export are on Audit. Both new pages are in the Admin
+  sidebar. An old link to Enterprise controls opens the Admin overview.
+- The model allowlist is picked from the provider's own list of models, searchable, with the
+  configured model marked. A model the list doesn't have, such as a remote Bot's, is added by its
+  `provider/model` name.
+- The conversation composer is two rows: the message box, then attach and the model on the left,
+  dictation and send on the right. It no longer draws a focus ring, and opening a conversation puts
+  the caret in it.
 - A Bot can now ask you a single decision with the likely answers as options, such as which time zone to use. That question used to be refused before it reached you, because options came only with two or more decisions at once, so the conversation showed "Blocked: Asked you" and the Bot guessed. It now waits above the composer, you pick an option or answer in your own words, and the Bot carries on with your answer.
 - A skill used in the first message of a new conversation now reaches the Bot. The `/` chip showed in the message, but the skill's instructions were left out, for every kind of Bot; later messages in a conversation already carried them.
 - A Bot on Google ADK no longer runs a tool twice when it runs on more than one replica, or restarts in the middle of a turn. OpenBot runs each tool a Bot calls and sends the result back in a new request, which can reach a replica that never saw the call. That replica answered your message again from the start, so it called the tool again and OpenBot ran it a second time: a message sent twice, a file written twice. A replica that had served the conversation before said nothing instead. It now picks up from the result the conversation already holds, so each call runs once.

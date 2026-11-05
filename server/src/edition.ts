@@ -36,6 +36,7 @@ export const PERSONAL_CAPABILITIES: Record<Capability, boolean> = {
 
 /**
  * There is one computer, so it is never stopped for sitting idle. Check-ins keep the team limit.
+ * The one person picks their own model: there is nobody else to decide it for them.
  */
 export const PERSONAL_ENTERPRISE_SETTINGS: EnterpriseSettings = {
   ssoRequired: false,
@@ -45,6 +46,7 @@ export const PERSONAL_ENTERPRISE_SETTINGS: EnterpriseSettings = {
   mcpAllowlist: { enabled: false, servers: [] },
   skillSharing: false,
   proactiveDailyRuns: 24,
+  modelSelection: true,
 };
 
 let running: Edition = "team";

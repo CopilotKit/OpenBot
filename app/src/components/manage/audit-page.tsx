@@ -9,7 +9,7 @@ import {
   IconSearch,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import { AuditTable } from "@/components/audit/audit-table";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
@@ -61,7 +61,11 @@ const FILTERS = [
   },
 ] as const;
 
-export function AuditPage() {
+/**
+ * `children` are sections only the team edition's Admin adds below the page's own (the admin's
+ * controls for these). The personal edition's Settings renders this page with none.
+ */
+export function AuditPage({ children }: { children?: ReactNode } = {}) {
   const [search, setSearch] = useState<string>(FILTERS[0].search);
   const [query, setQuery] = useState("");
   const events = useQuery(auditEventsQueryOptions(search));
@@ -111,116 +115,125 @@ export function AuditPage() {
   return (
     /*
      * THE ONE FULL-WIDTH PAGE IN ADMIN, and the one that keeps a table. The page is the window's
-     * height; the title, the views and the search stay where they are and only the rows scroll,
-     * because a log is scanned across and rows of prose would make every entry a paragraph.
+     * height; the title stays put and the rows scroll inside the log. With recording controls
+     * below it, the log is bounded so the page can scroll down to those controls too.
      */
     <PageShell
       description="Review Bot actions and actions blocked by this deployment’s policy."
       title="Audit"
       width="full"
     >
-      {events.isPending ? null : events.isError ? (
-        <p className="px-4 text-destructive text-sm" role="alert">
-          Couldn't load the audit log. Reload the page.
-        </p>
-      ) : (
-        <AuditTable
-          events={rows}
-          nameFor={nameFor}
-          query={query}
-          toolbar={({ count, filters }) => (
-            <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
-              {/*
-               * The saved views are one control with one answer, so they are drawn as a segmented
-               * group: the pressed one is filled, the rest sit flat inside the same outline.
-               */}
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground text-xs">View</span>
-                <fieldset
-                  aria-label="View"
-                  className="inline-flex items-center gap-0.5 rounded-lg border border-border p-0.5"
-                >
-                  {FILTERS.map((filter) => {
-                    const active = search === filter.search;
-                    return (
+      {/* With admin settings below the log, the page scrolls and the log keeps its own bounded
+          viewport. Without settings, the table fills the panel as before. */}
+      <div className={children ? "min-h-0 flex-1 overflow-y-auto" : "contents"}>
+        <div
+          className={children ? "flex h-[60vh] min-h-80 flex-col" : "contents"}
+        >
+          {events.isPending ? null : events.isError ? (
+            <p className="px-4 text-destructive text-sm" role="alert">
+              Couldn't load the audit log. Reload the page.
+            </p>
+          ) : (
+            <AuditTable
+              events={rows}
+              nameFor={nameFor}
+              query={query}
+              toolbar={({ count, filters }) => (
+                <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
+                  {/*
+                   * The saved views are one control with one answer, so they are drawn as a segmented
+                   * group: the pressed one is filled, the rest sit flat inside the same outline.
+                   */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-xs">View</span>
+                    <fieldset
+                      aria-label="View"
+                      className="inline-flex items-center gap-0.5 rounded-lg border border-border p-0.5"
+                    >
+                      {FILTERS.map((filter) => {
+                        const active = search === filter.search;
+                        return (
+                          <Button
+                            aria-pressed={active}
+                            className={cn(
+                              "h-6 px-2 font-normal",
+                              active
+                                ? "bg-muted text-foreground"
+                                : "text-muted-foreground",
+                            )}
+                            key={filter.label}
+                            onClick={() => setSearch(filter.search)}
+                            size="xs"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <filter.icon />
+                            {filter.label}
+                          </Button>
+                        );
+                      })}
+                    </fieldset>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative w-64">
+                      <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        aria-label="Search events"
+                        className="h-8 pl-8"
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder="Search events…"
+                        type="search"
+                        value={query}
+                      />
+                    </div>
+                    {filters}
+                    <span className="ml-1 text-muted-foreground text-xs tabular-nums">
+                      {count}
+                    </span>
+                    <div className="ml-auto flex items-center gap-2">
                       <Button
-                        aria-pressed={active}
-                        className={cn(
-                          "h-6 px-2 font-normal",
-                          active
-                            ? "bg-muted text-foreground"
-                            : "text-muted-foreground",
-                        )}
-                        key={filter.label}
-                        onClick={() => setSearch(filter.search)}
-                        size="xs"
-                        type="button"
-                        variant="ghost"
+                        onClick={() => events.refetch()}
+                        size="sm"
+                        variant="outline"
                       >
-                        <filter.icon />
-                        {filter.label}
+                        <IconRefresh />
+                        Refresh
                       </Button>
-                    );
-                  })}
-                </fieldset>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-64">
-                  <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    aria-label="Search events"
-                    className="h-8 pl-8"
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search events…"
-                    type="search"
-                    value={query}
-                  />
+                      <Button
+                        disabled={exporting}
+                        onClick={exportCsv}
+                        size="sm"
+                        variant="outline"
+                      >
+                        <IconDownload />
+                        {exporting ? "Exporting…" : "Export CSV"}
+                      </Button>
+                    </div>
+                  </div>
+                  {exportError ? (
+                    <p className="text-destructive text-sm" role="alert">
+                      {exportError}
+                    </p>
+                  ) : null}
+                  {exportCapped ? (
+                    <p className="text-muted-foreground text-sm" role="status">
+                      The file has the newest {exportCapped.toLocaleString()}{" "}
+                      events, not all of them. Narrow the filter or dates to
+                      export the rest.
+                    </p>
+                  ) : null}
+                  {rows.length === 0 ? (
+                    <PageEmpty icon={IconSearch} title="No matches">
+                      No events match this filter yet.
+                    </PageEmpty>
+                  ) : null}
                 </div>
-                {filters}
-                <span className="ml-1 text-muted-foreground text-xs tabular-nums">
-                  {count}
-                </span>
-                <div className="ml-auto flex items-center gap-2">
-                  <Button
-                    onClick={() => events.refetch()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <IconRefresh />
-                    Refresh
-                  </Button>
-                  <Button
-                    disabled={exporting}
-                    onClick={exportCsv}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <IconDownload />
-                    {exporting ? "Exporting…" : "Export CSV"}
-                  </Button>
-                </div>
-              </div>
-              {exportError ? (
-                <p className="text-destructive text-sm" role="alert">
-                  {exportError}
-                </p>
-              ) : null}
-              {exportCapped ? (
-                <p className="text-muted-foreground text-sm" role="status">
-                  The file has the newest {exportCapped.toLocaleString()}{" "}
-                  events, not all of them. Narrow the filter or dates to export
-                  the rest.
-                </p>
-              ) : null}
-              {rows.length === 0 ? (
-                <PageEmpty icon={IconSearch} title="No matches">
-                  No events match this filter yet.
-                </PageEmpty>
-              ) : null}
-            </div>
+              )}
+            />
           )}
-        />
-      )}
+        </div>
+        {children ? <div className="px-4 pb-16">{children}</div> : null}
+      </div>
     </PageShell>
   );
 }
