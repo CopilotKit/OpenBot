@@ -3,7 +3,7 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { stashFirstMessage } from "@/components/channels/transcript-messages";
 import {
   createGroupMutationOptions,
@@ -15,6 +15,7 @@ import {
   createChannelMutationOptions,
   deleteChannelMutationOptions,
 } from "./mutations";
+import { pendingStartPath, settlePendingStart } from "./pending-start";
 import { channelKeys } from "./queries";
 import { routeMessage } from "./route";
 
@@ -27,9 +28,11 @@ import { routeMessage } from "./route";
  * `/channel/new` — the sidebar's +, a coworker's card, its profile — was never told to anybody. The
  * two screens now share this one sequence: record, then start.
  *
- * The record is told before the channel exists, the way the routed path records before a channel is
- * pinned, and its answer is thrown away: the person already decided and nothing here may change
- * that. Failing to write the row must not stop the conversation, so a rejection is swallowed whole.
+ * The record is sent before the channel is asked for, the way the routed path records before a
+ * channel is pinned, and its answer is thrown away: the person already decided and nothing here may
+ * change that. Failing to write the row must not stop the conversation, so a rejection is swallowed
+ * whole. And because nothing waits on its answer, nothing waits on it at all: it used to be awaited,
+ * which put a whole round trip between send and the conversation opening for a row nobody reads.
  * Pure so the sequence can be tested; the hook below binds it to the real calls.
  */
 export async function startWithChosen(input: {
@@ -44,7 +47,7 @@ export async function startWithChosen(input: {
     skillInstructions: readonly string[],
   ) => Promise<void>;
 }): Promise<void> {
-  await input.record(input.text, input.agentId).catch(() => undefined);
+  void input.record(input.text, input.agentId).catch(() => undefined);
   await input.start(input.agentId, input.text, input.skillInstructions ?? []);
 }
 
@@ -108,10 +111,17 @@ export async function startWithModel(input: {
  *
  * Ordering matters: create, seed the channel cache, stash the first message, then navigate. That
  * keeps the first message visible while the channel thread joins.
+ *
+ * Started from a placeholder (`pendingId`, see `pending-start.ts`), the conversation replaces the
+ * placeholder only while the person is still looking at it. Somebody who went elsewhere while it
+ * was being made is not pulled back; the conversation is in their sidebar, and its first message
+ * stays stashed until they open it, which is when it is sent. Going back to the placeholder opens
+ * it too (`settlePendingStart`).
  */
 export function useStartChannel() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const router = useRouter();
   const createChannel = useMutation(createChannelMutationOptions(queryClient));
   const createGroup = useMutation(createGroupMutationOptions(queryClient));
   const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
@@ -123,6 +133,8 @@ export function useStartChannel() {
     skillInstructions: readonly string[] = [],
     /** A model picked before the conversation existed, saved before its first message runs. */
     model?: string | null,
+    /** The placeholder this was started behind, if any; see the hook's own comment. */
+    pendingId?: string,
   ) =>
     startWithModel({
       model: model ?? null,
@@ -137,6 +149,12 @@ export function useStartChannel() {
       },
       open: async (channelId) => {
         stashFirstMessage(channelId, text, skillInstructions);
+        if (pendingId !== undefined) {
+          // Remembered whether or not they are looking, so coming back to the placeholder opens it.
+          settlePendingStart(pendingId, channelId);
+          if (router.state.location.pathname !== pendingStartPath(pendingId))
+            return;
+        }
         await navigate({
           params: { channelId },
           replace: true,
@@ -183,13 +201,15 @@ export function useStartChannel() {
       text: string,
       skillInstructions: readonly string[] = [],
       model?: string | null,
+      pendingId?: string,
     ) =>
       startWithChosen({
         agentId,
         text,
         skillInstructions,
         record: routeMessage,
-        start: (id, message, skills) => start(id, message, skills, model),
+        start: (id, message, skills) =>
+          start(id, message, skills, model, pendingId),
       }),
   };
 }
