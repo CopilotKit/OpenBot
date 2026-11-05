@@ -4,6 +4,7 @@ ADK is Gemini-first and model-agnostic after that, so the provider stays the per
 reads LiteLLM model strings, and OpenBot writes the one it was told.
 """
 
+from contextlib import aclosing
 import hmac
 import os
 import sys
@@ -14,11 +15,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
 
+from ag_ui.core import DeveloperMessage, RunAgentInput, SystemMessage
 from ag_ui_adk import ADKAgent, AGUIToolset, add_adk_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from google.adk.agents import Agent
 from google.adk.models.lite_llm import LiteLlm
+from google.adk.sessions import InMemorySessionService
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -48,6 +51,35 @@ class CompleteToolCallsLiteLlm(LiteLlm):
                 })
             yield response
 
+
+
+def _role_first(input: RunAgentInput) -> RunAgentInput:
+    """Every system and developer message of this run, as the one system message ADK reads.
+
+    `ag_ui_adk` appends `messages[0]` to the agent's instruction when it is a system message and
+    drops every other one: history seeding has no place for them and only the newest user message
+    is dispatched. The server sends two, the standing role and then the granted-tools summary, so
+    the summary never reached the model. Folding them into one, in order, puts all of them in the
+    instruction, rebuilt from this run's input on every run, so a grant that changed since the
+    last run (same id, new content) is the one the model is told about.
+    """
+    system = [m for m in input.messages if isinstance(m, (SystemMessage, DeveloperMessage))]
+    if not system:
+        return input
+    role = SystemMessage(
+        id=system[0].id,
+        role="system",
+        content="\n\n".join(m.content for m in system if m.content),
+    )
+    rest = [m for m in input.messages if not isinstance(m, (SystemMessage, DeveloperMessage))]
+    return input.model_copy(update={"messages": [role, *rest]})
+
+
+class WholeThreadADKAgent(ADKAgent):
+    async def run(self, input: RunAgentInput):
+        async with aclosing(super().run(_role_first(input))) as events:
+            async for event in events:
+                yield event
 
 
 def _model_id() -> str:
@@ -85,17 +117,28 @@ async def health():
     return {"ok": True, "harness": "google-adk"}
 
 
-add_adk_fastapi_endpoint(
-    app,
-    ADKAgent(
-        adk_agent=Agent(
-            name="openbot",
-            tools=[AGUIToolset()],
-            model=CompleteToolCallsLiteLlm(model=_model_id()),
-            instruction="Answer the question you are asked, briefly and correctly.",
-        ),
-        app_name="openbot",
-        user_id="openbot",
+agent = WholeThreadADKAgent(
+    adk_agent=Agent(
+        name="openbot",
+        tools=[AGUIToolset()],
+        model=CompleteToolCallsLiteLlm(model=_model_id()),
+        instruction="Answer the question you are asked, briefly and correctly.",
     ),
-    path="/",
+    app_name="openbot",
+    user_id="openbot",
+    # The session is a cache of the thread the server sends every run, never its record. The
+    # library forgets a session idle for 20 minutes, but its ledger of messages already seen is
+    # keyed by thread and cleared on that delete only when the session id is the thread id. With
+    # generated ids the ledger outlived the session, so the next turn found every earlier message
+    # "seen", started an empty session and showed the model only the newest question. With the
+    # thread id as the session id, an expired session takes its ledger with it, and the next turn
+    # seeds a new session from the whole thread, as after a restart.
+    # A service of its own gives this agent its own manager, so these settings hold (the shared
+    # default keeps whatever the first agent in the process asked for).
+    session_service=InMemorySessionService(),
+    use_thread_id_as_session_id=True,
+    # An expired session copied into the in-memory memory service is never read and never freed.
+    save_session_to_memory_on_cleanup=False,
 )
+
+add_adk_fastapi_endpoint(app, agent, path="/")
