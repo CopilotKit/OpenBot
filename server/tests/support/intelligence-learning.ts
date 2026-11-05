@@ -10,6 +10,16 @@
  *  - published Skills: learned-skill-registry.ts, which answers REVISION_NOT_FOUND for a container
  *    nothing has been published to yet, and CONTAINER_NOT_FOUND for one that is not there.
  *
+ * The Inspector panel (`GET /api/inspector/learning`) answers as apps/app-api/src/routes/inspector-learning-routes.ts
+ * does, including its `dashboardLinksOptional=true` opt-in:
+ *  - by default, an Intelligence from before the opt-in with no dashboard: 404 with no body to every
+ *    call, opted in or not;
+ *  - `inspector: "no-dashboard"`: 404 to a plain call, the snapshot without dashboard links to a
+ *    call that opts in;
+ *  - `inspector: "dashboard"`: the snapshot with its links to either call, 400 to any other value;
+ *  - `inspector: "dashboard-before-opt-in"`: an older Intelligence with a dashboard, whose strict
+ *    query check answers 400 to the parameter it does not know, and the snapshot to a plain call.
+ *
  * Four Intelligences: `current` (Learning on, a project key may create containers), `0.15.1`
  * (Learning on, no create route for a project key), `learning-off` (`learning.enabled: false`,
  * where none of the Learning routes is registered and Express's catch-all answers ROUTE_NOT_FOUND),
@@ -222,6 +232,87 @@ export function run(status = "queued") {
   };
 }
 
+/**
+ * `GET /api/inspector/learning?runtimeContainerId=openbot` on an Intelligence with no dashboard, as its
+ * real route answered it to a call with `dashboardLinksOptional=true`
+ * (inspector-learning-routes.integration.spec.ts, Intelligence 5bcb27075): a
+ * conversation waiting for a run, a published Skill, an Insight and a proposed Skill to review. No
+ * `webAppOrigin` and no `links`.
+ */
+export const INSPECTOR_NO_DASHBOARD = {
+  schemaVersion: 1,
+  projectKey: "518ba89ee380617b2e1a7e0715f7d6c5",
+  snapshotVersion:
+    "8d9694e76b7274d4647e6bcbb96c6d7fd63dfa8d5c933e3c0a46b27623a1a90b",
+  configuration: {
+    state: "configured",
+    container: { id: "openbot", name: "OpenBot" },
+  },
+  pendingThreadCount: 1,
+  run: {
+    hasActiveRun: false,
+    hasEverSucceeded: true,
+    latest: { completedAt: "2026-11-04T12:00:00.000Z", status: "succeeded" },
+  },
+  pendingCandidateCount: 1,
+  skillsPage: {
+    page: 1,
+    pageSize: 3,
+    total: 1,
+    totalPages: 1,
+    items: [
+      {
+        id: "01a1aa63-43ec-7624-8be5-812bd1115b9b",
+        name: "verify-refund",
+        description: "Verify refund inputs.",
+        revision: 1,
+        skillMd: "# Verify refund inputs",
+        sourceInsight: {
+          id: "01a1aa63-43eb-7c28-bdc1-d43597050f1c",
+          statement: "Ask for the order first.",
+          impact: "Fewer wrong answers.",
+          totalThreadCount: 0,
+          evidenceTruncated: false,
+          evidence: [],
+          totalTrajectoryCount: 0,
+          trajectoryEvidence: [],
+        },
+      },
+    ],
+  },
+  insightsPage: {
+    page: 1,
+    pageSize: 4,
+    total: 1,
+    totalPages: 1,
+    items: [
+      {
+        id: "01a1aa63-43ec-74ae-ad98-80087cbfdab8",
+        statement: "Answer in the language of the question.",
+        impact: "Fewer wrong answers.",
+        totalThreadCount: 0,
+        evidenceTruncated: false,
+        evidence: [],
+        totalTrajectoryCount: 0,
+        trajectoryEvidence: [],
+      },
+    ],
+  },
+};
+
+/** The same read on an Intelligence with a dashboard: the route adds its origin and links. */
+export const INSPECTOR_WITH_DASHBOARD = {
+  ...INSPECTOR_NO_DASHBOARD,
+  webAppOrigin: "https://dashboard.example.test",
+  links: {
+    learning:
+      "https://dashboard.example.test/o/test-org-dca092de/test-project-dca092de/learning/openbot",
+    candidates:
+      "https://dashboard.example.test/o/test-org-dca092de/test-project-dca092de/learning/openbot/skills",
+    runs: "https://dashboard.example.test/o/test-org-dca092de/test-project-dca092de/learning/openbot/analysis-results",
+  },
+};
+
 export type FakeIntelligence = {
   url: string;
   requests: {
@@ -247,6 +338,7 @@ export function fakeIntelligence(
     candidates?: string[];
     starting?: { migrating?: number; keyless?: number };
     failCreates?: number;
+    inspector?: "no-dashboard" | "dashboard" | "dashboard-before-opt-in";
   } = {},
 ): FakeIntelligence {
   const migrating = options.starting?.migrating ?? 0;
@@ -284,9 +376,31 @@ export function fakeIntelligence(
           { error: { code: "AUTH_UNAUTHENTICATED" } },
           { status: 401 },
         );
-      // No dashboard origin: the Inspector panel is off (Intelligence f3eeec129).
-      if (path === "/api/inspector/learning")
-        return intelligenceError("ROUTE_NOT_FOUND");
+      if (path === "/api/inspector/learning") {
+        // The route sets these headers before it answers.
+        const headers = {
+          "cache-control": "no-store, private",
+          pragma: "no-cache",
+        };
+        const optIn = url.searchParams.get("dashboardLinksOptional");
+        const invalid = Response.json(
+          { error: "Invalid Inspector Learning request." },
+          { status: 400, headers },
+        );
+        if (
+          !options.inspector ||
+          (options.inspector === "no-dashboard" && optIn !== "true")
+        )
+          return new Response(null, { status: 404, headers });
+        if (options.inspector === "no-dashboard")
+          return Response.json(INSPECTOR_NO_DASHBOARD, { headers });
+        if (
+          optIn !== null &&
+          (options.inspector === "dashboard-before-opt-in" || optIn !== "true")
+        )
+          return invalid;
+        return Response.json(INSPECTOR_WITH_DASHBOARD, { headers });
+      }
       if (version === "rollout-closed" && path.startsWith("/api/v1/learning/"))
         return intelligenceError("LEARNING_NOT_ENABLED");
       if (path === "/api/v1/learning/containers" && request.method === "POST") {

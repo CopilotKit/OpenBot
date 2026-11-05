@@ -14,14 +14,12 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { type AppVariables, requireAdmin } from "../auth/guards";
 import type { LearningAutoAssign } from "./auto-assign";
+import type { InspectorLearning, InspectorLearningRequest } from "./inspector";
 import { type LearningSettingsStore, parseLearningSettings } from "./settings";
 
 /** The longest the settings page waits for an automatic check before answering without it. */
 const AUTO_ASSIGN_WAIT_MS = 3_000;
 
-type InspectorSnapshot = Awaited<
-  ReturnType<CopilotKitIntelligence["getInspectorLearning"]>
->;
 /** The runtime key's own Learning routes: a project's containers, runs and proposed Skills. */
 export type LearningManagement = Pick<
   CopilotKitIntelligence["experimental"]["learning"],
@@ -37,20 +35,22 @@ export type LearningAdminDependencies = {
   store: LearningSettingsStore;
   autoAssign?: LearningAutoAssign;
   status?: (agentId: string) => Promise<LearningDeliveryStatus>;
-  inspect?: (input: {
-    agentId?: string;
-    runtimeContainerId?: string;
-  }) => Promise<InspectorSnapshot>;
+  /** Intelligence's Inspector panel, which has every count (`createInspectorLearningReader`). */
+  inspect?: (input: InspectorLearningRequest) => Promise<InspectorLearning>;
   /** Review and publish here, which an Intelligence with no dashboard of its own needs. */
   manage?: LearningManagement;
 };
 
-/** An Inspector link, when it is one a browser can open. */
-function link(value: string | null | undefined): string | null {
-  if (!value) return null;
+/** An Inspector link, when it is one a browser can open on the dashboard's own origin. */
+function link(
+  value: string | null | undefined,
+  origin: string | null,
+): string | null {
+  if (!value || !origin) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:"
+    return (url.protocol === "https:" || url.protocol === "http:") &&
+      url.origin === origin
       ? url.toString()
       : null;
   } catch {
@@ -58,7 +58,18 @@ function link(value: string | null | undefined): string | null {
   }
 }
 
-function overview(snapshot: InspectorSnapshot): LearningOverview {
+/** The dashboard's origin, or null for an Intelligence with no dashboard. */
+function dashboardOrigin(snapshot: InspectorLearning): string | null {
+  if (!snapshot.webAppOrigin) return null;
+  try {
+    return new URL(snapshot.webAppOrigin).origin;
+  } catch {
+    return null;
+  }
+}
+
+function overview(snapshot: InspectorLearning): LearningOverview {
+  const origin = dashboardOrigin(snapshot);
   return {
     configuration: snapshot.configuration.state,
     ...(snapshot.configuration.state === "configured"
@@ -71,9 +82,9 @@ function overview(snapshot: InspectorSnapshot): LearningOverview {
     hasActiveRun: snapshot.run.hasActiveRun,
     latestRunStatus: snapshot.run.latest?.status ?? null,
     links: {
-      learning: link(snapshot.links.learning),
-      candidates: link(snapshot.links.candidates),
-      runs: link(snapshot.links.runs),
+      learning: link(snapshot.links?.learning, origin),
+      candidates: link(snapshot.links?.candidates, origin),
+      runs: link(snapshot.links?.runs, origin),
     },
   };
 }
@@ -82,9 +93,9 @@ const NO_LINKS = { learning: null, candidates: null, runs: null };
 const FINISHED_RUNS = new Set(["succeeded", "failed"]);
 
 /**
- * The overview from the project key's own Learning routes, for an Intelligence that serves no
- * Inspector panel because it has no dashboard. It cannot count waiting conversations, published
- * Skills or Insights, so those are null, and there is nothing to link to.
+ * The overview from the project key's own Learning routes, for an older Intelligence that serves no
+ * Inspector panel when it has no dashboard. It cannot count waiting conversations, published Skills
+ * or Insights, so those are null, and there is nothing to link to.
  */
 async function managedOverview(
   manage: LearningManagement,
@@ -409,7 +420,7 @@ export function createLearningRoutes(
           });
           return context.json({ overview: overview(snapshot) });
         } catch (error) {
-          // No Inspector panel: an Intelligence with no dashboard, or with Learning off. The
+          // No Inspector panel: an older Intelligence with no dashboard, or Learning off. The
           // project key's own routes answer the first and name the second.
           if (requestFailure(error).status !== 404 || !dependencies.manage)
             throw error;

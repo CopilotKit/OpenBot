@@ -203,6 +203,7 @@ import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
 } from "./learning/personal-space";
+import { createInspectorLearningReader } from "./learning/inspector";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
 import {
@@ -2843,7 +2844,10 @@ const app = createApp(
     store: learningSettings,
     autoAssign: learningAutoAssign,
     status: copilotRuntime.learning?.status,
-    inspect: copilotRuntime.learning?.inspect,
+    // Read directly: the runtime client refuses a snapshot without dashboard links.
+    inspect: copilotRuntime.learning
+      ? createInspectorLearningReader(config.runtime.intelligence)
+      : undefined,
     manage: learningProbeIntelligence.experimental.learning,
   },
   {

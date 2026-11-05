@@ -412,7 +412,7 @@ export function LearningPage() {
                     ["Insights", snapshot.insightCount],
                   ] as const
                 ).map(([label, count]) =>
-                  // An Intelligence with no dashboard does not count these for a project key.
+                  // An older Intelligence with no dashboard does not count these for a project key.
                   count === null ? null : (
                     <div key={label}>
                       <dt className="text-muted-foreground">{label}</dt>

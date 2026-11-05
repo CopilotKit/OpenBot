@@ -450,9 +450,6 @@ export function createLearningRuntime(options: {
         ...(status?.lastError ? { error: status.lastError } : {}),
       };
     },
-    inspect: (
-      input: Parameters<CopilotKitIntelligence["getInspectorLearning"]>[0],
-    ) => client.getInspectorLearning(input),
   };
 }
 export type LearningRuntime = ReturnType<typeof createLearningRuntime>;
