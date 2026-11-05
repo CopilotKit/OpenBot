@@ -18,6 +18,7 @@ Start with the root [README](../README.md), then use these references:
 - [Kubernetes](../charts/openbot/README.md): the Helm chart, what a cluster needs before it, and the values that differ per cloud.
 - [Releasing](releasing.md): how a release is proposed, reviewed and published.
 - [Windows desktop signing](windows-signing.md): protected Azure Key Vault signing and verification of the app and NSIS installer.
+- [Desktop install](desktop-install.md): the desktop app's setup flow, who owns each step, and the decisions behind it.
 - [Desktop provider OAuth](../desktop/PROVIDER_OAUTH.md): what a distributor configures to offer Google and xAI sign-in in a desktop build.
 - [Desktop telemetry](../desktop/TELEMETRY.md): every event the desktop app sends, and what it carries.
 
