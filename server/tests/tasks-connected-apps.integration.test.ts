@@ -845,6 +845,52 @@ describe("a task works with the apps the person connected", () => {
     ).toEqual([[ref(NOTION, COMMENT), "task"]]);
   });
 
+  test("in the person's own conversation a send asks once, on the send itself, and Allow once sends it", async () => {
+    const { owner, own, item } = await seed();
+    expect(await approvalStore.enabled(owner.id)).toBe(false);
+    script = (request) =>
+      answeredSinceAsk(request) === 0
+        ? {
+            toolCalls: [
+              {
+                name: modelName(NOTION, COMMENT),
+                arguments: JSON.stringify({
+                  page_id: "r-1",
+                  text: "Friday works for the spec.",
+                }),
+              },
+            ],
+          }
+        : { content: "I replied to Sam." };
+    await expect(
+      runTurn({
+        ownerUserId: owner.id,
+        routineId: `tasks-apps-${suite}-own-send`,
+        agentId: item.agentId,
+        threadId: own.threadId,
+        instruction: "Tell Sam Friday works.",
+        userMessage: {
+          id: randomUUID(),
+          role: "user",
+          content: "Tell Sam Friday works.",
+        },
+        initiator: PERSON_INITIATOR,
+      }),
+    ).rejects.toThrow("This action is waiting for your approval.");
+    // One card, for the send with what it sends: not a private-share card in front of it.
+    const waiting = await pendingFor(owner.id);
+    expect(
+      waiting.map((request) => [
+        request.action.toolRef,
+        request.action.policy?.source,
+      ]),
+    ).toEqual([[ref(NOTION, COMMENT), "safety"]]);
+    expect(callsOf(COMMENT)).toEqual([]);
+    await allowOnce(owner.id, waiting[0]?.id ?? "");
+    expect(callsOf(COMMENT)).toHaveLength(1);
+    expect(await pendingFor(owner.id)).toEqual([]);
+  });
+
   test("it asks before a tool of their own app that no reviewed list names, though the app's own server says it only reads", async () => {
     const { owner, item } = await seed();
     script = (request) =>

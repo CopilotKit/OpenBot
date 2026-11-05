@@ -271,7 +271,7 @@ export const GALLERY: GalleryComponent[] = [
     title: "Approval",
     kind: "decision",
     description:
-      "Ask the person to approve or decline something, and WAIT for their answer. Use before doing anything you cannot undo, spending money, sending a message, changing a record. You are given their decision and any reason they typed.",
+      "Ask the person to approve or decline something, and WAIT for their answer. You are given their decision and any reason they typed. Do not use it before deleting, sending, sharing, posting, paying or buying: OpenBot asks the person itself before each of those, so asking here as well asks them twice. Use it for a decision that is theirs to make, or before something else you cannot undo.",
     parameters: ApprovalCardProps,
     Component: ApprovalCard as GalleryComponent["Component"],
     preview: {

@@ -7,6 +7,7 @@ import {
   type Message,
   type RunAgentInput,
 } from "@ag-ui/client";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -644,7 +645,7 @@ describe("where a task stands", () => {
     });
   });
 
-  test("a task asks before every change though Ask before making changes is off, its reads of the person's own app run freely, and the person's own conversation is unchanged", async () => {
+  test("a task asks before every change though Ask before making changes is off, its reads of the person's own app run freely, and in the person's own conversation the send asks as every send does", async () => {
     const { owner, botId, own, item } = await seed();
     // The deployment's default: off, and the person never turned it on.
     expect(await approvalStore.enabled(owner.id)).toBe(false);
@@ -704,8 +705,9 @@ describe("where a task stands", () => {
       (await approvalStore.get(owner.id, waiting[0]?.id ?? "")).status,
     ).toBe("pending");
 
-    // The same send in the person's own conversation with the Bot goes, as their switch says.
-    await runTurn({
+    // The same send in the person's own conversation with the Bot asks too, as every send to other
+    // people does whatever the switch says: on the safety policy's floor, not as the task's.
+    const asked = await runTurn({
       ownerUserId: owner.id,
       routineId: `${prefix}-own-${randomUUID()}`,
       agentId: botId,
@@ -713,19 +715,21 @@ describe("where a task stands", () => {
       instruction: "Reply to Sam.",
       userMessage: { id: randomUUID(), role: "user", content: "Reply to Sam." },
       initiator: PERSON_INITIATOR,
-    });
-    expect(sent.length).toBe(sentBefore + 1);
-    expect(
-      await database
-        .select()
-        .from(approvalRequests)
-        .where(
-          and(
-            eq(approvalRequests.ownerUserId, owner.id),
-            eq(approvalRequests.status, "pending"),
-          ),
+    }).catch((error: unknown) => error);
+    expect(asked).toBeInstanceOf(HeadlessToolSuspension);
+    expect(sent.length).toBe(sentBefore);
+    const pending = await database
+      .select()
+      .from(approvalRequests)
+      .where(
+        and(
+          eq(approvalRequests.ownerUserId, owner.id),
+          eq(approvalRequests.status, "pending"),
         ),
-    ).toHaveLength(1);
+      );
+    expect(
+      pending.map((request) => request.action.policy?.source).sort(),
+    ).toEqual(["safety", "task"]);
   });
 
   test("with Ask before making changes on, a task's send still waits as the task's: no Always allow, and switching it off or saving an allow rule leaves it waiting", async () => {

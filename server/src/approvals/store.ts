@@ -31,12 +31,13 @@ const DEFAULT_PREFERENCES: ApprovalPreferences = {
   hostCommands: "ask",
 };
 /**
- * One person with no admin watching: a Bot asks before it acts until they say otherwise, and the
- * card's always-allow is how that trust is given, one action at a time.
+ * One person on their own machine: a Bot gets on with ordinary changes, and only what the safety
+ * policy names asks first (paying, deleting, sending, sharing, publishing; see `policy.ts`), as in the
+ * team edition. Turning "Ask before making changes" on in Settings is the person's to choose.
  */
 const PERSONAL_PREFERENCES: ApprovalPreferences = {
   ...DEFAULT_PREFERENCES,
-  enabled: true,
+  enabled: false,
 };
 const DEFAULT_TEAM: ApprovalTeamSettings = {
   enforceAutoReview: false,
@@ -74,7 +75,10 @@ export function createApprovalStore(database: Database): ApprovalStore {
         .where(eq(approvalPreferences.ownerUserId, owner))
         .limit(1);
       // The same default the policy decides with, so the switch shows what actually happens.
-      if (!row) return currentEdition() === "personal";
+      if (!row)
+        return currentEdition() === "personal"
+          ? PERSONAL_PREFERENCES.enabled
+          : DEFAULT_PREFERENCES.enabled;
       return row.enabled === true;
     },
     async setEnabled(owner, enabled) {
