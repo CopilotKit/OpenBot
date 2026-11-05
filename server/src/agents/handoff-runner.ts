@@ -522,9 +522,10 @@ export function createHandoffRunner(options: {
                 kind: HANDOFF_KIND,
                 key: item.key,
                 owner,
-                // A busy conversation on the first try is almost always the asking Bot finishing its
-                // own reply, a second or two from free. Later tries keep the minute, so a person
-                // mid-conversation still gets the same few minutes of patience.
+                // The delivery already waited for a busy conversation (`BUSY_WAIT_MS` in
+                // handoff-delivery.ts), so one still busy is a longer run; the first retry still
+                // comes quickly, and later tries keep the minute, so a person mid-conversation still
+                // gets the same few minutes of patience.
                 delayMs:
                   error instanceof ThreadBusyError && item.attempts <= 1
                     ? 5_000
