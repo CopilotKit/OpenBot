@@ -190,6 +190,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   its tools to every Bot, including Bots made later. It can no longer be removed, and a Bot's
   Routines tools can no longer be taken away.
 
+### A command's output keeps characters that arrive in two pieces
+
+The computer turned each piece of a command's output into text as it arrived. A character that takes several bytes, such as `€`, `é` or most non-Latin text, could be split between two pieces, and then the Bot read two `�` in its place. Output is now decoded as one stream, so each character arrives whole.
+
 ### A personal edition for one person on one computer
 
 Set `OPENBOT_EDITION=personal`, with single-user mode and one computer, for an OpenBot without the

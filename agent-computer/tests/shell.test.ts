@@ -200,6 +200,18 @@ describe("the command that actually runs", () => {
     expect(result.stdout).not.toContain("computer-token");
   });
 
+  test("a character written across two pipe chunks is read whole", async () => {
+    // The euro sign is three bytes. The pause makes them two reads, so each half has to wait for
+    // the other instead of being decoded on its own.
+    const result = await createShell(root, source()).run({
+      command:
+        "printf '\\xe2\\x82'; printf '\\xe2' >&2; sleep 0.3; printf '\\xac\\n'; printf '\\x82\\xac' >&2",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("€\n");
+    expect(result.stderr).toBe("€");
+  });
+
   test("a name in COMPUTER_SHELL_ENV is in the child", async () => {
     const result = await createShell(
       root,
