@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 
 /**
  * The reset handler, driven over HTTP against the real process.
@@ -27,22 +27,6 @@ import { join } from "node:path";
 const asked = process.env.OPENBOT_LIVE_SCREEN === "1";
 
 const TOKEN = "test-computer-token";
-
-/**
- * A port the operating system says is free, rather than one picked in advance: a fixed number fails
- * the whole file at import when anything else holds it, and reports as one broken test rather than
- * as a port clash.
- */
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const found = (probe.address() as { port: number }).port;
-      probe.close(() => resolve(found));
-    });
-  });
-}
 
 let BASE = "";
 let root = "";
@@ -75,7 +59,7 @@ beforeAll(async () => {
   // Headless rather than whatever a previous file left set: this process starts no browser, so the
   // mode only decides whether module load tries to start a virtual display.
   process.env.COMPUTER_BROWSER_MODE = "headless";
-  process.env.PORT = String(await freePort());
+  process.env.PORT = String(await reservePort());
   BASE = `http://127.0.0.1:${process.env.PORT}`;
   process.env.PROFILES_DIR = join(root, "profiles");
   process.env.WORKSPACE_DIR = join(root, "workspace");
