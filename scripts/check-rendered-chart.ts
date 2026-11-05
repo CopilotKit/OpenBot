@@ -58,7 +58,7 @@ for (const document of documents) {
  */
 const demands = [
   ...text.matchAll(
-    /secretKeyRef:\s*\n\s*name:\s*(\S+)\s*\n\s*key:\s*([A-Za-z0-9._-]+)(?:\s*\n\s*optional:\s*(true|false))?/g,
+    /secretKeyRef:\s*\n\s*name:\s*(\S+)\s*\n\s*key:\s*(["']?[A-Za-z0-9._-]+["']?)(?:\s*\n\s*optional:\s*(true|false))?/g,
   ),
 ];
 
@@ -112,6 +112,13 @@ for (const [, rawName, rawKey, optional] of demands) {
 }
 
 /**
+ * Whether anything in the render reads `key` from a Secret, written bare or quoted: the bundled
+ * Intelligence's chart quotes the key it reads its gateway token by.
+ */
+const readsKey = (key: string) =>
+  text.includes(`key: ${key}`) || text.includes(`key: "${key}"`);
+
+/**
  * Anything the chart writes and nothing reads.
  *
  * The mirror of the above, and the reason a key gets quietly dropped from an environment: the
@@ -134,7 +141,7 @@ for (const match of text.matchAll(
 for (const [name, keys] of written) {
   if (mountedWhole.has(name)) continue;
   for (const key of keys) {
-    if (!text.includes(`key: ${key}`)) {
+    if (!readsKey(key)) {
       problems.push(
         `Secret "${name}" carries "${key}", which nothing in this render reads.`,
       );
@@ -158,7 +165,7 @@ for (const document of documents) {
   for (const [, key] of document.matchAll(
     /^\s*(?:-\s+)?secretKey:\s*([a-z0-9-]+)\s*$/gm,
   )) {
-    if (key && !text.includes(`key: ${key}`)) {
+    if (key && !readsKey(key)) {
       problems.push(
         `ExternalSecret "${name}" syncs "${key}", which nothing in this render reads.`,
       );
@@ -227,14 +234,8 @@ if (policyComponents.size > 0) {
     const name = workload.match(/^\s{2}name:\s*(\S+)/m)?.[1] ?? "a workload";
     if (!component) continue;
     // The migrations Job runs once at install and is torn down; it is not a standing surface. The
-    // Learning setup Job is the same: once per revision, then gone (templates/learning/setup-job.yaml),
-    // and so is the bundled Intelligence's key Job (templates/intelligence/key-job.yaml).
-    if (
-      component === "migrations" ||
-      component === "learning-setup" ||
-      component === "intelligence-key"
-    )
-      continue;
+    // Learning setup Job is the same: once per revision, then gone (templates/learning/setup-job.yaml).
+    if (component === "migrations" || component === "learning-setup") continue;
     if (!policyComponents.has(component)) {
       problems.push(
         `This release has NetworkPolicies but none selects ${name} (component: ${component}), so it is the one pod left unfenced while everything around it is restricted. Give it a policy or say in the chart why it needs none.`,

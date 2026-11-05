@@ -10,11 +10,15 @@ import {
 } from "../audit";
 import type { LearningSettingsStore } from "./settings";
 
-/** What asking Intelligence about one container found. */
+/**
+ * What asking Intelligence about one container found. `learning_off`: Intelligence answered and has
+ * no Learning routes at all, which is Learning switched off in its deployment, not a failure to reach it.
+ */
 export type ContainerProbe =
   | "present"
   | "absent"
   | "not_entitled"
+  | "learning_off"
   | "unavailable";
 
 /**
@@ -42,9 +46,54 @@ export function classifyProbeError(error: unknown): ContainerProbe {
   return "unavailable";
 }
 
-/** Ask whether `containerId` exists in the project the runtime key belongs to. */
+/** The HTTP status and Intelligence error code a project-key Learning request failed with. */
+function requestFailure(error: unknown): { status?: number; code?: string } {
+  if (error === null || typeof error !== "object") return {};
+  const { status, code } = error as { status?: unknown; code?: unknown };
+  return {
+    ...(typeof status === "number" ? { status } : {}),
+    ...(typeof code === "string" ? { code } : {}),
+  };
+}
+
+/**
+ * Read a refusal from Intelligence's project-key Learning routes (`/api/v1/learning/containers/...`).
+ *
+ * Intelligence with Learning switched off registers none of them, so it answers 404 with its
+ * catch-all `ROUTE_NOT_FOUND`: Learning is off there, which the person who can turn it on needs to
+ * hear, rather than that Intelligence could not be reached.
+ */
+export function classifyLearningRouteError(error: unknown): ContainerProbe {
+  const { status, code } = requestFailure(error);
+  if (status === 404 && code === "ROUTE_NOT_FOUND") return "learning_off";
+  if (code === "LEARNING_CONTAINER_NOT_FOUND") return "absent";
+  if (code === "LEARNING_NOT_ENABLED") return "not_entitled";
+  return "unavailable";
+}
+
+/** The runtime client's catch-alls: a refusal it has no code for, which the read below can name. */
+const UNNAMED_REFUSALS = new Set([
+  "UNSUPPORTED_SERVER",
+  "AUTHORIZATION_FAILED",
+]);
+
+/**
+ * Ask whether `containerId` exists in the project the runtime key belongs to.
+ *
+ * The published-Skills read answers it on every Intelligence. When that read fails with a code the
+ * runtime client does not know (it reports any such refusal as `UNSUPPORTED_SERVER`, or a 403 as
+ * `AUTHORIZATION_FAILED`), the container itself is read on the same key, whose refusal carries
+ * Intelligence's own code: Learning switched off, a missing container, or Learning not licensed.
+ */
 export async function probeLearningContainer(
-  client: Pick<CopilotKitIntelligence, "getLearnedSkillsSnapshot">,
+  client: Pick<CopilotKitIntelligence, "getLearnedSkillsSnapshot"> & {
+    experimental?: {
+      learning: Pick<
+        CopilotKitIntelligence["experimental"]["learning"],
+        "getLearningContainer"
+      >;
+    };
+  },
   containerId: string,
   timeoutMs = 5_000,
 ): Promise<ContainerProbe> {
@@ -55,7 +104,24 @@ export async function probeLearningContainer(
     });
     return "present";
   } catch (error) {
-    return classifyProbeError(error);
+    const found = classifyProbeError(error);
+    const { code } = requestFailure(error);
+    if (
+      found !== "unavailable" ||
+      !client.experimental ||
+      !code ||
+      !UNNAMED_REFUSALS.has(code)
+    )
+      return found;
+    try {
+      await client.experimental.learning.getLearningContainer({
+        containerId,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return "present";
+    } catch (named) {
+      return classifyLearningRouteError(named);
+    }
   }
 }
 
@@ -201,10 +267,10 @@ const MIN_INTERVAL_MS = 60_000;
  *
  * - It never overrides a choice. A saved Admin setting of any kind, including a saved off, and a
  *   container named in the environment both mean there is nothing to do.
- * - It creates the container only through `create`, with a credential that can (a service token on
- *   a local evaluation install, or a CopilotKit CLI login on this machine; see
- *   learning/ensure-container.ts), once per process unless Admin asks again. The runtime key cannot.
- *   With no such credential it says exactly what to run, once, in the log and on the Admin page.
+ * - It creates the container only through `create`, with a credential that can (the runtime key on
+ *   an Intelligence that allows it, a service token on a local evaluation install, or a CopilotKit
+ *   CLI login on this machine; see learning/ensure-container.ts), once per process unless Admin asks
+ *   again. With none of them it says exactly what to run, once, in the log and on the Admin page.
  * - It is safe on many replicas: the write is a conditional insert, so the first one wins and the
  *   rest see a saved setting. Only the winner writes the audit row.
  * - It never blocks startup or a turn. Every failure is logged once per kind and tried again later.
@@ -253,6 +319,11 @@ export function createLearningAutoAssign(options: {
   /** Whether this process already tried `create`: once at boot, again only when Admin asks. */
   let createTried = false;
   let createError: string | undefined;
+  /**
+   * Whether the last attempt found nothing here that could create it (an Intelligence that does not
+   * let the runtime key, and no other credential). Admin then shows the steps, not a button.
+   */
+  let createSkipped = false;
 
   /** Create it with the configured credential, once. True when it is there now. */
   const tryCreate = async (): Promise<boolean> => {
@@ -261,7 +332,8 @@ export function createLearningAutoAssign(options: {
     try {
       const result = await options.create();
       createError = undefined;
-      if (result === "skipped") return false;
+      createSkipped = result === "skipped";
+      if (createSkipped) return false;
       log({
         type: "learning-auto-assign",
         outcome: result === "created" ? "container_created" : "container_found",
@@ -286,7 +358,7 @@ export function createLearningAutoAssign(options: {
     state: "absent",
     containerId,
     instructions,
-    canCreate: Boolean(options.create),
+    canCreate: Boolean(options.create) && !createSkipped,
     ...(createError ? { createError } : {}),
   });
 
@@ -308,6 +380,13 @@ export function createLearningAutoAssign(options: {
           "This Intelligence project's plan does not include Learning, so no container was assigned.",
       });
       return { state: "not_entitled" };
+    }
+    if (found === "learning_off") {
+      once("learning_off", {
+        message:
+          "Learning is switched off in this Intelligence, so Automatic Learning collects nothing. Turn it on in Intelligence (learning.enabled in its Helm chart); OpenBot checks again.",
+      });
+      return { state: "learning_off" };
     }
     if (found === "unavailable") {
       once("unavailable", {

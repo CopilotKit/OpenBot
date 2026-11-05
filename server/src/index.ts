@@ -348,32 +348,33 @@ const learningProbeIntelligence = createIntelligenceClient(
   config.runtime.intelligence,
 );
 /*
- * Who can create the `openbot` container here: never the runtime key. A service token the operator
- * configured (local evaluation installs), or a CopilotKit CLI login on this machine, which is what a
- * laptop running `bun run start` has. Neither, and the log and Admin say exactly what to run instead.
+ * Who can create a Learning container here. First the runtime key itself, on an Intelligence that
+ * lets a project key create one in its own project, at the address the server already uses (a
+ * Service in the cluster with the bundled Intelligence). On one that does not, a service token the
+ * operator configured (local evaluation installs), or a CopilotKit CLI login on this machine, which
+ * is what a laptop running `bun run start` has: those two only over HTTPS, or HTTP on loopback.
+ * None of them, and the log and Admin say exactly what to run instead.
  */
+const learningApiUrl = config.runtime.intelligence.apiUrl.replace(/\/+$/, "");
 const learningApiOrigin = (() => {
   try {
-    return intelligenceApiOrigin(config.runtime.intelligence.apiUrl);
+    return intelligenceApiOrigin(learningApiUrl);
   } catch {
     return undefined;
   }
 })();
-const learningCanCreate =
-  learningApiOrigin !== undefined &&
-  (config.learningSetup !== undefined || cliLoginPresent());
-/** The credential that can create a Learning container, for the `openbot` default and for each person's own space. */
-const learningCredentials = (apiUrl: string): LearningContainerCredentials => ({
+/** The credentials that can create a Learning container, for the `openbot` default and for each person's own space. */
+const learningCredentials = (): LearningContainerCredentials => ({
   directory: process.cwd(),
-  apiUrl,
+  apiUrl: learningApiOrigin ?? learningApiUrl,
   nonInteractive: true,
   key: keyIntelligence(
-    apiUrl,
+    learningApiUrl,
     config.runtime.intelligence.apiKey,
     config.runtime.intelligence.gatewayWsUrl,
   ),
-  cliLogin: cliLoginPresent(),
-  ...(config.learningSetup
+  cliLogin: learningApiOrigin !== undefined && cliLoginPresent(),
+  ...(config.learningSetup && learningApiOrigin
     ? {
         serviceToken: {
           token: config.learningSetup.serviceToken,
@@ -387,15 +388,8 @@ const learningAutoAssign = createLearningAutoAssign({
   store: learningSettingsStore,
   probe: (containerId) =>
     probeLearningContainer(learningProbeIntelligence, containerId),
-  ...(learningApiOrigin
-    ? { instructions: learningSetupInstructions(learningApiOrigin) }
-    : {}),
-  ...(learningCanCreate && learningApiOrigin
-    ? {
-        create: () =>
-          ensureLearningContainer(learningCredentials(learningApiOrigin)),
-      }
-    : {}),
+  instructions: learningSetupInstructions(learningApiOrigin ?? learningApiUrl),
+  create: () => ensureLearningContainer(learningCredentials()),
   audit: createAuditStore(database),
 });
 /*
@@ -407,15 +401,8 @@ const personalLearningSpaces = createPersonalLearningSpaces({
   readSettings: () => learningSettingsStore.read(),
   snapshots: learningProbeIntelligence,
   store: createPersonSpaceStore(database),
-  ...(learningCanCreate && learningApiOrigin
-    ? {
-        create: (container) =>
-          createLearningContainer({
-            ...learningCredentials(learningApiOrigin),
-            container,
-          }),
-      }
-    : {}),
+  create: (container) =>
+    createLearningContainer({ ...learningCredentials(), container }),
   nameFor: async (userId) =>
     (
       await database
@@ -2854,6 +2841,7 @@ const app = createApp(
     autoAssign: learningAutoAssign,
     status: copilotRuntime.learning?.status,
     inspect: copilotRuntime.learning?.inspect,
+    manage: learningProbeIntelligence.experimental.learning,
   },
   {
     productTelemetry,

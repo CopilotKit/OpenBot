@@ -1,13 +1,14 @@
 /**
  * Create this project's `openbot` Learning container with whatever credential can.
  *
- * THE RUNTIME KEY CANNOT. Intelligence serves `POST /api/learning/projects/:projectId/containers`
- * to three callers only: a person's browser session (from a trusted origin), a CopilotKit CLI login
+ * THE RUNTIME KEY FIRST. A current Intelligence creates a container in the key's own project on
+ * `POST /api/v1/learning/containers`, and nothing else is needed. Intelligence 0.15.1 and earlier
+ * have no such route (404), and serve `POST /api/learning/projects/:projectId/containers` to three
+ * callers only: a person's browser session (from a trusted origin), a CopilotKit CLI login
  * (exchanged for a fifteen-minute product credential), and a service token, which counts only on a
- * CopilotKit local evaluation install. A project key reaches the `/api/v1` routes and nothing here.
- * So every path below goes through one of those three, and each proves its result with the runtime
- * key afterwards: a container the key still cannot see is in another project, and is reported rather
- * than assigned.
+ * CopilotKit local evaluation install. So on those, every path below goes through one of the three,
+ * and each proves its result with the runtime key afterwards: a container the key still cannot see
+ * is in another project, and is reported rather than assigned.
  *
  * - A service token (INTELLIGENCE_SERVICE_TOKEN with INTELLIGENCE_PROJECT_ID), on any Intelligence:
  *   Intelligence decides whether it counts.
@@ -52,22 +53,90 @@ export const OPENBOT_CONTAINER: LearningContainerSpec = {
 export type CliResult = { exitCode: number; stdout: string };
 export type RunCli = (args: string[], directory: string) => Promise<CliResult>;
 
-/** What the configured runtime key can answer about its own project. */
+/** What the configured runtime key can answer about its own project, and do in it. */
 export type KeyIntelligence = {
   probe: (containerId: string) => Promise<ContainerProbe>;
   project: () => Promise<KeyIdentity | undefined>;
+  /**
+   * Create `container` in the key's own project. `unsupported`: this Intelligence has no such route
+   * for a project key, so another credential has to.
+   */
+  create?: (
+    container: LearningContainerSpec,
+  ) => Promise<"created" | "present" | "unsupported">;
 };
 
 export function keyIntelligence(
   apiUrl: string,
   apiKey: string,
   wsUrl?: string,
+  fetchImpl: typeof fetch = fetch,
 ): KeyIntelligence {
   const client = runtimeKeyClient(apiUrl, apiKey, wsUrl);
   return {
     probe: (containerId) => probeLearningContainer(client, containerId),
     project: () => keyIdentity(client),
+    create: (container) =>
+      createWithRuntimeKey({ apiUrl, apiKey, fetch: fetchImpl, container }),
   };
+}
+
+/**
+ * Create a container with the runtime key, in the project Intelligence reads off that key: the body
+ * names no project, so the key cannot make one anywhere else.
+ *
+ * 201 is a new container and 200 the one already stored under that id, unchanged, so replicas and
+ * people racing to ensure the same container all end with it. A 409 from an Intelligence that
+ * reports a taken id instead is present too. 404 is an Intelligence without the route (0.15.1 and
+ * earlier, or Learning switched off), and the caller tries its other credentials.
+ */
+export async function createWithRuntimeKey(input: {
+  apiUrl: string;
+  apiKey: string;
+  fetch: typeof fetch;
+  container: LearningContainerSpec;
+}): Promise<"created" | "present" | "unsupported"> {
+  const { container } = input;
+  const response = await input.fetch(
+    `${input.apiUrl.replace(/\/+$/, "")}/api/v1/learning/containers`,
+    {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${input.apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ id: container.id, name: container.name }),
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
+  const body: unknown = await response.json().catch(() => null);
+  const code =
+    object(body) && object(body.error) && typeof body.error.code === "string"
+      ? body.error.code
+      : undefined;
+  if (response.status === 201 || response.status === 200) {
+    if (
+      object(body) &&
+      object(body.container) &&
+      body.container.id === container.id
+    )
+      return response.status === 201 ? "created" : "present";
+    throw new Error(
+      `Intelligence answered the runtime key's container request with something other than the ${container.id} container. Nothing was assigned.`,
+    );
+  }
+  if (response.status === 409 && code === "LEARNING_CONTAINER_ALREADY_EXISTS")
+    return "present";
+  if (response.status === 404) return "unsupported";
+  if (code === "LEARNING_NOT_ENABLED")
+    throw new Error(
+      "This Intelligence's licence does not include Learning, so no container was created.",
+    );
+  throw new Error(
+    `Intelligence could not create the ${container.id} Learning container with the runtime key (HTTP ${response.status}${code ? `, ${code}` : ""}). OpenBot tries again.`,
+  );
 }
 
 /** `present`: it was already there. `created`: made here. `skipped`: nothing here could make it. */
@@ -512,6 +581,10 @@ export async function createLearningContainer(
     container.id === OPENBOT_CONTAINER.id
       ? CREATE_IN_INTELLIGENCE
       : `or create a Learning container with ID "${container.id}" in that project in Intelligence.`;
+  if (input.key.create) {
+    const created = await input.key.create(container);
+    if (created !== "unsupported") return created;
+  }
   if (input.serviceToken) {
     return createWithServiceToken({
       apiUrl: input.apiUrl,
@@ -619,6 +692,11 @@ export async function ensureLearningContainer(
       "This Intelligence project's plan does not include Learning. Nothing was created.",
     );
   }
+  if (found === "learning_off") {
+    throw new Error(
+      "Learning is switched off in this Intelligence (learning.enabled in its Helm chart). Turn it on there, then run this again. Nothing was created.",
+    );
+  }
   if (found === "unavailable") {
     throw new Error(
       "Intelligence could not be asked about the openbot Learning container with the configured runtime key. Check INTELLIGENCE_API_URL and INTELLIGENCE_API_KEY, then run this helper again.",
@@ -645,7 +723,21 @@ export async function ensureLearningContainer(
  */
 async function jobMain() {
   const environment = process.env;
-  const apiUrl = intelligenceApiOrigin(environment.INTELLIGENCE_API_URL ?? "");
+  // The runtime key goes wherever the server sends it (a Service in the cluster, over HTTP, with the
+  // bundled Intelligence). A service token or a CLI login only over HTTPS, or HTTP on loopback.
+  const keyUrl = (environment.INTELLIGENCE_API_URL ?? "")
+    .trim()
+    .replace(/\/+$/, "");
+  if (!/^https?:\/\//.test(keyUrl))
+    throw new Error("INTELLIGENCE_API_URL must be an http(s) URL.");
+  const origin = (() => {
+    try {
+      return intelligenceApiOrigin(keyUrl);
+    } catch {
+      return undefined;
+    }
+  })();
+  const apiUrl = origin ?? keyUrl;
   const apiKey = intelligenceApiKey(environment);
   if (!apiKey)
     throw new Error(
@@ -662,11 +754,14 @@ async function jobMain() {
     apiUrl,
     nonInteractive: true,
     key: keyIntelligence(
-      apiUrl,
+      keyUrl,
       apiKey,
       environment.INTELLIGENCE_GATEWAY_WS_URL?.trim() || undefined,
     ),
-    ...(token && projectId ? { serviceToken: { token, projectId } } : {}),
+    ...(token && projectId && origin
+      ? { serviceToken: { token, projectId } }
+      : {}),
+    ...(origin ? {} : { cliLogin: false }),
   });
   console.log(
     result === "skipped"

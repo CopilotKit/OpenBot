@@ -57,27 +57,28 @@ your own computer, and why the chart refuses it with a public URL or an open Loa
 secret that your file replaces. CI renders exactly this install on every change.
 
 **What happens, so a first install that takes a few minutes is not a surprise.** The chart installs
-Intelligence 0.15.1, generates every credential it needs as Secrets that are kept across upgrades and
-uninstalls, gives it the licence from your file (OpenBot gets the same one), and creates an
-organization with a service token. A Job then waits for Intelligence's API, creates OpenBot's project
-and key with that token, and stores the key in the Secret `openbot-intelligence-key`. The OpenBot
-server starts once that Secret exists. Intelligence's API restarts a few times on the way: it will not
-start until its organization exists, and Intelligence creates that in a post-install hook.
+Intelligence, generates every credential it needs as Secrets that are kept across upgrades and
+uninstalls, including OpenBot's runtime key in `openbot-intel-api-key`, and gives it the licence from
+your file (OpenBot gets the same one). Intelligence's bootstrap Job then creates OpenBot's organization
+and project, stores that key for it, and creates the `openbot` Learning container. Nobody signs in to
+anything. `--timeout 15m` gives a fresh cluster room to pull every image; `--wait` works on a first
+install too.
 
-**Do not pass `--wait` (or `--atomic`, or `--rollback-on-failure`) on the first install.** `--wait`
-holds those post-install hooks until every pod is ready, and Intelligence's API cannot be ready before
-them, so the install times out instead. Helm 4 does not wait unless asked. Upgrades are not affected.
-`--timeout 15m` gives the hooks room while a fresh cluster pulls every image.
+`kubectl -n openbot get pods,jobs` shows it coming up, and the log of the
+`openbot-intelligence-bootstrap` Job says what Intelligence set up. The browser reaches Intelligence's
+gateway through OpenBot's own address, so the one port-forward is all it needs.
 
-`kubectl -n openbot get pods,jobs` shows it coming up, and `kubectl -n openbot logs` on the
-`openbot-intelligence-key` Job says what it is waiting for. The browser reaches Intelligence's gateway
-through OpenBot's own address, so the one port-forward is all it needs.
+**Automatic Learning spends your model key.** Learning is on in OpenBot and in the bundled
+Intelligence, whose Learning agent reads finished conversations and proposes skills with
+`openai/gpt-5.5` on the key in `secrets.modelApiKey`. See [Automatic Learning](#automatic-learning).
 
 The secrets can also live in a Secret of your own instead of a file: set `secrets.existingSecret` to
 it, with the keys `license-token`, `model-api-key`, `key-encryption-key` and `computer-token`; put the
 database password under `postgres-password` and set `postgresql.auth.existingSecret` to the same
 Secret; and set `intelligence.appApi.licenseSecret.existingSecret` to it too, so Intelligence reads the
-same licence. `values.yaml` under `intelligence` explains every value the bundle sets.
+same licence. Intelligence's Learning agent reads `model-api-key` from that Secret as well: the chart
+copies it at install and on every upgrade, so a new key there reaches Learning on the next
+`helm upgrade`. `values.yaml` under `intelligence` explains every value the bundle sets.
 
 ## What a cluster needs first
 
@@ -495,10 +496,26 @@ nobody can talk to.
 
 ## Automatic Learning
 
-Learning is on by default, and it needs a container in the Intelligence project before it collects or
-delivers anything. With nothing saved in Admin and no `config.learning.containerId`, the server
-assigns the project's `openbot` container as the default by itself once it exists. The runtime key
-cannot create it, so give the chart a credential that can and a setup Job creates it on install and
+**With the bundled Intelligence** (the default) there is nothing to set up. Learning is on in
+Intelligence too (`intelligence.learning`), Intelligence creates the project's `openbot` container at
+install, the server assigns it as the default, and it creates each person's own Learning space with
+its runtime key. Intelligence's Learning agent runs on `secrets.modelApiKey` with `openai/gpt-5.5`
+(`intelligence.learning.agent`), so Learning spends the same key your Bots do. It runs by itself after
+15 finished conversations and after every 15 more, and keeps what it learns in an object store the
+release runs (`intelligence.localObjectStorage`). Trajectories, the sessions the Recorder captures, are
+on as well, which needs the licence's `trajectories` feature.
+
+Intelligence's own dashboard is not installed, so Admin → Automatic learning is where its work is
+reviewed: the skills it proposes, each one's SKILL.md and the conversations it was learned from,
+Approve (which publishes it to the container's Bots) and Reject, and Learn now to run it at any time.
+Every approval and rejection is recorded in OpenBot's audit log with the admin who made it. With an
+Intelligence that has a dashboard (managed Intelligence), the page links to it as well.
+
+**With an Intelligence of your own** (`intelligence.enabled: false`), Learning needs a container in its
+project before it collects or delivers anything. With nothing saved in Admin and no
+`config.learning.containerId`, the server assigns the project's `openbot` container as the default by
+itself once it exists. A current Intelligence lets the runtime key create it, and the server does. On
+one that does not, give the chart a credential that can and a setup Job creates it on install and
 every upgrade:
 
 - Managed Intelligence: a CopilotKit CLI login. Sign in into an empty folder and store the file it

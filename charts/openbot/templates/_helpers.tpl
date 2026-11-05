@@ -929,46 +929,42 @@ Bitnami subcharts work it out, so the addresses here are the Services there. Cal
 {{- end -}}
 {{- end -}}
 
-{{/* The Secret the key Job writes the bundled Intelligence's runtime key into. */}}
-{{- define "openbot.intelligenceKeySecretName" -}}
-{{- include "openbot.componentName" (dict "root" . "component" "intelligence-key") -}}
+{{/*
+Where the bundled Intelligence's runtime key lives, as YAML {name, key}: the first
+`intelligence.bootstrap.projects` entry with an `apiKey`. This chart generates the key into that
+Secret (templates/intelligence/secrets.yaml), Intelligence's bootstrap Job stores its hash, and the
+server reads it, so all three name one Secret. Empty when no project carries a key, which
+validation.yaml refuses.
+*/}}
+{{- define "openbot.intelligenceKeyRef" -}}
+{{- $values := .Values.intelligence | default dict -}}
+{{- $ref := dict -}}
+{{- range (($values.bootstrap | default dict).projects | default list) -}}
+{{- $apiKey := .apiKey | default dict -}}
+{{- if and (not $ref.name) $apiKey.existingSecret -}}
+{{- $ref = dict "name" $apiKey.existingSecret "key" ($apiKey.key | default "api-key") -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $ref -}}
 {{- end -}}
 
 {{/*
-INTELLIGENCE_API_KEY, from wherever it is: the Secret the key Job writes for the bundled Intelligence,
-or `secrets.intelligenceApiKey` in this chart's Secret for one that already runs.
+INTELLIGENCE_API_KEY, from wherever it is: the bundled Intelligence's project key Secret (see
+`openbot.intelligenceKeyRef`), or `secrets.intelligenceApiKey` in this chart's Secret for one that
+already runs.
 */}}
 {{- define "openbot.intelligenceApiKeyEnv" -}}
+{{- $ref := include "openbot.intelligenceKeyRef" . | fromYaml -}}
 - name: INTELLIGENCE_API_KEY
   valueFrom:
     secretKeyRef:
       {{- if include "openbot.intelligenceBundled" . }}
-      name: {{ include "openbot.intelligenceKeySecretName" . }}
+      name: {{ $ref.name }}
+      key: {{ $ref.key }}
       {{- else }}
       name: {{ include "openbot.secretName" . }}
-      {{- end }}
       key: intelligence-api-key
-{{- end -}}
-
-{{/*
-The organization the bundled Intelligence's service token acts for, by id: the `bootstrap`
-organization whose slug the token names, with the id the bootstrap Job gives it (`id`, or
-`org_<slug>` with anything outside a-z and 0-9 made `_`, as bootstrap-self-hosted.sh does).
-*/}}
-{{- define "openbot.intelligenceOrganizationId" -}}
-{{- $values := .Values.intelligence | default dict -}}
-{{- $tokens := (($values.appApi | default dict).serviceTokens | default dict).tokens | default list -}}
-{{- $token := dict -}}
-{{- range $tokens }}{{- if eq .name "openbot" }}{{- $token = . }}{{- end }}{{- end -}}
-{{- if not $token.organizationSlug -}}
-{{- fail "intelligence.appApi.serviceTokens.tokens needs the entry named `openbot`, with an organizationSlug: it is how this chart creates OpenBot's project and key in the bundled Intelligence." -}}
-{{- end -}}
-{{- $organization := dict -}}
-{{- range (($values.bootstrap | default dict).organizations | default list) }}{{- if eq .slug $token.organizationSlug }}{{- $organization = . }}{{- end }}{{- end -}}
-{{- if not $organization.slug -}}
-{{- fail (printf "intelligence.bootstrap.organizations has no organization with slug %q, which the `openbot` service token acts for. The bundled Intelligence would not start: its API refuses a service token for an organization that does not exist." $token.organizationSlug) -}}
-{{- end -}}
-{{- default (printf "org_%s" (regexReplaceAll "[^a-z0-9]" $organization.slug "_")) $organization.id -}}
+      {{- end }}
 {{- end -}}
 
 {{/*
