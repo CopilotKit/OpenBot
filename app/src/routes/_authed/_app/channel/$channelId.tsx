@@ -1,13 +1,19 @@
-import { IconSettings } from "@tabler/icons-react";
+import { IconDownload, IconLoader2, IconSettings } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
+import { useState } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
 import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { ConversationActions } from "@/components/channels/conversation-actions";
+import {
+  downloadMarkdown,
+  exportFilename,
+  transcriptMarkdown,
+} from "@/components/channels/transcript-export";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
@@ -16,6 +22,7 @@ import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
+import { readThreadMessages } from "@/lib/copilot/thread-messages";
 
 const chatSearchSchema = z.object({
   settings: z.boolean().optional(),
@@ -30,6 +37,17 @@ const HEADING_ENTRANCE_OFFSET = "translateY(4px)";
 
 /** Shared detail pane width for the live screen view. */
 const SCREEN_PANEL_WIDTH = 400;
+
+/**
+ * How long an export will wait for the conversation's durable history.
+ *
+ * Far longer than the 1.5s the transcript's own restore waits, because that deadline exists to
+ * keep a mount from stalling behind a slow read — an export is asked for deliberately, by a person
+ * waiting on a button, and "not exported because the store was slow once" is a failure they would
+ * rather not have. The transcript on screen is meanwhile untouched: this read is beside it, not
+ * through it.
+ */
+const EXPORT_READ_DEADLINE_MS = 10_000;
 
 export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
   validateSearch: chatSearchSchema,
@@ -48,6 +66,50 @@ function RouteComponent() {
   const agentId = channel.data?.agentIds[0];
 
   useMarkOpenChannelRead(channelId);
+
+  /*
+   * The export button's own state, kept here rather than in the transcript below: the button is
+   * asked for by a person looking at the header, and both the waiting and the refusal belong
+   * beside it, where the click happened.
+   *
+   * THE DURABLE HISTORY IS READ FRESH, not lifted from the transcript on screen. What is on screen
+   * is the running agent's own array, which holds the turn in flight and anything the run has not
+   * yet handed the store; what the store holds is the record. A person exporting a conversation is
+   * keeping the record, and the two are the same thing except exactly when they would most want
+   * them to be. A turn still streaming when Export is pressed can be missing from the file; press
+   * it again once the Bot has finished.
+   */
+  const [exporting, setExporting] = useState(false);
+  const [exportProblem, setExportProblem] = useState<string | null>(null);
+
+  const exportConversation = async () => {
+    const open = channel.data;
+    if (!open || agentId === undefined || exporting) return;
+    setExporting(true);
+    setExportProblem(null);
+    try {
+      const stored = await readThreadMessages(open.threadId, agentId, {
+        deadlineMs: EXPORT_READ_DEADLINE_MS,
+      });
+      if (stored.availability === "unavailable") throw new Error("unreadable");
+      downloadMarkdown(
+        exportFilename(open.name),
+        transcriptMarkdown({
+          name: open.name,
+          messages: stored.messages,
+          unreadable: stored.unreadable,
+        }),
+      );
+    } catch {
+      // One sentence, the same one every time: what the caller can do about it is try again, and
+      // the reason is either the store or the network, neither of which this screen can name.
+      setExportProblem(
+        "Couldn't read this conversation to export it. Try again.",
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Browser activity may auto-open the screen once per run unless this run was dismissed.
   const autoWatch = useAutoWatchScreen({
@@ -155,6 +217,28 @@ function RouteComponent() {
               open={isWatching}
               onOpenChange={(open) => show(open ? "watch" : null)}
             />
+            {/*
+             * Disabled rather than hidden while the channel loads, so the header's buttons are in
+             * the same places on first paint as on every paint after — a control that appears once
+             * the network answers reads as the page moving under the person.
+             */}
+            <Button
+              aria-label="Export conversation as Markdown"
+              disabled={
+                channel.data === undefined || agentId === undefined || exporting
+              }
+              onClick={() => {
+                void exportConversation();
+              }}
+              variant="ghost"
+              size="icon"
+            >
+              {exporting ? (
+                <IconLoader2 className="size-4.5 motion-safe:animate-spin" />
+              ) : (
+                <IconDownload className="size-4.5" />
+              )}
+            </Button>
             <Button
               aria-label="This conversation's Bot"
               aria-pressed={isSettingsOpen}
@@ -169,6 +253,12 @@ function RouteComponent() {
           </div>
         </div>
       </div>
+      {/* Said under the header, where the person is looking, and cleared by the next attempt. */}
+      {exportProblem ? (
+        <p className="text-destructive px-3 py-1 text-xs" role="alert">
+          {exportProblem}
+        </p>
+      ) : null}
       {agentId && channel.data?.agentIds.length === 1 ? (
         <BotPausedBanner agentId={agentId} />
       ) : null}
