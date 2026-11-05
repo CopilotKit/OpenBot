@@ -246,11 +246,12 @@ See `docs/personal-edition.md`.
 
 OpenBot Desktop now sets up OpenBot for one person with CopilotKit Intelligence on the same
 computer: Account (sign in to CopilotKit and accept the Intelligence evaluation licence), Install,
-AI and Start. Install starts on the first click and shows each image's size and speed. The
-installer carries the CopilotKit CLI current when it was built, and its Node, checked against
-digests taken then. The CLI chooses and runs the Intelligence; sign-in shows OpenBot's own page
-when the CLI offers it. OpenBot opens once Intelligence is ready with a valid licence, and the app
-warns five days before the licence expires.
+AI and Start. Install starts on the first click and shows each image's size and speed. The installer
+carries a CopilotKit CLI preview (`copilotkit` 4.33.1-pre.256cc68, pinned in
+`desktop/intelligence-cli.json`) that installs Intelligence 0.16.0-rc.5, a release candidate and the
+same release the Helm chart installs, and its Node, checked against pinned digests. The CLI runs the
+Intelligence; sign-in shows OpenBot's own page when the CLI offers it. OpenBot opens once
+Intelligence is ready with a valid licence, and the app warns five days before the licence expires.
 
 - **Only this Intelligence.** No hosted or self-hosted option, organization sign-in or Bot picker.
 - **OpenBot runs in containers**, from the published `openbot-server` image, not as Bun processes
@@ -572,7 +573,7 @@ stopping with nothing said. Every Bot is told to draw a table or chart once, wit
 ### The Helm chart installs CopilotKit Intelligence with OpenBot
 
 By default (`intelligence.enabled: true`), one `helm install` with `secrets.licenseToken` and
-`secrets.modelApiKey` is the whole product: Intelligence 0.16.0-rc.4, a release candidate,
+`secrets.modelApiKey` is the whole product: Intelligence 0.16.0-rc.5, a release candidate,
 self-hosted on its own PostgreSQL, Redis and object store. Its bootstrap creates OpenBot's project
 and `openbot` Learning container, with a runtime key the chart generates, and nobody signs in.
 Automatic Learning, on `secrets.modelApiKey` with `openai/gpt-5.5`, and trajectories are on. The
