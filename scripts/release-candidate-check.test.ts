@@ -223,8 +223,14 @@ test("allows a release policy change that only moves the version", () => {
     [
       "release-policy.json",
       {
-        before: JSON.stringify({ version: "v0.3.0-rc.1", upgrade: { fromVersions: ["v0.2.0"] } }),
-        after: JSON.stringify({ version: "v0.3.0", upgrade: { fromVersions: ["v0.2.0"] } }),
+        before: JSON.stringify({
+          version: "v0.3.0-rc.1",
+          upgrade: { fromVersions: ["v0.2.0"] },
+        }),
+        after: JSON.stringify({
+          version: "v0.3.0",
+          upgrade: { fromVersions: ["v0.2.0"] },
+        }),
       },
     ],
   ]);
@@ -236,8 +242,14 @@ test("rejects a release policy change beyond the version", () => {
     [
       "release-policy.json",
       {
-        before: JSON.stringify({ version: "v0.3.0-rc.1", upgrade: { fromVersions: ["v0.2.0"] } }),
-        after: JSON.stringify({ version: "v0.3.0", upgrade: { fromVersions: ["v0.1.0"] } }),
+        before: JSON.stringify({
+          version: "v0.3.0-rc.1",
+          upgrade: { fromVersions: ["v0.2.0"] },
+        }),
+        after: JSON.stringify({
+          version: "v0.3.0",
+          upgrade: { fromVersions: ["v0.1.0"] },
+        }),
       },
     ],
   ]);
