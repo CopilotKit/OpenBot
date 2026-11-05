@@ -1,4 +1,5 @@
-//! Choose a release for a new deployment and retain an existing deployment's exact version.
+//! Choose a release for a deployment: the exact build a pinned app was cut with, otherwise the
+//! release a deployment already follows, otherwise the latest public release.
 
 use std::path::Path;
 
@@ -6,11 +7,13 @@ use serde::Deserialize;
 
 use crate::deployment;
 
-/// Only new deployments consult GitHub. The fetcher records the exact tag after the source and
-/// image manifest have both downloaded successfully; restarts and repairs retain that pin.
-/// Uses blocking HTTP, so callers in an async runtime must use a blocking task.
+/// A pinned build always uses the version it was pinned to and never consults GitHub. Any other
+/// build keeps the release it already follows, so restarts and repairs retain that version; only a
+/// new deployment, or one left behind by a pinned build, asks this distribution for its latest
+/// release. The fetcher records the exact tag after the source and image manifest have both
+/// downloaded. Uses blocking HTTP, so callers in an async runtime must use a blocking task.
 pub fn resolve_version(root: &Path) -> Result<String, String> {
-    resolve_version_with(root, || {
+    resolve_version_with(root, deployment::pinned().as_ref(), || {
         let policy = crate::updates::distribution(root)?;
         let body = deployment::get(&crate::updates::latest_url(&policy))
             .map_err(|error| format!("could not find the latest OpenBot release: {error}"))?;
@@ -18,13 +21,20 @@ pub fn resolve_version(root: &Path) -> Result<String, String> {
     })
 }
 
+/// With a pin, the pin's version wins and `latest` is never called. Without one, the installed
+/// version is kept only when it was followed rather than pinned; a pinned deployment moves to the
+/// latest release.
 fn resolve_version_with(
     root: &Path,
+    pinned: Option<&deployment::Pin>,
     latest: impl FnOnce() -> Result<String, String>,
 ) -> Result<String, String> {
+    if let Some(pin) = pinned {
+        return Ok(pin.version.clone());
+    }
     match deployment::installed(root) {
-        Some(installed) => Ok(installed.version),
-        None => latest(),
+        Some(installed) if !installed.pinned => Ok(installed.version),
+        _ => latest(),
     }
 }
 
@@ -56,7 +66,7 @@ mod tests {
     #[test]
     fn a_fresh_install_selects_latest_without_recording_an_unfinished_download() {
         let root = scratch("release-fresh");
-        let version = resolve_version_with(&root, || Ok("v0.0.9".into())).unwrap();
+        let version = resolve_version_with(&root, None, || Ok("v0.0.9".into())).unwrap();
         assert_eq!(version, "v0.0.9");
         assert!(deployment::installed(&root).is_none());
         assert!(deployment::needs_fetch(&root, &version));
@@ -66,9 +76,9 @@ mod tests {
     #[test]
     fn an_installed_version_does_not_query_github_or_upgrade() {
         let root = scratch("release-installed");
-        deployment::record(&root, "v0.0.7").unwrap();
+        deployment::record(&root, "v0.0.7", false).unwrap();
         std::fs::write(deployment::images_path(&root), "{}").unwrap();
-        let version = resolve_version_with(&root, || panic!("must work offline")).unwrap();
+        let version = resolve_version_with(&root, None, || panic!("must work offline")).unwrap();
         assert_eq!(version, "v0.0.7");
         assert!(!deployment::needs_fetch(&root, &version));
         std::fs::remove_dir_all(root).unwrap();
@@ -77,8 +87,9 @@ mod tests {
     #[test]
     fn a_missing_manifest_repairs_the_pinned_version() {
         let root = scratch("release-repair");
-        deployment::record(&root, "v0.0.7").unwrap();
-        let version = resolve_version_with(&root, || panic!("keep the installed pin")).unwrap();
+        deployment::record(&root, "v0.0.7", false).unwrap();
+        let version =
+            resolve_version_with(&root, None, || panic!("keep the installed pin")).unwrap();
         assert_eq!(version, "v0.0.7");
         assert!(deployment::needs_fetch(&root, &version));
         std::fs::remove_dir_all(root).unwrap();
@@ -87,10 +98,49 @@ mod tests {
     #[test]
     fn a_failed_lookup_is_reported_without_recording_a_version() {
         let root = scratch("release-lookup-failed");
-        let error = resolve_version_with(&root, || Err("GitHub answered 403".into()))
+        let error = resolve_version_with(&root, None, || Err("GitHub answered 403".into()))
             .expect_err("a failed lookup must not fall back to an old release");
         assert!(error.contains("403"));
         assert!(deployment::installed(&root).is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn pin(version: &str) -> deployment::Pin {
+        deployment::Pin {
+            version: version.into(),
+            commit: "abc".into(),
+            images: "{}",
+        }
+    }
+
+    #[test]
+    fn a_pinned_build_never_asks_for_the_latest_release() {
+        let root = scratch("release-pinned-build");
+        deployment::record(&root, "v0.0.7", false).unwrap();
+        let pin = pin("internal-abc");
+        let version =
+            resolve_version_with(&root, Some(&pin), || panic!("a pinned build is offline"))
+                .unwrap();
+        assert_eq!(version, "internal-abc");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_customer_build_moves_a_pinned_deployment_to_the_latest_release() {
+        let root = scratch("release-unpin");
+        deployment::record(&root, "internal-abc", true).unwrap();
+        let version = resolve_version_with(&root, None, || Ok("v0.2.0".into())).unwrap();
+        assert_eq!(version, "v0.2.0");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_customer_build_keeps_its_own_release() {
+        let root = scratch("release-keep");
+        deployment::record(&root, "v0.2.0", false).unwrap();
+        let version =
+            resolve_version_with(&root, None, || panic!("must keep the followed release")).unwrap();
+        assert_eq!(version, "v0.2.0");
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -129,7 +179,7 @@ mod tests {
             assert!(root.join(path).exists(), "missing {path}");
         }
         assert_eq!(
-            resolve_version_with(&root, || panic!("restart must not need GitHub")).unwrap(),
+            resolve_version_with(&root, None, || panic!("restart must not need GitHub")).unwrap(),
             version
         );
         assert!(!deployment::needs_fetch(&root, &version));

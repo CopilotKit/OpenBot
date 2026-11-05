@@ -1,0 +1,88 @@
+name: Internal build
+
+# Installers for the team to try, from any branch. The images are the ones built from this commit,
+# pinned by digest into the installer, and never `latest`, so what a person installs is exactly what
+# this commit builds. Nothing is published: the installers are shared as run artifacts, kept 30 days.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: internal-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The manifest version names the build after its commit. Twelve characters is enough to tell two
+  # builds apart and short enough to read in an installer's About box.
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      manifest_version: ${{ steps.version.outputs.manifest_version }}
+    steps:
+      - id: version
+        name: Name the build
+        run: echo "manifest_version=internal-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+  # `tags` is empty because the images workflow always tags `sha-<commit>`, and that is the only tag
+  # an internal build needs. `latest` stays where it is.
+  images:
+    name: images
+    needs: prepare
+    uses: $/.github/workflows/images.yml
+    with:
+      ref: ${{ github.sha }}
+      tags: ""
+      latest: false
+      manifest_version: ${{ needs.prepare.outputs.manifest_version }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+  desktop:
+    name: desktop
+    needs: images
+    uses: $/.github/workflows/desktop-build.yml
+    with:
+      ref: ${{ github.sha }}
+      channel: internal
+      bundle_cli: true
+      manifest_artifact: ${{ needs.images.outputs.manifest-artifact }}
+      retention_days: 30
+      platforms: '["macos","windows"]'
+    secrets:
+      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
+
+  # One link per installer, so nobody has to dig through the run page for them. The CLI and Node
+  # versions are already in each desktop leg's own summary.
+  summary:
+    name: summary
+    needs: [prepare, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Link the installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST_VERSION: ${{ needs.prepare.outputs.manifest_version }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Internal build"
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Manifest version: \`$MANIFEST_VERSION\`"
+            echo
+            echo "Installers, kept 30 days:"
+            echo
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate \
+              --jq '.artifacts[] | select(.name | startswith("openbot-desktop-")) | "\(.name)\t\(.id)"' |
+              while IFS=$'\t' read -r name id; do
+                echo "- [$name](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts/$id)"
+              done
+          } >> "$GITHUB_STEP_SUMMARY"

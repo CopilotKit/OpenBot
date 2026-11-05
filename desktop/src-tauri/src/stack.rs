@@ -9199,7 +9199,7 @@ fn main() {
             down(&Address::new(crate::engine::Engine::Docker, None), root).unwrap();
             assert!(!record.exists());
         }
-        crate::deployment::record(&empty, "fixture").unwrap();
+        crate::deployment::record(&empty, "fixture", false).unwrap();
         assert!(down(&Address::new(crate::engine::Engine::Docker, None), &empty).is_err());
         assert!(!record.exists());
     }

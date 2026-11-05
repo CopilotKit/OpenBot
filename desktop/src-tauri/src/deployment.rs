@@ -34,6 +34,10 @@ pub struct Installed {
     /// empty, which never matches, so that deployment is laid out again.
     #[serde(default)]
     pub layout: Vec<String>,
+    /// Whether the version was chosen on purpose rather than followed. A stamp written before
+    /// pinning existed reads as unpinned.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// The tarball GitHub publishes for a tag.
@@ -130,6 +134,53 @@ pub fn pin(manifest: &Images) -> Result<Vec<(String, String)>, String> {
     Ok(pinned)
 }
 
+/// The release a build was pinned to, compiled into the binary.
+///
+/// `images` is the manifest text exactly as it was at build time, so what gets laid down on disk
+/// is the manifest that was tested and not a re-serialisation of it. `commit` is the source the
+/// release was cut from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pin {
+    pub version: String,
+    pub commit: String,
+    pub images: &'static str,
+}
+
+/// Build a [`Pin`] from manifest text and a commit, taking the version from the manifest.
+///
+/// Unreadable text is an error rather than a pin with no version: a build that cannot say which
+/// release it is has nothing to be pinned to.
+pub fn pin_from(images: &'static str, commit: &str) -> Result<Pin, String> {
+    let manifest: Images = serde_json::from_str(images)
+        .map_err(|error| format!("{IMAGES} is not readable: {error}"))?;
+    Ok(Pin {
+        version: manifest.version,
+        commit: commit.to_string(),
+        images,
+    })
+}
+
+/// The release this build was pinned to, or `None` for an ordinary build.
+///
+/// Only a build made with `OPENBOT_PINNED_DEPLOYMENT` set carries a pin; build.rs decides that and
+/// the compiler removes the other branch, so an ordinary build has no manifest inside it.
+#[cfg(openbot_pinned)]
+pub fn pinned() -> Option<Pin> {
+    Some(
+        pin_from(
+            include_str!(concat!(env!("OUT_DIR"), "/pinned-images.json")),
+            env!("OPENBOT_PINNED_COMMIT"),
+        )
+        .expect("the manifest this build was pinned to is readable; rebuild with a valid OPENBOT_PINNED_DEPLOYMENT"),
+    )
+}
+
+/// The release this build was pinned to, or `None` for an ordinary build.
+#[cfg(not(openbot_pinned))]
+pub fn pinned() -> Option<Pin> {
+    None
+}
+
 pub fn stamp_path(root: &Path) -> PathBuf {
     root.join(STAMP)
 }
@@ -141,11 +192,12 @@ pub fn installed(root: &Path) -> Option<Installed> {
         .and_then(|text| serde_json::from_str(&text).ok())
 }
 
-pub fn record(root: &Path, version: &str) -> std::io::Result<()> {
+pub fn record(root: &Path, version: &str, pinned: bool) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     let stamp = Installed {
         version: version.to_string(),
         layout: layout(),
+        pinned,
     };
     std::fs::write(
         stamp_path(root),
@@ -262,7 +314,7 @@ pub fn fetch_with(root: &Path, version: &str, get: Download) -> Result<(), Strin
         // installation takes the tag's tarball again, as it always has.
         if root.join(crate::updates::BASELINE).exists() {
             crate::updates::relay_accepted_release(root, get)?;
-            return record(root, version)
+            return record(root, version, false)
                 .map_err(|error| format!("could not record the version: {error}"));
         }
     }
@@ -281,7 +333,51 @@ pub fn fetch_with(root: &Path, version: &str, get: Download) -> Result<(), Strin
 
     fetch_images(root, version, get)?;
 
-    record(root, version).map_err(|error| format!("could not record the version: {error}"))
+    record(root, version, false).map_err(|error| format!("could not record the version: {error}"))
+}
+
+/// The tarball GitHub publishes for a commit.
+///
+/// A pinned build lays out the commit its release was cut from, not a tag that could be moved.
+pub fn commit_tarball_url(commit: &str) -> String {
+    format!("https://github.com/CopilotKit/OpenBot/archive/{commit}.tar.gz")
+}
+
+/// Lay out the commit a pinned build was cut from, with the images the build was compiled with.
+///
+/// Nothing is fetched for the image list: the manifest inside the binary is the one that was
+/// tested, so it is written as it is. The stamp is still written last, so an interrupted fetch is
+/// retried rather than half-run.
+pub fn fetch_pinned(root: &Path, pin: &Pin) -> Result<(), String> {
+    fetch_pinned_with(root, pin, get)
+}
+
+/// `fetch_pinned` with the download passed in, so a test can stand in for the network.
+///
+/// The manifest is checked before anything is fetched: a pin that names no image for a service is
+/// refused while it costs nothing, not after a tarball has been downloaded and unpacked.
+fn fetch_pinned_with(
+    root: &Path,
+    pin: &Pin,
+    get: impl Fn(&str) -> Result<Vec<u8>, String>,
+) -> Result<(), String> {
+    let manifest: Images = serde_json::from_str(pin.images)
+        .map_err(|error| format!("{IMAGES} is not readable: {error}"))?;
+    self::pin(&manifest)?;
+
+    let body = get(&commit_tarball_url(&pin.commit))
+        .map_err(|error| format!("could not fetch {} ({}): {error}", pin.version, pin.commit))?;
+
+    std::fs::create_dir_all(root)
+        .map_err(|error| format!("could not make {}: {error}", root.display()))?;
+
+    unpack(root, &body)?;
+
+    std::fs::write(images_path(root), pin.images)
+        .map_err(|error| format!("could not write {IMAGES}: {error}"))?;
+
+    record(root, &pin.version, true)
+        .map_err(|error| format!("could not record the version: {error}"))
 }
 
 /// Where an archive entry may be written under `root`, or `None` when it is not
@@ -490,11 +586,32 @@ mod tests {
     }
 
     #[test]
+    fn a_pin_takes_its_version_from_the_manifest_and_keeps_the_text_as_it_was() {
+        let text: &'static str = r#"{ "version": "v0.0.9",  "images": {} }"#;
+        let pin = pin_from(text, "0123456789abcdef0123456789abcdef01234567").unwrap();
+        assert_eq!(pin.version, "v0.0.9");
+        assert_eq!(pin.commit, "0123456789abcdef0123456789abcdef01234567");
+        assert_eq!(pin.images, text);
+    }
+
+    #[test]
+    fn a_manifest_that_cannot_be_read_is_not_a_pin() {
+        let error = pin_from("not json", "abc").unwrap_err();
+        assert!(error.contains("is not readable"), "{error}");
+    }
+
+    #[cfg(not(openbot_pinned))]
+    #[test]
+    fn an_ordinary_build_is_not_pinned() {
+        assert_eq!(pinned(), None);
+    }
+
+    #[test]
     fn a_deployment_without_an_image_manifest_is_fetched_again_rather_than_refused() {
         let dir = std::env::temp_dir().join(format!("openbot-manifest-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let _ = std::fs::remove_file(images_path(&dir));
-        record(&dir, "v0.0.7").unwrap();
+        record(&dir, "v0.0.7", false).unwrap();
 
         assert!(
             needs_fetch(&dir, "v0.0.7"),
@@ -544,6 +661,7 @@ mod tests {
             serde_json::to_string(&Installed {
                 version: "v0.0.7".into(),
                 layout: older,
+                pinned: false,
             })
             .unwrap(),
         )
@@ -679,6 +797,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("the scratch directory is made");
         dir
+    }
+
+    fn full_pin_text() -> &'static str {
+        let images: Vec<String> = IMAGE_VARIABLES
+            .iter()
+            .map(|(name, _)| {
+                format!(r#""{name}": {{ "reference": "ghcr.io/x/{name}@sha256:abc" }}"#)
+            })
+            .collect();
+        let text = format!(
+            r#"{{ "version": "v0.3.0-rc.1", "images": {{ {} }} }}"#,
+            images.join(", ")
+        );
+        Box::leak(text.into_boxed_str())
+    }
+
+    #[test]
+    fn a_pinned_fetch_lays_out_the_commit_with_the_compiled_in_images() {
+        let dir = scratch("pinned-fetch");
+        std::fs::write(dir.join(".env"), "KEEP=1").unwrap();
+        let pin = pin_from(full_pin_text(), "0123456789abcdef").unwrap();
+        let archive = tarball(&[(
+            "OpenBot-0123456789abcdef/docker-compose.yml",
+            b"services: {}",
+        )]);
+        fetch_pinned_with(&dir, &pin, |url| {
+            assert_eq!(url, commit_tarball_url("0123456789abcdef"));
+            Ok(archive.clone())
+        })
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(images_path(&dir)).unwrap(),
+            pin.images
+        );
+        let installed = installed(&dir).unwrap();
+        assert!(installed.pinned);
+        assert_eq!(installed.version, "v0.3.0-rc.1");
+        assert_eq!(std::fs::read_to_string(dir.join(".env")).unwrap(), "KEEP=1");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_incomplete_pin_is_refused_before_anything_is_fetched() {
+        let dir = scratch("pinned-incomplete");
+        let pin = pin_from(r#"{ "version": "v0.3.0", "images": {} }"#, "abc").unwrap();
+        let error = fetch_pinned_with(&dir, &pin, |_| panic!("nothing is fetched")).unwrap_err();
+        assert!(error.contains("names no"), "{error}");
+        assert!(installed(&dir).is_none());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -923,7 +1090,7 @@ mod tests {
     #[test]
     fn a_recorded_version_is_not_fetched_again() {
         let dir = std::env::temp_dir().join(format!("openbot-dep-same-{}", std::process::id()));
-        record(&dir, "v0.0.7").unwrap();
+        record(&dir, "v0.0.7", false).unwrap();
         std::fs::write(images_path(&dir), "{}").unwrap();
         assert!(!needs_fetch(&dir, "v0.0.7"));
         assert!(
@@ -946,8 +1113,25 @@ mod tests {
         assert!(needs_fetch(&dir, "v0.2.0"));
         assert_eq!(installed(&dir).unwrap().version, "v0.2.0");
 
-        record(&dir, "v0.2.0").unwrap();
+        record(&dir, "v0.2.0", false).unwrap();
         assert!(!needs_fetch(&dir, "v0.2.0"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_stamp_written_before_pinning_reads_as_unpinned() {
+        let dir = std::env::temp_dir().join(format!("openbot-dep-unpinned-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(stamp_path(&dir), r#"{"version":"v0.2.0","layout":["app"]}"#).unwrap();
+        assert!(!installed(&dir).unwrap().pinned);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_pinned_stamp_reads_back_as_pinned() {
+        let dir = std::env::temp_dir().join(format!("openbot-dep-pinned-{}", std::process::id()));
+        record(&dir, "v0.2.0", true).unwrap();
+        assert!(installed(&dir).unwrap().pinned);
         std::fs::remove_dir_all(&dir).ok();
     }
 
