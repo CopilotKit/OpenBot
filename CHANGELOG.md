@@ -157,6 +157,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `secrets` restarts the server.
 - Migration `0077_channel_opening` adds a nullable `channels.opening`.
 
+### A Bot's commands run in one live shell you can watch and take control of
+
+The Computer panel has a Terminal tab beside the screen: a real terminal where you watch each of the
+Bot's commands typed and its output stream, in colour. Take control gives you the keyboard there, as
+it does in the browser, and the Bot waits until you hand it back, then carries on in the same shell.
+`cd` and exported variables carry over from one command to the next. The Bot still gets each
+command's output and exit code within the same time and size limits, and approvals and policy for
+commands are unchanged. A command's stdout and stderr now come back as one stream, as a terminal
+shows them.
+
 ### Teach a Bot: do a task once in your own browser, and your Bots learn it
 
 The OpenBot Recorder is a Chrome and Edge extension that records a task while a person does it and
