@@ -76,7 +76,32 @@ def _role_first(input: RunAgentInput) -> RunAgentInput:
 
 
 class WholeThreadADKAgent(ADKAgent):
+    async def _drop_a_session_that_missed_a_turn(self, input: RunAgentInput) -> None:
+        """Start again from the thread when this process's session never saw one of its turns.
+
+        `ag_ui_adk` sends the model the session's own history plus the messages its ledger has not
+        seen, so a live session wins over the thread the server sent. A turn another replica
+        answered was never in this session, and the Bot answered as if it had not happened. Every
+        earlier user message of the thread must be in the ledger; when one is not, the session is
+        deleted (its ledger with it, since the session id is the thread id) and the library seeds a
+        new one from the whole thread, as after a restart. A session waiting on a client tool
+        result is kept: the result belongs to that session's pending call.
+        """
+        app_name, user_id = self._get_app_name(input), self._get_user_id(input)
+        manager = self._session_manager
+        seen = manager.get_processed_message_ids(app_name, input.thread_id, user_id=user_id)
+        if not seen:
+            return
+        users = [m.id for m in input.messages if getattr(m, "role", None) == "user" and m.id]
+        if set(users[:-1]) <= seen:
+            return
+        session = await manager.get_session(input.thread_id, app_name, user_id)
+        if session is None or (session.state or {}).get("pending_tool_calls"):
+            return
+        await manager._delete_session(session)
+
     async def run(self, input: RunAgentInput):
+        await self._drop_a_session_that_missed_a_turn(input)
         async with aclosing(super().run(_role_first(input))) as events:
             async for event in events:
                 yield event

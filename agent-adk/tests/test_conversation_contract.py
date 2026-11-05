@@ -21,7 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from harness_contract import (
     BOT,
+    EARLIER_QUESTION,
     GRANTED_TOOLS,
+    LATEST_QUESTION,
     anthropic_environment,
     conversation,
     fake_provider,
@@ -164,3 +166,44 @@ def test_a_changed_grant_reaches_the_model_on_the_next_run(monkeypatch):
     assert NEW_GRANT in sent
     assert GRANTED_TOOLS not in sent, "the model was still shown the grant it no longer holds"
     assert NEWER_QUESTION in sent
+
+
+MISSED_QUESTION = "CONTRACT_MISSED_QUESTION_7f3a"
+
+
+def test_a_turn_answered_elsewhere_reaches_a_live_session(monkeypatch):
+    """Another replica answered a turn this process's session never saw."""
+
+    def answered_elsewhere(messages):
+        messages[-1:-1] = [
+            {"id": "u2b", "role": "user", "content": f"Something else. {MISSED_QUESTION}"},
+            {"id": "a2b", "role": "assistant", "content": "Answered by another replica."},
+        ]
+
+    body = _two_turns(monkeypatch, "missed-thread", second=answered_elsewhere)
+    sent = json.dumps(body)
+    assert MISSED_QUESTION in sent, "the turn this session never saw reached the model"
+    assert missing_from(body) == []
+    for marker in (EARLIER_QUESTION, LATEST_QUESTION, NEWER_QUESTION, MISSED_QUESTION):
+        assert sent.count(marker) == 1, (marker, sent)
+
+
+def test_a_live_session_is_not_rebuilt_on_every_turn(monkeypatch):
+    """A healthy session keeps answering; only a session that missed a turn starts again."""
+    deleted = []
+
+    def watch(main):
+        manager = _session_manager(main)
+        original = manager._delete_session
+
+        async def recording(session):
+            deleted.append(session.id)
+            await original(session)
+
+        monkeypatch.setattr(manager, "_delete_session", recording)
+
+    async def between(main):
+        watch(main)
+
+    _two_turns(monkeypatch, "healthy-thread", between=between)
+    assert deleted == []
