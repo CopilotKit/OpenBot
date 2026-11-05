@@ -68,6 +68,11 @@ export type ChannelWork =
 export type ChannelSummary = AgentChannel & {
   /** A few words about the conversation, or null. The roster falls back to `name`. */
   summary: string | null;
+  /**
+   * The person's first words in the conversation, as one plain line, or null. What it is called
+   * until `summary` names it. Absent from a server that predates it, which reads as null.
+   */
+  opening?: string | null;
   lastMessage: string | null;
   lastMessageAgentId: string | null;
   /** ISO-8601. Ordering falls back to this, so a channel just created sorts to the top. */

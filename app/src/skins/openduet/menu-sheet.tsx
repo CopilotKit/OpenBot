@@ -34,6 +34,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
+import { untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -355,7 +356,7 @@ function ConversationRow({
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const title = channel.summary || channel.lastMessage || "New conversation";
+  const title = channel.summary || untitledLine(channel) || "New conversation";
   const when = channel.lastMessageAt
     ? relativeTime(channel.lastMessageAt)
     : null;
