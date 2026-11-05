@@ -397,3 +397,281 @@ describe("the personal edition's default", () => {
     });
   });
 });
+
+/** Asks in `category` with `behaviour`, or runs without asking where `category` is null. */
+type Expected = { category: string | null; behaviour?: "ask" | "hand_off" };
+
+/** Each case through the real gate, with what came of it, so a failure names the case. */
+async function outcomes(
+  owner: string,
+  cases: Record<
+    string,
+    readonly [Omit<ApprovalCandidate, "actorId">, Expected]
+  >,
+) {
+  const seen: Record<string, Expected> = {};
+  const wanted: Record<string, Expected> = {};
+  for (const [name, [action, expected]] of Object.entries(cases)) {
+    const request = await gate(owner, action);
+    const policy = request?.action.policy;
+    seen[name] = policy
+      ? {
+          category: CATEGORY_OF[policy.reason] ?? policy.reason,
+          behaviour: policy.behaviour as "ask" | "hand_off",
+        }
+      : { category: null };
+    wanted[name] = expected.category
+      ? { category: expected.category, behaviour: expected.behaviour ?? "ask" }
+      : { category: null };
+  }
+  return { seen, wanted };
+}
+
+const CATEGORY_OF: Record<string, string> = {
+  "Paying, purchasing or moving money is always done by the person.": "money",
+  "Deleting something always asks you first.": "deleting",
+  "Sending something to other people always asks you first.": "sending",
+  "Sharing something with other people always asks you first.": "sharing",
+  "Posting or publishing something always asks you first.": "publishing",
+};
+
+const nothing: Expected = { category: null };
+
+/**
+ * Named with a word a category uses, and outside it. "POST" here is the web request's verb, and in
+ * the others the verb is the action ("mark", "bookmark", "like"), with the word only its object.
+ */
+const OUTSIDE = {
+  "updating a Stripe plan with an HTTP POST": [
+    tool("composio-stripe", "STRIPE_POST_V1_PLANS_OVERVIEW", {
+      plan: "plan_1",
+      nickname: "Pro",
+    }),
+    nothing,
+  ],
+  "a Stripe POST to a setup intent": [
+    tool("composio-stripe", "STRIPE_POST_SETUP_INTENTS_INTENT", {
+      intent: "seti_1",
+    }),
+    nothing,
+  ],
+  "a Salesforce composite POST": [
+    tool("composio-salesforce", "SALESFORCE_POST_COMPOSITE_SOBJECTS", {
+      records: [{ Name: "Acme" }],
+    }),
+    nothing,
+  ],
+  "a Salesforce record created via POST": [
+    tool("composio-salesforce", "SALESFORCE_CREATE_CAMPAIGN_RECORD_VIA_POST", {
+      Name: "Spring",
+    }),
+    nothing,
+  ],
+  "marking a comment as spam": [
+    tool("composio-shopify", "SHOPIFY_MARK_COMMENT_AS_SPAM", {
+      comment_id: 1,
+    }),
+    nothing,
+  ],
+  "resolving a comment": [
+    tool("arcade-Linear", "ResolveComment", { comment_id: "c1" }),
+    nothing,
+  ],
+  "bookmarking a post": [
+    tool("composio-twitter", "TWITTER_ADD_POST_TO_BOOKMARKS", {
+      tweet_id: "1",
+    }),
+    nothing,
+  ],
+  "liking a post": [
+    tool("composio-twitter", "TWITTER_USER_LIKE_POST", { tweet_id: "1" }),
+    nothing,
+  ],
+  "liking a tweet": [tool("arcade-X", "LikeTweet", { tweet_id: "1" }), nothing],
+  "a reaction to a comment": [
+    tool("composio-linear", "LINEAR_CREATE_COMMENT_REACTION", {
+      comment_id: "c1",
+      emoji: "+1",
+    }),
+    nothing,
+  ],
+  "hiding replies": [
+    tool("composio-twitter", "TWITTER_HIDE_REPLIES", { tweet_id: "1" }),
+    nothing,
+  ],
+  "a draft of a post": [
+    tool("composio-buffer", "BUFFER_CREATE_POST_DRAFT", { text: "Soon" }),
+    nothing,
+  ],
+  "Gmail's send-as alias settings": [
+    tool("composio-gmail", "GMAIL_UPDATE_SEND_AS", {
+      send_as_email: "me@example.com",
+    }),
+    nothing,
+  ],
+  "cancelling a scheduled message": [
+    tool("arcade-Slack", "CancelScheduledMessage", {
+      scheduled_message_id: "Q1",
+    }),
+    nothing,
+  ],
+} as const;
+
+/** Inside a category, and missed: each asks as its category does. */
+const MISSED = {
+  "a Slack message scheduled for later": [
+    tool("composio-slack", "SLACK_SCHEDULE_MESSAGE", {
+      channel: "C1",
+      text: "Standup moved",
+      post_at: 1793900000,
+    }),
+    { category: "sending" },
+  ],
+  "a scheduled message through Arcade": [
+    tool("arcade-Slack", "CreateScheduledMessage", {
+      channel_name: "general",
+      message: "Standup moved",
+      send_at: "2026-11-06T09:00:00",
+    }),
+    { category: "sending" },
+  ],
+  "a Mailchimp campaign scheduled": [
+    tool("composio-mailchimp", "MAILCHIMP_SCHEDULE_CAMPAIGN", {
+      campaign_id: "c1",
+      schedule_time: "2026-11-06T09:00:00Z",
+    }),
+    { category: "sending" },
+  ],
+  "a Comment button": [
+    click("https://github.com/acme/notes/issues/7", "button", "Comment"),
+    { category: "sending" },
+  ],
+  "a Reply button": [
+    click("https://x.com/someone/status/1", "button", "Reply"),
+    { category: "sending" },
+  ],
+  "a payroll submitted": [
+    tool("composio-deel", "DEEL_SUBMIT_ON_DEMAND_PAYROLL", {
+      payroll_id: "p1",
+    }),
+    { category: "money", behaviour: "hand_off" },
+  ],
+  "a payroll run": [
+    tool("composio-gusto", "GUSTO_SUBMIT_PAYROLL", {
+      company_id: "co1",
+      payroll_id: "p1",
+    }),
+    { category: "money", behaviour: "hand_off" },
+  ],
+  "an Upgrade button": [
+    click("https://app.example.com/settings/workspace", "button", "Upgrade"),
+    { category: "money", behaviour: "hand_off" },
+  ],
+  "a Subscribe button on a plans page": [
+    click("https://www.nytimes.com/subscription", "button", "Subscribe"),
+    { category: "money", behaviour: "hand_off" },
+  ],
+  "a Subscribe button with a price": [
+    click(
+      "https://news.example.com/article/1",
+      "button",
+      "Subscribe for $4/month",
+    ),
+    { category: "money", behaviour: "hand_off" },
+  ],
+  "a paid plan changed by an app": [
+    tool("composio-shopify", "SHOPIFY_CREATE_APP_SUBSCRIPTION", {
+      name: "Pro",
+      price: 29,
+    }),
+    { category: "money", behaviour: "hand_off" },
+  ],
+} as const;
+
+/** Free, so outside buying: a hand-off would leave the Bot unable to do it at all. */
+const FREE = {
+  "subscribing to a YouTube channel": [
+    click("https://www.youtube.com/@someone", "button", "Subscribe"),
+    nothing,
+  ],
+  "a payroll migration file submitted": [
+    tool("composio-deel", "DEEL_SUBMIT_PAYROLL_MIGRATION_IMPORT", {
+      file_id: "f1",
+    }),
+    nothing,
+  ],
+} as const;
+
+/** Remove is deleting, unless it takes somebody's access away, which is sharing. */
+const REMOVING = {
+  "removing an attachment": [
+    tool("arcade-Linear", "RemoveAttachment", { attachment_id: "a1" }),
+    { category: "deleting" },
+  ],
+  "removing a member from a project": [
+    tool("composio-asana", "ASANA_REMOVE_MEMBERS_FOR_PROJECT", {
+      project_gid: "p1",
+      members: "u1",
+    }),
+    { category: "deleting" },
+  ],
+  "removing a collaborator": [
+    tool("composio-github", "GITHUB_REMOVE_A_REPOSITORY_COLLABORATOR", {
+      owner: "me",
+      repo: "notes",
+      username: "sam",
+    }),
+    { category: "sharing" },
+  ],
+  "a Remove button": [
+    click(
+      "https://mail.google.com/mail/u/0/#settings/filters",
+      "button",
+      "Remove",
+    ),
+    { category: "deleting" },
+  ],
+  "a Yes, remove button": [
+    click("https://app.example.com/team", "button", "Yes, remove"),
+    { category: "deleting" },
+  ],
+  "a Remove permanently button": [
+    click("https://app.example.com/files", "button", "Remove permanently"),
+    { category: "deleting" },
+  ],
+  "a Remove filter button": [
+    click("https://shop.example.com/search?q=lamp", "button", "Remove filter"),
+    nothing,
+  ],
+} as const;
+
+describe.each(EDITIONS)("named words in the %s edition", (edition) => {
+  let owner = "";
+  beforeAll(async () => {
+    owner = await person();
+  });
+
+  test("a word a category uses, outside the category, doesn't ask", async () => {
+    setEdition(edition);
+    const { seen, wanted } = await outcomes(owner, OUTSIDE);
+    expect(seen).toEqual(wanted);
+  });
+
+  test("a scheduled send, a Comment or Reply button, a payroll run and a paid plan ask as their category", async () => {
+    setEdition(edition);
+    const { seen, wanted } = await outcomes(owner, MISSED);
+    expect(seen).toEqual(wanted);
+  });
+
+  test("a free subscription and a payroll file are not handed off", async () => {
+    setEdition(edition);
+    const { seen, wanted } = await outcomes(owner, FREE);
+    expect(seen).toEqual(wanted);
+  });
+
+  test("removing asks as deleting, or as sharing when it takes access away", async () => {
+    setEdition(edition);
+    const { seen, wanted } = await outcomes(owner, REMOVING);
+    expect(seen).toEqual(wanted);
+  });
+});
