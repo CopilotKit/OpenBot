@@ -216,6 +216,7 @@ export function createHandoffDelivery(options: {
       const paused = await admission({
         ownerUserId: work.actorId,
         agentId: work.toBotId,
+        threadId: work.answerIn ?? undefined,
       });
       const agent = await agentFor({
         actorId: work.actorId,

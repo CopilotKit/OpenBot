@@ -103,7 +103,7 @@ const skipped = (bot: BotCheckInMetrics) =>
 /**
  * Admin, Check-ins: the switch and the daily limit, then how each Bot's check-ins went.
  *
- * The switch is the same "Check-ins" capability Enterprise controls lists, at the organization's
+ * The switch is the same "Check-ins" capability Permissions lists, at the organization's
  * scope; roles and groups are set there. The numbers are counts only: the server sends no titles
  * and no people, because what a check-in raised came from somebody's own apps.
  */
@@ -161,8 +161,8 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
         <>
           These apply to everybody. To change who gets check-ins by role or
           group, use{" "}
-          <Link className="underline" to="/admin/enterprise">
-            Enterprise controls
+          <Link className="underline" to="/admin/permissions">
+            Permissions
           </Link>
           .
         </>

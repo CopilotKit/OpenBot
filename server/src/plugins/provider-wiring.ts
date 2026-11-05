@@ -11,10 +11,38 @@ import type { ComposioActions } from "./composio";
  * The entrypoint's provider decision, with the vendor constructors passed in so this file imports
  * no vendor package and a test can answer without booting the server or making a request.
  */
-type ClientFactory<Actions> = (apiKey: string) => {
+type ClientFactory<Actions, Options = undefined> = (
+  apiKey: string,
+  options: Options,
+) => {
   actions: Actions;
   broker: ConnectedAppBroker;
 };
+
+/**
+ * What Arcade's client is built with beside its key: the address its project's user verifier must
+ * name for a consent to come back here, or nothing when this deployment does not know its own
+ * origin (see {@link arcadeVerifierAddress}), and whether this install owns that project and so may
+ * point the verifier at itself (see {@link ownsBrokerProject}).
+ */
+export type ArcadeClientOptions = {
+  verifierUrl?: string;
+  repointVerifier?: boolean;
+};
+
+/**
+ * WHETHER THIS INSTALL OWNS ITS BROKER PROJECT, which is what lets it change a project-wide setting
+ * such as Arcade's user verifier.
+ *
+ * A single-user install does. It has its own name at the broker (`ensureSingleUserIdentity` gives
+ * every one of them one, on the first start with a broker), its one person is its admin, and the
+ * personal edition is one of these. A deployment that signs people in does not: its key's project
+ * is treated as shared, so a setting there is an admin's to make by hand, and this deployment only
+ * checks it.
+ */
+export function ownsBrokerProject(c: { singleUser?: boolean }): boolean {
+  return c.singleUser === true;
+}
 
 export type ProviderWiring = {
   /** The one active provider, or `null` for a deployment that legitimately has no broker. */
@@ -58,10 +86,14 @@ export function selectProviderWiring(
     composioApiKey?: string;
     arcadeApiKey?: string;
     brokerProvider?: BrokerProvider;
+    /** This deployment's public origin, which Arcade's verifier must name. See `config.ts`. */
+    publicUrl?: string;
+    /** Single-user mode, which is what makes the broker project this install's own. */
+    singleUser?: boolean;
   },
   create: {
     composio: ClientFactory<ComposioActions>;
-    arcade: ClientFactory<ArcadeActions>;
+    arcade: ClientFactory<ArcadeActions, ArcadeClientOptions>;
   },
 ): ProviderWiring {
   const decision = providerDecision(c);
@@ -86,8 +118,10 @@ export function selectProviderWiring(
   }
   const provider = decision.provider;
   if (provider === "arcade") {
+    const verifierUrl = arcadeVerifierAddress(c.publicUrl);
     const client = create.arcade(
       requiredKey(provider, c.arcadeApiKey, "ARCADE_API_KEY"),
+      verifierUrl ? { verifierUrl, repointVerifier: ownsBrokerProject(c) } : {},
     );
     return {
       provider,
@@ -97,6 +131,7 @@ export function selectProviderWiring(
   }
   const client = create.composio(
     requiredKey(provider, c.composioApiKey, "COMPOSIO_API_KEY"),
+    undefined,
   );
   return {
     provider,
@@ -193,25 +228,42 @@ export function storedProvider(
 export const ARCADE_VERIFY_PATH = "/api/plugins/arcade/verify";
 
 /**
- * The startup warning an Arcade deployment prints about its verifier, because nothing can check it.
- *
- * THE SETTING IS NOT READABLE. Which verifier an Arcade project uses is set by hand in Arcade's
- * dashboard, and neither the SDK this deployment pins (`@arcadeai/arcadejs`, whose admin surface is
- * auth providers, secrets and user connections) nor Arcade's documented API reads it back. So the
- * deployment cannot tell a correctly pointed project from one left at Arcade's built-in verifier,
- * and says so once at startup rather than staying silent about the one step it depends on.
- *
- * LEFT AT THE DEFAULT, THIS DEPLOYMENT'S VERIFY ROUTE IS NEVER CALLED. That route is the return leg
- * that binds a consent to the attempt that started it, records the connection and files its audit
- * entry; with Arcade's own verifier none of that runs, and nothing in this deployment's logs says so.
+ * This deployment's verify address, which its Arcade client points the project's user verifier at
+ * before each consent it mints (`pointVerifierHere` in `./arcade-adapter`). Undefined when the
+ * deployment does not know its own public origin.
  *
  * Takes the configured public origin (`OPENBOT_PUBLIC_URL`, else `BETTER_AUTH_URL`, already stripped
- * of trailing slashes by config) and names the exact address to paste, or says which variable is
- * missing when there is none.
+ * of trailing slashes by config); the strip is repeated here so a caller cannot double the slash.
  */
-export function arcadeVerifierNotice(publicUrl: string | undefined): string {
-  const address = publicUrl
-    ? `${publicUrl.replace(/\/+$/, "")}${ARCADE_VERIFY_PATH}`
-    : `<this deployment's public origin>${ARCADE_VERIFY_PATH} (OPENBOT_PUBLIC_URL and BETTER_AUTH_URL are both unset, so this deployment does not know its own origin; set one)`;
-  return `Arcade is the active broker, and this deployment cannot check which user verifier its Arcade project uses: Arcade has no API that reads that setting. Unless the project's verifier is set to custom, pointing at ${address}, this deployment's verify route is never called: no consent is bound to the attempt that started it, and none is recorded or audited when it returns. Set it in the Arcade dashboard; see docs/plugins/arcade.md, "The verifier URL is the one dashboard-only step".`;
+export function arcadeVerifierAddress(
+  publicUrl: string | undefined,
+): string | undefined {
+  const origin = publicUrl?.trim().replace(/\/+$/, "");
+  return origin ? `${origin}${ARCADE_VERIFY_PATH}` : undefined;
+}
+
+/**
+ * The startup line an Arcade deployment prints about its project's user verifier, and null when
+ * there is nothing to say.
+ *
+ * ARCADE'S VERIFIER IS READ AND SET THROUGH ITS API. `GET` and `PUT
+ * /v1/admin/settings/session_verification` read and write the project's `verifier_url` with the same
+ * key every other call here uses. It used to say Arcade had no such API, and every deployment not
+ * at the address somebody had pasted into the dashboard sent people to a 404 after their consent.
+ *
+ * AN INSTALL THAT OWNS ITS PROJECT AND KNOWS ITS ORIGIN SAYS NOTHING: it points the verifier at
+ * itself before every consent. A deployment that signs people in treats the project as shared and
+ * never changes it, so it says once which address an admin sets, because Connect refuses until the
+ * project names it. WITHOUT AN ORIGIN neither can be done, and it says which variable to set.
+ */
+export function arcadeVerifierNotice(
+  publicUrl: string | undefined,
+  { ownsProject }: { ownsProject: boolean },
+): string | null {
+  const address = arcadeVerifierAddress(publicUrl);
+  if (!address) {
+    return `Arcade is the active broker, but OPENBOT_PUBLIC_URL and BETTER_AUTH_URL are both unset, so this deployment does not know its own origin and cannot check that its Arcade project's user verifier names <this deployment's public origin>${ARCADE_VERIFY_PATH}. A consent will come back to whatever address the project names, and anywhere else that is a page that does not exist. Set OPENBOT_PUBLIC_URL; see docs/plugins/arcade.md, "The verifier URL".`;
+  }
+  if (ownsProject) return null;
+  return `Arcade is the active broker and this deployment signs people in, so it treats its Arcade project as shared and never changes the project's user verifier. Connect checks it before every consent and refuses until it names ${address}. Set the custom verifier to that address in Arcade's dashboard (Auth, Settings); see docs/plugins/arcade.md, "The verifier URL".`;
 }

@@ -106,6 +106,7 @@ import {
   createGroupStore,
   groupSourceForRun,
 } from "./channels/group";
+import { createModelChoices, modelSelectionOn } from "./channels/model-choice";
 import { type ChannelStore, createChannelStore } from "./channels/routes";
 import { createStallGuard } from "./channels/stall-guard";
 import {
@@ -215,6 +216,7 @@ import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { memoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
+import { createModelCatalogue } from "./model-catalogue";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
@@ -241,6 +243,7 @@ import {
 } from "./plugins/personal-defaults";
 import {
   arcadeVerifierNotice,
+  ownsBrokerProject,
   selectProviderWiring,
   storedProvider,
 } from "./plugins/provider-wiring";
@@ -295,7 +298,7 @@ import { createServerResponsibilityEngine } from "./responsibilities/wiring";
 import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
-import { createModelCompleter } from "./routing/model";
+import { createModelCompleter, routingModelFor } from "./routing/model";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createSetupSources, modelKeyOf } from "./setup/checklist";
 import { createComputerCheck } from "./setup/computer-check";
@@ -959,11 +962,16 @@ if (wiredProvider) {
   assertActivatable(wiredProvider, otherProviderRows);
 }
 /*
- * Arcade's verifier is set by hand in Arcade's dashboard and cannot be read back, so an Arcade
- * deployment says once, at startup, which address it must be set to. See `arcadeVerifierNotice`.
+ * Arcade's client checks its project's user verifier names this deployment before every consent it
+ * mints, and a single-user install, which owns its project, points it here when it does not. A
+ * deployment that signs people in only checks, and one that does not know its origin can do
+ * neither; both say so once, at startup. See `arcadeVerifierNotice`.
  */
 if (wiredProvider === "arcade") {
-  console.warn(arcadeVerifierNotice(config.publicUrl));
+  const notice = arcadeVerifierNotice(config.publicUrl, {
+    ownsProject: ownsBrokerProject(config),
+  });
+  if (notice) console.warn(notice);
 }
 
 /**
@@ -1372,6 +1380,21 @@ const stallGuard = createStallGuard({
 const intentRouter = createIntentRouter({
   complete: createModelCompleter({
     model: runtimeModel,
+    /*
+     * Picking a Bot sits between send and the conversation opening; see `routingModelFor`. Never a
+     * model the admin's allowlist leaves out: the router then stays on the deployment's own model,
+     * which the allowlist already governs for every run.
+     */
+    fastModel: () => {
+      const fast = routingModelFor(runtimeModel, process.env);
+      const allowlist =
+        enterpriseControls()?.snapshot()?.settings.modelAllowlist;
+      return fast &&
+        (!allowlist?.enabled ||
+          allowlist.models.includes(`${runtimeModel.provider}/${fast}`))
+        ? fast
+        : undefined;
+    },
     resolveApiKey: () =>
       resolveModelApiKey({
         encryptionKey: config.keyEncryptionKey,
@@ -1423,6 +1446,24 @@ const resolveRuntimeModelApiKey = () =>
     keyId: tenantPackage.model.credentialSecretRef,
     environment: process.env,
   });
+
+/**
+ * The models a person may pick for a built-in Bot's run, asked of whatever serves the model: the
+ * provider, or the gateway in OPENAI_BASE_URL. Narrowed by the admin's allowlist when it is on.
+ */
+const modelCatalogue = createModelCatalogue({
+  model: runtimeModel,
+  apiKey: resolveRuntimeModelApiKey,
+  allowlist: () => enterpriseControls()?.snapshot()?.settings.modelAllowlist,
+  enabled: modelSelectionOn,
+});
+
+/** Each person's pick per conversation, saved through `/api/channels/:id/model` and read per run. */
+const modelChoices = createModelChoices({
+  database,
+  model: runtimeModel,
+  catalogue: modelCatalogue,
+});
 
 const hostAccessBroker = createHostAccessBroker(Date.now, {
   approvalGate: approvalService.gate,
@@ -1979,6 +2020,8 @@ const actorAgentResolver = createActorAgentResolver({
   loadAgents: loadAgentsForActor,
   model: runtimeModel,
   resolveModelApiKey: resolveRuntimeModelApiKey,
+  pickedModelForActor: (actorId) => (input) =>
+    modelChoices.forRun(actorId, input.threadId),
   stallGuard,
   loadToolsForActor: (actorId, initiator) =>
     restrictToolsForRun(
@@ -2683,6 +2726,8 @@ await installEnterpriseControls({
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
   ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
   builtInModel: `${runtimeModel.provider}/${runtimeModel.defaultModel}`,
+  // The run gate records and judges the model a built-in run will use: the person's pick, if any.
+  pickedModel: (actorId, threadId) => modelChoices.forRun(actorId, threadId),
   people: peopleStore,
   initialAdminEmails: config.auth?.initialAdminEmails ?? [],
   recorders: {
@@ -2979,6 +3024,8 @@ const app = createApp(
       tasks: taskRunner,
       auditStore: bootAuditStore,
     },
+    models: modelCatalogue,
+    modelChoices,
     // The checklist onboarding ends on. Facts and verdicts about this configuration, never values.
     setup: createSetupSources({
       productName: tenantPackage.productName,

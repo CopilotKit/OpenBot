@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { BotOrb } from "@/components/agents/bot-orb";
+import { Skeleton } from "@/components/ui/skeleton";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
@@ -55,6 +56,44 @@ export function ConversationIntro({
             <span className="inline-flex h-6.5 items-center rounded-lg bg-muted px-2.5 font-semibold text-[13px] text-muted-foreground">
               {agent.visibility === "public" ? "Public" : "Private"}
             </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Where the intro will be, while the Bot it introduces is still being picked.
+ *
+ * A message sent from home opens a conversation before a Bot is chosen (`/start/$startId`). The
+ * conversation it becomes has this intro above the message, and lands scrolled to its end, so the
+ * message sits where the end of the scroll puts it. Without something in the intro's place above
+ * it, the placeholder had nothing to scroll and drew the message at the top, and the message
+ * dropped 48px when the conversation arrived. The same footprint as `ConversationIntro`, line for
+ * line, so the conversation that replaces it moves nothing but the orb and the words coming in.
+ */
+export function ConversationIntroPlaceholder() {
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  return (
+    <div aria-hidden className="flex items-center gap-5 pt-4 pb-2">
+      <div className="relative isolate grid shrink-0 place-items-center">
+        <div className="orb-pattern" />
+        <Skeleton className="size-24 rounded-full" />
+      </div>
+      <div className="min-w-0 flex-1">
+        {/* The heading's line, then two lines of role, as `line-clamp-2` allows. */}
+        <div className="flex h-9 items-center">
+          <Skeleton className="h-7 w-48" />
+        </div>
+        <div className="mt-1 flex h-12 max-w-[60ch] flex-col justify-around">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+        {personal ? null : (
+          <div className="mt-3 flex">
+            <Skeleton className="h-6.5 w-16 rounded-lg" />
           </div>
         )}
       </div>

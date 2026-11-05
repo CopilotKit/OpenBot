@@ -254,12 +254,15 @@ const COMPONENT_GUIDANCE_LINES = [
   "",
   "Answer in plain text only for a short conversational reply, or when none of your tools fits the",
   "answer. A chart or figures you draw still follow the rules above about where figures come from.",
+  "",
+  "Draw a component once, when you have the result it shows. Do not draw a draft and then a second",
+  "one that replaces it: everything you draw stays in front of the person.",
 ];
 
 export const COMPONENT_GUIDANCE = asParagraphs(COMPONENT_GUIDANCE_LINES);
 
 /**
- * How a Bot shares out its own work: as an orchestrator, by default.
+ * How a Bot shares out its own work: to subagents, when the work is big enough to split.
  *
  * Every Bot is offered `run_subagent`, a fresh run of itself with the same tools, as the same person,
  * that sees none of the conversation and hands back only its answer. A Bot that does twenty lookups
@@ -268,17 +271,27 @@ export const COMPONENT_GUIDANCE = asParagraphs(COMPONENT_GUIDANCE_LINES);
  * agent of Anthropic's research system, and the split is Cognition's: subagents read and work, while
  * decisions and anything with a side effect stay with one agent.
  *
+ * NOT FOR A SINGLE QUESTION. This used to say to hand off anything over two or three tool calls, and
+ * a Bot asked for five companies from one web search started three subagents, searched the web
+ * itself at the same time, and drew two tables. Each subagent is work the person watches, and one
+ * search split three ways is slower and harder to follow than one search. So subagents are for a
+ * request that falls into independent parts, each needing a lot of reading of its own, and never a
+ * second pair of hands on the work the Bot is already doing.
+ *
  * Conditional on holding the tool, because a subagent reads this prompt too and holds no such tool,
  * and a check-in is offered none.
  */
 const ORCHESTRATION_GUIDANCE_LINES = [
-  `When you hold ${SUBAGENT_TOOL}, work as an orchestrator. When a request needs more than two or three`,
-  "tool calls, or reading through a lot of results, do not make those calls yourself: give the work to",
-  `subagents with ${SUBAGENT_TOOL}. A subagent is a fresh copy of you, with your tools, acting for the`,
-  "same person, that sees none of this conversation. So give each one a self-contained task with",
-  "everything it needs to know, and say what answer you want back. Split work along its natural seams,",
-  "one subagent for each account, document or question, and start the independent parts together by",
-  `calling ${SUBAGENT_TOOL} several times in one step, up to ${SUBAGENTS_PER_ANSWER} for one answer.`,
+  `When you hold ${SUBAGENT_TOOL}, you can give parts of a large job to subagents. A subagent is a`,
+  "fresh copy of you, with your tools, acting for the same person, that sees none of this conversation.",
+  "Use them only when a request falls into several independent parts that each need a lot of reading",
+  "of their own, such as one account, document or company each. A single question, one search, or a",
+  "lookup that takes a handful of tool calls, do yourself. Never work on the same thing yourself while",
+  "a subagent works on it, and never start a second subagent for work the first is already doing.",
+  "",
+  "When you do use them, give each one a self-contained task with everything it needs to know, and",
+  "say what answer you want back. Start the independent parts together by calling",
+  `${SUBAGENT_TOOL} several times in one step, up to ${SUBAGENTS_PER_ANSWER} for one answer.`,
   "",
   "Keep the planning, the decisions, anything that needs the person's approval, and the final answer",
   "yourself. A subagent that reaches an action needing approval stops and hands it back to you: if it",
@@ -309,6 +322,37 @@ const APPROVAL_GUIDANCE_LINES = [
 ];
 
 export const APPROVAL_GUIDANCE = asParagraphs(APPROVAL_GUIDANCE_LINES);
+
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+
+/**
+ * What day it is, which a model cannot know.
+ *
+ * Without it a Bot asked for announcements "this quarter" guessed a quarter from its training data,
+ * drew a table for the wrong one, and then reached for `date -I` on the computer, which is a command
+ * and so waits for the person's approval. A subagent it gave the work to stopped at the same command
+ * and handed it back. One line in the prompt answers all of that before it starts.
+ *
+ * In UTC, and said to be, because OpenBot does not know where the person is. Only the day, so the
+ * prompt changes once a day and not on every run, which keeps a provider's prompt cache warm. Last
+ * in the prompt for the same reason: everything before it stays a stable prefix.
+ */
+export function todayGuidance(now: Date): string {
+  const day = WEEKDAYS[now.getUTCDay()];
+  const date = now.toISOString().slice(0, 10);
+  return [
+    `Today is ${day}, ${date} (UTC). Use this date for anything relative to now, such as "this quarter",`,
+    `"last week" or "recent", and do not run a command or start a subagent to find it out.`,
+  ].join(" ");
+}
 
 /**
  * What a tool call is given when its answer never came.

@@ -284,6 +284,16 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         thread_id, run_id = input_data.thread_id, input_data.run_id
         lock = self._segment_locks.setdefault(thread_id, asyncio.Lock())
         async with lock:
+            answer_only = (
+                self._model_only
+                and (input_data.forwarded_props or {}).get("openbotAnswerOnly") is True
+            )
+            if answer_only:
+                # An SDK query keeps the tools it started with. The last model step must
+                # replay the real collected results in a fresh query with no tools, rather
+                # than resume a query that can keep calling them until the step cap.
+                await self.interrupt(thread_id)
+                input_data = input_data.model_copy(update={"tools": []})
             turn = self._turns.get(thread_id)
             if turn is not None and turn.task.done():
                 self._turns.pop(thread_id)
@@ -310,7 +320,11 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     yield RunFinishedEvent(thread_id=thread_id, run_id=run_id)
                     return
             else:
-                if input_data.messages and input_data.messages[-1].role == "tool":
+                if (
+                    not answer_only
+                    and input_data.messages
+                    and input_data.messages[-1].role == "tool"
+                ):
                     yield RunErrorEvent(
                         message="The Claude query for this tool result is no longer running. Start a new message."
                     )

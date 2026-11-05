@@ -18,6 +18,7 @@ import {
 import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
+import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { ProgressRow } from "@/components/channels/progress-row";
@@ -57,6 +58,8 @@ import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { readThreadMessages } from "@/lib/copilot/thread-messages";
+import { modelCatalogueQueryOptions } from "@/lib/models/queries";
+import { useConversationModel } from "@/lib/models/run-model";
 import {
   skillInstructionsFor,
   useSkillCommands,
@@ -641,6 +644,18 @@ export function ChannelChat({
 
   const skillCommands = useSkillCommands(runtimeAgentId);
   /*
+   * The model this conversation's Bot answers on. Only a Bot that runs inside OpenBot uses OpenBot's
+   * model, so only it gets a picker; a Bot on its own framework picks its own model.
+   */
+  const models = useQuery({
+    ...modelCatalogueQueryOptions(),
+    enabled: botProfile?.runsOnOpenBotModel === true,
+  });
+  const runModel = useConversationModel(
+    channel.id,
+    botProfile?.runsOnOpenBotModel ? models.data : undefined,
+  );
+  /*
    * History is the snapshot, the stored thread AND the voice archive. The transcript shows none of
    * it until all three are in, so it lands once at the bottom instead of drawing the conversation
    * and then splicing call cards into it; the notice waits for the same moment, so it appears in
@@ -1162,6 +1177,8 @@ export function ChannelChat({
             taskRunning={agent.isRunning || runsInFlight > 0}
           />
           <ConversationView
+            // Remounted per conversation, so opening one puts the caret in its composer once.
+            autoFocus
             threadId={channel.threadId}
             voiceCall={
               call.available
@@ -1186,6 +1203,17 @@ export function ChannelChat({
             busy={agent.isRunning || turnsInFlight > 0}
             // The `/` menu exposes only skills granted to this Bot.
             commands={skillCommands}
+            modelPicker={
+              <ModelPicker
+                catalogue={
+                  botProfile?.runsOnOpenBotModel ? models.data : undefined
+                }
+                disabled={!channel.active}
+                onChange={runModel.choose}
+                saving={runModel.saving}
+                value={runModel.value}
+              />
+            }
             // Readiness is handled by `say`; deletion is the only disabled-chat state.
             disabled={!channel.active}
             messages={withVoiceChats(
@@ -1261,6 +1289,7 @@ export function ChannelChat({
               </>
             }
             onSubmit={async (draft) => {
+              await runModel.beforeSend();
               // `draft.agentId` carries the @mentioned coworker, but nothing routes on it yet: this
               // channel is pinned to one `runtimeAgentId` for the life of its thread, so honouring a
               // per-message mention is a change to that binding, not to the composer.

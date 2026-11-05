@@ -8,6 +8,50 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Connecting an app through Arcade on a single-user or personal install now brings you back to the OpenBot you started from, wherever it runs. After the consent screen, Arcade sends you to the address its project names as its user verifier, which used to be set by hand in Arcade's dashboard, so any OpenBot at another address (anything but `localhost:3001` on a shared key) landed on a page that does not exist. A single-user install now points that setting at its own `OPENBOT_PUBLIC_URL` (or `BETTER_AUTH_URL`) before each Connect or Authorize and reads it back; several on one key take turns, and the latest Connect decides where people come back. A deployment that signs people in treats its Arcade project as shared and never changes the setting: it checks it before each Connect and, until it names this deployment, refuses before anybody signs in, with the exact address to set in Arcade's dashboard. It also names that address at startup. See [Arcade](docs/plugins/arcade.md#the-verifier-url).
+- A Bot's work in a conversation reads as one line. A subtask is a step in the same line as the
+  searches and pages beside it ("Searched the web, read 5 pages and ran 2 subtasks"), and opens to
+  its task, its answer and its steps. A subtask that stopped before an action needing approval says
+  "Handed back" instead of showing a "Needs your approval" badge with nothing to press.
+- Built-in Bots are told today's date (UTC), so "this quarter" or "last week" no longer starts a
+  guess or a `date` command that waits for approval. They use subtasks only for requests that split
+  into several independent parts, not for one question or one search, and draw a table or chart
+  once, with the result.
+- A built-in Bot's run always ends with an answer. Its last allowed step is sent without tools, so a
+  Bot that spent its steps searching answers from what it found instead of stopping in silence
+  ("the turn finished without saying anything").
+- Sending a message from the home page opens its conversation at once. The message shows while a
+  Bot is picked and the conversation is made, and the real conversation replaces it when it exists.
+  A start that fails goes back to the home page with the message in the box and the reason under it.
+  Before, the composer sat still for a second or more after send.
+- The Bot for an untagged message is picked on a lighter model: `claude-haiku-5-5` on Anthropic,
+  `gpt-6-luna` on OpenAI. A model the provider refuses falls back to the Bots' own model. Behind
+  `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`, and when the admin's model allowlist leaves the lighter
+  model out, routing stays on the Bots' model. Set `ROUTER_MODEL` to choose it.
+- A message that names its Bot with `@` no longer waits for the audit record of that choice before
+  the conversation starts. The record is still written.
+
+- People can pick the model a built-in Bot answers on, per conversation, from a brain icon in the
+  composer, including before the first message. The list is read from the model provider, or from
+  the gateway in `OPENAI_BASE_URL`, filtered to chat models and to the model allowlist. The pick is
+  kept per person and conversation, and every run there uses it, including routines. Off by default
+  in the team edition: an admin turns it on under Admin, Providers, "Let people choose a model".
+  Turning it off puts every run back on the configured model and keeps the saved
+  picks. Always on in the personal edition. Adds a nullable column (migration
+  `0076_model_selection`). Bots on their own framework, plans, and groups keep their own model.
+- Admin's Enterprise controls page is gone. Each of its sections now sits on the page it governs:
+  what people may do is on the new **Permissions** page; the model switch, the model allowlist and
+  model usage are on the new **Providers** page, beside the provider that serves the models; Require
+  SSO and SCIM are on Identity providers; the network policy and stopping idle computers are on
+  Computers; the MCP server allowlist is on Plugins; Skill sharing is on Automatic learning; and
+  Action Recording and the OpenTelemetry export are on Audit. Both new pages are in the Admin
+  sidebar. An old link to Enterprise controls opens the Admin overview.
+- The model allowlist is picked from the provider's own list of models, searchable, with the
+  configured model marked. A model the list doesn't have, such as a remote Bot's, is added by its
+  `provider/model` name.
+- The conversation composer is two rows: the message box, then attach and the model on the left,
+  dictation and send on the right. It no longer draws a focus ring, and opening a conversation puts
+  the caret in it.
 - A Bot can now ask you a single decision with the likely answers as options, such as which time zone to use. That question used to be refused before it reached you, because options came only with two or more decisions at once, so the conversation showed "Blocked: Asked you" and the Bot guessed. It now waits above the composer, you pick an option or answer in your own words, and the Bot carries on with your answer.
 - A skill used in the first message of a new conversation now reaches the Bot. The `/` chip showed in the message, but the skill's instructions were left out, for every kind of Bot; later messages in a conversation already carried them.
 - A Bot on Google ADK no longer runs a tool twice when it runs on more than one replica, or restarts in the middle of a turn. OpenBot runs each tool a Bot calls and sends the result back in a new request, which can reach a replica that never saw the call. That replica answered your message again from the start, so it called the tool again and OpenBot ran it a second time: a message sent twice, a file written twice. A replica that had served the conversation before said nothing instead. It now picks up from the result the conversation already holds, so each call runs once.

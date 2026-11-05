@@ -115,7 +115,15 @@ function summaryFor(
   return `${tools} · ${bots} ${bots === 1 ? "Bot" : "Bots"}`;
 }
 
-export function PluginsListPage() {
+/**
+ * `children` are sections only the team edition's Admin adds below the page's own (the admin's
+ * controls for these). The personal edition's Settings renders this page with none.
+ */
+export function PluginsListPage({
+  children,
+}: {
+  children?: React.ReactNode;
+} = {}) {
   const paths = useManagePaths();
   const plugins = useQuery(pluginsPageQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
@@ -331,6 +339,7 @@ export function PluginsListPage() {
           </PageSection>
         </>
       )}
+      {children}
     </PageShell>
   );
 }

@@ -36,8 +36,10 @@ import { Route as AuthedAdminEnterpriseRouteImport } from './routes/_authed/admi
 import { Route as AuthedAdminIdentityProvidersRouteImport } from './routes/_authed/admin/identity-providers'
 import { Route as AuthedAdminLearningRouteImport } from './routes/_authed/admin/learning'
 import { Route as AuthedAdminPeopleRouteImport } from './routes/_authed/admin/people'
+import { Route as AuthedAdminPermissionsRouteImport } from './routes/_authed/admin/permissions'
 import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admin/playground'
 import { Route as AuthedAdminProactiveRouteImport } from './routes/_authed/admin/proactive'
+import { Route as AuthedAdminProvidersRouteImport } from './routes/_authed/admin/providers'
 import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/skills'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedSettingsPersonalRouteImport } from './routes/_authed/settings/_personal'
@@ -61,6 +63,7 @@ import { Route as AuthedAppConnectionsKeyRouteImport } from './routes/_authed/_a
 import { Route as AuthedAppGroupChannelIdRouteImport } from './routes/_authed/_app/group/$channelId'
 import { Route as AuthedAppGroupNewRouteImport } from './routes/_authed/_app/group/new'
 import { Route as AuthedAppSScreenRouteImport } from './routes/_authed/_app/s/$screen'
+import { Route as AuthedAppStartStartIdRouteImport } from './routes/_authed/_app/start.$startId'
 import { Route as AuthedAdminBoundariesIndexRouteImport } from './routes/_authed/admin/boundaries_.$index'
 import { Route as AuthedAdminBoundariesNewRouteImport } from './routes/_authed/admin/boundaries_.new'
 import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed/admin/components/index'
@@ -232,6 +235,11 @@ const AuthedAdminPeopleRoute = AuthedAdminPeopleRouteImport.update({
   path: '/people',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
+const AuthedAdminPermissionsRoute = AuthedAdminPermissionsRouteImport.update({
+  id: '/permissions',
+  path: '/permissions',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
 const AuthedAdminPlaygroundRoute = AuthedAdminPlaygroundRouteImport.update({
   id: '/playground',
   path: '/playground',
@@ -240,6 +248,11 @@ const AuthedAdminPlaygroundRoute = AuthedAdminPlaygroundRouteImport.update({
 const AuthedAdminProactiveRoute = AuthedAdminProactiveRouteImport.update({
   id: '/proactive',
   path: '/proactive',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminProvidersRoute = AuthedAdminProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
 const AuthedAdminSkillsRoute = AuthedAdminSkillsRouteImport.update({
@@ -360,6 +373,11 @@ const AuthedAppGroupNewRoute = AuthedAppGroupNewRouteImport.update({
 const AuthedAppSScreenRoute = AuthedAppSScreenRouteImport.update({
   id: '/s/$screen',
   path: '/s/$screen',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
+const AuthedAppStartStartIdRoute = AuthedAppStartStartIdRouteImport.update({
+  id: '/start/$startId',
+  path: '/start/$startId',
   getParentRoute: () => AuthedAppRoute,
 } as any)
 const AuthedAdminBoundariesIndexRoute =
@@ -596,8 +614,10 @@ export interface FileRoutesByFullPath {
   '/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/admin/learning': typeof AuthedAdminLearningRoute
   '/admin/people': typeof AuthedAdminPeopleRoute
+  '/admin/permissions': typeof AuthedAdminPermissionsRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/proactive': typeof AuthedAdminProactiveRoute
+  '/admin/providers': typeof AuthedAdminProvidersRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
@@ -617,6 +637,7 @@ export interface FileRoutesByFullPath {
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
+  '/start/$startId': typeof AuthedAppStartStartIdRoute
   '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
   '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -679,8 +700,10 @@ export interface FileRoutesByTo {
   '/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/admin/learning': typeof AuthedAdminLearningRoute
   '/admin/people': typeof AuthedAdminPeopleRoute
+  '/admin/permissions': typeof AuthedAdminPermissionsRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/proactive': typeof AuthedAdminProactiveRoute
+  '/admin/providers': typeof AuthedAdminProvidersRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/settings': typeof AuthedSettingsIndexRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
@@ -700,6 +723,7 @@ export interface FileRoutesByTo {
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
+  '/start/$startId': typeof AuthedAppStartStartIdRoute
   '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
   '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -767,8 +791,10 @@ export interface FileRoutesById {
   '/_authed/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/_authed/admin/learning': typeof AuthedAdminLearningRoute
   '/_authed/admin/people': typeof AuthedAdminPeopleRoute
+  '/_authed/admin/permissions': typeof AuthedAdminPermissionsRoute
   '/_authed/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/_authed/admin/proactive': typeof AuthedAdminProactiveRoute
+  '/_authed/admin/providers': typeof AuthedAdminProvidersRoute
   '/_authed/admin/skills': typeof AuthedAdminSkillsRoute
   '/_authed/settings/_personal': typeof AuthedSettingsPersonalRouteWithChildren
   '/_authed/settings/approvals': typeof AuthedSettingsApprovalsRoute
@@ -790,6 +816,7 @@ export interface FileRoutesById {
   '/_authed/_app/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/_authed/_app/group/new': typeof AuthedAppGroupNewRoute
   '/_authed/_app/s/$screen': typeof AuthedAppSScreenRoute
+  '/_authed/_app/start/$startId': typeof AuthedAppStartStartIdRoute
   '/_authed/admin/boundaries_/$index': typeof AuthedAdminBoundariesIndexRoute
   '/_authed/admin/boundaries_/new': typeof AuthedAdminBoundariesNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -857,8 +884,10 @@ export interface FileRouteTypes {
     | '/admin/identity-providers'
     | '/admin/learning'
     | '/admin/people'
+    | '/admin/permissions'
     | '/admin/playground'
     | '/admin/proactive'
+    | '/admin/providers'
     | '/admin/skills'
     | '/settings/approvals'
     | '/settings/browsers'
@@ -878,6 +907,7 @@ export interface FileRouteTypes {
     | '/group/$channelId'
     | '/group/new'
     | '/s/$screen'
+    | '/start/$startId'
     | '/admin/boundaries/$index'
     | '/admin/boundaries/new'
     | '/admin/components/$name'
@@ -940,8 +970,10 @@ export interface FileRouteTypes {
     | '/admin/identity-providers'
     | '/admin/learning'
     | '/admin/people'
+    | '/admin/permissions'
     | '/admin/playground'
     | '/admin/proactive'
+    | '/admin/providers'
     | '/admin/skills'
     | '/settings'
     | '/settings/approvals'
@@ -961,6 +993,7 @@ export interface FileRouteTypes {
     | '/group/$channelId'
     | '/group/new'
     | '/s/$screen'
+    | '/start/$startId'
     | '/admin/boundaries/$index'
     | '/admin/boundaries/new'
     | '/admin/components/$name'
@@ -1027,8 +1060,10 @@ export interface FileRouteTypes {
     | '/_authed/admin/identity-providers'
     | '/_authed/admin/learning'
     | '/_authed/admin/people'
+    | '/_authed/admin/permissions'
     | '/_authed/admin/playground'
     | '/_authed/admin/proactive'
+    | '/_authed/admin/providers'
     | '/_authed/admin/skills'
     | '/_authed/settings/_personal'
     | '/_authed/settings/approvals'
@@ -1050,6 +1085,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/group/$channelId'
     | '/_authed/_app/group/new'
     | '/_authed/_app/s/$screen'
+    | '/_authed/_app/start/$startId'
     | '/_authed/admin/boundaries_/$index'
     | '/_authed/admin/boundaries_/new'
     | '/_authed/admin/components/$name'
@@ -1287,6 +1323,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminPeopleRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/permissions': {
+      id: '/_authed/admin/permissions'
+      path: '/permissions'
+      fullPath: '/admin/permissions'
+      preLoaderRoute: typeof AuthedAdminPermissionsRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/playground': {
       id: '/_authed/admin/playground'
       path: '/playground'
@@ -1299,6 +1342,13 @@ declare module '@tanstack/react-router' {
       path: '/proactive'
       fullPath: '/admin/proactive'
       preLoaderRoute: typeof AuthedAdminProactiveRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/providers': {
+      id: '/_authed/admin/providers'
+      path: '/providers'
+      fullPath: '/admin/providers'
+      preLoaderRoute: typeof AuthedAdminProvidersRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
     '/_authed/admin/skills': {
@@ -1460,6 +1510,13 @@ declare module '@tanstack/react-router' {
       path: '/s/$screen'
       fullPath: '/s/$screen'
       preLoaderRoute: typeof AuthedAppSScreenRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/start/$startId': {
+      id: '/_authed/_app/start/$startId'
+      path: '/start/$startId'
+      fullPath: '/start/$startId'
+      preLoaderRoute: typeof AuthedAppStartStartIdRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/admin/boundaries_/$index': {
@@ -1720,8 +1777,10 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminIdentityProvidersRoute: typeof AuthedAdminIdentityProvidersRoute
   AuthedAdminLearningRoute: typeof AuthedAdminLearningRoute
   AuthedAdminPeopleRoute: typeof AuthedAdminPeopleRoute
+  AuthedAdminPermissionsRoute: typeof AuthedAdminPermissionsRoute
   AuthedAdminPlaygroundRoute: typeof AuthedAdminPlaygroundRoute
   AuthedAdminProactiveRoute: typeof AuthedAdminProactiveRoute
+  AuthedAdminProvidersRoute: typeof AuthedAdminProvidersRoute
   AuthedAdminSkillsRoute: typeof AuthedAdminSkillsRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
   AuthedAdminBoundariesIndexRoute: typeof AuthedAdminBoundariesIndexRoute
@@ -1747,8 +1806,10 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminIdentityProvidersRoute: AuthedAdminIdentityProvidersRoute,
   AuthedAdminLearningRoute: AuthedAdminLearningRoute,
   AuthedAdminPeopleRoute: AuthedAdminPeopleRoute,
+  AuthedAdminPermissionsRoute: AuthedAdminPermissionsRoute,
   AuthedAdminPlaygroundRoute: AuthedAdminPlaygroundRoute,
   AuthedAdminProactiveRoute: AuthedAdminProactiveRoute,
+  AuthedAdminProvidersRoute: AuthedAdminProvidersRoute,
   AuthedAdminSkillsRoute: AuthedAdminSkillsRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
   AuthedAdminBoundariesIndexRoute: AuthedAdminBoundariesIndexRoute,
@@ -1868,6 +1929,7 @@ interface AuthedAppRouteChildren {
   AuthedAppGroupChannelIdRoute: typeof AuthedAppGroupChannelIdRoute
   AuthedAppGroupNewRoute: typeof AuthedAppGroupNewRoute
   AuthedAppSScreenRoute: typeof AuthedAppSScreenRoute
+  AuthedAppStartStartIdRoute: typeof AuthedAppStartStartIdRoute
   AuthedAppAgentsIndexRoute: typeof AuthedAppAgentsIndexRoute
   AuthedAppBotsIndexRoute: typeof AuthedAppBotsIndexRoute
   AuthedAppConnectionsIndexRoute: typeof AuthedAppConnectionsIndexRoute
@@ -1905,6 +1967,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppGroupChannelIdRoute: AuthedAppGroupChannelIdRoute,
   AuthedAppGroupNewRoute: AuthedAppGroupNewRoute,
   AuthedAppSScreenRoute: AuthedAppSScreenRoute,
+  AuthedAppStartStartIdRoute: AuthedAppStartStartIdRoute,
   AuthedAppAgentsIndexRoute: AuthedAppAgentsIndexRoute,
   AuthedAppBotsIndexRoute: AuthedAppBotsIndexRoute,
   AuthedAppConnectionsIndexRoute: AuthedAppConnectionsIndexRoute,

@@ -55,6 +55,7 @@ at `agent-langgraph` on a laptop.
 | `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both shipped Bots.        |
 | `OPENAI_BASE_URL`    | unset                              | OpenAI-compatible endpoint that key is spent against. See below.    |
 | `COPILOTKIT_OPENAI_API` | unset                          | Which OpenAI API the built-in Bots call behind an `OPENAI_BASE_URL` that is not OpenAI or Azure: `responses` or `chat`. Unset, the model decides. See [OpenAI-compatible endpoints](#openai-compatible-endpoints). |
+| `ROUTER_MODEL`       | `claude-haiku-5-5` / `gpt-6-luna`  | Model that picks which Bot an untagged message from the home page goes to. It runs while the person waits, so it defaults to a light model on the deployment's provider and falls back to the Bots' model when that one is refused. Behind `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL` it defaults to the Bots' model, since the endpoint's catalogue is unknown. |
 | `BOT_PROVIDER`       | `openai`                           | Provider the framework Bot (`agent-langgraph`) and the picked harness run on: `openai`, `anthropic`, or `google`. The Python Bots read it too; `agent-bot` does not, it is OpenAI only. |
 | `ANTHROPIC_API_KEY`  | unset                              | Anthropic key when `BOT_PROVIDER=anthropic`.                        |
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
@@ -980,7 +981,7 @@ default. Both the shared computer and the supervisor are given it: the computer 
 proxy from these names, and the supervisor forwards them into each computer it creates.
 
 Every computer runs its own filtering proxy on `127.0.0.1`, which applies the network policy an
-administrator sets under **Admin > Enterprise controls**, and it sets `HTTP_PROXY`, `HTTPS_PROXY` and
+administrator sets under **Admin > Computers > Network**, and it sets `HTTP_PROXY`, `HTTPS_PROXY` and
 `NO_PROXY` for itself and its shell to point at that filter. Do not set those three to reach an
 upstream proxy; use `EGRESS_PROXY_<BOT_ID>` or `EGRESS_PROXY_DEFAULT`, which the filter chains to.
 
