@@ -86,7 +86,8 @@ const MODEL_ANSWER = "Answered on the Responses API.";
 
 const queue = createWorkQueue(database);
 const auditStore = createAuditStore(database);
-const profiles = createAgentProfileStore(database);
+// Every Bot here is built in, so there is no managed agent endpoint to hand the store.
+const profiles = createAgentProfileStore(database, undefined);
 
 /** The Bots one Bot has been granted, read from the grants table as the plugin store reads it. */
 async function grantedTo(fromBotId: string): Promise<string[]> {
@@ -338,7 +339,6 @@ beforeEach(async () => {
       .insert(agentProfiles)
       .values({
         agentId: id,
-        name,
         title: "",
         roleDescription: "",
         avatarSeed: id,
@@ -509,10 +509,10 @@ describe("one Bot asking another, on two replicas", () => {
       (tool) => tool.name === "message_bot",
     );
     // Offered the names it can ask, so it has nothing to guess: Knowledge, and not Research.
-    const schema = z.toJSONSchema(offered?.parameters as z.ZodType) as {
-      properties: { bot: { enum?: string[] } };
-    };
-    expect(schema.properties.bot.enum).toEqual(["Knowledge"]);
+    const schema = z.toJSONSchema(offered?.parameters as z.ZodType);
+    expect(schema.properties?.bot).toEqual(
+      expect.objectContaining({ enum: ["Knowledge"] }),
+    );
 
     // The call the model made in the run that found this, through the same dispatch a run uses.
     const handed = await coordination.call({

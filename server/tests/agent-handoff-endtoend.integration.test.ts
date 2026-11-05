@@ -125,6 +125,7 @@ describe("a hop, from the tool call to the delivery", () => {
       },
       hasSomebodyToAsk: true,
       maxDepth: 2,
+      maxPerRun: 3,
     });
 
     // The asking Bot's own words, through the tool it is offered.
@@ -183,6 +184,7 @@ describe("a hop, from the tool call to the delivery", () => {
       },
       hasSomebodyToAsk: true,
       maxDepth: 2,
+      maxPerRun: 3,
     });
     await tool?.execute({ bot: "Target", task: "have a look" });
 
@@ -227,6 +229,7 @@ describe("a hop, from the tool call to the delivery", () => {
       },
       hasSomebodyToAsk: true,
       maxDepth: 2,
+      maxPerRun: 3,
     });
     await tool?.execute({ bot: "Target", task: "have a look" });
 

@@ -24,6 +24,7 @@ import type { AgentProfileStore } from "../src/agents/profile-store";
 import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
 import { DEV_ACTOR, initializeDevActorUser } from "../src/auth/dev-actor";
+import type { RoleRepository } from "../src/auth/guards";
 import { createStallGuard } from "../src/channels/stall-guard";
 import { loadConfig } from "../src/config";
 import { mountCopilotRuntime } from "../src/copilot";
@@ -113,7 +114,9 @@ beforeAll(async () => {
   );
 
   const auditStore = { insert: async (_event: AuditEventInput) => {} };
-  const roleRepository = { rolesForUser: async () => ["admin" as const] };
+  const roleRepository: RoleRepository = {
+    rolesForUser: async () => ["admin"],
+  };
   const recorder = createRecorderExtension({
     config,
     database,
