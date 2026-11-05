@@ -233,6 +233,69 @@ test("a release missing a signed installer changes nothing and fails", () => {
   ).toBe(false);
 });
 
+/** A stable release published before signing attached anything, as v0.2.0 was. */
+function unsigned(version: string) {
+  return {
+    [`OpenBot_${version}_aarch64.dmg`]: `ad-hoc arm64 ${version}`,
+    [`OpenBot_${version}_x64-setup.exe`]: `unsigned windows ${version}`,
+    "container-images.json": "{}",
+  };
+}
+
+// The schedule must not fail on main every six hours while Latest predates signed releases.
+test("a Latest release with no signed installers at all is not drift: nothing to sync, no AWS calls, success", () => {
+  const fake = downloads();
+  fake.release("v0.2.0", unsigned("0.2.0"));
+  fake.setLatest("v0.2.0");
+  const result = run(fake);
+  expect(result.code).toBe(0);
+  expect(result.out).toContain(
+    "Latest release v0.2.0 has no signed installers yet; nothing to sync.",
+  );
+  expect(result.out).not.toContain("::error::");
+  expect(fake.calls().some((call) => call.startsWith("aws "))).toBe(false);
+  expect(
+    fake.calls().some((call) => call.startsWith("gh release download")),
+  ).toBe(false);
+  expect(fake.bucket()).toEqual({});
+  expect(fake.invalidations()).toEqual([]);
+});
+
+// Half-signed: one signing run attached its files and the other did not, or someone removed one.
+test("a Latest release with some but not all signed files fails and changes nothing", () => {
+  for (const present of [
+    ["OpenBot-windows-x64-setup.exe"],
+    ["latest.json"],
+    ["latest.json", "OpenBot-mac-arm64.dmg", "OpenBot-mac-x64.dmg"],
+  ]) {
+    const fake = downloads();
+    const all = signed("0.3.0") as Record<string, string>;
+    const assets: Record<string, string> = unsigned("0.3.0");
+    for (const name of present) assets[name] = all[name] as string;
+    fake.release("v0.3.0", assets);
+    fake.setLatest("v0.3.0");
+    const result = run(fake);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("::error::v0.3.0 does not have the signed");
+    expect(fake.calls().some((call) => call.startsWith("aws "))).toBe(false);
+    expect(fake.bucket()).toEqual({});
+  }
+});
+
+test("a release asked for by tag with no signed installers at all fails and changes nothing", () => {
+  const fake = downloads();
+  fake.release("v0.2.0", unsigned("0.2.0"));
+  fake.release("v0.3.0", signed("0.3.0"));
+  fake.setLatest("v0.3.0");
+  const result = run(fake, { DOWNLOADS_TAG: "v0.2.0" });
+  expect(result.code).toBe(1);
+  expect(result.out).toContain(
+    "::error::v0.2.0 does not have the signed latest.json OpenBot-mac-arm64.dmg OpenBot-mac-x64.dmg OpenBot-windows-x64-setup.exe yet",
+  );
+  expect(fake.calls().some((call) => call.startsWith("aws "))).toBe(false);
+  expect(fake.bucket()).toEqual({});
+});
+
 test("a release with no latest.json, or whose versioned installer is not the signed one, changes nothing and fails", () => {
   const noFeed = downloads();
   const assets: Record<string, string> = signed("0.3.0");
@@ -400,7 +463,8 @@ test("making a stable release Latest dispatches the sync, and nothing else does"
   complete(byHand);
   expect(promote(byHand, "false").code).toBe(0);
   expect(byHand.calls()).not.toContain(dispatch);
-});
+  // Four runs of the script, each spawning several processes.
+}, 20_000);
 
 type Job = {
   if?: string;

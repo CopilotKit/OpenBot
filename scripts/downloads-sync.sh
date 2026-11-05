@@ -28,8 +28,10 @@
 # other caching headers is uploaded. /latest/* is invalidated only when something under latest/ was.
 # Nothing is ever deleted.
 #
-# It changes nothing and fails when the release is a prerelease, a draft or not a stable version,
-# or when it lacks latest.json or any installer under its fixed name. On a stable release only the
+# A Latest release with no signed installers at all, published before signing attached any, has
+# nothing to sync, and the run succeeds without touching AWS. Otherwise it changes nothing and fails
+# when the release is a prerelease, a draft or not a stable version, or when it lacks latest.json
+# or any installer under its fixed name. On a stable release only the
 # signing runs attach those, so their presence is what says each installer is signed. Each
 # versioned installer must be the same file as its fixed-name copy, so releases/<tag>/ gets the
 # signed build too.
@@ -85,6 +87,13 @@ for name in latest.json "${fixed_names[@]}"; do
     missing+=("$name")
   fi
 done
+# A Latest release with none of them predates signed releases, as v0.2.0 does. That is not drift,
+# so the scheduled run succeeds without touching AWS. Some but not all is a half-signed release or
+# a removed file, and a release asked for by tag is wanted specifically, so both fail.
+if [ "$mode" = latest ] && [ "${#missing[@]}" -eq "$(( ${#fixed_names[@]} + 1 ))" ]; then
+  echo "::notice::Latest release $tag has no signed installers yet; nothing to sync."
+  exit 0
+fi
 if [ "${#missing[@]}" -gt 0 ]; then
   echo "::error::$tag does not have the signed ${missing[*]} yet, so nothing was mirrored. The signing runs attach them before the release becomes Latest."
   exit 1

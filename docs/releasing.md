@@ -470,10 +470,11 @@ by hand. Each run:
 - compares each file's SHA-256 with what the bucket holds, uploads only what differs, and
   invalidates `/latest/*` only when something under `latest/` changed.
 
-When the Latest release lacks any of those files, the run fails and changes nothing, so the
-addresses keep serving the previous signed installers. A release published before signing attached
-fixed names, such as v0.2.0, has none, so the scheduled runs fail until a release signed on both
-platforms is Latest. Nothing is ever deleted.
+When the Latest release lacks some of those files, the run fails and changes nothing, so the
+addresses keep serving the previous signed installers. A Latest release with none of them was
+published before signing attached any, as v0.2.0 was: that is not drift, so the run succeeds with
+"no signed installers yet; nothing to sync" and does not touch AWS. A release asked for by tag must
+have them all. Nothing is ever deleted.
 
 To run it by hand, from `main`:
 
