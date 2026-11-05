@@ -9,15 +9,20 @@ import {
 import { randomUUID } from "node:crypto";
 import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
 import { answeredBy } from "@openbot/shared/handoff-markers";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
 import { Observable } from "rxjs";
+import { z } from "zod";
+import { askTheirOwnPerson } from "../src/agents/escalation";
 import { createHandoffDesk } from "../src/agents/handoff";
 import {
   createHandoffDelivery,
   type ThreadRunner,
 } from "../src/agents/handoff-delivery";
 import { createHandoffRunner } from "../src/agents/handoff-runner";
-import { handoffTool } from "../src/agents/handoff-tool";
+import {
+  createCoordinationTools,
+  handoffTool,
+} from "../src/agents/handoff-tool";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { createAuditStore } from "../src/audit";
@@ -31,6 +36,7 @@ import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
   agents,
+  auditEvents,
   pluginGrants,
   workItems,
 } from "../src/db/schema";
@@ -62,8 +68,12 @@ import {
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
-const ASKER = `general-assistant-${suite}`;
-const KNOWLEDGE = `knowledge-${suite}`;
+/** Every Bot this file makes starts with this, so a run that died part way is cleaned by the next. */
+const BOT_PREFIX = "handoff-answer-";
+const ASKER = `${BOT_PREFIX}general-assistant-${suite}`;
+const KNOWLEDGE = `${BOT_PREFIX}knowledge-${suite}`;
+/** A Bot the person can see and General Assistant was never given. */
+const RESEARCH = `${BOT_PREFIX}research-${suite}`;
 const ACTOR = `handoff-answer-actor-${suite}`;
 const THREAD = `asking-thread-${suite}`;
 
@@ -78,22 +88,25 @@ const queue = createWorkQueue(database);
 const auditStore = createAuditStore(database);
 const profiles = createAgentProfileStore(database);
 
+/** The Bots one Bot has been granted, read from the grants table as the plugin store reads it. */
+async function grantedTo(fromBotId: string): Promise<string[]> {
+  return (
+    await database
+      .select({ ref: pluginGrants.ref })
+      .from(pluginGrants)
+      .where(
+        and(eq(pluginGrants.kind, "bot"), eq(pluginGrants.agentId, fromBotId)),
+      )
+  ).map((row) => row.ref);
+}
+
 const desk = createHandoffDesk({
   queue,
   profiles,
   actorFor: async (id: string) => ({ id, role: "user" as const }),
   mayAddress: async (fromBotId, toBotId) =>
-    (
-      await database
-        .select({ ref: pluginGrants.ref })
-        .from(pluginGrants)
-        .where(
-          and(
-            eq(pluginGrants.kind, "bot"),
-            eq(pluginGrants.agentId, fromBotId),
-          ),
-        )
-    ).some((row) => row.ref === toBotId),
+    (await grantedTo(fromBotId)).includes(toBotId),
+  addressable: grantedTo,
   auditStore,
   caps: { maxDepth: 2, maxPerRun: 3 },
 });
@@ -299,11 +312,15 @@ async function clean() {
   await database
     .delete(workItems)
     .where(sql`${workItems.payload}->>'actorId' = ${ACTOR}`);
-  for (const id of [ASKER, KNOWLEDGE]) {
-    await database.delete(pluginGrants).where(eq(pluginGrants.agentId, id));
-    await database.delete(agentProfiles).where(eq(agentProfiles.agentId, id));
-    await database.delete(agents).where(eq(agents.id, id));
-  }
+  // By prefix, not by this run's ids: two Bots called Knowledge left by a run that died would make
+  // "the Knowledge Bot" ambiguous, which is the desk working, not this test.
+  await database
+    .delete(pluginGrants)
+    .where(like(pluginGrants.agentId, `${BOT_PREFIX}%`));
+  await database
+    .delete(agentProfiles)
+    .where(like(agentProfiles.agentId, `${BOT_PREFIX}%`));
+  await database.delete(agents).where(like(agents.id, `${BOT_PREFIX}%`));
 }
 
 beforeEach(async () => {
@@ -311,6 +328,7 @@ beforeEach(async () => {
   for (const [id, name] of [
     [ASKER, "General Assistant"],
     [KNOWLEDGE, "Knowledge"],
+    [RESEARCH, "Research"],
   ]) {
     await database
       .insert(agents)
@@ -433,5 +451,125 @@ describe("one Bot asking another, on two replicas", () => {
     expect(
       shown.filter((message) => message.role === "assistant"),
     ).toHaveLength(1);
+  });
+  /*
+   * "Ask the Knowledge Bot for help with this": the model sent `bot: "Knowledge Bot"`, the desk
+   * looked for a Bot with exactly that name, and the person saw a red "Blocked: Asked Knowledge Bot"
+   * step before the model called `list_bots` and tried again. The run is now offered the names it
+   * can ask, and a name said the way people say it resolves to the one Bot it means.
+   */
+  test("the Knowledge Bot is Knowledge: one handoff, no refusal, and its answer under its own name", async () => {
+    endpoint = startOpenAICompatibleEndpoint();
+    const built = await botsAgainst(endpoint.baseUrl);
+    const intelligence = platform();
+    intelligence.seed(THREAD, [
+      { id: "person-1", role: "user", content: PERSON },
+    ]);
+    const replica = (owner: string) =>
+      createHandoffRunner({
+        queue: createWorkQueue(database),
+        owner,
+        sign: () => "signed",
+        auditStore,
+        delivery: createHandoffDelivery({
+          admission: serverTurnAdmission,
+          agentFor: async ({ botId }) =>
+            (built[botId]?.clone() as AbstractAgent | undefined) ?? null,
+          history: intelligence.history,
+          lock: intelligence.lock,
+          runner: intelligence.runner,
+          mintThreadId: () => `scratch-${randomUUID()}`,
+          newRunId: () => randomUUID(),
+        }),
+      });
+
+    // The coordination tools as a built-in run is given them, wired as the server wires them.
+    const coordination = createCoordinationTools({
+      desk,
+      caps: { maxDepth: 2, maxPerRun: 3 },
+      botsReachableFrom: grantedTo,
+      addressableBots: async (from) => {
+        const granted = new Set(await grantedTo(from.botId));
+        return (await profiles.list({ id: from.actorId, role: "user" }))
+          .filter((bot) => granted.has(bot.id) && bot.id !== from.botId)
+          .map((bot) => ({ id: bot.id, name: bot.name }));
+      },
+      route: askTheirOwnPerson,
+      auditStore,
+      authoriseRun: async () => true,
+    });
+    const run = {
+      botId: ASKER,
+      actorId: ACTOR,
+      runId: `asking-run-${suite}`,
+      threadId: THREAD,
+      depth: 0,
+    };
+    const offered = (await coordination.toolsForRun(run)).find(
+      (tool) => tool.name === "message_bot",
+    );
+    // Offered the names it can ask, so it has nothing to guess: Knowledge, and not Research.
+    const schema = z.toJSONSchema(offered?.parameters as z.ZodType) as {
+      properties: { bot: { enum?: string[] } };
+    };
+    expect(schema.properties.bot.enum).toEqual(["Knowledge"]);
+
+    // The call the model made in the run that found this, through the same dispatch a run uses.
+    const handed = await coordination.call({
+      name: "message_bot",
+      args: {
+        bot: "Knowledge Bot",
+        task: "Describe, in exactly two sentences, what kinds of questions you are set up to answer and which sources you can use.",
+        expecting: "Exactly two sentences for the person.",
+      },
+      run,
+    });
+    expect(handed).toMatchObject({ isError: false });
+    expect(handed?.text).toStartWith("Handed to Knowledge");
+
+    const there = await replica(`replica-a-${suite}`).sweep();
+    expect(there.delivered).toContain(KNOWLEDGE);
+    const back = await replica(`replica-b-${suite}`).sweep();
+    expect(back.delivered).toContain(ASKER);
+
+    // One handoff, and nothing refused on the way.
+    const hops = await database
+      .select({ key: workItems.key })
+      .from(workItems)
+      .where(sql`${workItems.payload}->>'actorId' = ${ACTOR}`);
+    expect(hops.filter((hop) => hop.key.startsWith("hop:"))).toHaveLength(1);
+    const refused = await database
+      .select({ type: auditEvents.eventType })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.actorUserId, ACTOR),
+          eq(auditEvents.eventType, "agent.handoff_refused"),
+        ),
+      );
+    expect(refused).toEqual([]);
+
+    const answer = intelligence
+      .messages(THREAD)
+      .find((message) => answeredBy(message.id) !== null);
+    expect(answer).toMatchObject({ role: "assistant", content: MODEL_ANSWER });
+    expect(answeredBy(answer?.id ?? "")).toBe(KNOWLEDGE);
+
+    // A Bot it was never given is still refused, however it is named.
+    const notGiven = await coordination.call({
+      name: "message_bot",
+      args: { bot: "the Research Bot", task: "find the outage window" },
+      run,
+    });
+    expect(notGiven?.isError).toBe(true);
+    expect(notGiven?.text).toContain("You have not been given Research");
+    // And a name that is nobody says who it can ask.
+    const nobody = await coordination.call({
+      name: "message_bot",
+      args: { bot: "Archivist", task: "find the outage window" },
+      run,
+    });
+    expect(nobody?.isError).toBe(true);
+    expect(nobody?.text).toContain("The Bots you can ask are: Knowledge.");
   });
 });

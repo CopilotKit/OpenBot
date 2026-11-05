@@ -67,6 +67,39 @@ const parameters = z.object({
 });
 
 /**
+ * The Bots this run may ask, as the model is offered them: the `bot` field becomes a choice between
+ * their names rather than a blank it has to fill in.
+ *
+ * Left to guess, a model asked to "ask the Knowledge Bot" sent "Knowledge Bot", was refused, called
+ * `list_bots` and tried again, and the person watched a red Blocked step for a Bot that was there all
+ * along. A Bot whose name another reachable Bot shares is offered by its id, which is exact.
+ *
+ * Only what is OFFERED. A call is still read with the plain string schema and resolved by the desk,
+ * so a remote Bot holding an older schema, or a model that strays from the list, reaches the same
+ * resolution and the same refusals rather than a validation error.
+ */
+function offeredParameters(reachable: readonly { id: string; name: string }[]) {
+  const counts = new Map<string, number>();
+  for (const bot of reachable)
+    counts.set(
+      bot.name.toLowerCase(),
+      (counts.get(bot.name.toLowerCase()) ?? 0) + 1,
+    );
+  const choices = reachable.map((bot) =>
+    (counts.get(bot.name.toLowerCase()) ?? 0) > 1 ? bot.id : bot.name,
+  );
+  const [first, ...rest] = choices;
+  if (first === undefined) return parameters;
+  return parameters.extend({
+    bot: z
+      .enum([first, ...rest])
+      .describe(
+        `The Bot to hand this to. The ones you can ask: ${choices.join(", ")}`,
+      ),
+  });
+}
+
+/**
  * The tool, for a run that is allowed to have it.
  *
  * Returns nothing when this deployment has switched handoff off, so a Bot in that deployment is not
@@ -83,6 +116,11 @@ export function handoffTool(options: {
   /** How many Bots one run may address. Zero switches it off as surely as a depth of zero. */
   maxPerRun: number;
   /**
+   * The Bots it may ask, granted and visible to the person, for the schema the model is offered.
+   * Absent leaves `bot` a free string, which is how a call from a remote Bot's callback is read.
+   */
+  reachable?: readonly { id: string; name: string }[];
+  /**
    * The person's approval gate. Delegation is an action like any other: custom rules, auto-review
    * and "ask before" apply to handing work to another Bot, as Grok Bot reviews subagent launches.
    */
@@ -95,6 +133,7 @@ export function handoffTool(options: {
     hasSomebodyToAsk,
     maxDepth,
     maxPerRun,
+    reachable,
     approvalGate,
     privateShare,
   } = options;
@@ -127,7 +166,7 @@ export function handoffTool(options: {
       "in this conversation, under its own name, so do not wait for it or repeat what it will say: " +
       "tell them who you have asked and what for. If the work is yours to do, do it, and if it needs a " +
       "person's judgement rather than another Bot's, ask the person instead.",
-    parameters,
+    parameters: reachable ? offeredParameters(reachable) : parameters,
     execute: async (args: unknown) => {
       const parsed = parameters.safeParse(args);
       if (!parsed.success) {
@@ -359,6 +398,10 @@ export function createCoordinationTools(options: {
   desk: HandoffDesk;
   caps: HandoffCaps;
   botsReachableFrom: (botId: string) => Promise<readonly string[]>;
+  /** The Bots a run may ask, granted and visible to its person, by id and name. See `reachable`. */
+  addressableBots?: (
+    from: RunAssertion,
+  ) => Promise<readonly { id: string; name: string }[]>;
   route: EscalationRoute;
   auditStore: AuditStore;
   authoriseRun: (run: RunAssertion) => Promise<boolean>;
@@ -410,12 +453,18 @@ export function createCoordinationTools(options: {
         options.caps.maxDepth > 0 &&
         options.caps.maxPerRun > 0 &&
         (from.depth ?? 0) < options.caps.maxDepth;
+      const hasSomebodyToAsk =
+        canHandOn && (await options.botsReachableFrom(from.botId)).length > 0;
+      // A list that cannot be read leaves the field a free string; the desk still decides.
+      const reachable = hasSomebodyToAsk
+        ? await options.addressableBots?.(from).catch(() => undefined)
+        : undefined;
       const passing = canHandOn
         ? handoffTool({
             desk: options.desk,
             from,
-            hasSomebodyToAsk:
-              (await options.botsReachableFrom(from.botId)).length > 0,
+            hasSomebodyToAsk,
+            ...(reachable && reachable.length > 0 ? { reachable } : {}),
             ...options.caps,
             ...(options.approvalGate
               ? { approvalGate: options.approvalGate }

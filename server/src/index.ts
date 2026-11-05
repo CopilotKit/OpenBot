@@ -1267,6 +1267,8 @@ const handoffDesk = createHandoffDesk({
         // would let a Bot address one nobody gave it because the database blinked.
         .catch(() => [] as string[])
     ).includes(toBotId),
+  // The same grants, listed, so a name that matches no Bot is answered with the ones it may ask.
+  addressable: (fromBotId) => pluginStore.botsReachableFrom(fromBotId),
   /*
    * Deferred rather than passed directly, because `actorFor` is defined further down with the rest
    * of the run-building collaborators. It is only ever called during a hop, long after this module
