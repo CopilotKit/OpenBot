@@ -241,6 +241,8 @@ describe("channel activity", () => {
         ...channel,
         // Nothing has named this conversation: the sweep that does runs outside this store.
         summary: null,
+        // Only a person's message opens a conversation, and this one was the Bot's.
+        opening: null,
         lastMessage: "Categorized three expenses.",
         lastMessageAgentId: agentId,
         lastMessageAt: at,

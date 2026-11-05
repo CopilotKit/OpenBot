@@ -11,6 +11,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { readFiring } from "@openbot/shared/routine-firing";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -36,7 +37,7 @@ import {
   type ChannelEventHub,
 } from "./events";
 import { upgradeWebSocket } from "./socket";
-import { oneLine } from "./text";
+import { MAX_TITLE_GRAPHEMES, plainLine } from "./text";
 import type { ThreadIdentity } from "./thread-identity";
 import { type ChannelWork, channelWorkDto, workIn } from "./working";
 
@@ -61,6 +62,8 @@ export type AgentChannel = {
 export type ChannelSummary = AgentChannel & {
   /** A few words about the conversation, or null. Readers fall back to the channel's name. */
   summary: string | null;
+  /** The person's first words here, plain, or null: the conversation's name until `summary`. */
+  opening: string | null;
   lastMessage: string | null;
   lastMessageAgentId: string | null;
   createdAt: Date;
@@ -273,9 +276,20 @@ const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
 const MAX_CHANNEL_NAME_CODE_POINTS = 120;
 const MAX_ACTIVITY_GRAPHEMES = 200;
 
-/** Reduce a message to the one line a roster draws. See `oneLine` for why it is shared. */
+/**
+ * Reduce a message to the one line a roster draws, as plain text. See `plainLine`: until a
+ * conversation has a name this line stands in for one, so a Bot's Markdown must not reach it.
+ */
 function previewOf(text: string) {
-  return oneLine(text, MAX_ACTIVITY_GRAPHEMES);
+  return plainLine(text, MAX_ACTIVITY_GRAPHEMES);
+}
+
+/**
+ * What a person's message says, as the conversation's name until it has one. A routine's framed
+ * instruction is its instruction, the same as the summary sweep reads it.
+ */
+function openingOf(text: string) {
+  return plainLine(readFiring(text) ?? text, MAX_TITLE_GRAPHEMES);
 }
 
 function channelName(names: string[]) {
@@ -613,6 +627,7 @@ export function createChannelStore(
           threadId: intelligenceChannelMappings.threadId,
           deletedAt: agentProfiles.deletedAt,
           channelSummary: channels.summary,
+          opening: channels.opening,
           lastMessage: channels.lastMessage,
           lastMessageAt: channels.lastMessageAt,
           lastMessageAgentId: channels.lastMessageAgentId,
@@ -673,6 +688,7 @@ export function createChannelStore(
           threadId: row.threadId,
           active: row.deletedAt === null,
           summary: row.channelSummary,
+          opening: row.opening,
           lastMessage: row.lastMessage,
           lastMessageAt: row.lastMessageAt,
           lastMessageAgentId: row.lastMessageAgentId,
@@ -912,27 +928,67 @@ export function createChannelStore(
               ),
             )
             .returning({ id: channels.id });
+
+          /*
+           * A person's first words are what the conversation is called until it is named.
+           *
+           * Written whether or not the line above moved: a person's message reported after the Bot's
+           * reply is stale as the last message and is still the first thing they said. Only while
+           * there is none, so the first to arrive keeps it.
+           */
+          const opening =
+            activity.agentId === null ? openingOf(activity.text) : "";
+          const opened =
+            opening.length > 0 &&
+            (
+              await transaction
+                .update(channels)
+                .set({ opening })
+                .where(
+                  and(eq(channels.id, channelId), isNull(channels.opening)),
+                )
+                .returning({ id: channels.id })
+            ).length > 0;
+
           // Nothing changed, so there is nothing to announce: a stale report is not news.
-          if (applied.length === 0) return;
+          if (applied.length === 0 && !opened) return;
 
           const members = await transaction
             .select({ userId: channelMemberships.userId })
             .from(channelMemberships)
             .where(eq(channelMemberships.channelId, channelId));
+          const memberIds = members.map((member) => member.userId);
 
           // Announced inside the transaction, so it is delivered on commit and a write that rolls
           // back is never announced. The payload carries the members because the writer has already
           // resolved them; NOTIFY caps at 8000 bytes, which a 200-character preview leaves room in.
-          const event: ChannelActivityEvent = {
-            channelId,
-            memberIds: members.map((member) => member.userId),
-            lastMessage,
-            lastMessageAt: activity.at.toISOString(),
-            lastMessageAgentId: activity.agentId,
-          };
-          await transaction.execute(
-            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
-          );
+          if (applied.length > 0) {
+            const event: ChannelActivityEvent = {
+              channelId,
+              memberIds,
+              lastMessage,
+              lastMessageAt: activity.at.toISOString(),
+              lastMessageAgentId: activity.agentId,
+            };
+            await transaction.execute(
+              sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+            );
+          }
+          // On its own event, like a summary: it patches one field, and a stale message must not
+          // carry its preview onto the row.
+          if (opened) {
+            const event: ChannelActivityEvent = {
+              channelId,
+              memberIds,
+              lastMessage: null,
+              lastMessageAt: null,
+              lastMessageAgentId: null,
+              opening,
+            };
+            await transaction.execute(
+              sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+            );
+          }
         },
         { isolationLevel: "read committed" },
       );
@@ -1399,6 +1455,7 @@ function channelSummaryDto(
   return {
     ...channelDto(channel),
     summary: channel.summary,
+    opening: channel.opening,
     lastMessage: channel.lastMessage,
     lastMessageAgentId: channel.lastMessageAgentId,
     createdAt: channel.createdAt.toISOString(),

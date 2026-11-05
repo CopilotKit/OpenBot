@@ -308,6 +308,15 @@ export const channels = pgTable(
     /** When the summary above was written, so a later change can decide whether to redo it. */
     summaryAt: timestamp("summary_at", { withTimezone: true }),
     /**
+     * The first thing a person said here, as one plain line: what the conversation is called until
+     * `summary` names it.
+     *
+     * Without it the roster fell back to `last_message`, which by then is usually the Bot's reply, so
+     * a new conversation was called by its answer, Markdown and all, for as long as naming took, and
+     * for good when naming gave up. Written once, by the first person's message to arrive.
+     */
+    opening: text("opening"),
+    /**
      * The last thing said in this channel, denormalised so a roster is one indexed read.
      *
      * Channel grain, not per-member: what was said last is a property of the conversation, and a copy

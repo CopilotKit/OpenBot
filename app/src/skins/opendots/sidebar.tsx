@@ -35,6 +35,7 @@ import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { groupRoster } from "@/lib/agents/roster";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -285,7 +286,7 @@ function ThreadRow({
   const [confirming, setConfirming] = useState(false);
   const [pinProblem, setPinProblem] = useState<string | null>(null);
   const unread = isUnread(channel, open ? channel.id : undefined);
-  const title = channel.summary || channel.lastMessage || channel.name;
+  const title = channel.summary || untitledLine(channel) || channel.name;
   const link: LinkProps =
     channel.agentIds.length > 1
       ? { to: "/group/$channelId", params: { channelId: channel.id } }

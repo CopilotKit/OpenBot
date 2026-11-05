@@ -30,6 +30,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the Bot's permissions, out of sight, and kept going after Stop. A person's own runs, the subagents
   they start, headless turns and hops keep every tool as before. A remote Bot's naming run is also
   sent no signed run, so a callback from it is refused.
+- A new conversation is no longer called by the Bot's answer in the sidebar. Until it was named, a
+  conversation showed its last message, which was usually the Bot's reply, with its Markdown
+  asterisks and link brackets, and it kept that line for good when naming gave up. It now shows
+  your first message as plain text until its name arrives. A conversation a routine started shows
+  its last message, now also as plain text. A name the model writes in Markdown is stored as plain
+  text, and an answer too long to be a name is not stored as one. Migration `0076_channel_opening`
+  adds `channels.opening`.
 - The sign-in page the Desktop app opens now explains OpenBot setup — you are setting up a
   CopilotKit account for the personal edition of OpenBot, and your data stays on your computer —
   instead of the generic CopilotKit pitch. The app adds `mode=openbot` to the sign-in URL it opens;
