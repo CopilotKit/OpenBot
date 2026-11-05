@@ -89,6 +89,13 @@ pub fn record_launch(root: &Path, harness: Option<&HarnessChoice>) -> Result<(),
     )
 }
 
+/// Whether an app finished installing in `root`, or started OpenBot from it, at some point: its
+/// completed-installation or launch record is there, valid or not. Proof that the folder is an
+/// installation's own, which a source checkout never has (see `stack::project`).
+pub fn installed_before(root: &Path) -> bool {
+    root.join(FILE).is_file() || root.join(LAUNCH).is_file()
+}
+
 /// Passive resume intent. Runtime and credential validity are checked by the normal Start path.
 pub fn launch(root: &Path) -> Option<Launch> {
     let record: Launched = serde_json::from_slice(&std::fs::read(root.join(LAUNCH)).ok()?).ok()?;

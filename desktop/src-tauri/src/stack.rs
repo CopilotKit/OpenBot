@@ -3542,10 +3542,16 @@ the one thing a folder-named project cannot fake. Any other answer is `DESKTOP_P
 containers and its database as a previous installation's, and stopped on a key that was never
 its own; this is what keeps that from happening again.
 
-The cost is deliberate: an earlier installation whose containers are all gone (Stop takes them
-down) has nothing left that proves the project was its own, so it starts fresh under
-`DESKTOP_PROJECT`. Its old volumes are left exactly where they are, never deleted or renamed.
-Volumes do not carry the folder Compose ran from, so they cannot prove it either.
+AN UPGRADE KEEPS ITS DATA. Stop and Quit take an earlier app's containers down, so most
+installations reach this app with none left, only their volumes. Volumes do not carry the folder
+Compose ran from, so the folder has to prove it instead: an earlier app finished installing here
+(`preparation::installed_before`) and the legacy project's database volume is still on the
+engine. Such an installation keeps its legacy project, and with it its database, its Bots'
+computers and their volumes, provided no other folder is running that project right now.
+
+When another folder is running it (a developer's checkout called `openbot`), whose data the volume
+holds cannot be told, so nothing is decided and nothing is recorded: Install stops and says so,
+and runs again once that other OpenBot is stopped. Old volumes are never deleted or renamed here.
 */
 pub fn project(engine: &Address, root: &Path) -> Result<String, Problem> {
     project_choosing(engine, root, &project_name(root))
@@ -3560,11 +3566,20 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
     if !root.is_dir() {
         return Ok(DESKTOP_PROJECT.to_owned());
     }
-    let chosen = if legacy != DESKTOP_PROJECT
-        && compose_project_name(legacy)
-        && project_ran_from(engine, root, legacy)?
-    {
-        legacy.to_owned()
+    let chosen = if legacy != DESKTOP_PROJECT && compose_project_name(legacy) {
+        let running = legacy_containers(engine, root, legacy)?;
+        if running.here {
+            legacy.to_owned()
+        } else if crate::preparation::installed_before(root)
+            && legacy_database(engine, root, legacy)?
+        {
+            if let Some(folder) = running.elsewhere.first() {
+                return Err(legacy_in_use_problem(legacy, folder));
+            }
+            legacy.to_owned()
+        } else {
+            DESKTOP_PROJECT.to_owned()
+        }
     } else {
         DESKTOP_PROJECT.to_owned()
     };
@@ -3591,9 +3606,67 @@ fn project_choice_problem(detail: impl Into<String>) -> Problem {
     )
 }
 
-/// Whether any container of Compose project `legacy` was run from `root`. Only reads: lists and
-/// inspects, and never stops, removes or takes down anything, whoever's it is.
-fn project_ran_from(engine: &Address, root: &Path, legacy: &str) -> Result<bool, Problem> {
+/// The earlier installation's data is there, but another folder runs its Compose project now.
+fn legacy_in_use_problem(legacy: &str, folder: &Path) -> Problem {
+    Problem::with(
+        format!(
+            "OpenBot found the data of your earlier installation, but another copy of OpenBot on this computer is using it right now, from {}. Stop that copy, then try again. Nothing was changed or deleted.",
+            folder.display()
+        ),
+        format!(
+            "Compose project `{legacy}` and its volume `{legacy}_postgres-data` are in use by containers that ran from {}.",
+            folder.display()
+        ),
+    )
+}
+
+/// Which folders the containers of Compose project `legacy` ran from: this one, or others.
+#[derive(Default)]
+struct LegacyContainers {
+    here: bool,
+    elsewhere: Vec<PathBuf>,
+}
+
+/// Whether the engine still holds the database volume Compose made for project `legacy`: named
+/// `<legacy>_postgres-data` and labelled as that project's `postgres-data`. Only reads.
+fn legacy_database(engine: &Address, root: &Path, legacy: &str) -> Result<bool, Problem> {
+    let volume = format!("{legacy}_postgres-data");
+    let listed = volume_inventory(engine, root)
+        .map_err(|problem| project_choice_problem(problem.detail.unwrap_or_default()))?;
+    if !listed.contains(&volume) {
+        return Ok(false);
+    }
+    let inspect = engine
+        .command()
+        .current_dir(root)
+        .args(["volume", "inspect", &volume])
+        .output()
+        .map_err(|error| {
+            project_choice_problem(format!("Could not inspect volume {volume}: {error}"))
+        })?;
+    // Gone since it was listed.
+    if !inspect.status.success() {
+        return Ok(false);
+    }
+    let inspected: serde_json::Value = serde_json::from_slice(&inspect.stdout).map_err(|_| {
+        project_choice_problem(format!(
+            "Inspection of volume {volume} did not return valid JSON."
+        ))
+    })?;
+    Ok(inspected.as_array().into_iter().flatten().any(|found| {
+        let labels = &found["Labels"];
+        labels["com.docker.compose.project"].as_str() == Some(legacy)
+            && labels["com.docker.compose.volume"].as_str() == Some("postgres-data")
+    }))
+}
+
+/// Which folders ran the containers of Compose project `legacy`. Only reads: lists and inspects,
+/// and never stops, removes or takes down anything, whoever's it is.
+fn legacy_containers(
+    engine: &Address,
+    root: &Path,
+    legacy: &str,
+) -> Result<LegacyContainers, Problem> {
     let listed = engine
         .command()
         .current_dir(root)
@@ -3608,6 +3681,7 @@ fn project_ran_from(engine: &Address, root: &Path, legacy: &str) -> Result<bool,
         )));
     }
     let here = canonical(root);
+    let mut found = LegacyContainers::default();
     for id in String::from_utf8_lossy(&listed.stdout).split_whitespace() {
         let inspect = engine
             .command()
@@ -3627,18 +3701,23 @@ fn project_ran_from(engine: &Address, root: &Path, legacy: &str) -> Result<bool,
                     "Inspection of container {id} did not return valid JSON."
                 ))
             })?;
-        let ran_here = inspected.as_array().into_iter().flatten().any(|container| {
+        for container in inspected.as_array().into_iter().flatten() {
             let labels = &container["Config"]["Labels"];
-            labels["com.docker.compose.project"].as_str() == Some(legacy)
-                && labels["com.docker.compose.project.working_dir"]
-                    .as_str()
-                    .is_some_and(|folder| canonical(Path::new(folder)) == here)
-        });
-        if ran_here {
-            return Ok(true);
+            if labels["com.docker.compose.project"].as_str() != Some(legacy) {
+                continue;
+            }
+            let Some(folder) = labels["com.docker.compose.project.working_dir"].as_str() else {
+                continue;
+            };
+            let folder = canonical(Path::new(folder));
+            if folder == here {
+                found.here = true;
+            } else if !found.elsewhere.contains(&folder) {
+                found.elsewhere.push(folder);
+            }
         }
     }
-    Ok(false)
+    Ok(found)
 }
 
 /// The folder as the file system resolves it, so `/var` and `/private/var`, or `..` in a label,
@@ -9900,6 +9979,110 @@ fn main() {
             ),
             "{log}"
         );
+    }
+
+    /// An earlier app's installation in `root`: finished installing, its database volume left on
+    /// the engine by a Stop or Quit that took every container down.
+    fn earlier_installation(root: &Path) {
+        crate::deployment::record(root, "v0.2.0").unwrap();
+        std::fs::write(root.join(crate::preparation::FILE), "{}").unwrap();
+        std::fs::write(root.join(".fixture-volumes"), "openbot_postgres-data\n").unwrap();
+        std::fs::write(
+            root.join(".fixture-inspect"),
+            r#"[{"Name":"openbot_postgres-data","Labels":{"com.docker.compose.project":"openbot","com.docker.compose.volume":"postgres-data"}}]"#,
+        )
+        .unwrap();
+    }
+
+    /// The upgrade every person makes: they quit the earlier app (which takes its containers
+    /// down), install this one, and open it. Their database is still on the engine and has to be
+    /// the one OpenBot runs on, not a new empty one beside it.
+    #[test]
+    fn an_upgraded_install_keeps_its_data_after_its_containers_were_taken_down() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_upgraded_install_keeps_its_data_after_its_containers_were_taken_down",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        let (root, record) = project_choice_root(&path, "upgrade-after-quit");
+        earlier_installation(&root);
+        assert_eq!(project(&docker, &root).unwrap(), "openbot");
+        assert_eq!(saved_project(&root).as_deref(), Some("openbot"));
+        // The database, and the Bots' computers under the namespace they were made in.
+        assert_eq!(
+            compose_names(&docker, &root),
+            (Some("openbot".to_owned()), None)
+        );
+        let log = std::fs::read_to_string(&record).unwrap();
+        for line in log.lines() {
+            let command = line.split_once('\t').unwrap().1;
+            assert!(
+                command.starts_with("ps --all --quiet --no-trunc ")
+                    || command == "volume ls --format {{.Name}}"
+                    || command == "volume inspect openbot_postgres-data",
+                "an upgrade only looks at the engine: {command}"
+            );
+        }
+    }
+
+    /// The earlier installation's data is there, and a source checkout called `openbot` runs that
+    /// project right now. Whose data the volume holds cannot be told, so Install says so and
+    /// decides nothing, rather than starting empty beside it.
+    #[test]
+    fn an_upgraded_install_whose_project_another_folder_runs_says_so_and_records_nothing() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_upgraded_install_whose_project_another_folder_runs_says_so_and_records_nothing",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        let (root, _) = project_choice_root(&path, "upgrade-in-use");
+        earlier_installation(&root);
+        let checkout = path.bin.join("src").join("openbot");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::write(
+            root.join(".fixture-containers"),
+            compose_container_row("dev0", "postgres", "openbot", &checkout),
+        )
+        .unwrap();
+        let problem = project(&docker, &root).unwrap_err();
+        assert!(
+            problem
+                .said
+                .contains("another copy of OpenBot on this computer is using it"),
+            "{}",
+            problem.said
+        );
+        assert!(
+            problem.said.contains("Nothing was changed or deleted"),
+            "{}",
+            problem.said
+        );
+        assert_eq!(
+            saved_project(&root),
+            None,
+            "nothing is decided while it is in use"
+        );
+    }
+
+    /// A folder no app ever finished installing in does not take an `openbot` database it finds:
+    /// it may be a developer's.
+    #[test]
+    fn a_folder_no_app_installed_in_never_adopts_a_leftover_openbot_database() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_folder_no_app_installed_in_never_adopts_a_leftover_openbot_database",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        let (root, _) = project_choice_root(&path, "fresh-beside-leftover");
+        earlier_installation(&root);
+        std::fs::remove_file(root.join(crate::preparation::FILE)).unwrap();
+        assert_eq!(project(&docker, &root).unwrap(), DESKTOP_PROJECT);
     }
 
     #[test]
