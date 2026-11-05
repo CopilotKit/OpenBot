@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { LearningProposalDetail } from "@openbot/shared/learning";
+import type {
+  LearningOverview,
+  LearningProposalDetail,
+} from "@openbot/shared/learning";
 import type { MiddlewareHandler } from "hono";
 import type { AuditEventInput } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
@@ -8,11 +11,13 @@ import {
   runtimeKeyClient,
   withLearningAutoAssign,
 } from "../src/learning/auto-assign";
+import { createInspectorLearningReader } from "../src/learning/inspector";
 import { createLearningRoutes } from "../src/learning/routes";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import {
   type FakeIntelligence,
   fakeIntelligence,
+  INSPECTOR_WITH_DASHBOARD,
   RUNTIME_KEY,
   SKILL_MD,
 } from "./support/intelligence-learning";
@@ -218,10 +223,12 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
   function admin(
     version: Parameters<typeof fakeIntelligence>[0] = "current",
     role: "admin" | "user" = "admin",
+    inspector?: "no-dashboard" | "dashboard" | "dashboard-before-opt-in",
   ) {
     const intelligence = fakeIntelligence(version, {
       containers: ["openbot"],
       candidates: [PROPOSAL],
+      ...(inspector ? { inspector } : {}),
     });
     served.push(intelligence);
     const client = runtimeKeyClient(
@@ -246,7 +253,10 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
     const app = createLearningRoutes(
       {
         store,
-        inspect: (input) => client.getInspectorLearning(input),
+        inspect: createInspectorLearningReader({
+          apiUrl: intelligence.url,
+          apiKey: RUNTIME_KEY,
+        }),
         manage: client.experimental.learning,
       },
       requireUser,
@@ -398,7 +408,50 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
     });
   });
 
-  test("with no dashboard, the overview comes from the key's own routes and links nowhere", async () => {
+  test("with no dashboard, the overview has the Inspector panel's counts and links nowhere", async () => {
+    const { app, store } = admin("current", "admin", "no-dashboard");
+    await useDefault(store);
+    const response = await app.request("/overview");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      overview: {
+        configuration: "configured",
+        container: { id: "openbot", name: "OpenBot" },
+        pendingThreadCount: 1,
+        pendingCandidateCount: 1,
+        publishedSkillCount: 1,
+        insightCount: 1,
+        hasActiveRun: false,
+        latestRunStatus: "succeeded",
+        links: { learning: null, candidates: null, runs: null },
+      },
+    });
+  });
+
+  test("with a dashboard, the overview has the same counts and links into it, on any Intelligence", async () => {
+    for (const inspector of ["dashboard", "dashboard-before-opt-in"] as const) {
+      const { app, store, intelligence } = admin("current", "admin", inspector);
+      await useDefault(store);
+      const response = await app.request("/overview");
+      expect(response.status).toBe(200);
+      expect(
+        ((await response.json()) as { overview: LearningOverview }).overview,
+      ).toMatchObject({
+        pendingThreadCount: 1,
+        publishedSkillCount: 1,
+        insightCount: 1,
+        links: INSPECTOR_WITH_DASHBOARD.links,
+      });
+      // An older Intelligence refuses the opt-in it does not know; the plain call answers.
+      expect(
+        intelligence.requests.filter(
+          (request) => request.path === "/api/inspector/learning",
+        ).length,
+      ).toBe(inspector === "dashboard" ? 1 : 2);
+    }
+  });
+
+  test("an Intelligence with no Inspector panel gives the overview from the key's own routes", async () => {
     const { app, store } = admin();
     await useDefault(store);
     const response = await app.request("/overview");
