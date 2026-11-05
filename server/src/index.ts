@@ -961,11 +961,13 @@ if (wiredProvider) {
   assertActivatable(wiredProvider, otherProviderRows);
 }
 /*
- * Arcade's verifier is set by hand in Arcade's dashboard and cannot be read back, so an Arcade
- * deployment says once, at startup, which address it must be set to. See `arcadeVerifierNotice`.
+ * Arcade's client points its project's user verifier at this deployment before every consent it
+ * mints, from the public origin handed to `selectProviderWiring` above. A deployment that does not
+ * know its origin cannot, and says so once, at startup. See `arcadeVerifierNotice`.
  */
 if (wiredProvider === "arcade") {
-  console.warn(arcadeVerifierNotice(config.publicUrl));
+  const notice = arcadeVerifierNotice(config.publicUrl);
+  if (notice) console.warn(notice);
 }
 
 /**

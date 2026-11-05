@@ -11,10 +11,20 @@ import type { ComposioActions } from "./composio";
  * The entrypoint's provider decision, with the vendor constructors passed in so this file imports
  * no vendor package and a test can answer without booting the server or making a request.
  */
-type ClientFactory<Actions> = (apiKey: string) => {
+type ClientFactory<Actions, Options = undefined> = (
+  apiKey: string,
+  options: Options,
+) => {
   actions: Actions;
   broker: ConnectedAppBroker;
 };
+
+/**
+ * What Arcade's client is built with beside its key: the address its project's user verifier must
+ * name for a consent to come back here, or nothing when this deployment does not know its own
+ * origin. See {@link arcadeVerifierAddress}.
+ */
+export type ArcadeClientOptions = { verifierUrl?: string };
 
 export type ProviderWiring = {
   /** The one active provider, or `null` for a deployment that legitimately has no broker. */
@@ -58,10 +68,12 @@ export function selectProviderWiring(
     composioApiKey?: string;
     arcadeApiKey?: string;
     brokerProvider?: BrokerProvider;
+    /** This deployment's public origin, which Arcade's verifier is pointed at. See `config.ts`. */
+    publicUrl?: string;
   },
   create: {
     composio: ClientFactory<ComposioActions>;
-    arcade: ClientFactory<ArcadeActions>;
+    arcade: ClientFactory<ArcadeActions, ArcadeClientOptions>;
   },
 ): ProviderWiring {
   const decision = providerDecision(c);
@@ -86,8 +98,10 @@ export function selectProviderWiring(
   }
   const provider = decision.provider;
   if (provider === "arcade") {
+    const verifierUrl = arcadeVerifierAddress(c.publicUrl);
     const client = create.arcade(
       requiredKey(provider, c.arcadeApiKey, "ARCADE_API_KEY"),
+      verifierUrl ? { verifierUrl } : {},
     );
     return {
       provider,
@@ -97,6 +111,7 @@ export function selectProviderWiring(
   }
   const client = create.composio(
     requiredKey(provider, c.composioApiKey, "COMPOSIO_API_KEY"),
+    undefined,
   );
   return {
     provider,
@@ -193,25 +208,36 @@ export function storedProvider(
 export const ARCADE_VERIFY_PATH = "/api/plugins/arcade/verify";
 
 /**
- * The startup warning an Arcade deployment prints about its verifier, because nothing can check it.
- *
- * THE SETTING IS NOT READABLE. Which verifier an Arcade project uses is set by hand in Arcade's
- * dashboard, and neither the SDK this deployment pins (`@arcadeai/arcadejs`, whose admin surface is
- * auth providers, secrets and user connections) nor Arcade's documented API reads it back. So the
- * deployment cannot tell a correctly pointed project from one left at Arcade's built-in verifier,
- * and says so once at startup rather than staying silent about the one step it depends on.
- *
- * LEFT AT THE DEFAULT, THIS DEPLOYMENT'S VERIFY ROUTE IS NEVER CALLED. That route is the return leg
- * that binds a consent to the attempt that started it, records the connection and files its audit
- * entry; with Arcade's own verifier none of that runs, and nothing in this deployment's logs says so.
+ * This deployment's verify address, which its Arcade client points the project's user verifier at
+ * before each consent it mints (`pointVerifierHere` in `./arcade-adapter`). Undefined when the
+ * deployment does not know its own public origin.
  *
  * Takes the configured public origin (`OPENBOT_PUBLIC_URL`, else `BETTER_AUTH_URL`, already stripped
- * of trailing slashes by config) and names the exact address to paste, or says which variable is
- * missing when there is none.
+ * of trailing slashes by config); the strip is repeated here so a caller cannot double the slash.
  */
-export function arcadeVerifierNotice(publicUrl: string | undefined): string {
-  const address = publicUrl
-    ? `${publicUrl.replace(/\/+$/, "")}${ARCADE_VERIFY_PATH}`
-    : `<this deployment's public origin>${ARCADE_VERIFY_PATH} (OPENBOT_PUBLIC_URL and BETTER_AUTH_URL are both unset, so this deployment does not know its own origin; set one)`;
-  return `Arcade is the active broker, and this deployment cannot check which user verifier its Arcade project uses: Arcade has no API that reads that setting. Unless the project's verifier is set to custom, pointing at ${address}, this deployment's verify route is never called: no consent is bound to the attempt that started it, and none is recorded or audited when it returns. Set it in the Arcade dashboard; see docs/plugins/arcade.md, "The verifier URL is the one dashboard-only step".`;
+export function arcadeVerifierAddress(
+  publicUrl: string | undefined,
+): string | undefined {
+  const origin = publicUrl?.trim().replace(/\/+$/, "");
+  return origin ? `${origin}${ARCADE_VERIFY_PATH}` : undefined;
+}
+
+/**
+ * The startup warning an Arcade deployment prints when it cannot point its project's verifier at
+ * itself, and null when it can.
+ *
+ * ARCADE'S VERIFIER IS SET THROUGH ITS API. `GET` and `PUT /v1/admin/settings/session_verification`
+ * read and write the project's `verifier_url` with the same key every other call here uses, so a
+ * deployment that knows its own origin points the verifier at itself before every consent and has
+ * nothing to warn about. It used to say Arcade had no such API, and every deployment not at the
+ * address somebody had pasted into the dashboard sent people to a 404 after their consent.
+ *
+ * WITHOUT AN ORIGIN IT CANNOT, and the consent comes back to whatever the project names, which is
+ * this deployment only by coincidence. So it says which variable to set, once, at startup.
+ */
+export function arcadeVerifierNotice(
+  publicUrl: string | undefined,
+): string | null {
+  if (arcadeVerifierAddress(publicUrl)) return null;
+  return `Arcade is the active broker, but OPENBOT_PUBLIC_URL and BETTER_AUTH_URL are both unset, so this deployment does not know its own origin and cannot point its Arcade project's user verifier at <this deployment's public origin>${ARCADE_VERIFY_PATH}. A consent will come back to whatever address the project names, and anywhere else that is a page that does not exist. Set OPENBOT_PUBLIC_URL; see docs/plugins/arcade.md, "The verifier URL".`;
 }

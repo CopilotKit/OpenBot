@@ -1,34 +1,43 @@
 import { describe, expect, test } from "bun:test";
 import {
   ARCADE_VERIFY_PATH,
+  arcadeVerifierAddress,
   arcadeVerifierNotice,
 } from "../src/plugins/provider-wiring";
 
 /**
- * Arcade's verifier setting cannot be read back, so an Arcade deployment warns at startup with the
- * exact address its project's custom verifier must be set to.
+ * An Arcade deployment points its project's user verifier at itself before every consent, at the
+ * address built here. It warns at startup only when it does not know its own origin and so cannot.
  */
-describe("arcadeVerifierNotice", () => {
-  test("names the exact verifier address, what happens without it, and the docs", () => {
-    const notice = arcadeVerifierNotice("https://openbot.example.com");
-    expect(notice).toContain(
+describe("arcadeVerifierAddress", () => {
+  test("is the public origin followed by the verify route", () => {
+    expect(arcadeVerifierAddress("https://openbot.example.com")).toBe(
       "https://openbot.example.com/api/plugins/arcade/verify",
     );
-    expect(notice).toContain("cannot check");
-    expect(notice).toContain("verify route is never called");
-    expect(notice).toContain("docs/plugins/arcade.md");
   });
 
   test("a trailing slash on the origin does not double the separator", () => {
-    expect(arcadeVerifierNotice("https://openbot.example.com/")).toContain(
+    expect(arcadeVerifierAddress("https://openbot.example.com/")).toBe(
       "https://openbot.example.com/api/plugins/arcade/verify",
     );
+  });
+
+  test("there is none without an origin", () => {
+    expect(arcadeVerifierAddress(undefined)).toBeUndefined();
+    expect(arcadeVerifierAddress("  ")).toBeUndefined();
+  });
+});
+
+describe("arcadeVerifierNotice", () => {
+  test("says nothing when the deployment knows its origin and points the verifier itself", () => {
+    expect(arcadeVerifierNotice("https://openbot.example.com")).toBeNull();
   });
 
   test("with no public origin it says which variables are missing instead of inventing one", () => {
     const notice = arcadeVerifierNotice(undefined);
     expect(notice).toContain(ARCADE_VERIFY_PATH);
     expect(notice).toContain("OPENBOT_PUBLIC_URL");
+    expect(notice).toContain("docs/plugins/arcade.md");
     expect(notice).not.toContain("undefined");
   });
 });
