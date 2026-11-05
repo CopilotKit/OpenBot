@@ -580,9 +580,10 @@ async function hostStopped(
       throw new Error(
         "Stop this installation's routine worker before applying a host update; no process was stopped",
       );
-    throw new Error(
-      "Another installation's host worker is active; existing startup shares global worker detection, so the update was paused without stopping that worker",
-    );
+    const directories = cwd.split("\n").filter((line) => line.startsWith("n"));
+    if (directories.length !== 1 || !directories[0]?.startsWith("n/"))
+      throw new Error("Could not establish host worker ownership");
+    // start.sh scopes worker discovery to this checkout too; a known other installation is safe.
   }
 }
 
@@ -1097,7 +1098,14 @@ export async function applyLocalUpdate(
     else
       await run(
         compose(
-          ["run", "--rm", "--no-deps", "--no-build", "migrate"],
+          [
+            "up",
+            "--no-build",
+            "--no-deps",
+            "--exit-code-from",
+            "migrate",
+            "migrate",
+          ],
           root,
           initial.composeProject,
         ),

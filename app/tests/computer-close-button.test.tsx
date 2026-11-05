@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { ComputerView } from "@/components/computer/computer-view";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * The Bot's screen, opened full size, has a button that closes it.
@@ -69,7 +70,9 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-afterAll(() => {
+// The screen refetches every 10ms, so its last renders are still posted when the last test ends.
+afterAll(async () => {
+  await settleReactWork();
   globalThis.fetch = originalFetch;
   globalThis.WebSocket = originalWebSocket;
   if (originalIntersectionObserver) {

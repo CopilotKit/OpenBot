@@ -177,7 +177,7 @@ test("image apply preserves customer files and project identity and accepts only
   );
   const dump = f.calls.findIndex((c) => c.includes("pg_dump"));
   const migrate = f.calls.findIndex(
-    (c) => c.includes("run") && c.includes("migrate"),
+    (c) => c.includes("--exit-code-from") && c.includes("migrate"),
   );
   expect(stop).toBeGreaterThan(-1);
   expect(dump).toBeGreaterThan(stop);
@@ -195,7 +195,7 @@ test("image apply preserves customer files and project identity and accepts only
 test("migration failure keeps accepted metadata and durable recovery evidence", async () => {
   const f = fixture();
   const run: CommandRunner = async (command, options) => {
-    if (command.includes("run") && command.includes("migrate"))
+    if (command.includes("--exit-code-from") && command.includes("migrate"))
       throw new Error("guarded migration refused divergent history");
     return f.run(command, options);
   };
@@ -392,7 +392,7 @@ test.each([
         "migration",
         (c) =>
           c.includes("scripts/migrate.ts") ||
-          (c.includes("run") && c.includes("migrate")),
+          (c.includes("--exit-code-from") && c.includes("migrate")),
       ],
       ["install", (c) => c[0] === "bun" && c[1] === "install"],
       ["start", (c) => c.includes("scripts/start.sh") || c.includes("up")],
@@ -424,3 +424,22 @@ test.each([
       expect([step, deadlines[step]]).toEqual([step, undefined]);
   },
 );
+
+test("host planning allows established unrelated workers and refuses its own or unknown ownership", async () => {
+  const f = fixture("host");
+  const planning = (cwd: string) =>
+    planLocalUpdate({
+      ...f.options,
+      run: async (command, options) => {
+        if (command[0] === "pgrep") return "4242\n";
+        if (command[0] === "lsof" && command.includes("cwd")) return cwd;
+        return f.run(command, options);
+      },
+    });
+  expect((await planning("p4242\nn/another/openbot\n")).allowed).toBe(true);
+  expect((await planning(`p4242\nn${f.root}\n`)).reasons.join(" ")).toContain(
+    "this installation's routine worker",
+  );
+  expect((await planning("p4242\n")).allowed).toBe(false);
+  expect(f.calls.some((command) => command.includes(" stop "))).toBe(false);
+});

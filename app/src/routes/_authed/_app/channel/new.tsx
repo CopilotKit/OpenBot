@@ -31,7 +31,10 @@ import {
   agentQueryOptions,
 } from "@/lib/agents/queries";
 import { useStartChannel } from "@/lib/channels/start";
-import { useSkillCommands } from "@/lib/plugins/skill-commands";
+import {
+  skillInstructionsFor,
+  useSkillCommands,
+} from "@/lib/plugins/skill-commands";
 import { searchTextEntry } from "@/lib/search-text";
 import { newId } from "../../../../lib/new-id";
 
@@ -283,7 +286,13 @@ function RouteComponent() {
           try {
             // Recorded, then started: a coworker picked here is as much a choice as an `@` on the
             // home screen, and the trail has to say so for both.
-            await startChosen(recipient.id, draft.text);
+            // With its `/` skills, which the conversation puts in front of it as it does for every
+            // later message; handing over only the text sent the chip and dropped the skill.
+            await startChosen(
+              recipient.id,
+              draft.text,
+              skillInstructionsFor(draft.commandIds, skillCommands),
+            );
           } catch (caught) {
             // Preserve the unsent draft when channel creation fails.
             setSent(null);

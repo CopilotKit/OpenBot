@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 
 /**
  * The optional full browser, driven as the container drives it.
@@ -17,21 +17,6 @@ import { join } from "node:path";
 const asked = process.env.OPENBOT_HEADED_BROWSER === "1";
 const TOKEN = "headed-browser-test-token";
 const BOT = "headed-browser";
-
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("The port probe did not return a TCP address."));
-        return;
-      }
-      probe.close(() => resolve(address.port));
-    });
-  });
-}
 
 let base = "";
 let root = "";
@@ -52,7 +37,7 @@ function api(path: string, init?: RequestInit) {
 beforeAll(async () => {
   if (!asked) return;
   root = await mkdtemp(join(tmpdir(), "agent-computer-headed-"));
-  const port = await freePort();
+  const port = await reservePort();
   base = `http://127.0.0.1:${port}`;
   process.env.COMPUTER_TOKEN = TOKEN;
   // Linux is where hosted computers run and headed is their default, so it is left to the default

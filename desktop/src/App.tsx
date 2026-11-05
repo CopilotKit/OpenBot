@@ -549,6 +549,15 @@ function Setup() {
     />
   );
 
+  const runtimeRecovery = (
+    <RuntimeUpdates
+      key={root}
+      root={root}
+      onApply={applyRuntimeUpdate}
+      recoveryOnly
+    />
+  );
+
   /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
   async function startFresh(volumes: string[], containers: string[]) {
     setBusy(true);
@@ -717,6 +726,7 @@ function Setup() {
           }}
           failure={displayedFailure && <Failure problem={displayedFailure} />}
         />
+        {runtimeRecovery}
       </main>
     );
   }
@@ -771,6 +781,7 @@ function Setup() {
             </div>
           )}
         </div>
+        {runtimeRecovery}
       </main>
     );
   }
@@ -847,6 +858,7 @@ function Setup() {
             setRecoveryFailure(null);
           }}
         />
+        {runtimeRecovery}
       </main>
     );
   }

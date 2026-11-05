@@ -60,7 +60,7 @@ test("request boundary replaces client claims, preserves application fields and 
   );
   expect(body.messages).toEqual(input.messages);
 });
-test("run metadata is isolated across actors and deployments without authorization receipts", async () => {
+test("a run is counted only with the context its deployment stated for its person", async () => {
   const f = await fixture();
   const enriched = await productHeadlessBoundary(f.telemetry)(input, {
     ownerUserId: "actor-one",
@@ -71,6 +71,7 @@ test("run metadata is isolated across actors and deployments without authorizati
     telemetry: { trigger: "human" },
   });
   const next = new ProductFixtureAgent([...events]);
+  // Another person's run carrying it is not counted, and neither is another deployment's.
   await lastValueFrom(
     f.telemetry.middleware("actor-two")(enriched, next).pipe(toArray()),
   );
@@ -78,19 +79,21 @@ test("run metadata is isolated across actors and deployments without authorizati
   await lastValueFrom(
     other.telemetry.middleware("actor-one")(enriched, next).pipe(toArray()),
   );
+  // A run with no context of OpenBot's, as the runtime makes to name a conversation, is not either.
   await lastValueFrom(
     f.telemetry
-      .middleware("actor-one")({ ...enriched, threadId: "other-thread" }, next)
+      .middleware("actor-one")({ ...input, forwardedProps: {} }, next)
       .pipe(toArray()),
+  );
+  // Its own person's run is.
+  await lastValueFrom(
+    f.telemetry.middleware("actor-one")(enriched, next).pipe(toArray()),
   );
   await f.telemetry.flush();
   await other.telemetry.flush();
   const accepted = f.sent.filter((e) => e.event.endsWith("run_accepted"));
-  expect(accepted[0]?.properties?.user_id).not.toBe(
-    accepted[1]?.properties?.user_id,
-  );
-  expect(accepted[0]?.properties?.trigger).toBe("unknown");
-  expect(other.sent[0]?.properties?.deployment_id).toBe("another-deployment");
+  expect(accepted.map((e) => e.properties?.trigger)).toEqual(["human"]);
+  expect(other.sent).toEqual([]);
 });
 test("custom remote clone retains product middleware and full forwarded context", async () => {
   const f = await fixture();

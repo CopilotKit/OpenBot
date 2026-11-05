@@ -1597,7 +1597,7 @@ test.each(["model", "intelligence"])(
       ),
     ).toBe(false);
     expect(installationCalls()).toHaveLength(0);
-    expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();
+    expect(view.queryByRole("button", { name: "Install" })).toBeNull();
   },
 );
 
@@ -2032,6 +2032,80 @@ function emptyConfiguration() {
   };
 }
 
+test("cold reopen exposes explicit update recovery without a prepared installation", async () => {
+  const root = "/tmp/interrupted-unprepared-runtime";
+  setupRootConfiguration(root, async () => emptyConfiguration());
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "runtime_update_status")
+      return {
+        fromVersion: "v0.2.0",
+        toVersion: "v0.3.0",
+        databaseMayHaveChanged: true,
+      };
+    if (command === "recover_runtime_update")
+      return { version: "v0.2.0", accepted: false, databaseRestored: true };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  const restore = await view.findByRole("button", {
+    name: "Restore previous release",
+  });
+  expect(view.getByRole("button", { name: "Install" })).toBeTruthy();
+  expect(
+    view.queryByRole("button", { name: "Check runtime update" }),
+  ).toBeNull();
+  expect(installationCalls()).toHaveLength(0);
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+  expect(
+    invokeCalls.some((call) => call.command === "recover_runtime_update"),
+  ).toBe(false);
+  await userEvent.click(restore);
+  expect(
+    await view.findByText(
+      /v0.2.0 is back in place, with its database restored/,
+    ),
+  ).toBeTruthy();
+  expect(
+    invokeCalls.filter((call) => call.command === "recover_runtime_update"),
+  ).toEqual([{ command: "recover_runtime_update", args: { root } }]);
+});
+
+test("fresh unprepared installation keeps update recovery hidden", async () => {
+  setupRootConfiguration("/tmp/fresh-unprepared-runtime", async () =>
+    emptyConfiguration(),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "runtime_update_status" ? null : previous(command, args);
+  const view = await renderApp();
+  await view.findByRole("button", { name: "Install" });
+  expect(view.queryByText("Runtime updates")).toBeNull();
+  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  expect(view.queryByText("Runtime updates")).toBeNull();
+});
+
+test("unprepared recovery status read failures stay visible", async () => {
+  setupRootConfiguration("/tmp/unreadable-runtime-journal", async () =>
+    emptyConfiguration(),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "runtime_update_status")
+      throw { said: "The update journal cannot be read." };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  expect(
+    await view.findByText("The update journal cannot be read."),
+  ).toBeTruthy();
+  expect(
+    view.queryByRole("button", { name: "Restore previous release" }),
+  ).toBeNull();
+});
+
 test("leftover database is offered as a fresh start that carries on into Start", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
@@ -2180,6 +2254,15 @@ function setupRootConfiguration(
 ) {
   invokeHandler = async (command, args) => {
     if (command === "prepare_installation") return null;
+    if (command === "runtime_update_status") return null;
+    if (command === "detect_engine") {
+      return {
+        engine: "docker",
+        responding: true,
+        engine_socket: null,
+        detail: "Docker is answering.",
+      };
+    }
     if (command === "default_root") return rootA;
     if (command === "selected_root") return null;
     if (command === "already_configured") {

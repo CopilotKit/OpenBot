@@ -902,6 +902,27 @@ a:hover {
   font-size: 12px;
 }
 
+/* A newer OpenBot exists. Shares the blocker's box because it is the same shape of interruption,
+   without its red heading: this is good news, not something in the way. */
+.update-offer {
+  border: 1px solid var(--hair);
+  border-radius: var(--r-row);
+  background: var(--raised);
+  padding: 0.9rem 1rem;
+  margin: 1rem auto 0;
+  max-width: 34rem;
+}
+
+.update-offer p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+.update-offer .row {
+  margin-top: 0.9rem;
+}
+
 .setup-help {
   display: inline-block;
   margin-top: 10px;

@@ -264,9 +264,15 @@ mod port_tests {
     use super::*;
     use std::collections::HashSet;
     use std::net::{TcpListener, TcpStream};
+    use std::sync::Mutex;
+
+    // These tests probe the same default ports. Keep each complete scenario exclusive,
+    // including the gap between releasing a probe and binding its simulated conflict.
+    static PORT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn occupied_ports_are_replaced_with_distinct_bindable_loopback_ports() {
+        let _ports = PORT_TEST_LOCK.lock().unwrap();
         let foreign = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = foreign.local_addr().unwrap().port();
         let preferred = Ports {
@@ -301,6 +307,7 @@ mod port_tests {
 
     #[test]
     fn occupied_ipv6_port_is_not_treated_as_available_ipv4_port() {
+        let _ports = PORT_TEST_LOCK.lock().unwrap();
         let foreign = TcpListener::bind("[::1]:0").unwrap();
         let port = foreign.local_addr().unwrap().port();
         let preferred = Ports {
@@ -313,6 +320,7 @@ mod port_tests {
 
     #[test]
     fn saved_ports_survive_reopen_and_only_a_new_conflict_moves() {
+        let _ports = PORT_TEST_LOCK.lock().unwrap();
         let root = crate::test_support::temp_root("saved-local-ports");
         std::fs::create_dir_all(&root).unwrap();
         let chosen = Ports::default()
@@ -352,7 +360,8 @@ mod port_tests {
     }
 
     #[test]
-    fn own_published_container_ports_are_reused_but_a_foreign_listener_is_not() {
+    fn own_published_container_ports_are_reused_but_do_not_authorize_host_port_reuse() {
+        let _ports = PORT_TEST_LOCK.lock().unwrap();
         let owned = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = owned.local_addr().unwrap().port();
         let preferred = Ports {
@@ -413,6 +422,7 @@ mod port_tests {
     /// for one and none is written.
     #[test]
     fn the_browser_gets_a_port_of_its_own_only_where_it_runs() {
+        let _ports = PORT_TEST_LOCK.lock().unwrap();
         let foreign = TcpListener::bind("127.0.0.1:0").unwrap();
         let taken = foreign.local_addr().unwrap().port();
         let preferred = Ports {

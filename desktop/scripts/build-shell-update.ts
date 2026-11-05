@@ -32,6 +32,16 @@ const result = Bun.spawnSync(
     "--config",
     "src-tauri/tauri.updater.conf.json",
     ...process.argv.slice(2),
+    // The bundler reads this before Rust's runtime plugin setup can supply it.
+    "--config",
+    JSON.stringify({
+      plugins: {
+        updater: {
+          pubkey: process.env.OPENBOT_SHELL_UPDATE_PUBLIC_KEY?.trim(),
+          endpoints: [endpoint.href],
+        },
+      },
+    }),
   ],
   {
     cwd: fileURLToPath(new URL("..", import.meta.url)),

@@ -5,12 +5,16 @@ import { isShuttingDownPage, ShuttingDownWindow } from "./ShuttingDown";
 import { isStatusPage, StatusWindow } from "./StatusWindow";
 import "@fontsource-variable/inter";
 import "./styles.css";
+import { UpdateOffer } from "./UpdateOffer";
 
 const root = document.getElementById("root");
 if (!root)
   throw new Error("index.html has no #root for the window to render into.");
 
 // Sent here by Quit: only the Shutting down screen, so none of setup's launch checks run again.
+// The update offer sits beside the setup flow rather than inside it. `App` returns a different
+// screen from a dozen places, and a banner that has to be added to each of them is a banner that
+// will be missing from the next one somebody writes.
 createRoot(root).render(
   <StrictMode>
     {/* The ground every screen sits on; see `.backdrop` in styles.css. */}
@@ -20,7 +24,10 @@ createRoot(root).render(
     ) : isStatusPage(window.location.hash) ? (
       <StatusWindow />
     ) : (
-      <App />
+      <>
+        <UpdateOffer />
+        <App />
+      </>
     )}
   </StrictMode>,
 );

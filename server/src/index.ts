@@ -234,7 +234,9 @@ import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import {
   ensureAlwaysOnApp,
+  personalDefaultAppsMemory,
   personalDefaultsDeps,
+  startPersonalDefaultApps,
   withPersonalDefaults,
 } from "./plugins/personal-defaults";
 import {
@@ -302,7 +304,10 @@ import { createTaskStore } from "./tasks/store";
 import { createTaskTurn } from "./tasks/turn";
 import { createTeamBots } from "./team-bots/team-bots";
 import { createProductTelemetry } from "./telemetry/product";
-import { productHeadlessBoundary } from "./telemetry/product-boundaries";
+import {
+  deliveryLineage,
+  productHeadlessBoundary,
+} from "./telemetry/product-boundaries";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -1150,6 +1155,16 @@ const routineStore = createRoutineStore(database);
 useRoutineTools(routineStore);
 // Routines is on from the start in every edition, for every Bot. See personal-defaults.ts.
 await ensureAlwaysOnApp(pluginStore, personalDefaultsDeps(database));
+/*
+ * The personal edition turns Parallel's keyless web search on once, on its first start. Not awaited:
+ * adding it asks search.parallel.ai for its tools, and an offline start must still start. It keeps
+ * retrying until the tools arrive. Does nothing in the team edition.
+ */
+startPersonalDefaultApps(
+  pluginStore,
+  personalDefaultsDeps(database),
+  personalDefaultAppsMemory(database),
+);
 const responsibilityStore = createResponsibilityStore(database, {
   resolveTarget: async (ownerUserId, agentId, channelId) => {
     const actor = await actorFor(ownerUserId);
@@ -1986,6 +2001,8 @@ const actorAgentResolver = createActorAgentResolver({
         botId,
         threadId: input.threadId,
         runId: input.runId,
+        // The subagent carries on the asking run's task, on the asking run's surface.
+        ...productTelemetry.lineageOf(actorId, input.forwardedProps),
         initiator: initiator ?? PERSON_INITIATOR,
         ...(depth ? { depth } : {}),
       }),
@@ -2298,6 +2315,7 @@ const deliveryRouter = createDeliveryRouter({
           content: input.text,
         },
         initiator: PERSON_INITIATOR,
+        telemetry: deliveryLineage(input.source, input.runId),
         signal: input.signal,
       });
       if (result.replyText)

@@ -4,6 +4,23 @@ import type { CommandOption } from "@/components/channels/composer";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 
 /**
+ * The instructions behind a draft's `/` chips, in the order they were typed.
+ *
+ * Resolved against the same list the menu was built from, so a chip left over from a skill that has
+ * since been revoked resolves to nothing rather than to a stale instruction. Shared by the two places
+ * a message is first sent from, a conversation and `/channel/new`, so a skill means the same thing
+ * on the first message as on every one after it.
+ */
+export function skillInstructionsFor(
+  commandIds: readonly string[],
+  commands: readonly CommandOption[],
+): string[] {
+  return commandIds
+    .map((id) => commands.find((command) => command.id === id)?.prompt)
+    .filter((instruction): instruction is string => Boolean(instruction));
+}
+
+/**
  * Granted skills as `/` menu commands. Each one inserts a chip, not composer text.
  */
 export function useSkillCommands(agentId: string): CommandOption[] {

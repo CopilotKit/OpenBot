@@ -1208,7 +1208,7 @@ mod tests {
     fn the_install_runs_again_after_each_wait_and_a_failure_does_not_stop_it() {
         let calls = AtomicUsize::new(0);
         let job = || {
-            if calls.fetch_add(1, Ordering::SeqCst) % 2 == 0 {
+            if calls.fetch_add(1, Ordering::SeqCst).is_multiple_of(2) {
                 Err(Problem::plain("nope"))
             } else {
                 Ok(vec![])
