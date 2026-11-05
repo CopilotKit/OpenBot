@@ -12,6 +12,7 @@ import {
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import {
+  APPROVAL_GUIDANCE,
   COMPONENT_GUIDANCE,
   type ComputerGuidance,
   ORCHESTRATION_GUIDANCE,
@@ -587,6 +588,8 @@ export function builtInAgentConfiguration(
       COMPONENT_GUIDANCE,
       // When to give work to subagents. Worded for a run that holds the tool, which most do.
       ORCHESTRATION_GUIDANCE,
+      // OpenBot asks the person before consequential actions, so the Bot does not ask as well.
+      APPROVAL_GUIDANCE,
       // How to read the untrusted-content envelope every outside result arrives in.
       UNTRUSTED_GUIDANCE,
       ...(grantedToolGuidance(tools, connectedVendors, shown)

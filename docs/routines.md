@@ -16,7 +16,8 @@ one, all by being asked.
 every Bot all of its tools, including the write tools `create_routine`, `update_routine` and
 `delete_routine`. A Bot made later gets them the first time it runs. Routines can't be turned off, and
 its tools can't be taken from a Bot: the server answers `403`. A Bot still asks before each write
-while Ask before acting is on. See `server/src/plugins/personal-defaults.ts`.
+while Ask before making changes is on, and before `delete_routine` always (see
+[Approvals](approvals.md)). See `server/src/plugins/personal-defaults.ts`.
 
 The routine belongs to whoever asked for it and runs as them. See
 [Who a routine runs as](#who-a-routine-runs-as).
