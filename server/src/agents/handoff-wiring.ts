@@ -1,8 +1,3 @@
-import {
-  productHandoffAnalyticsContext,
-  productHandoffInput,
-} from "../telemetry/product-boundaries";
-import type { ProductTelemetry } from "../telemetry/product";
 import { randomUUID } from "node:crypto";
 import { IntelligenceAgentRunner } from "@copilotkit/runtime/v2";
 import { workOwner } from "@openbot/shared/work-owner";
@@ -15,6 +10,11 @@ import type { DeploymentConfig } from "../config";
 import type { mountCopilotRuntime } from "../copilot";
 import type { Database } from "../db/client";
 import { intelligenceChannelMappings } from "../db/schema";
+import type { ProductTelemetry } from "../telemetry/product";
+import {
+  productHandoffAnalyticsContext,
+  productHandoffInput,
+} from "../telemetry/product-boundaries";
 import { repeatAfterEach } from "../work/loop";
 import {
   createWorkQueue,
@@ -116,9 +116,9 @@ export async function startHandoffDelivery(deps: {
        *
        * An Intelligence thread has exactly one agent, so a second Bot cannot answer inside the first
        * Bot's conversation however it asks. Its turn runs here instead, unmapped to any channel, and
-       * what it said comes back to the conversation that asked through the relay — in the asking
-       * Bot's voice, which is the only voice that thread admits. Minted with the deployment's own
-       * identity, like every thread this deployment starts.
+       * what it said comes back to the conversation that asked through the relay, written there
+       * word for word as its own message. Minted with the deployment's own identity, like every
+       * thread this deployment starts.
        */
       mintThreadId: () => threadIdentity.mint(),
       /*
@@ -132,9 +132,15 @@ export async function startHandoffDelivery(deps: {
           .from(intelligenceChannelMappings)
           .where(eq(intelligenceChannelMappings.threadId, input.threadId))
           .limit(1);
-        // A Bot's group thread maps to no channel; its answer goes to the shared transcript.
+        // A Bot's group thread maps to no channel; its answer goes to the shared transcript, marked
+        // as the answering Bot's rather than the thread's own.
         if (!mapped) {
-          await groupConversations.announceHandoff(input);
+          await groupConversations.announceHandoff({
+            threadId: input.threadId,
+            actorId: input.actorId,
+            agentId: input.answeredBy ?? input.agentId,
+            text: input.text,
+          });
           return;
         }
         const actor = await actorFor(input.actorId).catch(() => null);

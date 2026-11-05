@@ -47,6 +47,14 @@ export type HandoffWork = {
    * the asking Bot, which is why it can speak in it at all.
    */
   answerIn?: string;
+  /**
+   * What the Bot that was asked said, word for word, on a hop carrying it home.
+   *
+   * Present, the hop writes these words into `answerIn` as that Bot's own message (`fromBotId` is
+   * the Bot that said them) and no model runs. Absent on a relay queued before this existed, which
+   * is delivered the old way, by running the asking Bot on `task`.
+   */
+  answer?: string;
 };
 
 export type HandoffDelivery = {
@@ -171,16 +179,23 @@ export function createHandoffRunner(options: {
    * itself worth a notice, and the check above skips any hop that carries one.
    */
   /**
-   * Put the answer in front of the person, the same way a failure is: by running the Bot that
-   * asked, in the conversation they are watching.
+   * Put the answer in front of the person, in the conversation they are watching, as the answering
+   * Bot's own message.
    *
-   * THE ADDRESSED BOT NEVER SPEAKS THERE — the platform gives a thread exactly one agent — so its
-   * words come home in the asking Bot's voice, attributed. The same `answerIn` marker that stops a
-   * notice recursing stops a relay relaying: a hop that carries one enqueues nothing when it lands.
+   * WORD FOR WORD, UNDER ITS OWN NAME. The platform gives a thread exactly one agent, so the
+   * answering Bot cannot run in the asking Bot's thread; its words are written there by the
+   * deployment instead, on a message whose id names the Bot that said them (see
+   * `answerMessageId`). This used to run the asking Bot to say the answer over in its own voice: a
+   * second model call, the answer paraphrased, and nothing in the conversation from the Bot the
+   * person was told would answer, which is the opposite of what the Bot's settings promise.
    *
-   * The answer is clipped rather than trusted to be a paragraph. It rides inside the prompt of the
-   * relaying run, and a Bot that came back with a report the length of a book would otherwise spend
-   * the relay's whole context window repeating it.
+   * `task` still carries the old instruction, so a replica running the previous release that claims
+   * this mid-upgrade delivers it the old way rather than reading the question as its own task.
+   *
+   * The same `answerIn` marker that stops a notice recursing stops a relay relaying: a hop that
+   * carries one enqueues nothing when it lands. The answer is clipped rather than trusted to be a
+   * paragraph, because a Bot that came back with a book would otherwise put a book in the person's
+   * conversation, and in every prompt that reads it afterwards.
    */
   const relay = (work: HandoffWork, key: string, answer: string) =>
     queue.offer({
@@ -197,7 +212,10 @@ export function createHandoffRunner(options: {
         runId: work.runId,
         depth: work.depth,
         ...(work.initiator ? { initiator: work.initiator } : {}),
+        ...(work.toName ? { fromName: work.toName } : {}),
+        ...(work.fromName ? { toName: work.fromName } : {}),
         answerIn: work.threadId,
+        answer: clip(answer),
         task: `You asked ${work.toName ?? work.toBotId} to help with this: ${work.task}\n\nIt answered:\n\n${clip(answer)}\n\nGive the person the outcome. Keep what matters, drop the pleasantries, and say it came from ${work.toName ?? work.toBotId}.`,
       } as unknown as Record<string, unknown>,
     });
@@ -601,8 +619,16 @@ function attribute(work: HandoffWork): string {
   if (work.answerIn) {
     return `${work.task}\n\nSay this in your own words to the person in this conversation, in a sentence or two. Do not hand it to another Bot.`;
   }
+  /*
+   * BY NAME, AND IT IS TOLD WHICH ONE IT IS. A Bot's own prompt does not have to say its name, and
+   * the person's words it reads alongside this were said to the asking Bot: "ask the Knowledge Bot,
+   * do not answer it yourself", read by a Bot that was never told it is Knowledge, sent it looking
+   * for a Knowledge Bot, and it answered that there was none.
+   */
+  const asker = work.fromName ?? work.fromBotId;
+  const self = work.toName ?? work.toBotId;
   const lines = [
-    `${work.fromBotId} has asked you to help with this, on behalf of the person in this conversation.`,
+    `You are ${self}. ${asker}, another Bot, has asked you to help with this, on behalf of the person it is talking to.`,
     "",
     `Task: ${work.task}`,
   ];
@@ -611,7 +637,7 @@ function attribute(work: HandoffWork): string {
     lines.push(`What a good answer looks like: ${work.expecting}`);
   lines.push(
     "",
-    "Answer in this conversation as yourself. The person can see it, so write it for them rather than for the Bot that asked.",
+    `Answer it yourself, as ${self}, with what you can reach. Your answer is shown to the person in their conversation with ${asker}, under your own name, so write it for them rather than for the Bot that asked.`,
   );
   return lines.join("\n");
 }

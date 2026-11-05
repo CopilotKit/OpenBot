@@ -30,6 +30,20 @@ const PRIOR: Message[] = [
 
 const FINISHED = [{ type: "RUN_FINISHED" }] as unknown as BaseEvent[];
 
+/**
+ * The one message a forward hop hands the addressed Bot, as text: the asking conversation set out
+ * above the ask, attributed. Parts that are not text are left out of the reading.
+ */
+function theAsk(messages: readonly Message[]): string {
+  expect(messages).toHaveLength(1);
+  const content = (messages[0] as { content?: unknown }).content;
+  if (typeof content === "string") return content;
+  return (content as { type?: string; text?: string }[])
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n\n");
+}
+
 /** Enough of an agent for the delivery to hand a conversation to. */
 function stubAgent(): AbstractAgent {
   const agent = {
@@ -119,12 +133,18 @@ describe("turning a hop into a turn", () => {
 
     const messages = requests[0]?.input.messages as Message[];
     // The conversation, then the ask. A Bot handed only the task answers a question whose other half
-    // was settled three messages ago.
-    expect(messages.map((m) => m.id).slice(0, 2)).toEqual(["m1", "m2"]);
-    expect(messages.at(-1)).toMatchObject({
-      role: "user",
-      content: "assistant has asked you to help",
-    });
+    // was settled three messages ago. Both arrive in one message, the conversation attributed to
+    // whoever said it: none of it was said to this Bot, and handed over as its own turns, the
+    // person's words to the asking Bot read as instructions to it.
+    const ask = theAsk(messages);
+    expect(messages[0]).toMatchObject({ role: "user" });
+    const person = ask.indexOf("The person: we had an outage yesterday");
+    const asker = ask.indexOf("assistant: I will find out when");
+    const request = ask.indexOf("assistant has asked you to help");
+    expect(person).toBeGreaterThan(-1);
+    expect(asker).toBeGreaterThan(person);
+    expect(request).toBeGreaterThan(asker);
+    expect(ask).toEndWith("assistant has asked you to help");
   });
 
   test("the run carries the deployment's signed statement of what it is", async () => {
@@ -269,8 +289,9 @@ describe("which conversation the turn runs in", () => {
     });
 
     // Its own conversation is new and empty; reading that would tell it nothing.
-    const messages = requests[0]?.input.messages as Array<{ id: string }>;
-    expect(messages.map((m) => m.id).slice(0, 2)).toEqual(["m1", "m2"]);
+    const ask = theAsk(requests[0]?.input.messages as Message[]);
+    expect(ask).toContain("we had an outage yesterday");
+    expect(ask).toContain("I will find out when");
   });
 });
 
@@ -314,10 +335,13 @@ describe("the conversation that crosses a hop", () => {
 
     const messages = requests[0]?.input.messages as Message[];
     expect(messages.map((message) => message.id)).toEqual([
-      "m1",
-      "m4",
-      `handoff-platform-run`,
+      "handoff-platform-run",
     ]);
+    const ask = theAsk(messages);
+    expect(ask).toContain("The person: ask the researcher");
+    expect(ask).toContain("assistant: I have asked them.");
+    expect(ask).not.toContain("Handed to Researcher");
+    expect(ask).toEndWith("the ask");
   });
 });
 
@@ -552,11 +576,12 @@ describe("what the addressed Bot is actually given", () => {
 
     const given = (agent as unknown as { messages: Message[] }).messages;
     expect(given.map((message) => message.id)).toEqual([
-      "m1",
-      "m2",
       "handoff-platform-run",
     ]);
-    expect(given.at(-1)).toMatchObject({ role: "user", content: "the ask" });
+    expect(given[0]).toMatchObject({ role: "user" });
+    const ask = theAsk(given);
+    expect(ask).toContain("we had an outage yesterday");
+    expect(ask).toEndWith("the ask");
     // And it runs in its own conversation, which the agent also carries.
     expect((agent as unknown as { threadId: string }).threadId).toBe(
       "scratch-thread",
@@ -833,10 +858,25 @@ describe("a conversation that is not all plain strings", () => {
 
     const messages = requests[0]?.input.messages as Message[];
     expect(messages.map((message) => message.id)).toEqual([
-      "m1",
-      "m2",
       "handoff-platform-run",
     ]);
+    // The text is quoted and the picture travels with it, after the line it belongs to.
+    const parts = (messages[0] as { content: unknown[] }).content;
+    expect(parts).toContainEqual({
+      type: "text",
+      text: "The person: here is the invoice",
+    });
+    const line = parts.findIndex(
+      (part) =>
+        (part as { text?: string }).text === "The person: here is the invoice",
+    );
+    expect(parts[line + 1]).toEqual({
+      type: "image",
+      url: "https://example.test/a.png",
+    });
+    const ask = theAsk(messages);
+    expect(ask).toContain("assistant: I will read it");
+    expect(ask).toEndWith("the ask");
   });
 
   /*
@@ -866,9 +906,11 @@ describe("a conversation that is not all plain strings", () => {
 
     const messages = requests[0]?.input.messages as Message[];
     expect(messages.map((message) => message.id)).toEqual([
-      "m3",
       "handoff-platform-run",
     ]);
+    const ask = theAsk(messages);
+    expect(ask).toContain("The person: what does it say?");
+    expect(typeof (messages[0] as { content: unknown }).content).toBe("string");
   });
 });
 

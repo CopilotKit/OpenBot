@@ -62,6 +62,12 @@ export type OpenAICompatibleEndpoint = {
   /** What `OPENAI_BASE_URL` is set to, `/v1` included, as `.env.example` documents it. */
   baseUrl: string;
   requests: EndpointRequest[];
+  /**
+   * The conversation each request sent, in the same order as `requests`: the Responses API's `input`
+   * or Chat Completions' `messages`, exactly as it arrived. What a Bot was actually shown is a
+   * question only the request on the wire answers.
+   */
+  conversations: unknown[];
   stop(): Promise<void>;
 };
 
@@ -88,6 +94,7 @@ export function startOpenAICompatibleEndpoint(
 ): OpenAICompatibleEndpoint {
   const responsesApi = options.responsesApi ?? true;
   const requests: EndpointRequest[] = [];
+  const conversations: unknown[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -106,6 +113,8 @@ export function startOpenAICompatibleEndpoint(
         model?: unknown;
         tools?: unknown;
         reasoning_effort?: unknown;
+        input?: unknown;
+        messages?: unknown;
       };
       const model = typeof body.model === "string" ? body.model : "";
       // Chat Completions nests a tool's name under `function`; the Responses API does not.
@@ -114,6 +123,7 @@ export function startOpenAICompatibleEndpoint(
           String(tool.function?.name ?? tool.name),
       );
       requests.push({ api, model, tools });
+      conversations.push(api === "responses" ? body.input : body.messages);
       if (api === "responses") return stream("responses-stream.sse");
       const name = model.split("/").at(-1) ?? "";
       const notServed = NOT_ON_CHAT[name];
@@ -141,6 +151,7 @@ export function startOpenAICompatibleEndpoint(
   return {
     baseUrl: `http://127.0.0.1:${server.port}/v1`,
     requests,
+    conversations,
     stop: () => server.stop(true),
   };
 }
