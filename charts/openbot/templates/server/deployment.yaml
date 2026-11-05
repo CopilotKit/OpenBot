@@ -85,6 +85,14 @@ spec:
       tolerations:
 {{ toYaml . | indent 8 }}
       {{- end }}
+      {{- /*
+        Not started until the database accepts this pod's connection and holds every migration its
+        image carries; see `openbot.waitForDatabase`. For as long as the migrations Job may run
+        (`migrations.activeDeadlineSeconds`), so a first install never gives up on a Job that is still
+        working: that Job waits for the bundled database and migrates inside the same ceiling.
+      */}}
+      initContainers:
+{{ include "openbot.waitForDatabase" (dict "root" . "seconds" (default 900 .Values.migrations.activeDeadlineSeconds) "securityContext" .Values.securityContext) | indent 8 }}
       containers:
         - name: server
           image: {{ include "openbot.image" . }}

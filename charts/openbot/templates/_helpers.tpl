@@ -281,6 +281,68 @@ migrated one database while the API talked to another is a failure that looks li
 {{- end -}}
 
 {{/*
+The init container that holds a workload until OpenBot's database can serve it.
+
+Every workload that reads the database carries it: the API server and each scheduled Job. It runs
+`files/wait-for-database.mjs`, which lets go only when the database accepts the workload's own
+connection AND holds every migration in the workload's own image. A first install with the bundled
+database starts the server beside a PostgreSQL that is not up yet and a migrations Job that has not
+run yet; without this the server connected anyway, logged `Failed to connect` and a failed
+`insert into "users"` on every first install, and could serve against a schema the migrations had
+not reached.
+
+IT NEVER WAITS FOR SOMETHING BEHIND IT, which is what keeps `helm install --wait` from deadlocking.
+On a first install with the bundled database the migrations Job is an ordinary resource created in
+the same pass as the server, so it runs while the server waits. In every other case it is a
+pre-install or pre-upgrade hook that has finished before the server's new pods exist, and the wait
+passes at once. A rollout whose migrations have not run (hooks skipped, or `migrations.enabled`
+false) holds its new pods here, saying which migration is missing, while the old ones keep serving.
+Old pods that restart after an upgrade migrated pass, because the database holds every migration
+their image carries and more.
+
+The OpenBot image itself, so there is nothing new to pull, from /app/server, the directory the
+migrations Job migrates from. The address and credentials are `openbot.databaseUrlEnv`, the same
+definition the container it holds reads.
+
+BOUNDED, and loud when the bound runs out: it says what it last saw and exits 1, so a Deployment's
+pod restarts it and a Job records the failure.
+
+Called with (dict "root" . "seconds" <how long> "securityContext" <the main container's, or nil>).
+*/}}
+{{- define "openbot.waitForDatabase" -}}
+{{- $root := .root -}}
+- name: wait-for-database
+  image: {{ include "openbot.image" $root }}
+  imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+  workingDir: /app/server
+  command:
+    - /usr/local/bin/bun
+    - -e
+    - |
+{{ $root.Files.Get "files/wait-for-database.mjs" | indent 6 }}
+  env:
+{{ include "openbot.databaseUrlEnv" $root | indent 4 }}
+    - name: OPENBOT_DATABASE_WAIT_SECONDS
+      value: {{ .seconds | int64 | quote }}
+    - name: OPENBOT_DATABASE_WAIT_HINT
+      {{- if $root.Values.migrations.enabled }}
+      value: {{ printf "This release's migrations run in the %s-<revision> Job, whose log says why they have not been applied: kubectl logs job/%s-<revision>." (include "openbot.componentName" (dict "root" $root "component" "migrations")) (include "openbot.componentName" (dict "root" $root "component" "migrations")) | quote }}
+      {{- else }}
+      value: "This chart does not run the migrations (migrations.enabled is false), so apply them yourself with this image: bun scripts/migrate.ts from /app/server, with this DATABASE_URL."
+      {{- end }}
+  {{- with .securityContext }}
+  securityContext:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+{{- end -}}
+
+{{/*
 The Secret the bundled database's password is in, named the way the subchart names it: whatever
 `postgresql.auth.existingSecret` renders to (the subchart passes it through `tpl`, so the default
 `{{ .Release.Name }}-postgresql` is a name per release), or the subchart's own when that is empty.

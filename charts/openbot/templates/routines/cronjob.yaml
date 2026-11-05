@@ -37,7 +37,8 @@ spec:
       backoffLimit: 1
       # Under the five-minute schedule period, and load-bearing with `concurrencyPolicy: Forbid`
       # above: without it a wedged run is never killed, so Forbid suppresses every later sweep and
-      # routines stop firing for good, with only a Running job as evidence.
+      # routines stop firing for good, with only a Running job as evidence. The wait for the database
+      # below takes at most 180 of it.
       activeDeadlineSeconds: 240
       template:
         metadata:
@@ -61,6 +62,15 @@ spec:
           imagePullSecrets:
 {{ toYaml . | indent 12 }}
           {{- end }}
+          {{- /*
+            A run that fires before the database can serve it (the first tick of a first install can
+            land before the bundled PostgreSQL is up or migrated) waits for it rather than failing; see
+            `openbot.waitForDatabase`. For three quarters of the run's ceiling, so a wait that runs out
+            says why in its own words instead of being killed as DeadlineExceeded, and the sweep keeps a
+            minute that is many times what it takes.
+          */}}
+          initContainers:
+{{ include "openbot.waitForDatabase" (dict "root" . "seconds" 180) | indent 12 }}
           containers:
             - name: routines
               image: {{ include "openbot.image" . }}

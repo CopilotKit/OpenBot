@@ -68,6 +68,13 @@ and project, stores that key for it, and creates the `openbot` Learning containe
 anything. `--timeout 15m` gives a fresh cluster room to pull every image; `--wait` works on a first
 install too.
 
+OpenBot's own database comes up beside it. The `openbot-migrations-1` Job waits for the bundled
+PostgreSQL and migrates it, and the server and the scheduled Jobs wait in their `wait-for-database`
+init container until that database accepts their connection and holds every migration their image
+carries, so the server's first boot is against a database that is ready rather than a stream of
+connection errors. `kubectl -n openbot logs deploy/openbot-server -c wait-for-database` says what it
+is waiting for.
+
 `kubectl -n openbot get pods,jobs` shows it coming up, and the log of the
 `openbot-intelligence-bootstrap` Job says what Intelligence set up. The browser reaches Intelligence's
 gateway through OpenBot's own address, so the one port-forward is all it needs.
@@ -835,7 +842,26 @@ pass would run again on every resume from idle.
 ### How a rollout is sequenced
 
 Migrations run as a `pre-install,pre-upgrade` Job, so no replica ever serves in front of a schema it
-has not seen. An init container would mean every replica racing to migrate the same database.
+has not seen. An init container would mean every replica racing to migrate the same database. The
+one exception is a first install with the bundled database: there the Job is an ordinary one, created
+with the database it waits for, because a pre-install hook would run before that database exists.
+
+Every pod that reads the database, the server's and each scheduled Job's, starts with a
+`wait-for-database` init container from the same image. It lets the pod start only once the database
+accepts that pod's own connection and records every migration its image carries, matched by the hash
+the migrator stores, so it cannot pass on a database the migrations have not finished with. It never
+waits for something behind it: on a first install the migrations Job runs beside it, and otherwise the
+hook has finished before the new pods exist, so `--wait` works either way.
+
+- **An upgrade** passes the wait at once, because the hook migrated first. An old pod that restarts
+  meanwhile passes too: the database holds every migration its older image carries, and more.
+- **A rollout whose migrations have not run** (`--no-hooks`, or `migrations.enabled: false` with the
+  migrations not yet applied by hand) holds its new pods in the wait, which names the migration that is
+  missing, while the old ReplicaSet keeps serving. It never starts them on the older schema.
+- **It is bounded.** The server waits as long as the migrations Job may run
+  (`migrations.activeDeadlineSeconds`, 15 minutes by default), then exits 1 with what it last saw and
+  is restarted. A scheduled Job waits three quarters of its own ceiling, then fails with the same
+  message, and the next run starts again.
 
 Roll back a failed upgrade rather than leaving half a rollout: `helm upgrade --install --atomic` on
 Helm 3, and `--rollback-on-failure` on Helm 4, which renamed the flag. Helm 4 still accepts
