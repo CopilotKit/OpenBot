@@ -101,16 +101,24 @@ serviceAccount:
   annotations: {}
   automountServiceAccountToken: false
 
-# The database migrations, run as a Job before the API starts. A pre-upgrade hook, so a rollout
-# never puts a new replica in front of a schema it has not seen.
+# The database migrations, run as a Job. A pre-install and pre-upgrade hook, so a rollout never puts a
+# new replica in front of a schema it has not seen; on a first install with the bundled database it is
+# an ordinary Job instead, created beside the database it then waits for.
+#
+# NOTHING THAT READS THE DATABASE STARTS BEFORE THEY HAVE RUN. The API server and each scheduled Job
+# carry a `wait-for-database` init container that holds them until the database accepts their own
+# connection and holds every migration in their image, and whose log names the one it is waiting for.
+# Switched off here, the migrations are yours to run (`bun scripts/migrate.ts` from /app/server in this
+# image, with the same DATABASE_URL), and those workloads wait for you to have run them.
 migrations:
   enabled: true
   backoffLimit: 3
-  # How long to wait for the database to accept connections before giving up. A pre-install hook runs
-  # before the chart's own resources, so on a first install with the bundled database this Job starts
-  # before the database does.
+  # How long this Job waits for the database to accept connections before giving up. On a first
+  # install with the bundled database it starts before the database does.
   waitForDatabaseSeconds: 300
   # A ceiling on the whole Job, so a migration that hangs fails the release rather than holding it.
+  # Also how long the API server waits for the migrations before its `wait-for-database` gives up and
+  # the pod restarts it, so the server never stops waiting on a Job that may still be working.
   activeDeadlineSeconds: 900
   # Kept on failure so somebody can read why. Helm deletes it before the next run.
   resources:
@@ -502,6 +510,8 @@ computers:
     culler:
       # A ceiling on one sweep. `concurrencyPolicy: Forbid` means a sweep that hangs holds the lock
       # for ever and culling stops silently, which is the failure this feature exists to prevent.
+      # Waiting for the database, when a run fires before it can serve one, takes at most three
+      # quarters of it.
       activeDeadlineSeconds: 600
       enabled: true
       schedule: "*/5 * * * *"
@@ -555,6 +565,8 @@ attachments:
     # stop. A deployment arriving with a large backlog does not need it raised: the sweep deletes in
     # bounded batches, each its own transaction, so a run stopped at the ceiling keeps what it
     # committed and the next one carries on from there. Raising it drains that backlog in fewer runs.
+    # Waiting for the database, when a run fires before it can serve one, takes at most three quarters
+    # of it.
     activeDeadlineSeconds: 300
 
 database:

@@ -17,9 +17,10 @@ be ready against a database with no schema in it.
 
 So on a first install with the bundled database this is not a hook at all. It is an ordinary Job,
 created in the same pass as the database and the Deployment, and it waits for the database while the
-replicas restart against a schema that is on its way. Nothing is ordered because nothing needs to
-be: the Job's own wait is the ordering, and a replica that starts too early is a restart rather than
-a failure.
+replicas wait for it: every pod that reads the database holds in its `wait-for-database` init
+container until this Job's migrations are in (`openbot.waitForDatabase`). They used to start anyway,
+log a connection failure on every first install and retry, against a schema still on its way. The
+server waiting on this Job is not a deadlock because this Job never waits on the server.
 
 Every other case is a hook, because in every other case the database already exists. An external
 database on install, and any upgrade at all, run `pre`, where the schema is ready before a replica
