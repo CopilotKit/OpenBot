@@ -42,6 +42,8 @@ on:
       - .github/workflows/desktop-build.yml
       - .github/workflows/desktop-signing.yml
       - scripts/release-*
+      - scripts/downloads-*
+      - .github/workflows/downloads-sync.yml
       - docs/releasing.md
   push:
     branches: [main]
@@ -54,6 +56,8 @@ on:
       - .github/workflows/desktop-build.yml
       - .github/workflows/desktop-signing.yml
       - scripts/release-*
+      - scripts/downloads-*
+      - .github/workflows/downloads-sync.yml
       - docs/releasing.md
 
 permissions:
@@ -91,12 +95,14 @@ jobs:
         working-directory: desktop
       # What a release signs and attaches: a candidate pinned to its own images with no updater,
       # a stable release made Latest only once its signed Mac and Windows installers are both on
-      # it, and every signed installer under its fixed download name too.
+      # it, every signed installer under its fixed download name too, and downloads.copilotkit.ai
+      # serving only the Latest stable release's signed installers.
       - name: Signed release regressions
         run: >-
           bun test scripts/signed-build.test.ts scripts/publish-signed-mac.test.ts
           scripts/publish-signed-windows.test.ts scripts/signing-workflows.test.ts
           ../scripts/release-latest.test.ts ../scripts/release-download-names.test.ts
+          ../scripts/downloads-sync.test.ts
         working-directory: desktop
       - name: Importing the Developer ID intermediate twice succeeds
         # The first real signing run stopped here: the .p12 already carried the intermediate, and a
@@ -407,8 +413,11 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.release-tag != '')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # `actions: write` to start Downloads sync when this run makes the release Latest
+    # (scripts/release-make-latest.sh).
     permissions:
       contents: write
+      actions: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_TAG: ${{ inputs.release-tag || github.ref_name }}

@@ -159,6 +159,10 @@ On a stable release only the signing runs attach the fixed download names, so a 
 means its installer is signed. The release becomes Latest once `latest.json` and every fixed name
 are on it.
 
+Making a release Latest also starts **Downloads sync**, so
+[downloads.copilotkit.ai](#downloadscopilotkitai) serves the same signed installers. Both attach jobs
+have `actions: write` for that.
+
 If either signing run is never approved, or fails, the release stays not Latest. Sign it again from
 its tag with `make-latest` set, or mark it Latest by hand on its release page.
 
@@ -437,6 +441,56 @@ new build, delete it from the release first, then re-run.
 
 Linux installers are not attached to a release yet.
 
+### downloads.copilotkit.ai
+
+The website links to `downloads.copilotkit.ai`, which serves a copy of the Latest stable release's
+signed installers:
+
+| Platform | Address |
+|---|---|
+| Mac, Apple silicon | `https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg` |
+| Mac, Intel | `https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg` |
+| Windows, x64 | `https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe` |
+| Update feed | `https://downloads.copilotkit.ai/latest/latest.json` |
+
+Each stable release's installers also stay under their versioned names, for example
+`https://downloads.copilotkit.ai/releases/v0.3.0/OpenBot_0.3.0_aarch64.dmg`. Those never change, so
+they are cached for a year; the `latest/` addresses are cached for five minutes. The installed apps
+still read their update feed from GitHub.
+
+**Downloads sync** ([`downloads-sync.yml`](../.github/workflows/downloads-sync.yml), running
+[`scripts/downloads-sync.sh`](../scripts/downloads-sync.sh)) keeps it in step. The signing run that
+makes a stable release Latest starts it ([`scripts/release-make-latest.sh`](../scripts/release-make-latest.sh)),
+so the addresses follow within minutes; it also runs every six hours in case anything drifted, and
+by hand. Each run:
+
+- reads the release GitHub marks Latest, which is never a candidate, a beta or a draft;
+- checks it carries `latest.json` and every installer under its fixed download name, and that each
+  versioned installer is the same file as its fixed-name copy, so both are the signed build;
+- compares each file's SHA-256 with what the bucket holds, uploads only what differs, and
+  invalidates `/latest/*` only when something under `latest/` changed.
+
+When the Latest release lacks some of those files, the run fails and changes nothing, so the
+addresses keep serving the previous signed installers. A Latest release with none of them was
+published before signing attached any, as v0.2.0 was: that is not drift, so the run succeeds with
+"no signed installers yet; nothing to sync" and does not touch AWS. A release asked for by tag must
+have them all. Nothing is ever deleted.
+
+To run it by hand, from `main`:
+
+```sh
+gh workflow run downloads-sync.yml --ref main              # the Latest release
+gh workflow run downloads-sync.yml --ref main -f tag=v0.3.0  # releases/v0.3.0/ only
+```
+
+Behind the address, in AWS account `604598162673`: a private, versioned S3 bucket
+`copilotkit-openbot-downloads` (us-east-1), read only by CloudFront distribution `EQ4EH8L79LPGX`
+through an origin access control, with an ACM certificate for `downloads.copilotkit.ai` and alias
+records in the `copilotkit.ai` zone. The workflow signs in as the role `openbot-release-downloads`
+with GitHub's OIDC token, so there is no stored key. The role trusts only `downloads-sync.yml` on
+`main`, and may only read and write the bucket's objects and invalidate that distribution. The role
+ARN, bucket and distribution are written in the workflow; none is a secret.
+
 ## What merging does
 
 `publish-release.yml` runs on every push to `main` and to `release/**`, and starts by deciding
@@ -571,6 +625,7 @@ not matter: a pull request opened by a workflow does not trigger them.
 `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` to the installer build when it is set, and build without
 it when it is not. Signed desktop builds are the exception: they read the `macos-signing` and
 `windows-signing` environments described above and in [Windows signing](windows-signing.md).
+Downloads sync signs in to AWS with GitHub's OIDC token rather than a stored key.
 
 ## The one thing CI cannot do
 

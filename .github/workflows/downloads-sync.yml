@@ -1,0 +1,54 @@
+name: Downloads sync
+
+# Mirrors the Latest stable release's signed installers to downloads.copilotkit.ai, the address the
+# website links to (scripts/downloads-sync.sh, docs/releasing.md). It serves only what the signing
+# runs attached, and its latest/ folder changes only when a stable release becomes Latest.
+#
+# Started by the signing run that makes a stable release Latest (scripts/release-make-latest.sh),
+# every six hours in case anything drifted or that start failed, and by hand. Each run compares
+# checksums and uploads only what differs, so a run with nothing new changes nothing.
+#
+# It signs in to AWS as `openbot-release-downloads`, which trusts this workflow on main and nothing
+# else, and may only write the bucket and invalidate the distribution named below.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Mirror only releases/<tag>/ of this stable release, such as v0.3.0. Empty mirrors the Latest release, latest/ included.
+        type: string
+        default: ""
+        required: false
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions: {}
+
+# One sync at a time, and a running one is never cancelled: it may be halfway through latest/.
+concurrency:
+  group: downloads-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Mirror the Latest release to downloads.copilotkit.ai
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read # read the release and download its assets
+      id-token: write # sign in to AWS as openbot-release-downloads
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DOWNLOADS_BUCKET: copilotkit-openbot-downloads
+      DOWNLOADS_DISTRIBUTION_ID: EQ4EH8L79LPGX
+      DOWNLOADS_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604598162673:role/openbot-release-downloads
+          role-session-name: openbot-downloads-sync
+          aws-region: us-east-1
+      - run: scripts/downloads-sync.sh
