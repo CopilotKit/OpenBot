@@ -23,6 +23,7 @@ import {
   takeUntil,
 } from "rxjs";
 import { sanitizeSeededHistory } from "../history-sanitize";
+import { answersOnLastStep, type RunSteps } from "./last-step";
 import {
   type NativeRunScope,
   nativeApprovalRun,
@@ -215,16 +216,28 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
    * and so one per clone: the runtime clones before every run. See `NativeRunScope`.
    */
   private readonly scope: NativeRunScope;
+  /** Where this run's steps began, so its last one is sent without tools. See `answersOnLastStep`. */
+  private readonly steps: RunSteps;
 
   constructor(
     configuration: BuiltInAgentConfiguration,
     hooks: BuiltInAgentHooks,
   ) {
     const scope = nativeRunScope();
-    super(toolsWithin(configuration, scope));
+    const steps: RunSteps = {};
+    super(toolsWithin(answersOnLastStep(configuration, steps), scope));
     this.configuration = configuration;
     this.hooks = hooks;
     this.scope = scope;
+    this.steps = steps;
+    /*
+     * The runtime names where a model is hosted from its name, for its own telemetry, and a model
+     * handed over already wrapped has no name to read. Named from the configuration it was given.
+     */
+    if (!("factory" in configuration))
+      (this as { modelHostClass: string }).modelHostClass = new BuiltInAgent({
+        model: configuration.model,
+      }).modelHostClass;
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
@@ -248,6 +261,8 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
           code: TOOL_LIMIT_EXCEEDED,
         } as BaseEvent,
       );
+    // A new run counts its steps from where it starts, never from where an earlier run stopped.
+    this.steps.before = undefined;
     const answeredByResume = new Set(
       (input.resume ?? []).map((entry) => entry.interruptId),
     );

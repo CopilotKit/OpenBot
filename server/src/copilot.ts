@@ -17,6 +17,7 @@ import {
   type ComputerGuidance,
   ORCHESTRATION_GUIDANCE,
   PROVENANCE_GUIDANCE,
+  todayGuidance,
 } from "@openbot/shared/bot-prompt";
 import {
   defaultModelFor,
@@ -531,6 +532,8 @@ export function builtInAgentConfiguration(
    * `planToolSearch`. Empty sends everything, which is every Bot at or under the floor.
    */
   waiting: ReadonlySet<string> = new Set(),
+  /** When this run is, for the date the prompt ends with. A test pins it. */
+  now: Date = new Date(),
 ): BuiltInAgentConfiguration {
   if (!apiKey && !planModel) {
     return {
@@ -583,7 +586,7 @@ export function builtInAgentConfiguration(
     model: wrapped ?? planModel ?? `${model.provider}/${model.defaultModel}`,
     /*
      * The package's role, then the person's own standing instructions, then what this Bot actually
-     * holds, then the computer.
+     * holds, then the computer, then the date.
      *
      * The grants go BEFORE the computer prose on purpose. That prose is long and emphatic about the
      * browser and mentions connectors nowhere, so a Bot that read it last reached for the browser
@@ -619,6 +622,8 @@ export function builtInAgentConfiguration(
         ? [computerGuidance({ search: holdsWebSearch(tools) })]
         : []),
       ...(learnedSkills?.catalog ? [learnedSkills.catalog] : []),
+      // Last, so everything above stays one prefix a provider can cache. See `todayGuidance`.
+      todayGuidance(now),
     ].join("\n\n"),
     ...(planModel ? {} : { apiKey: apiKey ?? undefined }),
     /*

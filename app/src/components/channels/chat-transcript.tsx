@@ -10,6 +10,7 @@ import {
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
 import { answeredBy } from "@openbot/shared/handoff-markers";
+import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import { readToolName } from "@openbot/shared/tool-name";
 import {
   IconAlertTriangle,
@@ -1594,7 +1595,11 @@ const ToolRow = memo(function ToolRow({
   return (
     <TurnInFlightContext.Provider value={inFlight}>
       <Arriving>
-        {steps.length === 1 && only && !isBrowserStep(only) ? (
+        {steps.length === 1 &&
+        only &&
+        !isBrowserStep(only) &&
+        // A subtask is drawn as work even alone, so a second call joining it does not change its shape.
+        only.toolCall.function.name !== SUBAGENT_TOOL ? (
           <ArgumentsArrivingContext.Provider value={active}>
             <ToolCallBody
               args={only.toolCall.function.arguments}

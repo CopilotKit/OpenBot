@@ -16,7 +16,6 @@ import { HandoffTool } from "./handoff-tool";
 import { SandboxedTools } from "./sandboxed-tools";
 import { SignInTool } from "./sign-in-tool";
 import { SkillTools } from "./skill-tools";
-import { SubagentTool } from "./subagent-tool";
 
 /**
  * The CopilotKit client, wrapped once for the whole authenticated app.
@@ -71,8 +70,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           where the grant and the caps are. A hop that happens off-screen is the thing to avoid.
         */}
         <HandoffTool />
-        {/* A Bot's own subtasks: their steps as they happen, then their answers. Runs on the server. */}
-        <SubagentTool />
         <EscalationTool />
         {/* A Bot offering a check-in on what the two of them just looked at. Runs on the server. */}
         <CheckInOfferTool />
