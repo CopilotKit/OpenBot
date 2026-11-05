@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   type FakeRepo,
   fakeRepo,
@@ -70,9 +70,19 @@ function publish(fake: FakeRepo, dir: string, tag: string, makeLatest: string) {
       MAKE_LATEST: makeLatest,
       ARTIFACTS: "artifacts",
       FEED_RETRY_DELAY: "0",
+      RUNNER_TEMP: dir,
     },
     dir,
   );
+}
+
+/** The asset names one `gh release upload` call attaches. */
+function names(call: string) {
+  return call
+    .split(" ")
+    .slice(6)
+    .filter((arg) => arg !== "--clobber")
+    .map((path) => basename(path));
 }
 
 const feedFor = (version: string) => ({
@@ -88,9 +98,18 @@ test("a candidate attaches its pinned .dmg files only, and is not checked agains
   const dir = job("0.3.0-rc.1", "v0.3.0-rc.1");
   const result = publish(fake, dir, "v0.3.0-rc.1", "false");
   expect(result.code).toBe(0);
-  expect(fake.calls()).toEqual([
-    "gh release view v0.3.0-rc.1 -R CopilotKit/OpenBot",
-    `gh release upload v0.3.0-rc.1 -R CopilotKit/OpenBot artifacts/OpenBot_0.3.0-rc.1_aarch64.dmg artifacts/OpenBot_0.3.0-rc.1_x64.dmg --clobber`,
+  const calls = fake.calls();
+  expect(calls).toHaveLength(2);
+  expect(calls[0]).toBe("gh release view v0.3.0-rc.1 -R CopilotKit/OpenBot");
+  expect(calls[1]).toStartWith(
+    "gh release upload v0.3.0-rc.1 -R CopilotKit/OpenBot artifacts/OpenBot_0.3.0-rc.1_aarch64.dmg artifacts/OpenBot_0.3.0-rc.1_x64.dmg ",
+  );
+  // The fixed download names, in the same upload, so the stable links serve the signed build.
+  expect(names(calls[1] as string)).toEqual([
+    "OpenBot_0.3.0-rc.1_aarch64.dmg",
+    "OpenBot_0.3.0-rc.1_x64.dmg",
+    "OpenBot-mac-arm64.dmg",
+    "OpenBot-mac-x64.dmg",
   ]);
   expect(existsSync(join(dir, "latest.json"))).toBe(false);
   expect(fake.latest()).toBe("v0.2.0");
@@ -113,9 +132,30 @@ test("a build of another version is not attached", () => {
   expect(fake.calls()).toEqual([]);
 });
 
-// A stable release is published not Latest; it becomes Latest here, after its signed installers.
+// The gap where Mac signing made a release Latest while its Windows link still served the unsigned
+// installer: Latest waits for the signed Windows one as well.
+test("a stable release signed on Mac before Windows is not Latest yet, so its Windows link never serves the unsigned installer", () => {
+  const fake = repo("v0.2.0");
+  fake.attach("OpenBot_0.3.0_x64-setup.exe");
+  fake.feed("v0.3.0", feedFor("0.3.0"));
+  const dir = job("0.3.0");
+  const result = publish(fake, dir, "v0.3.0", "true");
+  expect(result.code).toBe(0);
+  expect(result.out).toContain(
+    "v0.3.0 is not Latest yet: it still needs the signed OpenBot-windows-x64-setup.exe.",
+  );
+  expect(fake.calls().some((call) => call.startsWith("gh release edit"))).toBe(
+    false,
+  );
+  expect(fake.calls().some((call) => call.startsWith("curl"))).toBe(false);
+  expect(fake.latest()).toBe("v0.2.0");
+});
+
+// A stable release is published not Latest; it becomes Latest in the signing run that attaches
+// the last signed installer, here when Windows signing finished first.
 test("a stable release becomes Latest only after its signed installers are attached, then its feed is checked", () => {
   const fake = repo("v0.2.0");
+  fake.attach("OpenBot_0.3.0_x64-setup.exe", "OpenBot-windows-x64-setup.exe");
   fake.feed("v0.3.0", feedFor("0.3.0"));
   const dir = job("0.3.0");
   const result = publish(fake, dir, "v0.3.0", "true");
@@ -125,9 +165,12 @@ test("a stable release becomes Latest only after its signed installers are attac
   const uploads = calls.filter((call) => call.startsWith("gh release upload"));
   expect(uploads).toHaveLength(3);
   expect(uploads[0]).toContain("latest.json");
-  expect(uploads[1]).toContain(
-    "artifacts/OpenBot_0.3.0_aarch64.dmg artifacts/OpenBot_0.3.0_x64.dmg",
-  );
+  expect(names(uploads[1] as string)).toEqual([
+    "OpenBot_0.3.0_aarch64.dmg",
+    "OpenBot_0.3.0_x64.dmg",
+    "OpenBot-mac-arm64.dmg",
+    "OpenBot-mac-x64.dmg",
+  ]);
   expect(uploads[2]).toContain("OpenBot-darwin-x86_64.app.tar.gz.sig");
   const promote = calls.indexOf(
     "gh release edit v0.3.0 -R CopilotKit/OpenBot --latest",
@@ -141,6 +184,7 @@ test("a stable release becomes Latest only after its signed installers are attac
 
 test("a stable release does not take Latest from a newer one that became Latest meanwhile", () => {
   const fake = repo("v0.4.0");
+  fake.attach("OpenBot-windows-x64-setup.exe");
   const dir = job("0.3.1");
   const result = publish(fake, dir, "v0.3.1", "true");
   expect(result.code).toBe(0);
@@ -174,6 +218,7 @@ test("signing the current Latest again checks its feed", () => {
 
 test("a Latest release whose feed names another version fails", () => {
   const fake = repo("v0.2.0");
+  fake.attach("OpenBot-windows-x64-setup.exe");
   fake.feed("v0.3.0", feedFor("0.2.0"));
   const dir = job("0.3.0");
   const result = publish(fake, dir, "v0.3.0", "true");
@@ -181,4 +226,16 @@ test("a Latest release whose feed names another version fails", () => {
   expect(result.out).toContain(
     "does not serve a latest.json with version 0.3.0",
   );
+});
+
+test("a signed image with no fixed download name is not attached", () => {
+  const fake = repo("v0.2.0");
+  const dir = job("0.3.0");
+  writeFileSync(join(dir, "artifacts/OpenBot_0.3.0_universal.dmg"), "signed");
+  const result = publish(fake, dir, "v0.3.0", "true");
+  expect(result.code).toBe(1);
+  expect(result.out).toContain(
+    "is not an installer with a fixed download name",
+  );
+  expect(fake.calls().some((call) => call.includes("upload"))).toBe(false);
 });

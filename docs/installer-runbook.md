@@ -44,8 +44,24 @@ There are three kinds of build:
 | Kind | Made by | Pinned to its commit | Signed | Where it goes |
 |---|---|---|---|---|
 | Internal build | **Internal build** workflow | Yes | No | Workflow artifacts, kept 30 days |
-| Release candidate or beta | **Create release PR**, then merge | Yes | Mac: after approval | GitHub prerelease |
-| Stable release | **Create release PR**, then merge | No: it installs the latest release | Mac: after approval | GitHub release, marked Latest once Mac signing attaches its signed installers |
+| Release candidate or beta | **Create release PR**, then merge | Yes | After approval | GitHub prerelease |
+| Stable release | **Create release PR**, then merge | No: it installs the latest release | After approval | GitHub release, marked Latest once Mac and Windows signing have both attached their signed installers |
+
+A release is made only by merging its release PR. Do not push a `v*` tag by hand: that builds and
+publishes nothing. It only starts Mac signing, which then has no release to attach to.
+
+Every release carries each installer under a fixed name as well as under its versioned name. These
+addresses always give the installers of the release marked Latest:
+
+| Platform | Address |
+|---|---|
+| Mac, Apple silicon | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-mac-arm64.dmg` |
+| Mac, Intel | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-mac-x64.dmg` |
+| Windows, x64 | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-windows-x64-setup.exe` |
+
+A candidate or beta is never Latest. Link to its installers by version:
+`https://github.com/CopilotKit/OpenBot/releases/download/<tag>/OpenBot-mac-arm64.dmg`. See
+[Download links](releasing.md#download-links).
 
 ## 1. Make an internal build
 
@@ -110,10 +126,14 @@ Use a candidate to test what will become a release. The details are in
 4. Review and merge the release PR. Merging publishes the candidate.
    **Expected:** a GitHub prerelease `vX.Y.Z-rc.1` with `container-images.json`, the source
    archive, the chart, the release manifest, and the Mac and Windows installers.
-5. Approve **Desktop macOS signing** when it asks. This needs a `macos-signing` approver.
-   **Expected:** the signed Apple silicon `.dmg` replaces the ad-hoc one on the release, and a signed
-   Intel `.dmg` is added. For a candidate both are pinned to the candidate's images, like the ad-hoc
-   one. A stable release also gets `latest.json` and becomes Latest at this point.
+5. Approve **Desktop macOS signing** and **Desktop Windows signing** when they ask. These need a
+   `macos-signing` and a `windows-signing` approver.
+   **Expected:** the signed Apple silicon `.dmg` replaces the ad-hoc one on the release, a signed
+   Intel `.dmg` is added, and the signed `-setup.exe` replaces the unsigned one. Each is attached
+   under its versioned name and its fixed name. For a candidate all three are pinned to the
+   candidate's images, like the unsigned ones. A stable release also gets `latest.json`, and becomes
+   Latest when the second of the two signing runs finishes. Until then the fixed addresses keep
+   giving the previous release's signed installers.
 6. Test the candidate with [Install and test](#3-install-and-test) and
    [Check a build](#4-check-a-build).
 7. For a fix, merge it into `release/X.Y`, then run **Create release PR** from that branch with
@@ -121,10 +141,11 @@ Use a candidate to test what will become a release. The details are in
 8. To finish, run **Create release PR** from `release/X.Y` with `kind=final`, then merge. A final may
    not differ from its last candidate except in the version, the changelog and the policy's
    version. **Expected:** a merge-back PR into `main` opens. The release becomes Latest once you
-   approve Mac signing for it (step 5).
+   approve both signing runs for it and they finish (step 5).
 
 A stable release from `main` (`kind=stable`) follows steps 1 to 5 without a release branch. Its
-installers are not pinned: they install the latest release.
+installers are not pinned: they install the latest release. When it becomes Latest, the fixed
+addresses in [What an installer contains](#what-an-installer-contains) give its installers.
 
 ## 3. Install and test
 
@@ -273,8 +294,10 @@ results in the PR or the issue for the build.
 | An image job fails | Open the failed job's log and read the first error. A Dockerfile error is a code problem on the branch. Do not run it again until you know the cause. |
 | The build fails with `the pinned deployment manifest ... has commit ..., but this build compiles ...` | The installer is being built from a different commit than its images. Build both from the same commit. |
 | A signing run waits | It needs an approver from the table in [Before you start](#before-you-start). |
-| A stable release is published but is not Latest | It becomes Latest once Mac signing attaches its signed installers. Approve the signing run. If that run failed, run **Desktop macOS signing** again from the release tag with `signing-mode: developer-id`, `release-tag` set and `make-latest` on. |
-| Mac signing of a candidate fails with `container-images.json ... was built from ...` | The signing run is not on the candidate's tag. Run it from the tag the release was published from. |
+| A stable release is published but is not Latest | It becomes Latest once both Mac and Windows signing have attached their signed installers. The attach step of the run that finished says which installers it still needs. Approve the other run. If a run failed, run it again from the release tag with `release-tag` set and `make-latest` on. |
+| Mac or Windows signing of a candidate fails with `container-images.json ... was built from ...` | The signing run is not on the candidate's tag. Run it from the tag the release was published from. |
+| A fixed download address gives the unsigned build | That platform's signing run was not approved, or failed. Approve it, or run it again from the release tag with `release-tag` set; its attach step replaces both names. |
+| A fixed download address gives an older release | `latest/download` follows the release marked Latest. A candidate or beta is never Latest, a stable release becomes Latest only once both signing runs have attached their installers, and a patch released while a newer release is out does not become Latest. |
 | Windows setup stops with a virtualization message | The machine cannot run WSL 2. Use an x64 PC or an x64 VM with nested virtualization. |
 | Setup returns to Install after sign-in | The saved sign-in no longer works. Sign in again. |
 | A step shows **Retry** | Select it once. If it fails again, open **Technical details** and copy them into the issue. |

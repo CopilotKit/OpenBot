@@ -15,10 +15,15 @@
 # no updater, so only its .dmg files are attached: it has no updater archive and no latest.json,
 # and it never becomes Latest.
 #
-# A stable release is published not Latest. It becomes Latest here, after its signed .dmg files
-# are attached, so `releases/latest` never serves an ad-hoc build that macOS refuses, or a release
-# with no Intel installer. Only when publish-release.yml said it should, and only when no newer
-# release has become Latest since.
+# A stable release is published not Latest. It becomes Latest once both signing runs have
+# attached their installers, here or in Desktop Windows signing, whichever finishes second
+# (scripts/release-make-latest.sh). So `releases/latest` never serves an ad-hoc build that macOS
+# refuses, an unsigned Windows installer, or a release with no Intel installer. Only when
+# publish-release.yml said it should, and only when no newer release has become Latest since.
+#
+# Every .dmg is attached twice, in one upload: under the name Tauri gave it, replacing the ad-hoc
+# one, and under its fixed download name (scripts/release-download-names.sh), so the address a web
+# page links to serves the signed build too. Both happen before the release can become Latest.
 set -euo pipefail
 
 : "${RELEASE_TAG:?RELEASE_TAG must name the release}"
@@ -44,13 +49,25 @@ if [ "${#images[@]}" -eq 0 ]; then
   echo "::error::No signed .dmg in $artifacts."
   exit 1
 fi
+fixed_dir="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/download-names.XXXXXX")"
+uploads=("${images[@]}")
+for image in "${images[@]}"; do
+  # Assigned first: a failure inside a command's argument would not stop the script.
+  fixed="$("$root/scripts/release-download-names.sh" "$image")"
+  if [ -e "$fixed_dir/$fixed" ]; then
+    echo "::error::Two signed images would both be published as $fixed."
+    exit 1
+  fi
+  cp "$image" "$fixed_dir/$fixed"
+  uploads+=("$fixed_dir/$fixed")
+done
 
 if [ -n "$pinned" ]; then
   if [ "$pinned" != "$RELEASE_TAG" ]; then
     echo "::error::The signed build is pinned to $pinned, not to $RELEASE_TAG."
     exit 1
   fi
-  gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" "${images[@]}" --clobber
+  gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" "${uploads[@]}" --clobber
   echo "Attached the signed installers of $RELEASE_TAG, pinned to its own images. A pinned build has no update feed and never becomes Latest."
   exit 0
 fi
@@ -82,58 +99,12 @@ jq -n \
 cat latest.json
 
 gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" latest.json --clobber
-gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" "${images[@]}" --clobber
+gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" "${uploads[@]}" --clobber
 gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" \
   "$artifacts/OpenBot-darwin-aarch64.app.tar.gz" \
   "$artifacts/OpenBot-darwin-aarch64.app.tar.gz.sig" \
   "$artifacts/OpenBot-darwin-x86_64.app.tar.gz" \
   "$artifacts/OpenBot-darwin-x86_64.app.tar.gz.sig" --clobber
 
-if [ "$make_latest" = true ]; then
-  becomes="$(VERSION="$RELEASE_TAG" PRERELEASE=false "$root/scripts/release-becomes-latest.sh")"
-  if [ "$becomes" = true ]; then
-    gh release edit "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --latest
-    echo "$RELEASE_TAG is now the latest release."
-  else
-    echo "A newer release is already Latest, so $RELEASE_TAG stays as it is."
-  fi
-fi
-
-# Installed apps read only the Latest release's feed. A release that is not Latest, such as a patch
-# to an older line or a release signed again by hand, has nothing here to check.
-if out="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>&1)"; then
-  current="$out"
-elif grep -q 'HTTP 404' <<<"$out"; then
-  current=""
-else
-  echo "::error::Could not read the current latest release: $out"
-  exit 1
-fi
-if [ "$current" != "$RELEASE_TAG" ]; then
-  echo "$RELEASE_TAG is not the latest release, so installed apps do not read its feed. Not checking it."
-  exit 0
-fi
-
-# Read back what installed apps will read: the endpoint compiled into them, fetched the way they
-# fetch it, redirects and all. An endpoint that answers with a web page, or a Latest release that is
-# not this one, fails here instead of failing silently in every app.
-endpoint="$(jq -r '.plugins.updater.endpoints[0]' "$root/desktop/src-tauri/tauri.macos-signing.conf.json")"
-expected="${RELEASE_TAG#v}"
-for attempt in 1 2 3 4 5; do
-  # The asset was uploaded seconds ago; give the download redirect a moment to catch up.
-  if curl -fsSL --retry 3 "$endpoint" -o feed.json &&
-    jq -e --arg version "$expected" '
-      .version == $version and
-      ([.platforms // {} | to_entries[]
-        | select(.key | startswith("darwin-"))
-        | select((.value.url | type) == "string" and (.value.signature | type) == "string")]
-        | length > 0)
-    ' feed.json > /dev/null 2>&1; then
-    echo "$endpoint serves latest.json for $expected."
-    exit 0
-  fi
-  if [ "$attempt" -lt 5 ]; then sleep "$delay"; fi
-done
-echo "::error::$endpoint does not serve a latest.json with version $expected and a darwin-* platform."
-head -c 500 feed.json 2>/dev/null || true
-exit 1
+# Latest once Windows signing has attached its installer too, and the feed check when it is.
+MAKE_LATEST="$make_latest" FEED_RETRY_DELAY="$delay" "$root/scripts/release-make-latest.sh"
