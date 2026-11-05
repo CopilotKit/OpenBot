@@ -98,7 +98,27 @@ beforeEach(() => {
       if (path === "/api/plugins")
         return json({
           catalogue: [],
-          servers: [],
+          servers: [
+            {
+              id: "notion",
+              title: "Notion",
+              logo: null,
+              tools: [
+                {
+                  name: "search_pages",
+                  description: "Search pages by title. Returns ids.",
+                  ref: "notion/search_pages",
+                  effect: "read",
+                },
+                {
+                  name: "create_page",
+                  description: "Create a page.",
+                  ref: "notion/create_page",
+                  effect: "write",
+                },
+              ],
+            },
+          ],
           skills,
           botsMayCallBack: true,
           redirectUri: null,
@@ -199,6 +219,57 @@ describe("writing a skill", () => {
         }),
       },
     ]);
+  });
+});
+
+describe("choosing a skill's tools", () => {
+  test("each app is one row, and its tools are ticked in a dialog", async () => {
+    const { view } = renderAt("/admin/skills/new");
+    const user = userEvent.setup({ document });
+    const notion = (await view.findByText("Notion")).closest("button");
+    expect(within(notion as HTMLElement).getByText("None")).toBeTruthy();
+    // No button per tool on the page itself.
+    expect(view.queryByRole("button", { name: "search_pages" })).toBeNull();
+
+    await user.click(notion as HTMLElement);
+    const dialog = await view.findByRole("dialog");
+    // Named for people, described by the first sentence, writes marked.
+    expect(within(dialog).getByText("Search pages")).toBeTruthy();
+    expect(within(dialog).getByText("Search pages by title.")).toBeTruthy();
+    expect(within(dialog).getByText("changes things")).toBeTruthy();
+    await user.click(
+      within(dialog).getByRole("checkbox", { name: "Use Search pages" }),
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Done" }));
+
+    const row = view.getByText("Notion").closest("button") as HTMLElement;
+    expect(within(row).getByText("Search pages")).toBeTruthy();
+    expect(within(row).getByText("1 of 2 tools")).toBeTruthy();
+
+    await user.type(view.getByLabelText("Title"), "Find a page");
+    await user.type(view.getByLabelText("Command"), "find");
+    await user.type(view.getByLabelText("Instructions"), "Find it.");
+    await user.click(view.getByRole("button", { name: "Save skill" }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]?.body).toMatchObject({ tools: ["notion/search_pages"] });
+  });
+
+  test("Select all ticks every tool of the app", async () => {
+    const { view } = renderAt("/admin/skills/new");
+    const user = userEvent.setup({ document });
+    await user.click(
+      (await view.findByText("Notion")).closest("button") as HTMLElement,
+    );
+    const dialog = await view.findByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Select all" }),
+    );
+    expect(
+      within(dialog).getByRole("button", { name: "Clear all" }),
+    ).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "Done" }));
+    const row = view.getByText("Notion").closest("button") as HTMLElement;
+    expect(within(row).getByText("All 2 tools")).toBeTruthy();
   });
 });
 
