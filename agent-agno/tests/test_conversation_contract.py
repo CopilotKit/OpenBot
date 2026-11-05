@@ -172,3 +172,43 @@ def test_a_tool_result_made_of_parts_is_replayed_as_its_text(monkeypatch):
     body = _run(monkeypatch, openai_environment, run)
     assert missing_from(body) == []
     assert "TOOL_PART_MARKER_7f3a" in json.dumps(body)
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_a_tool_result_for_a_run_this_process_does_not_hold_is_answered_from_the_thread(
+    monkeypatch, environment
+):
+    """A restart, or a second replica, between a client tool call and its result.
+
+    The result comes back as trailing tool messages, which the router treats as resuming a run it
+    paused. A fresh process holds no paused run, and the router failed the run ("Session ... not
+    found", or "No paused run matching the provided tool results"). With nothing to resume, it
+    answers from the thread instead, the call and its result included, as it would any other run.
+    """
+    run = conversation()
+    run["messages"] += [
+        {
+            "id": "a2",
+            "role": "assistant",
+            "toolCalls": [
+                {
+                    "id": "call-restart",
+                    "type": "function",
+                    "function": {"name": "remember_fact", "arguments": '{"fact": "x"}'},
+                }
+            ],
+        },
+        {"id": "t2", "role": "tool", "toolCallId": "call-restart", "content": "RESUMED_RESULT_7f3a"},
+    ]
+    run["tools"] = [
+        {
+            "name": "remember_fact",
+            "description": "Remember a fact.",
+            "parameters": {"type": "object", "properties": {"fact": {"type": "string"}}},
+        }
+    ]
+    body = _run(monkeypatch, environment, run)
+    assert missing_from(body) == []
+    sent = json.dumps(body)
+    assert "RESUMED_RESULT_7f3a" in sent
+    assert "call-restart" in sent

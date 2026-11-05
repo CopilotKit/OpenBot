@@ -12,12 +12,14 @@ twice. With a list, Agno no longer attaches the router's `images=`/`files=` to a
 builds, so each user message here carries its own media. Nor does it add the run's AG-UI `context`
 to one, so `add_run_context` does that.
 
-The router looks `extract_user_input` up in its module on every run, which is the seam `install`
-replaces. `agent-agno/tests/test_conversation_contract.py` fails if an Agno upgrade moves it.
+The router looks `extract_user_input` and `resume_paused_run` up in its module on every run, which
+are the seams `install` replaces. `agent-agno/tests/test_conversation_contract.py` fails if an Agno
+upgrade moves either.
 """
 
 import json
 import math
+from contextvars import ContextVar
 
 import litellm
 from agno.agent._utils import convert_dependencies_to_string
@@ -25,6 +27,7 @@ from agno.db.in_memory import InMemoryDb
 from agno.models.message import Message
 from agno.os.interfaces.agui import router
 from agno.os.interfaces.agui.input import extract_media
+from agno.os.interfaces.agui.resume import find_resume_target_run_id, resume_paused_run
 from agno.run.base import RunStatus
 
 # AG-UI roles that are not conversation: a reasoning trace or an activity card the browser drew.
@@ -64,6 +67,11 @@ CHARS_PER_TOKEN = 2.5
 MEDIA_TOKENS = 4_784
 
 _budget = REPLAY_BUDGET_TOKENS
+
+# This run's input as `conversation_input` built it. The router builds the input before it decides
+# whether the run resumes a paused one, so `resume_or_answer` can fall back to it. Each request runs
+# in its own task, and so in its own context.
+_this_run: ContextVar = ContextVar("this_run")
 
 
 def replay_budget(model_id: str) -> int:
@@ -195,7 +203,32 @@ def conversation_input(messages):
                 content=f"Earlier messages in this conversation are not shown: the {start} oldest were left out to fit the context window. If you are asked about something that is not below, say you can no longer see it.",
             )
         )
-    return instructions + thread[start:] or ""
+    run = instructions + thread[start:] or ""
+    _this_run.set(run)
+    return run
+
+
+async def resume_or_answer(entity, session_id, tool_messages, run_context, run_kwargs):
+    """A client tool's result: resume the run that paused on it, or answer from the whole thread.
+
+    The result arrives as trailing tool messages, which the router takes to resume a run Agno
+    paused on the call. Agno holds a paused run in this process alone (`PausedRunsDb`), so after a
+    restart, or on another replica, there is none, and the router failed the run ("Session ... not
+    found", "No paused run matching the provided tool results"). With nothing to resume, the run is
+    answered like any other, from the thread the server sent, which carries the call and its result.
+    """
+    if await find_resume_target_run_id(entity, session_id, tool_messages) is not None:
+        return await resume_paused_run(entity, session_id, tool_messages, run_context, run_kwargs)
+    return entity.arun(
+        input=_this_run.get(),
+        stream=True,
+        stream_events=True,
+        session_id=session_id,
+        user_id=run_context.user_id,
+        run_id=run_context.run_id,
+        run_context=run_context,
+        **run_kwargs,
+    )
 
 
 def add_run_context(run_input, run_context, agent) -> None:
@@ -243,3 +276,4 @@ def install(model_id: str) -> None:
     global _budget
     _budget = replay_budget(model_id)
     router.extract_user_input = conversation_input
+    router.resume_paused_run = resume_or_answer
