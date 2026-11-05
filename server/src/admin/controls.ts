@@ -35,6 +35,7 @@ import {
   setPolicyOverlay,
 } from "../computer/policy";
 import {
+  deliverEgressPolicies,
   type EgressPolicy,
   effectiveNetworkPolicy,
   egressDecision,
@@ -340,6 +341,9 @@ export async function installEnterpriseControls(
   const refresh = async () => {
     try {
       snapshot = await loadSnapshot(store);
+      // Any Bot's network policy may have changed with what was just read, so the push on the way to
+      // each action sends it again rather than trusting that its computer already holds it.
+      deps.provider?.forgetPushedPolicies?.();
     } catch (error) {
       console.error(
         JSON.stringify({
@@ -453,38 +457,19 @@ export async function installEnterpriseControls(
     return deps.duringRecording ? deps.duringRecording(botId, policy) : policy;
   };
 
-  let pushing: Promise<void> | undefined;
+  // Tried again within seconds until it lands, quietly while a computer is likely still starting.
+  const delivery = deliverEgressPolicies({
+    push: () =>
+      pushEgressPolicies({
+        provider: deps.provider as ComputerProvider,
+        token: deps.computerToken,
+        policyForBot,
+        ...(deps.webBotAuth ? { webBotAuth: deps.webBotAuth } : {}),
+      }),
+  });
   const pushNetworkPolicies = async () => {
     if (!deps.provider) return;
-    if (pushing) return pushing;
-    pushing = (async () => {
-      try {
-        const report = await pushEgressPolicies({
-          provider: deps.provider as ComputerProvider,
-          token: deps.computerToken,
-          policyForBot,
-          ...(deps.webBotAuth ? { webBotAuth: deps.webBotAuth } : {}),
-        });
-        if (report.failed.length > 0) {
-          console.warn(
-            JSON.stringify({
-              type: "egress-policy-push-incomplete",
-              ...report,
-            }),
-          );
-        }
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            type: "egress-policy-push-failed",
-            error: String(error),
-          }),
-        );
-      } finally {
-        pushing = undefined;
-      }
-    })();
-    return pushing;
+    return delivery.push();
   };
 
   const ownedBots = async (userId: string) =>
@@ -706,6 +691,7 @@ export async function installEnterpriseControls(
     offboard,
     stop: async () => {
       for (const timer of timers) clearInterval(timer);
+      delivery.stop();
       for (const remove of removeTaps) remove();
       setPolicyOverlay(null);
       installed = undefined;
