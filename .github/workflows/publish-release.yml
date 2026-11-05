@@ -3,9 +3,14 @@ name: Publish release
 # Merging a release PR is the trigger. Nothing here is dispatched by hand, so a published release is
 # always a reviewed commit on main, and the tag is created by this workflow rather than by a person
 # with a terminal.
+#
+# Stable releases merge into main. Candidates and betas merge into their own `release/X.Y` branch,
+# and so does the final cut from a candidate, so those branches are watched too. The release PRs'
+# own branches live under `release/publish/`, which `release/**` would also match, so they are
+# left out: a push to a PR branch is never a release.
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**", "!release/publish/**"]
 
 permissions:
   contents: read
@@ -20,9 +25,9 @@ env:
   OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
 
 jobs:
-  # Every push to main runs this, and almost none of them are releases. This job decides which, and
-  # it decides from the merged pull request rather than from the commit message, because a commit
-  # message is something anybody can write.
+  # Every push to main or a release branch runs this, and almost none of them are releases. This job
+  # decides which, and it decides from the merged pull request rather than from the commit message,
+  # because a commit message is something anybody can write.
   metadata:
     name: classify
     runs-on: ubuntu-latest
@@ -32,52 +37,80 @@ jobs:
     outputs:
       is_release: ${{ steps.release.outputs.is_release }}
       version: ${{ steps.release.outputs.version }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      final_from_candidate: ${{ steps.release.outputs.final_from_candidate }}
     steps:
-      - id: pull-request
+      - id: release
+        name: Decide
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const { owner, repo } = context.repo;
+            // The branch that was pushed, without its `refs/heads/` prefix.
+            const branch = context.ref.replace(/^refs\/heads\//, "");
+            const notRelease = (why) => {
+              core.setOutput("is_release", "false");
+              core.setOutput("version", "");
+              core.setOutput("prerelease", "false");
+              core.setOutput("final_from_candidate", "false");
+              core.info(why);
+            };
             const { data: pulls } =
               await github.rest.repos.listPullRequestsAssociatedWithCommit({
                 owner, repo, commit_sha: context.sha,
               });
+            // The PR must have merged into the branch that was pushed, as this very commit. A PR
+            // that merged somewhere else and only shares the commit is not this release.
             const pull = pulls.find((candidate) =>
-              candidate.base.ref === "main" &&
+              candidate.base.ref === branch &&
               candidate.merged_at !== null &&
               candidate.merge_commit_sha === context.sha
             );
             if (!pull) {
               // Not a merge commit of a reviewed PR. That is most pushes; it is not an error.
-              core.setOutput("head_ref", "");
-              core.setOutput("trusted", "false");
-              return;
+              return notRelease("Not a release commit.");
             }
             // A release branch name is not enough on its own: a fork can open a PR from a branch
             // with any name it likes. The branch must be in this repository and the PR must carry
-            // the label, which only somebody with write access can add.
+            // the label, which only somebody with write access can add. The name allows a
+            // candidate or beta suffix, written the same way `scripts/release-version.ts` reads it.
+            const match =
+              /^release\/publish\/(v(\d+)\.(\d+)\.\d+(-(rc|beta)\.[1-9]\d*)?)$/.exec(pull.head.ref);
             const trusted =
-              /^release\/publish\/v\d+\.\d+\.\d+$/.test(pull.head.ref) &&
+              match !== null &&
               pull.head.repo?.full_name === `${owner}/${repo}` &&
               pull.labels.some((label) => label.name === "release");
-            core.setOutput("head_ref", pull.head.ref);
-            core.setOutput("trusted", String(trusted));
-      - id: release
-        name: Decide
-        env:
-          HEAD_REF: ${{ steps.pull-request.outputs.head_ref }}
-          TRUSTED: ${{ steps.pull-request.outputs.trusted }}
-        run: |
-          set -euo pipefail
-          if [ "$TRUSTED" != true ]; then
-            echo "is_release=false" >> "$GITHUB_OUTPUT"
-            echo "Not a release commit."
-            exit 0
-          fi
-          version="${HEAD_REF#release/publish/}"
-          echo "is_release=true" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Releasing $version"
+            if (!trusted) {
+              return notRelease("Not a release commit.");
+            }
+            const [, version, major, minor, suffix] = match;
+            const prerelease = suffix !== undefined;
+            // A version belongs to one branch. A stable release merges into main. A candidate or
+            // beta merges into the `release/X.Y` branch its own version names, so 0.3.0-rc.2 can
+            // only come from `release/0.3`. A stable version on that branch is the final cut from
+            // a candidate, which gets the extra check in `verify`. A labelled release PR anywhere
+            // else was opened against the wrong branch, and that is a mistake to stop on, not a
+            // push to ignore.
+            const ownBranch = `release/${major}.${minor}`;
+            let finalFromCandidate = false;
+            if (!prerelease && branch === "main") {
+              // A stable release, the same as it has always been.
+            } else if (prerelease && branch === ownBranch) {
+              // A candidate or beta.
+            } else if (!prerelease && branch === ownBranch) {
+              finalFromCandidate = true;
+            } else {
+              core.setFailed(
+                `${version} was merged into ${branch}, but it can only be released from ` +
+                (prerelease ? ownBranch : `main or ${ownBranch}`) + "."
+              );
+              return;
+            }
+            core.setOutput("is_release", "true");
+            core.setOutput("version", version);
+            core.setOutput("prerelease", String(prerelease));
+            core.setOutput("final_from_candidate", String(finalFromCandidate));
+            core.info(`Releasing ${version} from ${branch}.`);
 
   # The version in the tree has to agree with the branch that is publishing it. They are written by
   # the same workflow, so disagreement means something was edited by hand after review.
@@ -86,27 +119,50 @@ jobs:
     needs: metadata
     if: needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
+    # Reading the releases is all the decision below needs.
+    permissions:
+      contents: read
     outputs:
-      components: ${{ steps.components.outputs.components }}
+      becomes_latest: ${{ steps.latest.outputs.becomes_latest }}
       image_repository: ${{ steps.registry.outputs.repository }}
     steps:
+      # The whole history and the tags: the policy check reads the database of each release it
+      # upgrades from at that release's tag, and a final cut from a candidate is compared with the
+      # candidate's tag.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
+      # No cache. Nothing is installed here, so there is nothing to gain, and a cache that a
+      # release branch can restore is one that a less careful branch could have written.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
+          no-cache: true
       - env:
           VERSION: ${{ needs.metadata.outputs.version }}
+          PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
         run: |
           set -euo pipefail
           test "v$(bun -e 'console.log(require("./package.json").version)')" = "$VERSION"
-          grep -q "^## ${VERSION#v}$" CHANGELOG.md || {
-            echo "::error::CHANGELOG.md has no section for ${VERSION#v}."
-            exit 1
-          }
+          # A stable release has its own section, written when the release was prepared. A
+          # candidate or beta does not get one: its notes are what is under Unreleased, and a
+          # prerelease nobody can describe is not worth publishing. awk decides on its own: piped
+          # into `grep -q`, it is killed when grep stops reading early, and pipefail calls that a
+          # failure.
+          if [ "$PRERELEASE" = true ]; then
+            awk '$0=="## Unreleased"{f=1;next} /^## /{if(f)exit} f && /[^[:space:]]/{found=1; exit} END{exit !found}' CHANGELOG.md || {
+              echo "::error::CHANGELOG.md has nothing under Unreleased for ${VERSION#v}."
+              exit 1
+            }
+          else
+            grep -q "^## ${VERSION#v}$" CHANGELOG.md || {
+              echo "::error::CHANGELOG.md has no section for ${VERSION#v}."
+              exit 1
+            }
+          fi
       # release-policy.json must name this version. One left over from the previous release names
       # that release, and is refused here, before anything is built or pushed.
       - name: Validate release compatibility and source baseline
@@ -121,11 +177,34 @@ jobs:
           set -euo pipefail
           repository="ghcr.io/$(tr '[:upper:]' '[:lower:]' <<< "$REPOSITORY")"
           echo "repository=$repository" >> "$GITHUB_OUTPUT"
-      # The services published alongside the image above. Read from the tree rather than written
-      # here, because CI checks the same file when it proves those Dockerfiles still build, so the
-      # set that is tested and the set that is published cannot drift apart.
-      - id: components
-        run: echo "components=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
+      # A final ships what its candidates were tested as. Apart from the version and the changelog,
+      # it must not differ from the last candidate, and this script says where it does.
+      - if: needs.metadata.outputs.final_from_candidate == 'true'
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: bun scripts/release-candidate-check.ts "$GITHUB_SHA" "${VERSION#v}"
+      # Whether this release becomes the latest one, decided once, before anything is built. A
+      # candidate or beta never does. A stable release does only when nothing newer already is. A
+      # patch from main can be cut while a newer final from a release branch is out, before the
+      # merge back lands, and customer installers and whoever pulls `latest` must not be moved back
+      # to it. A re-run of an older release likewise leaves Latest where it is.
+      #
+      # The `latest` image tag follows this decision when the images are pushed. The GitHub
+      # release's Latest mark follows it too, but later: the release is published not Latest, and
+      # Desktop macOS signing marks it Latest once its signed installers are attached, so
+      # `releases/latest` never serves an installer macOS refuses (scripts/release-becomes-latest.sh
+      # is asked again there, so a newer release published meanwhile keeps Latest).
+      - id: latest
+        name: Decide whether this becomes the latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          becomes_latest="$(scripts/release-becomes-latest.sh)"
+          echo "becomes_latest=$becomes_latest" >> "$GITHUB_OUTPUT"
+          echo "$VERSION becomes the latest release: $becomes_latest."
 
   # The same checks CI runs, against the commit being published. This is the gate: nothing is built
   # or tagged unless they pass here, on this exact tree.
@@ -136,253 +215,57 @@ jobs:
     permissions:
       contents: read
 
-  # One image, built once. Everything downstream refers to it by digest, so what was tested is what
-  # is deployed and there is no second build to disagree with the first.
-  image:
-    name: image
+  # The images, built once from the commit that passed the checks above, and tagged with this
+  # release's version and `latest`. How they are built lives in `images.yml`, so every channel that
+  # publishes images builds them the same way and only the tags differ. `latest` follows the one
+  # decision made in `verify`, the same one that marks the GitHub release Latest: whoever pulls
+  # `latest` gets the newest stable release, never a candidate, a beta or an older patch.
+  images:
     needs: [metadata, verify, checks]
     if: needs.metadata.outputs.is_release == 'true'
-    runs-on: ubuntu-latest
+    uses: $/.github/workflows/images.yml
+    with:
+      ref: ${{ github.sha }}
+      tags: ${{ needs.metadata.outputs.version }}
+      latest: ${{ needs.verify.outputs.becomes_latest == 'true' }}
+      manifest_version: ${{ needs.metadata.outputs.version }}
     permissions:
       contents: read
       packages: write
-      # The attestation is signed with the workflow's own OIDC identity, so there is no key to hold
-      # and the signature says which workflow, repository and commit produced the image.
+      # The attestations are signed with the workflow's own OIDC identity, so there is no key to
+      # hold and the signature says which workflow, repository and commit produced each image.
       id-token: write
       attestations: write
-    outputs:
-      digest: ${{ steps.push.outputs.digest }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          push: true
-          build-args: |
-            OPENBOT_BUILD_VERSION=${{ needs.metadata.outputs.version }}
-            OPENBOT_BUILD_COMMIT=${{ github.sha }}
-            OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
-            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
-            OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
-          # The version, the commit, and a moving latest. The version tag is the one to deploy; the
-          # commit tag is how you find out what a running image actually contains.
-          tags: |
-            ${{ needs.verify.outputs.image_repository }}:${{ needs.metadata.outputs.version }}
-            ${{ needs.verify.outputs.image_repository }}:${{ github.sha }}
-            ${{ needs.verify.outputs.image_repository }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: true
-          sbom: true
-      # BuildKit's own attestations above travel inside the image. This one is the record GitHub
-      # holds, and it is what `gh attestation verify oci://${{ needs.verify.outputs.image_repository }}:vX.Y.Z
-      # -R CopilotKit/OpenBot` checks before anybody deploys it. Bound to the digest, never a tag,
-      # because a tag can be moved to point at something else afterwards.
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-name: ${{ needs.verify.outputs.image_repository }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
 
-  # The images the installer pulls instead of building. `docker-compose.yml` builds these from
-  # source on every machine, which needs a toolchain and several minutes a desktop install does not
-  # have. Published here, from the same commit as the image above, so a deployment and a laptop run
-  # the same code.
-  #
-  # Two architectures, because the machines are laptops: arm64 Macs and amd64 everything else. Built
-  # on native runners rather than under QEMU. Emulated `bun install` and `vite build` are a known
-  # source of release-day flakiness, and arm64 runners are free to a public repository, so emulation
-  # would be the slower and less reliable option at no saving.
-  component-images:
-    name: ${{ matrix.image }} ${{ matrix.platform.arch }}
-    needs: [metadata, verify, checks]
+  # The macOS and Windows installers, built from the commit that passed the checks, with the CLI
+  # bundled. A candidate or beta pins the images built above, so whoever tests it runs exactly what
+  # the final will ship. A stable release is what customers install, and it is not pinned. These are
+  # ad-hoc signed and not notarized, because this workflow holds no signing certificate. Desktop
+  # macOS signing, dispatched at the end of `github-release`, replaces the .dmg with a signed one
+  # built the same way, pinned or not (desktop/scripts/signed-build.ts).
+  desktop:
+    name: desktop
+    needs: [metadata, verify, checks, images]
     if: needs.metadata.outputs.is_release == 'true'
-    runs-on: ${{ matrix.platform.runner }}
+    uses: $/.github/workflows/desktop-build.yml
+    with:
+      ref: ${{ github.sha }}
+      channel: release
+      bundle_cli: true
+      manifest_artifact: ${{ needs.metadata.outputs.prerelease == 'true' && needs.images.outputs.manifest-artifact || '' }}
+      retention_days: 30
+      platforms: '["macos","windows"]'
+    secrets:
+      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
     permissions:
       contents: read
-      packages: write
-    strategy:
-      # One image failing should not hide whether the others build, and a half-finished run leaves
-      # nothing deployable: these builds are pushed untagged, and the tags are written by the job
-      # below only once both architectures of an image exist.
-      fail-fast: false
-      matrix:
-        image: ${{ fromJSON(needs.verify.outputs.components) }}
-        platform:
-          - arch: amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      # Pushed by digest and deliberately untagged. A tag written here would name one architecture,
-      # and the two jobs for one image would race to own it, so the last to finish would decide what
-      # the tag meant.
-      #
-      # zstd, not gzip. A pull is already a compressed transfer, so this is not about compressing
-      # something that was not; it is a better algorithm for the same job. `force-compression`
-      # reaches layers that came from somebody else's registry; without it only our own thin layers
-      # change and the saving rounds to nothing. The cost is that these images no longer share layers
-      # with a gzip pull of the same base, and that a client which cannot read zstd cannot read them,
-      # which is why this is here and not on the `openbot` image above: that one is pulled by servers
-      # with whatever they have, and these are pulled by an installer that ships Podman. After the
-      # Chromium-only `agent-computer` Dockerfile change, while keeping Node/npm/npx from the
-      # official Node 24.18.1 image, local zstd OCI layer descriptors measured 535.0 MiB on arm64
-      # and 518.1 MiB on amd64.
-      - id: push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: ${{ matrix.image }}/Dockerfile
-          platforms: linux/${{ matrix.platform.arch }}
-          build-args: |
-            OPENBOT_BUILD_VERSION=${{ needs.metadata.outputs.version }}
-            OPENBOT_BUILD_COMMIT=${{ github.sha }}
-            OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
-            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
-            OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
-          # `oci-mediatypes=true` because zstd layers have no Docker-schema2 media type to be
-          # described by. It is buildx's default for this exporter and is stated rather than
-          # assumed, since the push fails without it and the reason would not be obvious.
-          outputs: type=image,name=${{ needs.verify.outputs.image_repository }}-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,force-compression=true
-          # Scoped per image and per architecture. One shared scope would have ten builds
-          # overwriting each other's cache and none of them reading their own.
-          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
-          provenance: true
-          sbom: true
-      # A matrix job's outputs are not addressable by the jobs that consume them, so the digest
-      # travels as a file. One artifact per image and architecture, because same-named artifacts
-      # from different matrix legs collide.
-      - name: Record the digest
-        env:
-          DIGEST: ${{ steps.push.outputs.digest }}
-          ARCH: ${{ matrix.platform.arch }}
-        run: |
-          set -euo pipefail
-          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          mkdir -p digests
-          echo "$DIGEST" > "digests/$ARCH"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: digest-${{ matrix.image }}-${{ matrix.platform.arch }}
-          path: digests/
-          retention-days: 1
-
-  # Two per-architecture images become one reference. Whatever pulls it, a laptop or a cluster, names
-  # the manifest list and gets its own architecture without being told which one it is.
-  component-manifests:
-    name: ${{ matrix.image }} manifest
-    needs: [metadata, verify, checks, component-images]
-    if: needs.metadata.outputs.is_release == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      # Same identity and the same reason as the image above: the attestation says which workflow,
-      # repository and commit produced this, and there is no key to hold.
-      id-token: write
-      attestations: write
-    strategy:
-      fail-fast: false
-      matrix:
-        image: ${{ fromJSON(needs.verify.outputs.components) }}
-    steps:
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      # Exact artifact names, one per architecture, not a `digest-<image>-*` glob. An image whose
-      # name is a prefix of another — `agent-langgraph` of `agent-langgraph-agui` — would otherwise
-      # match the other's digest artifacts too, and `merge-multiple` would overwrite this image's own
-      # `amd64`/`arm64` file with the other's. That shipped once: this image's manifest list was built
-      # from a digest that lived in the other's repository, so the join failed with "not found".
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: digest-${{ matrix.image }}-amd64
-          path: digests
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: digest-${{ matrix.image }}-arm64
-          path: digests
-      - id: merge
-        name: Write the tags over both architectures
-        env:
-          REPOSITORY: ${{ needs.verify.outputs.image_repository }}-${{ matrix.image }}
-          VERSION: ${{ needs.metadata.outputs.version }}
-          COMMIT: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          # Both architectures or neither. A manifest list holding one of them installs on half the
-          # machines and looks exactly like one holding both until somebody's laptop says
-          # "no matching manifest".
-          refs=()
-          for arch in amd64 arm64; do
-            digest="$(cat "digests/$arch")"
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            refs+=("$REPOSITORY@$digest")
-          done
-          docker buildx imagetools create \
-            --tag "$REPOSITORY:$VERSION" \
-            --tag "$REPOSITORY:$COMMIT" \
-            --tag "$REPOSITORY:latest" \
-            "${refs[@]}"
-          # The list's own digest, which is what anything downstream pins. Read back from the
-          # registry rather than derived here, and checked, so a template that stops returning a
-          # digest fails now instead of writing something unusable into the release.
-          digest="$(docker buildx imagetools inspect "$REPOSITORY:$VERSION" --format '{{.Manifest.Digest}}')"
-          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-name: ${{ needs.verify.outputs.image_repository }}-${{ matrix.image }}
-          subject-digest: ${{ steps.merge.outputs.digest }}
-          push-to-registry: true
-      # For the same reason the digests above travel as files: a matrix cannot hand a value to a
-      # later job.
-      - name: Record the manifest
-        env:
-          NAME: ${{ matrix.image }}
-          REPOSITORY: ${{ needs.verify.outputs.image_repository }}-${{ matrix.image }}
-          DIGEST: ${{ steps.merge.outputs.digest }}
-        run: |
-          set -euo pipefail
-          mkdir -p manifests
-          jq -n --arg name "$NAME" --arg repository "$REPOSITORY" --arg digest "$DIGEST" \
-            '{name: $name, repository: $repository, digest: $digest}' > "manifests/$NAME.json"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: manifest-${{ matrix.image }}
-          path: manifests/
-          retention-days: 1
 
   # The tag and the release, last, so nothing is announced that was not built. The manifest is the
   # useful artefact: it pins the digest, so a deploy or a rollback names an exact image rather than a
   # tag somebody could move.
   github-release:
     name: tag and release
-    needs: [metadata, verify, checks, image, component-manifests]
+    needs: [metadata, verify, checks, images, desktop]
     if: needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -402,55 +285,19 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
+          no-cache: true
+      # The manifest the images above were recorded in, into the workspace, where the step below
+      # attaches it to the release.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: manifest-*
-          path: manifests
-          merge-multiple: true
-      - name: Write the image manifest
-        env:
-          VERSION: ${{ needs.metadata.outputs.version }}
-          DIGEST: ${{ needs.image.outputs.digest }}
-          COMMIT: ${{ github.sha }}
-          COMPONENTS: ${{ needs.verify.outputs.components }}
-        run: |
-          set -euo pipefail
-          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          # Every image this release published, or the file is not written. A missing entry is a
-          # service whatever reads this would quietly build from source instead, which is the thing
-          # publishing them was for, and it would only be noticed on somebody's laptop.
-          expected="$(jq -r 'length' <<< "$COMPONENTS")"
-          found="$(find manifests -name '*.json' -type f | wc -l | tr -d ' ')"
-          if [ "$found" != "$expected" ]; then
-            echo "::error::Expected $expected component manifests, found $found."
-            exit 1
-          fi
-          components="$(jq -s 'map({
-            (.name): {
-              repository: .repository,
-              digest: .digest,
-              reference: (.repository + "@" + .digest),
-            }
-          }) | add' manifests/*.json)"
-          # Keep the legacy image manifest intact for existing installers.
-          jq -n \
-            --arg version "$VERSION" \
-            --arg digest "$DIGEST" \
-            --arg commit "$COMMIT" \
-            --arg repository "${{ needs.verify.outputs.image_repository }}" \
-            --argjson components "$components" \
-            '{
-              version: $version,
-              commit: $commit,
-              images: ({
-                openbot: {
-                  repository: $repository,
-                  digest: $digest,
-                  reference: ($repository + "@" + $digest),
-                },
-              } + $components),
-            }' > container-images.json
-          cat container-images.json
+          name: ${{ needs.images.outputs.manifest-artifact }}
+      # The installers the desktop job built, one folder per platform under `installers/`, where the
+      # step below attaches them to the release. They are ad-hoc and unsigned, like every CI build,
+      # until the signing run replaces the .dmg.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: openbot-desktop-*
+          path: installers
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.19.0
@@ -507,10 +354,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.metadata.outputs.version }}
+          PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
+          FINAL_FROM_CANDIDATE: ${{ needs.metadata.outputs.final_from_candidate }}
+          BECOMES_LATEST: ${{ needs.verify.outputs.becomes_latest }}
         run: |
           set -euo pipefail
-          # The notes are the section a person wrote, not a list of commits.
-          awk -v v="## ${VERSION#v}" '$0==v{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md > notes.md
+          # The notes are the section a person wrote, not a list of commits. A candidate or beta
+          # has no section of its own yet, so its notes are what is under Unreleased.
+          if [ "$PRERELEASE" = true ]; then
+            section="## Unreleased"
+            # A prerelease is marked as one and never becomes the repository's latest release.
+            create_flags=(--prerelease --latest=false)
+            edit_flags=(--prerelease --latest=false)
+          else
+            section="## ${VERSION#v}"
+            # Never Latest here. The installers attached below are ad-hoc, and macOS refuses
+            # them, so `releases/latest` keeps serving the previous release's signed installers
+            # until Desktop macOS signing attaches this one's and marks it Latest, following
+            # `verify`'s decision (BECOMES_LATEST). A re-run leaves Latest as it is: the signing
+            # run may already have moved it here.
+            create_flags=(--latest=false)
+            edit_flags=()
+          fi
+          awk -v v="$section" '$0==v{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md > notes.md
           test -s notes.md
 
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" > tag.json 2>/dev/null; then
@@ -529,7 +395,7 @@ jobs:
             # content and kept above, so it is byte-identical here. The one exception is the
             # provenance bundle, replaced only when the published one attests assets that were
             # never published.
-            gh release edit "$VERSION" --title "$VERSION" --notes-file notes.md
+            gh release edit "$VERSION" --title "$VERSION" --notes-file notes.md "${edit_flags[@]}"
             for artifact in container-images.json release-assets/*; do
               name="$(basename "$artifact")"
               published="$OPENBOT_PUBLISHED_ASSETS/$name"
@@ -545,17 +411,153 @@ jobs:
             done
           else
             gh release create "$VERSION" container-images.json release-assets/* \
-              --title "$VERSION" --notes-file notes.md
+              --title "$VERSION" --notes-file notes.md "${create_flags[@]}"
           fi
+
+          # The installers are rebuilt on every run, so a rerun produces new bytes. They are kept
+          # out of the check above, which holds the release's source, chart and manifest to what
+          # was first published. An installer already on the release, such as the signed .dmg a
+          # signing run attached, is kept, so a re-run never puts the ad-hoc build back.
+          scripts/release-attach-installers.sh "$VERSION" installers
+          installers=()
+          while IFS= read -r installer; do
+            installers+=("$installer")
+          done < <(find installers -type f \( -name '*.dmg' -o -name '*.exe' \) | sort)
+
+          # Say which CLI the installers carry. Every platform bundles the same one, so the first
+          # build-version.json that names a CLI is the answer.
+          cli="no CLI bundled"
+          node=""
+          while IFS= read -r build; do
+            if jq -e '.cli' "$build" >/dev/null; then
+              cli="$(jq -r '.cli.name + "@" + .cli.version' "$build")"
+              node="$(jq -r '.node.version // empty' "$build")"
+              break
+            fi
+          done < <(find installers -type f -name build-version.json | sort)
+          {
+            echo "### Installers for $VERSION"
+            echo ""
+            for installer in "${installers[@]}"; do
+              echo "- \`$(basename "$installer")\`"
+            done
+            echo ""
+            echo "- CLI: $cli"
+            if [ -n "$node" ]; then
+              echo "- Node: $node"
+            fi
+            # A final cut from a candidate is checked against that candidate, which includes the
+            # CLI pin, so the CLI here is the one the candidate was tested with.
+            if [ "$FINAL_FROM_CANDIDATE" = true ]; then
+              echo "- This is the CLI the candidate pinned."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
       # The tag above was created with GITHUB_TOKEN, and GitHub starts no workflow from that push, so
       # Mac signing is dispatched explicitly; a dispatch is the one event GITHUB_TOKEN may start. On
       # the tag, so the signed build is this commit and carries the release version. The
-      # `macos-signing` environment's required reviewers still approve the signing itself.
+      # `macos-signing` environment's required reviewers still approve the signing itself. A
+      # candidate's signed build is pinned to this release's images, like its ad-hoc one. A stable
+      # release becomes Latest there, once its signed installers are attached, when `verify` said
+      # it should.
       - name: Start signing the Mac build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.metadata.outputs.version }}
+          BECOMES_LATEST: ${{ needs.verify.outputs.becomes_latest }}
         run: |
           set -euo pipefail
           gh workflow run desktop-macos-signing.yml -R "$GITHUB_REPOSITORY" --ref "$VERSION" \
-            -f signing-mode=developer-id -f release-tag="$VERSION"
+            -f signing-mode=developer-id -f release-tag="$VERSION" -f make-latest="$BECOMES_LATEST"
+
+  # A final cut from a candidate is published from `release/X.Y`, so main has not seen it: the
+  # version bump, the changelog section and any fix made while the candidates were tested are all
+  # on the release branch only. This opens the PR that brings them home. It is a PR and not a push,
+  # so a person reviews it, and it only opens, so a conflict is a conflict for a person to resolve.
+  # A PR opened with the workflow's token does not start CI, so the body says to push or close and
+  # reopen it before merging.
+  #
+  # The PR comes from `merge-back/vX.Y.Z`, a branch made at the tip of the release branch, and not
+  # from the release branch itself. The first candidate pinned `desktop/intelligence-cli.json` to
+  # an exact CLI version, and a final cannot change it. Merged as it is, that pin would replace
+  # main's own choice, such as `latest`, and every later build from main would keep the old CLI.
+  # So main's file is put back on the merge-back branch first. The branch is outside `release/`,
+  # so a push to it is not a release.
+  merge-back:
+    name: merge back
+    needs: [metadata, github-release]
+    if: needs.metadata.outputs.final_from_candidate == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Open the merge-back PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          CLI_FILE: desktop/intelligence-cli.json
+        run: |
+          set -euo pipefail
+          # The release branch is the one the version names: v0.3.0 was cut from release/0.3.
+          if ! [[ "$VERSION" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            echo "::error::'$VERSION' is not a stable version, so it has no release branch."
+            exit 1
+          fi
+          BRANCH="release/${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          MERGE_BRANCH="merge-back/$VERSION"
+          repo="repos/$GITHUB_REPOSITORY"
+
+          # A re-run, or a PR somebody opened by hand, is already what this job is for.
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --head "$MERGE_BRANCH" \
+            --state open --json url --jq '.[0].url // empty')"
+          if [ -n "$existing" ]; then
+            echo "A PR for $MERGE_BRANCH is already open: $existing"
+            exit 0
+          fi
+
+          # Reads the file at a ref as "<blob sha> <base64 content>". Prints nothing when the
+          # file is not there. Any other error stops the run.
+          read_cli() {
+            local out
+            if out="$(gh api "$repo/contents/$CLI_FILE?ref=$1" \
+              --jq '.sha + " " + (.content | gsub("\n"; ""))' 2>&1)"; then
+              printf '%s\n' "$out"
+            elif ! grep -q 'HTTP 404' <<<"$out"; then
+              echo "::error::Could not read $CLI_FILE on $1: $out" >&2
+              return 1
+            fi
+          }
+
+          # A re-run after a failure may find the branch already made. It is used as it is.
+          if out="$(gh api "$repo/git/ref/heads/$MERGE_BRANCH" --jq .object.sha 2>&1)"; then
+            echo "$MERGE_BRANCH already exists at $out."
+          elif grep -q 'HTTP 404' <<<"$out"; then
+            tip="$(gh api "$repo/git/ref/heads/$BRANCH" --jq .object.sha)"
+            gh api "$repo/git/refs" -f ref="refs/heads/$MERGE_BRANCH" -f sha="$tip" >/dev/null
+            echo "Created $MERGE_BRANCH at $tip, the tip of $BRANCH."
+          else
+            echo "::error::Could not read $MERGE_BRANCH: $out"
+            exit 1
+          fi
+
+          main_cli="$(read_cli main)"
+          branch_cli="$(read_cli "$MERGE_BRANCH")"
+          if [ -z "$main_cli" ]; then
+            echo "main has no $CLI_FILE, so the release branch's is left as it is."
+          elif [ "${main_cli#* }" = "${branch_cli#* }" ]; then
+            echo "$CLI_FILE is the same on main and $MERGE_BRANCH."
+          else
+            put=(-X PUT "$repo/contents/$CLI_FILE" -f message="Keep main's Intelligence CLI choice"
+              -f content="${main_cli#* }" -f branch="$MERGE_BRANCH")
+            if [ -n "$branch_cli" ]; then
+              put+=(-f sha="${branch_cli%% *}")
+            fi
+            gh api "${put[@]}" >/dev/null
+            echo "Put main's $CLI_FILE back on $MERGE_BRANCH."
+          fi
+
+          body="$VERSION was released from $BRANCH. This brings its version and the fixes made on that branch to main."
+          body="$body"$'\n\n'"It comes from $MERGE_BRANCH, which is $BRANCH with main's own \`$CLI_FILE\`. The release pinned the Intelligence CLI to an exact version, and main keeps its own choice."
+          body="$body"$'\n\n'"A PR opened with GITHUB_TOKEN does not trigger CI. Push an empty commit to $MERGE_BRANCH or close and reopen this PR to run the checks before merging."
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$MERGE_BRANCH" \
+            --title "Merge $BRANCH back into main" --body "$body"

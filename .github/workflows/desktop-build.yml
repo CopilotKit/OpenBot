@@ -1,0 +1,283 @@
+name: Desktop build
+
+# The Desktop installer build, shared by every workflow that produces one. A pull request builds an
+# unpinned installer with no CLI and keeps it for a week; an internal build or a release candidate
+# bundles the CLI and pins the deployment the images workflow just published. The steps that prove
+# the tree are the same in every case, so they live here once.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to build.
+        type: string
+        required: true
+      channel:
+        description: The build channel passed to desktop-version.ts, internal or release.
+        type: string
+        default: internal
+      bundle_cli:
+        description: Bundle the CLI and its Node runtime into the macOS and Windows installers.
+        type: boolean
+        default: false
+      manifest_artifact:
+        description: The artifact holding container-images.json to pin into the installer. Empty builds an unpinned installer.
+        type: string
+        default: ""
+      retention_days:
+        description: How long the installers are kept.
+        type: number
+        default: 7
+      platforms:
+        description: A JSON array of platforms to build, from macos, windows and linux.
+        type: string
+        default: '["macos","windows"]'
+    secrets:
+      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:
+        required: false
+
+permissions:
+  contents: read
+
+# The identity this build updates from, compiled into the app (`updates.rs`). The same expressions
+# desktop.yml uses; a called workflow does not inherit its caller's `env`.
+env:
+  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
+  OPENBOT_RELEASE_REPOSITORY: ${{ github.repository }}
+  OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
+
+jobs:
+  # The three artifacts, ad-hoc signed on macOS and unsigned on Windows. Signing and notarizing
+  # need certificates this workflow deliberately does not hold; Desktop macOS signing and Desktop
+  # Windows signing have them. This proves the tree builds into an app on each platform, which is
+  # the thing that breaks when a dependency is not portable.
+  app:
+    name: app (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform == 'macos' && 'macos-latest' || matrix.platform == 'windows' && 'windows-latest' || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.platforms) }}
+    steps:
+      # A caller can only pass a string, so refuse a channel desktop-version.ts would not know
+      # before spending a build on it.
+      - name: Check the channel
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          case "$CHANNEL" in
+            internal|release) ;;
+            *) echo "::error::channel must be internal or release, got '$CHANNEL'"; exit 1 ;;
+          esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      # No cache, Rust or Bun, for a release: its installers are attached to the release, and they
+      # must come from the tree and the lockfiles, not from anything an earlier run left behind. A
+      # run on a release branch can restore caches written on main. The same rule as the signing
+      # workflows and the tag-and-release job.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: ${{ inputs.channel == 'release' }}
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - if: inputs.channel != 'release'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: desktop/src-tauri
+          key: ${{ matrix.platform }}
+      - if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - run: bun run typecheck
+        working-directory: desktop
+      - name: Desktop version regressions
+        run: bun test scripts/desktop-version.test.ts
+        working-directory: desktop
+      - name: Prepare build version
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: bun scripts/desktop-version.ts "$CHANNEL"
+        working-directory: desktop
+      # The CLI ships only in the macOS and Windows installers. A tree from before the bundled CLI
+      # existed has no overlay to add it, so it builds without one and says so rather than failing.
+      - name: Bundle the CLI
+        id: cli
+        if: inputs.bundle_cli && matrix.platform != 'linux'
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          if ! test -f desktop/src-tauri/tauri.bundled-cli.conf.json; then
+            echo "No CLI bundled: this tree has no tauri.bundled-cli.conf.json" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          case "$PLATFORM" in
+            macos) bun desktop/scripts/cli-bundle.ts darwin arm64 ;;
+            windows) bun desktop/scripts/cli-bundle.ts win32 x64 ;;
+          esac
+          echo "bundled=true" >> "$GITHUB_OUTPUT"
+      # The image manifest the images workflow published for this commit. build.rs compiles it into
+      # the installer, so the app starts the exact images that were built with it.
+      - name: Download the pinned image manifest
+        if: inputs.manifest_artifact != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.manifest_artifact }}
+          path: ${{ runner.temp }}/pinned
+      - name: Locate the pinned image manifest
+        id: pinned
+        if: inputs.manifest_artifact != ''
+        shell: bash
+        run: |
+          manifest="$RUNNER_TEMP/pinned/container-images.json"
+          test -f "$manifest"
+          echo "path=$manifest" >> "$GITHUB_OUTPUT"
+      # `tauri build`, not `cargo build --release`. tauri-build emits `cargo:rustc-cfg=dev`
+      # for anything the Tauri CLI did not build, so a plain cargo release binary still points
+      # at the dev server and shows "Could not connect to localhost" when it is run. That
+      # compiles, proves the Rust, and proves nothing about the thing people install.
+      #
+      # Bundling is included because the bundle is the product, and because the failures live
+      # there: the Windows resource step needs an .ico, and macOS wants an .icns, neither of
+      # which a compile would miss.
+      #
+      # The CLI and pin variables are exported here and nowhere else, so the Rust tests below
+      # build unpinned. They are exported only when set, because build.rs reads any value of
+      # OPENBOT_PINNED_DEPLOYMENT, even an empty one, as a path.
+      - name: Build the installer
+        shell: bash
+        working-directory: desktop
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ matrix.platform == 'macos' && '-' || '' }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
+          BUNDLED_CLI: ${{ steps.cli.outputs.bundled }}
+          PINNED_MANIFEST: ${{ steps.pinned.outputs.path }}
+        run: |
+          args=(--config src-tauri/tauri.build-version.conf.json)
+          if [ "$BUNDLED_CLI" = "true" ]; then
+            args+=(--config src-tauri/tauri.bundled-cli.conf.json)
+            export OPENBOT_BUNDLED_CLI=1
+          fi
+          if [ -n "$PINNED_MANIFEST" ]; then
+            export OPENBOT_PINNED_DEPLOYMENT="$PINNED_MANIFEST"
+          fi
+          bun run tauri build "${args[@]}"
+      # Say what this installer is, on the run's page, so nobody has to unpack it to find out.
+      - name: Summarize the build
+        shell: bash
+        env:
+          COMMIT: ${{ inputs.ref }}
+          CHANNEL: ${{ inputs.channel }}
+          PLATFORM: ${{ matrix.platform }}
+          PINNED_MANIFEST: ${{ steps.pinned.outputs.path }}
+        run: |
+          if [ -n "$PINNED_MANIFEST" ]; then
+            pinned="$(jq -r '.version' "$PINNED_MANIFEST")"
+          else
+            pinned="unpinned"
+          fi
+          if jq -e '.cli' desktop/build-version.json > /dev/null; then
+            cli="$(jq -c '.cli' desktop/build-version.json)"
+            node="$(jq -c '.node' desktop/build-version.json)"
+          else
+            cli="no CLI bundled"
+            node="no CLI bundled"
+          fi
+          {
+            echo "### Desktop installer ($PLATFORM)"
+            echo ""
+            echo "- Commit: \`$COMMIT\`"
+            echo "- Channel: $CHANNEL"
+            echo "- Pinned manifest: $pinned"
+            echo "- CLI: $cli"
+            echo "- Node: $node"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify packaged Mac version and ad-hoc signature
+        if: matrix.platform == 'macos'
+        run: |
+          # Tauri removes the temporary .app after producing a DMG. Check its payload.
+          images=(desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          test "${#images[@]}" -eq 1
+          mount="$RUNNER_TEMP/openbot-version-check"
+          mkdir -p "$mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "${images[0]}"
+          trap 'hdiutil detach "$mount"' EXIT
+          export OPENBOT_VERIFY_APP="$mount/OpenBot.app"
+          python3 - <<'PY'
+          import json, os, pathlib, plistlib, subprocess
+          build = json.loads(pathlib.Path('desktop/build-version.json').read_text())
+          app = pathlib.Path(os.environ['OPENBOT_VERIFY_APP'])
+          info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+          # A prerelease version keeps numeric Apple fields: only its major.minor.patch goes there.
+          apple = build['releaseVersion'].split('-')[0]
+          for key, expected in {
+              'CFBundleShortVersionString': apple,
+              'CFBundleVersion': apple,
+              'OpenBotBuildVersion': build['version'],
+              'OpenBotSourceRevision': build['sourceSha'],
+          }.items():
+              if info.get(key) != expected:
+                  raise SystemExit(f'{key}: expected {expected}, got {info.get(key)}')
+          subprocess.run(['codesign', '--verify', '--deep', '--strict', '--verbose=2', str(app)], check=True)
+          print(f"Verified packaged Mac version: {build['version']}")
+          PY
+      # Frontend assets and platform dependencies are ready after the packaged build.
+      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in.
+      - name: Rust regression tests
+        run: cargo test --locked --lib --bins
+        working-directory: desktop/src-tauri
+      # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
+      # the install that writes its manifests. The host name and extension id come from
+      # shared/recorder-extension.json, which the Rust reads at compile time.
+      - name: Recorder native host tests
+        run: cargo test --locked --test recorder_host
+        working-directory: desktop/src-tauri
+      # Only a release build is a GUI-subsystem executable on Windows, and only a release build proves
+      # the debug-only test seam is absent.
+      - name: Recorder native host tests (release)
+        if: matrix.platform == 'windows'
+        run: cargo test --locked --release --test recorder_host
+        working-directory: desktop/src-tauri
+      # Hosted Windows runners are administrators. Exercise setup again with an actual Users-only
+      # account: DISM's feature reads worked as CI's administrator but refused ordinary app users.
+      - name: Windows standard-user setup regression
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        working-directory: desktop/src-tauri
+        run: |
+          $messages = @(cargo test --locked --lib --no-run --message-format=json)
+          if ($LASTEXITCODE -ne 0) { throw 'Could not build the native setup test.' }
+          $executables = @($messages | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object {
+            $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'openbot_desktop_lib' -and
+            $_.profile.test -and $_.executable
+          } | ForEach-Object { $_.executable } | Select-Object -Unique)
+          if ($executables.Count -ne 1) { throw 'Expected exactly one current desktop library test executable.' }
+          # Windows PowerShell's credentialed launch matches the desktop and native validation.
+          # PowerShell Core inherited the CI runner's profile directories into the temporary user.
+          $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ../scripts/test-windows-standard-user.ps1 -TestExecutable $executables[0]
+          if ($LASTEXITCODE -ne 0) { throw 'The native standard-user setup test failed.' }
+      # Keep what was built. Without this the only way to try an installer is to build one on
+      # the machine you are trying it on, which is not what anybody installs.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: openbot-desktop-${{ matrix.platform }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**/*.dmg
+            desktop/src-tauri/target/release/bundle/**/*.exe
+            desktop/src-tauri/target/release/bundle/**/*.AppImage
+            desktop/src-tauri/target/release/bundle/**/*.deb
+            desktop/src-tauri/target/release/bundle/**/*.rpm
+            desktop/build-version.json
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
