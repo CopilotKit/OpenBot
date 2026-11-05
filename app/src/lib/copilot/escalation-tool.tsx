@@ -60,8 +60,18 @@ export function EscalationTool() {
             {given?.why ? (
               <p className="text-muted-foreground">{given.why}</p>
             ) : null}
+            {/*
+             * Numbered when there are several, so "the second one" means something. One decision
+             * is just the question, and a list of one numbered "1." reads as if more were missing.
+             */}
             {given?.parts?.length ? (
-              <ol className="list-decimal space-y-0.5 pl-5">
+              <ol
+                className={
+                  given.parts.length > 1
+                    ? "list-decimal space-y-0.5 pl-5"
+                    : "list-none"
+                }
+              >
                 {given.parts.map((part, index) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: the parts arrive as one list and never reorder
                   <li key={index}>
