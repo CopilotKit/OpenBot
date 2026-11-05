@@ -359,7 +359,11 @@ function podAnnotations(
   name: string,
 ): Record<string, string> {
   const workload = docs.find((d) => d.kind === kind && component(name)(d)) as
-    | { spec?: { template?: { metadata?: { annotations?: Record<string, string> } } } }
+    | {
+        spec?: {
+          template?: { metadata?: { annotations?: Record<string, string> } };
+        };
+      }
     | undefined;
   return workload?.spec?.template?.metadata?.annotations ?? {};
 }
