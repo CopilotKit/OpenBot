@@ -962,32 +962,6 @@ than anything that names the cause.
 {{- end -}}
 
 {{- /*
-  The operator's credential for creating the openbot Learning container (values: config.learning.setup).
-
-  Read through `default dict` at every level, because `setup` is a key this chart did not have before
-  and `helm upgrade --reuse-values` hands back the previous release's values without it.
-*/}}
-{{- define "openbot.learningSetup" -}}
-{{- $learning := .Values.config.learning | default dict -}}
-{{- toYaml ($learning.setup | default dict) -}}
-{{- end -}}
-
-{{- /* INTELLIGENCE_SERVICE_TOKEN and INTELLIGENCE_PROJECT_ID, when the operator named a token Secret. */}}
-{{- define "openbot.learningServiceTokenEnv" -}}
-{{- $setup := include "openbot.learningSetup" . | fromYaml -}}
-{{- $token := $setup.serviceTokenSecret | default dict -}}
-{{- if $token.name }}
-- name: INTELLIGENCE_SERVICE_TOKEN
-  valueFrom:
-    secretKeyRef:
-      name: {{ $token.name | quote }}
-      key: {{ $token.key | default "token" | quote }}
-- name: INTELLIGENCE_PROJECT_ID
-  value: {{ $setup.projectId | toString | quote }}
-{{- end }}
-{{- end -}}
-
-{{- /*
   A number from values written out in digits, which is how the computer reads its settings.
 
   A whole number in a values file arrives as a float, because Helm reads values through JSON, and a
