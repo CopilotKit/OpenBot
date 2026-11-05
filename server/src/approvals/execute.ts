@@ -42,6 +42,8 @@ export type ApprovedActionDependencies = {
     actorId: string;
     initiator: AuditInitiator;
     credentialActorId?: string;
+    /** The conversation the approved action was asked in, as the live call would have known it. */
+    threadId?: string;
   }): Promise<{ text: string; isError: boolean }>;
   /**
    * Whose connected account a call goes out on: the live call path's rule (a Team Bot reaches its
@@ -190,6 +192,8 @@ export function createApprovedActionExecutor(deps: ApprovedActionDependencies) {
         actorId: action.actorId,
         initiator,
         ...(credentialActorId === action.actorId ? {} : { credentialActorId }),
+        // Carried explicitly: an approved call may run from a sweep, long after its run ended.
+        threadId: action.threadId,
       });
     } catch (error) {
       if (error instanceof PluginRefusedError)

@@ -107,6 +107,12 @@ export function callMethods(context: StoreContext) {
        * reaching its owner's account (team-bots/team-bots.ts). Every gate is still the asker's.
        */
       credentialActorId?: string;
+      /**
+       * The thread of the run making the call. A Bot running here is in a run already, and its
+       * thread is read from that run when this is absent; a Bot running its own loop says it
+       * through its signed run assertion. See the transport's `threadId`.
+       */
+      threadId?: string;
     }): Promise<{ text: string; isError: boolean }> {
       const [serverId, ...rest] = input.ref.split("/");
       const toolName = rest.join("/");
@@ -573,6 +579,7 @@ export function callMethods(context: StoreContext) {
             tokenHeader: tokenHeaderFor(entry),
             actorId: vendorUserId ?? input.credentialActorId ?? input.actorId,
             botId: input.botId,
+            threadId: input.threadId ?? currentApprovalContext()?.threadId,
           },
           /*
            * THE NAME THE VENDOR KNOWS, WHICH IS THE ONLY ONE IT WILL ANSWER TO. `toolName` is this

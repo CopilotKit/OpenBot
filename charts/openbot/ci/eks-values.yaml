@@ -82,3 +82,7 @@ computers:
     # Named here rather than in the chart, which is the whole point of a per-target values file: the
     # chart must not name `gp3`, and a deployment on EKS should.
     storageClass: gp3
+
+# Managed Intelligence, named in config.intelligence above, rather than the one the chart installs.
+intelligence:
+  enabled: false

@@ -8,14 +8,22 @@ import {
   cliEnvironment,
   cliLoginPresent,
   cmdLineSafe,
+  createLearningContainer,
   ensureLearningContainer,
   type KeyIntelligence,
+  keyIntelligence,
   learningSetupInstructions,
   MANAGED_API,
   npxCommand,
   runNpx,
   stopProcessTree,
 } from "../src/learning/ensure-container";
+import {
+  type FakeIntelligence,
+  fakeIntelligence,
+  intelligenceError,
+  RUNTIME_KEY,
+} from "./support/intelligence-learning";
 
 const SELF_HOSTED = "https://intelligence.customer.example";
 const directories: string[] = [];
@@ -39,7 +47,7 @@ function key(answers: ContainerProbe[]): KeyIntelligence & {
   return view;
 }
 
-function intelligence(status: number, body: unknown) {
+function intelligenceFetch(status: number, body: unknown) {
   const requests: { url: string; init: RequestInit }[] = [];
   const fetch = Object.assign(
     async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -55,7 +63,7 @@ const serviceToken = { token: "synthetic-service-token", projectId: "7" };
 
 describe("creating the container with a service token", () => {
   test("posts the openbot container to the token's project and proves it with the key", async () => {
-    const api = intelligence(201, {
+    const api = intelligenceFetch(201, {
       container: { id: "openbot", projectId: 7, name: "OpenBot" },
     });
     const runtimeKey = key(["absent", "present"]);
@@ -88,7 +96,7 @@ describe("creating the container with a service token", () => {
   });
 
   test("one that already exists is present, not an error", async () => {
-    const api = intelligence(409, {
+    const api = intelligenceFetch(409, {
       error: { code: "LEARNING_CONTAINER_ALREADY_EXISTS" },
     });
     expect(
@@ -104,7 +112,7 @@ describe("creating the container with a service token", () => {
   });
 
   test("a refused token says where service tokens work, and nothing is assigned", async () => {
-    const api = intelligence(403, { error: { code: "FORBIDDEN" } });
+    const api = intelligenceFetch(403, { error: { code: "FORBIDDEN" } });
     await expect(
       ensureLearningContainer({
         directory: tmpdir(),
@@ -118,7 +126,7 @@ describe("creating the container with a service token", () => {
   });
 
   test("a container in another project is reported, not assigned", async () => {
-    const wrongProject = intelligence(201, {
+    const wrongProject = intelligenceFetch(201, {
       container: { id: "openbot", projectId: 8 },
     });
     await expect(
@@ -131,7 +139,7 @@ describe("creating the container with a service token", () => {
         fetch: wrongProject.fetch,
       }),
     ).rejects.toThrow("other than the openbot container");
-    const invisible = intelligence(201, {
+    const invisible = intelligenceFetch(201, {
       container: { id: "openbot", projectId: 7 },
     });
     await expect(
@@ -147,7 +155,7 @@ describe("creating the container with a service token", () => {
   });
 
   test("a container already there never reaches Intelligence's write route", async () => {
-    const api = intelligence(500, {});
+    const api = intelligenceFetch(500, {});
     expect(
       await ensureLearningContainer({
         directory: tmpdir(),
@@ -310,4 +318,117 @@ describe("the CopilotKit CLI", () => {
       expect(Date.now() - started).toBeLessThan(4_000);
     },
   );
+});
+
+describe("creating a container with the runtime key", () => {
+  const served: FakeIntelligence[] = [];
+  afterEach(() => {
+    for (const intelligence of served.splice(0)) intelligence.stop();
+  });
+  const serve = (
+    version: Parameters<typeof fakeIntelligence>[0],
+    containers: string[] = [],
+  ) => {
+    const intelligence = fakeIntelligence(version, { containers });
+    served.push(intelligence);
+    return intelligence;
+  };
+  const credentials = (intelligence: FakeIntelligence) => ({
+    directory: tmpdir(),
+    apiUrl: intelligence.url,
+    nonInteractive: true,
+    key: keyIntelligence(intelligence.url, RUNTIME_KEY, "ws://127.0.0.1:9"),
+  });
+  const person = { id: "user-4f2a9c", name: "Ada" };
+
+  test("makes a person's space in the key's own project, naming no project", async () => {
+    const intelligence = serve("current");
+    expect(
+      await createLearningContainer({
+        ...credentials(intelligence),
+        container: person,
+        // Never reached: the key could do it.
+        serviceToken,
+      }),
+    ).toBe("created");
+    const posts = intelligence.requests.filter((r) => r.method === "POST");
+    expect(posts).toEqual([
+      {
+        method: "POST",
+        path: "/api/v1/learning/containers",
+        auth: `Bearer ${RUNTIME_KEY}`,
+        body: { id: "user-4f2a9c", name: "Ada" },
+      },
+    ]);
+    expect(intelligence.containers.has("user-4f2a9c")).toBe(true);
+  });
+
+  test("one already there is present, whether Intelligence says 200 or 409", async () => {
+    expect(
+      await createLearningContainer({
+        ...credentials(serve("current", ["user-4f2a9c"])),
+        container: person,
+      }),
+    ).toBe("present");
+    // An Intelligence that reports a taken id as a conflict instead.
+    const conflict = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => intelligenceError("LEARNING_CONTAINER_ALREADY_EXISTS"),
+    });
+    try {
+      const url = `http://127.0.0.1:${conflict.port}`;
+      expect(
+        await createLearningContainer({
+          directory: tmpdir(),
+          apiUrl: url,
+          nonInteractive: true,
+          key: keyIntelligence(url, RUNTIME_KEY, "ws://127.0.0.1:9"),
+          container: person,
+        }),
+      ).toBe("present");
+    } finally {
+      conflict.stop(true);
+    }
+  });
+
+  test("on Intelligence 0.15.1, which has no such route, the other credentials are tried", async () => {
+    const intelligence = serve("0.15.1");
+    // Nothing else here: skipped, as before, rather than an error.
+    expect(
+      await createLearningContainer({
+        ...credentials(intelligence),
+        container: person,
+      }),
+    ).toBe("skipped");
+    // A service token is the next one tried.
+    const token = intelligenceFetch(201, {
+      container: { id: "user-4f2a9c", projectId: 7, name: "Ada" },
+    });
+    expect(
+      await createLearningContainer({
+        ...credentials(intelligence),
+        container: person,
+        serviceToken,
+        fetch: token.fetch,
+      }),
+    ).toBe("created");
+    expect(token.requests.map((r) => r.url)).toEqual([
+      `${intelligence.url}/api/learning/projects/7/containers`,
+    ]);
+  });
+
+  test("ensuring the openbot default proves it with the key afterwards", async () => {
+    const intelligence = serve("current");
+    expect(await ensureLearningContainer(credentials(intelligence))).toBe(
+      "created",
+    );
+    expect(intelligence.containers.has("openbot")).toBe(true);
+  });
+
+  test("Learning switched off in Intelligence is said, not reported as unreachable", async () => {
+    await expect(
+      ensureLearningContainer(credentials(serve("learning-off"))),
+    ).rejects.toThrow("Learning is switched off in this Intelligence");
+  });
 });

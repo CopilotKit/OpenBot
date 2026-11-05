@@ -21,6 +21,7 @@
  * implementations of the same hard thing, one of which nobody tests.
  */
 
+import { untitledLine } from "@openbot/shared/conversation-title";
 import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
 import {
   and,
@@ -35,11 +36,14 @@ import {
   ne,
   sql,
 } from "drizzle-orm";
+import { ROSTER_ORDER } from "../channels/routes";
+import { oneLine } from "../channels/text";
 import type { Database } from "../db/client";
 import {
   channelAgents,
   channelMemberships,
   channels,
+  intelligenceChannelMappings,
   routineRuns,
   routineSweeps,
   routines,
@@ -80,14 +84,14 @@ export const MAX_RUN_ERROR = 400;
 const FAILURE_SCAN_LIMIT = 20;
 
 const NO_SHARED_CHANNEL =
-  "I can only post into a channel you and I are both in.";
+  "I can only post into a conversation you and I are both in.";
 const NO_CHANNEL_AT_ALL =
-  "We have no channel for me to post into. Start one and ask again.";
+  "We have no conversation for me to post into. Start one and ask again.";
 const INSTRUCTION_EMPTY = "A routine needs an instruction to carry out.";
 const INSTRUCTION_TOO_LONG = `An instruction can be at most ${MAX_INSTRUCTION_CODE_POINTS} characters.`;
 const TOO_MANY_ENABLED = `You already have ${MAX_ENABLED_ROUTINES} routines switched on. Switch one off before adding another.`;
 
-/** How many names an ambiguity refusal reads out before it gives up and says "and others". */
+/** How many conversations a refusal reads out before it gives up and says "and others". */
 const MAX_NAMED_CHANNELS = 5;
 
 export type RoutineRunOutcome = "succeeded" | "failed" | "skipped" | "waiting";
@@ -128,6 +132,11 @@ export type RoutineSummary = {
   channelId: string;
   /** The target channel's name, or null when the row is gone entirely rather than soft-deleted. */
   channelName: string | null;
+  /**
+   * The target conversation as the sidebar titles it, or null when the row is gone entirely. What
+   * a Bot names it by: the name is only its Bots' names, the same for every conversation with them.
+   */
+  channelTitle: string | null;
   /** Whether the target channel was deleted. A broken routine is shown, not hidden. */
   channelDeleted: boolean;
   /** The most recent firing, or null when it has never fired. */
@@ -138,6 +147,14 @@ export type RoutineInput = {
   ownerUserId: string;
   agentId: string;
   channelId?: string;
+  /**
+   * The thread of the run that asked, when it ran in one.
+   *
+   * With no `channelId`, the routine posts into the conversation this thread belongs to, which is
+   * what "every morning, post the summary here" means. Never a channel by itself: it is checked
+   * against the owner's own threads, and a thread that is not one of theirs is ignored.
+   */
+  threadId?: string;
   instruction: string;
   cron: string;
   timezone?: string;
@@ -324,48 +341,82 @@ function nextRunFor(cron: string, timezone: string, after: Date): Date {
   }
 }
 
+/** One conversation a routine could post into, as much of it as naming it needs. */
+type Conversation = {
+  id: string;
+  summary: string | null;
+  opening: string | null;
+  lastMessage: string | null;
+};
+
+/** As long as a conversation's own title may be, so a preview standing in for one is no longer. */
+const MAX_TITLE_GRAPHEMES = 60;
+
 /**
- * "A", "A, B", or five names and "and others" — a sentence, not a list a client renders.
+ * A conversation as the sidebar names it: its title once it has one, the person's first words until
+ * then (the last thing said where nobody spoke first), and "New conversation" before anything was.
  *
- * A name alone is not always enough to ask by: a real account turned up six channels all named
- * "General Assistant" with the same Bot, and a refusal built from names alone read "General
- * Assistant, General Assistant, … and others" — circular, because the person cannot answer it and
- * the model cannot map an answer back to a channelId. So every candidate whose name is shared by
- * another candidate gets its full id appended in parentheses; the id is the one thing the model can
- * pass back as `channelId` when names cannot tell two channels apart, and a person pasting it back
- * is ugly but functional. A candidate with a unique name stays bare, so the common case — and the
- * sentence's length — is unaffected by a collision elsewhere in the list.
+ * The same rule as the sidebar row (`threadTitle` in app/src/components/app-sidebar/channel.tsx),
+ * read from the same columns, because the person picks from this list by recognising what they
+ * see in the sidebar. The channel's NAME is never used: it is only its Bots' names, which is how a
+ * real account came to be offered six conversations all called "General Assistant".
  */
-function nameThem(candidates: { id: string; name: string }[]): string {
-  const counts = new Map<string, number>();
-  for (const candidate of candidates) {
-    counts.set(candidate.name, (counts.get(candidate.name) ?? 0) + 1);
-  }
-  const labels = candidates.map((candidate) =>
-    (counts.get(candidate.name) ?? 0) > 1
-      ? `${candidate.name} (${candidate.id})`
-      : candidate.name,
-  );
-  if (labels.length <= MAX_NAMED_CHANNELS) return labels.join(", ");
-  return [...labels.slice(0, MAX_NAMED_CHANNELS), "and others"].join(", ");
+function conversationTitle(conversation: {
+  summary: string | null;
+  opening: string | null;
+  lastMessage: string | null;
+}): string {
+  const summary = conversation.summary?.trim();
+  if (summary) return oneLine(summary, MAX_TITLE_GRAPHEMES);
+  const untitled = untitledLine(conversation);
+  if (untitled) return oneLine(untitled, MAX_TITLE_GRAPHEMES);
+  return "New conversation";
+}
+
+/**
+ * Each conversation by its title and its id, the run's own one marked, then "and others" past five.
+ *
+ * The title is what the person recognises and the id is what the model passes back, so both go in
+ * every entry: two conversations can share a title ("New conversation" twice is ordinary), and a
+ * title alone would leave the model unable to tell which one was picked.
+ */
+function listThem(candidates: Conversation[], here: string | null): string {
+  const labels = candidates
+    .slice(0, MAX_NAMED_CHANNELS)
+    .map(
+      (candidate) =>
+        `"${conversationTitle(candidate)}" (${candidate.id === here ? "this conversation, " : ""}id: ${candidate.id})`,
+    );
+  if (candidates.length > MAX_NAMED_CHANNELS) labels.push("and others");
+  return labels.join(", ");
 }
 
 export function createRoutineStore(database: Database): RoutineStore {
   /**
    * Where the reply lands, decided here rather than at the tool boundary.
    *
-   * Discovery confirmed the conversation's own channel is not reachable at the tool layer, so a model
-   * asked to make a routine either names a channel or names nothing. Both are resolved against what
-   * the owner and this agent actually share, which is the only check that stops a routine posting
-   * one person's summary into another person's conversation.
+   * Three ways in, in this order. A channel the model named, checked against what the owner and this
+   * agent actually share, which is the only check that stops a routine posting one person's summary
+   * into another person's conversation. Then the conversation the request was made in, read off the
+   * run's own thread. Then, with no conversation to go on, the one channel they share, or a question.
+   *
+   * THE CONVERSATION USED NOT TO BE REACHABLE HERE, and that cost the obvious case. A person in one of
+   * seven conversations with General Assistant asked for a routine "here", the tool could see only
+   * the owner and the Bot, so the store saw seven candidates, refused, and the model put a picker in
+   * front of them labelled "General Assistant, channel 1" to "channel 5". The run always knew which
+   * conversation it was in; the store was simply never told.
    */
   async function resolveChannel(
     ownerUserId: string,
     agentId: string,
-    channelId?: string,
+    wanted: { channelId?: string; threadId?: string },
     handle: Database | Transaction = database,
   ): Promise<string> {
-    if (channelId !== undefined) {
+    const here = wanted.threadId
+      ? await conversationOf(ownerUserId, agentId, wanted.threadId, handle)
+      : null;
+
+    if (wanted.channelId !== undefined) {
       // One query for all four conditions: the channel exists, it is not deleted, the owner is a
       // member, and this agent is in it. Any miss is the same refusal, because telling them apart
       // would tell a caller which channel ids exist.
@@ -386,17 +437,112 @@ export function createRoutineStore(database: Database): RoutineStore {
             eq(channelAgents.agentId, agentId),
           ),
         )
-        .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
+        .where(
+          and(eq(channels.id, wanted.channelId), isNull(channels.deletedAt)),
+        )
         .limit(1);
       const found = rows[0];
-      if (!found) throw new RoutineRefusedError(NO_SHARED_CHANNEL);
-      return found.id;
+      if (found) return found.id;
+      /*
+       * The ones they do share, by the titles the person reads, so a model that guessed an id has
+       * something true to ask with. Only the owner's own conversations with this Bot, which is
+       * nothing a caller could not already list, so the miss still says nothing about other ids.
+       */
+      const shared = await conversationsWith(ownerUserId, agentId, handle);
+      if (shared.length === 0) throw new RoutineRefusedError(NO_SHARED_CHANNEL);
+      throw new RoutineRefusedError(
+        `${NO_SHARED_CHANNEL} These are the ones we share: ${listThem(
+          shared,
+          here,
+        )}. Pass one of these ids as channelId.`,
+      );
     }
 
-    // Six rows is enough to answer the question: one resolves, more than one refuses, and the
-    // sentence names at most five before it says "and others".
-    const candidates = await handle
-      .select({ id: channels.id, name: channels.name })
+    if (here) return here;
+
+    const candidates = await conversationsWith(ownerUserId, agentId, handle);
+    const only = candidates[0];
+    if (!only) throw new RoutineRefusedError(NO_CHANNEL_AT_ALL);
+    if (candidates.length > 1) {
+      // Listed, because this refusal goes back to the model: a list of titles is a question it can
+      // put to the person, and "be more specific" is not.
+      throw new RoutineRefusedError(
+        `You have more than one conversation with me: ${listThem(
+          candidates,
+          here,
+        )}. Ask which one it should post in, offering each by its title, and pass the id of the one they choose as channelId.`,
+      );
+    }
+    return only.id;
+  }
+
+  /**
+   * The conversation a run's thread belongs to, when it is one this routine may post into.
+   *
+   * The owner's own thread of a live channel they are in, with this agent in it: the same join the
+   * routine runner needs at firing time, since it posts through the owner's thread of the channel.
+   * The thread came from the run, and a run's thread reaches the server from the browser, so it is
+   * a hint and never an authority: a thread that is somebody else's, or a channel the owner has left,
+   * finds nothing and the store falls back to asking. A scratch thread (a Bot answering another Bot,
+   * the direct chat) maps to no channel at all and finds nothing either.
+   */
+  async function conversationOf(
+    ownerUserId: string,
+    agentId: string,
+    threadId: string,
+    handle: Database | Transaction,
+  ): Promise<string | null> {
+    const [row] = await handle
+      .select({ id: channels.id })
+      .from(intelligenceChannelMappings)
+      .innerJoin(
+        channels,
+        and(
+          eq(channels.id, intelligenceChannelMappings.channelId),
+          isNull(channels.deletedAt),
+        ),
+      )
+      .innerJoin(
+        channelMemberships,
+        and(
+          eq(channelMemberships.channelId, channels.id),
+          eq(channelMemberships.userId, ownerUserId),
+        ),
+      )
+      .innerJoin(
+        channelAgents,
+        and(
+          eq(channelAgents.channelId, channels.id),
+          eq(channelAgents.agentId, agentId),
+        ),
+      )
+      .where(
+        and(
+          eq(intelligenceChannelMappings.threadId, threadId),
+          eq(intelligenceChannelMappings.userId, ownerUserId),
+        ),
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  /**
+   * The conversations this owner and this agent share, in the order the sidebar draws them.
+   *
+   * One more row than a refusal names, so "and others" is said only when there are others.
+   */
+  async function conversationsWith(
+    ownerUserId: string,
+    agentId: string,
+    handle: Database | Transaction,
+  ): Promise<Conversation[]> {
+    return await handle
+      .select({
+        id: channels.id,
+        summary: channels.summary,
+        opening: channels.opening,
+        lastMessage: channels.lastMessage,
+      })
       .from(channels)
       .innerJoin(
         channelMemberships,
@@ -413,21 +559,8 @@ export function createRoutineStore(database: Database): RoutineStore {
         ),
       )
       .where(isNull(channels.deletedAt))
-      .orderBy(desc(channels.createdAt), desc(channels.id))
+      .orderBy(...ROSTER_ORDER)
       .limit(MAX_NAMED_CHANNELS + 1);
-
-    const only = candidates[0];
-    if (!only) throw new RoutineRefusedError(NO_CHANNEL_AT_ALL);
-    if (candidates.length > 1) {
-      // Named, because this refusal goes back to the model: a sentence listing the channels is a
-      // question it can put to the person, and "be more specific" is not.
-      throw new RoutineRefusedError(
-        `You are in more than one channel with me — ${nameThem(
-          candidates,
-        )}. Say which one.`,
-      );
-    }
-    return only.id;
   }
 
   /**
@@ -505,7 +638,7 @@ export function createRoutineStore(database: Database): RoutineStore {
         values.channelId = await resolveChannel(
           ownerUserId,
           existing.agentId,
-          patch.channelId,
+          { channelId: patch.channelId },
           transaction,
         );
       }
@@ -557,11 +690,10 @@ export function createRoutineStore(database: Database): RoutineStore {
     async create(input) {
       const instruction = validInstruction(input.instruction);
       const timezone = input.timezone ?? "UTC";
-      const channelId = await resolveChannel(
-        input.ownerUserId,
-        input.agentId,
-        input.channelId,
-      );
+      const channelId = await resolveChannel(input.ownerUserId, input.agentId, {
+        channelId: input.channelId,
+        threadId: input.threadId,
+      });
       const nextRunAt = nextRunFor(input.cron, timezone, new Date());
 
       // Counted and inserted under the owner's cap lock, so two creates racing at 19 cannot both
@@ -609,6 +741,9 @@ export function createRoutineStore(database: Database): RoutineStore {
         .select({
           routine: routines,
           channelName: channels.name,
+          channelSummary: channels.summary,
+          channelOpening: channels.opening,
+          channelLastMessage: channels.lastMessage,
           channelDeletedAt: channels.deletedAt,
           // A left join, and the id is selected to tell "no channel row at all" (a hard delete
           // somewhere else) from "soft-deleted": both mean the target is unusable, and neither is
@@ -652,7 +787,15 @@ export function createRoutineStore(database: Database): RoutineStore {
       }
 
       return rows.map(
-        ({ routine, channelName, channelDeletedAt, channelExists }) => ({
+        ({
+          routine,
+          channelName,
+          channelSummary,
+          channelOpening,
+          channelLastMessage,
+          channelDeletedAt,
+          channelExists,
+        }) => ({
           id: routine.id,
           agentId: routine.agentId,
           instruction: routine.instruction,
@@ -662,6 +805,14 @@ export function createRoutineStore(database: Database): RoutineStore {
           nextRunAt: routine.nextRunAt,
           channelId: routine.channelId,
           channelName,
+          channelTitle:
+            channelExists === null
+              ? null
+              : conversationTitle({
+                  summary: channelSummary,
+                  opening: channelOpening,
+                  lastMessage: channelLastMessage,
+                }),
           channelDeleted: channelExists === null || channelDeletedAt !== null,
           lastRun: lastRuns.get(routine.id) ?? null,
         }),

@@ -146,6 +146,15 @@ export type WorkQueue = {
     owner: string;
     delayMs: number;
     reason?: string;
+    /**
+     * This hand-out was not an attempt: the work was certainly not started, because something it
+     * waits on was not ready (a conversation somebody else is running in). The claim's count is
+     * given back, so waiting never spends the attempts that exist for real failures, and the next
+     * claim still says, truthfully, that the work has not run.
+     */
+    uncounted?: boolean;
+    /** Fields written over the payload's, for what the work keeps between tries. */
+    payload?: Record<string, unknown>;
   }) => Promise<boolean>;
   /**
    * Drop what is done with, older than the retention window. Returns how many went.
@@ -364,7 +373,7 @@ export function createWorkQueue(database: Database): WorkQueue {
       return Boolean(finished);
     },
 
-    async release({ kind, key, owner, delayMs, reason }) {
+    async release({ kind, key, owner, delayMs, reason, uncounted, payload }) {
       // Freed and pushed out, rather than finished: the work still wants doing, just not immediately
       // and not by whoever just gave up on it. The reason stays on the row so an item that runs out
       // of attempts says why rather than simply stopping.
@@ -376,6 +385,16 @@ export function createWorkQueue(database: Database): WorkQueue {
           runAt: fromNow(delayMs),
           updatedAt: sql`now()`,
           ...(reason === undefined ? {} : { lastError: reason }),
+          ...(uncounted
+            ? { attempts: sql`greatest(${workItems.attempts} - 1, 0)` }
+            : {}),
+          ...(payload === undefined
+            ? {}
+            : {
+                // Sent as text and parsed here: a parameter typed jsonb is encoded again by the
+                // driver, and `||` with a JSON string makes the payload an array.
+                payload: sql`${workItems.payload} || ${JSON.stringify(payload)}::text::jsonb`,
+              }),
         })
         .where(ours(kind, key, owner))
         .returning({ key: workItems.key });

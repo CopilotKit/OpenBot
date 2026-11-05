@@ -26,7 +26,7 @@ export const Channel = memo(function Channel({
   participantIds,
   name,
   summary,
-  lastMessage,
+  untitled,
   lastMessageAt,
   pinned,
   unread,
@@ -38,8 +38,8 @@ export const Channel = memo(function Channel({
   name: string;
   /** What the conversation is about, once named. The channel name only says which Bot it is. */
   summary?: string;
-  /** Used as the thread title until the conversation has been named. */
-  lastMessage?: string;
+  /** Used as the thread title until the conversation has been named. See `untitledLine`. */
+  untitled?: string;
   lastMessageAt?: string;
   pinned: boolean;
   unread: boolean;
@@ -57,7 +57,7 @@ export const Channel = memo(function Channel({
   });
   /* Types in only on arrival; an already-named row draws it outright. */
   const revealed = useTypedReveal(summary);
-  const threadTitle = revealed.text || lastMessage || "New conversation";
+  const threadTitle = revealed.text || untitled || "New conversation";
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
   /**
@@ -91,7 +91,7 @@ export const Channel = memo(function Channel({
             <ChannelItemContent
               participantIds={participantIds}
               name={name}
-              title={summary || lastMessage || "New conversation"}
+              title={summary || untitled || "New conversation"}
               displayedTitle={threadTitle}
               lastMessageAt={lastMessageAt}
               emphasis={emphasis}

@@ -1241,6 +1241,7 @@ export type PluginStoreOptions = {
       token?: string;
       actorId?: string;
       botId?: string;
+      threadId?: string;
     },
     toolName: string,
     args: Record<string, unknown>,

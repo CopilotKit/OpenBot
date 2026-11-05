@@ -70,6 +70,22 @@ spec:
         - port: 4100
           protocol: TCP
     {{- end }}
+    {{- if include "openbot.intelligenceBundled" . }}
+    {{- /*
+      The bundled Intelligence's API and gateway, which are pods in this cluster and so inside the
+      private ranges the rule below cuts out. Every conversation goes through them.
+    */}}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ default "intelligence" .Values.intelligence.nameOverride }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: {{ ((.Values.intelligence.appApi | default dict).service | default dict).port | default 4201 }}
+          protocol: TCP
+        - port: {{ ((.Values.intelligence.realtimeGateway | default dict).service | default dict).port | default 4401 }}
+          protocol: TCP
+    {{- end }}
     {{- /*
       Intelligence, the identity provider, and every Bot: all of them, and all outside the cluster.
 

@@ -14,6 +14,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   candidate's and never an unsigned build, and follow a new release within minutes of it becoming
   Latest. Each release's installers stay under `releases/<tag>/`. See
   [Releasing](docs/releasing.md#downloadscopilotkitai).
+- The Helm chart now installs CopilotKit Intelligence with OpenBot by default, so one `helm install` is the whole product: Intelligence 0.16.0-rc.2 in self-hosted mode on its own bundled PostgreSQL and Redis, with every credential it needs generated and kept across upgrades, OpenBot's project and runtime key created inside it by Intelligence's own bootstrap from a key the chart generates, with nobody signing in, and Automatic Learning and Trajectories on. The licence is given once, as `secrets.licenseToken`, and reaches both; Learning's agent runs on `secrets.modelApiKey`. The server carries the browser's socket to Intelligence's gateway on its own address, so a single `kubectl port-forward` reaches everything. The chart README's vanilla install is the three steps. **Before upgrading:** a release pointed at managed Intelligence, or at one of its own, needs `--set intelligence.enabled=false`; the chart refuses the upgrade until it is set rather than install a second, empty Intelligence.
 - Connecting an app through Arcade on a single-user or personal install now brings you back to the OpenBot you started from, wherever it runs. After the consent screen, Arcade sends you to the address its project names as its user verifier, which used to be set by hand in Arcade's dashboard, so any OpenBot at another address (anything but `localhost:3001` on a shared key) landed on a page that does not exist. A single-user install now points that setting at its own `OPENBOT_PUBLIC_URL` (or `BETTER_AUTH_URL`) before each Connect or Authorize and reads it back; several on one key take turns, and the latest Connect decides where people come back. A deployment that signs people in treats its Arcade project as shared and never changes the setting: it checks it before each Connect and, until it names this deployment, refuses before anybody signs in, with the exact address to set in Arcade's dashboard. It also names that address at startup. See [Arcade](docs/plugins/arcade.md#the-verifier-url).
 - A Bot's work in a conversation reads as one line. A subtask is a step in the same line as the
   searches and pages beside it ("Searched the web, read 5 pages and ran 2 subtasks"), and opens to
@@ -90,6 +91,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the Bot's permissions, out of sight, and kept going after Stop. A person's own runs, the subagents
   they start, headless turns and hops keep every tool as before. A remote Bot's naming run is also
   sent no signed run, so a callback from it is refused.
+- A new conversation is no longer called by the Bot's answer in the sidebar. Until it was named, a
+  conversation showed its last message, which was usually the Bot's reply, with its Markdown
+  asterisks and link brackets, and it kept that line for good when naming gave up. It now shows
+  your first message as plain text until its name arrives. A conversation a routine started shows
+  its last message, now also as plain text. A name the model writes in Markdown is stored as plain
+  text, and an answer too long to be a name is not stored as one. Migration `0077_channel_opening`
+  adds `channels.opening`.
 - The sign-in page the Desktop app opens now explains OpenBot setup — you are setting up a
   CopilotKit account for the personal edition of OpenBot, and your data stays on your computer —
   instead of the generic CopilotKit pitch. The app adds `mode=openbot` to the sign-in URL it opens;

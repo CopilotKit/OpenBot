@@ -244,16 +244,18 @@ Four things are decided by the deployment and never by the model:
 The second Bot runs as the same person, with its own role and its own grants, so it sees what that
 person may see and no more.
 
-**The answer lands in that Bot's own conversation with the person.** Not the conversation that asked,
-and this is a property of the platform rather than a choice: an Intelligence thread is owned by
-exactly one agent. So the conversation that asked says where the work went, and the one that answers
-moves to the top of the roster with an unread mark. The person gets both halves.
+**The answer lands in the conversation that asked, under the answering Bot's name.** An Intelligence
+thread is owned by exactly one agent, so the second Bot cannot run in the first Bot's thread. It runs
+in a scratch thread of its own that no channel shows, and its words then come home as a second hop:
+the deployment writes them, word for word, into the asking conversation as a message whose id names
+the Bot that said them (`bot-answer:<bot>:<run>`), and the transcript draws that message under the
+answering Bot's face and name. No model runs for that second hop, and the asking Bot does not say the
+answer over in its own voice.
 
-What the answering conversation keeps is one line saying who asked and what for, not the envelope.
-Those are two texts with two readers: the model needs the task, the constraints and the shape of a
-good answer, while a person scrolling needs to know why that Bot suddenly spoke. The asking
-conversation's history is read by the addressed Bot as context and is not repeated into the
-transcript.
+The addressed Bot is told which Bot it is and who asked, and reads the asking conversation as context
+set out inside the ask, each turn attributed to whoever said it. It is never handed that conversation
+as turns of its own: every word in it was said to the asking Bot, and read as its own, a person's
+"ask Knowledge, do not answer it yourself" tells Knowledge not to answer.
 
 **A hop that fails for good is said out loud.** When one runs out of attempts, the asking Bot is sent
 back into the conversation the person is watching to say plainly that nothing came back. Otherwise a

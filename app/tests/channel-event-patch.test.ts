@@ -406,3 +406,41 @@ describe("a summary", () => {
     ).toBe(data);
   });
 });
+
+/**
+ * A person's first words, the row's name until it has a summary.
+ *
+ * Announced on its own, and possibly for a message the server found stale as the last message (a
+ * person's line reported after the Bot's reply), so it must not carry its null preview onto the row.
+ */
+describe("an opening", () => {
+  test("patches only the opening, leaving the Bot's reply and the order alone", () => {
+    const data = cache([
+      channel("recent", { lastMessageAt: "2024-04-02T00:00:00.000Z" }),
+      channel("a", {
+        lastMessage: "The latest stable kubectl release is v1.37.2.",
+        lastMessageAt: "2024-04-01T00:00:00.000Z",
+        lastMessageAgentId: "agent-1",
+      }),
+    ]);
+
+    const patched = applyChannelEvent(
+      data,
+      event({
+        channelId: "a",
+        opening: "Find the latest released version of kubectl",
+      }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels.map((row) => row.id)).toEqual([
+      "recent",
+      "a",
+    ]);
+    expect(patched.pages[0]?.channels[1]).toEqual({
+      ...(data.pages[0]?.channels[1] as ChannelSummary),
+      opening: "Find the latest released version of kubectl",
+    });
+  });
+});
