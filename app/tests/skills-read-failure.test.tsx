@@ -212,9 +212,7 @@ test("the admin skills page says the skills failed to load, not that there are n
   expect(
     await view.findByText("Couldn't load skills. Reload the page."),
   ).toBeTruthy();
-  expect(
-    view.queryByText("No skills yet. Write one with Write a skill."),
-  ).toBeNull();
+  expect(view.queryByText("No skills yet")).toBeNull();
 });
 
 test("a deployment with genuinely no skills still says so on the admin page", async () => {

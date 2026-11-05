@@ -1,4 +1,5 @@
 import { useForm } from "@tanstack/react-form";
+import { PageCard } from "@/components/layout/page-shell";
 import { SkillTools } from "@/components/skills/skill-tools";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +27,7 @@ export function SkillFields({
   error,
   onCancel,
   footer,
+  card,
   slugLocked = false,
 }: {
   defaultValues: SkillFormValues;
@@ -35,6 +37,11 @@ export function SkillFields({
   onCancel?: () => void;
   /** Anything that belongs with the skill but saves on its own, shown above the submit button. */
   footer?: React.ReactNode;
+  /**
+   * On a page of its own: the fields go in a `PageCard`, with `cancel` and the submit button in its
+   * footer, as every other screen that adds something does (`new-credential-page.tsx`).
+   */
+  card?: { cancel: React.ReactNode };
   /**
    * Editing, where the command cannot change.
    *
@@ -53,6 +60,156 @@ export function SkillFields({
     },
   });
 
+  const fields = (
+    <FieldGroup>
+      <form.Field name="slug">
+        {(field) => {
+          const isInvalid =
+            field.state.meta.isTouched && !field.state.meta.isValid;
+          return (
+            <Field data-invalid={isInvalid}>
+              <FieldLabel htmlFor={field.name}>Command</FieldLabel>
+              <Input
+                aria-invalid={isInvalid}
+                disabled={slugLocked}
+                id={field.name}
+                name={field.name}
+                onBlur={field.handleBlur}
+                /*
+                 * Lower-cased as they type rather than refused afterwards. The server's pattern
+                 * has no capitals in it, and "Standup" is a reasonable thing to type and a
+                 * pointless thing to be told off for.
+                 */
+                onChange={(event) =>
+                  field.handleChange(event.target.value.toLowerCase())
+                }
+                placeholder="standup"
+                value={field.state.value}
+              />
+              {isInvalid ? (
+                <FieldError errors={field.state.meta.errors} />
+              ) : (
+                <p className="text-muted-foreground text-xs">
+                  {slugLocked ? (
+                    "You can't change a command. To rename this skill, write a new one and delete this one."
+                  ) : (
+                    <>
+                      What you type after a slash.{" "}
+                      <code>
+                        /{"{"}command{"}"}
+                      </code>
+                    </>
+                  )}
+                </p>
+              )}
+            </Field>
+          );
+        }}
+      </form.Field>
+
+      <form.Field name="title">
+        {(field) => {
+          const isInvalid =
+            field.state.meta.isTouched && !field.state.meta.isValid;
+          return (
+            <Field data-invalid={isInvalid}>
+              <FieldLabel htmlFor={field.name}>Title</FieldLabel>
+              <Input
+                aria-invalid={isInvalid}
+                id={field.name}
+                name={field.name}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.value)}
+                placeholder="My standup skill"
+                value={field.state.value}
+              />
+              {isInvalid ? (
+                <FieldError errors={field.state.meta.errors} />
+              ) : null}
+            </Field>
+          );
+        }}
+      </form.Field>
+
+      <form.Field name="summary">
+        {(field) => {
+          const isInvalid =
+            field.state.meta.isTouched && !field.state.meta.isValid;
+          return (
+            <Field data-invalid={isInvalid}>
+              <FieldLabel htmlFor={field.name}>One-liner</FieldLabel>
+              <Input
+                aria-invalid={isInvalid}
+                id={field.name}
+                name={field.name}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.value)}
+                placeholder="Turns yesterday's work into a standup update"
+                value={field.state.value}
+              />
+              {isInvalid ? (
+                <FieldError errors={field.state.meta.errors} />
+              ) : (
+                <p className="text-muted-foreground text-xs">
+                  Shown beside the command in this list and in the{" "}
+                  <code>/</code> menu. Optional.
+                </p>
+              )}
+            </Field>
+          );
+        }}
+      </form.Field>
+
+      <form.Field name="instructions">
+        {(field) => {
+          const isInvalid =
+            field.state.meta.isTouched && !field.state.meta.isValid;
+          return (
+            <Field data-invalid={isInvalid}>
+              <FieldLabel htmlFor={field.name}>Instructions</FieldLabel>
+              <Textarea
+                aria-invalid={isInvalid}
+                className="min-h-40"
+                id={field.name}
+                name={field.name}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.value)}
+                placeholder="Summarise what I did yesterday in this conversation, then list what is left."
+                value={field.state.value}
+              />
+              {isInvalid ? (
+                <FieldError errors={field.state.meta.errors} />
+              ) : (
+                <p className="text-muted-foreground text-xs">
+                  What the Bot is told when you use the command. Write it as
+                  instructions to the Bot.
+                </p>
+              )}
+            </Field>
+          );
+        }}
+      </form.Field>
+      <form.Field name="tools">
+        {(field) => (
+          <SkillTools
+            onChange={field.handleChange}
+            selected={field.state.value}
+          />
+        )}
+      </form.Field>
+    </FieldGroup>
+  );
+
+  const submit = (
+    <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting]}>
+      {([canSubmit, isSubmitting]) => (
+        <Button disabled={!canSubmit || isSubmitting} type="submit">
+          {isSubmitting ? "Saving…" : submitLabel}
+        </Button>
+      )}
+    </form.Subscribe>
+  );
+
   return (
     <form
       noValidate
@@ -61,176 +218,51 @@ export function SkillFields({
         form.handleSubmit();
       }}
     >
-      <FieldGroup>
-        <form.Field name="slug">
-          {(field) => {
-            const isInvalid =
-              field.state.meta.isTouched && !field.state.meta.isValid;
-            return (
-              <Field data-invalid={isInvalid}>
-                <FieldLabel htmlFor={field.name}>Command</FieldLabel>
-                <Input
-                  aria-invalid={isInvalid}
-                  disabled={slugLocked}
-                  id={field.name}
-                  name={field.name}
-                  onBlur={field.handleBlur}
-                  /*
-                   * Lower-cased as they type rather than refused afterwards. The server's pattern
-                   * has no capitals in it, and "Standup" is a reasonable thing to type and a
-                   * pointless thing to be told off for.
-                   */
-                  onChange={(event) =>
-                    field.handleChange(event.target.value.toLowerCase())
-                  }
-                  placeholder="standup"
-                  value={field.state.value}
-                />
-                {isInvalid ? (
-                  <FieldError errors={field.state.meta.errors} />
-                ) : (
-                  <p className="text-muted-foreground text-xs">
-                    {slugLocked ? (
-                      "You can't change a command. To rename this skill, write a new one and delete this one."
-                    ) : (
-                      <>
-                        What you type after a slash.{" "}
-                        <code>
-                          /{"{"}command{"}"}
-                        </code>
-                      </>
-                    )}
-                  </p>
-                )}
-              </Field>
-            );
-          }}
-        </form.Field>
-
-        <form.Field name="title">
-          {(field) => {
-            const isInvalid =
-              field.state.meta.isTouched && !field.state.meta.isValid;
-            return (
-              <Field data-invalid={isInvalid}>
-                <FieldLabel htmlFor={field.name}>Title</FieldLabel>
-                <Input
-                  aria-invalid={isInvalid}
-                  id={field.name}
-                  name={field.name}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  placeholder="My standup skill"
-                  value={field.state.value}
-                />
-                {isInvalid ? (
-                  <FieldError errors={field.state.meta.errors} />
-                ) : null}
-              </Field>
-            );
-          }}
-        </form.Field>
-
-        <form.Field name="summary">
-          {(field) => {
-            const isInvalid =
-              field.state.meta.isTouched && !field.state.meta.isValid;
-            return (
-              <Field data-invalid={isInvalid}>
-                <FieldLabel htmlFor={field.name}>One-liner</FieldLabel>
-                <Input
-                  aria-invalid={isInvalid}
-                  id={field.name}
-                  name={field.name}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  placeholder="Turns yesterday's work into a standup update"
-                  value={field.state.value}
-                />
-                {isInvalid ? (
-                  <FieldError errors={field.state.meta.errors} />
-                ) : (
-                  <p className="text-muted-foreground text-xs">
-                    Shown beside the command in this list and in the{" "}
-                    <code>/</code> menu. Optional.
-                  </p>
-                )}
-              </Field>
-            );
-          }}
-        </form.Field>
-
-        <form.Field name="instructions">
-          {(field) => {
-            const isInvalid =
-              field.state.meta.isTouched && !field.state.meta.isValid;
-            return (
-              <Field data-invalid={isInvalid}>
-                <FieldLabel htmlFor={field.name}>Instructions</FieldLabel>
-                <Textarea
-                  aria-invalid={isInvalid}
-                  className="min-h-40"
-                  id={field.name}
-                  name={field.name}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  placeholder="Summarise what I did yesterday in this conversation, then list what is left."
-                  value={field.state.value}
-                />
-                {isInvalid ? (
-                  <FieldError errors={field.state.meta.errors} />
-                ) : (
-                  <p className="text-muted-foreground text-xs">
-                    What the Bot is told when you use the command. Write it as
-                    instructions to the Bot.
-                  </p>
-                )}
-              </Field>
-            );
-          }}
-        </form.Field>
-        <form.Field name="tools">
-          {(field) => (
-            <SkillTools
-              onChange={field.handleChange}
-              selected={field.state.value}
-            />
-          )}
-        </form.Field>
-      </FieldGroup>
-
-      {/*
-       * Rendered by the caller, between the fields and the buttons, so granting sits with the rest
-       * of the skill rather than after the point where the form is finished with.
-       *
-       * IT IS NOT PART OF THE FORM'S STATE. Each toggle saves the moment it is pressed, while
-       * everything above waits for the submit button — so it must not look like a field, and
-       * pressing one is never undone by closing the panel without saving.
-       */}
-      {footer ? <div className="mt-6">{footer}</div> : null}
-
-      {error ? (
-        <p className="mt-4 text-sm text-destructive" role="alert">
-          {error.message}
-        </p>
-      ) : null}
-
-      <div className="mt-4 flex gap-2">
-        <form.Subscribe
-          selector={(state) => [state.canSubmit, state.isSubmitting]}
+      {card ? (
+        <PageCard
+          footer={
+            <>
+              {card.cancel}
+              {submit}
+            </>
+          }
         >
-          {([canSubmit, isSubmitting]) => (
-            <Button disabled={!canSubmit || isSubmitting} type="submit">
-              {isSubmitting ? "Saving…" : submitLabel}
-            </Button>
-          )}
-        </form.Subscribe>
-        {onCancel ? (
-          <Button onClick={onCancel} type="button" variant="outline">
-            Cancel
-          </Button>
-        ) : null}
-      </div>
+          {fields}
+          {error ? (
+            <p className="mt-4 text-sm text-destructive" role="alert">
+              {error.message}
+            </p>
+          ) : null}
+        </PageCard>
+      ) : (
+        <>
+          {fields}
+          {/*
+           * Rendered by the caller, between the fields and the buttons, so granting sits with the rest
+           * of the skill rather than after the point where the form is finished with.
+           *
+           * IT IS NOT PART OF THE FORM'S STATE. Each toggle saves the moment it is pressed, while
+           * everything above waits for the submit button — so it must not look like a field, and
+           * pressing one is never undone by closing the panel without saving.
+           */}
+          {footer ? <div className="mt-6">{footer}</div> : null}
+
+          {error ? (
+            <p className="mt-4 text-sm text-destructive" role="alert">
+              {error.message}
+            </p>
+          ) : null}
+
+          <div className="mt-4 flex gap-2">
+            {submit}
+            {onCancel ? (
+              <Button onClick={onCancel} type="button" variant="outline">
+                Cancel
+              </Button>
+            ) : null}
+          </div>
+        </>
+      )}
     </form>
   );
 }
