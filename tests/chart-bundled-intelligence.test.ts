@@ -10,7 +10,10 @@
  *  - OpenBot's bundled PostgreSQL and Intelligence's never render as the same object, and
  *    Intelligence's database URL names its own database with the password that database is given;
  *  - `intelligence.enabled: false` renders today's chart: no Intelligence, the addresses and key the
- *    operator named, and no gateway proxy.
+ *    operator named, and no gateway proxy;
+ *  - Automatic Learning is on in the bundled Intelligence, as it is in OpenBot: its agent, scheduler
+ *    and object store render, every Secret they read is one the chart writes with the key they ask
+ *    for, and every client of the store reaches the store's pod, whatever the release is called.
  */
 import { describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
@@ -39,7 +42,10 @@ type Doc = {
 type EnvVar = {
   name: string;
   value?: string;
-  valueFrom?: { secretKeyRef?: { name: string; key: string } };
+  valueFrom?: {
+    secretKeyRef?: { name: string; key: string };
+    configMapKeyRef?: { name: string; key: string };
+  };
 };
 
 function render(...args: string[]): Doc[] {
@@ -165,67 +171,55 @@ describe.skipIf(!helm)("the chart with the bundled Intelligence", () => {
     ).toBeUndefined();
   });
 
-  test("gives the server the key the key Job writes, made with the token Intelligence's API mounts, for an organization Intelligence creates", () => {
+  test("generates OpenBot's runtime key once, and the server and Intelligence's bootstrap read that one Secret", () => {
     const docs = render(...vanilla);
     const server = workload(docs, "Deployment", component("server"));
-    const job = workload(docs, "Job", component("intelligence-key"));
-    const jobEnv = containerEnv(job);
-    const appApi = workload(docs, "Deployment", component("app-api"));
+    const bootstrap = workload(docs, "Job", component("bootstrap"));
 
     const key = envSecret(containerEnv(server), "INTELLIGENCE_API_KEY");
-    expect(key?.name).toBe(envValue(jobEnv, "INTELLIGENCE_KEY_SECRET"));
-    expect(key?.key).toBe("intelligence-api-key");
-    // Written by the Job, never by Helm: a rendered copy would be put back empty on every upgrade.
-    expect(
-      docs.some((d) => d.kind === "Secret" && d.metadata.name === key?.name),
-    ).toBe(false);
-    expect(envValue(jobEnv, "INTELLIGENCE_API_URL")).toBe(
-      envValue(containerEnv(server), "INTELLIGENCE_API_URL"),
+    const value = secretValue(docs, key?.name ?? "", key?.key ?? "") ?? "";
+    // The shape Intelligence's bootstrap accepts (app-db-migrations/bootstrap-self-hosted.sh), with
+    // the short and long tokens its API splits the key into on every request.
+    expect(value).toMatch(
+      /^cpk(-[A-Za-z0-9-]*)?_[A-Za-z0-9]{8,64}_[A-Za-z0-9]{24,256}$/,
     );
 
-    // The Job may write that one Secret and create it, and nothing else.
-    const role = workload(
-      docs,
-      "Role",
-      component("intelligence-key"),
-    ) as Doc & {
-      rules: {
-        resources: string[];
-        resourceNames?: string[];
-        verbs: string[];
-      }[];
-    };
-    expect(role.rules).toEqual([
-      {
-        apiGroups: [""],
-        resources: ["secrets"],
-        resourceNames: [key?.name ?? ""],
-        verbs: ["get", "update"],
-      },
-      { apiGroups: [""], resources: ["secrets"], verbs: ["create"] },
-    ] as never);
-
-    // The service token: the Job's is the Secret Intelligence's API mounts, and it is generated.
-    const token = envSecret(jobEnv, "INTELLIGENCE_SERVICE_TOKEN");
-    const mounted = (appApi.spec?.template?.spec.volumes ?? [])
-      .map((v) => v.secret?.secretName)
-      .filter(Boolean);
-    expect(mounted).toContain(token?.name);
-    expect(
-      secretValue(docs, token?.name ?? "", token?.key ?? "")?.length,
-    ).toBeGreaterThanOrEqual(43);
-
-    // For the organization Intelligence's own bootstrap creates, by the id it creates it with.
-    const bootstrap = workload(docs, "Job", component("bootstrap"));
+    // Intelligence's bootstrap reads the same Secret and key for OpenBot's project, in OpenBot's
+    // organization, with the container Automatic Learning assigns.
+    const fromBootstrap = (containerEnv(bootstrap) ?? []).filter((e) =>
+      /^BOOTSTRAP_PROJECT_\d+_API_KEY$/.test(e.name),
+    );
+    expect(fromBootstrap.map((e) => e.valueFrom?.secretKeyRef)).toEqual([
+      { name: key?.name ?? "", key: key?.key ?? "" },
+    ]);
     const config = JSON.parse(
       Buffer.from(
         envValue(containerEnv(bootstrap), "BOOTSTRAP_CONFIG_B64") ?? "",
         "base64",
       ).toString("utf8"),
-    ) as { organizations: { id?: string; slug: string }[] };
-    expect(config.organizations.map((o) => o.id)).toContain(
-      envValue(jobEnv, "INTELLIGENCE_ORGANIZATION_ID"),
+    ) as {
+      organizations: { slug: string }[];
+      projects: {
+        organizationSlug: string;
+        apiKey?: { existingSecret: string; key: string };
+        learningContainers?: { id: string }[];
+      }[];
+    };
+    const project = config.projects.find(
+      (p) => p.apiKey?.existingSecret === key?.name,
     );
+    expect(config.organizations.map((o) => o.slug)).toContain(
+      project?.organizationSlug,
+    );
+    expect(project?.learningContainers?.map((c) => c.id)).toContain("openbot");
+
+    // No Job of OpenBot's makes the key, so none of its pods is allowed to write a Secret.
+    const ownRoles = docs.filter(
+      (d) =>
+        (d.kind === "Role" || d.kind === "RoleBinding") &&
+        d.metadata.labels?.["app.kubernetes.io/name"] === "openbot",
+    );
+    expect(ownRoles.map((d) => d.metadata.name)).toEqual([]);
   });
 
   test("hands the licence, given once, to OpenBot's server and to Intelligence's API", () => {
@@ -320,6 +314,249 @@ describe.skipIf(!helm)("the chart with the bundled Intelligence", () => {
     expect(refusal(...vanilla, "--set", "intelligence=null")).toContain(
       "no `intelligence` key",
     );
+  });
+});
+
+type Container = {
+  name: string;
+  env?: EnvVar[];
+  envFrom?: { configMapRef?: { name: string }; secretRef?: { name: string } }[];
+};
+type PodSpec = { containers: Container[]; initContainers?: Container[] };
+type Workload = {
+  kind: string;
+  metadata: { name: string; labels?: Record<string, string> };
+  spec?: {
+    selector?:
+      | Record<string, string>
+      | { matchLabels?: Record<string, string> };
+    ports?: { port: number; targetPort?: string | number; name?: string }[];
+    template?: {
+      metadata?: { labels?: Record<string, string> };
+      spec: PodSpec;
+    };
+    jobTemplate?: { spec: { template: { spec: PodSpec } } };
+  };
+  data?: Record<string, string>;
+};
+
+/** A workload's own container: the first, not an init container. */
+function mainContainer(doc: Doc): Container {
+  const container = (doc as Workload).spec?.template?.spec.containers[0];
+  if (!container) throw new Error(`${doc.metadata.name} has no container`);
+  return container;
+}
+
+/** Every container of a Deployment, StatefulSet, Job or CronJob. */
+function containersOf(doc: Workload): Container[] {
+  const pod =
+    doc.spec?.template?.spec ?? doc.spec?.jobTemplate?.spec.template.spec;
+  return [...(pod?.initContainers ?? []), ...(pod?.containers ?? [])];
+}
+
+const WORKLOADS = new Set(["Deployment", "StatefulSet", "Job", "CronJob"]);
+const MODEL_KEY = "the-customers-model-key";
+const learningVanilla = [
+  ...vanilla,
+  "--set-string",
+  `secrets.modelApiKey=${MODEL_KEY}`,
+];
+
+/** A variable's value as the container sees it: written in, or read from a ConfigMap. */
+function configValue(docs: Doc[], container: Container, name: string) {
+  const variable = container.env?.find((e) => e.name === name);
+  const mapData = (mapName: string | undefined) =>
+    (
+      docs.find((d) => d.kind === "ConfigMap" && d.metadata.name === mapName) as
+        | Workload
+        | undefined
+    )?.data;
+  if (variable?.value !== undefined) return variable.value;
+  const ref = variable?.valueFrom?.configMapKeyRef;
+  if (ref) return mapData(ref.name)?.[ref.key];
+  for (const from of container.envFrom ?? []) {
+    const value = mapData(from.configMapRef?.name)?.[name];
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+describe.skipIf(!helm)("Automatic Learning in the bundled Intelligence", () => {
+  test("is on, with its agent on the customer's model key and the scheduler", () => {
+    const docs = render(...learningVanilla);
+    const appApi = mainContainer(
+      workload(docs, "Deployment", component("app-api")),
+    );
+    expect(configValue(docs, appApi, "LEARNING_RUNTIME_ENABLED")).toBe("true");
+    // The self-hosted rollout gate, which closes before the licence is read.
+    expect(configValue(docs, appApi, "LEARNING_ENABLED")).toBe("true");
+    expect(configValue(docs, appApi, "LEARNING_AUTOMATION_ENABLED")).toBe(
+      "true",
+    );
+    expect(configValue(docs, appApi, "APP_API_LEARNING_MODEL_CONFIGURED")).toBe(
+      "true",
+    );
+    const agent = mainContainer(
+      workload(docs, "Deployment", component("learning-agent")),
+    );
+    expect(configValue(docs, agent, "LEARNING_AGENT_MODEL")).toBe(
+      "openai/gpt-5.5",
+    );
+    const key = envSecret(agent.env ?? [], "OPENAI_API_KEY");
+    expect(secretValue(docs, key?.name ?? "", key?.key ?? "")).toBe(MODEL_KEY);
+    const token = envSecret(agent.env ?? [], "LEARNING_AGENT_TOKEN");
+    expect(
+      secretValue(docs, token?.name ?? "", token?.key ?? "")?.length,
+    ).toBeGreaterThanOrEqual(32);
+
+    expect(
+      docs.some(
+        (d) => d.kind === "CronJob" && component("learning-scheduler")(d),
+      ),
+    ).toBe(true);
+    expect(
+      docs.some(
+        (d) => d.kind === "Deployment" && component("learning-reconciler")(d),
+      ),
+    ).toBe(true);
+  });
+
+  test("every Secret a bundled workload reads, by reference or by name, is one the chart writes with that key", () => {
+    const docs = render(...learningVanilla);
+    const missing: string[] = [];
+    const check = (where: string, name: string, key: string) => {
+      if (secretValue(docs, name, key) === undefined)
+        missing.push(`${where} reads ${name}/${key}`);
+    };
+    for (const doc of docs as Workload[]) {
+      if (!WORKLOADS.has(doc.kind)) continue;
+      for (const container of containersOf(doc)) {
+        const where = `${doc.kind} ${doc.metadata.name} (${container.name})`;
+        const env = container.env ?? [];
+        for (const variable of env) {
+          const ref = variable.valueFrom?.secretKeyRef as
+            | { name: string; key: string; optional?: boolean }
+            | undefined;
+          // An optional one is the workload saying it runs without it; the test below covers it.
+          if (ref && !ref.optional) check(where, ref.name, ref.key);
+        }
+        // The Learning reconciler hands its runner Jobs Secrets by name, as pairs of variables.
+        for (const variable of env) {
+          const match = /^(LEARNING_[A-Z_]+)_SECRET_NAME$/.exec(variable.name);
+          if (!match || !variable.value) continue;
+          const keyVariables = env.filter(
+            (other) =>
+              other.name.startsWith(`${match[1]}_`) &&
+              other.name !== variable.name &&
+              /_(SECRET_KEY|ACCESS_KEY)$/.test(other.name),
+          );
+          for (const keyVariable of keyVariables)
+            check(where, variable.value, keyVariable.value ?? "");
+        }
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  test("every client of the object store reaches the store's pod, under any release name", () => {
+    for (const release of ["openbot", "ci"]) {
+      const result = Bun.spawnSync(
+        [
+          "helm",
+          "template",
+          release,
+          chart,
+          "--namespace",
+          "openbot",
+          "--set-string",
+          `secrets.keyEncryptionKey=${randomBytes(32).toString("base64")}`,
+          ...learningVanilla,
+        ],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      expect(new TextDecoder().decode(result.stderr)).toBe("");
+      const docs = parseAllDocuments(new TextDecoder().decode(result.stdout))
+        .map((document) => document.toJSON() as Workload | null)
+        .filter((document): document is Workload => document !== null);
+      const store = docs.find(
+        (d) =>
+          d.kind === "StatefulSet" &&
+          d.metadata.name.endsWith("-local-object-storage"),
+      );
+      const podLabels = store?.spec?.template?.metadata?.labels ?? {};
+      const endpoints = new Set<string>();
+      for (const doc of docs) {
+        if (doc.kind === "ConfigMap" && doc.data?.S3_ENDPOINT)
+          endpoints.add(doc.data.S3_ENDPOINT);
+        if (!WORKLOADS.has(doc.kind)) continue;
+        for (const container of containersOf(doc)) {
+          const value = container.env?.find(
+            (e) => e.name === "S3_ENDPOINT",
+          )?.value;
+          if (value !== undefined) endpoints.add(value);
+        }
+      }
+      // app-api, the gateway, the Learning runners' ConfigMap and the bucket Job all have one.
+      expect(endpoints.size).toBe(1);
+      const endpoint = new URL([...endpoints][0] ?? "");
+      const service = docs.find(
+        (d) => d.kind === "Service" && d.metadata.name === endpoint.hostname,
+      );
+      expect(service).toBeDefined();
+      const selector = (service?.spec?.selector ?? {}) as Record<
+        string,
+        string
+      >;
+      expect(Object.keys(selector).length).toBeGreaterThan(0);
+      for (const [label, value] of Object.entries(selector))
+        expect(podLabels[label]).toBe(value);
+      expect(service?.spec?.ports?.map((p) => p.port)).toContain(
+        Number(endpoint.port),
+      );
+      expect(service?.spec?.ports?.[0]?.targetPort).toBe("s3");
+    }
+  });
+
+  test("turns Trajectories on in both Intelligence services that decide it, together", () => {
+    const docs = render(...learningVanilla);
+    for (const name of ["app-api", "realtime-gateway"]) {
+      const container = mainContainer(
+        workload(docs, "Deployment", component(name)),
+      );
+      expect(configValue(docs, container, "FF_LEARNING_TRAJECTORIES")).toBe(
+        "true",
+      );
+    }
+    // Learning's runners take it too, from their ConfigMap.
+    const runtime = docs.find(
+      (d) =>
+        d.kind === "ConfigMap" && d.metadata.name.endsWith("-learning-runtime"),
+    ) as Workload | undefined;
+    expect(runtime?.data?.FF_LEARNING_TRAJECTORIES).toBe("true");
+    // The gateway asks the API about a Trajectory with a token Intelligence's chart generates.
+    const gateway = mainContainer(
+      workload(docs, "Deployment", component("realtime-gateway")),
+    );
+    const token = envSecret(
+      gateway.env ?? [],
+      "REALTIME_GATEWAY_APP_API_INTERNAL_TOKEN",
+    );
+    expect(
+      secretValue(docs, token?.name ?? "", token?.key ?? "")?.length,
+    ).toBeGreaterThanOrEqual(32);
+  });
+
+  test("with no model key the install still renders, and Learning's agent finds none rather than a placeholder", () => {
+    const docs = render(...vanilla, "--set-string", "secrets.modelApiKey=");
+    const agent = mainContainer(
+      workload(docs, "Deployment", component("learning-agent")),
+    );
+    const key = agent.env?.find((e) => e.name === "OPENAI_API_KEY")?.valueFrom
+      ?.secretKeyRef as
+      | { name: string; key: string; optional?: boolean }
+      | undefined;
+    expect(key?.optional).toBe(true);
+    expect(secretValue(docs, key?.name ?? "", key?.key ?? "")).toBeUndefined();
   });
 });
 

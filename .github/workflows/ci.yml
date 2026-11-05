@@ -300,6 +300,8 @@ jobs:
             refuses "the bundled Intelligence with no licence for it" \
               --set-string secrets.licenseToken= \
               --set-string intelligence.appApi.licenseSecret.existingSecret=openbot-intel-license
+            refuses "the bundled Intelligence with no project key for OpenBot" \
+              --set intelligence.bootstrap.projects=null
           else
             echo "skipped: the bundled-Intelligence refusals are armed only where the target bundles it"
             refuses "no Intelligence at all" \

@@ -104,7 +104,14 @@ This template renders nothing.
 {{- if and (not .Values.secrets.licenseToken) (eq $licenseSecret.existingSecret "openbot-intel-license") }}
 {{- fail "The bundled Intelligence is self-hosted and needs the CopilotKit licence. Set secrets.licenseToken and the chart gives it to both OpenBot and Intelligence. If the licence is in a Secret of your own (secrets.existingSecret, or a store), also set intelligence.appApi.licenseSecret.existingSecret to that Secret's name and intelligence.appApi.licenseSecret.key to its key, so Intelligence reads the same one." }}
 {{- end }}
-{{- $_ := include "openbot.intelligenceOrganizationId" . }}
+{{- /*
+  OpenBot's runtime key: a project in `intelligence.bootstrap.projects` with an `apiKey`, which this
+  chart generates and the server reads. Without one the server would wait forever for a Secret
+  nothing writes.
+*/}}
+{{- if not (include "openbot.intelligenceKeyRef" . | fromYaml).name }}
+{{- fail "intelligence.bootstrap.projects has no project with an apiKey. The bundled Intelligence gives OpenBot its runtime key through one: keep the chart's `openbot` project, or give yours apiKey.existingSecret and apiKey.key." }}
+{{- end }}
 {{- else if or (not .Values.config.intelligence.apiUrl) (not .Values.config.intelligence.gatewayWsUrl) }}
 {{- fail "OpenBot requires CopilotKit Intelligence. With intelligence.enabled=false, set config.intelligence.apiUrl and config.intelligence.gatewayWsUrl, and the matching secrets.intelligenceApiKey." }}
 {{- end }}
