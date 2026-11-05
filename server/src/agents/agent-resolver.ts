@@ -4,6 +4,7 @@ import type { AuditInitiator } from "../audit";
 import type { AgentFetch, StallGuard } from "../channels/stall-guard";
 import {
   type HandoffForRun,
+  type HoldsTools,
   type LoadAgentsForActor,
   type LoadAttachment,
   type LoadInstructions,
@@ -32,6 +33,11 @@ export type AgentResolutionContext = {
    * neither start a subagent of its own nor reach past itself to another Bot or a person.
    */
   subagent?: boolean;
+  /**
+   * Which runs on the Bots built may hold their tools. Absent means every run does. Set only for the
+   * runtime's own map, which it also runs for itself (`isAskedRun` in copilot.ts).
+   */
+  holdsTools?: HoldsTools;
 };
 
 export class CoworkerUnavailableError extends Error {}
@@ -39,6 +45,7 @@ export class CoworkerUnavailableError extends Error {}
 export type ActorAgentResolver = {
   resolveAgentsForActor(
     actor: AgentActor,
+    context?: AgentResolutionContext,
   ): Promise<Record<string, AbstractAgent>>;
   resolveAgentForActor(
     actor: AgentActor,
@@ -156,6 +163,7 @@ export function createActorAgentResolver(
       acquireForActor,
       deps.loadPersonalMemoryForActor?.(actor.id),
       deps.recordToolLimitRefusalForActor?.(actor.id, context?.initiator),
+      context?.holdsTools,
       deps.pickedModelForActor?.(actor.id),
     ).then((agents) => {
       const loadName = deps.loadNameForActor;
@@ -175,8 +183,16 @@ export function createActorAgentResolver(
     });
   };
 
-  const resolveAgentsForActor = async (actor: AgentActor) =>
-    resolveRegisteredAgents(actor, await deps.loadAgents(actor));
+  const resolveAgentsForActor = async (
+    actor: AgentActor,
+    context?: AgentResolutionContext,
+  ) =>
+    resolveRegisteredAgents(
+      actor,
+      await deps.loadAgents(actor),
+      undefined,
+      context,
+    );
 
   return {
     resolveAgentsForActor,

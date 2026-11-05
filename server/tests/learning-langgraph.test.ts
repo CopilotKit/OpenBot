@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { HttpAgent, type RunAgentInput, type Tool } from "@ag-ui/client";
 import { lastValueFrom, toArray } from "rxjs";
+import { reservePort } from "../../tests/support/reserved-port";
 import { RemoteLearnedSkillsMiddleware } from "../src/learning/remote";
 
 const catalog = "Published skill refunds: use the refund procedure.";
@@ -80,13 +81,7 @@ for (const framework of ["langgraph", "bot"]) {
         );
       },
     });
-    const reservation = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch: () => new Response(),
-    });
-    const port = reservation.port;
-    await reservation.stop(true);
+    const port = await reservePort();
     const child = Bun.spawn(
       [Bun.argv[0], "--no-env-file", `agent-${framework}/src/index.ts`],
       {

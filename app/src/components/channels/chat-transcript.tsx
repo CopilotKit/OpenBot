@@ -31,6 +31,7 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+import { InlineApproval } from "@/components/approvals/inline-approval";
 import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
@@ -1481,12 +1482,22 @@ const ToolCallBody = memo(function ToolCallBody({
          *
          * What was called, shimmering until its result arrives, and then the server's own words
          * drawn the way a Bot's prose is drawn.
+         *
+         * WHILE OPENBOT ASKS ABOUT IT, ITS CARD IS DRAWN HERE INSTEAD. The server stops the turn and
+         * opens a request for the person, and this line would otherwise shimmer with no way to
+         * answer it but the Bots page. The same card a computer step draws (see `approval-tools`),
+         * read from the same inbox, and the line comes back once it is decided.
          */}
         {drawn ?? (
-          <ServerToolLine
-            name={name}
-            place={{ toolCallId, latest }}
-            result={result}
+          <InlineApproval
+            toolCallId={toolCallId}
+            fallback={
+              <ServerToolLine
+                name={name}
+                place={{ toolCallId, latest }}
+                result={result}
+              />
+            }
           />
         )}
       </ToolPlaceContext.Provider>

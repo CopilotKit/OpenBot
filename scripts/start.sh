@@ -455,6 +455,8 @@ if identifies_as_openbot "$SERVER_PORT" server; then
     fi
   fi
 fi
+# Redirect the whole background group. Redirecting only Bun inside `(command &)` leaves its
+# waiting Bash wrapper holding the updater's captured stdout/stderr open after this script exits.
 if ! identifies_as_openbot "$SERVER_PORT" server; then
   if [ "$ONE_COMPUTER_EACH" = "true" ]; then
     (cd server && PORT="$SERVER_PORT" \
@@ -462,11 +464,11 @@ if ! identifies_as_openbot "$SERVER_PORT" server; then
       SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" \
       COMPUTER_TOKEN="$COMPUTER_TOKEN" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/production-entry.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/production-entry.ts) >"$LOGS/server.log" 2>&1 &
   else
     (cd server && PORT="$SERVER_PORT" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/production-entry.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/production-entry.ts) >"$LOGS/server.log" 2>&1 &
   fi
 fi
 wait_for_openbot "$SERVER_PORT" server
@@ -476,27 +478,34 @@ wait_for_openbot "$SERVER_PORT" server
 # only now, because dispatching a claimed routine is one HTTP call to this server's own
 # /internal/routines/run, and the wait_for above is what confirms that call has somewhere to land.
 #
-# Guarded by a pgrep check rather than an HTTP health check, the same way the restart guard above
-# matches the server's own command line with `pkill -f`: the worker loop has no HTTP endpoint of its
-# own to ask, so "is a matching process already running" is the only signal a rerun of this script
-# has for "leave it alone."
+# Scoped to this checkout's working directory: another local installation can run the same command.
+# The worker has no HTTP endpoint, so a process match plus its cwd is the ownership signal.
+# Unknown ownership refuses startup before another worker can be launched.
 #
 # Launched from `$ROOT` with `bun worker/src/index.ts`, not `cd worker && bun src/index.ts`: on a
-# Linux host, container processes are visible to `pgrep` too, and `server/Dockerfile`,
-# `agent-computer/Dockerfile`, and `supervisor/Dockerfile` all run `bun src/index.ts` as their argv.
-# The old pattern matched those containers, the guard false-positived, and the worker silently never
-# started. `bun worker/src/index.ts` matches nothing else in the repo. Running from `$ROOT` is safe:
-# relative imports resolve from the importing file, not from the process's cwd.
-if ! running "bun worker/src/index.ts"; then
+# Linux host, container processes are visible too and several services run `bun src/index.ts`.
+# Relative imports resolve from the importing file, so running the worker from `$ROOT` is safe.
+worker_running=false
+if running_here "bun worker/src/index.ts" "$ROOT"; then
+  worker_running=true
+else
+  ownership_status=$?
+  if [ "$ownership_status" -ne 1 ]; then exit "$ownership_status"; fi
+fi
+if [ "$worker_running" = false ]; then
   WORKER_DATABASE_URL="$(setting DATABASE_URL postgres://openbot:openbot@localhost:5432/openbot)"
   (cd "$ROOT" && \
     DATABASE_URL="$WORKER_DATABASE_URL" \
     SERVER_INTERNAL_URL="http://localhost:$SERVER_PORT" \
     WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-    bun worker/src/index.ts >"$LOGS/worker.log" 2>&1 &)
+    bun worker/src/index.ts) >"$LOGS/worker.log" 2>&1 &
   info "  worker: started (routine sweep loop)"
   sleep 1
-  if ! running "bun worker/src/index.ts"; then
+  if running_here "bun worker/src/index.ts" "$ROOT"; then
+    :
+  else
+    ownership_status=$?
+    if [ "$ownership_status" -ne 1 ]; then exit "$ownership_status"; fi
     red "  worker: did not stay up, check $LOGS/worker.log"
   fi
 else
@@ -529,7 +538,7 @@ JS
 info "4/4  App"
 require_free_or_ours "$APP_PORT" app
 if ! identifies_as_openbot "$APP_PORT" app; then
-  (cd app && bun run dev --port "$APP_PORT" --strictPort >"$LOGS/app.log" 2>&1 &)
+  (cd app && bun run dev --port "$APP_PORT" --strictPort) >"$LOGS/app.log" 2>&1 &
 fi
 wait_for_openbot "$APP_PORT" app
 

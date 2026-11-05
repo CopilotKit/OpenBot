@@ -68,6 +68,11 @@ import {
 import { sanitizeSeededHistory } from "./history-sanitize";
 import type { AuditInitiator } from "./initiator";
 import { keepLease } from "./lease";
+import {
+  observeDetachedRun,
+  type StopRecorder,
+  stopRecorder,
+} from "./run-stop";
 import { TURN_LIMITS } from "./limits";
 import type { ComponentCatalog, TurnAdmission } from "./ports";
 import { historyOrEmpty } from "./thread-history";
@@ -96,6 +101,8 @@ export type TurnRunner = (input: {
     trigger: "human" | "routine" | "followup" | "subagent" | "unknown";
     surface?: "web" | "desktop" | "mobile" | "external_channel" | "unknown";
     rootTaskId?: string;
+    /** The root task this turn works for, as its parent run's context already states it. */
+    inheritedRootTaskId?: string;
     parentRunId?: string;
     attempt?: number;
   };
@@ -145,6 +152,11 @@ export type IntelligenceLike = {
     agentId: string;
     ttlSeconds?: number;
     learningContainerId?: string;
+    /**
+     * The run's analytics context, which the platform records with the run. Sent on the wire only
+     * by a runtime that knows the field; `@copilotkit/runtime` 1.83.0 drops it and locks as before.
+     */
+    analyticsContext?: Record<string, unknown>;
   }): Promise<unknown>;
   /** NOTE: no `userId` and no `agentId` — renew is identified by the thread and the run alone. */
   ɵrenewThreadLock(params: {
@@ -155,6 +167,14 @@ export type IntelligenceLike = {
   ɵcleanupThreadLock(params: {
     threadId: string;
     runId: string;
+  }): Promise<void>;
+  /** Records a stop OpenBot made; absent before `@copilotkit/runtime` has it. See `run-stop.ts`. */
+  ɵrecordRunStop?(params: {
+    threadId: string;
+    runId: string;
+    userId: string;
+    agentId: string;
+    signal?: AbortSignal;
   }): Promise<void>;
 };
 
@@ -177,6 +197,8 @@ export type RunnerLike = {
     agent: AbstractAgent;
     input: RunAgentInput;
     persistedInputMessages?: Message[];
+    /** Called by a runner that records its own stops; ignored by one that does not. */
+    recordStop?: StopRecorder;
   }): EventStream;
   stop(request: {
     threadId: string;
@@ -359,6 +381,40 @@ export function turnInput(input: {
 }
 
 /**
+ * Where a host leaves a run's analytics context: the forwardedProps key CopilotKit's runtime reads
+ * for a browser run and sends, as `analyticsContext`, on the thread lock. This file is that engine
+ * for a turn with no browser, so it reads the same key.
+ */
+const ANALYTICS_CONTEXT = "__copilotkitAnalyticsContext";
+
+/** The run's input without the analytics context, and the context when it is an object. */
+function takeAnalyticsContext(input: RunAgentInput): {
+  input: RunAgentInput;
+  analyticsContext?: Record<string, unknown>;
+} {
+  const props: unknown = input.forwardedProps;
+  if (
+    typeof props !== "object" ||
+    props === null ||
+    Array.isArray(props) ||
+    !Object.hasOwn(props, ANALYTICS_CONTEXT)
+  )
+    return { input };
+  const { [ANALYTICS_CONTEXT]: context, ...rest } = props as Record<
+    string,
+    unknown
+  >;
+  return {
+    input: { ...input, forwardedProps: rest },
+    ...(typeof context === "object" &&
+    context !== null &&
+    !Array.isArray(context)
+      ? { analyticsContext: context as Record<string, unknown> }
+      : {}),
+  };
+}
+
+/**
  * The thread's lock for one run, held until it is released.
  *
  * Acquired with this run's own id and renewed on a heartbeat with the same id, so the lock the
@@ -386,6 +442,7 @@ async function takeLease(input: {
   agentId: string;
   ttlSeconds: number;
   learningContainerId?: string;
+  analyticsContext?: Record<string, unknown>;
   heartbeatMs: number;
   onLost: (error: unknown) => void;
 }): Promise<Lease> {
@@ -397,6 +454,7 @@ async function takeLease(input: {
     agentId,
     ttlSeconds,
     learningContainerId,
+    analyticsContext,
     heartbeatMs,
     onLost,
   } = input;
@@ -407,6 +465,7 @@ async function takeLease(input: {
     agentId,
     ttlSeconds,
     ...(learningContainerId ? { learningContainerId } : {}),
+    ...(analyticsContext ? { analyticsContext } : {}),
   });
 
   const heartbeat = keepLease({
@@ -745,6 +804,28 @@ export function createTurnRunner(options: {
       ...(depth ? { depth } : {}),
     });
     agent.threadId = threadId;
+    /*
+     * A Stop this turn did not make itself: a person pressing Stop on the thread, which Intelligence
+     * relays to the runner. Known here as a cancel, like the turn's own. A lost lock is the turn's
+     * own stop and is not reported as one.
+     */
+    let stoppingHere = false;
+    observeDetachedRun(
+      agent,
+      () => stoppingHere,
+      () => {
+        void options
+          .onKnownStop?.(ownerUserId, runId, "cancelled")
+          .catch(() => {
+            console.warn(
+              JSON.stringify({
+                type: "product-telemetry",
+                reason: "stop_observation_failed",
+              }),
+            );
+          });
+      },
+    );
     agent.setMessages(messages);
     if (continuation) agent.setState(continuation.snapshot.state);
     const headlessTools = [
@@ -774,9 +855,11 @@ export function createTurnRunner(options: {
       ...(continuation ? { continuation } : {}),
     });
 
+    let stated = false;
     if (options.prepareRunInput) {
       try {
         input = await options.prepareRunInput(input, hostTurn);
+        stated = true;
       } catch {
         console.warn(
           JSON.stringify({
@@ -786,6 +869,14 @@ export function createTurnRunner(options: {
         );
       }
     }
+    /*
+     * The analytics context goes on the lock and nowhere else, as the runtime does for a browser
+     * run: the agent and the run's stored events never see it. Only a context the host stated for
+     * THIS turn is sent; one left in a resumed run's forwardedProps is dropped with the key.
+     */
+    const taken = takeAnalyticsContext(input);
+    input = taken.input;
+    const analyticsContext = stated ? taken.analyticsContext : undefined;
 
     /*
      * The reply is recovered by diffing the agent, because the runner throws away what `runAgent`
@@ -819,6 +910,7 @@ export function createTurnRunner(options: {
     let deadline: ReturnType<typeof setTimeout> | undefined;
     let backstop: ReturnType<typeof setTimeout> | undefined;
     let heartbeatError: unknown;
+    let lockLost = false;
     let waiting: HeadlessToolSuspension | undefined;
     /** Whether the deadline stopped this turn. See `settle`. */
     let stopped = false;
@@ -837,6 +929,7 @@ export function createTurnRunner(options: {
 
     /** Stop this exact run, both ends: the agent's own abort and the runner's stop flag. */
     const stopTurn = () => {
+      stoppingHere = true;
       try {
         agent.abortRun();
       } catch {
@@ -856,6 +949,7 @@ export function createTurnRunner(options: {
       agentId,
       ttlSeconds: lockTtlSeconds,
       ...(learningContainerId ? { learningContainerId } : {}),
+      ...(analyticsContext ? { analyticsContext } : {}),
       heartbeatMs,
       /*
        * A lock we no longer hold means somebody else is in this thread — the person, most likely,
@@ -864,6 +958,7 @@ export function createTurnRunner(options: {
        */
       onLost: (error) => {
         heartbeatError = error;
+        lockLost = true;
         stopTurn();
       },
     });
@@ -889,8 +984,24 @@ export function createTurnRunner(options: {
       });
       const completed = new Promise<void>((resolve, reject) => {
         let terminal: Error | undefined;
+        /*
+         * A stop this turn makes (its cancel, a pause, the deadline) is recorded with Intelligence
+         * before the run's terminal event, so the run reads as cancelled. The runner does the
+         * recording and bounds it; see `run-stop.ts`.
+         */
+        const recordStop = stopRecorder(
+          intelligence,
+          { threadId, runId, userId: ownerUserId, agentId },
+          () => !lockLost,
+        );
         runner
-          .run({ threadId, agent, input, persistedInputMessages })
+          .run({
+            threadId,
+            agent,
+            input,
+            persistedInputMessages,
+            ...(recordStop ? { recordStop } : {}),
+          })
           .subscribe({
             /*
              * RUN_ERROR THROUGH `next` IS TERMINAL. The Intelligence runner reports a failed run by

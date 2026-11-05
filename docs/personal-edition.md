@@ -54,7 +54,7 @@ settings and team rules, and a paused Automatic Learning.
 | --- | --- |
 | Use Bots, cloud browser, network and computer, custom rules, password manager, apps a Bot uses as you, check-ins | On |
 | Local computer access, Slack and Teams, Team Bots, Isolated Bots | Off |
-| Ask before acting | On for anybody who has not chosen otherwise |
+| Ask before making changes | Off for anybody who has not chosen otherwise. Paying, deleting, sending, sharing and posting ask anyway. See [Approvals](approvals.md) |
 | Stop idle computers | Never: there is one |
 | Check-ins per Bot per day | 24, as in the team edition |
 | SSO, action recording, model and MCP allowlists, skill sharing | Off |
@@ -81,14 +81,18 @@ account are the same decision when one person makes both:
   client typed first wait behind **Show apps that need setup**, and a search finds them too. With a
   broker set up, the last tile browses its directory of more apps.
 - Connecting an app gives **every Bot every tool** it lists, including the ones that change things.
-  What stands in front of a write is Ask before acting (Allow once, Always allow here, or Deny, in the
-  conversation). An app can't be taken from one Bot; turning it off takes it from all of them. See
-  `server/src/plugins/personal-defaults.ts`.
+  Ordinary changes just happen. Deleting, sending, sharing and posting ask first in the
+  conversation (Allow once or Deny), and paying or buying is handed to you. Turn on **Ask before
+  making changes** in Settings → Approvals to be asked about every change. See
+  [Approvals](approvals.md). An app can't be taken from one Bot; turning it off takes it from all of
+  them. See `server/src/plugins/personal-defaults.ts`.
 - A connected tile opens `/connections/<app>`: its tools, your account, and turning it off.
 - **Sign-ins and keys**, below the grid, links to saved website logins and API keys, which live under
   Settings.
 - **Routines is always on**, here as in the team edition: every Bot has all of its tools, and it
   can't be turned off. See [Routines](routines.md).
+- **Parallel Search is on from the start**, and can be turned off. See
+  [Web search is on from the start](#web-search-is-on-from-the-start).
 
 **In a conversation**, when a Bot needs an app that isn't connected, it shows a card with
 **Connect**: one press turns the app on and opens its sign-in in a new tab, and the conversation
@@ -106,3 +110,19 @@ all about other people, other computers or Slack and Teams.
 The server answers `404` for the API behind the team-only screens: people, identity providers,
 enterprise controls (except `/api/admin/enterprise/me`, which any page may ask), the admin learning
 and check-in settings, and SCIM and SSO registration. See `server/src/edition-routes.ts`.
+
+## Web search is on from the start
+
+The first time the server starts, it turns on **Parallel Search**, Parallel's free web search that
+needs no key, so every Bot can search the web and read pages with nothing set up. Every Bot gets its
+`web_search` and `web_fetch` tools, including Bots made later.
+
+What a Bot searches for goes to Parallel: the search queries and the addresses of the pages it asks
+to read, and a session identifier for the conversation. Full conversations are not sent. See
+[Public-web research](web-research.md#choice-and-controls).
+
+It is turned on once. Turn it off on its Connections page and it stays off: the server writes down
+that it turned it on (`personal_default_apps` in `enterprise_settings`) and never does it again.
+Starting offline doesn't stop the server. Parallel is turned on without its tools, and the server
+asks for them again in the background, and on every start, until Parallel answers, so nobody has to
+press Refresh. See `ensurePersonalDefaultApps` in `server/src/plugins/personal-defaults.ts`.

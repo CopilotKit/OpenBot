@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { connect, createServer, type Socket } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 import {
   BunWebSocket,
   fileFor,
@@ -181,7 +182,7 @@ describe("which file a path names", () => {
   });
 
   test("a decoded NUL path is refused before it reaches Bun.file", async () => {
-    const proxy = await startProxy(await unusedPort());
+    const proxy = await startProxy(await reservePort());
     try {
       const response = await fetch(
         `http://127.0.0.1:${proxy.port}/assets/a%00b.js`,
@@ -237,23 +238,6 @@ type HeaderSnapshot = {
   cookie: string | null;
   origin: string | null;
 };
-
-async function unusedPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() => {
-        if (address && typeof address === "object") {
-          resolve(address.port);
-        } else {
-          reject(new Error("server did not receive a TCP port"));
-        }
-      });
-    });
-  });
-}
 
 function snapshotHeaders(request: Request): HeaderSnapshot {
   return {
@@ -313,7 +297,7 @@ async function startProxy(
   upstreamPort: number,
   environment: Record<string, string> = {},
 ) {
-  const port = await unusedPort();
+  const port = await reservePort();
   const child = Bun.spawn({
     cmd: [process.execPath, "--no-env-file", "serve.ts"],
     cwd: join(import.meta.dir, ".."),
@@ -521,7 +505,7 @@ describe("api proxy", () => {
   });
 
   test("forwards session headers to authenticated upstream websocket handshakes", async () => {
-    const upstreamPort = await unusedPort();
+    const upstreamPort = await reservePort();
     const upstream = startAuthenticatedUpstream(upstreamPort);
     const proxy = await startProxy(upstreamPort);
     const proxyPort = proxy.port;
@@ -581,7 +565,7 @@ describe("api proxy", () => {
 
 describe("upstream websocket handshake", () => {
   test("an unavailable upstream never opens the downstream", async () => {
-    const proxy = await startProxy(await unusedPort());
+    const proxy = await startProxy(await reservePort());
     try {
       expect(
         await failedHandshake(`ws://127.0.0.1:${proxy.port}/api/events`),
@@ -599,7 +583,7 @@ describe("upstream websocket handshake", () => {
       socket.on("data", () => requests++);
       socket.on("close", () => sockets.delete(socket));
     });
-    const port = await unusedPort();
+    const port = await reservePort();
     await new Promise<void>((resolve) =>
       upstream.listen(port, "127.0.0.1", resolve),
     );
@@ -723,7 +707,7 @@ describe.skipIf(lanAddress === undefined)("where the app listens", () => {
    * same network that administrator, through here.
    */
   test("on this machine's two loopbacks and not on its network address", async () => {
-    const proxy = await startProxy(await unusedPort());
+    const proxy = await startProxy(await reservePort());
     try {
       expect(await accepts("127.0.0.1", proxy.port)).toBe(true);
       expect(await accepts("::1", proxy.port)).toBe(true);
@@ -734,7 +718,7 @@ describe.skipIf(lanAddress === undefined)("where the app listens", () => {
   });
 
   test("on every interface when the deployment names an address on its network", async () => {
-    const proxy = await startProxy(await unusedPort(), {
+    const proxy = await startProxy(await reservePort(), {
       OPENBOT_APP_URL: `http://${lanAddress}:3010`,
     });
     try {

@@ -108,6 +108,63 @@ test("shell build entrypoint refuses absent trust before native work without exp
   );
 });
 
+test("shell build supplies the compiled public trust to Tauri's artifact bundler", () => {
+  const root = mkdtempSync(join(tmpdir(), "openbot-shell-build-"));
+  temporary.push(root);
+  const preload = join(root, "capture-native-build.js");
+  const capture = join(root, "native-build.json");
+  // Exercise the entrypoint while replacing only the expensive external native build boundary.
+  writeFileSync(
+    preload,
+    `import { writeFileSync } from "node:fs";
+Bun.spawnSync = (argv, options) => {
+  writeFileSync(process.env.OPENBOT_BUILD_CAPTURE, JSON.stringify({
+    argv,
+    privateKeyAvailable: options.env.TAURI_SIGNING_PRIVATE_KEY === "synthetic-private-signing-material"
+  }));
+  return { exitCode: 0 };
+};\n`,
+  );
+  const result = Bun.spawnSync(
+    [
+      process.execPath,
+      "--preload",
+      preload,
+      join(import.meta.dir, "../desktop/scripts/build-shell-update.ts"),
+      "--bundles",
+      "app",
+    ],
+    {
+      env: {
+        ...process.env,
+        OPENBOT_BUILD_CAPTURE: capture,
+        OPENBOT_SHELL_UPDATE_PUBLIC_KEY: "synthetic-public-signing-key",
+        OPENBOT_SHELL_UPDATE_ENDPOINT: "https://updates.example/latest.json",
+        TAURI_SIGNING_PRIVATE_KEY: "synthetic-private-signing-material",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  expect(result.exitCode).toBe(0);
+  const build = JSON.parse(readFileSync(capture, "utf8"));
+  const configuration = build.argv
+    .filter((argument: string) => argument.startsWith("{"))
+    .map((argument: string) => JSON.parse(argument))
+    .find(
+      (config: { plugins?: { updater?: object } }) => config.plugins?.updater,
+    );
+  expect(configuration?.plugins.updater).toEqual({
+    pubkey: "synthetic-public-signing-key",
+    endpoints: ["https://updates.example/latest.json"],
+  });
+  expect(build.argv).toContain("app");
+  expect(build.privateKeyAvailable).toBe(true);
+  expect(JSON.stringify(build.argv)).not.toContain(
+    "synthetic-private-signing-material",
+  );
+});
+
 type WorkflowStep = {
   uses?: string;
   run?: string;

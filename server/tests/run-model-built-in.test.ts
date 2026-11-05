@@ -2,7 +2,12 @@ import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import type { BaseEvent, RunAgentInput } from "@ag-ui/client";
 import { EventType } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
-import { buildAgents, type RuntimeModel } from "../src/copilot";
+import {
+  ASKED_RUN,
+  buildAgents,
+  isAskedRun,
+  type RuntimeModel,
+} from "../src/copilot";
 
 /*
  * A built-in Bot's run, end to end against a fake provider: the model the provider is asked for is
@@ -28,7 +33,7 @@ afterAll(async () => {
 
 beforeEach(() => llm.clearRequests());
 
-async function bot(picked: string | undefined) {
+async function bot(picked: string | undefined, holdsTools?: typeof isAskedRun) {
   const agents = await buildAgents(
     [
       {
@@ -54,7 +59,9 @@ async function bot(picked: string | undefined) {
     undefined,
     undefined,
     undefined,
+    // recordToolLimitRefusal
     undefined,
+    holdsTools,
     async () => picked,
   );
   if (!agents.assistant) throw new Error("Bot missing");
@@ -76,8 +83,9 @@ function input(forwardedProps: Record<string, unknown>): RunAgentInput {
 async function run(
   forwardedProps: Record<string, unknown>,
   picked: string | undefined,
+  holdsTools?: typeof isAskedRun,
 ) {
-  const agent = await bot(picked);
+  const agent = await bot(picked, holdsTools);
   const events: BaseEvent[] = [];
   await new Promise<void>((resolve, reject) => {
     agent.run(input(forwardedProps)).subscribe({
@@ -112,4 +120,18 @@ test("a run asks the provider for the model the person picked", async () => {
 test("a model the request names is not the one asked for", async () => {
   await run({ openbotModel: "gpt-4o", model: "openai/gpt-4o" }, undefined);
   expect(modelsAsked()).toEqual(["gpt-5.5"]);
+});
+
+/*
+ * The runtime's own runs (naming the conversation, suggestions) are built with none of the Bot's
+ * tools, and still answer on the conversation's model: the gate judged and recorded that one.
+ */
+test("a run the runtime makes for itself asks for the picked model too", async () => {
+  await run({}, "gpt-4o", isAskedRun);
+  expect(modelsAsked()).toEqual(["gpt-4o"]);
+});
+
+test("a run somebody asked for, on a request map that holds tools, asks for the pick", async () => {
+  await run({ [ASKED_RUN]: true }, "gpt-4o", isAskedRun);
+  expect(modelsAsked()).toEqual(["gpt-4o"]);
 });

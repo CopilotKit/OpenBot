@@ -35,11 +35,17 @@ import { routeMessage } from "./route";
 export async function startWithChosen(input: {
   agentId: string;
   text: string;
+  /** The first message's `/` skills; see `FirstMessage`. */
+  skillInstructions?: readonly string[];
   record: (text: string, agentId: string) => Promise<unknown>;
-  start: (agentId: string, text: string) => Promise<void>;
+  start: (
+    agentId: string,
+    text: string,
+    skillInstructions: readonly string[],
+  ) => Promise<void>;
 }): Promise<void> {
   await input.record(input.text, input.agentId).catch(() => undefined);
-  await input.start(input.agentId, input.text);
+  await input.start(input.agentId, input.text, input.skillInstructions ?? []);
 }
 
 /**
@@ -113,6 +119,8 @@ export function useStartChannel() {
   const start = (
     agentId: string,
     text: string,
+    /** The first message's `/` skills; see `FirstMessage`. */
+    skillInstructions: readonly string[] = [],
     /** A model picked before the conversation existed, saved before its first message runs. */
     model?: string | null,
   ) =>
@@ -128,7 +136,7 @@ export function useStartChannel() {
         await deleteChannel.mutateAsync(channelId);
       },
       open: async (channelId) => {
-        stashFirstMessage(channelId, text);
+        stashFirstMessage(channelId, text, skillInstructions);
         await navigate({
           params: { channelId },
           replace: true,
@@ -170,12 +178,18 @@ export function useStartChannel() {
     startGroup,
     start,
     /** `start`, for a coworker the person chose: the choice is recorded first. */
-    startChosen: (agentId: string, text: string, model?: string | null) =>
+    startChosen: (
+      agentId: string,
+      text: string,
+      skillInstructions: readonly string[] = [],
+      model?: string | null,
+    ) =>
       startWithChosen({
         agentId,
         text,
+        skillInstructions,
         record: routeMessage,
-        start: (id, message) => start(id, message, model),
+        start: (id, message, skills) => start(id, message, skills, model),
       }),
   };
 }

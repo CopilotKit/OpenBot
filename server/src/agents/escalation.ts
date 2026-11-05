@@ -51,7 +51,7 @@ export type EscalationRoute = (input: {
   initiator?: AuditInitiator;
   question: string;
   why?: string;
-  /** The separate decisions inside the question, when there are several. */
+  /** The decisions inside the question, one or several, when the Bot sent them as parts. */
   parts?: QuestionPart[];
 }) => Promise<{ reached: string } | { refusal: string }>;
 
@@ -105,14 +105,24 @@ const parameters = z.object({
     .describe(
       "Why this needs a person rather than you: what you cannot settle on your own",
     ),
+  /*
+   * One part is a question too.
+   *
+   * This took two to six, written for the case it was added for: several decisions that used to
+   * arrive numbered inside one sentence. A single decision with the answers the Bot expects (which
+   * time zone, and the three it thinks likely) is the same shape with one entry, and models send it
+   * that way. Refused, the person was never asked, the chat drew the step as Blocked, and the Bot
+   * went on to guess, which is the one thing this tool is for stopping.
+   */
   parts: z
     .array(questionPartSchema)
-    .min(2)
+    .min(1)
     .max(6)
     .optional()
     .describe(
-      "When you need several separate decisions, one entry per decision. `question` then sums " +
-        "them up in a sentence",
+      "The decisions you need, one entry per decision, with `options` when you can name the " +
+        "likely answers. A single decision is one entry. With several, `question` sums them up " +
+        "in a sentence",
     ),
 });
 
@@ -139,9 +149,9 @@ export function escalationTool(options: {
       "Put a question to a person when the work needs judgement you do not have: a decision only " +
       "they can make, a fact only they know, permission you do not hold. Prefer this to guessing, " +
       "and prefer it to asking another Bot when no other Bot could settle it either. Say what you " +
-      "need and why, then stop and wait for their answer. Several decisions go in `parts`, one " +
-      "each, with `options` when you can name the likely answers, rather than numbered inside " +
-      "one sentence.",
+      "need and why, then stop and wait for their answer. Put each decision in `parts`, one " +
+      "entry each, with `options` when you can name the likely answers: one decision is a " +
+      "single entry, and several are separate entries rather than numbered inside one sentence.",
     parameters,
     execute: async (args: unknown) => {
       const parsed = parameters.safeParse(args);
