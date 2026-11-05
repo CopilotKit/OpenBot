@@ -172,6 +172,9 @@ export function createOriginGuard(
   };
 }
 
+/** A plain Host header, lowercased: a name or an address, and a port or none. */
+const PLAIN_HOST = /^(\[[0-9a-f:.]+\]|[a-z0-9._-]+)(?::\d{1,5})?$/;
+
 /** A Host header's name, lowercased and without its port, or null for one that is not a plain host. */
 function hostName(request: Request): string | null {
   const raw = request.headers.get("host")?.trim().toLowerCase();
@@ -182,7 +185,7 @@ function hostName(request: Request): string | null {
       return null;
     }
   }
-  const match = /^(\[[0-9a-f:.]+\]|[a-z0-9._-]+)(?::\d{1,5})?$/.exec(raw);
+  const match = PLAIN_HOST.exec(raw);
   return match?.[1]?.replace(/\.+$/, "") ?? null;
 }
 
@@ -255,4 +258,43 @@ export function createSingleUserGate(
     if (refused) return context.json({ error: refused }, 403);
     return next();
   };
+}
+
+/**
+ * OpenBot's own origin as a caller on this machine reached it, or null.
+ *
+ * For an address handed to something that is not one of OpenBot's pages, and so has no page to
+ * resolve a path against: the Recorder's capture pass names the Intelligence gateway's socket on
+ * OpenBot's own address (intelligence-gateway-proxy.ts). Where no public URL is configured, as over a
+ * `kubectl port-forward`, the only name that address has is the one the caller used to reach it.
+ *
+ * Made from `Host` only where nobody else could have written it. The caller is on loopback: the
+ * socket's peer, which nobody can write, and what a port-forward's connection is inside the pod. The
+ * Host is one of this machine's own loopback names, which no DNS answer can stand in for. And a
+ * single-user OpenBot admits the request at all ({@link singleUserRefusal}). Any other caller's Host
+ * is its own say-so, and it gets nothing made from it. The scheme is the connection's own, which over
+ * a port-forward is plain HTTP.
+ *
+ * Undefined `caller` is the app called in-process, which has no connection to vouch for anything.
+ */
+export function ownOriginOnThisMachine(
+  request: Request,
+  caller: NetworkCaller | undefined,
+  config: Pick<DeploymentConfig, "singleUser" | "singleUserAccess">,
+): string | null {
+  if (!caller?.address || !isLoopbackHost(caller.address)) return null;
+  if (
+    config.singleUser &&
+    singleUserRefusal(request, caller, config.singleUserAccess) !== null
+  )
+    return null;
+  const host = request.headers.get("host")?.trim().toLowerCase();
+  if (!host || !PLAIN_HOST.test(host)) return null;
+  let origin: URL;
+  try {
+    origin = new URL(`${new URL(request.url).protocol}//${host}`);
+  } catch {
+    return null;
+  }
+  return isLoopbackHost(origin.hostname) ? origin.origin : null;
 }

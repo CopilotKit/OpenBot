@@ -96,6 +96,7 @@ import { createHostAccessRoutes } from "./host-access/routes";
 import { identityRoutes } from "./identity/routes";
 import type { IdentityStore } from "./identity/store";
 import { createIntelligenceClient } from "./intelligence-client";
+import { createCapturePassOrigin } from "./intelligence-gateway-proxy";
 import {
   createLearningRoutes,
   type LearningAdminDependencies,
@@ -1445,6 +1446,13 @@ export function createApp(
           ),
         ),
       );
+    /*
+     * The Recorder's capture pass names the Intelligence gateway's socket, and where this server
+     * carries that socket with no public URL to write before it, as over a `kubectl port-forward`, the
+     * address is a path. The page resolves a path against itself; the Recorder is not on the page, so
+     * its pass is answered knowing this server's own origin as the Recorder reached it.
+     */
+    app.use("/api/copilotkit/*", createCapturePassOrigin(config));
     // Mounted at the ROOT with the handler carrying its own basePath. Mounting it at
     // "/api/copilotkit" as well double-prefixes it: Hono strips the prefix before the handler sees
     // the path, so every route lands at /api/copilotkit/api/copilotkit/* and /info 404s. The browser

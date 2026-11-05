@@ -36,7 +36,11 @@ container uses it). `INTELLIGENCE_GATEWAY_PROXY=on` has the server carry the soc
 `/api/intelligence/client` on its own address, for an Intelligence nobody outside the cluster can
 reach: the Helm chart sets it for the Intelligence it installs, so one port-forward or one Ingress
 host is enough. The socket needs a signed-in session, and the gateway still checks the join token on
-it. Set one of the two, not both; `off` or unset is neither.
+it. Set one of the two, not both; `off` or unset is neither. With the proxy on and no
+`OPENBOT_PUBLIC_URL`, the page is told the socket as a path and resolves it against itself. The
+OpenBot Recorder is not on the page, so its capture pass names the socket on the address the
+Recorder reached OpenBot at, and only where that is this machine's loopback, as over
+`kubectl port-forward`. A Recorder that reaches OpenBot any other way needs `OPENBOT_PUBLIC_URL`.
 
 `COPILOTKIT_LICENSE_TOKEN` is optional: managed Intelligence issues no licence token, and a
 self-hosted Intelligence that has one sets this and has it forwarded to the runtime. That
