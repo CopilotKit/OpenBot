@@ -4,21 +4,25 @@ import {
   beforeEach,
   describe,
   expect,
+  spyOn,
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
 import { answeredBy } from "@openbot/shared/handoff-markers";
-import { and, eq, like, sql } from "drizzle-orm";
+import { IntelligenceKnowingANewThread } from "@openbot/toolkit/copilotkit/agents";
+import { createIntelligenceThreadLock } from "@openbot/toolkit/copilotkit/thread-lock";
+import { and, eq, gte, like, sql } from "drizzle-orm";
 import { Observable } from "rxjs";
 import { z } from "zod";
 import { askTheirOwnPerson } from "../src/agents/escalation";
-import { createHandoffDesk } from "../src/agents/handoff";
+import { createHandoffDesk, HANDOFF_KIND } from "../src/agents/handoff";
 import {
   createHandoffDelivery,
   type ThreadRunner,
 } from "../src/agents/handoff-delivery";
 import { createHandoffRunner } from "../src/agents/handoff-runner";
+import { answerGoneFrom } from "../src/agents/handoff-wiring";
 import {
   createCoordinationTools,
   handoffTool,
@@ -40,6 +44,7 @@ import {
   pluginGrants,
   workItems,
 } from "../src/db/schema";
+import { observeIntelligenceAuthentication } from "../src/intelligence-client";
 import { loadTenantPackage } from "../src/tenant-package";
 import { createWorkQueue } from "../src/work/queue";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -242,6 +247,100 @@ function platform() {
   };
 }
 
+/**
+ * Intelligence's thread and lock routes over HTTP, as `apps/app-api/src/routes/threads-routes.ts`
+ * answers them: one run holds a thread's lock, and anybody else asking is refused with
+ * `THREAD_LOCK_FAILED`, a 409 the platform marks retryable.
+ */
+function lockingIntelligence() {
+  const threads = new Set<string>();
+  const holders = new Map<string, string>();
+  const refused: string[] = [];
+  const envelope = (code: string, message: string, retryable: boolean) => ({
+    error: { code, message, category: "x", retryable },
+    requestId: "request-test",
+    traceId: "trace-test",
+  });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url);
+      if (request.method === "POST" && url.pathname === "/api/threads") {
+        const { threadId } = (await request.json()) as { threadId: string };
+        threads.add(threadId);
+        return Response.json(
+          { thread: { id: threadId, name: null } },
+          { status: 201 },
+        );
+      }
+      const [, , , id, tail] = url.pathname.split("/");
+      const threadId = decodeURIComponent(id ?? "");
+      if (request.method === "GET" && tail === undefined) {
+        return threads.has(threadId)
+          ? Response.json({ thread: { id: threadId, name: null } })
+          : Response.json(
+              envelope("THREAD_NOT_FOUND", "Thread not found.", false),
+              { status: 404 },
+            );
+      }
+      if (tail === "lock") {
+        const { runId } = (await request.json()) as { runId: string };
+        if (request.method === "POST") {
+          threads.add(threadId);
+          if (holders.has(threadId)) {
+            refused.push(threadId);
+            return Response.json(
+              envelope(
+                "THREAD_LOCK_FAILED",
+                "Thread is already locked by another runner.",
+                true,
+              ),
+              { status: 409 },
+            );
+          }
+          holders.set(threadId, runId);
+          return Response.json({
+            threadId,
+            runId,
+            joinToken: "join",
+            ttlSeconds: 120,
+          });
+        }
+        if (request.method === "PATCH")
+          return Response.json({ ttlSeconds: 120 });
+        if (request.method === "DELETE") {
+          if (holders.get(threadId) === runId) holders.delete(threadId);
+          return new Response(null, { status: 204 });
+        }
+      }
+      return new Response(null, { status: 404 });
+    },
+  });
+  return {
+    /** The lock a hop takes, on the client copilot.ts builds for the runtime and its hops. */
+    lock: createIntelligenceThreadLock({
+      client: observeIntelligenceAuthentication(
+        new IntelligenceKnowingANewThread({
+          apiUrl: `http://127.0.0.1:${server.port}`,
+          wsUrl: `ws://127.0.0.1:${server.port}`,
+          apiKey: "cpk-test-key",
+        }),
+      ),
+    }),
+    /** A person's run, or the asking Bot's, holding a conversation. */
+    hold(threadId: string, runId: string) {
+      threads.add(threadId);
+      holders.set(threadId, runId);
+    },
+    free(threadId: string) {
+      holders.delete(threadId);
+    },
+    refused,
+    stop: () => server.stop(true),
+  };
+}
+
 /** The text of every message of one role in what the model was sent, whichever API carried it. */
 function turns(conversation: unknown, role: string): string[] {
   if (!Array.isArray(conversation)) return [];
@@ -352,7 +451,9 @@ beforeEach(async () => {
     .onConflictDoNothing();
 });
 
+const stops: (() => void)[] = [];
 afterEach(async () => {
+  for (const stop of stops.splice(0)) stop();
   for (const name of VARIABLES) {
     const value = saved[name];
     if (value === undefined) delete process.env[name];
@@ -571,5 +672,271 @@ describe("one Bot asking another, on two replicas", () => {
     });
     expect(nobody?.isError).toBe(true);
     expect(nobody?.text).toContain("The Bots you can ask are: Knowledge.");
+  });
+});
+
+/*
+ * Kink 25 of the Helm bundle build. General Assistant asked Knowledge; the answer appeared, but the
+ * server printed `Intelligence platform request failed` with a 409 `THREAD_LOCK_FAILED` first: the
+ * answer going home asked for the person's conversation while General Assistant's own run was still
+ * finishing the sentence that said it had asked. The hop went back on the queue and was delivered
+ * five seconds later. Now it waits for the conversation, takes it the moment it is free, and the
+ * platform's "not yet" is not printed as a failure.
+ */
+describe("an answer that comes home while the asking Bot is still finishing", () => {
+  const failedPrints = (printed: { mock: { calls: unknown[][] } }) =>
+    printed.mock.calls.filter((call) =>
+      call.some(
+        (part) =>
+          typeof part === "string" &&
+          part.includes("Intelligence platform request failed"),
+      ),
+    );
+  const answersIn = (
+    intelligence: ReturnType<typeof platform>,
+    threadId: string,
+  ) =>
+    intelligence
+      .messages(threadId)
+      .filter((message) => answeredBy(message.id) !== null);
+  const relays = () =>
+    database
+      .select({
+        attempts: workItems.attempts,
+        finishedAt: workItems.finishedAt,
+      })
+      .from(workItems)
+      .where(
+        and(
+          eq(workItems.kind, HANDOFF_KIND),
+          like(workItems.key, "relay:%"),
+          sql`${workItems.payload}->>'actorId' = ${ACTOR}`,
+        ),
+      );
+
+  const relayKey = and(
+    eq(workItems.kind, HANDOFF_KIND),
+    like(workItems.key, "relay:%"),
+    sql`${workItems.payload}->>'actorId' = ${ACTOR}`,
+  );
+  const relayRows = async () =>
+    (
+      await database
+        .select({
+          attempts: workItems.attempts,
+          // Measured on the database's clock, which is the one that set it.
+          waitS: sql<number>`extract(epoch from (${workItems.runAt} - now()))::float8`,
+          payload: workItems.payload,
+        })
+        .from(workItems)
+        .where(relayKey)
+    ).map((row) => ({
+      ...row,
+      payload: row.payload as { busyRetries?: number },
+    }));
+  /** The relay due now, rather than after its backoff, so a test of many tries takes no minutes. */
+  const dueNow = () =>
+    database
+      .update(workItems)
+      .set({ runAt: sql`now() - interval '1 second'` })
+      .where(relayKey);
+  /** When this test began, so the trail read is this test's own. */
+  let since = new Date();
+  /** The failure rows written for this person's hops in this test. */
+  const failureRows = async () =>
+    (
+      await database
+        .select({ payload: auditEvents.payload })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.actorUserId, ACTOR),
+            eq(auditEvents.eventType, "agent.handoff_failed"),
+            gte(auditEvents.createdAt, since),
+          ),
+        )
+    ).map((row) => row.payload as Record<string, unknown>);
+
+  async function handedToKnowledge() {
+    since = new Date();
+    endpoint = startOpenAICompatibleEndpoint();
+    const built = await botsAgainst(endpoint.baseUrl);
+    const intelligence = platform();
+    intelligence.seed(THREAD, [
+      { id: "person-1", role: "user", content: PERSON },
+    ]);
+    const locks = lockingIntelligence();
+    stops.push(locks.stop);
+    const replica = (owner: string, busyWaitMs?: number) =>
+      createHandoffRunner({
+        queue: createWorkQueue(database),
+        owner,
+        sign: () => "signed",
+        auditStore,
+        // The server's own check, and the queue's real attempt budget (five).
+        answerGone: answerGoneFrom(database),
+        delivery: createHandoffDelivery({
+          admission: serverTurnAdmission,
+          agentFor: async ({ botId }) =>
+            (built[botId]?.clone() as AbstractAgent | undefined) ?? null,
+          history: intelligence.history,
+          lock: locks.lock,
+          runner: intelligence.runner,
+          mintThreadId: () => `scratch-${randomUUID()}`,
+          newRunId: () => randomUUID(),
+          ...(busyWaitMs === undefined ? {} : { busyWaitMs }),
+        }),
+      });
+    // General Assistant's run, which holds its conversation until it has finished saying it asked.
+    locks.hold(THREAD, `asking-run-${suite}`);
+    const handed = await handoffTool({
+      desk,
+      from: {
+        botId: ASKER,
+        actorId: ACTOR,
+        runId: `asking-run-${suite}`,
+        threadId: THREAD,
+        depth: 0,
+      },
+      hasSomebodyToAsk: true,
+      maxDepth: 2,
+      maxPerRun: 3,
+    })?.execute({
+      bot: KNOWLEDGE,
+      task: "Describe, in exactly two sentences, what kinds of questions you are set up to answer and which sources you can use.",
+    });
+    expect(String(handed)).toStartWith("Handed to Knowledge");
+    return { intelligence, locks, replica };
+  }
+
+  test("waits for the conversation, lands once under its own name, and prints nothing", async () => {
+    const { intelligence, locks, replica } = await handedToKnowledge();
+    const printed = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const there = await replica(`replica-a-${suite}`).sweep();
+      expect(there.delivered).toContain(KNOWLEDGE);
+
+      // General Assistant finishes a moment after Knowledge's answer is ready.
+      const finishing = setTimeout(() => locks.free(THREAD), 1_000);
+      const back = await replica(`replica-b-${suite}`).sweep();
+      clearTimeout(finishing);
+      expect(back).toEqual({ delivered: [ASKER], skipped: [] });
+      // It did meet the busy conversation, and waited rather than failing.
+      expect(locks.refused).toContain(THREAD);
+
+      const answers = answersIn(intelligence, THREAD);
+      expect(answers).toHaveLength(1);
+      expect(answers[0]).toMatchObject({ content: MODEL_ANSWER });
+      expect(answeredBy(answers[0]?.id ?? "")).toBe(KNOWLEDGE);
+      expect(await relays()).toEqual([
+        { attempts: 1, finishedAt: expect.any(Date) },
+      ]);
+
+      // Never twice: neither replica finds anything left to deliver.
+      expect((await replica(`replica-a-${suite}`).sweep()).delivered).toEqual(
+        [],
+      );
+      expect((await replica(`replica-b-${suite}`).sweep()).delivered).toEqual(
+        [],
+      );
+      expect(answersIn(intelligence, THREAD)).toHaveLength(1);
+      expect(failedPrints(printed)).toEqual([]);
+    } finally {
+      printed.mockRestore();
+    }
+  });
+
+  /*
+   * The bug after the first fix: a conversation busy for longer than the queue's five attempts ran
+   * the relay out of attempts, and the answer was dropped with nobody told. A held lock is not a
+   * failure: it spends no attempt, and the relay keeps trying, backing off, until the lock frees.
+   */
+  test("busy for longer than five attempts, it spends none, is not lost, and lands once when free", async () => {
+    const { intelligence, locks, replica } = await handedToKnowledge();
+    const printed = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(
+        (await replica(`replica-a-${suite}`, 20).sweep()).delivered,
+      ).toContain(KNOWLEDGE);
+
+      // The person runs in that conversation across eight tries, more than the five the queue allows.
+      for (let attempt = 1; attempt <= 8; attempt++) {
+        const busy = await replica(
+          `replica-${attempt % 2 ? "b" : "a"}-${suite}`,
+          20,
+        ).sweep();
+        expect(busy.delivered).toEqual([]);
+        expect(busy.skipped).toEqual([
+          expect.objectContaining({
+            reason: expect.stringContaining("busy with another run"),
+          }),
+        ]);
+        // Nothing spent, and the wait before the next try grows: 5 s, 10 s, 20 s, 40 s, then a minute.
+        const [row] = await relayRows();
+        expect(row?.attempts).toBe(0);
+        expect(row?.payload.busyRetries).toBe(attempt);
+        const expected = Math.min(5 * 2 ** (attempt - 1), 60);
+        expect(Number(row?.waitS)).toBeLessThanOrEqual(expected);
+        expect(Number(row?.waitS)).toBeGreaterThan(expected - 5);
+        await dueNow();
+      }
+      expect(answersIn(intelligence, THREAD)).toEqual([]);
+      // Waiting is not failing: no failure row for any of those tries.
+      expect(await failureRows()).toEqual([]);
+
+      // Their run ends.
+      locks.free(THREAD);
+      const later = await replica(`replica-a-${suite}`, 20).sweep();
+      expect(later).toEqual({ delivered: [ASKER], skipped: [] });
+
+      const answers = answersIn(intelligence, THREAD);
+      expect(answers).toHaveLength(1);
+      expect(answeredBy(answers[0]?.id ?? "")).toBe(KNOWLEDGE);
+      expect(await relays()).toEqual([
+        { attempts: 1, finishedAt: expect.any(Date) },
+      ]);
+      expect(
+        (await replica(`replica-b-${suite}`, 20).sweep()).delivered,
+      ).toEqual([]);
+      expect(answersIn(intelligence, THREAD)).toHaveLength(1);
+      expect(failedPrints(printed)).toEqual([]);
+    } finally {
+      printed.mockRestore();
+    }
+  });
+
+  test("a Bot deleted while its conversation is busy is recorded as not delivered, never silently dropped", async () => {
+    const { intelligence, replica } = await handedToKnowledge();
+    expect(
+      (await replica(`replica-a-${suite}`, 20).sweep()).delivered,
+    ).toContain(KNOWLEDGE);
+    expect((await replica(`replica-b-${suite}`, 20).sweep()).delivered).toEqual(
+      [],
+    );
+
+    // The person deletes General Assistant, whose conversation the answer was going to.
+    await database
+      .update(agentProfiles)
+      .set({ deletedAt: new Date() })
+      .where(eq(agentProfiles.agentId, ASKER));
+    await dueNow();
+    const over = await replica(`replica-a-${suite}`, 20).sweep();
+    expect(over.delivered).toEqual([]);
+    expect(over.skipped).toEqual([
+      expect.objectContaining({
+        reason: "the Bot it was to speak as was deleted",
+      }),
+    ]);
+    expect(await relays()).toEqual([
+      { attempts: 1, finishedAt: expect.any(Date) },
+    ]);
+    expect(await failureRows()).toEqual([
+      expect.objectContaining({
+        reason: "not delivered: the Bot it was to speak as was deleted",
+        final: true,
+        to: ASKER,
+      }),
+    ]);
+    expect(answersIn(intelligence, THREAD)).toEqual([]);
   });
 });

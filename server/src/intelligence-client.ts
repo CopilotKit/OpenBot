@@ -1,7 +1,8 @@
 import {
-  CopilotKitIntelligence,
+  type CopilotKitIntelligence,
   PlatformRequestError,
 } from "@copilotkit/runtime/v2";
+import { IntelligenceKnowingANewThread } from "@openbot/toolkit/copilotkit/agents";
 import type { IntelligenceSettings } from "./config";
 import {
   clearDesktopConnectionFailure,
@@ -170,12 +171,15 @@ export async function runtimeEntitlementStatus(
  * the runtime for the client it built would tie this to the mounting order of a module that has no
  * other reason to care. The settings both read come from one place, which is the part that has to
  * agree.
+ *
+ * The same class as the runtime's, so a question whose "no" is ordinary (a thread the browser
+ * remembers that is gone) is answered without the base client printing the "no" as a failure.
  */
 export function createIntelligenceClient(
   settings: IntelligenceSettings,
 ): CopilotKitIntelligence {
   return observeIntelligenceAuthentication(
-    new CopilotKitIntelligence({
+    new IntelligenceKnowingANewThread({
       apiUrl: settings.apiUrl,
       wsUrl: settings.gatewayWsUrl,
       apiKey: settings.apiKey,

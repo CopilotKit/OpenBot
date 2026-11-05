@@ -30,11 +30,17 @@ import {
   withinNativeRun,
 } from "../native-approval";
 import { historyOrEmpty } from "../thread-history";
+import {
+  answered,
+  askPlatform,
+  bodyOf,
+  expectedRefusal,
+} from "./expected-answers";
 
 /**
  * The CopilotKit agents OpenBot runs its Bots as: a built-in Bot that will not send a broken
  * conversation, one whose tools are chosen when its run starts, a remote Bot that survives being
- * cloned, a Bot that is no longer there, and the platform client with one answer corrected.
+ * cloned, a Bot that is no longer there, and the platform client with its expected answers kept quiet.
  *
  * Moved out of the server's copilot.ts. What the server does around a run — inlining attachments,
  * watching the model connection — comes in as {@link BuiltInAgentHooks}, so nothing here imports it.
@@ -468,7 +474,17 @@ export class UnavailableAgent extends AbstractAgent {
  * returns `Response.json` of whatever comes back, so an empty history here is the `{ messages: [] }`
  * the browser expects and a 200 instead of a 500.
  *
- * `ɵgetClientWsUrl` is the other, and only when `browserWsUrl` is given. That address is the one
+ * `getThread`, `getThreadMessages` and `ɵacquireThreadLock` also ask without the base client's
+ * print for the one answer each is expected to get (see expected-answers.ts). A conversation is
+ * opened before its thread exists, so the browser's history read and Learning's "is this thread
+ * new?" both get a 404 on every new conversation, and the base client printed each as
+ * `Intelligence platform request failed`. And a Bot's answer to another Bot goes into a
+ * conversation whose own run is often still finishing, so its lock is refused with a 409 the hop
+ * waits out (handoff-delivery.ts), which printed the same way. The 404 and the 409 are still the
+ * client's own `PlatformRequestError` (or, for the history, the empty one), just not printed;
+ * every other answer is the base client's to give and to print.
+ *
+ * `ɵgetClientWsUrl` is corrected too, and only when `browserWsUrl` is given. That address is the one
  * the runtime sends the browser in `/info`, and the browser opens it itself, so it has to be the
  * gateway as the browser can reach it. A server in a container reaches local Intelligence at
  * `host.docker.internal`, which a browser on the host cannot resolve, while the browser's
@@ -506,12 +522,89 @@ export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
     return origin ? `${origin.replace(/^http/, "ws")}${address}` : address;
   }
 
-  override getThreadMessages(
+  /** A thread, or the client's 404 for one nobody has run yet, unprinted. */
+  override async getThread(
+    params: Parameters<CopilotKitIntelligence["getThread"]>[0],
+  ): ReturnType<CopilotKitIntelligence["getThread"]> {
+    const answer = await askPlatform(this, {
+      method: "GET",
+      path: `/api/threads/${encodeURIComponent(params.threadId)}?${new URLSearchParams({ userId: params.userId })}`,
+    });
+    if (answer?.status === 404) throw expectedRefusal(answer);
+    if (answered(answer))
+      return bodyOf<{
+        thread: Awaited<ReturnType<CopilotKitIntelligence["getThread"]>>;
+      }>(answer).thread;
+    return super.getThread(params);
+  }
+
+  /** A thread's history, and none at all for a thread nobody has run yet, without printing its 404. */
+  override async getThreadMessages(
     params: Parameters<CopilotKitIntelligence["getThreadMessages"]>[0],
-  ) {
+  ): ReturnType<CopilotKitIntelligence["getThreadMessages"]> {
+    const answer = await askPlatform(this, {
+      method: "GET",
+      path: `/api/threads/${encodeURIComponent(params.threadId)}/messages?${new URLSearchParams({ userId: params.userId })}`,
+      ...(params.channelDeliveryId
+        ? {
+            headers: { "X-Cpki-Channel-Delivery-Id": params.channelDeliveryId },
+          }
+        : {}),
+    });
+    if (answer?.status === 404) return { messages: [] };
+    if (answered(answer))
+      return bodyOf<
+        Awaited<ReturnType<CopilotKitIntelligence["getThreadMessages"]>>
+      >(answer);
     return historyOrEmpty(() => super.getThreadMessages(params), {
       messages: [],
     });
+  }
+
+  /**
+   * A conversation's run lock, or the client's 409 for one somebody is running in, unprinted.
+   *
+   * The body is the base client's, field for field: what the runtime's own runs send and what a
+   * hop sends must be the same request, and a test sends both and compares them.
+   */
+  override async ɵacquireThreadLock(
+    params: Parameters<CopilotKitIntelligence["ɵacquireThreadLock"]>[0],
+  ): ReturnType<CopilotKitIntelligence["ɵacquireThreadLock"]> {
+    const answer = await askPlatform(this, {
+      method: "POST",
+      path: `/api/threads/${encodeURIComponent(params.threadId)}/lock`,
+      body: {
+        runId: params.runId,
+        userId: params.userId,
+        agentId: params.agentId,
+        ...(params.supportsBackendThreadId === undefined
+          ? {}
+          : { supportsBackendThreadId: params.supportsBackendThreadId }),
+        ...(params.learningContainerId !== undefined
+          ? { learningContainerId: params.learningContainerId }
+          : {}),
+        ...(params.requestId !== undefined
+          ? { requestId: params.requestId }
+          : {}),
+        ...(params.lockKeyPrefix !== undefined
+          ? { lockKeyPrefix: params.lockKeyPrefix }
+          : {}),
+        ...(params.ttlSeconds !== undefined
+          ? { ttlSeconds: params.ttlSeconds }
+          : {}),
+      },
+      ...(params.channelDeliveryId
+        ? {
+            headers: { "X-Cpki-Channel-Delivery-Id": params.channelDeliveryId },
+          }
+        : {}),
+    });
+    if (answer?.status === 409) throw expectedRefusal(answer);
+    if (answered(answer))
+      return bodyOf<
+        Awaited<ReturnType<CopilotKitIntelligence["ɵacquireThreadLock"]>>
+      >(answer);
+    return super.ɵacquireThreadLock(params);
   }
 }
 

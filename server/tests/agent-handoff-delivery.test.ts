@@ -60,7 +60,11 @@ function delivery(
   events: BaseEvent[],
   agent: AbstractAgent | null = stubAgent(),
   lockHeld = true,
-  options: { history?: readonly unknown[]; deadlineMs?: number } = {},
+  options: {
+    history?: readonly unknown[];
+    deadlineMs?: number;
+    busyWaitMs?: number;
+  } = {},
 ) {
   const requests: Array<{
     threadId: string;
@@ -80,6 +84,9 @@ function delivery(
       ...(options.deadlineMs === undefined
         ? {}
         : { deadlineMs: options.deadlineMs }),
+      ...(options.busyWaitMs === undefined
+        ? {}
+        : { busyWaitMs: options.busyWaitMs }),
       agentFor: async (input) => {
         builtFor.push(input);
         return agent;
@@ -228,16 +235,19 @@ describe("holding the conversation while a Bot answers", () => {
    * a failure. The hop goes back on the queue and is tried again.
    */
   test("a conversation somebody else is running in is waited for, not failed", async () => {
-    const { delivery: deliver, requests } = delivery(
-      FINISHED,
-      stubAgent(),
-      false,
-    );
+    const {
+      delivery: deliver,
+      requests,
+      lockCalls,
+    } = delivery(FINISHED, stubAgent(), false, { busyWaitMs: 600 });
 
     await expect(
       deliver.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" }),
     ).rejects.toThrow("busy");
     expect(requests).toEqual([]);
+    // Asked again while it waited, then given back to the queue holding nothing.
+    expect(lockCalls.length).toBeGreaterThan(1);
+    expect(new Set(lockCalls)).toEqual(new Set(["acquire"]));
   });
 
   /*

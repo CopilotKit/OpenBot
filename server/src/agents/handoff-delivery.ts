@@ -34,8 +34,9 @@ import { textOf } from "./message-text";
 /** Whatever runs an agent against a thread and records what it did. */
 
 /**
- * The conversation an answer belongs in has a run going. Usually the Bot that asked, still finishing
- * the sentence that said it had asked, so the first retry comes quickly rather than a minute later.
+ * The conversation an answer belongs in still has a run going after the hop waited for it (see
+ * `BUSY_WAIT_MS`), so the hop goes back on the queue and the first retry comes quickly rather than a
+ * minute later.
  */
 export class ThreadBusyError extends Error {
   constructor(message: string) {
@@ -182,6 +183,11 @@ export function createHandoffDelivery(options: {
    * conversation it was asked in locked against them for as long as the process lives.
    */
   deadlineMs?: number;
+  /**
+   * How long a hop waits for the conversation it speaks in to be free before handing the hop back to
+   * the queue. Overridden by tests; see `BUSY_WAIT_MS`.
+   */
+  busyWaitMs?: number;
   /** How often the lock is renewed while the Bot works. Overridden by tests; see `LOCK_RENEW_EVERY_MS`. */
   renewEveryMs?: number;
   /**
@@ -206,6 +212,7 @@ export function createHandoffDelivery(options: {
     setBusy,
     newRunId,
     deadlineMs = DEFAULT_DELIVERY_DEADLINE_MS,
+    busyWaitMs = BUSY_WAIT_MS,
     renewEveryMs = LOCK_RENEW_EVERY_MS,
     lockLifetimeMs = THREAD_LOCK_TTL_SECONDS * 1000,
   } = options;
@@ -371,17 +378,28 @@ export function createHandoffDelivery(options: {
             );
             return undefined;
           });
-        const held = await lock.acquire({
-          ...requested,
-          userId: work.actorId,
-          agentId: work.toBotId,
-          ...(analyticsContext ? { analyticsContext } : {}),
-        });
+        /*
+         * Waited for, a little, when somebody else is running in it. An answer going home usually
+         * lands while the Bot that asked is still finishing the sentence that said it had asked,
+         * which is seconds: taking the lock the moment it is free puts the answer on screen then,
+         * rather than after a trip round the queue, and keeps the platform's refusal what it is, an
+         * ordinary "not yet" (IntelligenceKnowingANewThread does not print it).
+         */
+        const held = await acquireWhenFree(
+          () =>
+            lock.acquire({
+              ...requested,
+              userId: work.actorId,
+              agentId: work.toBotId,
+              ...(analyticsContext ? { analyticsContext } : {}),
+            }),
+          busyWaitMs,
+          paused,
+        );
         if (!held) {
           /*
-           * Somebody else is running in this conversation. Thrown so the hop goes back on the queue
-           * and is tried again: a person mid-question, or the Bot that asked still finishing its own
-           * sentence, is a wait rather than a failure.
+           * Still somebody else's after the wait: a person mid-question, most likely. Thrown so the
+           * hop goes back on the queue and is tried again, which is a wait rather than a failure.
            */
           throw new ThreadBusyError(
             `${where.threadId} is busy with another run; the hop will be tried again`,
@@ -729,6 +747,51 @@ const RELAY_CONTEXT_MESSAGES = 6;
  * a renewal: the conversation is already free and something else may be in it.
  */
 const LOCK_RENEW_EVERY_MS = 30_000;
+
+/**
+ * How long a hop waits for its conversation to be free before going back on the queue.
+ *
+ * Sized for the common case, the Bot that asked finishing its own reply, with room to spare. Not
+ * longer, because this replica delivers its hops one at a time and a hop waiting here holds up the
+ * next; a conversation busy for longer than this is a person's own run, and the queue's retry is
+ * the right wait for that.
+ */
+const BUSY_WAIT_MS = 30_000;
+/** The first look again, doubled each time up to the second figure. */
+const BUSY_RETRY_FIRST_MS = 250;
+const BUSY_RETRY_MAX_MS = 2_000;
+
+/**
+ * The lock, taken as soon as the conversation is free, or null if it is still busy after `waitMs`.
+ *
+ * Gives up at once, with the pause's own reason, when the person pauses the Bot while it waits: the
+ * same way a paused run ends.
+ */
+async function acquireWhenFree(
+  acquire: () => Promise<{ runId: string } | null>,
+  waitMs: number,
+  paused: AbortSignal,
+): Promise<{ runId: string } | null> {
+  const giveUpAt = Date.now() + waitMs;
+  let delayMs = BUSY_RETRY_FIRST_MS;
+  for (;;) {
+    paused.throwIfAborted();
+    const held = await acquire();
+    if (held) return held;
+    const left = giveUpAt - Date.now();
+    if (left <= 0) return null;
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        paused.removeEventListener("abort", done);
+        resolve();
+      };
+      const timer = setTimeout(done, Math.min(delayMs, left));
+      paused.addEventListener("abort", done, { once: true });
+    });
+    delayMs = Math.min(delayMs * 2, BUSY_RETRY_MAX_MS);
+  }
+}
 
 /**
  * How long one hop may run for by default.

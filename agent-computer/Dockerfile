@@ -72,6 +72,12 @@ RUN ln -s /app/node_modules /shared/node_modules
 COPY --from=recorder-build /src/extension/dist /recorder
 ENV OPENBOT_RECORDER_DIR=/recorder
 
+# The X server's socket directory and the keysym names its keyboard data needs, as the root Dockerfile
+# has them: Xvfb as any user but root refuses to make the first, and xkbcomp warns at every start
+# without the second. See docker/x11/XKeysymDB.
+RUN install -d -m 1777 /tmp/.X11-unix
+COPY docker/x11/XKeysymDB /usr/share/X11/XKeysymDB
+
 # Durable working directory. Bot-produced files that must survive replacement live here.
 RUN mkdir -p /workspace
 ENV WORKSPACE_DIR=/workspace

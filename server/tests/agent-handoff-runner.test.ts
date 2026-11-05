@@ -49,6 +49,8 @@ function runner(options?: {
   const delivered: Array<{ message: string; assertion: string }> = [];
   const offered: HandoffWork[] = [];
   const delays: number[] = [];
+  const released: { uncounted: boolean; payload?: Record<string, unknown> }[] =
+    [];
   /** Each time the asking conversation was told the queue moved, with what the queue had seen by then. */
   const settled: Array<{ threadId: string; after: string[] }> = [];
 
@@ -66,13 +68,18 @@ function runner(options?: {
       key,
       owner,
       delayMs,
+      uncounted,
+      payload,
     }: {
       key: string;
       owner: string;
       delayMs: number;
+      uncounted?: boolean;
+      payload?: Record<string, unknown>;
     }) => {
       calls.push({ verb: "release", key, owner });
       delays.push(delayMs);
+      released.push({ uncounted: uncounted === true, payload });
       return true;
     },
     offer: async ({
@@ -104,6 +111,7 @@ function runner(options?: {
     delivered,
     offered,
     delays,
+    released,
     settled,
     runner: createHandoffRunner({
       queue,
@@ -230,26 +238,38 @@ describe("delivering a hop", () => {
     expect(events).toContain("agent.handoff_failed");
   });
 
-  test("an answer that finds the asking Bot still talking is retried in seconds, then a minute", async () => {
-    const first = runner({
-      deliver: async () => {
-        throw new ThreadBusyError("thread-1 is busy with another run");
-      },
-    });
+  test("an answer that finds its conversation busy spends no attempt and backs off to a minute", async () => {
+    const busy = async () => {
+      throw new ThreadBusyError("thread-1 is busy with another run");
+    };
+    const first = runner({ deliver: busy });
     await first.runner.sweep();
     expect(first.delays).toEqual([5_000]);
+    expect(first.released).toEqual([
+      { uncounted: true, payload: { busyRetries: 1 } },
+    ]);
+    // Waiting is not failing.
+    expect(first.events).not.toContain("agent.handoff_failed");
 
-    const later = runner({
-      claimed: [
-        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 2 },
-      ] as unknown as WorkItem[],
-      deliver: async () => {
-        throw new ThreadBusyError("thread-1 is busy with another run");
-      },
-    });
-    await later.runner.sweep();
-    expect(later.delays).toEqual([60_000]);
+    const waits = [];
+    for (const busyRetries of [1, 2, 3, 4, 9]) {
+      const later = runner({
+        claimed: [
+          {
+            kind: "bot.message",
+            key: "run-1:abc",
+            payload: { ...WORK, busyRetries },
+            attempts: 1,
+          },
+        ] as unknown as WorkItem[],
+        deliver: busy,
+      });
+      await later.runner.sweep();
+      waits.push(...later.delays);
+    }
+    expect(waits).toEqual([10_000, 20_000, 40_000, 60_000, 60_000]);
 
+    // A real failure still spends an attempt, a minute apart, and is recorded as one.
     const other = runner({
       deliver: async () => {
         throw new Error("the gateway was unreachable");
@@ -257,6 +277,8 @@ describe("delivering a hop", () => {
     });
     await other.runner.sweep();
     expect(other.delays).toEqual([60_000]);
+    expect(other.released).toEqual([{ uncounted: false }]);
+    expect(other.events).toContain("agent.handoff_failed");
   });
 
   /*
