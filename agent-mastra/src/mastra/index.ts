@@ -110,28 +110,52 @@ function agUiContextEntries(
   return agUi.context;
 }
 
+type ContextEntry = { description: string; value: string };
+
+function isUsableEntry(entry: unknown): entry is ContextEntry {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    "description" in entry &&
+    typeof entry.description === "string" &&
+    "value" in entry &&
+    typeof entry.value === "string" &&
+    entry.value.trim().length > 0
+  );
+}
+
+/**
+ * What the model is told: the base line, OpenBot's three model-visible entries in a fixed order,
+ * then whatever the calling surface sent, as `description: value`.
+ *
+ * Every other `OpenBot …` entry is for this process, not the model: the Bot id, the deployment's
+ * tool list, and the signed run assertion, which is a credential. The server keeps callers out of
+ * that namespace (`RESERVED_MASTRA_CONTEXT_DESCRIPTIONS` in server/src/copilot.ts), so the prefix
+ * is a safe line to draw. Caller context used to be dropped here altogether, although the server
+ * forwards it and every other harness puts it in front of the model.
+ */
 export function buildOpenBotInstructions({
   requestContext,
 }: OpenBotInstructionArgs = {}) {
-  const contextEntries = agUiContextEntries(requestContext);
+  const contextEntries =
+    agUiContextEntries(requestContext).filter(isUsableEntry);
   const openbotInstructions = OPENBOT_CONTEXT_DESCRIPTIONS.flatMap(
     (description) =>
       contextEntries
-        .filter(
-          (entry): entry is { description: string; value: string } =>
-            typeof entry === "object" &&
-            entry !== null &&
-            "description" in entry &&
-            entry.description === description &&
-            "value" in entry &&
-            typeof entry.value === "string" &&
-            entry.value.trim().length > 0,
-        )
+        .filter((entry) => entry.description === description)
         .map((entry) => entry.value.trim()),
   );
+  const callerInstructions = contextEntries
+    .filter((entry) => !entry.description.startsWith("OpenBot "))
+    .map((entry) =>
+      entry.description.trim()
+        ? `${entry.description.trim()}: ${entry.value.trim()}`
+        : entry.value.trim(),
+    );
 
-  if (openbotInstructions.length === 0) return openbotBaseInstructions;
-  return [openbotBaseInstructions, ...openbotInstructions].join("\n\n");
+  const instructions = [...openbotInstructions, ...callerInstructions];
+  if (instructions.length === 0) return openbotBaseInstructions;
+  return [openbotBaseInstructions, ...instructions].join("\n\n");
 }
 
 const openbot = new Agent({
