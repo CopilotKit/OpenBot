@@ -22,10 +22,11 @@ on:
         default: ""
         required: false
       # publish-release.yml says whether the release becomes Latest. A stable release is published
-      # not Latest, and becomes Latest only once its signed installers are attached here. Signing a
-      # release again by hand leaves Latest where it is unless this is set.
+      # not Latest, and becomes Latest once both this and Desktop Windows signing have attached their
+      # signed installers, in whichever finishes second. Signing a release again by hand leaves
+      # Latest where it is unless this is set.
       make-latest:
-        description: Mark the release Latest once the signed installers are attached, unless a newer release already is
+        description: Mark the release Latest once every signed installer is attached, unless a newer release already is
         type: boolean
         default: false
         required: false
@@ -89,13 +90,13 @@ jobs:
         run: bun test src/UpdateOffer.test.tsx
         working-directory: desktop
       # What a release signs and attaches: a candidate pinned to its own images with no updater,
-      # a stable release made Latest only once its signed installers are on it, and every signed
-      # installer under its fixed download name too, on Mac and on Windows.
+      # a stable release made Latest only once its signed Mac and Windows installers are both on
+      # it, and every signed installer under its fixed download name too.
       - name: Signed release regressions
         run: >-
           bun test scripts/signed-build.test.ts scripts/publish-signed-mac.test.ts
-          scripts/publish-signed-windows.test.ts ../scripts/release-latest.test.ts
-          ../scripts/release-download-names.test.ts
+          scripts/publish-signed-windows.test.ts scripts/signing-workflows.test.ts
+          ../scripts/release-latest.test.ts ../scripts/release-download-names.test.ts
         working-directory: desktop
       - name: Importing the Developer ID intermediate twice succeeds
         # The first real signing run stopped here: the .p12 already carried the intermediate, and a
@@ -386,10 +387,11 @@ jobs:
   # against the public key it was built with. It is written here, from both architectures' real
   # `.sig` files, rather than by hand.
   #
-  # This job is also where a stable release becomes Latest: publish-release.yml publishes it not
-  # Latest, so `releases/latest` keeps serving the previous signed installers until these are
-  # attached. A candidate or beta attaches its pinned .dmg files and nothing else. The details are
-  # in desktop/scripts/publish-signed-mac.sh.
+  # This job, or Desktop Windows signing's, is also where a stable release becomes Latest:
+  # publish-release.yml publishes it not Latest, so `releases/latest` keeps serving the previous
+  # signed installers until both signing runs have attached theirs, and whichever finishes second
+  # marks it (scripts/release-make-latest.sh). A candidate or beta attaches its pinned .dmg files
+  # and nothing else. The details are in desktop/scripts/publish-signed-mac.sh.
   publish:
     name: Publish latest.json
     needs: sign

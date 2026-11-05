@@ -14,11 +14,16 @@
 # including one a failed upload left unreadable, is uploaded, and `--clobber` replaces whatever that
 # failed upload left behind.
 #
-# Each installer is also attached under its fixed download name (release-download-names.sh), so a
-# web page can link to `releases/latest/download/<fixed name>`. The fixed-name copy is made from the
-# installer as it is on the release: when the signed one was kept, the copy is the signed one too.
-# A copy that is missing, or that differs from its installer, such as one an interrupted signing
-# upload left behind, is replaced.
+# A candidate or beta's installers are also attached under their fixed download names
+# (release-download-names.sh), so a tester has a link before signing is approved. The fixed-name
+# copy is made from the installer as it is on the release: when the signed one was kept, the copy
+# is the signed one too. A copy that is missing, or that differs from its installer, such as one an
+# interrupted signing upload left behind, is replaced.
+#
+# A stable release's fixed names are left to the signing runs, which attach them from the signed
+# installers. A web page links to `releases/latest/download/<fixed name>`, and the release becomes
+# Latest only once every fixed name is on it (release-make-latest.sh), so those links never serve
+# an unsigned installer.
 #
 # When ATTACHED_LIST names a file, writes "<installer name> <fixed name>" to it, one per line, for
 # the run summary.
@@ -66,7 +71,12 @@ for i in "${!installers[@]}"; do
     echo "Attached $name."
     attached="$installer"
   fi
-  if [ -n "$published" ] && [ -f "$published/$fixed" ] && cmp -s "$attached" "$published/$fixed"; then
+  if [[ "$version" != *-* ]]; then
+    # A stable release: only the signing runs attach its fixed names, from the signed installers,
+    # and it becomes Latest once all of them are there (release-make-latest.sh). An unsigned copy
+    # here would be served from `releases/latest/download` the moment it did.
+    echo "$fixed is attached by the signing run, from the signed $name."
+  elif [ -n "$published" ] && [ -f "$published/$fixed" ] && cmp -s "$attached" "$published/$fixed"; then
     echo "$fixed is already a copy of $name."
   else
     cp "$attached" "$fixed_dir/$fixed"

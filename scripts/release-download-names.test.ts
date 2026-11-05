@@ -60,3 +60,16 @@ test("any other file has no fixed name, and fails", () => {
     );
   }
 });
+
+// A stable release waits for every one of these to be signed before it becomes Latest, so the list
+// must be exactly the names the installers map to.
+test("--all lists every fixed name an installer maps to", () => {
+  const all = Bun.spawnSync(["bash", script, "--all"]).stdout.toString();
+  expect(all.trim().split("\n")).toEqual(
+    [
+      "OpenBot_0.3.0_aarch64.dmg",
+      "OpenBot_0.3.0_x64.dmg",
+      "OpenBot_0.3.0_x64-setup.exe",
+    ].map((installer) => downloadName(installer).name),
+  );
+});

@@ -14,6 +14,15 @@ on:
         type: string
         default: ""
         required: false
+      # publish-release.yml says whether the release becomes Latest. A stable release becomes
+      # Latest once both this and Desktop macOS signing have attached their signed installers,
+      # in whichever finishes second. Signing a release again by hand leaves Latest alone unless
+      # this is set.
+      make-latest:
+        description: Mark the release Latest once every signed installer is attached, unless a newer release already is
+        type: boolean
+        default: false
+        required: false
   # A label permits validation before this workflow exists on main. New pushes
   # run only the checks: remove/reapply the label to request signing a new head.
   pull_request:
@@ -22,6 +31,8 @@ on:
       - desktop/**
       - package.json
       - .github/workflows/desktop-signing.yml
+      - .github/workflows/publish-release.yml
+      - scripts/release-*
       - docs/windows-signing.md
 
 permissions:
@@ -50,6 +61,16 @@ jobs:
       - name: PowerShell signing regressions
         shell: pwsh
         run: ./desktop/scripts/test-windows-signing.ps1
+      # A stable release becomes Latest only once this workflow's signed installer is on it too, so
+      # the Windows download link never serves the unsigned one. The scripts behind it run in
+      # Updater regressions (no Apple access) and the main test suite; this checks the wiring here.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      - name: Latest waits for the signed Windows installer
+        run: bun test scripts/signing-workflows.test.ts
+        working-directory: desktop
 
   sign:
     name: Sign and verify app and NSIS installer
@@ -200,6 +221,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_TAG: ${{ inputs.release-tag }}
+      MAKE_LATEST: ${{ inputs.make-latest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

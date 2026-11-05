@@ -53,12 +53,18 @@ function repo(): FakeRepo {
   return fake;
 }
 
-function publish(fake: FakeRepo, dir: string, tag: string) {
+function publish(fake: FakeRepo, dir: string, tag: string, makeLatest = "") {
   return runScript(
     script,
     [],
     fake,
-    { RELEASE_TAG: tag, ARTIFACTS: "artifacts", RUNNER_TEMP: dir },
+    {
+      RELEASE_TAG: tag,
+      MAKE_LATEST: makeLatest,
+      ARTIFACTS: "artifacts",
+      RUNNER_TEMP: dir,
+      FEED_RETRY_DELAY: "0",
+    },
     dir,
   );
 }
@@ -96,10 +102,56 @@ test("a stable release gets the signed installer under its own name and its fixe
   ]);
 });
 
-test("signing never moves Latest", () => {
+test("signing again by hand never moves Latest", () => {
   const fake = repo();
   const { dir } = job("0.3.0");
   expect(publish(fake, dir, "v0.3.0").code).toBe(0);
+  expect(fake.calls().some((call) => call.startsWith("gh release edit"))).toBe(
+    false,
+  );
+  expect(fake.latest()).toBe("v0.2.0");
+});
+
+// The gap where Mac signing made a release Latest while this link still served the unsigned
+// installer: whichever signing run attaches the last signed installer makes the release Latest.
+test("Windows signing that finishes after Mac signing makes the release Latest, then checks its feed", () => {
+  const fake = repo();
+  fake.attach(
+    "latest.json",
+    "OpenBot_0.3.0_aarch64.dmg",
+    "OpenBot_0.3.0_x64.dmg",
+    "OpenBot-mac-arm64.dmg",
+    "OpenBot-mac-x64.dmg",
+  );
+  fake.feed("v0.3.0", {
+    version: "0.3.0",
+    platforms: {
+      "darwin-aarch64": { url: "https://example.test/a", signature: "s" },
+    },
+  });
+  const { dir } = job("0.3.0");
+  const result = publish(fake, dir, "v0.3.0", "true");
+  expect(result.code).toBe(0);
+  const calls = fake.calls();
+  const upload = calls.findIndex((call) =>
+    call.startsWith("gh release upload"),
+  );
+  const promote = calls.indexOf(
+    "gh release edit v0.3.0 -R CopilotKit/OpenBot --latest",
+  );
+  expect(promote).toBeGreaterThan(upload);
+  expect(fake.latest()).toBe("v0.3.0");
+  expect(result.out).toContain("serves latest.json for 0.3.0.");
+});
+
+test("Windows signing that finishes before Mac signing leaves the release not Latest", () => {
+  const fake = repo();
+  const { dir } = job("0.3.0");
+  const result = publish(fake, dir, "v0.3.0", "true");
+  expect(result.code).toBe(0);
+  expect(result.out).toContain(
+    "v0.3.0 is not Latest yet: it still needs the signed latest.json OpenBot-mac-arm64.dmg OpenBot-mac-x64.dmg.",
+  );
   expect(fake.calls().some((call) => call.startsWith("gh release edit"))).toBe(
     false,
   );

@@ -2,6 +2,7 @@
 # Prints the fixed name a release attaches an installer under.
 #
 # Usage: release-download-names.sh <installer file>
+#        release-download-names.sh --all    every fixed name, one per line
 #
 # Tauri puts the version in every installer's name, `OpenBot_0.3.0_aarch64.dmg`, so a link to
 # `releases/latest/download/<that name>` breaks with the next release. Each installer is also
@@ -11,6 +12,13 @@
 # A file that is not one of the known installers fails, so a new platform or a renamed product is
 # noticed instead of being published without a stable link.
 set -euo pipefail
+
+# Every fixed name. A stable release becomes Latest only once each of these is on it, signed
+# (scripts/release-make-latest.sh), so a new one here is one more installer it waits for.
+if [ "${1:-}" = --all ]; then
+  printf '%s\n' OpenBot-mac-arm64.dmg OpenBot-mac-x64.dmg OpenBot-windows-x64-setup.exe
+  exit 0
+fi
 
 name="$(basename "${1:?usage: release-download-names.sh <installer file>}")"
 if [[ "$name" =~ ^OpenBot_[^_]+_aarch64\.dmg$ ]]; then

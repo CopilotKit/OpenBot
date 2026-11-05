@@ -59,7 +59,9 @@ job with permission to write to the repository attaches it to the release with `
 twice: as `OpenBot_<version>_x64-setup.exe`, which replaces the unsigned installer of the
 same name, and as `OpenBot-windows-x64-setup.exe`, the fixed name a web page links to. See
 [Download links](releasing.md#download-links). The signing job itself never holds that
-permission. Windows signing never marks a release Latest; Mac signing does that. See
+permission. A stable release becomes Latest once both this and Mac signing have attached their
+signed installers, in whichever of the two finishes second, so the Windows address never gives the
+unsigned installer. Set `make-latest` when signing a release again by hand for it to do that. See
 [Which release is Latest](releasing.md#which-release-is-latest).
 
 To sign a release again by hand, use **Actions → Desktop Windows signing → Run workflow**,

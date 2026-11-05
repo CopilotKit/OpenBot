@@ -6,15 +6,20 @@
 #
 # Env:
 #   RELEASE_TAG        the release to attach to, such as v0.3.0
+#   MAKE_LATEST        `true` when publish-release.yml decided this release becomes Latest
 #   GITHUB_REPOSITORY  and GH_TOKEN, for `gh`
 #   ARTIFACTS          the signed artifact (default `artifacts`)
+#   FEED_RETRY_DELAY   seconds between reads of the update feed (default 15)
 #
 # The signed -setup.exe is attached twice, in one upload, with `--clobber`: under the name Tauri gave
 # it, replacing the unsigned installer the release was published with, and under its fixed download
 # name (scripts/release-download-names.sh), so the address a web page links to serves the signed
 # build too. A candidate or beta was built pinned to its own release
-# (desktop/scripts/signed-build.ts), like the unsigned one it replaces. This never moves Latest:
-# Desktop macOS signing does that.
+# (desktop/scripts/signed-build.ts), like the unsigned one it replaces, and never becomes Latest.
+#
+# A stable release becomes Latest once both signing runs have attached their installers, here or
+# in Desktop macOS signing, whichever finishes second (scripts/release-make-latest.sh). So the
+# Windows address a web page links to never serves the unsigned installer.
 set -euo pipefail
 
 : "${RELEASE_TAG:?RELEASE_TAG must name the release}"
@@ -60,4 +65,8 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo ""
     echo "- \`$(basename "$installer")\`, also as \`$fixed\`"
   } >> "$GITHUB_STEP_SUMMARY"
+fi
+
+if [ -z "$pinned" ]; then
+  MAKE_LATEST="${MAKE_LATEST:-false}" "$root/scripts/release-make-latest.sh"
 fi

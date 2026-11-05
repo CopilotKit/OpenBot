@@ -132,9 +132,30 @@ test("a build of another version is not attached", () => {
   expect(fake.calls()).toEqual([]);
 });
 
-// A stable release is published not Latest; it becomes Latest here, after its signed installers.
+// The gap where Mac signing made a release Latest while its Windows link still served the unsigned
+// installer: Latest waits for the signed Windows one as well.
+test("a stable release signed on Mac before Windows is not Latest yet, so its Windows link never serves the unsigned installer", () => {
+  const fake = repo("v0.2.0");
+  fake.attach("OpenBot_0.3.0_x64-setup.exe");
+  fake.feed("v0.3.0", feedFor("0.3.0"));
+  const dir = job("0.3.0");
+  const result = publish(fake, dir, "v0.3.0", "true");
+  expect(result.code).toBe(0);
+  expect(result.out).toContain(
+    "v0.3.0 is not Latest yet: it still needs the signed OpenBot-windows-x64-setup.exe.",
+  );
+  expect(fake.calls().some((call) => call.startsWith("gh release edit"))).toBe(
+    false,
+  );
+  expect(fake.calls().some((call) => call.startsWith("curl"))).toBe(false);
+  expect(fake.latest()).toBe("v0.2.0");
+});
+
+// A stable release is published not Latest; it becomes Latest in the signing run that attaches
+// the last signed installer, here when Windows signing finished first.
 test("a stable release becomes Latest only after its signed installers are attached, then its feed is checked", () => {
   const fake = repo("v0.2.0");
+  fake.attach("OpenBot_0.3.0_x64-setup.exe", "OpenBot-windows-x64-setup.exe");
   fake.feed("v0.3.0", feedFor("0.3.0"));
   const dir = job("0.3.0");
   const result = publish(fake, dir, "v0.3.0", "true");
@@ -163,6 +184,7 @@ test("a stable release becomes Latest only after its signed installers are attac
 
 test("a stable release does not take Latest from a newer one that became Latest meanwhile", () => {
   const fake = repo("v0.4.0");
+  fake.attach("OpenBot-windows-x64-setup.exe");
   const dir = job("0.3.1");
   const result = publish(fake, dir, "v0.3.1", "true");
   expect(result.code).toBe(0);
@@ -196,6 +218,7 @@ test("signing the current Latest again checks its feed", () => {
 
 test("a Latest release whose feed names another version fails", () => {
   const fake = repo("v0.2.0");
+  fake.attach("OpenBot-windows-x64-setup.exe");
   fake.feed("v0.3.0", feedFor("0.2.0"));
   const dir = job("0.3.0");
   const result = publish(fake, dir, "v0.3.0", "true");

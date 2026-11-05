@@ -417,9 +417,10 @@ jobs:
           # The installers are rebuilt on every run, so a rerun produces new bytes. They are kept
           # out of the check above, which holds the release's source, chart and manifest to what
           # was first published. An installer already on the release, such as a signed one a
-          # signing run attached, is kept, so a re-run never puts the unsigned build back. Each
-          # installer is also attached under its fixed download name, copied from what is on the
-          # release (scripts/release-download-names.sh).
+          # signing run attached, is kept, so a re-run never puts the unsigned build back. A
+          # candidate's installers are also attached under their fixed download names. A stable
+          # release's fixed names are left to the signing runs, so `releases/latest/download` never
+          # serves an unsigned installer (scripts/release-attach-installers.sh).
           attached_list="$RUNNER_TEMP/attached-installers.txt"
           ATTACHED_LIST="$attached_list" scripts/release-attach-installers.sh "$VERSION" installers
 
@@ -438,7 +439,11 @@ jobs:
             echo "### Installers for $VERSION"
             echo ""
             while read -r name fixed; do
-              echo "- \`$name\`, also as \`$fixed\`"
+              if [ "$PRERELEASE" = true ]; then
+                echo "- \`$name\`, also as \`$fixed\`"
+              else
+                echo "- \`$name\`, and as \`$fixed\` once it is signed"
+              fi
             done < "$attached_list"
             echo ""
             echo "- CLI: $cli"
@@ -455,10 +460,11 @@ jobs:
       # Mac signing is dispatched explicitly; a dispatch is the one event GITHUB_TOKEN may start. On
       # the tag, so the signed build is this commit and carries the release version. The
       # `macos-signing` environment's required reviewers still approve the signing itself. A
-      # candidate's signed build is pinned to this release's images, like its ad-hoc one. A stable
-      # release becomes Latest there, once its signed installers are attached, when `verify` said
-      # it should. Each signing run attaches its signed installers under both their names, replacing
-      # the unsigned ones attached above.
+      # candidate's signed build is pinned to this release's images, like its ad-hoc one. Each
+      # signing run attaches its signed installers under both their names, replacing the unsigned
+      # ones attached above. A stable release becomes Latest in whichever signing run, Mac or
+      # Windows, finishes second, once every signed installer is on it, when `verify` said it
+      # should (scripts/release-make-latest.sh).
       - name: Start signing the Mac build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -469,16 +475,17 @@ jobs:
           gh workflow run desktop-macos-signing.yml -R "$GITHUB_REPOSITORY" --ref "$VERSION" \
             -f signing-mode=developer-id -f release-tag="$VERSION" -f make-latest="$BECOMES_LATEST"
       # Windows signing, started the same way and for the same reason. It attaches the signed
-      # -setup.exe, pinned like the unsigned one for a candidate, and never moves Latest: that
-      # stays with Mac signing.
+      # -setup.exe, pinned like the unsigned one for a candidate, and carries the same Latest
+      # decision as Mac signing.
       - name: Start signing the Windows build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.metadata.outputs.version }}
+          BECOMES_LATEST: ${{ needs.verify.outputs.becomes_latest }}
         run: |
           set -euo pipefail
           gh workflow run desktop-signing.yml -R "$GITHUB_REPOSITORY" --ref "$VERSION" \
-            -f signing-mode=keyvault -f release-tag="$VERSION"
+            -f signing-mode=keyvault -f release-tag="$VERSION" -f make-latest="$BECOMES_LATEST"
 
   # A final cut from a candidate is published from `release/X.Y`, so main has not seen it: the
   # version bump, the changelog section and any fix made while the candidates were tested are all

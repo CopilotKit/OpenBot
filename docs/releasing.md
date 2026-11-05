@@ -138,20 +138,27 @@ feed: a candidate, a patch to an older line, or a release signed again by hand.
 ### Which release is Latest
 
 `releases/latest`, the download links under it and the update feed all follow the release marked
-Latest. A stable release is published **not** Latest, and becomes Latest only after Desktop macOS
-signing has attached its signed `.dmg` files and `latest.json`. Until then the previous release
-stays Latest, with its signed installers, so `releases/latest` never serves an ad-hoc installer that
+Latest. A stable release is published **not** Latest, and becomes Latest only once both signing
+runs have attached their signed installers: Desktop macOS signing its `.dmg` files and `latest.json`,
+and Desktop Windows signing its `-setup.exe`, each under its fixed download name too. Whichever
+finishes second marks it ([`scripts/release-make-latest.sh`](../scripts/release-make-latest.sh)).
+Until then the previous release stays Latest, with its signed installers, so `releases/latest` never
+serves an unsigned Windows installer, or an ad-hoc installer that
 macOS refuses, or a release with no Intel installer.
 
 Whether a release becomes Latest is decided once, in `verify`, by
 [`scripts/release-becomes-latest.sh`](../scripts/release-becomes-latest.sh): never for a candidate or
 beta, and for a stable release only when no newer release is Latest. The publish workflow hands
-that decision to the signing run as `make-latest`, and the signing run asks the script again just
-before it marks the release, so a newer release published meanwhile keeps Latest. A re-run of the
-publish workflow does not touch Latest.
+that decision to both signing runs as `make-latest`, and the run that marks the release asks the
+script again just before it does, so a newer release published meanwhile keeps Latest. A re-run of
+the publish workflow does not touch Latest.
 
-If Mac signing is never approved, or fails, the release stays not Latest. Sign it again from its tag
-with `make-latest` set, or mark it Latest by hand on its release page.
+On a stable release only the signing runs attach the fixed download names, so a fixed name on it
+means its installer is signed. The release becomes Latest once `latest.json` and every fixed name
+are on it.
+
+If either signing run is never approved, or fails, the release stays not Latest. Sign it again from
+its tag with `make-latest` set, or mark it Latest by hand on its release page.
 
 `latest.json` names a version and, for `darwin-aarch64` and `darwin-x86_64`, an archive URL and
 that archive's minisign signature. The app verifies the signature against the public key in
@@ -370,8 +377,8 @@ A final also cannot change `desktop/intelligence-cli.json`, so it bundles the CL
 pinned.
 
 The final is a normal release: its installers are attached, and it becomes Latest, with its images
-tagged `latest`, only when no newer release already is, and only once its signed Mac installers are
-attached (see [Which release is Latest](#which-release-is-latest)). A patch from `main` can be
+tagged `latest`, only when no newer release already is, and only once its signed Mac and Windows
+installers are attached (see [Which release is Latest](#which-release-is-latest)). A patch from `main` can be
 released while a newer final is out, and that does not move Latest back.
 
 The smoke journey is still required before a final. See
@@ -396,7 +403,9 @@ history and the next merge-back does not conflict.
 
 Every release carries each installer twice: under the name Tauri gives it, which contains the
 version, and under a fixed name that is the same in every release. A web page links to the fixed
-name:
+name. On a candidate or beta the publish workflow attaches both. On a stable release it attaches the
+unsigned installers under their versioned names only, and the signing runs attach the fixed names
+from the signed installers:
 
 | Platform | Address |
 |---|---|
@@ -412,17 +421,17 @@ them, and the publish and signing workflows fail on an installer it does not kno
 so these addresses never give one. Link a prerelease by its version instead, for example
 `https://github.com/CopilotKit/OpenBot/releases/download/v0.3.0-rc.1/OpenBot-mac-arm64.dmg`.
 
-A stable release becomes Latest only once Mac signing has attached its signed `.dmg` files under
-both names (see [Which release is Latest](#which-release-is-latest)), so the Mac addresses always
-give signed builds, and the Intel one always exists. Windows signing does not move Latest. If it is
-approved after Mac signing, the Windows address gives the new release's unsigned installer until
-Windows signing attaches the signed one. Approve both. Each signing run replaces its installers
-under both names, and running it again replaces them again.
+A stable release becomes Latest only once both signing runs have attached their signed installers
+under both names (see [Which release is Latest](#which-release-is-latest)), so these addresses
+always give signed builds, and the Intel one always exists. Until then they give the previous
+release's. Each signing run replaces its installers under both names, and running it again replaces
+them again.
 
-A re-run of the publish workflow keeps an installer that is already attached, signed or not, and
-makes the fixed-name copy from it, replacing a copy that is missing or differs. So a re-run never
-puts an unsigned build back over a signed one, under either name. To replace an attached installer
-with a new build, delete it from the release first, then re-run.
+A re-run of the publish workflow keeps an installer that is already attached, signed or not. On a
+candidate or beta it makes the fixed-name copy from it, replacing a copy that is missing or differs;
+on a stable release it leaves the fixed names to the signing runs. So a re-run never puts an
+unsigned build back over a signed one, under either name. To replace an attached installer with a
+new build, delete it from the release first, then re-run.
 
 Linux installers are not attached to a release yet.
 
@@ -463,17 +472,21 @@ Then, in order:
   marked as a prerelease and never Latest. A stable release is published not Latest. A re-run keeps
   any installer already on the release, so it never puts an unsigned installer back over a signed
   one
-- each installer is also attached under its [fixed download name](#download-links)
+- a candidate or beta's installers are also attached under their
+  [fixed download names](#download-links). A stable release's fixed names come from the signing runs
 - [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag. It waits
   for a `macos-signing` reviewer, then attaches the signed `.dmg` files to the release. The signed
   `.dmg` has the same name as the ad-hoc one and replaces it, under both names. For a stable release
   it also attaches the updater archives and `latest.json`, and then marks the release Latest when
-  `verify` decided it becomes Latest (see [Which release is Latest](#which-release-is-latest)). A
+  `verify` decided it becomes Latest and Windows signing has already attached its installer (see
+  [Which release is Latest](#which-release-is-latest)). A
   candidate or beta's signed `.dmg` is pinned to its images, and has no updater archive and no
   `latest.json`
 - [Desktop Windows signing](windows-signing.md) is dispatched on the tag. It waits for a
   `windows-signing` reviewer, then attaches the signed `-setup.exe`, which replaces the unsigned one
-  under both names. A candidate or beta's is pinned to its images. It never moves Latest
+  under both names. A candidate or beta's is pinned to its images. For a stable release it marks the
+  release Latest when `verify` decided it becomes Latest and Mac signing has already attached its
+  installers
 - for a final cut from `release/X.Y`, the merge-back PR opens as described under
   [Finishing a candidate](#finishing-a-candidate)
 
