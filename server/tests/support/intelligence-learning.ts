@@ -15,6 +15,11 @@
  * where none of the Learning routes is registered and Express's catch-all answers ROUTE_NOT_FOUND),
  * and `rollout-closed` (Learning on with `globalEnabled: false` and no rollout entry, where every
  * Learning route answers LEARNING_NOT_ENABLED: learning-availability-guard.ts).
+ *
+ * Any of them can be met still starting, as a first install of OpenBot's Helm bundle meets it
+ * (`starting`): while the migrations Job runs every request fails on a table that is not there yet
+ * (500 INTERNAL_SERVER_ERROR), and until the bootstrap Job stores the runtime key it is not found
+ * (401 AUTH_UNAUTHENTICATED).
  */
 import { createHash } from "node:crypto";
 
@@ -55,14 +60,17 @@ const ERRORS = {
     "Check that this organization has an active subscription: every current plan grants Learning, and this organization is not entitled to it.",
     "permission",
   ],
+  INTERNAL_SERVER_ERROR: [500, "Unexpected server error.", "internal", true],
+  AUTH_UNAUTHENTICATED: [401, "Authentication is required.", "auth"],
 } as const;
 export type IntelligenceErrorCode = keyof typeof ERRORS;
 
 export function intelligenceError(code: IntelligenceErrorCode): Response {
-  const [status, message, category] = ERRORS[code];
+  const entry: readonly [number, string, string, boolean?] = ERRORS[code];
+  const [status, message, category, retryable = false] = entry;
   return Response.json(
     {
-      error: { code, message, category, retryable: false },
+      error: { code, message, category, retryable },
       requestId: "request-test",
       traceId: "trace-test",
     },
@@ -227,11 +235,23 @@ export type FakeIntelligence = {
   stop: () => void;
 };
 
-/** Serve one of the three Intelligences on 127.0.0.1. */
+/**
+ * Serve one of the four Intelligences on 127.0.0.1. `starting`: the first `migrating` requests meet
+ * the migrations and the next `keyless` the wait for the bootstrap. `failCreates`: the first container
+ * creations fail as a 500.
+ */
 export function fakeIntelligence(
   version: "current" | "0.15.1" | "learning-off" | "rollout-closed",
-  options: { containers?: string[]; candidates?: string[] } = {},
+  options: {
+    containers?: string[];
+    candidates?: string[];
+    starting?: { migrating?: number; keyless?: number };
+    failCreates?: number;
+  } = {},
 ): FakeIntelligence {
+  const migrating = options.starting?.migrating ?? 0;
+  const keyless = options.starting?.keyless ?? 0;
+  let createsFailed = 0;
   const containers = new Map(
     (options.containers ?? []).map((id) => [id, container(id, id)]),
   );
@@ -252,6 +272,11 @@ export function fakeIntelligence(
         auth: request.headers.get("authorization"),
         body: text ? JSON.parse(text) : null,
       });
+      const answered = requests.length - 1;
+      if (answered < migrating)
+        return intelligenceError("INTERNAL_SERVER_ERROR");
+      if (answered < migrating + keyless)
+        return intelligenceError("AUTH_UNAUTHENTICATED");
       if (version === "learning-off")
         return intelligenceError("ROUTE_NOT_FOUND");
       if (request.headers.get("authorization") !== `Bearer ${RUNTIME_KEY}`)
@@ -266,6 +291,10 @@ export function fakeIntelligence(
         return intelligenceError("LEARNING_NOT_ENABLED");
       if (path === "/api/v1/learning/containers" && request.method === "POST") {
         if (version === "0.15.1") return intelligenceError("ROUTE_NOT_FOUND");
+        if (createsFailed < (options.failCreates ?? 0)) {
+          createsFailed++;
+          return intelligenceError("INTERNAL_SERVER_ERROR");
+        }
         const body = JSON.parse(text) as { id: string; name: string };
         const existing = containers.get(body.id);
         if (existing)

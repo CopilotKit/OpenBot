@@ -31,6 +31,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { intelligenceApiKey } from "@openbot/shared/intelligence-key";
+import { transientStatus } from "../intelligence-startup";
 import {
   type ContainerProbe,
   type KeyIdentity,
@@ -88,7 +89,9 @@ export function keyIntelligence(
  * 201 is a new container and 200 the one already stored under that id, unchanged, so replicas and
  * people racing to ensure the same container all end with it. A 409 from an Intelligence that
  * reports a taken id instead is present too. 404 is an Intelligence without the route (0.15.1 and
- * earlier, or Learning switched off), and the caller tries its other credentials.
+ * earlier, or Learning switched off), and the caller tries its other credentials. A failure that may
+ * pass in a moment (nothing answering, a 5xx, a 408 or 429) is thrown marked `retryable`, which the
+ * server's automatic assignment reads as Intelligence still starting rather than as its one try.
  */
 export async function createWithRuntimeKey(input: {
   apiUrl: string;
@@ -97,20 +100,30 @@ export async function createWithRuntimeKey(input: {
   container: LearningContainerSpec;
 }): Promise<"created" | "present" | "unsupported"> {
   const { container } = input;
-  const response = await input.fetch(
-    `${input.apiUrl.replace(/\/+$/, "")}/api/v1/learning/containers`,
-    {
-      method: "POST",
-      redirect: "error",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${input.apiKey}`,
-        "content-type": "application/json",
+  let response: Response;
+  try {
+    response = await input.fetch(
+      `${input.apiUrl.replace(/\/+$/, "")}/api/v1/learning/containers`,
+      {
+        method: "POST",
+        redirect: "error",
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${input.apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ id: container.id, name: container.name }),
+        signal: AbortSignal.timeout(15_000),
       },
-      body: JSON.stringify({ id: container.id, name: container.name }),
-      signal: AbortSignal.timeout(15_000),
-    },
-  );
+    );
+  } catch (error) {
+    throw Object.assign(
+      new Error(
+        `Intelligence did not answer the runtime key's request to create the ${container.id} Learning container (${error instanceof Error ? error.message : String(error)}).`,
+      ),
+      { retryable: true },
+    );
+  }
   const body: unknown = await response.json().catch(() => null);
   const code =
     object(body) && object(body.error) && typeof body.error.code === "string"
@@ -134,8 +147,11 @@ export async function createWithRuntimeKey(input: {
     throw new Error(
       "This Intelligence's licence does not include Learning, so no container was created.",
     );
-  throw new Error(
-    `Intelligence could not create the ${container.id} Learning container with the runtime key (HTTP ${response.status}${code ? `, ${code}` : ""}). OpenBot tries again.`,
+  throw Object.assign(
+    new Error(
+      `Intelligence could not create the ${container.id} Learning container with the runtime key (HTTP ${response.status}${code ? `, ${code}` : ""}). OpenBot tries again.`,
+    ),
+    { retryable: transientStatus(response.status) },
   );
 }
 
@@ -698,8 +714,12 @@ export async function ensureLearningContainer(
     );
   }
   if (found === "unavailable") {
-    throw new Error(
-      "Intelligence could not be asked about the openbot Learning container with the configured runtime key. Check INTELLIGENCE_API_URL and INTELLIGENCE_API_KEY, then run this helper again.",
+    // Retryable: the server gets here only after its own probe answered, so Intelligence is starting or flapping.
+    throw Object.assign(
+      new Error(
+        "Intelligence could not be asked about the openbot Learning container with the configured runtime key. Check INTELLIGENCE_API_URL and INTELLIGENCE_API_KEY, then run this helper again.",
+      ),
+      { retryable: true },
     );
   }
   const created = await createLearningContainer(input);

@@ -1,3 +1,11 @@
+import type { IntelligenceSettings } from "./config";
+import { runtimeEntitlementStatus } from "./intelligence-client";
+import {
+  askWhileIntelligenceStarts,
+  INTELLIGENCE_STARTUP_WINDOW_MS,
+  type StartupClock,
+  transientStatus,
+} from "./intelligence-startup";
 import type { RuntimeEntitlementResponse } from "./self-host-banner";
 
 /**
@@ -9,8 +17,9 @@ import type { RuntimeEntitlementResponse } from "./self-host-banner";
  * log says why recall is empty. The licence belongs to Intelligence's own deployment rather than to
  * OpenBot's, which is the part that is easy to miss, so the line says where it goes.
  *
- * Read once and never blocks start-up. The self-host banner reads the same answer on page loads,
- * but only while the banner is enabled, so it cannot be the thing that reports this.
+ * Read at boot and never blocks start-up; an Intelligence still starting is waited out first (see
+ * `reportIntelligenceEntitlement`). The self-host banner reads the same answer on page loads, but
+ * only while the banner is enabled, so it cannot be the thing that reports this.
  */
 export type EntitlementWarning = {
   type: "intelligence-entitlement-not-ready";
@@ -68,16 +77,131 @@ export function entitlementWarning(
   };
 }
 
-/** Ask once and log what was found. Resolves either way and never throws. */
-export async function reportIntelligenceEntitlement(options: {
-  entitlements: () => Promise<RuntimeEntitlementResponse>;
-  log?: (message: string) => void;
-}): Promise<void> {
+/** What one read found: Intelligence's answer, or why there was none and whether that may pass. */
+type Read =
+  | { kind: "answer"; response: RuntimeEntitlementResponse }
+  | { kind: "failed"; reason: string; status?: number; transient: boolean };
+
+/**
+ * A failed read. The runtime client's errors carry the HTTP status and whether it may pass
+ * (`PlatformRequestError`), and `runtimeEntitlementStatus` marks a request nothing answered as one
+ * that may. Anything else never reached an answer either, so it is treated the same way.
+ */
+function failed(error: unknown): Read {
+  const { status, retryable } =
+    error !== null && typeof error === "object"
+      ? (error as { status?: unknown; retryable?: unknown })
+      : {};
+  const code = typeof status === "number" ? status : undefined;
+  return {
+    kind: "failed",
+    reason: error instanceof Error ? error.message : String(error),
+    ...(code !== undefined ? { status: code } : {}),
+    transient:
+      typeof retryable === "boolean"
+        ? retryable
+        : code === undefined || transientStatus(code),
+  };
+}
+
+/** Intelligence refused the key: a bad key, or, on a first install, one its bootstrap has not stored yet. */
+function refused(read: Read): boolean {
+  return read.kind === "failed" && (read.status === 401 || read.status === 403);
+}
+
+/**
+ * Ask, and log what was found. Resolves either way and never throws.
+ *
+ * An Intelligence still starting (nothing answers, a 5xx, a timeout) is asked again until
+ * `INTELLIGENCE_STARTUP_WINDOW_MS` closes, with one quiet line saying so, and only an answer still
+ * unreadable then is reported as unreadable. A refused key (401, 403) is reported at once, unless
+ * Intelligence was seen starting first: on a first install its bootstrap stores the key only after
+ * the migrations, so the same good key is refused for a few seconds in between.
+ *
+ * With `intelligence`, whether Intelligence answers yet is asked without the runtime client first
+ * (`runtimeEntitlementStatus`), so the failures expected while it starts never reach the client,
+ * which prints every one of them.
+ */
+export async function reportIntelligenceEntitlement(
+  options: {
+    entitlements: () => Promise<RuntimeEntitlementResponse>;
+    intelligence?: Pick<IntelligenceSettings, "apiUrl" | "apiKey">;
+    log?: (message: string) => void;
+    /** The one quiet line said while waiting. */
+    note?: (message: string) => void;
+  } & StartupClock,
+): Promise<void> {
   const log = options.log ?? ((message: string) => console.warn(message));
+  const note = options.note ?? ((message: string) => console.info(message));
+  const { intelligence, sleep, now } = options;
+  const windowMs = options.windowMs ?? INTELLIGENCE_STARTUP_WINDOW_MS;
+  const minutes = Math.round(windowMs / 60_000);
+
+  const readOnce = async (): Promise<Read> => {
+    if (intelligence) {
+      try {
+        const status = await runtimeEntitlementStatus(intelligence);
+        if (status !== 200)
+          return {
+            kind: "failed",
+            reason: `Intelligence answered HTTP ${status}`,
+            status,
+            transient: transientStatus(status),
+          };
+      } catch (error) {
+        return failed(error);
+      }
+    }
+    try {
+      return { kind: "answer", response: await options.entitlements() };
+    } catch (error) {
+      return failed(error);
+    }
+  };
+  let seenStarting = false;
+  const read = async (): Promise<Read> => {
+    const found = await readOnce();
+    if (found.kind === "failed" && found.transient) seenStarting = true;
+    return found;
+  };
+
   try {
-    const warning = entitlementWarning(await options.entitlements());
-    if (warning) log(JSON.stringify(warning));
+    const found = await askWhileIntelligenceStarts(
+      read,
+      (answer) =>
+        answer.kind === "failed" &&
+        (answer.transient || (seenStarting && refused(answer))),
+      {
+        windowMs,
+        ...(sleep ? { sleep } : {}),
+        ...(now ? { now } : {}),
+        onWaiting: (answer) =>
+          note(
+            JSON.stringify({
+              type: "intelligence-entitlement-waiting",
+              ...(answer.kind === "failed" ? { reason: answer.reason } : {}),
+              message: `Waiting for Intelligence to finish starting. OpenBot asks again for up to ${minutes} minutes before reporting it.`,
+            }),
+          ),
+      },
+    );
+    if (found.kind === "answer") {
+      const warning = entitlementWarning(found.response);
+      if (warning) log(JSON.stringify(warning));
+      return;
+    }
+    log(
+      JSON.stringify({
+        type: "intelligence-entitlement-unreadable",
+        reason: refused(found)
+          ? `Intelligence refused this deployment's INTELLIGENCE_API_KEY (HTTP ${found.status}).`
+          : found.reason,
+        ...(found.status !== undefined ? { status: found.status } : {}),
+        ...(seenStarting ? { waitedMinutes: minutes } : {}),
+      }),
+    );
   } catch (error) {
+    // Only a logger or the clock can throw here, and the boot check still never takes the server down.
     log(
       JSON.stringify({
         type: "intelligence-entitlement-unreadable",
