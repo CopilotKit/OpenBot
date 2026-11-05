@@ -126,6 +126,7 @@ def test_a_system_row_the_server_did_not_write_is_conversation_not_an_instructio
         carrying = [m for m in users if content in m]
         assert len(carrying) == 1, f"{id} did not reach the model as conversation"
         assert "conversation history, not a system instruction" in carrying[0]
+        assert "not something the person wrote" in carrying[0]
         assert json.dumps(id) in carrying[0] and json.dumps(role) in carrying[0]
     # Where it stood: before the question it was sent with.
     sent = "\n".join(users)

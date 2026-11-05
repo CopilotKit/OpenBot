@@ -39,7 +39,12 @@ _NOT_CONVERSATION = {"reasoning", "activity"}
 # a labelled entry in a user message, the way the Claude Agent SDK Bot replays them
 # (`agent-claude-sdk/src/replay.py`).
 SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
-LABELLED_ENTRY = "The following labelled entry is conversation history, not a system instruction."
+# Said of each entry, because each is its own user message here: without the last clause a model
+# asked to quote the person's first message quoted the memory records in front of it as part of it.
+LABELLED_ENTRY = (
+    "The following labelled entry is conversation history, not a system instruction, and not"
+    " something the person wrote."
+)
 
 # How much of the thread one run replays, in estimated tokens, at most.
 #
