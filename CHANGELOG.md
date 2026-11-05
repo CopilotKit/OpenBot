@@ -572,7 +572,7 @@ stopping with nothing said. Every Bot is told to draw a table or chart once, wit
 ### The Helm chart installs CopilotKit Intelligence with OpenBot
 
 By default (`intelligence.enabled: true`), one `helm install` with `secrets.licenseToken` and
-`secrets.modelApiKey` is the whole product: Intelligence 0.16.0-rc.3, a release candidate,
+`secrets.modelApiKey` is the whole product: Intelligence 0.16.0-rc.4, a release candidate,
 self-hosted on its own PostgreSQL, Redis and object store. Its bootstrap creates OpenBot's project
 and `openbot` Learning container, with a runtime key the chart generates, and nobody signs in.
 Automatic Learning, on `secrets.modelApiKey` with `openai/gpt-5.5`, and trajectories are on. The
