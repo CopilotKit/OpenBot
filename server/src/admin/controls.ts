@@ -975,16 +975,6 @@ export function auditRoutineStore<T extends RoutineLike>(
 /* ------------------------------ headless turns ------------------------------ */
 
 /**
- * One usage row for a headless turn that reached the model, as the gate writes one for each browser
- * run (`gate.ts`): the configured model for a built-in Bot, `unknown` for a remote one, which chooses
- * its own and was not watched here.
- *
- * Without it a turn nobody started from the browser served a model and left no row, so an admin
- * reading usage never saw what background check-ins cost. Called only once the turn was admitted, so
- * a turn the allowlist refused keeps the one refused row `headlessTurnRefusal` wrote for it. A failed
- * write is logged and never fails the turn, as the gate's is.
- */
-/**
  * `provider/model` a built-in run in this thread answers on: the person's pick for the
  * conversation, or the deployment's own. Same spelling as `builtInModel`.
  */
@@ -999,6 +989,16 @@ export async function builtInModelFor(
   return picked ? `${deployment.split("/")[0]}/${picked}` : deployment;
 }
 
+/**
+ * One usage row for a headless turn that reached the model, as the gate writes one for each browser
+ * run (`gate.ts`): the configured model for a built-in Bot, `unknown` for a remote one, which chooses
+ * its own and was not watched here.
+ *
+ * Without it a turn nobody started from the browser served a model and left no row, so an admin
+ * reading usage never saw what background check-ins cost. Called only once the turn was admitted, so
+ * a turn the allowlist refused keeps the one refused row `headlessTurnRefusal` wrote for it. A failed
+ * write is logged and never fails the turn, as the gate's is.
+ */
 export async function recordHeadlessUsage(input: {
   ownerUserId: string;
   agentId: string;

@@ -87,11 +87,6 @@ export function chatModelIds(
 }
 
 /**
- * What a model is called where a person picks it. OpenAI publishes no display names, so its ids are
- * spelled out (`gpt-5.4-mini` is GPT-5.4 Mini); anything else, including a gateway's own namespaced
- * names, is shown as it is, because that is the name its operator chose.
- */
-/**
  * Who makes a model, read from its name. A gateway's namespaced name (`anthropic/claude-…`) says so
  * outright; a bare name is matched on the families each vendor publishes. A gateway alias that
  * names no family (`fast`, `smart`) has no vendor, and that is the honest answer.
@@ -133,6 +128,11 @@ function option(id: string, label?: string): ModelOption {
   };
 }
 
+/**
+ * What a model is called where a person picks it. OpenAI publishes no display names, so its ids are
+ * spelled out (`gpt-5.4-mini` is GPT-5.4 Mini); anything else, including a gateway's own namespaced
+ * names, is shown as it is, because that is the name its operator chose.
+ */
 export function modelLabel(id: string): string {
   const match = /^gpt-([^-]+)((?:-[a-z0-9.]+)*)$/i.exec(id);
   if (!match) return id;
