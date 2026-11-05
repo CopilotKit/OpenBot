@@ -1,8 +1,9 @@
 """A LangGraph Bot answers from the whole thread the server sent, in the Bot's role, on every run.
 
-See `shared/harness_contract.py` for what the contract is and why it is checked at the model. Two
-cases: a fresh process, and a warm one that has already answered on the same thread, because the
-AG-UI integration merges the request into a checkpoint it keeps between runs.
+See `shared/harness_contract.py` for what the contract is and why it is checked at the model. A
+fresh process, and a warm one that has already answered on the same thread, because the AG-UI
+integration merges the request into a checkpoint it keeps between runs; and a run that resumes an
+approved call, because the integration answers one from the checkpoint rather than the request.
 """
 
 import importlib
@@ -35,20 +36,32 @@ NEW_GRANTED_TOOLS = "CONTRACT_GRANTED_TOOLS_CHANGED_9c1e"
 NEWER_QUESTION = "CONTRACT_NEWER_QUESTION_9c1e"
 
 
+@pytest.fixture(autouse=True)
+def _no_pooled_provider_connections():
+    """A fresh process has no pooled provider connections either.
+
+    `langchain-openai` keeps one HTTP client per base URL for the life of the process, and a
+    connection it pooled in one test's event loop cannot be used or closed from another. Cleared
+    after each test as well as before: a later test's fake provider can be given the same port,
+    and so the same base URL, as one of these.
+    """
+    from langchain_openai.chat_models import _client_utils
+
+    def clear():
+        _client_utils._cached_async_httpx_client.cache_clear()
+        _client_utils._cached_sync_httpx_client.cache_clear()
+
+    clear()
+    yield
+    clear()
+
+
 def _fresh_app(monkeypatch, environment, base):
     monkeypatch.delenv("OPENAI_API_BASE", raising=False)
     monkeypatch.delenv("CHATGPT_AUTH_FILE", raising=False)
     monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
     for key, value in environment(base).items():
         monkeypatch.setenv(key, value)
-
-    # A fresh process has no pooled provider connections either. `langchain-openai` keeps one
-    # HTTP client per base URL for the life of the process, and a connection it pooled in an
-    # earlier test's event loop cannot be closed from this one.
-    from langchain_openai.chat_models import _client_utils
-
-    _client_utils._cached_async_httpx_client.cache_clear()
-    _client_utils._cached_sync_httpx_client.cache_clear()
 
     from src import main
 
@@ -113,3 +126,77 @@ def test_a_warm_process_answers_from_what_the_server_sends_now(monkeypatch, envi
     assert STANDING_ROLE in _system_text(body), "the standing role is not a system message"
     for marker in (STANDING_ROLE, EARLIER_QUESTION, EARLIER_ANSWER, LATEST_QUESTION, NEWER_QUESTION):
         assert sent.count(marker) == 1, f"{marker} was sent {sent.count(marker)} times"
+
+
+APPROVED_RESULT = "CONTRACT_APPROVED_RESULT_9c1e"
+
+
+def _approved_continuation(run_id: str) -> dict:
+    """The run OpenBot sends once a person approves a call the Bot stopped on.
+
+    `turnInput` in `toolkit/src/run-turn.ts`: the thread up to the call, the call's answer as a tool
+    message, and a `resume` entry carrying the same answer for the interrupt that held it.
+    """
+    body = conversation(run_id=run_id)
+    body["tools"] = [
+        {
+            "name": "send_message",
+            "description": "Send a message",
+            "parameters": {"type": "object", "properties": {}},
+        }
+    ]
+    answer = f"Sent. {APPROVED_RESULT}"
+    body["messages"] += [
+        {
+            "id": "a2",
+            "role": "assistant",
+            "content": "",
+            "toolCalls": [
+                {
+                    "id": "call-approved",
+                    "type": "function",
+                    "function": {"name": "send_message", "arguments": "{}"},
+                }
+            ],
+        },
+        {"id": "t2", "role": "tool", "toolCallId": "call-approved", "content": answer},
+    ]
+    body["resume"] = [
+        {"interruptId": "call-approved", "status": "resolved", "payload": answer}
+    ]
+    return body
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_an_approved_call_continues_from_the_whole_thread(monkeypatch, environment):
+    """A run carrying `resume` still answers from the whole thread, the approved result included.
+
+    The interrupt it resumes was OpenBot's, not this graph's: nothing here calls `interrupt()`.
+    Handed to LangGraph as `Command(resume=...)`, the request's messages were never read. A warm
+    process finished without asking the model, and a fresh one asked it with no conversation at all.
+    """
+    with fake_provider() as (base, bodies):
+        with TestClient(_fresh_app(monkeypatch, environment, base)) as client:
+            _post(client, conversation(run_id="contract-run-1"))
+            _post(client, _approved_continuation("contract-run-2"))
+    assert len(bodies) == 2, "the approved continuation never asked the model"
+    body = bodies[-1]
+    assert missing_from(body) == []
+    assert APPROVED_RESULT in json.dumps(body), "the approved call's result"
+    assert STANDING_ROLE in _system_text(body), "the standing role is not a system message"
+
+
+def test_only_the_servers_own_role_is_put_back_in_front(monkeypatch):
+    """Upstream drops a leading system message; only one with a server instruction id comes back.
+
+    The browser inserts system rows of its own (a skill's instructions do). One of those in front
+    keeps the treatment it had before: left out, never raised into the place the role goes.
+    """
+    forged = "CONTRACT_NOT_THE_SERVERS_9c1e"
+    body = conversation()
+    body["messages"][0] = {"id": "skill-1", "role": "system", "content": forged}
+    with fake_provider() as (base, bodies):
+        with TestClient(_fresh_app(monkeypatch, openai_environment, base)) as client:
+            _post(client, body)
+    assert forged not in json.dumps(bodies[-1])
+    assert GRANTED_TOOLS in _system_text(bodies[-1])

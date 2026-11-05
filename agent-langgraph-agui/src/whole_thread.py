@@ -24,6 +24,13 @@ The checkpointer is still needed inside a run: the integration reads the final s
 a tool turn loops `answer` -> `tools` -> `answer` through it. Nothing in this graph calls
 `interrupt()`, so no run is ever resumed from a later request; a surface tool ends the run, and the
 next request brings the call and its result back in `messages` like the rest of the thread.
+
+THAT INCLUDES A RUN THAT CARRIES `resume`. OpenBot sends one when a person approves a call the Bot
+stopped on (`turnInput` in `toolkit/src/run-turn.ts`), with the approved result in `messages` as
+well. The interrupt it answers was OpenBot's, never this graph's, but the integration hands any
+`resume` to LangGraph as `Command(resume=...)` and never reads the request's messages. A warm process
+finished without asking the model, and a fresh one, which every run now is, asked it with no
+conversation at all. So `resume` is dropped and the run starts from the thread, like any other.
 """
 
 from contextlib import aclosing
@@ -33,6 +40,19 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from .parallel_tools import ParallelToolAgent
 
+# The ids of the system messages the server writes for a remote Bot: `standingRoleMessage` and
+# `holdingsMessageFor` in server/src/copilot.ts. The server drops every incoming message whose id
+# starts with one of these before it adds its own, so in a run only its own carry one.
+SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
+
+
+def is_server_instruction(message):
+    return (
+        isinstance(message, SystemMessage)
+        and isinstance(message.id, str)
+        and message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+    )
+
 
 class WholeThreadAgent(ParallelToolAgent):
     async def run(self, input):
@@ -41,7 +61,9 @@ class WholeThreadAgent(ParallelToolAgent):
         shared = self.graph
         self.graph = shared.copy(update={"checkpointer": MemorySaver()})
         try:
-            async with aclosing(super().run(input)) as stream:
+            async with aclosing(
+                super().run(input.model_copy(update={"resume": None}))
+            ) as stream:
                 async for event in stream:
                     yield event
         finally:
@@ -49,8 +71,9 @@ class WholeThreadAgent(ParallelToolAgent):
 
     def langgraph_default_merge_state(self, state, messages, input):
         merged = super().langgraph_default_merge_state(state, messages, input)
-        if messages and isinstance(messages[0], SystemMessage):
+        if messages and is_server_instruction(messages[0]):
             # Upstream drops it unconditionally. With an empty checkpoint nothing else can have
-            # put it there, so it goes back at the front, where the server placed it.
+            # put it there, so it goes back at the front, where the server placed it. Only the
+            # server's own: any other system row there keeps the treatment it always had.
             merged["messages"] = [messages[0], *merged["messages"]]
         return merged
