@@ -192,3 +192,37 @@ def test_an_earlier_tool_call_and_an_attached_image_are_part_of_the_thread(monke
     assert "TOOL_RESULT_MARKER" in sent
     assert "call-0" in sent
     assert PIXEL in sent, "the image attached earlier in the thread reached the model"
+
+
+MISSED_QUESTION = "CONTRACT_MISSED_QUESTION_7f3a"
+
+
+def test_a_live_session_is_reused_rather_than_rebuilt(monkeypatch, tmp_path):
+    """Two runs on one healthy session: the second is a turn of the same harness conversation."""
+    first = conversation()
+    with fresh_bot(monkeypatch, tmp_path) as run:
+        run(first)
+        body = run(_next_turn(first))
+    turns = [content.get("role") for content in body.get("contents", [])]
+    assert turns[-1] == "user" and "model" in turns, (
+        "the newest question is its own turn after the model's earlier reply, not a rebuilt history",
+        turns,
+    )
+
+
+def test_a_turn_answered_elsewhere_reaches_a_live_session(monkeypatch, tmp_path):
+    """Another replica, or this one before a crash it survived, answered a turn this session missed."""
+    first = conversation()
+    following = _next_turn(first)
+    following["messages"][-2:-2] = [
+        {"id": "u2b", "role": "user", "content": f"Something else. {MISSED_QUESTION}"},
+        {"id": "a2b", "role": "assistant", "content": "Answered by another replica."},
+    ]
+    with fresh_bot(monkeypatch, tmp_path) as run:
+        run(first)
+        body = run(following)
+    sent = json.dumps(body)
+    assert MISSED_QUESTION in sent, "the turn this session never saw reached the model"
+    assert missing_from(body) == []
+    for marker in (EARLIER_QUESTION, LATEST_QUESTION, NEXT_QUESTION, MISSED_QUESTION):
+        assert sent.count(marker) == 1, (marker, sent)

@@ -18,10 +18,11 @@ newest line alone, and a Bot on Antigravity never received its role:
 So here a session never resumes anything. Every session is a new harness conversation, built with
 this run's system messages as its instructions, and its first prompt is the whole thread as
 labelled history. While that session lives, the harness holds the conversation, and only user
-messages it has not been sent are forwarded, as upstream does, so nothing is said twice. The
-standing role and the summary of granted tools are part of the session's identity: when either
-changes, the session is rebuilt the same way, because the harness cannot change its instructions
-mid-conversation.
+messages it has not been sent are forwarded, as upstream does, so nothing is said twice. A live
+session that was never sent one of the thread's earlier user turns (another replica answered it)
+is closed and started again from the thread. The standing role and the summary of granted tools
+are part of the session's identity: when either changes, the session is rebuilt the same way,
+because the harness cannot change its instructions mid-conversation.
 """
 
 import contextvars
@@ -51,6 +52,11 @@ _HISTORY_PREAMBLE = (
 _run_instructions: contextvars.ContextVar[str] = contextvars.ContextVar(
     "openbot_antigravity_instructions", default=""
 )
+# The ids of this run's user messages before its newest one: what a live session must already have
+# been sent to hold the conversation. Same reasons for a context variable.
+_run_earlier_users: contextvars.ContextVar[frozenset] = contextvars.ContextVar(
+    "openbot_antigravity_earlier_users", default=frozenset()
+)
 
 
 def _text(content: Any) -> str:
@@ -74,6 +80,14 @@ def system_instructions(messages) -> str:
         for text in [_text(getattr(message, "content", None))]
         if text
     )
+
+
+def user_ids(messages) -> list:
+    return [
+        message.id
+        for message in messages or []
+        if getattr(message, "role", None) == "user" and getattr(message, "id", None)
+    ]
 
 
 def _conversation(messages) -> list:
@@ -136,6 +150,17 @@ class _FreshSessions(SessionManager):
             factory=fresh,
             bridge_factory=bridge_factory,
         )
+        if not built and not session.is_parked and not _run_earlier_users.get() <= session.forwarded_prompts:
+            # A turn this session was never sent: another replica answered it, or this one before
+            # a restart of the session it survived. The thread the server sent is the conversation,
+            # so start again from it rather than answer without that turn.
+            await self.close(thread_id)
+            session = await super().get_or_create(
+                thread_id,
+                signature=f"{signature}:{instructions}",
+                factory=fresh,
+                bridge_factory=bridge_factory,
+            )
         if built:
             # No await since the session was made, so no run has used it yet.
             session.forwarded_prompts = set()
@@ -156,6 +181,7 @@ class OpenBotAntigravityAgent(AntigravityAgent):
 
     async def run(self, input_data):
         _run_instructions.set(system_instructions(input_data.messages))
+        _run_earlier_users.set(frozenset(user_ids(input_data.messages)[:-1]))
         async for event in super().run(input_data):
             yield event
 
@@ -176,4 +202,7 @@ class OpenBotAntigravityAgent(AntigravityAgent):
         if prompt is None or session.forwarded_prompts:
             # Nothing new, or a live session that already holds everything before `prompt`.
             return prompt, prompt_id
+        # The history carries every user turn, so the session now holds each of them: without this,
+        # the next run would find them unsent and rebuild a session that was fine.
+        session.forwarded_prompts.update(user_ids(input_data.messages))
         return history_prompt(input_data.messages), prompt_id
