@@ -28,6 +28,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "./support/reserved-port";
 import {
   applyLocalUpdate,
   type CommandRunner,
@@ -53,18 +54,6 @@ function available(command: string[]) {
 }
 const docker = available(["docker", "info", "--format", "{{.ServerVersion}}"]);
 const pgDump = available(["pg_dump", "--version"]);
-/** A port nothing on this machine is listening on. Chosen here rather than by `-p 127.0.0.1::5000`,
- * because Docker Desktop's engine cannot reach a host port it picked itself for a push. */
-function freePort() {
-  const listener = Bun.listen({
-    hostname: "127.0.0.1",
-    port: 0,
-    socket: { data() {} },
-  });
-  const { port } = listener;
-  listener.stop(true);
-  return port;
-}
 function sh(command: string[], input?: string) {
   return execFileSync(command[0] ?? "", command.slice(1), {
     encoding: "utf8",
@@ -194,9 +183,11 @@ describe.skipIf(!docker)(
     let registry = "";
     let reference = "";
     // A pinned digest that exists only in a local registry, and not yet in this engine.
-    beforeAll(() => {
+    beforeAll(async () => {
       const name = `fix979-registry-${id}`;
-      const port = freePort();
+      // Chosen here rather than by `-p 127.0.0.1::5000`, because Docker Desktop's engine cannot
+      // reach a host port it picked itself for a push.
+      const port = await reservePort();
       sh([
         "docker",
         "run",

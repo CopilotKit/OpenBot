@@ -24,6 +24,7 @@ import {
   readSession,
   writeLocal,
 } from "../src/shared/storage";
+import { reservePort } from "../../tests/support/reserved-port";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 
 type Exchange = { code: string; label: string; installId: string };
@@ -875,9 +876,7 @@ test("a code OpenBot refuses, or an OpenBot that does not answer, stores nothing
     }),
   ).toEqual({ connected: false, reason: "exchange-refused" });
   // Nothing listens on this port: OpenBot Desktop named an OpenBot that is not running.
-  const closed = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: openbot });
-  const gone = closed.url.origin;
-  await closed.stop(true);
+  const gone = `http://127.0.0.1:${await reservePort()}`;
   expect(
     await connectThroughDesktop({
       askDesktop: async () => ({ openbotUrl: gone, code: "obc_d" }),
@@ -1648,9 +1647,7 @@ test("a trusted OpenBot's code OpenBot refuses, or an OpenBot that does not answ
     ok: false,
     error: "exchange-refused",
   });
-  const closed = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: openbot });
-  const gone = closed.url.origin;
-  await closed.stop(true);
+  const gone = `http://127.0.0.1:${await reservePort()}`;
   desktopAnswers(gone);
   expect(await connect("obc_d", gone)).toEqual({
     ok: false,
