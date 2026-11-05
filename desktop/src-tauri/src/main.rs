@@ -101,6 +101,12 @@ struct Shell {
     dashboards: Dashboards,
     /// The OpenBot app page's sidebar row, and the app origins allowed to reach it.
     intelligence_bridge: intelligence_bridge::Bridge,
+    /// The origins of the OpenBot app this shell verified it owns (`trust_owned_app`). Only a page
+    /// from one of these is treated as OpenBot and gets the window's controls; any other page on
+    /// a loopback port is someone else's.
+    owned_app_origins: Mutex<Vec<String>>,
+    /// The origins already given the window's controls (`allow_app_page`).
+    app_page_grants: Mutex<Vec<String>>,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -3798,7 +3804,7 @@ fn show_openbot_on<R: tauri::Runtime>(
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
     // Only the owned app itself.
-    intelligence_bridge::allow(&app, &url);
+    trust_owned_app(&app, &url);
     let destination = url;
     eprintln!("[show] navigating to the owned OpenBot app");
     let window = app
@@ -3958,7 +3964,8 @@ fn remember_appearance<R: tauri::Runtime>(app: &tauri::AppHandle<R>, dark: bool)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WindowPage {
     Setup,
-    /// OpenBot served from this machine: its sidebar takes the title bar's place.
+    /// The OpenBot this shell verified it owns, served from this machine: its sidebar takes the
+    /// title bar's place. A page on another loopback origin is `Other`.
     OwnedApp,
     /// OpenBot served from this machine, from a release whose styles make no room for the window
     /// buttons: the system's title bar, still in the app's own light or dark.
@@ -3972,6 +3979,7 @@ fn window_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -
         WindowPage::Setup
     } else if url.scheme() == "http"
         && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
+        && is_owned_app_origin(app, url)
     {
         if app_makes_room_for_window_buttons(&cleanup_root(
             &app.state::<Shell>(),
@@ -4208,12 +4216,49 @@ const APP_THEME_PAGE: &str = r#"(() => {
   sync();
 })();"#;
 
-/// Lets OpenBot's own page move and zoom the window from its drag handle, set the window's
-/// appearance to its own theme, and use Settings → This computer (`desktop_page`), and nothing more.
-fn allow_window_drag<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) {
-    static GRANTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/**
+Record `address` as the OpenBot app this shell verified it owns, and let it use the Intelligence row.
+
+Called with an address `owned_app_url` verified, before the window navigates there. Its origin is
+then the only loopback origin the window treats as OpenBot (`window_page`) and gives the window's
+controls to (`allow_app_page`).
+*/
+fn trust_owned_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
+    if let Some(origin) = intelligence_bridge::app_origin(address) {
+        let shell = app.state::<Shell>();
+        let mut trusted = shell.owned_app_origins.lock().unwrap();
+        if !trusted.contains(&origin) {
+            trusted.push(origin);
+        }
+    }
+    intelligence_bridge::allow(app, address);
+}
+
+/// Whether `url` is on the origin of the OpenBot app this shell verified it owns.
+fn is_owned_app_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> bool {
     let origin = url.origin().ascii_serialization();
-    let mut granted = GRANTED.lock().unwrap();
+    app.state::<Shell>()
+        .owned_app_origins
+        .lock()
+        .unwrap()
+        .contains(&origin)
+}
+
+/**
+Lets OpenBot's own page move and zoom the window from its drag handle, set the window's appearance
+to its own theme, and use Settings → This computer (`desktop_page`), and nothing more.
+
+Only the origin this shell verified as its own OpenBot (`trust_owned_app`). A page on any other
+loopback port, which a link in a reply can open in this window, gets none of it: Settings → This
+computer can stop OpenBot and the local Intelligence.
+*/
+fn allow_app_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) {
+    if !is_owned_app_origin(app, url) {
+        return;
+    }
+    let origin = url.origin().ascii_serialization();
+    let shell = app.state::<Shell>();
+    let mut granted = shell.app_page_grants.lock().unwrap();
     if granted.contains(&origin) {
         return;
     }
@@ -4230,6 +4275,104 @@ fn allow_window_drag<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::
     match app.add_capability(capability) {
         Ok(()) => granted.push(origin),
         Err(error) => eprintln!("[window] could not let the app page drag the window: {error}"),
+    }
+}
+
+#[cfg(test)]
+mod app_page_tests {
+    use super::*;
+
+    /// A stand-in for `desktop_page` under its own name, so the Tauri ACL that guards the real
+    /// commands guards these: a command answers only when the page's origin was granted it.
+    fn app() -> (
+        tauri::App<tauri::test::MockRuntime>,
+        tauri::WebviewWindow<tauri::test::MockRuntime>,
+    ) {
+        let stand_in =
+            tauri::plugin::Builder::<tauri::test::MockRuntime>::new(desktop_page::PLUGIN)
+                .invoke_handler(|invoke| {
+                    invoke.resolver.resolve(());
+                    true
+                })
+                .build();
+        let app = tauri::test::mock_builder()
+            .plugin(stand_in)
+            .plugin(intelligence_bridge::plugin())
+            .manage(Shell::default())
+            .build(tauri::generate_context!(test = true))
+            .unwrap();
+        let window = app.get_webview_window("main").unwrap_or_else(|| {
+            tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+                .build()
+                .unwrap()
+        });
+        (app, window)
+    }
+
+    fn ask(
+        window: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+        from: &str,
+        cmd: &str,
+    ) -> Result<serde_json::Value, serde_json::Value> {
+        tauri::test::get_ipc_response(
+            window,
+            tauri::webview::InvokeRequest {
+                cmd: cmd.into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: from.parse().unwrap(),
+                body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+                headers: Default::default(),
+                invoke_key: tauri::test::INVOKE_KEY.into(),
+            },
+        )
+        .map(|body| body.deserialize().unwrap())
+    }
+
+    const STOP: &str = "plugin:openbot-desktop|stop";
+
+    /// Settings → This computer can stop OpenBot and the local Intelligence. A page on another
+    /// loopback port that this window loads, from a link in a reply for instance, used to get the
+    /// same controls as OpenBot's own page.
+    #[test]
+    fn only_the_owned_app_origin_can_stop_openbot_from_its_page() {
+        let (app, window) = app();
+        let foreign: tauri::Url = "http://127.0.0.1:3011/".parse().unwrap();
+        let owned: tauri::Url = "http://127.0.0.1:3010/settings/this-computer"
+            .parse()
+            .unwrap();
+
+        // Loaded before any OpenBot was verified: not OpenBot, and granted nothing.
+        assert_eq!(window_page(app.handle(), &foreign), WindowPage::Other);
+        allow_app_page(app.handle(), &foreign);
+        assert!(ask(&window, foreign.as_str(), STOP).is_err());
+
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        assert!(matches!(
+            window_page(app.handle(), &owned),
+            WindowPage::OwnedApp | WindowPage::LocalApp
+        ));
+        allow_app_page(app.handle(), &owned);
+        assert_eq!(
+            ask(&window, owned.as_str(), STOP),
+            Ok(serde_json::Value::Null)
+        );
+
+        // Another port on the same address, and another name for it, stay someone else's.
+        for other in [
+            "http://127.0.0.1:3011/",
+            "http://localhost:3010/",
+            "http://[::1]:3010/",
+        ] {
+            let other: tauri::Url = other.parse().unwrap();
+            assert_eq!(
+                window_page(app.handle(), &other),
+                WindowPage::Other,
+                "{other}"
+            );
+            allow_app_page(app.handle(), &other);
+            assert!(ask(&window, other.as_str(), STOP).is_err(), "{other}");
+        }
     }
 }
 
@@ -4301,7 +4444,7 @@ fn show_status_in_app(app: &tauri::AppHandle) -> bool {
         return false;
     };
     url.set_path(COMPUTER_SETTINGS_PATH);
-    intelligence_bridge::allow(app, url.as_str());
+    trust_owned_app(app, url.as_str());
     if window.navigate(url).is_err() {
         return false;
     }
@@ -6073,7 +6216,7 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
             .then(|| owned_app_url(&shell, &root, ports))
             .flatten()
         {
-            intelligence_bridge::allow(app, &url);
+            trust_owned_app(app, &url);
             url.parse().ok()
         } else {
             setup_destination(app).ok()
@@ -6986,7 +7129,7 @@ fn main() {
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp)
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
-                allow_window_drag(window.app_handle(), payload.url());
+                allow_app_page(window.app_handle(), payload.url());
                 // macOS draws the window's outline from it; Windows tints the title bar with it.
                 if cfg!(any(target_os = "macos", target_os = "windows")) {
                     let _ = window.eval(APP_THEME_PAGE);
