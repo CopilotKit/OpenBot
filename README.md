@@ -40,9 +40,9 @@ You can get started with OpenBot in three ways.
 
 In Personal Edition, you start with one assistant on your computer. With the source template, Docker Compose starts the supporting services, PostgreSQL stores the workspace configuration, and you choose the model. OpenBot encrypts stored model credentials and keeps them out of logs.
 
-The example team deployment starts with two coworkers, and they are configuration rather than code: **General Assistant** for everyday work and **Knowledge** for company questions. A **Risk Analyst** joins them once its endpoint is configured, and ten more wait in `examples/fintech/catalog/`, each doing one job — reading an expense claim against the policy as written, turning a meeting note into the follow-ups actually in it, drafting release notes from what shipped, triaging a ticket, answering a new starter from the handbook, writing a brief that names what it could not find, writing up an interview, handing an on-call shift over, assembling what is known before a renewal, and grouping customer feedback into themes it can cite. Copy one into `examples/fintech/agents/` to add it, write your own there or in `agents.yaml`, or make one from `/bots` in the UI.
+The team template comes with two Bots. **General Assistant** helps with everyday work. **Knowledge** answers questions from the company documents you connect and cites its sources.
 
-Anything a Bot does to a computer, a file, an MCP server or a component goes through one gateway that decides and records it. That is the difference between an agent that can use your tools and an agent you can let near them.
+To add a Bot, open `/bots` or start from one of the [YAML examples](examples/fintech/catalog/). For example, [Meeting Follow-ups](examples/fintech/catalog/meeting-follow-ups.yaml) reads meeting notes and lists who agreed to do what. Copy its file into `examples/fintech/agents/` and restart OpenBot to try it. You grant tool access separately, so you can let a Bot read a document without giving it permission to edit it.
 
 More at [openbot.co](https://openbot.co).
 
