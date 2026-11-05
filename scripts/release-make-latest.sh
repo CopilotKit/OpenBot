@@ -19,7 +19,8 @@
 # attaches latest.json and both Mac names, and Windows signing the Windows one.
 #
 # Only when publish-release.yml said the release becomes Latest, and only when no newer release has
-# become Latest since (scripts/release-becomes-latest.sh).
+# become Latest since (scripts/release-becomes-latest.sh). Making it Latest also starts Downloads
+# sync, so downloads.copilotkit.ai serves the same signed installers; the job needs `actions: write`.
 set -euo pipefail
 
 : "${RELEASE_TAG:?RELEASE_TAG must name the release}"
@@ -57,6 +58,11 @@ if [ "$make_latest" = true ]; then
     if [ "$becomes" = true ]; then
       gh release edit "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --latest
       echo "$RELEASE_TAG is now the latest release."
+      # downloads.copilotkit.ai mirrors the Latest release (scripts/downloads-sync.sh). An edit made
+      # with the workflow's token starts no workflow, and a dispatch does, so the sync is started
+      # here rather than by the release changing. It also runs every six hours in case this fails.
+      gh workflow run downloads-sync.yml -R "$GITHUB_REPOSITORY" --ref main
+      echo "Started Downloads sync, which copies its signed installers to downloads.copilotkit.ai."
     else
       echo "A newer release is already Latest, so $RELEASE_TAG stays as it is."
     fi
