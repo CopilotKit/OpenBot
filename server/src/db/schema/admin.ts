@@ -58,6 +58,9 @@ export const capabilitySettings = pgTable(
  *
  * Keys: `sso_required`, `action_recording`, `inactive_computer_days`, `model_allowlist`,
  * `mcp_allowlist`. The value is `{ value: ... }` so every key stores a JSON object.
+ *
+ * `personal_default_apps` is the personal edition's, not a switch: the default apps it has turned
+ * on once, so one the person turned off stays off (see `plugins/personal-defaults.ts`).
  */
 export const enterpriseSettings = pgTable("enterprise_settings", {
   key: text("key").primaryKey(),

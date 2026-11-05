@@ -519,7 +519,7 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
     expect(
       await view.findByText("Confirm Friday ship date for the 120 mugs"),
     ).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Start" }));
+    fireEvent.click(view.getByRole("button", { name: "Work on it" }));
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
@@ -527,7 +527,7 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
         body: null,
       }),
     );
-    fireEvent.click(await view.findByRole("button", { name: "Hide" }));
+    fireEvent.click(await view.findByRole("button", { name: /^Dismiss / }));
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
@@ -576,7 +576,7 @@ describe("the frame carries the deployment's brand, not OpenDuet's", () => {
     fireEvent.click(await view.findByRole("tab", { name: "Active" }));
     await view.findByRole("region", { name: "Needs input" });
     fireEvent.click(view.getByRole("tab", { name: "Up next" }));
-    await view.findByRole("button", { name: "Start" });
+    await view.findByRole("button", { name: "Work on it" });
     expect(readable()).not.toContain("OpenDuet");
   });
 });

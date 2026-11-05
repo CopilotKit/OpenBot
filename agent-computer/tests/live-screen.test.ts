@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 
 /**
  * The live screen, driven against the real process with a real browser.
@@ -31,24 +31,6 @@ import { join } from "node:path";
 const asked = process.env.OPENBOT_LIVE_SCREEN === "1";
 
 const TOKEN = "test-computer-token";
-
-/**
- * A port the operating system says is free, rather than one picked in advance.
- *
- * A fixed number here fails the whole file at import when anything else holds it, and reports as one
- * broken test rather than as a port clash. 41641 in particular is Tailscale's default, so on a host
- * running it this file could never have run at all.
- */
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const found = (probe.address() as { port: number }).port;
-      probe.close(() => resolve(found));
-    });
-  });
-}
 
 let BASE = "";
 let WS = "";
@@ -198,7 +180,7 @@ async function stopped(botId: string): Promise<boolean> {
 beforeAll(async () => {
   if (!asked) return;
   root = await mkdtemp(join(tmpdir(), "agent-computer-live-screen-"));
-  const port = await freePort();
+  const port = await reservePort();
   BASE = `http://127.0.0.1:${port}`;
   WS = `ws://127.0.0.1:${port}`;
   process.env.COMPUTER_TOKEN = TOKEN;

@@ -55,6 +55,8 @@ export type EnterpriseSettings = {
   skillSharing: boolean;
   /** How many check-ins each Bot may run for one person in a day. 24 by default. */
   proactiveDailyRuns: number;
+  /** People may pick the model a built-in Bot answers on, per conversation. Off by default. */
+  modelSelection: boolean;
 };
 
 export type EnterpriseOverview = {

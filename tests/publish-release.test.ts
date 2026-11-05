@@ -29,7 +29,11 @@ const workflow = parse(
   ),
 ) as { jobs: Record<string, Job> };
 
-const OPENBOT = "ghcr.io/copilotkit/openbot";
+// The workflow names its registry from the repository it runs in, so a fork publishes to its own.
+// biome-ignore lint/suspicious/noTemplateCurlyInString: this is the workflow's literal expression, unexpanded.
+const OPENBOT = "${{ needs.verify.outputs.image_repository }}";
+const escapeRegExp = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // The machines are laptops as well as servers: arm64 Macs and amd64 everything else. Native runners
 // for each, never QEMU, for the reason the workflow gives on `component-images`.
@@ -50,7 +54,7 @@ function buildJobs(): Array<{ name: string; job: Job; build: Step }> {
 
 function pushesOpenbot(build: Step): boolean {
   const target = `${build.with?.outputs ?? ""}\n${build.with?.tags ?? ""}`;
-  return new RegExp(`${OPENBOT}(?![-\\w])`).test(target);
+  return new RegExp(`${escapeRegExp(OPENBOT)}(?![-\\w])`).test(target);
 }
 
 /** The job that writes tags over both architectures of one repository. */

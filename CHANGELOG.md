@@ -8,7 +8,83 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Twenty things change for an existing deployment:
+- People can pick the model a built-in Bot answers on, per conversation, from a brain icon in the
+  composer, including before the first message. The list is read from the model provider, or from
+  the gateway in `OPENAI_BASE_URL`, filtered to chat models and to the model allowlist. The pick is
+  kept per person and conversation, and every run there uses it, including routines. Off by default
+  in the team edition: an admin turns it on under Admin, Providers, "Let people choose a model".
+  Turning it off puts every run back on the configured model and keeps the saved
+  picks. Always on in the personal edition. Adds a nullable column (migration
+  `0076_model_selection`). Bots on their own framework, plans, and groups keep their own model.
+- Admin's Enterprise controls page is gone. Each of its sections now sits on the page it governs:
+  what people may do is on the new **Permissions** page; the model switch, the model allowlist and
+  model usage are on the new **Providers** page, beside the provider that serves the models; Require
+  SSO and SCIM are on Identity providers; the network policy and stopping idle computers are on
+  Computers; the MCP server allowlist is on Plugins; Skill sharing is on Automatic learning; and
+  Action Recording and the OpenTelemetry export are on Audit. Both new pages are in the Admin
+  sidebar. An old link to Enterprise controls opens the Admin overview.
+- The model allowlist is picked from the provider's own list of models, searchable, with the
+  configured model marked. A model the list doesn't have, such as a remote Bot's, is added by its
+  `provider/model` name.
+- The conversation composer is two rows: the message box, then attach and the model on the left,
+  dictation and send on the right. It no longer draws a focus ring, and opening a conversation puts
+  the caret in it.
+- A Bot can now ask you a single decision with the likely answers as options, such as which time zone to use. That question used to be refused before it reached you, because options came only with two or more decisions at once, so the conversation showed "Blocked: Asked you" and the Bot guessed. It now waits above the composer, you pick an option or answer in your own words, and the Bot carries on with your answer.
+- A skill used in the first message of a new conversation now reaches the Bot. The `/` chip showed in the message, but the skill's instructions were left out, for every kind of Bot; later messages in a conversation already carried them.
+- A Bot on Google ADK no longer runs a tool twice when it runs on more than one replica, or restarts in the middle of a turn. OpenBot runs each tool a Bot calls and sends the result back in a new request, which can reach a replica that never saw the call. That replica answered your message again from the start, so it called the tool again and OpenBot ran it a second time: a message sent twice, a file written twice. A replica that had served the conversation before said nothing instead. It now picks up from the result the conversation already holds, so each call runs once.
+- An app tool that only names a message, a comment or a post no longer asks as sending or posting. Its first verb is the action, so marking a comment as spam, bookmarking or liking a post, reacting to or editing a comment, and cancelling a scheduled send run under your approval settings. So do Stripe, Salesforce, Canva, Ramp and Lemlist requests named for the web's POST method, such as `STRIPE_POST_V1_PLANS_OVERVIEW`, which used to ask as posting.
+- A scheduled send asks first, as a send does (Slack's schedule message, Mailchimp's and SendGrid's scheduled campaigns). A button labelled exactly Comment or Reply asks as sending. A payroll run (Deel's submit on-demand payroll) is handed to you, as are an Upgrade, Downgrade or Change plan button, a Subscribe button whose label or page is about a paid plan, and an app subscription bought through an app. Subscribing to a channel or a free newsletter doesn't.
+- Removing something through an app asks first, as deleting does, unless it takes somebody's access away, which asks as sharing. A button labelled exactly Remove, Yes, remove or Remove permanently asks too; Remove filter and other buttons that start with Remove don't.
+- When OpenBot asks before a Bot uses an app (sending an invitation, deleting a file), the card with Allow once and Deny now appears in the conversation, where the call is. It used to show only on the Bots page, and the conversation showed the call still running. A browser step's card already appeared in the conversation.
+- A calendar event or meeting with attendees now asks first through every app that sends one, not only Composio's Google Calendar. Arcade's Google Calendar, Outlook Calendar and Teams, and Composio's Outlook, Zoom and Calendly name their attendees differently, so their invitations went out without asking.
+- Paying an invoice or an order through an app (Stripe's pay invoice, Square's pay order) is now handed to you, as a transfer or a payout is. It used to run without asking. Payroll settings that only mention pay, such as a pay schedule, are unchanged.
+- A transfer that moves no money, such as moving a GitHub repository to another owner, is no longer handed to you as a payment. A Bot can do it again, under your approval settings.
+- The Approval card no longer tells a Bot that OpenBot asks before deleting, sending, sharing, posting, paying or buying. A Bot on another framework is offered that card, and its own tools don't go through OpenBot's checks, so it skipped its card and nobody asked. A Bot OpenBot runs is still told this in its instructions. A deployment that already published the card keeps its current words until an admin publishes new ones.
+- A Bot on the Strands harness now follows its role and knows which tools it holds. The role and the tools summary OpenBot sends with every message never reached the model before, so a Strands Bot answered as a plain assistant. They now arrive as its instructions on every run, so a changed grant or a new role takes effect on the next message, with no container restart. Only those two become its instructions. A skill's instructions, which never reached a Strands Bot either, now reach it as part of the conversation, with no more authority than your own messages.
+- A Bot on the Agno harness now answers from the whole conversation, in its standing role. It used to be sent only the newest message, so it never remembered an earlier turn, restart or not, and never received its standing role or the summary of the tools it holds. Earlier tool calls and attached images are part of what it is sent, and so, still, are its learned skills and the person's memory. A very long conversation sends its newest messages, up to about 100,000 tokens or half the model's context window if that is smaller, and the Bot is told that older ones are not shown, so the conversation cannot outgrow the window and fail every turn. Only the standing role and granted-tools summary OpenBot writes become the Bot's instructions. Any other system message, such as a skill's instructions or a memory record, is sent where it stands in the conversation, labelled as part of it, and never as an instruction; a skill used to never reach an Agno Bot at all. The harness no longer keeps a copy of every finished run in memory, only a run waiting for a tool's result, and when the result of a tool call reaches a harness that restarted, or another replica, while it waited, the Bot carries on from the conversation instead of failing the run.
+- A Bot on Google ADK now keeps the whole conversation after it sits idle. ADK forgets a conversation that has been quiet for about 20 minutes, and on the next message the Bot saw only that message, with no earlier turns. It now starts again from the whole thread OpenBot sends. It also now gets the list of tools it holds, which it never did, and gets the current list on every message, so a tool you grant or take away mid-conversation is the one it is told about. A skill you run on it, and your personal memory, now reach it too, as part of the conversation rather than as its instructions. Before, it never saw either. Only the standing role and granted-tools summary OpenBot writes become its instructions.
+- A LangGraph Bot now follows its role. Its role never reached the model before, so it answered as a plain assistant. It also answers from the conversation as OpenBot holds it now: after you change what it can use, its next answer knows, and a restart no longer changes what it remembers of a thread. After you approve something it stopped to ask about, it now carries on from the conversation and the approved result; it used to stop there without answering, or answer with none of the conversation. Only its role and the summary of what it can use are its instructions: a skill you pick, and the personal memory OpenBot quotes for it, reach it as part of the conversation.
+- A Bot on the Antigravity harness now answers from the whole conversation, in its standing role. After a restart, a crash of its harness, or on the first run of a thread that already had history, it used to be sent only the newest message, and it never received its standing role or the summary of the tools it holds. Earlier tool calls and attached images are part of what it is sent. Changing a Bot's standing role or its tools now reaches a conversation already in progress. A long conversation is sent from its newest messages, with a note that earlier ones are left out, rather than cut off before the question.
+- A Bot on the Claude Agent SDK harness now remembers the whole conversation after its container restarts, or after the conversation sits idle for 30 minutes. It used to answer only the newest message and say it had no record of anything before it. It now also receives its standing role and the summary of its granted tools, which it never did, and a grant an administrator adds or removes applies on the next run instead of waiting for a new worker. Each turn now starts a fresh Claude process, which adds a second or two. A very long conversation replays its newest messages, up to about 100,000 tokens, and the Bot is told that older ones are not shown, so the conversation cannot outgrow the model's context window and fail every turn. Only the standing role and granted-tools summary OpenBot writes become the Bot's instructions: the server no longer forwards any other message that uses their ids to a remote Bot, and any other system message in a conversation reaches the Bot as part of the conversation.
+- A Bot on the Mastra harness now receives the context the calling surface sends, such as a component catalogue, after its standing role and tool guidance. It used to receive only OpenBot's own three entries, though the server forwarded the rest. OpenBot's machine-only entries (the Bot id, the deployment's tools and the signed run assertion) still never reach the model. A skill's instructions and the personal-memory records OpenBot quotes now reach it too, in the conversation where they sat and labelled as conversation data rather than instructions; the Mastra bridge used to drop them.
+- Deleting, sending to other people, sharing and posting now always ask first, in both editions, whatever Ask before making changes or a saved rule says. A Bot asks with Allow once or Deny, and never offers Always allow for these. Moving money and buying are handed to you, as card payments already were: transfers, payouts, withdrawals and orders now count, as well as buttons such as Transfer, Place your order and Send $20. They are recognised by an app tool's name or the label of the button a Bot presses, never by what it writes, so drafts, documents and calendar events for yourself stay ordinary changes. A calendar event with attendees asks, because it sends them invitations, and so do Cmd+Enter or Ctrl+Enter in a page and Enter in a box for writing a message. You are asked once: a connector send asks on the send itself, where it used to ask about sharing first, and a Bot OpenBot runs is told not to put its own approval card in front of OpenBot's. **Before upgrading:** a Bot that sends, deletes, shares or posts through an app on a schedule now waits for your approval each time, and an Always allow you saved for one of these no longer applies. See [Approvals](docs/approvals.md).
+- The personal edition no longer turns Ask before making changes on for somebody who has not chosen. Ordinary changes run without asking; what always asks (above) still does. A choice already saved is kept.
+- The personal edition turns on Parallel Search, Parallel's free web search with no key, the first time it starts, so every Bot, including ones made later, can search the web and read pages with nothing set up. Search queries and the addresses of pages a Bot reads go to Parallel. It is turned on once: turned off, it stays off after a restart (the server remembers it as `personal_default_apps` in `enterprise_settings`). An existing personal install turns it on at its first start after upgrading unless it already has it. Starting offline still starts; the server keeps asking Parallel for its tools in the background and on each start until it answers. The team edition is unchanged. See [Personal edition](docs/personal-edition.md#web-search-is-on-from-the-start).
+- With OpenBot's product telemetry off, CopilotKit's own runtime events no longer carry the deployment's ID. They still carry `app_id=openbot`. With it on, nothing changes.
+- A run OpenBot stops now ends as `cancelled` in its product telemetry, matching Intelligence: a person's Stop, a stop that reaches a subagent, a cancelled or paused headless turn, and a paused Bot-to-Bot hop. A headless turn stopped at its deadline ends as `timeout`. These used to read `unknown` with `missing_terminal`, which still describes a run that ends with neither a terminal event nor a stop. A lost lock is not counted as a stop.
+- OpenBot's product run counts no longer include the run the CopilotKit runtime makes to name each new conversation, or its suggestion runs: only work a person, routine, subagent or hop started is counted. A subagent's runs now report the surface of the run that started it instead of `unknown`.
+- A headless turn or a Bot-to-Bot hop that OpenBot stops (a cancel, a pause, the turn's deadline) is recorded with Intelligence as stopped before its run ends, so Intelligence reports it as cancelled rather than finished. This takes a CopilotKit runtime that can record a stop; on `@copilotkit/runtime` 1.83.0 nothing is recorded and stops work as before. A paused hop now waits for its run to close on the platform before it gives up, where it used to leave that run without an end.
+- With product telemetry on, each run now also tells Intelligence which OpenBot deployment, scoped user, trigger, surface and task it belongs to, as the shared analytics context (version 1) on the run's thread lock. It reaches Intelligence once OpenBot runs a CopilotKit runtime that forwards it; `@copilotkit/runtime` 1.83.0 drops it. With telemetry off nothing is sent, and a value a browser sent under the same key is removed.
+- Naming a new conversation, and the runtime's suggestions route, now run the Bot with none of its
+  tools. The CopilotKit runtime names a conversation by running its Bot again on a title prompt;
+  since every Bot could start subagents, that hidden run sometimes started one, which acted with all
+  the Bot's permissions, out of sight, and kept going after Stop. A person's own runs, the subagents
+  they start, headless turns and hops keep every tool as before. A remote Bot's naming run is also
+  sent no signed run, so a callback from it is refused.
+- The sign-in page the Desktop app opens now explains OpenBot setup — you are setting up a
+  CopilotKit account for the personal edition of OpenBot, and your data stays on your computer —
+  instead of the generic CopilotKit pitch. The app adds `mode=openbot` to the sign-in URL it opens;
+  sign-in itself is unchanged, and an older hosted page ignores the mode.
+- Choosing Anthropic in the Desktop setup screen, or setting `BOT_PROVIDER=anthropic` without a `BOT_MODEL`, now runs `claude-sonnet-5-5` instead of `claude-sonnet-4-5`, which Anthropic retires on 2026-11-30. A deployment that pins `BOT_MODEL` is unaffected.
+- Code and markdown in a Bot's interface are drawn the way a reply draws them: highlighted in the light and dark themes, with the same copy and download buttons, tables and Doc links. They were plain monospace before, and nearly unreadable in dark mode.
+- The Computer panel's Activity lists every command the Bot runs and every file it reads, saves or lists, with what it printed, whether the step ran at once, after you allowed it, or before the page was opened. It had stayed empty for anything that went through approval. A step that was not done shows why in your words ("You declined it."), not the sentence the Bot is told, and the line in the conversation says the same. A command you decline on the Bot's own approval card is listed too. A step you did yourself shows as done by you. A step shows the time it ran only when the page saw it run, never the time the page was opened. Resetting a computer from Admin clears the Activity of every Bot that ran on it, and a reload or another tab no longer brings it back.
+- A page on another website can no longer use OpenBot through your browser. The CopilotKit runtime answers CORS only for OpenBot's own origins (the public and app URLs, `TRUSTED_ORIGINS`, the app's port on this machine) and the Recorder; every other origin gets no CORS headers. A request that changes something, and every WebSocket, from another site's page is refused with 403, in every auth mode; requests with no `Origin` and no `Sec-Fetch-Site` (webhooks, the worker, Bots calling back, the mobile app, CLIs) are unaffected, and `/api/auth/*` keeps Better Auth's own check. On a single-user OpenBot (`OPENBOT_SINGLE_USER=true`, OpenBot Desktop among them), the administrator is admitted only for a request addressed to this machine's own name (`localhost`, `127.0.0.1`, `[::1]`, or the host of a configured URL), which stops DNS rebinding; and where the server runs on the person's own machine with no address beyond it configured, only for a caller on this machine. **Before upgrading:** a single-user OpenBot that other machines on your network open without any configured address now refuses them; set `OPENBOT_APP_URL` (or `TRUSTED_ORIGINS`) to the address they use, or configure sign-in. The app's own servers (`app/serve.ts`, the Vite dev server) likewise answer only this machine unless such an address is configured. Containers built from OpenBot's images set `OPENBOT_IN_CONTAINER=true` and keep admitting callers through the container engine, as before.
+- A page on another website can no longer use OpenBot through your browser. The CopilotKit runtime answers CORS only for OpenBot's own origins (the public and app URLs, `TRUSTED_ORIGINS`, and the app's port on this machine and on each of those hosts) and the Recorder; every other origin gets no CORS headers. A request that changes something, and every WebSocket, from another site's page is refused with 403, in every auth mode; requests with no `Origin` and no `Sec-Fetch-Site` (webhooks, the worker, Bots calling back, the mobile app, CLIs) are unaffected, and `/api/auth/*` keeps Better Auth's own check. On a single-user OpenBot (`OPENBOT_SINGLE_USER=true`, OpenBot Desktop among them), the administrator is admitted only for a request addressed to this machine's own name (`localhost`, `127.0.0.1`, `[::1]`, or the host of a configured URL), which stops DNS rebinding; and where the server runs on the person's own machine with no address beyond it configured, only for a caller on this machine. **Before upgrading:** a single-user OpenBot that other machines on your network open without any configured address now refuses them; set `OPENBOT_APP_URL` (or `TRUSTED_ORIGINS`) to the address they use, or configure sign-in. The app's own servers (`app/serve.ts`, the Vite dev server) likewise answer only this machine unless such an address is configured. Containers built from OpenBot's images set `OPENBOT_IN_CONTAINER=true` and keep admitting callers through the container engine, as before.
+
+- Each person's computer, and each Isolated Bot's, now holds a token of its own, derived from `COMPUTER_TOKEN`, and the server calls it with that token rather than the deployment's. A Bot that reads its own computer's token can open that computer and no other. Existing per-person and per-Bot computers are recreated the first time they are used after upgrading, keeping their files and sign-ins. Helm `sandbox` writes each Sandbox its own token. The one shared computer (no supervisor) is unchanged.
+
+- A Bot's endpoint no longer receives the `Authorization` header, or any `x-*` header, from the request of the person running it. A Bot's own key and the deployment's agent token are still sent. A remote Bot that read a header the person's client sent has to be given it as one of the Bot's own headers instead.
+
+- OpenBot can record scoped run outcomes, capability use and observed result consumption through its existing telemetry sink. Self-hosted servers opt in with `OPENBOT_PRODUCT_TELEMETRY=1`; desktop honors its existing telemetry disclosure and opt-out. First observed success and duplicate-event handling are computed in PostHog; no telemetry database or migration is added. See [telemetry coverage and delivery limits](docs/TELEMETRY.md).
+
+**Before upgrading.** Twenty-two things change for an existing deployment:
+- Check-ins are asked for, not switched on. A Bot no longer turns on an hourly check-in the first
+  time you talk to it alone. Instead, after it reads something that keeps changing (a document, your
+  inbox), it offers a check-in on that one thing, with Turn on and Not now, daily unless you pick
+  more often. A Bot can now watch several things, each listed by name on its check-ins. Migration
+  `0075_individual_check_ins` adds `proactive_settings.subject` and `source_link` and lets a Bot hold
+  more than one check-in. Check-ins that already exist keep running. Set
+  `OPENBOT_PROACTIVE_DEFAULTS=true` to keep switching them on as before.
 - Bots now share one computer per person instead of each having its own. Migration
   `0069_isolated_bots` adds `agent_profiles.isolated`, off for every existing Bot. With the
   supervisor (laptop, Desktop, Compose), a person's computer is created the first time one of their
@@ -98,6 +174,65 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   always recorded. One that exists only at Arcade is recorded, with no new consent, the next time
   the person opens the app under Connections, or presses Connect where Arcade already holds
   everything the app asks for.
+- Routines is now always on. At start, OpenBot adds the Routines app if it is missing and gives
+  its tools to every Bot, including Bots made later. It can no longer be removed, and a Bot's
+  Routines tools can no longer be taken away.
+
+### A personal edition for one person on one computer
+
+Set `OPENBOT_EDITION=personal`, with single-user mode and one computer, for an OpenBot without the
+team features. It starts with one Personal Assistant and asks before acting by default. Connections
+is the one place for apps, saved logins and keys, and every Bot can use every app you connect.
+Admin is replaced by a short list of what OpenBot for Business adds. See `docs/personal-edition.md`.
+Deployments that do not set it behave as before.
+
+`scripts/start.sh` starts your own browser in the personal edition: your installed Chrome or Edge,
+as a window on your desktop with the Recorder in it, as OpenBot Desktop does for the team edition.
+**Teach a Bot** in the sidebar takes you to the page where Open opens it. `scripts/stop.sh` stops it.
+
+The sidebar's **Browser** button is now **Teach a Bot**, in every edition. It always takes you to
+its page, and a browser that opens as a window on your desktop opens only when you press Open
+there. The popover that recorded in the browser OpenBot is open in is gone: record with the
+Recorder's own button in that browser.
+
+You can also record a task in a Bot's browser in the personal edition: take control of its screen and
+press Record. Its one computer carries only your Bots, so `scripts/start.sh` starts it as yours
+(`COMPUTER_PERSON_ID`), and the server allows Record there. Every other OpenBot whose Bots share one
+computer still refuses it.
+
+### A responsibility hears about large pull requests
+
+GitHub events for a responsibility were refused above 32 KB, and most `pull_request` deliveries are
+larger: the pull request repeats its repository under `head` and `base`. For the last 30 pull
+requests on this repository, 23 were refused. They were answered 503, which GitHub does not deliver
+again on its own, so the responsibility never ran and nothing said why. The route now takes up to
+256 KB, like the event triggers, and fits what it stores into 32 KB the same way they do: an event
+over 32 KB is kept as its short top-level fields (`action`, `number`) and an excerpt from the start of
+the rest, so the Bot sees which pull request changed and the beginning of its details. A body over
+256 KB is answered 413.
+
+### A Bot can hold hundreds of tools
+
+A Bot that holds more than 50 tools is no longer sent all of them on every step. Its own tools stay
+in front of the model, and an app's tools wait behind one search tool: the model searches in a few
+words and calls what it found from its next step, by the tool's real name. Every call still goes
+through the grant, the approval rules and the audit trail. A Bot holding 279 tools after approving
+Shopify, which stopped answering, now answers. A question that needs an app's tool makes one more
+model call than before. Bots at or under 50 tools are sent exactly what they were.
+
+A run that would still send more than 128 tools at once, counting the room it keeps for a search's
+answer, is refused before the model is called. Chat Completions refuses more than 128 itself, and
+search never sends more. The person is told why, and the audit log records it under Blocked as "Too
+many tools for its model".
+
+### A Bot's shell in the one-container image installs packages and nothing else as root
+
+In the `openbot` image (one container, and Helm's computer pods), a Bot installs a package with
+`sudo openbot-apt update` and `sudo openbot-apt install <package>` (`-y` is accepted and changes
+nothing), which is what its tool description now says. `sudo apt-get`, `sudo dpkg` and the other package commands are refused: with
+any arguments they ran any command as root, and root there reads the deployment's secrets. The
+helper takes package names only. `/app` is no longer owned by the Bot's user, so a Bot cannot change
+the API's code or the page it serves. Computers that run as root keep using `apt-get` directly.
 
 ### The all-in-one image runs natively on arm64
 
@@ -124,6 +259,14 @@ so a question that needs several lookups makes more model calls than before. A s
 on the person: an action that needs approval is handed back, and the Bot asks in the conversation.
 Each subagent shows in the conversation as a subtask with its steps as they happen and its answer.
 OpenBot runs the tool itself, so a remote agent needs no change.
+
+### The Bot's screen, opened full size, has a close button
+
+The full-size view of a Bot's screen now has an X in its corner that closes it and goes back to the
+conversation, including while the person has control. Before, Escape was the only way out of a live
+view. Closing does what Escape does: it leaves the wheel where it is. While the person holds the
+wheel, the small view of the screen now says so on an amber band, and that the Bot waits until they
+hand it back.
 
 ### Bots tell you when something needs you
 
@@ -293,6 +436,30 @@ can also call OpenBot's API with a person's Entra token; a token issued to any o
 Migration `0073_entra_scope` adds the nullable `mcp_servers.entra_scope`; servers
 without it are unchanged. See [Company systems behind Microsoft Entra](docs/configuration.md#company-systems-behind-microsoft-entra).
 
+### Shopify and other Composio apps on a server-to-server grant can be connected
+
+Composio publishes some apps, Shopify among them, with only `OAUTH2` and `S2S_OAUTH2` and nothing
+it manages, so they were hidden from the picker and refused at enable. Set
+`COMPOSIO_<SLUG>_CLIENT_ID` and `COMPOSIO_<SLUG>_CLIENT_SECRET` (for Shopify,
+`COMPOSIO_SHOPIFY_CLIENT_ID` and `COMPOSIO_SHOPIFY_CLIENT_SECRET`) to the OAuth client you
+registered with the vendor, and the app can be enabled and connected: Composio exchanges that client
+for the token, and the connect form asks only for what the connection needs, such as the store
+subdomain. Because the credential is the deployment's, such an app connects only as one shared
+account: an administrator makes it shared, connects it and grants it to Bots, and a personal
+Connect is refused and not offered. The client is saved on the app's config at Composio when it is
+enabled; see [rotating the client](docs/configuration.md#rotating-a-composio-apps-own-client).
+Unset, nothing changes.
+
+### A Bot sees the images its tools return
+
+An image a tool returned, such as a Gmail attachment fetched through Composio, reached the model as
+a storage link it could not open, so "look at the photo the customer attached" could not work. The
+server now downloads it and puts the picture in front of the model on the next step, beside the
+tool's answer: https only, only from Composio's file storage host, never from a name that resolves
+to a private, loopback or metadata address, at most 8 MB each and the newest four in a run. A picture that cannot be downloaded, including one whose link has expired by
+a later turn, is replaced by a sentence telling the model it is not there. Each picture is sent to
+the model provider on every later step of the conversation, so expect more input tokens there.
+
 ### An unreconciled app authorization always reaches the audit trail
 
 An app authorization whose vendor answer cannot be reconciled is now settled and audited together.
@@ -426,6 +593,28 @@ pace, and the view follows it until the person scrolls up or selects some of it,
 again when they come back to the end or press the arrow. A rail beside a conversation has a mark
 per turn: hovering one previews what was asked and answered, and choosing it goes there. Nothing
 changes for a deployment.
+
+### First run gets you into the app in three clicks at most
+
+- The looping intro is replaced by a short onboarding. Welcome shows what OpenBot does as one
+  animation (asking in plain words, the browser and files Bots use apart from yours, and picking a
+  Bot), with Set up your permissions beside it: the Ask before making changes switch, the same one
+  as Settings → Approvals. Somebody running OpenBot alone, on Desktop or with `copilotkit local`,
+  then gets Talk to us, where Book a call opens CopilotKit's booking page in a new tab and Not now
+  moves on. Last comes the name, skipped when sign-in already gave one. A reload and browser Back
+  keep the person's place, which is now saved as they go.
+- Notifications are offered in a conversation once the first task has started, with Enable
+  notifications and Not now, instead of during onboarding.
+- New **Settings → Setup**, for admins and somebody running OpenBot alone, asks the new
+  `GET /api/setup` whether Intelligence, the model key, the Bot computer, more apps and Slack and
+  Teams work, row by row, with the page or the variables that close each gap. The Settings sidebar
+  counts the rows an admin can fix. Check again asks Intelligence and the model provider again, at
+  most every 10 seconds. Reading the checklist does the same once an answer could not be had or is
+  five minutes old, without waiting for it, so the next read has the new answer; a refusal (a
+  licence, a key, a computer's policy) waits for Check again or the five minutes. To check the Bot
+  computer, the server sends each running computer its network policy whenever it asks, and sees
+  that it answers; it wakes none.
+- The self-host banner's link now reads Book a call.
 
 ### Generated interfaces use A2UI 1.0
 
@@ -713,6 +902,15 @@ now asks Composio again, records the account it holds, and shows the app as conn
 opening the app's page already did. A Shared app's team account is still recorded only by an admin.
 If Composio then reports no account after all, Connect says nothing was connected and asks you to
 press it again. It no longer tells you to disconnect anything.
+
+### A Bot's Slack link code works only in a direct message
+
+The `link <code>` message a Bot's Reaching you shows now links on Slack only when it is sent to the
+app in a direct message. Sent in a channel, with or without a mention, it is cancelled and the sender
+is told to make a new one, as an account code from Connections already was. Whoever sends the code
+first is linked to that Bot: their messages run it as its owner, and its questions and approval
+requests go to them, so a code others have seen must not still work. Teams codes still link wherever
+they are sent, until OpenTag is confirmed to mark a Teams one-to-one chat as private.
 
 ### A Bot with an app or web research can use its browser in a conversation again
 

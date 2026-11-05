@@ -1227,6 +1227,80 @@ function emptyConfiguration() {
   };
 }
 
+test("cold reopen exposes explicit update recovery without a prepared installation", async () => {
+  const root = "/tmp/interrupted-unprepared-runtime";
+  setupRootConfiguration(root, async () => emptyConfiguration());
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "runtime_update_status")
+      return {
+        fromVersion: "v0.2.0",
+        toVersion: "v0.3.0",
+        databaseMayHaveChanged: true,
+      };
+    if (command === "recover_runtime_update")
+      return { version: "v0.2.0", accepted: false, databaseRestored: true };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  const restore = await view.findByRole("button", {
+    name: "Restore previous release",
+  });
+  expect(view.getByRole("button", { name: "Set up OpenBot" })).toBeTruthy();
+  expect(
+    view.queryByRole("button", { name: "Check runtime update" }),
+  ).toBeNull();
+  expect(installationCalls()).toHaveLength(0);
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+  expect(
+    invokeCalls.some((call) => call.command === "recover_runtime_update"),
+  ).toBe(false);
+  await userEvent.click(restore);
+  expect(
+    await view.findByText(
+      /v0.2.0 is back in place, with its database restored/,
+    ),
+  ).toBeTruthy();
+  expect(
+    invokeCalls.filter((call) => call.command === "recover_runtime_update"),
+  ).toEqual([{ command: "recover_runtime_update", args: { root } }]);
+});
+
+test("fresh unprepared installation keeps update recovery hidden", async () => {
+  setupRootConfiguration("/tmp/fresh-unprepared-runtime", async () =>
+    emptyConfiguration(),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "runtime_update_status" ? null : previous(command, args);
+  const view = await renderApp();
+  await view.findByRole("button", { name: "Set up OpenBot" });
+  expect(view.queryByText("Runtime updates")).toBeNull();
+  await enterInstallation(view);
+  expect(view.queryByText("Runtime updates")).toBeNull();
+});
+
+test("unprepared recovery status read failures stay visible", async () => {
+  setupRootConfiguration("/tmp/unreadable-runtime-journal", async () =>
+    emptyConfiguration(),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "runtime_update_status")
+      throw { said: "The update journal cannot be read." };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  expect(
+    await view.findByText("The update journal cannot be read."),
+  ).toBeTruthy();
+  expect(
+    view.queryByRole("button", { name: "Restore previous release" }),
+  ).toBeNull();
+});
+
 test("leftover database is offered as a fresh start that carries on into Start", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
@@ -1381,6 +1455,7 @@ function setupRootConfiguration(
 ) {
   invokeHandler = async (command, args) => {
     if (command === "prepare_installation") return null;
+    if (command === "runtime_update_status") return null;
     if (command === "detect_engine") {
       return {
         engine: "docker",
@@ -1433,6 +1508,7 @@ function setupRootConfiguration(
       ];
     }
     if (command === "start_stack") return null;
+    if (command === "connect_intelligence_apps") return null;
     throw new Error(`unexpected command ${command}`);
   };
 }
@@ -2001,6 +2077,114 @@ async function enterProjectSelection() {
   return view;
 }
 
+async function signInWithProjects(root: string, handler: Invoke) {
+  setupRootConfiguration(root, async () => emptyConfiguration());
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "begin_intelligence_sign_in"
+      ? "https://copilotkit.test/sign-in"
+      : command === "finish_intelligence_sign_in"
+        ? [{ id: "project-1", name: "Project One" }]
+        : command === "intelligence_key_for"
+          ? "created-project-key"
+          : handler(command, args).catch((error) =>
+              error === UNHANDLED
+                ? previous(command, args)
+                : Promise.reject(error),
+            );
+  const view = await renderApp();
+  await enterInstallation(view);
+  await completeInstallation(view);
+  await chooseOpenAi(view);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in to CopilotKit" }),
+  );
+  return view;
+}
+
+const UNHANDLED = Symbol("unhandled");
+
+async function chooseOpenAi(view: Awaited<ReturnType<typeof renderApp>>) {
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "model-test-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+}
+
+/*
+ * APPS CANNOT FAIL SIGN-IN. Connecting apps ran inside the CopilotKit sign-in, so until Ops could
+ * provision, every managed sign-in failed with an apps error. Now sign-in finishes, the projects
+ * are offered, Start is available, and Connect apps retries for the same folder.
+ */
+test("managed sign-in finishes when apps cannot connect, and Connect apps retries", async () => {
+  let connects = 0;
+  const view = await signInWithProjects("/tmp/apps-retry", async (command) => {
+    if (command !== "connect_intelligence_apps") throw UNHANDLED;
+    if (++connects === 1)
+      throw {
+        said: "OpenBot couldn't connect your apps. Check your connection, then choose Connect apps. If it keeps happening, ask an admin.",
+      };
+    return null;
+  });
+  await userEvent.click(
+    await view.findByRole("button", { name: "Project One" }),
+  );
+  expect(view.getByText("Connected to CopilotKit.")).toBeTruthy();
+  expect(
+    await view.findByText(/OpenBot couldn't connect your apps/),
+  ).toBeTruthy();
+  expect(view.getByText("You can start OpenBot without them.")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+  await userEvent.click(view.getByRole("button", { name: "Connect apps" }));
+  await waitFor(() =>
+    expect(view.queryByRole("button", { name: "Connect apps" })).toBeNull(),
+  );
+  expect(view.queryByText(/OpenBot couldn't connect your apps/)).toBeNull();
+  expect(
+    invokeCalls
+      .filter((call) => call.command === "connect_intelligence_apps")
+      .map((call) => call.args),
+  ).toEqual([{ root: "/tmp/apps-retry" }, { root: "/tmp/apps-retry" }]);
+  expect(invokeCalls).toContainEqual({
+    command: "intelligence_key_for",
+    args: { root: "/tmp/apps-retry", project: "project-1" },
+  });
+  expect(view.queryByLabelText(/Composio.*key/i)).toBeNull();
+});
+
+/*
+ * A SIGN-IN BELONGS TO ITS FOLDER. The project list outlived a change of folder, so picking a
+ * project after switching made a key for the new folder with the old folder's sign-in, and the
+ * new folder started without its apps.
+ */
+test("changing the folder after sign-in drops that sign-in's projects", async () => {
+  const view = await signInWithProjects("/tmp/folder-a", async () => {
+    throw UNHANDLED;
+  });
+  expect(await view.findByRole("button", { name: "Project One" })).toBeTruthy();
+  await userEvent.click(
+    view.getByRole("button", { name: "Change installation" }),
+  );
+  const rootField = view.getByLabelText("Where OpenBot lives");
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.clear(rootField);
+  await user.type(rootField, "/tmp/folder-b");
+  await act(async () => {
+    rootField.blur();
+  });
+  await completeInstallation(view);
+  await chooseOpenAi(view);
+  expect(view.queryByRole("button", { name: "Project One" })).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Sign in to CopilotKit" }),
+  ).toBeTruthy();
+  expect(
+    invokeCalls.some((call) => call.command === "intelligence_key_for"),
+  ).toBe(false);
+});
+
 test("creating a named project connects it only after the user submits", async () => {
   const view = await enterProjectSelection();
   const creation = deferred<{ id: string; name: string }>();
@@ -2021,7 +2205,7 @@ test("creating a named project connects it only after the user submits", async (
   await userEvent.click(create);
   expect(invokeCalls).toContainEqual({
     command: "create_intelligence_project",
-    args: { name: "OpenBot workspace" },
+    args: { root: "/tmp/create-project", name: "OpenBot workspace" },
   });
   expect(
     view.getByRole("button", { name: "Creating project…" }),
@@ -2036,7 +2220,7 @@ test("creating a named project connects it only after the user submits", async (
   expect(view.getByText("Connected to CopilotKit.")).toBeTruthy();
   expect(invokeCalls).toContainEqual({
     command: "intelligence_key_for",
-    args: { project: "new-project" },
+    args: { root: "/tmp/create-project", project: "new-project" },
   });
   expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
     "disabled",

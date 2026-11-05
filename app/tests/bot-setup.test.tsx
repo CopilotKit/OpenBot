@@ -30,6 +30,7 @@ import {
   ISOLATION_WITHDRAWN,
 } from "@/lib/agents/isolation";
 import { agentQueryOptions } from "@/lib/agents/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import type { AgentProfileStore } from "../../server/src/agents/profile-store";
 import type { AgentProfile } from "../../server/src/agents/profile-types";
 import { createAgentRoutes } from "../../server/src/agents/routes";
@@ -174,10 +175,17 @@ function Setup() {
   return agent.data ? <SetupSections agent={agent.data} /> : null;
 }
 
-function draw() {
+function draw(edition?: "team" | "personal") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  if (edition)
+    queryClient.setQueryData(deploymentKeys.capabilities(), {
+      generativeUi: true,
+      selfHostBanner: false,
+      localEvaluation: false,
+      edition,
+    });
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: Setup }),
@@ -197,6 +205,21 @@ async function rename(view: ReturnType<typeof draw>, to: string) {
   await user.type(field, to);
   await user.click(view.getByRole("button", { name: "Save" }));
 }
+
+test("the personal edition's Setup has no Visibility or Isolated: one person, one computer", async () => {
+  serve(MANAGED);
+  const view = draw("personal");
+  expect(await view.findByRole("button", { name: /^Name/ })).toBeTruthy();
+  expect(
+    view
+      .getByRole("link", {
+        name: "Give each Bot its own computer with OpenBot for Business.",
+      })
+      .getAttribute("href"),
+  ).toBe("https://calendly.com/d/dwfr-k64-8d2/openbot-for-business");
+  expect(view.queryByText("Visibility")).toBeNull();
+  expect(view.queryByText("Isolated")).toBeNull();
+});
 
 test("a built-in coworker can be renamed on a deployment whose own Bot lives on localhost", async () => {
   serve(MANAGED);

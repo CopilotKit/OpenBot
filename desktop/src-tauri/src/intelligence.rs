@@ -20,7 +20,7 @@ use serde::Deserialize;
 
 /// Where the sign-in page and the CLI API live.
 const OPS_FRONTEND: &str = "https://dashboard.operations.copilotkit.ai";
-const OPS_API: &str = "https://api.operations.copilotkit.ai";
+pub(crate) const OPS_API: &str = "https://api.operations.copilotkit.ai";
 /// Where projects and their keys live.
 const PRODUCT_API: &str = "https://api.intelligence.copilotkit.ai";
 
@@ -88,6 +88,32 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// The CopilotKit CLI session a browser sign-in produced.
+///
+/// No `Debug` and no `Serialize`, and only this crate can read it, so it cannot reach a log, an
+/// error or the window. Connecting apps is the one thing that uses it.
+#[derive(Clone)]
+pub struct OpsSession(String);
+
+impl OpsSession {
+    pub fn new(session: String) -> Self {
+        Self(session)
+    }
+
+    pub(crate) fn bearer(&self) -> &str {
+        &self.0
+    }
+}
+
+/// What a finished browser sign-in brings back, none of it saved yet.
+///
+/// The caller checks that this attempt is still the one the window wants before it keeps any of it.
+pub struct SignedIn {
+    pub credential: String,
+    pub projects: Vec<Project>,
+    pub session: OpsSession,
+}
+
 impl SigningInToIntelligence {
     /// Open the callback and return the address a browser has to visit.
     pub fn begin() -> Result<(Self, String), String> {
@@ -107,8 +133,10 @@ impl SigningInToIntelligence {
                 .collect()
         };
         let callback = format!("http://127.0.0.1:{port}/callback");
+        // `source=cli&mode=openbot` makes the hosted sign-in page show its OpenBot copy. The pair
+        // is an allowlist key the page checks; the words themselves live in the page.
         let url = format!(
-            "{OPS_FRONTEND}/cli-auth?callback={}&state={state}",
+            "{OPS_FRONTEND}/cli-auth?callback={}&state={state}&source=cli&mode=openbot",
             urlencode(&callback)
         );
         Ok((
@@ -126,13 +154,24 @@ impl SigningInToIntelligence {
         self.port
     }
 
-    /// Wait for the browser, then turn what it brings into a project key.
-    pub fn finish(self) -> Result<(String, Vec<Project>), crate::problem::Problem> {
+    /// Wait for the browser, then turn what it brings into a credential and its projects.
+    ///
+    /// Nothing is saved here, and the app broker is not contacted. Apps are a follow-on step that
+    /// can only add a key, so no app failure can fail this sign-in.
+    pub fn finish(self) -> Result<SignedIn, crate::problem::Problem> {
+        self.finish_at(OPS_API, PRODUCT_API)
+    }
+
+    fn finish_at(self, ops: &str, product_api: &str) -> Result<SignedIn, crate::problem::Problem> {
         let token = self.wait_for_token()?;
-        let session = exchange(&token)?;
-        let product = product_credential(&session)?;
-        let projects = list_projects(&product)?;
-        Ok((product, projects))
+        let session = exchange_at(ops, &token)?;
+        let credential = product_credential_at(ops, &session)?;
+        let projects = list_projects_at(product_api, &credential)?;
+        Ok(SignedIn {
+            credential,
+            projects,
+            session: OpsSession(session),
+        })
     }
 
     fn wait_for_token(&self) -> Result<String, String> {
@@ -300,9 +339,9 @@ struct Session {
     cli_token: String,
 }
 
-fn exchange(clerk_token: &str) -> Result<String, crate::problem::Problem> {
+fn exchange_at(ops: &str, clerk_token: &str) -> Result<String, crate::problem::Problem> {
     let response = client()?
-        .post(format!("{OPS_API}/api/cli/auth/session"))
+        .post(format!("{ops}/api/cli/auth/session"))
         .json(&serde_json::json!({ "clerkToken": clerk_token }))
         .send()
         .map_err(|error| {
@@ -337,9 +376,9 @@ struct ProductCredentialResponse {
     product_credential: ProductCredential,
 }
 
-fn product_credential(session: &str) -> Result<String, crate::problem::Problem> {
+fn product_credential_at(ops: &str, session: &str) -> Result<String, crate::problem::Problem> {
     let response = client()?
-        .post(format!("{OPS_API}/api/cli/auth/product-credential"))
+        .post(format!("{ops}/api/cli/auth/product-credential"))
         .bearer_auth(session)
         .send()
         .map_err(|error| {
@@ -363,9 +402,12 @@ fn product_credential(session: &str) -> Result<String, crate::problem::Problem> 
         })
 }
 
-fn list_projects(product: &str) -> Result<Vec<Project>, crate::problem::Problem> {
+fn list_projects_at(
+    product_api: &str,
+    product: &str,
+) -> Result<Vec<Project>, crate::problem::Problem> {
     let response = client()?
-        .get(format!("{PRODUCT_API}/api/projects"))
+        .get(format!("{product_api}/api/projects"))
         .bearer_auth(product)
         .send()
         .map_err(|error| {
@@ -936,48 +978,7 @@ mod tests {
         }
     }
 
-    type CapturedRequests = Vec<(String, Vec<u8>)>;
-
-    fn response_server(
-        responses: Vec<(&'static str, &'static str)>,
-    ) -> (String, std::thread::JoinHandle<CapturedRequests>) {
-        use std::io::{BufRead, Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let request = std::thread::spawn(move || {
-            let mut requests = Vec::new();
-            for (status, body) in responses {
-                let (stream, _) = listener.accept().unwrap();
-                stream
-                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                    .unwrap();
-                let mut reader = std::io::BufReader::new(stream);
-                let mut headers = String::new();
-                loop {
-                    let mut line = String::new();
-                    assert!(reader.read_line(&mut line).unwrap() > 0);
-                    headers.push_str(&line);
-                    if line == "\r\n" {
-                        break;
-                    }
-                }
-                let length: usize = headers
-                    .lines()
-                    .find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse().unwrap())
-                    })
-                    .unwrap_or(0);
-                let mut request_body = vec![0; length];
-                reader.read_exact(&mut request_body).unwrap();
-                write!(reader.get_mut(), "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
-                requests.push((headers, request_body));
-            }
-            requests
-        });
-        (url, request)
-    }
+    use crate::http_test_support::response_server;
     /// The field name that broke a whole sign-in, read off the real response.
     #[test]
     fn the_session_is_read_from_the_name_the_endpoint_uses() {
@@ -1138,6 +1139,66 @@ mod tests {
         assert!(url.contains("127.0.0.1"), "{url}");
         assert!(!url.contains("localhost"), "{url}");
         assert!(signing.port() > 0);
+    }
+
+    /// The pair `source=cli` and `mode=openbot` makes the hosted sign-in page show its OpenBot
+    /// copy. The pair is an allowlist key the page checks; the words themselves live in the page,
+    /// never in this URL.
+    #[test]
+    fn the_url_names_the_openbot_handoff_context() {
+        let (_signing, url) = SigningInToIntelligence::begin().expect("it did not start");
+        assert!(url.contains("source=cli"), "{url}");
+        assert!(url.contains("mode=openbot"), "{url}");
+    }
+
+    /// Apps cannot fail CopilotKit sign-in. Composio provisioning sat in front of the credential,
+    /// so before Ops could provision every managed sign-in failed there. A browser sign-in now asks
+    /// Ops for its session and credential, lists the projects, and never calls app provisioning.
+    #[test]
+    fn a_finished_sign_in_never_waits_on_app_provisioning() {
+        let (ops, ops_requests) = response_server(vec![
+            ("200 OK", r#"{"cliToken":"synthetic-ops-session"}"#),
+            (
+                "200 OK",
+                r#"{"productCredential":{"token":"synthetic-product"}}"#,
+            ),
+        ]);
+        let (product, product_requests) = response_server(vec![(
+            "200 OK",
+            r#"{"projects":[{"id":7,"name":"my-app"}]}"#,
+        )]);
+        let (signing, _) = SigningInToIntelligence::begin().unwrap();
+        let port = signing.port();
+        let callback = format!(
+            "GET /callback?state={}&clerkToken=synthetic-clerk HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            signing.state
+        );
+        let browser = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream.write_all(callback.as_bytes()).unwrap();
+            let mut reply = String::new();
+            let _ = stream.read_to_string(&mut reply);
+        });
+        let signed_in = signing.finish_at(&ops, &product).unwrap();
+        browser.join().unwrap();
+        assert_eq!(signed_in.credential, "synthetic-product");
+        assert_eq!(signed_in.projects.len(), 1);
+        assert_eq!(signed_in.session.bearer(), "synthetic-ops-session");
+        let called: Vec<String> = ops_requests
+            .join()
+            .unwrap()
+            .into_iter()
+            .map(|(headers, _)| headers.lines().next().unwrap_or_default().to_owned())
+            .collect();
+        assert_eq!(
+            called,
+            [
+                "POST /api/cli/auth/session HTTP/1.1",
+                "POST /api/cli/auth/product-credential HTTP/1.1"
+            ]
+        );
+        assert_eq!(product_requests.join().unwrap().len(), 1);
     }
 }
 

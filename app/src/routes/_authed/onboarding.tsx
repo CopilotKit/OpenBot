@@ -1,31 +1,76 @@
-import { WEB_HARNESSES } from "@openbot/shared/harnesses";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import Avatar from "boring-avatars";
-import { AnimatePresence, MotionConfig, motion } from "motion/react";
+import {
+  createFileRoute,
+  redirect,
+  useLocation,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router";
+import { motion, useReducedMotion } from "motion/react";
 import * as React from "react";
-import useMeasure from "react-use-measure";
-import { HarnessMark } from "@/components/agents/harness-mark";
-import AgentOrb from "@/components/agents/orb/agent-orb";
-import { Composer } from "@/components/channels/composer";
-import { DesktopIllustration } from "@/components/computer/desktop-illustration";
-import { ComputerPlaceholder } from "@/components/computer/placeholder";
 import { SELF_HOST_URL } from "@/components/layout/self-host-banner";
-import { IllustrationFrame } from "@/components/onboarding/illustration-frame";
-import { IntroAnimation } from "@/components/onboarding/intro-animation";
-import { LaptopIllustration } from "@/components/onboarding/laptop-illustration";
-import { OrganizationFlow } from "@/components/onboarding/organization-flow";
-import { OnboardingNameStep } from "@/components/settings/profile";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
+import { IntroReel } from "@/components/onboarding/demos/intro-reel";
+import { SelfHostDemo } from "@/components/onboarding/demos/self-host-demo";
+import { FINISH_MS, useNameStep } from "@/components/onboarding/name-step";
+import { StepIntro } from "@/components/onboarding/onboarding-frame";
+import {
+  type OnboardingStep,
+  OnboardingWizard,
+} from "@/components/onboarding/onboarding-wizard";
+import { Button } from "@/components/ui/button";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { completeOnboardingMutationOptions } from "@/lib/onboarding/mutations";
-import { cn } from "@/lib/utils";
+import {
+  advanceOnboardingMutationOptions,
+  completeOnboardingMutationOptions,
+} from "@/lib/onboarding/mutations";
+import { setupChecklistQueryOptions } from "@/lib/setup/queries";
 import { queryClient } from "@/query-client";
 
+const PRODUCT = appConfig.brand.productName;
+
+/**
+ * Every step, by id, with the number the server stores for it.
+ *
+ * `POST /api/me/onboarding` keeps a step as an integer, so each id has a number of its own. A
+ * number per id, never a position in the list: Talk to us joins the list only for somebody trying
+ * OpenBot alone, and the name step leaves it for somebody whose name is known, so a position would
+ * mean different steps to different people. 0 is the server's "not started".
+ */
+const STEP_NUMBER = {
+  welcome: 1,
+  selfhost: 2,
+  name: 3,
+} as const;
+type StepId = keyof typeof STEP_NUMBER;
+
+const isStepId = (value: unknown): value is StepId =>
+  typeof value === "string" && Object.hasOwn(STEP_NUMBER, value);
+
+/** The step a stored number names, or null for "not started" and for a number no step has. */
+function stepForNumber(step: number | undefined): StepId | null {
+  const found = Object.entries(STEP_NUMBER).find(([, at]) => at === step);
+  return found ? (found[0] as StepId) : null;
+}
+
+/**
+ * The step somebody was last on. Kept in the history entry Continue pushed (`onboardingFrom`), so
+ * Back after a reload still pops the entry instead of adding a second one for the same step.
+ */
+type OnboardingEntry = { onboardingFrom?: unknown };
+
 export const Route = createFileRoute("/_authed/onboarding")({
+  /*
+   * WHERE SOMEBODY IS LIVES IN THE ADDRESS. `?step=<id>` is the step on screen, so a reload stays
+   * on it, and browser Back and Forward walk the steps. Anything else is ignored.
+   */
+  validateSearch: (search: Record<string, unknown>): { step?: StepId } => ({
+    // Named even when absent: the router lays this over the raw search, so a key left out would
+    // keep whatever was typed into the address.
+    step: isStepId(search.step) ? search.step : undefined,
+  }),
   beforeLoad: async ({ context }) => {
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
@@ -38,429 +83,309 @@ export const Route = createFileRoute("/_authed/onboarding")({
   component: RouteComponent,
 });
 
-function WelcomeStep() {
-  return (
-    <div className="w-full flex flex-col items-center justify-center">
-      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
-        Welcome to {appConfig.brand.productName}
-      </h1>
-      <div className="h-8" />
-      <IllustrationFrame
-        className="flex flex-col items-center px-8 pt-16 pb-10"
-        label="A message box where you hand off tasks to your Bots"
-      >
-        <AgentOrb size="72px" />
-        {/*
-         * A POSTER OF A COMPOSER, AND THE FRAME AROUND IT IS WHAT MAKES IT ONE: `IllustrationFrame` is
-         * `pointer-events-none` and `inert`. Nothing here is
-         * meant to be typed in, clicked or dropped on: it is a picture of the thing the person is
-         * about to get, shown while they read a sentence about it.
-         *
-         * THE DROP THAT PASSES STRAIGHT THROUGH IT IS SOMEBODY ELSE'S TO CATCH, WHICH IS WORTH
-         * SAYING OUT LOUD. The composer guards its own form against a dropped file navigating the
-         * whole app away (`refuseDragOver` in `composer.tsx`), and that guard cannot fire here: an
-         * element with no pointer events is never the target of the drop, so the event goes past it
-         * to the document as if this composer were not on the page. What catches it is
-         * `useUnclaimedDropGuard` in `routes/__root.tsx`, which refuses every drop nobody claimed —
-         * the reason that guard lives at the root rather than in the composer, and the reason this
-         * wrapper does not need to change to be safe. Taking `pointer-events-none` off to "fix" the
-         * drop would turn the poster back into a live composer with nowhere to upload to.
-         */}
-        <div className="max-w-md w-full mx-auto mt-10">
-          <Composer
-            compact
-            className="scale-90"
-            editorClassName="text-base"
-            initialValue="Hand off tasks to your team of Bots"
-          />
-        </div>
-      </IllustrationFrame>
-    </div>
-  );
-}
-
-function ComputerUseStep() {
-  return (
-    <div className="w-full flex flex-col items-center justify-center">
-      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
-        Each Bot has its own browser and files
-      </h1>
-      <div className="h-8" />
-      <div className="relative aspect-5/3 w-full max-w-lg rounded-2xl overflow-hidden border border-border">
-        <ComputerPlaceholder className="absolute inset-0 h-full w-full" />
-        <DesktopIllustration />
-      </div>
-    </div>
-  );
-}
-
-/** What a roster card needs — placeholders carry these three fields and nothing more. */
-type RosterCard = Pick<AgentProfile, "id" | "name" | "avatarSeed">;
+/*
+ * THREE CLICKS AT MOST INTO THE APP. Welcome, then Talk to us for somebody trying OpenBot alone,
+ * then the name. Everything else waits for the app: the setup checklist lives in Settings → Setup,
+ * apps are connected from Connections when a Bot needs one, and notifications are offered once the
+ * first task has started (`NotifyPrompt`), when what they are for is plain.
+ */
 
 /**
- * Stand-ins for a deployment that has fewer than three public agents to show. Invented names on
- * purpose: they illustrate what a roster looks like without claiming any of these exist here.
+ * The welcome step: one animation of what OpenBot does, and beside it the one choice worth making
+ * before the first task, whether a Bot asks before it changes anything.
+ *
+ * The animation is a picture and the switch is real, so they never share a pane: the switch sits
+ * with the words, and the picture stays a picture.
  */
-const AGENTS_PLACEHOLDER: RosterCard[] = [
-  {
-    id: "placeholder-research",
-    name: "Research Analyst",
-    avatarSeed: "research-analyst",
-  },
-  { id: "placeholder-data", name: "Data Analyst", avatarSeed: "data-analyst" },
-  {
-    id: "placeholder-support",
-    name: "Support Desk",
-    avatarSeed: "support-agent",
-  },
-];
-
-function RosterStep() {
-  const { data: agents } = useQuery(agentListQueryOptions());
-  const explore =
-    agents?.filter((a) => !a.mine && a.visibility === "public") ?? [];
-  // Always three cards: real public agents first, placeholders topping up a sparse deployment.
-  // slice past the end is just [], so a roster of three or more takes no placeholders at all.
-  const roster: Array<RosterCard & { example?: boolean }> = [
-    ...explore.slice(0, 3),
-    ...AGENTS_PLACEHOLDER.slice(explore.length).map((placeholder) => ({
-      ...placeholder,
-      example: true,
-    })),
-  ];
-
-  return (
-    <div className="w-full flex flex-col items-center justify-center">
-      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
-        Pick a Bot or make your own
-      </h1>
-      <div className="h-8" />
-      <IllustrationFrame
-        className="grid grid-cols-1 md:grid-cols-2 gap-4 p-6"
-        label={`Bots you can work with, such as ${roster.map((a) => a.name).join(", ")}, and one of your own`}
-      >
-        {roster.map((a) => {
-          return (
-            <div
-              key={a.id}
-              // Dimmed and labelled, so an invented name never reads as a Bot this deployment has.
-              className={`bg-card p-4 rounded-lg flex flex-row gap-4 items-center ${a.example ? "opacity-70" : ""}`}
-            >
-              <Avatar name={a.avatarSeed} size={40} />
-              <div className="flex min-w-0 flex-col">
-                <h3 className="line-clamp-1 text-base font-medium tracking-tight">
-                  {a.name}
-                </h3>
-                {a.example ? (
-                  <span className="text-xs text-muted-foreground">Example</span>
-                ) : null}
-              </div>
+function welcomeStep(computer: boolean): OnboardingStep {
+  return {
+    id: "welcome",
+    title: `Welcome to ${PRODUCT}`,
+    intro: () => (
+      <StepIntro
+        after={
+          <section
+            aria-labelledby="onboarding-permissions"
+            className="flex flex-col gap-3 text-left"
+          >
+            <div className="flex flex-col gap-1">
+              <h2
+                className="text-lg font-semibold text-pretty"
+                id="onboarding-permissions"
+              >
+                Set up your permissions
+              </h2>
+              <p className="text-pretty text-muted-foreground">
+                Turn this on to review changes before a Bot makes them.
+              </p>
             </div>
-          );
-        })}
-        <div className="bg-card p-4 rounded-lg flex flex-row gap-4 items-center">
-          <div className="rounded-full size-[40px] border border-foreground/30 border-dashed" />
-          <h3 className="line-clamp-1 text-base font-medium tracking-tight text-foreground/70">
-            Your own Bot
-          </h3>
-        </div>
-      </IllustrationFrame>
-    </div>
-  );
+            <AskFirstSwitch />
+            <p className="text-sm text-pretty text-muted-foreground">
+              Paying, deleting, sending, sharing, posting and changing account
+              security always wait for you. You can change this later in
+              Settings.
+            </p>
+          </section>
+        }
+      >
+        <p>Hand work to Bots in plain words. They tell you when it's done.</p>
+      </StepIntro>
+    ),
+    demo: () => <IntroReel computer={computer} />,
+  };
 }
 
 /*
- * These local-evaluation scenes are for somebody trying OpenBot on their own machine
- * (see `localEvaluation` in RouteComponent). They answer what that person is deciding: where their
- * data is, whether their own agents fit, and what taking it to their organization involves (OB-02 in
- * the product backlog). None of it is said to an organization's own people, who are past all three.
+ * TALK TO US IS FOR SOMEBODY TRYING OPENBOT ON THEIR OWN MACHINE, and only they see it (see
+ * `localEvaluation` in RouteComponent). None of it is said to an organization's own people, who
+ * already have OpenBot.
  */
-
-function LocalStep() {
-  return (
-    <div className="w-full flex flex-col items-center justify-center">
-      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
-        It runs on your machine
-      </h1>
-      {/*
-       * "Stored", and the model named, because "your data never leaves" would be untrue: every turn
-       * goes to the model provider this install was set up with. What stays is everything kept. No
-       * word about sign-in either: activating a local install signs you in to CopilotKit.
-       */}
-      <p className="mt-3 max-w-md text-center text-muted-foreground">
-        Your conversations, files and Bots are stored on this computer. Only
-        what you send to your model leaves it.
+const selfhost: OnboardingStep = {
+  id: "selfhost",
+  title: "Talk to us",
+  intro: () => (
+    <StepIntro>
+      <p>
+        Thinking about {PRODUCT} for your team? Book a call and we'll walk you
+        through running it for your organization.
       </p>
-      <div className="h-8" />
-      <IllustrationFrame
-        className="flex items-center justify-center px-8 py-12"
-        label={`A laptop running ${appConfig.brand.productName}`}
-      >
-        <LaptopIllustration />
-      </IllustrationFrame>
-    </div>
-  );
-}
-
-/** Every framework the New Bot wizard offers by name; "an agent you already run" is the sentence. */
-const FRAMEWORKS = WEB_HARNESSES.filter((harness) => harness.id !== "byo-url");
-
-function AgentsStep() {
-  return (
-    <div className="w-full flex flex-col items-center justify-center">
-      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
-        Bring the agents you already have
-      </h1>
-      <p className="mt-3 max-w-md text-center text-muted-foreground">
-        Any AG-UI agent can join as a Bot. Add one from Bots, then New Bot.
-      </p>
-      <div className="h-8" />
-      <IllustrationFrame
-        className="flex flex-wrap justify-center gap-2 p-6"
-        label={`Frameworks that work as Bots: ${FRAMEWORKS.map((harness) => harness.name).join(", ")}`}
-      >
-        {FRAMEWORKS.map((harness) => (
-          <span
-            className="flex items-center gap-2 rounded-full bg-card px-3 py-1.5 text-sm"
-            key={harness.id}
-          >
-            <HarnessMark id={harness.mark} name={harness.name} />
-            {harness.name}
-          </span>
-        ))}
-      </IllustrationFrame>
-    </div>
-  );
-}
-
-function OrganizationStep() {
-  return (
-    <div className="w-full flex flex-col items-center justify-center">
-      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
-        Deploy it for your organization
-      </h1>
-      <p className="mt-3 max-w-md text-center text-muted-foreground">
-        Run one container image, or a Helm chart for EKS, GKE or AKS. Your
-        people sign in with Google, Microsoft or Okta.
-      </p>
-      <div className="h-8" />
-      <IllustrationFrame
-        className="flex justify-center px-6 py-8"
-        label="Your people sign in with Google, Microsoft or Okta, and your organization gets its own rules, its own Bots and an audit trail"
-      >
-        <OrganizationFlow />
-      </IllustrationFrame>
-      {/*
-       * The one real control on these slides, so it sits outside the frame: a frame means picture.
-       * A new tab, because following it must not cost this person their place in onboarding.
-       */}
-      <a
-        className={cn(buttonVariants({ variant: "outline" }), "mt-6")}
-        href={SELF_HOST_URL}
-        rel="noopener noreferrer"
-        target="_blank"
-      >
-        Talk to an engineer
-      </a>
-    </div>
-  );
-}
-
-function Introduction({ localEvaluation }: { localEvaluation: boolean }) {
-  return (
-    <IntroAnimation
-      scenes={[
-        { id: "welcome", label: "Welcome", content: <WelcomeStep /> },
-        {
-          id: "computer",
-          label: "Each Bot has its own browser and files",
-          content: <ComputerUseStep />,
-        },
-        {
-          id: "roster",
-          label: "Pick a Bot or make your own",
-          content: <RosterStep />,
-        },
-        ...(localEvaluation
-          ? [
-              {
-                id: "local",
-                label: "It runs on your machine",
-                content: <LocalStep />,
-              },
-              {
-                id: "agents",
-                label: "Bring the agents you already have",
-                content: <AgentsStep />,
-              },
-            ]
-          : []),
-      ]}
-    />
-  );
-}
-
-/** A pane arrives from the side the journey is moving toward, and leaves out the other. */
-const variants = {
-  initial: (direction: number) => ({ x: `${110 * direction}%`, opacity: 0 }),
-  active: { x: "0%", opacity: 1 },
-  exit: (direction: number) => ({ x: `${-110 * direction}%`, opacity: 0 }),
+    </StepIntro>
+  ),
+  demo: () => <SelfHostDemo />,
+  // A new tab, so booking doesn't cost the place in onboarding, and then on to the next step.
+  primaryLabel: "Book a call",
+  onPrimary: (next) => {
+    window.open(SELF_HOST_URL, "_blank", "noopener,noreferrer");
+    next();
+  },
+  secondary: { label: "Not now" },
 };
 
 function RouteComponent() {
   const navigate = useNavigate();
+  const router = useRouter();
+  const location = useLocation();
+  const search = Route.useSearch();
   const complete = useMutation(completeOnboardingMutationOptions(queryClient));
-
-  // Browser state on purpose: the step is not persisted while the wizard is being designed.
-  const [step, setStep] = React.useState<"intro" | "organization" | "name">(
-    "intro",
-  );
-  const [direction, setDirection] = React.useState(1);
-  // The way out: set once the completion is saved, it fades the whole page and then navigates.
-  const [leaving, setLeaving] = React.useState(false);
-  const [ref, bounds] = useMeasure();
+  const advance = useMutation(advanceOnboardingMutationOptions(queryClient));
+  const me = useQuery(currentUserQueryOptions());
 
   /*
-   * Local-evaluation content is never shown to an organization's people:
-   * the server says single-user mode, which an organization's deployment, always behind sign-in,
-   * cannot be in. Until the answer arrives they are left out, so a slow or failed request never
-   * shows an organization's employees a page about deploying OpenBot themselves.
+   * Talk to us is for somebody evaluating OpenBot locally, never for an organization's people: the
+   * server says single-user mode, which an organization's deployment, always behind sign-in, cannot
+   * be in. Until the answer arrives it is left out, and Welcome's button waits for it, so a slow or
+   * failed request never shows an organization's employees a page about booking a call, and an
+   * evaluator never walks past theirs.
    *
    * NOT GATED ON `selfHostBanner` AS WELL. That flag is off for any deployment with a paid
    * Intelligence entitlement, and the stack `copilotkit local` installs runs on an enterprise
-   * evaluation licence, so every CLI evaluator, the person these slides are for, would never see them.
+   * evaluation licence, so every CLI evaluator, the person this step is for, would never see it.
    */
   const {
     data: capabilities,
     error: capabilitiesError,
     refetch: retryCapabilities,
     isFetching: loadingCapabilities,
+    isPending: askingCapabilities,
   } = useQuery(deploymentCapabilitiesQueryOptions());
-  const localEvaluation = capabilities?.localEvaluation === true;
-  const last = step === "name";
 
-  const go = (to: typeof step, forward: boolean) => {
-    setDirection(forward ? 1 : -1);
-    setStep(to);
+  /*
+   * A NAME ALREADY KNOWN IS NOT ASKED FOR AGAIN. A sign-in that brought a real name leaves the name
+   * step out, and the last step left gets the person in instead.
+   *
+   * DECIDED ONCE, ON ARRIVAL. Saving the name on the name step makes it known, and deciding again
+   * then would drop the step from under its own finish, back to Welcome. `beforeLoad` has the user
+   * in the cache before the first render, so the first answer is the real one.
+   */
+  const [nameKnown] = React.useState(
+    () =>
+      me.data?.needsName !== true &&
+      Boolean(me.data?.name) &&
+      me.data?.name !== me.data?.email,
+  );
+  const ids: StepId[] = [
+    "welcome",
+    ...(capabilities?.localEvaluation ? (["selfhost"] as const) : []),
+    ...(nameKnown ? [] : (["name"] as const)),
+  ];
+
+  /*
+   * The step on screen: the address's, else the one the server saved, else the first. A step not in
+   * this person's list (Talk to us for an organization's person, the name step once it is known)
+   * reads as the last one they have, once the answer that decides it is in. Arriving without a step
+   * writes it into the address in place, so the entry the person lands on already names its step.
+   */
+  const reachable = (step: StepId | null | undefined): StepId | undefined => {
+    if (!step) return undefined;
+    if (step === "selfhost" && !capabilities) return step;
+    return ids.includes(step) ? step : ids[ids.length - 1];
   };
+  const saved = reachable(stepForNumber(me.data?.onboarding?.step));
+  const asked = reachable(isStepId(search.step) ? search.step : undefined);
+  const current: StepId = asked ?? saved ?? "welcome";
+  React.useEffect(() => {
+    if (asked !== undefined && asked === search.step) return;
+    navigate({ to: "/onboarding", search: { step: current }, replace: true });
+  }, [navigate, current, asked, search.step]);
+
+  // Saved wherever the person goes, by Continue, Back or the browser.
+  const savedStep = me.data?.onboarding?.step;
+  const { mutate: save } = advance;
+  React.useEffect(() => {
+    if (savedStep === undefined || savedStep === STEP_NUMBER[current]) return;
+    // Talk to us waits for the answer that says whether this person has one.
+    if (current === "selfhost" && !capabilities) return;
+    /*
+     * A save that fails is tried again on the next move, since the saved step still differs. It is
+     * said in the console rather than on the step: the person is where they meant to be, and only a
+     * reload would show the place was not kept.
+     */
+    save(STEP_NUMBER[current], {
+      onError: (error) =>
+        console.warn("Your place in onboarding was not saved.", error),
+    });
+  }, [current, savedStep, save, capabilities]);
+
+  /*
+   * CONTINUE PUSHES, AND BACK RETURNS THROUGH HISTORY WHEN IT CAN. Continue adds an entry carrying
+   * the step it was pressed on, so browser Back walks back a step. The frame's Back pops that entry
+   * when it was pushed from the step behind, and otherwise (arriving by a link, say) replaces this
+   * entry with the step behind, so history never holds the same step twice in a row.
+   */
+  const cameFrom = (location.state as OnboardingEntry).onboardingFrom;
+  const move = (to: string, way: "forward" | "back") => {
+    if (!isStepId(to)) return;
+    if (way === "back" && cameFrom === to) {
+      router.history.back();
+      return;
+    }
+    const state: Record<string, unknown> =
+      way === "forward" ? { onboardingFrom: current } : {};
+    navigate({
+      to: "/onboarding",
+      search: { step: to },
+      replace: way === "back",
+      state,
+    });
+  };
+
+  /*
+   * THE WAY OUT IS THE LAST STEP'S BUTTON. On the name step, Get started saves the name first. Then
+   * completion is saved, the orb or the button plays its finish, the page fades, and the app opens.
+   * A completion that fails is said on the step, and the button can be pressed again.
+   */
+  const reduced = useReducedMotion() === true;
+  const [finished, setFinished] = React.useState(false);
+  const [leaving, setLeaving] = React.useState(false);
+  const finish = async () => {
+    await complete.mutateAsync(undefined);
+    setFinished(true);
+    await new Promise((resolve) =>
+      setTimeout(resolve, reduced ? 150 : FINISH_MS),
+    );
+    setLeaving(true);
+  };
+  React.useEffect(() => {
+    if (!leaving) return;
+    // Navigation must also complete in a background tab, where animation frames may pause.
+    const timer = setTimeout(() => navigate({ to: "/" }), reduced ? 0 : 300);
+    return () => clearTimeout(timer);
+  }, [leaving, navigate, reduced]);
+
+  const name = useNameStep({ finish, finished });
+  /*
+   * The checklist says whether there is a Bot computer, and the intro shows one only where there
+   * is. Until it answers, the usual case: a computer that is there.
+   */
+  const { data: checklist } = useQuery(setupChecklistQueryOptions());
+  const computerMissing =
+    checklist?.rows.find((row) => row.id === "computer")?.status ===
+    "needs_setup";
+
+  const capabilitiesFailed =
+    capabilitiesError && !capabilities ? (
+      <div className="flex flex-col items-center gap-1 lg:items-start">
+        <p
+          className="text-sm text-center text-destructive lg:text-left"
+          role="alert"
+        >
+          Couldn't load your setup. Try again to continue.
+        </p>
+        <Button
+          disabled={loadingCapabilities}
+          onClick={() => retryCapabilities()}
+          size="sm"
+          variant="ghost"
+        >
+          Try again
+        </Button>
+      </div>
+    ) : undefined;
+  const finishFailed = complete.error ? (
+    <p
+      className="text-sm text-center text-destructive lg:text-left"
+      role="alert"
+    >
+      Couldn't finish setting up. Try again.
+    </p>
+  ) : undefined;
+
+  const byId: Record<StepId, OnboardingStep> = {
+    welcome: {
+      ...welcomeStep(!computerMissing),
+      primaryDisabled: !capabilities,
+      notice: capabilitiesFailed,
+    },
+    selfhost,
+    name,
+  };
+  /*
+   * Without the name step, the last step's buttons finish onboarding where they would have moved
+   * on: Get started on Welcome, and Book a call or Not now on Talk to us.
+   */
+  const lastId = ids[ids.length - 1];
+  const steps: OnboardingStep[] = ids.map((id) => {
+    const step = byId[id];
+    if (id !== lastId || id === "name") return step;
+    const out = () => void finish().catch(() => undefined);
+    return {
+      ...step,
+      primaryLabel: finished ? "All set" : (step.primaryLabel ?? "Get started"),
+      primaryDone: finished,
+      primaryPending: complete.isPending,
+      onPrimary: () => {
+        step.onPrimary?.(() => undefined);
+        out();
+      },
+      secondary: step.secondary
+        ? { label: step.secondary.label, onClick: out }
+        : undefined,
+      notice: step.notice ?? finishFailed,
+    };
+  });
+
+  // A Talk to us step in the address waits for the answer that puts it in the list, rather than
+  // drawing Welcome for a moment and then jumping.
+  const waiting = askingCapabilities && current === "selfhost";
 
   return (
     // Outside `_app` on purpose: no sidebar and no chrome until onboarding is done.
     // The fade runs only after the completion is saved, so a failed save never fades a page the
-    // person still needs — and navigation waits for the fade, so the home screen never pops in
-    // over a half-faded wizard.
+    // person still needs, and navigation waits for the fade, so the next screen never pops in over
+    // a half-faded onboarding.
     <motion.div
       animate={{ opacity: leaving ? 0 : 1 }}
-      className={`min-h-svh overflow-hidden flex flex-col items-center justify-center w-full ${leaving ? "pointer-events-none" : ""}`}
+      className={`min-h-svh w-full ${leaving ? "pointer-events-none" : ""}`}
       initial={false}
-      onAnimationComplete={() => {
-        if (leaving) {
-          navigate({ to: "/" });
-        }
-      }}
-      transition={{ duration: 0.5, ease: "easeInOut" }}
+      transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
     >
-      <div className="mx-auto w-full max-w-2xl px-4">
-        <MotionConfig transition={{ duration: 0.5, type: "spring", bounce: 0 }}>
-          {/* The frame follows each pane's height, so the buttons glide instead of jumping. */}
-          <motion.div
-            animate={{ height: bounds.height > 0 ? bounds.height : "auto" }}
-            className="overflow-hidden"
-          >
-            <div ref={ref}>
-              <AnimatePresence
-                custom={direction}
-                initial={false}
-                mode="popLayout"
-              >
-                <motion.div
-                  animate="active"
-                  custom={direction}
-                  exit="exit"
-                  initial="initial"
-                  key={step}
-                  variants={variants}
-                >
-                  {step === "intro" && (
-                    <Introduction localEvaluation={localEvaluation} />
-                  )}
-                  {step === "organization" && <OrganizationStep />}
-                  {step === "name" && (
-                    <OnboardingNameStep
-                      onSaved={async () => {
-                        await complete.mutateAsync(undefined);
-                        setLeaving(true);
-                      }}
-                    />
-                  )}
-                </motion.div>
-              </AnimatePresence>
-
-              {capabilitiesError && !capabilities ? (
-                <div className="mt-4 text-center">
-                  <p className="text-sm text-destructive" role="alert">
-                    We couldn't load your setup. Try again to continue.
-                  </p>
-                  <Button
-                    variant="ghost"
-                    disabled={loadingCapabilities}
-                    onClick={() => retryCapabilities()}
-                  >
-                    Try again
-                  </Button>
-                </div>
-              ) : null}
-
-              {complete.error ? (
-                <p className="mt-4 text-destructive text-sm" role="alert">
-                  {complete.error.message}
-                </p>
-              ) : null}
-
-              <motion.div
-                className={`${last ? "mt-4" : "mt-8"} flex flex-col items-center justify-center max-w-xs gap-4 w-full mx-auto`}
-                layout
-              >
-                {!last && (
-                  <Button
-                    className="w-full"
-                    disabled={complete.isPending || !capabilities}
-                    onClick={() =>
-                      go(
-                        step === "intro" && localEvaluation
-                          ? "organization"
-                          : "name",
-                        true,
-                      )
-                    }
-                    size="lg"
-                  >
-                    Continue
-                  </Button>
-                )}
-                {step !== "intro" && (
-                  <Button
-                    className="w-full"
-                    disabled={complete.isPending}
-                    onClick={() =>
-                      go(
-                        step === "name" && localEvaluation
-                          ? "organization"
-                          : "intro",
-                        false,
-                      )
-                    }
-                    variant="secondary"
-                    size="lg"
-                  >
-                    Back
-                  </Button>
-                )}
-              </motion.div>
-            </div>
-          </motion.div>
-        </MotionConfig>
-      </div>
+      {waiting ? null : (
+        <OnboardingWizard
+          onMove={(to, way) => move(to, way)}
+          stepId={current}
+          steps={steps}
+        />
+      )}
     </motion.div>
   );
 }

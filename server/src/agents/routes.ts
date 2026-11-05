@@ -345,6 +345,11 @@ export function createAgentRoutes(
     // A string comparison on purpose: two absent values must not read as "runs on our Bot".
     builtIn:
       typeof agent.endpoint === "string" && agent.endpoint === managedEndpoint,
+    /*
+     * Whether it runs inside OpenBot on OpenBot's own model, so a person can pick the model per
+     * conversation. Only a `built_in` Bot has no endpoint; one on any framework picks its own model.
+     */
+    runsOnOpenBotModel: agent.endpoint === null,
   });
   /**
    * The dtos, each with whether its computer of its own is in effect now.

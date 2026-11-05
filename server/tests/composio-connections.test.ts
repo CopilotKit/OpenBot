@@ -368,6 +368,14 @@ const consentToolkit = `consented-${suite}`;
 /** What `addBrokeredApp` spells that app's row, so {@link clean} can take it back. */
 const consentId = `composio-${consentToolkit}`;
 /**
+ * AN APP ON THE DEPLOYMENT'S OWN CLIENT (`S2S_OAUTH2`), which may only hold a shared account.
+ *
+ * Enabled for real, like {@link consentToolkit}, so the scheme the refusal turns on is the word
+ * `addBrokeredApp` records rather than this file's idea of it.
+ */
+const s2sToolkit = `s2s-${suite}`;
+const s2sId = `composio-${s2sToolkit}`;
+/**
  * FOUR APPS NOBODY ELSE IN THIS FILE CONNECTS, one per test about a check that reached no verdict.
  *
  * A slug of its own for each, on {@link enabledToolkit}'s reasoning taken one step further. Those
@@ -405,6 +413,7 @@ const ownedToolkits = [
   decoyToolkit,
   collidedToolkit,
   consentToolkit,
+  s2sToolkit,
   outageToolkit,
   pinnedToolkit,
   undoneToolkit,
@@ -828,6 +837,7 @@ async function clean() {
         schemeTwinId,
         collidedId,
         consentId,
+        s2sId,
         outageId,
         pinnedId,
         undoneId,
@@ -861,6 +871,7 @@ async function clean() {
         schemeTwinId,
         collidedId,
         consentId,
+        s2sId,
         outageId,
         pinnedId,
         undoneId,
@@ -3262,6 +3273,74 @@ test("a key typed at a consent app is refused before the vendor is handed anythi
   expect(schemesSent).toEqual([]);
   // And no row was written, so nothing on any screen claims this person has an account here.
   expect(await connectedToolkitsFor(askerId)).toEqual([]);
+});
+
+/**
+ * A PERSON'S OWN ACCOUNT ON THE DEPLOYMENT'S OWN CLIENT, WHICH IS THE ORGANIZATION'S ACCESS UNDER
+ * THEIR NAME.
+ *
+ * CRITERION. `connectBrokeredWithFields` for a person against an app recorded `S2S_OAUTH2` refuses,
+ * names the app and the shared account, and hands Composio nothing.
+ *
+ * REASON. Such a person types only a store subdomain; what Composio exchanges for the token is the
+ * client whoever runs this deployment registered. A personal account there would give anybody who
+ * can see the app the store's full access, granted by nobody and filed on the trail as their own.
+ * The connect route refuses first; this is the store's own refusal, for a caller that skips it.
+ */
+test("a person's own account on the deployment's own client is refused before anything is sent", async () => {
+  useAnsweringClient();
+  await store.addBrokeredApp({
+    slug: s2sToolkit,
+    title: "Store App",
+    by: admin,
+    connection: { kind: "fields", authScheme: "S2S_OAUTH2" },
+  });
+
+  await expect(
+    store.connectBrokeredWithFields({
+      toolkit: s2sToolkit,
+      account: { holder: "person", userId: askerId, vendorUserId: askerId },
+      by: askerId,
+      values: { subdomain: "acme" },
+    }),
+  ).rejects.toThrow(
+    new RegExp(`${s2sToolkit} connects only as one shared account`),
+  );
+
+  expect(asksMade()).toEqual([`ensureAuthConfig:${s2sToolkit}/fields`]);
+  expect(valuesSent).toEqual([]);
+  expect(schemesSent).toEqual([]);
+  expect(await connectedToolkitsFor(askerId)).toEqual([]);
+});
+
+/**
+ * AND THE DEPLOYMENT'S OWN ACCOUNT IS LET THROUGH, which is what keeps the refusal above narrow.
+ *
+ * CRITERION. The same app, connected as the deployment's shared account, reaches Composio with the
+ * typed values under `S2S_OAUTH2`.
+ *
+ * REASON. A refusal keyed on the scheme alone would make the app unconnectable for everybody; the
+ * shared account an administrator connects is the one this kind of app is for.
+ */
+test("the deployment's shared account on its own client is connected", async () => {
+  useAnsweringClient();
+  await store.addBrokeredApp({
+    slug: s2sToolkit,
+    title: "Store App",
+    by: admin,
+    connection: { kind: "fields", authScheme: "S2S_OAUTH2" },
+  });
+
+  const result = await store.connectBrokeredWithFields({
+    toolkit: s2sToolkit,
+    account: { holder: "deployment", vendorUserId: `deployment-${suite}` },
+    by: admin,
+    values: { subdomain: "acme" },
+  });
+
+  expect(result.connected).toBe(true);
+  expect(valuesSent).toEqual([{ subdomain: "acme" }]);
+  expect(schemesSent).toEqual(["S2S_OAUTH2"]);
 });
 
 /**

@@ -100,6 +100,7 @@ const settingInputs: {
     servers: z.array(SERVER).max(500),
   }),
   skillSharing: z.boolean(),
+  modelSelection: z.boolean(),
   /*
    * At least one. Stopping check-ins altogether is the Check-ins switch, which tells the people it
    * covers that an admin turned them off; a cap of none would tell them their Bot used its day. At
@@ -120,7 +121,7 @@ export function createEnterpriseAdminRoutes(
 
   const unavailable = (context: Context) =>
     context.json(
-      { error: "Enterprise controls are not running on this server." },
+      { error: "Admin settings aren't available on this server." },
       503,
     );
 
@@ -482,7 +483,7 @@ export function createProactiveAdminRoutes(
     const controls = enterpriseControls();
     if (!controls)
       return context.json(
-        { error: "Enterprise controls are not running on this server." },
+        { error: "Admin settings aren't available on this server." },
         503,
       );
     const parsed = parseMetricsDays(context.req.query("days") ?? null);

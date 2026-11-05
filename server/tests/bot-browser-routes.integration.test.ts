@@ -502,12 +502,11 @@ args[34] = {
   botBrowser: {
     recorder,
     openbotUrl: openbotAddress(config),
-    token: COMPUTER_TOKEN,
-    // As index.ts pushes it: the Bot's policy, to the computer of the seat the recording is on.
+    // As index.ts pushes it: the Bot's policy, to the computer of the seat the recording is on, under its token.
     pushPolicy: async (seat) => {
       const policy = await policyForBot(seat.botId);
       await pushEgressPolicy(await gateway.locate(seat), seat.botId, policy, {
-        token: COMPUTER_TOKEN,
+        token: gateway.tokenFor(seat),
       });
     },
   },
@@ -1199,6 +1198,8 @@ describe("recording in a Bot's browser", () => {
     expect(botRecordRefusal(sharedComputer)).toBe(SHARED_COMPUTER_RECORD);
     expect(botRecordRefusal({ isolation: "per-person" })).toBeNull();
     expect(botRecordRefusal(undefined)).toBeNull();
+    // The personal edition's one computer carries only its one person's Bots, as a person's own computer does.
+    expect(botRecordRefusal(sharedComputer, "personal")).toBeNull();
 
     const requestId = await takeWheel("ada");
     const startsBefore = asked.filter((line) =>

@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenBot release manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "distribution",
+    "version",
+    "source",
+    "artifacts",
+    "compatibility",
+    "upgrade"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repository", "channel"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "channel": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$"
+        }
+      }
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S(?:.*\\S)?$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "upstreamRepository",
+        "upstreamCommit",
+        "modified"
+      ],
+      "properties": {
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "upstreamRepository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "upstreamCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "modified": {
+          "type": "boolean"
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "images"],
+      "properties": {
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url", "sha256"],
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://[^/@#\\s]+(?:/[^#\\s]*)?$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "images": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reference"],
+            "properties": {
+              "reference": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "chart": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "url", "sha256"],
+          "properties": {
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^\\S(?:.*\\S)?$"
+            },
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://[^/@#\\s]+(?:/[^#\\s]*)?$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launcherApi",
+        "configSchema",
+        "extensionApi",
+        "database",
+        "intelligenceCapabilities"
+      ],
+      "properties": {
+        "launcherApi": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "configSchema": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "extensionApi": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "database": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from", "to", "rollbackCompatible"],
+          "properties": {
+            "from": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^\\S(?:.*\\S)?$"
+              },
+              "uniqueItems": true
+            },
+            "to": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^\\S(?:.*\\S)?$"
+            },
+            "rollbackCompatible": {
+              "type": "boolean"
+            }
+          }
+        },
+        "intelligenceCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\S(?:.*\\S)?$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "upgrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromVersions", "requiresDowntime", "recovery"],
+      "properties": {
+        "fromVersions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\S(?:.*\\S)?$"
+          },
+          "uniqueItems": true
+        },
+        "requiresDowntime": {
+          "type": "boolean"
+        },
+        "recovery": {
+          "enum": ["restart-previous", "restore-backup"]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "compatibility": {
+            "properties": {
+              "database": {
+                "properties": {
+                  "rollbackCompatible": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "upgrade": {
+            "properties": {
+              "recovery": {
+                "const": "restore-backup"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

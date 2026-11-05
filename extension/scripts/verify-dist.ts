@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import type { BuildVariant } from "../src/manifest";
+import { type BuildVariant, toChromeManifestVersion } from "../src/manifest";
 
 type VerifyOptions = { variant: BuildVariant; rootVersion: string };
 
@@ -97,9 +97,15 @@ export function verifyDist(dir: string, options: VerifyOptions): string[] {
     }
   }
 
-  if (manifest.version !== options.rootVersion) {
+  const expected = toChromeManifestVersion(options.rootVersion);
+  if (manifest.version !== expected.version) {
     problems.push(
-      `manifest version ${String(manifest.version)} is not the release version ${options.rootVersion}`,
+      `manifest version ${String(manifest.version)} is not the release version ${expected.version}`,
+    );
+  }
+  if (manifest.version_name !== expected.version_name) {
+    problems.push(
+      `manifest version_name ${String(manifest.version_name)} is not the release version_name ${String(expected.version_name)}`,
     );
   }
 

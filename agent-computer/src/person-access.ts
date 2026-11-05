@@ -90,7 +90,8 @@ export function personHoldsTheWheel(since: string): ComputerControlState {
  *     supervisor and a Sandbox start them. Started for a person's browser, it runs that browser and nothing else.
  *   - `person`: one person's computer (`COMPUTER_PERSON_ID`), carrying every Bot that person uses. Their Bots share it,
  *     so their own browser does not run there, but Record in one of those Bots' browsers does: the connection it holds
- *     is the person's own, beside only their own Bots' work.
+ *     is the person's own, beside only their own Bots' work. The supervisor and a Sandbox start one per person; the
+ *     personal edition starts its one computer this way too (scripts/start.sh), since its only person owns every Bot.
  *   - `shared`: none of these, the one computer every person's Bots reach. No person's browser runs there, and nobody
  *     records in a Bot's browser there.
  */

@@ -76,6 +76,8 @@ startup.
 
 `agent-computer` requires `COMPUTER_TOKEN` and permits only `/health` without it. Docker Compose binds it to `127.0.0.1:4100`.
 
+A computer made for one person or one isolated Bot, by the supervisor or as a Sandbox, never holds the deployment's `COMPUTER_TOKEN`. It holds its own, `HMAC-SHA256(COMPUTER_TOKEN, "openbot computer token v1\n<kind>:<id>")` for whose computer it is, and the server derives the same value whenever it calls that computer. A Bot can run anything on its own person's computer, root included, and can read the token that computer was started with; that token opens that computer and no other. A computer created before this, holding the deployment's token, is replaced with its volumes kept the next time it is used. The one shared computer is not a boundary between people and keeps the deployment's token.
+
 Compose puts it on a different network from PostgreSQL. A Bot has a shell, and a shell reaches whatever its container reaches, so the database is on a `data` network carrying only itself and `migrate`, and everything else is on `default`. A deployment that runs the API server inside Compose rather than on the host joins it to both, which is the one place the two meet.
 
 With `COMPUTER_SUPERVISOR_URL`, each person gets a computer container of their own, and every Bot they use has its own folder and browser profile in it; a Bot marked Isolated gets a container of its own instead. Without it, all Bots share `AGENT_COMPUTER_URL`, still with a profile and folder for each person and Bot.
@@ -339,6 +341,16 @@ Skills come from two places: a person writes one, or the tenant package ships on
 A skill declares the tools it needs (`skill_tools`). Before the run starts, the deployment asks its own model which skills the message needs, and the Bot is built with those skills' tools plus every granted tool no skill claims. A declaration grants nothing: the offer is always intersected with what the Bot was already granted, so writing a skill can never hand anybody a tool.
 
 This narrows the offer. It is not a boundary, and it never substitutes for one. The grant, the policy and the audit row decide what may happen; this decides only what the model can see. Every way it can fail — no skills declared, a model that cannot answer, a message that matches nothing, twelve tools or fewer — leaves the whole catalogue offered, because a narrowing that failed closed would remove capability an administrator granted, silently. `mcp.tools_discovered` records what was offered, out of how much, and why.
+
+### Holding more tools than one request carries
+
+Offered is not always sent. One app approval can grant a Bot hundreds of tools (Shopify brought 239), and every tool sent on every step costs context and worsens the model's choice; Chat Completions refuses a request with more than 128, and the Responses API caps the compiled size of the strict schemas in one request. So past fifty tools, an app's offered tools wait behind one ordinary tool, `search_tools` (`server/src/agents/tool-search.ts`), unless a chosen skill asked for them or they find sources on the web. The Bot's own tools stay in front of the model on every step.
+
+The model searches in a few words, and the tools a search names are sent from its next step on, under their real names, for the next few turns. Which tools those are is read back from the search answers in the conversation itself, so nothing is held between steps or on any one replica. The runtime fixes a run's tools when it starts, so this is done by wrapping the model (`withToolSearch`): every step passes through it, and it decides which tool definitions go up.
+
+Like narrowing, this is not a boundary. Every granted tool stays registered with the runtime and executes through the plugin store's `callTool`, so a waiting tool is checked, evaluated and audited exactly as a shown one is, and a search ranks only what the Bot was granted. The providers' own tool search (`tool_search`, `defer_loading`) is not used: replayed through the runtime it breaks a conversation from its second turn, and it exists only on some models and APIs.
+
+Before the model call, a run is counted (`toolNamesSent`, without what waits). A run that would still send more than Chat Completions accepts, or more than search allows, is refused with a sentence, and the audit trail records `agent.tool_limit_refused`.
 
 ## Personal memory
 

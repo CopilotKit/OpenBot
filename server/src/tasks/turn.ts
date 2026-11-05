@@ -26,6 +26,8 @@ export type TaskTurnInput = {
   text: string;
   signal: AbortSignal;
   final: boolean;
+  /** Which run of the turn this is, counting from 1. A retry shares its first run's ask. */
+  attempt?: number;
 };
 
 export type TaskTurn = (
@@ -80,6 +82,12 @@ export function createTaskTurn(deps: {
       const result = await deps.runTurn({
         ...scope,
         routineId: input.runId,
+        telemetry: {
+          trigger: "human",
+          surface: "web",
+          rootTaskId: input.askId,
+          attempt: input.attempt,
+        },
         instruction: input.text,
         userMessage: { id: input.askId, role: "user", content: input.text },
         initiator: PERSON_INITIATOR,

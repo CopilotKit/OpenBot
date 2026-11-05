@@ -1,5 +1,6 @@
 import {
   IconArrowLeft,
+  IconBrain,
   IconBuildingBank,
   IconBulb,
   IconChecks,
@@ -8,6 +9,7 @@ import {
   IconKey,
   IconLayoutGrid,
   IconListDetails,
+  IconLockAccess,
   IconPuzzle,
   IconRadar,
   IconShieldCheck,
@@ -80,6 +82,11 @@ const GROUPS: {
         linkOptions: { to: "/admin/plugins" },
       },
       {
+        title: "Providers",
+        icon: IconBrain,
+        linkOptions: { to: "/admin/providers" },
+      },
+      {
         title: "Skills",
         icon: IconSlash,
         linkOptions: { to: "/admin/skills" },
@@ -113,6 +120,11 @@ const GROUPS: {
         title: "People",
         icon: IconUsers,
         linkOptions: { to: "/admin/people" },
+      },
+      {
+        title: "Permissions",
+        icon: IconLockAccess,
+        linkOptions: { to: "/admin/permissions" },
       },
       {
         title: "Identity providers",

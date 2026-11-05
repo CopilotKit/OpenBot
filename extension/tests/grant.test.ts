@@ -10,6 +10,7 @@ import {
   type GrantVerdict,
   PASS_HINTS,
 } from "../src/offscreen/grant";
+import { reservePort } from "../../tests/support/reserved-port";
 
 const BUSY = "Intelligence is busy or unreachable. Retrying; nothing is lost.";
 const MARKETPLACE =
@@ -410,13 +411,7 @@ describe("fetchGrant", () => {
   });
 
   test("an unreachable OpenBot retries (row 21)", async () => {
-    const dead = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch: () => new Response(""),
-    });
-    const url = `http://127.0.0.1:${dead.port}`;
-    dead.stop(true);
+    const url = `http://127.0.0.1:${await reservePort()}`;
     try {
       await fetchGrant({ openbotUrl: url, token: "t" }, id);
       throw new Error("did not fail");
