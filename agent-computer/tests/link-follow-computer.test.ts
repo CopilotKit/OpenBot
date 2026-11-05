@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 
 /**
  * A followed link, checked on the computer: the real process, its dispatcher and bundled Chromium headless.
@@ -31,18 +32,6 @@ const PAGES: Record<string, string> = {
   "/elsewhere": "<title>Elsewhere</title><h1>Elsewhere</h1>",
   "/other": "<title>Other</title><h1>Other</h1>",
 };
-
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: () => new Response(),
-  });
-  const { port } = probe;
-  await probe.stop(true);
-  if (port === undefined) throw new Error("The port probe did not listen.");
-  return port;
-}
 
 async function call<T = Record<string, unknown>>(
   path: string,
@@ -102,7 +91,7 @@ beforeAll(async () => {
     },
   });
   origin = `http://127.0.0.1:${site.port}`;
-  const port = await freePort();
+  const port = await reservePort();
   base = `http://127.0.0.1:${port}`;
   child = Bun.spawn([process.execPath, "src/index.ts"], {
     cwd: join(import.meta.dir, ".."),

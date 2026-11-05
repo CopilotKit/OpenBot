@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 import type { Page } from "playwright";
 import type {
   BrowserState,
@@ -226,19 +227,6 @@ async function browserProcess(profile: string): Promise<number> {
       `Expected one browser on ${profile}, found ${found.length}.`,
     );
   return found[0] as number;
-}
-
-/** A port nothing listens on, so a page there is refused. */
-async function closedPort(): Promise<number> {
-  const probe = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: () => new Response(),
-  });
-  const { port } = probe;
-  await probe.stop(true);
-  if (port === undefined) throw new Error("The port probe did not listen.");
-  return port;
 }
 
 /** Every browser the tests start, closed at the end whatever happened. */
@@ -608,7 +596,7 @@ for (const variant of VARIANTS) {
         (await api("/browser/tabs", { action: "new" })).json as BrowserState,
       );
       if (!before || !blank) throw new Error("Both tabs should be listed.");
-      const port = await closedPort();
+      const port = await reservePort();
       expect(
         await api("/browser/navigate", { url: `http://127.0.0.1:${port}/` }),
       ).toEqual({
@@ -628,7 +616,7 @@ for (const variant of VARIANTS) {
         (await api("/browser/tabs", { action: "new" })).json as BrowserState,
       );
       if (!before || !blank) throw new Error("Both tabs should be listed.");
-      const port = await closedPort();
+      const port = await reservePort();
       const failed = `http://127.0.0.1:${port}/`;
       expect((await api("/browser/navigate", { url: failed })).status).toBe(
         502,

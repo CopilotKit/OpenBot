@@ -13,11 +13,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHmac, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { environmentFor } from "../../supervisor/src/environment";
+import { reservePort } from "../../tests/support/reserved-port";
 import type { AgentProfileStore } from "../src/agents/profile-store";
 import type { AuditEventInput } from "../src/audit";
 import { withPersonBrowsers } from "../src/browser/host";
@@ -62,21 +62,6 @@ function supervisorEnvironment(
   );
 }
 
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("The port probe did not return a TCP address."));
-        return;
-      }
-      probe.close(() => resolve(address.port));
-    });
-  });
-}
-
 type Computer = {
   base: string;
   child: ReturnType<typeof Bun.spawn>;
@@ -92,7 +77,7 @@ async function startComputer(
   await Promise.all(
     ["profiles", "workspace", "recorder"].map((name) => mkdir(join(dir, name))),
   );
-  const port = await freePort();
+  const port = await reservePort();
   const child = Bun.spawn([process.execPath, "--no-env-file", "src/index.ts"], {
     cwd: fileURLToPath(new URL("../../agent-computer", import.meta.url)),
     env: {
@@ -330,7 +315,7 @@ describe("the server calling a person's computer", () => {
 
   test("opens the live screen under that computer's own token", async () => {
     const supervisor = supervisorAt({ cy });
-    const port = await freePort();
+    const port = await reservePort();
     const { gateway } = gatewayOn(supervisor);
     const server = startHttpServer({
       port,
