@@ -176,7 +176,16 @@ test.if(onMac)(
     const after = run([join(scripts, "verify-cli-bundle.sh"), app, "adhoc"]);
     expect(after.code, after.output).toBe(0);
     expect(after.output).toContain("2 Mach-O files");
-    // The runtime still runs under the hardened runtime with its entitlements.
-    expect(run([node]).code).toBe(0);
+    // The runtime keeps what V8 needs under the hardened runtime, and nothing more.
+    const entitlements = run([
+      "codesign",
+      "-d",
+      "--entitlements",
+      "-",
+      "--xml",
+      node,
+    ]);
+    expect(entitlements.output).toContain("com.apple.security.cs.allow-jit");
+    expect(entitlements.output).not.toContain("get-task-allow");
   },
 );
