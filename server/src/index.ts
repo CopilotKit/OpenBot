@@ -192,12 +192,9 @@ import {
   withLearningAutoAssign,
 } from "./learning/auto-assign";
 import {
-  cliLoginPresent,
   createLearningContainer,
   ensureLearningContainer,
-  intelligenceApiOrigin,
   keyIntelligence,
-  type LearningContainerCredentials,
   learningSetupInstructions,
 } from "./learning/ensure-container";
 import {
@@ -352,61 +349,34 @@ const learningProbeIntelligence = createIntelligenceClient(
   config.runtime.intelligence,
 );
 /*
- * Who can create a Learning container here. First the runtime key itself, on an Intelligence that
- * lets a project key create one in its own project, at the address the server already uses (a
- * Service in the cluster with the bundled Intelligence). On one that does not, a service token the
- * operator configured (local evaluation installs), or a CopilotKit CLI login on this machine, which
- * is what a laptop running `bun run start` has: those two only over HTTPS, or HTTP on loopback.
- * None of them, and the log and Admin say exactly what to run instead.
+ * The runtime key creates Learning containers in its own project (Intelligence 0.16.0 and later), at
+ * the address the server already uses: the `openbot` default and each person's own space.
  */
-const learningApiUrl = config.runtime.intelligence.apiUrl.replace(/\/+$/, "");
-const learningApiOrigin = (() => {
-  try {
-    return intelligenceApiOrigin(learningApiUrl);
-  } catch {
-    return undefined;
-  }
-})();
-/** The credentials that can create a Learning container, for the `openbot` default and for each person's own space. */
-const learningCredentials = (): LearningContainerCredentials => ({
-  directory: process.cwd(),
-  apiUrl: learningApiOrigin ?? learningApiUrl,
-  nonInteractive: true,
-  key: keyIntelligence(
-    learningApiUrl,
-    config.runtime.intelligence.apiKey,
-    config.runtime.intelligence.gatewayWsUrl,
-  ),
-  cliLogin: learningApiOrigin !== undefined && cliLoginPresent(),
-  ...(config.learningSetup && learningApiOrigin
-    ? {
-        serviceToken: {
-          token: config.learningSetup.serviceToken,
-          projectId: config.learningSetup.projectId,
-        },
-      }
-    : {}),
-});
+const learningKey = keyIntelligence(
+  config.runtime.intelligence.apiUrl.replace(/\/+$/, ""),
+  config.runtime.intelligence.apiKey,
+  config.runtime.intelligence.gatewayWsUrl,
+);
 const learningAutoAssign = createLearningAutoAssign({
   enabled: config.learningAutoAssign,
   store: learningSettingsStore,
   probe: (containerId) =>
     probeLearningContainer(learningProbeIntelligence, containerId),
-  instructions: learningSetupInstructions(learningApiOrigin ?? learningApiUrl),
-  create: () => ensureLearningContainer(learningCredentials()),
+  instructions: learningSetupInstructions(),
+  create: () => ensureLearningContainer({ key: learningKey }),
   audit: createAuditStore(database),
 });
 /*
  * Each person's own Learning space: every recording they make joins it, and every Bot they run uses its Skills. Made
- * with the same credential as the default container, on first need: when their browser connects, and again on a
- * capture pass if it is still missing. With no such credential a missing space cannot be made, and the Recorder says so.
+ * with the runtime key, like the default container, on first need: when their browser connects, and again on a
+ * capture pass if it is still missing. When Intelligence cannot make it, the Recorder says so.
  */
 const personalLearningSpaces = createPersonalLearningSpaces({
   readSettings: () => learningSettingsStore.read(),
   snapshots: learningProbeIntelligence,
   store: createPersonSpaceStore(database),
   create: (container) =>
-    createLearningContainer({ ...learningCredentials(), container }),
+    createLearningContainer({ key: learningKey, container }),
   nameFor: async (userId) =>
     (
       await database

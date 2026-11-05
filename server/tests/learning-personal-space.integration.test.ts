@@ -7,7 +7,7 @@ import { users } from "../src/db/schema/core";
 import { learningPersonSpaces } from "../src/db/schema/learning";
 import {
   createLearningContainer,
-  type KeyIntelligence,
+  keyIntelligence,
 } from "../src/learning/ensure-container";
 import {
   createPersonalLearningSpaces,
@@ -21,7 +21,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * Several OpenBot replicas making the same person's Learning space at once, against one database and one Intelligence.
  * Intelligence is faked as it behaves: a container id is unique per project, a second create answers 409
  * LEARNING_CONTAINER_ALREADY_EXISTS, and the runtime key's skills read says whether a container exists. Each replica
- * creates through the real service-token path in learning/ensure-container.ts.
+ * creates through the real runtime-key path in learning/ensure-container.ts.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -33,12 +33,10 @@ const containers = new Map<string, string>();
 const posts: { id: string; name: string }[] = [];
 const fetch = Object.assign(
   async (url: RequestInfo | URL, init?: RequestInit) => {
-    expect(String(url)).toBe(`${API}/api/learning/projects/7/containers`);
+    expect(String(url)).toBe(`${API}/api/v1/learning/containers`);
     expect(
-      ((init?.headers ?? {}) as Record<string, string>)[
-        "x-copilotkit-ei-service-token"
-      ],
-    ).toBe("synthetic-service-token");
+      ((init?.headers ?? {}) as Record<string, string>).authorization,
+    ).toBe("Bearer cpk-synthetic-runtime-key");
     const body = JSON.parse(String(init?.body)) as { id: string; name: string };
     posts.push(body);
     // A real round trip, so the replicas genuinely overlap.
@@ -65,11 +63,7 @@ const fetch = Object.assign(
   { preconnect: () => {} },
 ) as typeof globalThis.fetch;
 
-const key: KeyIntelligence = {
-  probe: async (containerId) =>
-    containers.has(containerId) ? "present" : "absent",
-  project: async () => undefined,
-};
+const key = keyIntelligence(API, "cpk-synthetic-runtime-key", undefined, fetch);
 
 function replica() {
   return createPersonalLearningSpaces({
@@ -90,16 +84,7 @@ function replica() {
       },
     } as never,
     store: createPersonSpaceStore(database),
-    create: (container) =>
-      createLearningContainer({
-        directory: process.cwd(),
-        apiUrl: API,
-        nonInteractive: true,
-        key,
-        serviceToken: { token: "synthetic-service-token", projectId: "7" },
-        fetch,
-        container,
-      }),
+    create: (container) => createLearningContainer({ key, container }),
     nameFor: async () => "Ada Lovelace",
     log: () => {},
   });

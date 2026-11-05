@@ -1,19 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { ContainerProbe } from "../src/learning/auto-assign";
 import {
   cliEnvironment,
-  cliLoginPresent,
   cmdLineSafe,
   createLearningContainer,
   ensureLearningContainer,
   type KeyIntelligence,
   keyIntelligence,
   learningSetupInstructions,
-  MANAGED_API,
   npxCommand,
   runNpx,
   stopProcessTree,
@@ -25,208 +21,62 @@ import {
   RUNTIME_KEY,
 } from "./support/intelligence-learning";
 
-const SELF_HOSTED = "https://intelligence.customer.example";
-const directories: string[] = [];
-afterEach(async () => {
-  await Promise.all(
-    directories.splice(0).map((path) => rm(path, { recursive: true })),
-  );
-});
-
+/** A key whose probe answers in turn and whose creation is counted, for the steps around it. */
 function key(answers: ContainerProbe[]): KeyIntelligence & {
   probes: number;
+  creates: number;
 } {
   const view = {
     probes: 0,
+    creates: 0,
     probe: async () => {
       view.probes++;
       return answers.shift() ?? "absent";
     },
-    project: async () => ({ organizationSlug: "team", projectSlug: "chosen" }),
+    create: async () => {
+      view.creates++;
+      return "created" as const;
+    },
   };
   return view;
 }
 
-function intelligenceFetch(status: number, body: unknown) {
-  const requests: { url: string; init: RequestInit }[] = [];
-  const fetch = Object.assign(
-    async (url: RequestInfo | URL, init?: RequestInit) => {
-      requests.push({ url: String(url), init: init ?? {} });
-      return Response.json(body, { status });
-    },
-    { preconnect: () => {} },
-  ) as typeof globalThis.fetch;
-  return { requests, fetch };
-}
+describe("ensuring the openbot default", () => {
+  test("a container already there is never created again", async () => {
+    const runtimeKey = key(["present"]);
+    expect(await ensureLearningContainer({ key: runtimeKey })).toBe("present");
+    expect(runtimeKey.creates).toBe(0);
+  });
 
-const serviceToken = { token: "synthetic-service-token", projectId: "7" };
+  test("a missing one is created with the key", async () => {
+    const runtimeKey = key(["absent"]);
+    expect(await ensureLearningContainer({ key: runtimeKey })).toBe("created");
+    expect(runtimeKey.creates).toBe(1);
+  });
 
-describe("creating the container with a service token", () => {
-  test("posts the openbot container to the token's project and proves it with the key", async () => {
-    const api = intelligenceFetch(201, {
-      container: { id: "openbot", projectId: 7, name: "OpenBot" },
-    });
-    const runtimeKey = key(["absent", "present"]);
-    expect(
-      await ensureLearningContainer({
-        directory: tmpdir(),
-        apiUrl: SELF_HOSTED,
-        nonInteractive: true,
-        key: runtimeKey,
-        serviceToken,
-        fetch: api.fetch,
-        run: async () => {
-          throw new Error("No CLI with a service token");
-        },
-      }),
-    ).toBe("created");
-    expect(api.requests).toHaveLength(1);
-    const request = api.requests[0] as { url: string; init: RequestInit };
-    expect(request.url).toBe(
-      `${SELF_HOSTED}/api/learning/projects/7/containers`,
+  test("a plan without Learning, or Intelligence out of reach, creates nothing", async () => {
+    const notEntitled = key(["not_entitled"]);
+    await expect(ensureLearningContainer({ key: notEntitled })).rejects.toThrow(
+      "does not include Learning",
     );
-    expect(request.init.method).toBe("POST");
-    const headers = request.init.headers as Record<string, string>;
-    expect(headers["x-copilotkit-ei-service-token"]).toBe(serviceToken.token);
-    expect(JSON.parse(String(request.init.body))).toEqual({
-      id: "openbot",
-      name: "OpenBot",
-    });
-    expect(runtimeKey.probes).toBe(2);
-  });
-
-  test("one that already exists is present, not an error", async () => {
-    const api = intelligenceFetch(409, {
-      error: { code: "LEARNING_CONTAINER_ALREADY_EXISTS" },
-    });
-    expect(
-      await ensureLearningContainer({
-        directory: tmpdir(),
-        apiUrl: SELF_HOSTED,
-        nonInteractive: true,
-        key: key(["absent", "present"]),
-        serviceToken,
-        fetch: api.fetch,
-      }),
-    ).toBe("present");
-  });
-
-  test("a refused token says where service tokens work, and nothing is assigned", async () => {
-    const api = intelligenceFetch(403, { error: { code: "FORBIDDEN" } });
+    const unavailable = key(["unavailable"]);
     await expect(
-      ensureLearningContainer({
-        directory: tmpdir(),
-        apiUrl: MANAGED_API,
-        nonInteractive: true,
-        key: key(["absent"]),
-        serviceToken,
-        fetch: api.fetch,
-      }),
-    ).rejects.toThrow("only on a CopilotKit local evaluation install");
+      ensureLearningContainer({ key: unavailable }),
+    ).rejects.toMatchObject({ retryable: true });
+    expect(notEntitled.creates + unavailable.creates).toBe(0);
   });
 
-  test("a container in another project is reported, not assigned", async () => {
-    const wrongProject = intelligenceFetch(201, {
-      container: { id: "openbot", projectId: 8 },
-    });
-    await expect(
-      ensureLearningContainer({
-        directory: tmpdir(),
-        apiUrl: SELF_HOSTED,
-        nonInteractive: true,
-        key: key(["absent"]),
-        serviceToken,
-        fetch: wrongProject.fetch,
-      }),
-    ).rejects.toThrow("other than the openbot container");
-    const invisible = intelligenceFetch(201, {
-      container: { id: "openbot", projectId: 7 },
-    });
-    await expect(
-      ensureLearningContainer({
-        directory: tmpdir(),
-        apiUrl: SELF_HOSTED,
-        nonInteractive: true,
-        key: key(["absent", "absent"]),
-        serviceToken,
-        fetch: invisible.fetch,
-      }),
-    ).rejects.toThrow("another project");
-  });
-
-  test("a container already there never reaches Intelligence's write route", async () => {
-    const api = intelligenceFetch(500, {});
-    expect(
-      await ensureLearningContainer({
-        directory: tmpdir(),
-        apiUrl: SELF_HOSTED,
-        nonInteractive: true,
-        key: key(["present"]),
-        serviceToken,
-        fetch: api.fetch,
-      }),
-    ).toBe("present");
-    expect(api.requests).toHaveLength(0);
-  });
-});
-
-describe("with no credential that can create it", () => {
-  test("self-hosted without a person or a token is skipped, and the CLI is not run", async () => {
-    let runs = 0;
-    expect(
-      await ensureLearningContainer({
-        directory: tmpdir(),
-        apiUrl: SELF_HOSTED,
-        nonInteractive: true,
-        key: key(["absent"]),
-        run: async () => {
-          runs++;
-          return { exitCode: 0, stdout: "{}" };
-        },
-      }),
-    ).toBe("skipped");
-    expect(runs).toBe(0);
-  });
-
-  test("the instructions name the exact steps for each kind of Intelligence", () => {
-    const managed = learningSetupInstructions(MANAGED_API);
-    expect(managed).toContain("npx --yes copilotkit@latest login");
-    expect(managed).toContain("bun scripts/setup-learning.ts");
-    expect(managed).toContain("config.learning.setup.cliLoginSecret");
-    expect(managed).toContain('ID "openbot"');
-    const selfHosted = learningSetupInstructions(SELF_HOSTED);
-    expect(selfHosted).toContain("bun scripts/setup-learning.ts");
-    expect(selfHosted).toContain(
-      "INTELLIGENCE_SERVICE_TOKEN and INTELLIGENCE_PROJECT_ID",
+  test("the instructions say to upgrade or create it by hand", () => {
+    const instructions = learningSetupInstructions();
+    expect(instructions).toContain("0.16.0");
+    expect(instructions).toContain('ID "openbot"');
+    expect(learningSetupInstructions("user-4f2a9c")).toContain(
+      'ID "user-4f2a9c"',
     );
   });
 });
 
 describe("the CopilotKit CLI", () => {
-  test("a login is found where the CLI keeps it, and only there", async () => {
-    const home = await mkdtemp(join(tmpdir(), "openbot-cli-home-"));
-    directories.push(home);
-    expect(cliLoginPresent({}, "darwin", home)).toBe(false);
-    await mkdir(join(home, "Library/Preferences/copilotkit-auth-nodejs"), {
-      recursive: true,
-    });
-    await writeFile(
-      join(home, "Library/Preferences/copilotkit-auth-nodejs/config.json"),
-      "{}",
-    );
-    expect(cliLoginPresent({}, "darwin", home)).toBe(true);
-    expect(cliLoginPresent({}, "linux", home)).toBe(false);
-    const configured = join(home, "mounted");
-    expect(
-      cliLoginPresent({ COPILOTKIT_CONFIG_DIR: configured }, "darwin", home),
-    ).toBe(false);
-    await mkdir(join(configured, "auth"), { recursive: true });
-    await writeFile(join(configured, "auth/config.json"), "{}");
-    expect(
-      cliLoginPresent({ COPILOTKIT_CONFIG_DIR: configured }, "linux", home),
-    ).toBe(true);
-  });
-
   test("runs without this process's secrets", () => {
     const environment = cliEnvironment({
       PATH: "/usr/bin",
@@ -333,22 +183,16 @@ describe("creating a container with the runtime key", () => {
     served.push(intelligence);
     return intelligence;
   };
-  const credentials = (intelligence: FakeIntelligence) => ({
-    directory: tmpdir(),
-    apiUrl: intelligence.url,
-    nonInteractive: true,
-    key: keyIntelligence(intelligence.url, RUNTIME_KEY, "ws://127.0.0.1:9"),
-  });
+  const runtimeKey = (intelligence: FakeIntelligence) =>
+    keyIntelligence(intelligence.url, RUNTIME_KEY, "ws://127.0.0.1:9");
   const person = { id: "user-4f2a9c", name: "Ada" };
 
   test("makes a person's space in the key's own project, naming no project", async () => {
     const intelligence = serve("current");
     expect(
       await createLearningContainer({
-        ...credentials(intelligence),
+        key: runtimeKey(intelligence),
         container: person,
-        // Never reached: the key could do it.
-        serviceToken,
       }),
     ).toBe("created");
     const posts = intelligence.requests.filter((r) => r.method === "POST");
@@ -366,7 +210,7 @@ describe("creating a container with the runtime key", () => {
   test("one already there is present, whether Intelligence says 200 or 409", async () => {
     expect(
       await createLearningContainer({
-        ...credentials(serve("current", ["user-4f2a9c"])),
+        key: runtimeKey(serve("current", ["user-4f2a9c"])),
         container: person,
       }),
     ).toBe("present");
@@ -380,9 +224,6 @@ describe("creating a container with the runtime key", () => {
       const url = `http://127.0.0.1:${conflict.port}`;
       expect(
         await createLearningContainer({
-          directory: tmpdir(),
-          apiUrl: url,
-          nonInteractive: true,
           key: keyIntelligence(url, RUNTIME_KEY, "ws://127.0.0.1:9"),
           container: person,
         }),
@@ -392,43 +233,39 @@ describe("creating a container with the runtime key", () => {
     }
   });
 
-  test("on Intelligence 0.15.1, which has no such route, the other credentials are tried", async () => {
+  test("an Intelligence older than 0.16.0 says to upgrade or create it by hand", async () => {
     const intelligence = serve("0.15.1");
-    // Nothing else here: skipped, as before, rather than an error.
-    expect(
-      await createLearningContainer({
-        ...credentials(intelligence),
-        container: person,
-      }),
-    ).toBe("skipped");
-    // A service token is the next one tried.
-    const token = intelligenceFetch(201, {
-      container: { id: "user-4f2a9c", projectId: 7, name: "Ada" },
+    const refusal = createLearningContainer({
+      key: runtimeKey(intelligence),
+      container: person,
     });
-    expect(
-      await createLearningContainer({
-        ...credentials(intelligence),
-        container: person,
-        serviceToken,
-        fetch: token.fetch,
-      }),
-    ).toBe("created");
-    expect(token.requests.map((r) => r.url)).toEqual([
-      `${intelligence.url}/api/learning/projects/7/containers`,
-    ]);
+    await expect(refusal).rejects.toThrow("older than 0.16.0");
+    await expect(refusal).rejects.not.toMatchObject({ retryable: true });
+    await expect(refusal).rejects.toThrow('ID "user-4f2a9c"');
   });
 
-  test("ensuring the openbot default proves it with the key afterwards", async () => {
+  test("a failure that may pass in a moment is marked retryable", async () => {
+    const intelligence = fakeIntelligence("current", { failCreates: 1 });
+    served.push(intelligence);
+    await expect(
+      createLearningContainer({ key: runtimeKey(intelligence) }),
+    ).rejects.toMatchObject({ retryable: true });
+    expect(
+      await createLearningContainer({ key: runtimeKey(intelligence) }),
+    ).toBe("created");
+  });
+
+  test("ensuring the openbot default creates it in the key's project", async () => {
     const intelligence = serve("current");
-    expect(await ensureLearningContainer(credentials(intelligence))).toBe(
-      "created",
-    );
+    expect(
+      await ensureLearningContainer({ key: runtimeKey(intelligence) }),
+    ).toBe("created");
     expect(intelligence.containers.has("openbot")).toBe(true);
   });
 
   test("Learning switched off in Intelligence is said, not reported as unreachable", async () => {
     await expect(
-      ensureLearningContainer(credentials(serve("learning-off"))),
+      ensureLearningContainer({ key: runtimeKey(serve("learning-off")) }),
     ).rejects.toThrow("Learning is switched off in this Intelligence");
   });
 });

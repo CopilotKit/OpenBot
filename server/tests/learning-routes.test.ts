@@ -151,7 +151,7 @@ test("the settings page assigns a newly created container on load and says why n
       state: "absent",
       containerId: "openbot",
       canCreate: false,
-      instructions: expect.stringContaining("bun scripts/setup-learning.ts"),
+      instructions: expect.stringContaining('ID "openbot"'),
     },
   });
   probe = "present";
@@ -165,7 +165,7 @@ test("the settings page assigns a newly created container on load and says why n
   });
 });
 
-test("an administrator creates the container with the deployment's credential, same-origin only", async () => {
+test("an administrator creates the container with the runtime key, same-origin only", async () => {
   const store = createLearningSettingsStore();
   let probe: "absent" | "present" = "absent";
   let creates = 0;
@@ -173,10 +173,10 @@ test("an administrator creates the container with the deployment's credential, s
     enabled: true,
     store,
     probe: async () => probe,
-    // As at boot: the first attempt finds nothing to create with yet.
+    // As at boot: the first attempt fails, and Admin asks again.
     create: async () => {
       creates++;
-      if (creates === 1) return "skipped";
+      if (creates === 1) throw new Error("Intelligence refused it.");
       probe = "present";
       return "created";
     },

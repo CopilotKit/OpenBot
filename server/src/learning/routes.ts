@@ -326,8 +326,8 @@ export function createLearningRoutes(
     );
   };
   /**
-   * Create this project's container with the credential this deployment holds, then assign it.
-   * Offered only when there is one (`automatic.canCreate`); without one the page shows what to run.
+   * Create this project's container with the runtime key, then assign it. Offered when the server
+   * can create one (`automatic.canCreate`); otherwise the page shows what to do instead.
    */
   routes.post("/container", async (context) => {
     if (!sameOriginJson(context))
