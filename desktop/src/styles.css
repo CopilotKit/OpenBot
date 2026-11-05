@@ -403,6 +403,11 @@ button.text-link:hover:not(:disabled) {
   margin: 0 0 20px;
 }
 
+/* After the install's own rows on the Install screen, apart from them rather than against them. */
+.steps + .local-alert {
+  margin-top: 16px;
+}
+
 .local-alert.needs {
   border-color: color-mix(in srgb, var(--ring) 45%, var(--border));
   background: color-mix(in srgb, var(--ring) 7%, var(--card));

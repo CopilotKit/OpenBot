@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
@@ -669,4 +671,16 @@ test("an answer OpenBot does not recognise is never echoed", async () => {
   const screen = view();
   await screen.findByRole("alert");
   expect(document.body.textContent).not.toContain("synthetic-secret-marker");
+});
+
+/**
+ * On the Install screen the card follows the install's own rows, and it sat on them with no gap,
+ * its border against theirs. Whatever comes before it, it stands apart.
+ */
+test("the card stands apart from the install rows above it", () => {
+  const styles = readFileSync(join(import.meta.dir, "styles.css"), "utf8");
+  const rule =
+    styles.match(/\.steps\s*\+\s*\.local-alert\s*\{([^}]*)\}/)?.[1] ?? "";
+  const gap = Number(rule.match(/margin-top:\s*(\d+)px/)?.[1] ?? 0);
+  expect(gap).toBeGreaterThanOrEqual(12);
 });
