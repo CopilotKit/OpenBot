@@ -743,21 +743,53 @@ type StreamData = {
   botId: string;
   /** The person's input so far, applied one message after another. See input-queue.ts. */
   inputs?: InputQueue;
-  /** Frames waiting for the connection to drain before Chrome is asked for the next one. */
-  drained?: Array<() => void>;
+  /** The newest frame not sent yet, because the connection was still busy with the ones before it. */
+  heldFrame?: string;
+  /** Looks again for room for `heldFrame`; see `sendHeldFrame`. */
+  heldRetry?: ReturnType<typeof setTimeout>;
 };
 
 /**
- * How much may sit unsent on a live-screen socket before the cast waits for it: about one frame.
- * More than that and the person is watching the past; see the ack in screencast.ts.
+ * How much may sit unsent on a live-screen socket before a new frame is held back: about one frame.
+ * More than that and the person is watching the past.
  */
 const STREAM_BUFFER_LIMIT = 128 * 1024;
 
-/** Let every frame waiting on this socket go. */
-function wakeDrained(ws: ServerWebSocket<StreamData>) {
-  const waiting = ws.data.drained;
-  ws.data.drained = undefined;
-  for (const wake of waiting ?? []) wake();
+/** How often a held frame looks again for room, besides when Bun says the socket drained. */
+const HELD_FRAME_RETRY_MS = 50;
+
+/**
+ * Send the held frame, if the connection has room for it.
+ *
+ * A frame is held, never queued, while the frames before it are still going out, and a newer one
+ * replaces it: the person sees the page as it is by the time there is room, and never a backlog. Held
+ * rather than dropped, because the frame that arrives while the connection is busy is often the last
+ * one the page makes before it goes still, and Chrome sends nothing more for a still page: dropped,
+ * the screen stayed on the page as it was a moment before it stopped.
+ *
+ * Bun's `drain` is the quick way to hear there is room, and not the only one: a frame sent from inside
+ * `drain` that did not fit was sometimes followed by no further `drain` at all (measured in the
+ * server's proxy, which does the same, at about one time in twenty). So while a frame is held the
+ * socket is also looked at again shortly. `onGone` is told when the socket has gone.
+ */
+function sendHeldFrame(ws: ServerWebSocket<StreamData>, onGone: () => void) {
+  const held = ws.data.heldFrame;
+  if (held === undefined) return;
+  if (ws.getBufferedAmount() > STREAM_BUFFER_LIMIT) {
+    ws.data.heldRetry ??= setTimeout(() => {
+      ws.data.heldRetry = undefined;
+      sendHeldFrame(ws, onGone);
+    }, HELD_FRAME_RETRY_MS);
+    return;
+  }
+  clearTimeout(ws.data.heldRetry);
+  ws.data.heldRetry = undefined;
+  ws.data.heldFrame = undefined;
+  try {
+    ws.send(held);
+  } catch {
+    onGone();
+  }
 }
 
 /**
@@ -880,19 +912,11 @@ serve<StreamData>({
         }
       });
       try {
-        const send = (frame: unknown): void | Promise<void> => {
+        const send = (frame: unknown) => {
+          // The newest frame, held until the connection has room for it; see `sendHeldFrame`.
+          ws.data.heldFrame = JSON.stringify(frame);
           // A closed socket starts a fresh cast on the next connection.
-          try {
-            ws.send(JSON.stringify(frame));
-          } catch {
-            void session.viewer.release(ws);
-            return;
-          }
-          // Still sending the frames before this one: the next waits until they are out.
-          if (ws.getBufferedAmount() <= STREAM_BUFFER_LIMIT) return;
-          return new Promise<void>((resolve) => {
-            ws.data.drained = [...(ws.data.drained ?? []), resolve];
-          });
+          sendHeldFrame(ws, () => void session.viewer.release(ws));
         };
 
         /*
@@ -954,12 +978,15 @@ serve<StreamData>({
       ws.data.inputs.push(String(raw));
     },
 
+    /** Room on the connection again: the frame held while it was busy goes now. */
     drain(ws) {
-      wakeDrained(ws);
+      // A socket that has gone is released by its close.
+      sendHeldFrame(ws, () => undefined);
     },
 
     async close(ws) {
-      wakeDrained(ws);
+      clearTimeout(ws.data.heldRetry);
+      ws.data.heldFrame = undefined;
       // Names the socket, so it can only ever give up its own screen. A superseded socket closing
       // after its replacement has started releases nothing; see viewer.ts.
       //
