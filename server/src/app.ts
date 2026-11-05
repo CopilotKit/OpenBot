@@ -63,6 +63,10 @@ import {
 } from "./channels/attachments";
 import type { ChannelEventHub } from "./channels/events";
 import { createGroupRoutes, type GroupConversations } from "./channels/group";
+import {
+  createModelChoiceRoutes,
+  type ModelChoices,
+} from "./channels/model-choice";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
 import { createThreadRoutes } from "./channels/thread-routes";
@@ -96,6 +100,7 @@ import { createHostAccessRoutes } from "./host-access/routes";
 import { identityRoutes } from "./identity/routes";
 import type { IdentityStore } from "./identity/store";
 import { createIntelligenceClient } from "./intelligence-client";
+import { createCapturePassOrigin } from "./intelligence-gateway-proxy";
 import {
   createLearningRoutes,
   type LearningAdminDependencies,
@@ -107,6 +112,10 @@ import {
 import type { MemoryIngestion } from "./memory/ingestion";
 import { createMemoryRoutes } from "./memory/routes";
 import type { MemoryStore } from "./memory/store";
+import {
+  createModelRoutes,
+  type ModelCatalogueReader,
+} from "./model-catalogue";
 import { parsePageLimit } from "./paging";
 import { createPasswordRoutes, createSignInRoutes } from "./passwords/routes";
 import type { SignInService } from "./passwords/service";
@@ -484,6 +493,10 @@ export function createApp(
      * configuration and state. See setup/checklist.ts. Absent, `/api/setup` is not mounted.
      */
     setup?: SetupSources;
+    /** The models a person may pick for a built-in Bot's run. Absent, `/api/models` is not mounted. */
+    models?: ModelCatalogueReader;
+    /** Each person's pick per conversation. Absent, `/api/channels/:id/model` is not mounted. */
+    modelChoices?: ModelChoices;
   },
   /**
    * Whether to offer help self-hosting, which also hides it from a deployment that pays for
@@ -1445,6 +1458,13 @@ export function createApp(
           ),
         ),
       );
+    /*
+     * The Recorder's capture pass names the Intelligence gateway's socket, and where this server
+     * carries that socket with no public URL to write before it, as over a `kubectl port-forward`, the
+     * address is a path. The page resolves a path against itself; the Recorder is not on the page, so
+     * its pass is answered knowing this server's own origin as the Recorder reached it.
+     */
+    app.use("/api/copilotkit/*", createCapturePassOrigin(config));
     // Mounted at the ROOT with the handler carrying its own basePath. Mounting it at
     // "/api/copilotkit" as well double-prefixes it: Hono strips the prefix before the handler sees
     // the path, so every route lands at /api/copilotkit/api/copilotkit/* and /info 404s. The browser
@@ -1739,6 +1759,13 @@ export function createApp(
    */
   if (coworker?.setup)
     app.route("/api/setup", createSetupRoutes(coworker.setup, requireUser));
+  if (coworker?.models)
+    app.route("/api/models", createModelRoutes(coworker.models, requireUser));
+  if (coworker?.modelChoices)
+    app.route(
+      "/api/channels",
+      createModelChoiceRoutes(coworker.modelChoices, requireUser),
+    );
   if (coworker?.groups)
     app.route("/api/groups", createGroupRoutes(coworker.groups, requireUser));
   if (coworker?.teamBots)
@@ -1994,6 +2021,8 @@ export function createApp(
           // From the assertion, never the body: this is the name the audit row will carry.
           actorId: verdict.actorId,
           ...(verdict.initiator ? { initiator: verdict.initiator } : {}),
+          // The conversation this run is in, signed with the rest: where a routine asked for "here" posts.
+          ...(verdict.run.threadId ? { threadId: verdict.run.threadId } : {}),
         });
         // Worded by the helper the in-process door uses, so a framework Bot's model reads a vendor's
         // error as the vendor's and not as a result. Neither Bot words it on its way through.

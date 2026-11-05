@@ -1,13 +1,15 @@
 # Windows desktop signing
 
-Builds use the root OpenBot release number plus `-internal.g<commit>`. The workflow verifies
+Builds use the root OpenBot release number plus `-internal.g<commit>`, or the plain release
+number when the run is on a release tag. The workflow verifies
 that both the packaged app and installer embed that version, and includes `build-version.json`
 with the binaries. See [desktop build versions](releasing.md#desktop-build-versions).
 
 The [Desktop Windows signing workflow](../.github/workflows/desktop-signing.yml)
 builds OpenBot and its NSIS installer with the existing DigiCert certificate in
 Azure Key Vault. It retains verified binaries and signature evidence as Actions
-artifacts for 14 days. It does not create or publish a release.
+artifacts for 14 days. It does not create a release, but it can attach its signed
+installer to one that exists: see [Sign a release](#sign-a-release).
 
 Ordinary Desktop CI and fork PR builds remain unsigned. The
 `tauri.windows-signing.conf.json` overlay is passed explicitly to Tauri only by
@@ -38,6 +40,38 @@ The binaries upload only after both pass. The extracted app is retained from
 `desktop/signed-app/`: Tauri restores the unsigned build executable after bundling,
 so verifying `target/release/openbot-desktop.exe` would inspect the wrong copy.
 These checks do not test SmartScreen reputation or exercise the app UI.
+
+## Sign a release
+
+Every release starts this workflow. After `publish-release.yml` creates the tag and the
+release, it dispatches this workflow on the tag with `signing-mode: keyvault` and
+`release-tag` set to that version. The tag alone would not start it: GitHub starts no
+workflow from a push made with `GITHUB_TOKEN`, and this workflow has no tag trigger anyway.
+The run still waits for a `windows-signing` reviewer to approve it.
+
+On a tag, the build carries the plain release version, the same as the unsigned installer
+the release was published with, and is built by
+[`desktop/scripts/signed-build.ts`](../desktop/scripts/signed-build.ts), as the signed Mac
+build is. A candidate or beta is pinned to its release's own `container-images.json`, like
+its unsigned installer, and the Intelligence CLI is bundled whenever the tree has
+`tauri.bundled-cli.conf.json`. After the signing job verifies the installer, a separate
+job with permission to write to the repository attaches it to the release with `--clobber`,
+twice: as `OpenBot_<version>_x64-setup.exe`, which replaces the unsigned installer of the
+same name, and as `OpenBot-windows-x64-setup.exe`, the fixed name a web page links to. See
+[Download links](releasing.md#download-links). The signing job itself never holds that
+permission. A stable release becomes Latest once both this and Mac signing have attached their
+signed installers, in whichever of the two finishes second, so the Windows address never gives the
+unsigned installer. Set `make-latest` when signing a release again by hand for it to do that. See
+[Which release is Latest](releasing.md#which-release-is-latest).
+
+To sign a release again by hand, use **Actions → Desktop Windows signing → Run workflow**,
+choose the release tag under **Use workflow from**, set `signing-mode` to `keyvault`, and
+set `release-tag` to the same tag. A run from anywhere else builds an internal version, and
+the attach job refuses it, because its version is not the tag's. A candidate's signing run
+also refuses a `container-images.json` from another commit. To attach again after the
+signing job succeeded, re-run only the failed attach job: it uses the installer that attempt
+signed. [`desktop/scripts/publish-signed-windows.sh`](../desktop/scripts/publish-signed-windows.sh)
+is the attach step.
 
 ## One-time infrastructure setup
 

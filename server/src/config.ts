@@ -30,6 +30,7 @@ import {
   transcriptionConfig,
 } from "./dictation/config";
 import { type Edition, parseEdition } from "./edition";
+import { proxiedClientSocketUrl } from "./intelligence-gateway-proxy";
 import type { BrokerProvider } from "./plugins/access";
 import { type VoiceConfig, voiceConfig } from "./voice/config";
 import { type WebBotAuth, webBotAuthFromEnv } from "./web-bot-auth";
@@ -57,6 +58,11 @@ export type IntelligenceSettings = {
    * `INTELLIGENCE_BROWSER_GATEWAY_WS_URL` in `runtimeCapabilities`.
    */
   browserGatewayWsUrl?: string;
+  /**
+   * This server carries the browser's gateway socket itself (`INTELLIGENCE_GATEWAY_PROXY=on`), and
+   * `browserGatewayWsUrl` is its own address for it. See `intelligence-gateway-proxy.ts`.
+   */
+  gatewayProxy?: true;
 };
 
 export type DockerComputerConfig = {
@@ -1201,14 +1207,43 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
     "INTELLIGENCE_BROWSER_GATEWAY_WS_URL",
   );
 
+  /*
+   * Or OpenBot carries the browser's socket itself, for an Intelligence that only OpenBot can reach:
+   * one in the same cluster, behind a `kubectl port-forward` or a single Ingress host. The browser
+   * is then told OpenBot's own address for it, so naming a second one as well is a contradiction.
+   */
+  const gatewayProxy = onOrOff(environment, "INTELLIGENCE_GATEWAY_PROXY");
+  if (gatewayProxy && browserGatewayWsUrl) {
+    throw new Error(
+      "INTELLIGENCE_GATEWAY_PROXY=on and INTELLIGENCE_BROWSER_GATEWAY_WS_URL both say where the browser reaches the Intelligence gateway. Set one of them.",
+    );
+  }
+
   return {
     mode: "intelligence",
     durableHistory: true,
     intelligence: {
       ...(settings as IntelligenceSettings),
-      ...(browserGatewayWsUrl ? { browserGatewayWsUrl } : {}),
+      ...(gatewayProxy
+        ? {
+            browserGatewayWsUrl: proxiedClientSocketUrl(
+              optional(environment, "OPENBOT_PUBLIC_URL"),
+            ),
+            gatewayProxy: true as const,
+          }
+        : browserGatewayWsUrl
+          ? { browserGatewayWsUrl }
+          : {}),
     },
   };
+}
+
+/** `on` or `off`, and unset is off. Anything else is a typo that would otherwise read as off. */
+function onOrOff(environment: Environment, name: string): boolean {
+  const value = optional(environment, name);
+  if (value === undefined || value === "off") return false;
+  if (value === "on") return true;
+  throw new Error(`${name} must be "on" or "off".`);
 }
 
 /**

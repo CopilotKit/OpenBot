@@ -1,3 +1,5 @@
+import { fromMarkdown } from "mdast-util-from-markdown";
+
 /**
  * The unit a person sees as one character.
  *
@@ -47,4 +49,59 @@ export function oneLine(text: string, maxGraphemes: number): string {
   );
   if (graphemes.length <= maxGraphemes) return collapsed;
   return `${graphemes.slice(0, maxGraphemes - 1).join("")}…`;
+}
+
+/**
+ * How long a conversation's name may run. A title long enough to truncate says no more than the
+ * preview it replaced.
+ */
+export const MAX_TITLE_GRAPHEMES = 60;
+
+/** The parts of a parsed message this reads: a node's text, an image's words, and what it holds. */
+type MarkdownNode = {
+  type: string;
+  value?: unknown;
+  alt?: unknown;
+  children?: MarkdownNode[];
+};
+
+/** Nodes whose children are separate blocks, a paragraph or an item each, so a space goes between. */
+const BLOCK_PARENTS = new Set(["root", "blockquote", "list", "listItem"]);
+
+/**
+ * How much of a message is parsed. A roster line is the first few dozen characters, and a reply can
+ * be many thousands, so the rest is never read. Generous, so a construct opened near the start is
+ * still closed inside it: what is cut off past here is never drawn either way.
+ */
+const MAX_PARSED_CODE_UNITS = 4_000;
+
+function textOf(node: MarkdownNode): string {
+  if (node.type === "image" || node.type === "imageReference")
+    return typeof node.alt === "string" ? node.alt : "";
+  if (node.type === "break") return "\n";
+  // Text, inline code, a code block and raw HTML are all words somebody wrote, so they stay.
+  if (typeof node.value === "string") return node.value;
+  const children = node.children ?? [];
+  return children.map(textOf).join(BLOCK_PARENTS.has(node.type) ? "\n" : "");
+}
+
+/**
+ * What a message says with its Markdown taken off: `**kubectl**` is `kubectl`, `[docs](https://…)`
+ * is `docs`, `# Status` is `Status`, a list is its items.
+ *
+ * A Bot answers in Markdown, and the transcript draws it, but a roster line is plain text. Drawn as
+ * it was written, a reply's asterisks and pound signs became part of the conversation's name in the
+ * sidebar. Parsed rather than pattern-matched, so a `*` or `_` that is not formatting (`2 * 3`,
+ * `snake_case`) is left exactly where it was, the way the transcript leaves it.
+ */
+export function plainText(markdown: string): string {
+  const root: MarkdownNode = fromMarkdown(
+    cutAtCodeUnits(markdown, MAX_PARSED_CODE_UNITS),
+  );
+  return textOf(root);
+}
+
+/** {@link plainText} on one line, the way a roster draws it. See {@link oneLine}. */
+export function plainLine(markdown: string, maxGraphemes: number): string {
+  return oneLine(plainText(markdown), maxGraphemes);
 }

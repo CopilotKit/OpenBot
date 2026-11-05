@@ -9,6 +9,9 @@ import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
+import { answeredBy } from "@openbot/shared/handoff-markers";
+import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
+import { readToolName } from "@openbot/shared/tool-name";
 import {
   IconAlertTriangle,
   IconBox,
@@ -31,6 +34,7 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+import { InlineApproval } from "@/components/approvals/inline-approval";
 import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
@@ -46,6 +50,7 @@ import {
 import {
   MessageContent,
   MessageFooter,
+  MessageHeader,
   Message as MessageRow,
 } from "@/components/ui/message";
 import {
@@ -57,6 +62,7 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
@@ -66,18 +72,18 @@ import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
-import { readToolName } from "@openbot/shared/tool-name";
 import {
   asText,
   forDisplay,
   REFUSAL_MARKER,
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
+import { useResultVisibility } from "@/lib/product-telemetry";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
-import { useResultVisibility } from "@/lib/product-telemetry";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import { AppAccessCard } from "./app-access-card";
+import { ChannelAvatar } from "./avatar";
 import { isBrowserStep } from "./browser-activity";
 import {
   attachmentModality,
@@ -769,11 +775,26 @@ const TranscriptMessage = memo(function TranscriptMessage({
   const origin = isUser ? splitChatOrigin(text) : null;
   const said = origin ? origin.text : text;
   const invoked = isUser ? splitSkillChip(said, commandNames) : null;
+  /*
+   * Another Bot's answer, asked for by this one: drawn under that Bot's face and name, as a group
+   * conversation draws each Bot, so it reads as the Bot that was asked speaking rather than as this
+   * Bot saying something new. The id is what says whose it is; see `answerMessageId`.
+   */
+  const answerer = isUser ? null : answeredBy(messageId);
 
   return (
-    <MessageRow align={align}>
+    <MessageRow
+      align={align}
+      {...(answerer ? { "data-speaker": answerer } : {})}
+    >
+      {answerer ? (
+        <div className="shrink-0 pt-0.5">
+          <ChannelAvatar participantIds={[answerer]} size={24} />
+        </div>
+      ) : null}
       <MessageContent>
         <Arriving>
+          {answerer ? <AnswererName botId={answerer} /> : null}
           {/*
             A Bot's message takes the whole column, not the width of its words: block content
             inside it — a fenced code block, a table — should span the transcript rather than
@@ -841,6 +862,18 @@ const TranscriptMessage = memo(function TranscriptMessage({
     </MessageRow>
   );
 });
+
+/** Whose answer this is, by the name the person knows the Bot by. */
+function AnswererName({ botId }: { botId: string }) {
+  const { data: bots } = useQuery(agentListQueryOptions());
+  // Nothing until the roster arrives, rather than a placeholder that is replaced a moment later.
+  if (!bots) return null;
+  return (
+    <MessageHeader className="text-xs font-medium text-muted-foreground">
+      {bots.find((bot) => bot.id === botId)?.name ?? "A Bot no longer here"}
+    </MessageHeader>
+  );
+}
 
 /**
  * The one shape an attachment url is allowed to have, taken from the helper that builds it rather
@@ -1481,12 +1514,22 @@ const ToolCallBody = memo(function ToolCallBody({
          *
          * What was called, shimmering until its result arrives, and then the server's own words
          * drawn the way a Bot's prose is drawn.
+         *
+         * WHILE OPENBOT ASKS ABOUT IT, ITS CARD IS DRAWN HERE INSTEAD. The server stops the turn and
+         * opens a request for the person, and this line would otherwise shimmer with no way to
+         * answer it but the Bots page. The same card a computer step draws (see `approval-tools`),
+         * read from the same inbox, and the line comes back once it is decided.
          */}
         {drawn ?? (
-          <ServerToolLine
-            name={name}
-            place={{ toolCallId, latest }}
-            result={result}
+          <InlineApproval
+            toolCallId={toolCallId}
+            fallback={
+              <ServerToolLine
+                name={name}
+                place={{ toolCallId, latest }}
+                result={result}
+              />
+            }
           />
         )}
       </ToolPlaceContext.Provider>
@@ -1552,7 +1595,11 @@ const ToolRow = memo(function ToolRow({
   return (
     <TurnInFlightContext.Provider value={inFlight}>
       <Arriving>
-        {steps.length === 1 && only && !isBrowserStep(only) ? (
+        {steps.length === 1 &&
+        only &&
+        !isBrowserStep(only) &&
+        // A subtask is drawn as work even alone, so a second call joining it does not change its shape.
+        only.toolCall.function.name !== SUBAGENT_TOOL ? (
           <ArgumentsArrivingContext.Provider value={active}>
             <ToolCallBody
               args={only.toolCall.function.arguments}

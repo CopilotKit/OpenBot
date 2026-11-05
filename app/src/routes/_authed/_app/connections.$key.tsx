@@ -497,7 +497,7 @@ function AppConnectionPage() {
         title={server.title}
       >
         {notice ? (
-          <p className="text-destructive text-sm" role="alert">
+          <p className="break-words text-destructive text-sm" role="alert">
             {notice}
           </p>
         ) : null}
@@ -577,7 +577,7 @@ function AppConnectionPage() {
       title={entry.title}
     >
       {notice ? (
-        <p className="text-destructive text-sm" role="alert">
+        <p className="break-words text-destructive text-sm" role="alert">
           {notice}
         </p>
       ) : null}

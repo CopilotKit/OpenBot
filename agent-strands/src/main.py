@@ -16,6 +16,8 @@ from fastapi.responses import JSONResponse
 from strands import Agent
 from strands.models.litellm import LiteLLMModel
 
+from src.system_prompt import RunSystemPrompt, invocation_state
+
 
 def _model_id() -> str:
     """`provider/model`, which is how litellm addresses one.
@@ -55,8 +57,15 @@ async def health():
     return {"ok": True, "harness": "strands"}
 
 
+# The role arrives as system messages on every run and becomes that run's system prompt; see
+# `system_prompt.py` for why the integration cannot be left to do it.
 add_strands_fastapi_endpoint(
     app,
-    StrandsAgent(name="openbot", agent=Agent(model=LiteLLMModel(model_id=_model_id()))),
+    StrandsAgent(
+        name="openbot",
+        agent=Agent(model=LiteLLMModel(model_id=_model_id())),
+        hooks=[RunSystemPrompt()],
+    ),
     "/",
+    invocation_state_provider=invocation_state,
 )

@@ -64,13 +64,16 @@ let customerFiles: string[] = [];
 beforeAll(async () => {
   if (!helm) return;
   work = mkdtempSync(join(tmpdir(), "openbot-promotion-helm-"));
-  // The packaged chart is the artifact a release pins. Packaging needs the bundled PostgreSQL
-  // subchart in charts/, which `helm dependency build` fetches when this checkout has not.
+  // The packaged chart is the artifact a release pins. Packaging needs the bundled PostgreSQL and
+  // Intelligence subcharts in charts/, which `helm dependency build` fetches when this checkout has
+  // not.
   cpSync(chartSource, join(work, "openbot"), { recursive: true });
+  const vendored = existsSync(join(work, "openbot", "charts"))
+    ? readdirSync(join(work, "openbot", "charts"))
+    : [];
   if (
-    !existsSync(join(work, "openbot", "charts")) ||
-    !readdirSync(join(work, "openbot", "charts")).some((name) =>
-      name.startsWith("postgresql-"),
+    !["postgresql-", "intelligence-"].every((prefix) =>
+      vendored.some((name) => name.startsWith(prefix)),
     )
   )
     await runCommand(["helm", "dependency", "build", join(work, "openbot")], {

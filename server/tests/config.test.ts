@@ -185,6 +185,62 @@ describe("deployment configuration", () => {
     ).toThrow("INTELLIGENCE_BROWSER_GATEWAY_WS_URL must be a valid URL");
   });
 
+  // Intelligence installed in the cluster beside OpenBot has no address a browser can reach, and the
+  // browser opens the gateway's socket itself. With the proxy on, the browser is told OpenBot's own
+  // address for it: a path, resolved against the page, or on the public URL when there is one.
+  test("tells the browser OpenBot's own address for the gateway when the server carries its socket", () => {
+    const proxied = loadConfig({
+      ...baseEnvironment,
+      INTELLIGENCE_GATEWAY_WS_URL:
+        "ws://openbot-intelligence-realtime-gateway:4401",
+      INTELLIGENCE_GATEWAY_PROXY: "on",
+    });
+    if (proxied.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(proxied.runtime.intelligence.gatewayProxy).toBe(true);
+    expect(proxied.runtime.intelligence.browserGatewayWsUrl).toBe(
+      "/api/intelligence/client",
+    );
+    // The server still reaches the gateway where it is.
+    expect(proxied.runtime.intelligence.gatewayWsUrl).toBe(
+      "ws://openbot-intelligence-realtime-gateway:4401",
+    );
+
+    const published = loadConfig({
+      ...baseEnvironment,
+      INTELLIGENCE_GATEWAY_PROXY: "on",
+      OPENBOT_PUBLIC_URL: "https://openbot.example.com/",
+    });
+    if (published.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(published.runtime.intelligence.browserGatewayWsUrl).toBe(
+      "wss://openbot.example.com/api/intelligence/client",
+    );
+
+    const off = loadConfig({
+      ...baseEnvironment,
+      INTELLIGENCE_GATEWAY_PROXY: "off",
+    });
+    if (off.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(off.runtime.intelligence.gatewayProxy).toBeUndefined();
+    expect(off.runtime.intelligence.browserGatewayWsUrl).toBeUndefined();
+
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_GATEWAY_PROXY: "on",
+        INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://localhost:14401",
+      }),
+    ).toThrow("Set one of them");
+    expect(() =>
+      loadConfig({ ...baseEnvironment, INTELLIGENCE_GATEWAY_PROXY: "yes" }),
+    ).toThrow('INTELLIGENCE_GATEWAY_PROXY must be "on" or "off"');
+  });
+
   test("still forwards a licence token when a deployment sets one", () => {
     const config = loadConfig({
       ...baseEnvironment,

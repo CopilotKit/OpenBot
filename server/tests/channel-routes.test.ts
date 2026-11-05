@@ -210,6 +210,7 @@ describe("what a channel is waiting on", () => {
     const summary = (id: string) => ({
       ...channel({ id }),
       summary: null,
+      opening: null,
       lastMessage: null,
       lastMessageAgentId: null,
       createdAt: since,
@@ -242,6 +243,7 @@ describe("what a channel is waiting on", () => {
     const summary = (id: string, task: boolean) => ({
       ...channel({ id }),
       summary: null,
+      opening: null,
       lastMessage: null,
       lastMessageAgentId: null,
       createdAt: since,

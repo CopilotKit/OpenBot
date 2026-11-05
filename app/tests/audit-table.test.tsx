@@ -9,14 +9,15 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import {
   type AuditEvent,
   botText,
   subjectText,
 } from "@/components/audit/audit-cells";
+import { AuditPage } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { auditKeys } from "@/lib/audit/queries";
-import { Route as AuditRoute } from "@/routes/_authed/admin/audit";
 
 /**
  * Admin → Audit as a log viewer: one window tall, the table across the whole pane and the only thing
@@ -65,7 +66,7 @@ const ROWS = [
   }),
 ];
 
-async function renderAudit() {
+async function renderAudit(sections?: ReactNode) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
@@ -74,7 +75,9 @@ async function renderAudit() {
   queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
   queryClient.setQueryData(agentKeys.list(false), []);
   const router = createRouter({
-    routeTree: createRootRoute({ component: AuditRoute.options.component }),
+    routeTree: createRootRoute({
+      component: () => <AuditPage>{sections}</AuditPage>,
+    }),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   const view = render(
@@ -160,4 +163,23 @@ test("the Outcome button narrows the rows to the outcomes ticked", async () => {
   );
   await waitFor(() => expect(whats(view.container)).toEqual(["navigate"]));
   expect(view.getByText("1 of 3 events")).toBeTruthy();
+});
+
+test("recording history shares a page scroller with the bounded audit log", async () => {
+  const view = await renderAudit(
+    <section aria-label="Recorded commands">
+      {Array.from({ length: 100 }, (_, i) => `Command ${i}`).map((command) => (
+        <p key={command}>{command}</p>
+      ))}
+    </section>,
+  );
+  const recording = view.getByRole("region", { name: "Recorded commands" });
+  const pageScroller = recording.closest(".overflow-y-auto");
+  expect(pageScroller).not.toBeNull();
+  const tableScroller = view.container.querySelector(
+    "[data-slot=table-container]",
+  );
+  expect(pageScroller?.contains(tableScroller)).toBe(true);
+  expect(tableScroller?.contains(recording)).toBe(false);
+  expect(recording.textContent).toContain("Command 99");
 });

@@ -13,11 +13,12 @@
     "windows": [
       {
         "title": "OpenBot",
-        "width": 900,
-        "height": 640,
+        "width": 1000,
+        "height": 800,
         "minWidth": 720,
         "minHeight": 560,
-        "resizable": true
+        "resizable": true,
+        "titleBarStyle": "Transparent"
       }
     ],
     "security": { "csp": null }

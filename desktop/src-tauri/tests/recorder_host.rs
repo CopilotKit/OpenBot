@@ -575,116 +575,29 @@ fn a_silent_app_is_answered_for_within_the_extensions_wait() {
     drop(held);
 }
 
-/// A selected deployment in organization mode under `home`, its sign-in saved for `authority` when `cookie` is Some.
-#[cfg(unix)]
-fn organization_deployment(home: &Path, authority: &str, cookie: Option<&str>) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-    let config = if cfg!(target_os = "macos") {
-        home.join("Library").join("Application Support")
-    } else {
-        home.join(".config")
-    }
-    .join("ai.copilotkit.openbot.desktop");
-    let root = home.join("deployment");
-    std::fs::create_dir_all(&config).unwrap();
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(
-        config.join("last-launched-root.json"),
-        serde_json::to_string(&root).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(
-        root.join(".env"),
-        format!("OPENBOT_ORGANIZATION_AUTH_URL={authority}\n"),
-    )
-    .unwrap();
-    if let Some(cookie) = cookie {
-        let secrets = root.join(".secrets");
-        std::fs::create_dir_all(&secrets).unwrap();
-        std::fs::set_permissions(&secrets, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let saved = secrets.join("OPENBOT_ORGANIZATION_SESSION.secret");
-        std::fs::write(
-            &saved,
-            json!({ "authority": authority, "cookie": cookie }).to_string(),
-        )
-        .unwrap();
-        std::fs::set_permissions(&saved, std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
-    root
-}
-
-// Organization mode: the ping reads whether Desktop holds a sign-in, without the network.
-#[cfg(unix)]
+// The host's stderr reaches Chrome's log and the terminal of whoever started the browser: never a connect code, on
+// success or on failure.
 #[test]
-fn an_organization_ping_without_a_saved_sign_in_is_not_signed_in() {
-    if !cfg!(debug_assertions) {
-        return;
-    }
-    let home = TempHome::new("organization-ping");
-    let authority = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let authority_url = format!("http://{}", authority.local_addr().unwrap());
-    organization_deployment(home.path(), &authority_url, None);
-    let app = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let url = format!("http://{}", app.local_addr().unwrap());
-    let probe = serve_routes(app, 1, |_| http("200 OK", "", "{}"));
-    let mut host = Host::start(home.path(), &extension_origin(), Some(&url));
-    assert_eq!(
-        host.ask(json!({ "type": "ping" })),
-        json!({ "ok": false, "available": false, "error": "not-signed-in" })
-    );
-    assert_eq!(
-        probe.join().unwrap()[0].line,
-        "GET /api/capabilities HTTP/1.1"
-    );
-    assert!(host.close().success());
-    authority.set_nonblocking(true).unwrap();
-    match authority.accept() {
-        Err(error) => assert_eq!(error.kind(), ErrorKind::WouldBlock),
-        Ok((_, peer)) => panic!("a ping dialled the organization from {peer}"),
-    }
-}
-
-// The host's stderr reaches Chrome's log and the terminal of whoever started the browser: never a connect code or
-// any part of a cookie, on success or on failure.
-#[cfg(unix)]
-#[test]
-fn the_host_never_logs_a_code_or_a_cookie() {
+fn the_host_never_logs_a_code() {
     if !cfg!(debug_assertions) {
         return;
     }
     let home = TempHome::new("stderr");
-    let authority = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let authority_url = format!("http://{}", authority.local_addr().unwrap());
-    organization_deployment(
-        home.path(),
-        &authority_url,
-        Some("better-auth.session_token=saved-secret"),
-    );
-    let me = r#"{"user":{"id":"u1","email":"a@b.c","name":null,"role":"user"}}"#;
-    let organization = serve_routes(authority, 2, move |_| http("200 OK", "", me));
     let app = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let url = format!("http://{}", app.local_addr().unwrap());
     let minted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let app = serve_routes(app, 7, move |line| {
+    let app = serve_routes(app, 3, move |line| {
         let minted_code = r#"{"code":"obc_secretcode","expiresAt":"2026-10-18T12:00:00.000Z"}"#;
         if line.starts_with("GET /api/capabilities ") {
             http("200 OK", "", "{}")
-        } else if line.starts_with("POST /api/auth/organization/session ") {
-            http("200 OK", "", r#"{"ticket":"t"}"#)
-        } else if line.starts_with("GET /api/auth/organization/session?ticket=t ") {
-            http(
-                "302 Found",
-                "Location: /\r\nSet-Cookie: openbot.organization-session=local-secret; Path=/; HttpOnly\r\n",
-                "",
-            )
         } else if minted.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
             http("201 Created", "", minted_code)
         } else {
-            // A refusal that repeats the code and the cookie in its body.
+            // A refusal that repeats the code in its body.
             http(
                 "500 Internal Server Error",
                 "",
-                r#"{"error":"obc_secretcode openbot.organization-session=local-secret"}"#,
+                r#"{"error":"obc_secretcode"}"#,
             )
         }
     });
@@ -703,23 +616,12 @@ fn the_host_never_logs_a_code_or_a_cookie() {
     );
     let (status, stderr) = host.close_with_stderr();
     assert!(status.success(), "{status:?}: {stderr}");
-    let seen = app.join().unwrap();
-    assert!(seen[3]
-        .head
-        .to_lowercase()
-        .contains("cookie: openbot.organization-session=local-secret\r\n"));
-    organization.join().unwrap();
+    app.join().unwrap();
     assert!(
         stderr.contains("answered the handoff with 500"),
         "the failure was not logged at all: {stderr}"
     );
-    for secret in [
-        "obc_",
-        "secret",
-        "session_token",
-        "organization-session",
-        "ticket",
-    ] {
+    for secret in ["obc_", "secret"] {
         assert!(
             !stderr.contains(secret),
             "stderr holds {secret:?}: {stderr}"

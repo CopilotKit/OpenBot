@@ -101,16 +101,24 @@ serviceAccount:
   annotations: {}
   automountServiceAccountToken: false
 
-# The database migrations, run as a Job before the API starts. A pre-upgrade hook, so a rollout
-# never puts a new replica in front of a schema it has not seen.
+# The database migrations, run as a Job. A pre-install and pre-upgrade hook, so a rollout never puts a
+# new replica in front of a schema it has not seen; on a first install with the bundled database it is
+# an ordinary Job instead, created beside the database it then waits for.
+#
+# NOTHING THAT READS THE DATABASE STARTS BEFORE THEY HAVE RUN. The API server and each scheduled Job
+# carry a `wait-for-database` init container that holds them until the database accepts their own
+# connection and holds every migration in their image, and whose log names the one it is waiting for.
+# Switched off here, the migrations are yours to run (`bun scripts/migrate.ts` from /app/server in this
+# image, with the same DATABASE_URL), and those workloads wait for you to have run them.
 migrations:
   enabled: true
   backoffLimit: 3
-  # How long to wait for the database to accept connections before giving up. A pre-install hook runs
-  # before the chart's own resources, so on a first install with the bundled database this Job starts
-  # before the database does.
+  # How long this Job waits for the database to accept connections before giving up. On a first
+  # install with the bundled database it starts before the database does.
   waitForDatabaseSeconds: 300
   # A ceiling on the whole Job, so a migration that hangs fails the release rather than holding it.
+  # Also how long the API server waits for the migrations before its `wait-for-database` gives up and
+  # the pod restarts it, so the server never stops waiting on a Job that may still be working.
   activeDeadlineSeconds: 900
   # Kept on failure so somebody can read why. Helm deletes it before the next run.
   resources:
@@ -166,18 +174,24 @@ config:
       issuer: ""
   tenantPackageDir: /app/examples/fintech
 
-  # CopilotKit Intelligence, which OpenBot requires. All four values are needed together: the server
-  # refuses to start on a partial set, deliberately, because a half-configured Intelligence is a
-  # mistake somebody made rather than a deployment that meant to run without one.
+  # CopilotKit Intelligence, which OpenBot requires, when it is NOT the one this chart installs
+  # (`intelligence.enabled: false` below): managed Intelligence, or a self-hosted one run elsewhere.
+  # Both addresses and `secrets.intelligenceApiKey` are needed together, deliberately, because a
+  # half-configured Intelligence is a mistake somebody made rather than a deployment that meant to run
+  # without one.
+  #
+  # Leave both empty with the bundled Intelligence: the chart points the server at it in the cluster,
+  # and refuses an address here rather than install a second Intelligence beside the one you named.
   intelligence:
     apiUrl: ""
     gatewayWsUrl: ""
-    # The two secret halves live under `secrets` below, never here.
+    # The secret halves live under `secrets` below, never here.
   # Learning defaults on; collection and delivery require an existing, assigned container.
   # With nothing saved in Admin and no containerId below, the server assigns the project's openbot
-  # container on its own once it exists. The runtime key cannot create it, so `setup` below gives the
-  # chart a credential that can; without one, the server log and Admin → Automatic Learning say
-  # exactly what to run (scripts/setup-learning.ts, from a computer that can sign in to Intelligence).
+  # container on its own once it exists. The bundled Intelligence creates it at install, and a current
+  # Intelligence lets the runtime key create it. On one that does not, `setup` below gives the chart a
+  # credential that can; without one, the server log and Admin → Automatic Learning say exactly what
+  # to run (scripts/setup-learning.ts, from a computer that can sign in to Intelligence).
   # Optional initial defaults; saved Admin → Automatic Learning settings take precedence, including off.
   learning:
     containerId: ""
@@ -496,6 +510,8 @@ computers:
     culler:
       # A ceiling on one sweep. `concurrencyPolicy: Forbid` means a sweep that hangs holds the lock
       # for ever and culling stops silently, which is the failure this feature exists to prevent.
+      # Waiting for the database, when a run fires before it can serve one, takes at most three
+      # quarters of it.
       activeDeadlineSeconds: 600
       enabled: true
       schedule: "*/5 * * * *"
@@ -503,9 +519,12 @@ computers:
 # Standing instructions a Bot runs on a schedule. The sweep offers due routines to the shared work
 # queue and hands each firing to the API server, which runs the turn as the person who scheduled it.
 routines:
-  # Off by default, because it needs a secret. Without `secrets.workerSharedSecret` the API server
-  # refuses every handoff, and a CronJob whose every run is a 401 is worse than no CronJob at all.
-  enabled: false
+  # ON BY DEFAULT, because every Bot can be asked for a routine, and with no sweep it is stored,
+  # scheduled and shown with a next run time, and never runs. The sweep presents a secret the API
+  # server checks; nobody has to make one. A key you hold wins (`worker-shared-secret` in your store
+  # or in `secrets.existingSecret`), then `secrets.workerSharedSecret`, and otherwise the chart
+  # generates one into `<release>-worker-secret` and keeps it across upgrades.
+  enabled: true
   # Pause new scheduled runs during an operator-controlled maintenance window. Existing Jobs
   # retain their lease/timeout behavior; suspension does not cancel work already in flight.
   suspend: false
@@ -527,9 +546,9 @@ routines:
 # anybody who reaches 32 can attach nothing, in any channel, for good.
 attachments:
   culler:
-    # On by default, unlike `routines` above: this needs nothing but the database, which every
+    # On by default, like `routines` above: this needs nothing but the database, which every
     # deployment already has, so there is no failure mode where enabling it does more harm than the
-    # rows it was written to remove. Nothing but the database is meant literally — the script reads
+    # rows it was written to remove. Nothing but the database is meant literally: the script reads
     # `DATABASE_URL` and no other variable, which is why this CronJob carries no secret at all.
     enabled: true
     # Hourly, not the five-minute schedule the other two CronJobs use: nothing here is time-sensitive
@@ -546,6 +565,8 @@ attachments:
     # stop. A deployment arriving with a large backlog does not need it raised: the sweep deletes in
     # bounded batches, each its own transaction, so a run stopped at the ceiling keeps what it
     # committed and the next one carries on from there. Raising it drains that backlog in fewer runs.
+    # Waiting for the database, when a run fires before it can serve one, takes at most three quarters
+    # of it.
     activeDeadlineSeconds: 300
 
 database:
@@ -591,12 +612,15 @@ postgresql:
     # of it. `CREATE EXTENSION IF NOT EXISTS` then passes for an ordinary user.
     username: postgres
     database: openbot
-    # SET ONE, OR UPGRADES FAIL. The subchart generates a password on install and then refuses to
-    # render on upgrade unless it is given the current one, which turns the second `helm upgrade`
-    # into an error about credentials. A password you chose, or a Secret you made, makes the release
-    # repeatable. The chart refuses to install without one rather than letting you find out later.
+    # OPTIONAL. Left empty, this chart generates one into the Secret below, once, reads it back on
+    # every upgrade and keeps it on uninstall, because PostgreSQL takes its password at first boot
+    # only and the volume outlives the release. Set it to choose the password yourself.
     password: ""
-    existingSecret: ""
+    # The Secret the database reads its password from (key `postgres-password`). By default it is the
+    # one this chart writes, under the name the subchart would have given its own. Name a Secret you
+    # made instead and the chart writes none. Empty hands the password back to the subchart, which
+    # then needs `password` above.
+    existingSecret: "{{ .Release.Name }}-postgresql"
   image:
     # Bitnami moved its unsupported images to this frozen mirror. Nothing new lands here, so the tag
     # is named rather than inherited from the subchart: with it inherited, bumping the subchart
@@ -635,19 +659,34 @@ secrets:
   # Created by the chart when `existingSecret` is empty. Pass with --set-string or a values file that
   # is not in version control; `KEY_ENCRYPTION_KEY` and the model credential are the two that matter
   # and neither should ever be a literal in a file anybody commits.
+  #
+  # The key the credential vault is encrypted with. With the bundled database (`postgresql.enabled`)
+  # it is optional: the chart generates one, reads it back on every upgrade and keeps it on uninstall,
+  # and it lives and dies with the database it unlocks, both in this namespace.
+  #
+  # REQUIRED WITH A DATABASE OF YOUR OWN. That database outlives this namespace, and a generated key
+  # does not: delete the namespace and reinstall, and every credential stored in the database is
+  # encrypted with a key nobody has any more. So it is a key you hold. Generate one with:
+  # openssl rand -base64 32
   keyEncryptionKey: ""
   betterAuthSecret: ""
   modelApiKey: ""
+  # What the API presents to a Bot's computer (`computers.mode` shared or sandbox). With the bundled
+  # database it is optional, generated and kept like `keyEncryptionKey`; with a database of your own,
+  # set one (`openssl rand -hex 32`), or name a Secret in `computers.existingTokenSecret`.
   computerToken: ""
   supervisorToken: ""
-  # From the CopilotKit CLI: `npx --yes copilotkit@latest project select` prints the runtime key.
-  # The chart refuses to install without it, because there is no mode where this runs with
-  # Intelligence missing.
+  # Only with `intelligence.enabled: false`. From the CopilotKit CLI: `npx --yes copilotkit@latest
+  # project select` prints the runtime key. The chart refuses to install without it, because there is
+  # no mode where this runs with Intelligence missing. The bundled Intelligence needs none: the chart
+  # creates a project and its key there itself (see `intelligence` below).
   intelligenceApiKey: ""
-  # Optional. Managed Intelligence issues no licence token; set this only for a self-hosted
-  # Intelligence that has one, and it is passed to the server as COPILOTKIT_LICENSE_TOKEN. From a
-  # store, name `license-token` in `externalSecrets.data` instead; it is passed the same way. That
-  # Intelligence needs the licence on its own deployment too, or it refuses memory.
+  # The CopilotKit licence. REQUIRED with the bundled Intelligence, which is self-hosted and needs it
+  # on its own deployment: given here once, it reaches both, OpenBot's server as
+  # COPILOTKIT_LICENSE_TOKEN and Intelligence through `intelligence.appApi.licenseSecret`. From a
+  # Secret of your own or a store, see `intelligence.appApi.licenseSecret` below.
+  #
+  # Optional with managed Intelligence, which issues no licence token.
   licenseToken: ""
   # Optional. One key for the whole deployment, for Composio, the broker holding people's accounts for
   # a few hundred apps (docs/plugins/composio.md). Passed to the server alone as COMPOSIO_API_KEY.
@@ -655,8 +694,11 @@ secrets:
   composioApiKey: ""
   # Sent to `config.managedAgent.url` on every call. Required when that url is set.
   managedAgentToken: ""
-  # Required when `routines.enabled`: what the CronJob presents to the API server to be recognised
-  # as the worker rather than as an unauthenticated caller.
+  # Optional. What the routines CronJob presents to the API server to be recognised as the worker
+  # rather than as an unauthenticated caller. Empty, the chart generates one and keeps it (see
+  # `routines` above). Set it when something outside this chart fires routines too, or when the chart
+  # is rendered by a tool that cannot read the cluster (Argo CD's `helm template`), where a generated
+  # value would change on every render.
   workerSharedSecret: ""
   # The client secret for whichever provider is configured above.
   googleClientSecret: ""
@@ -755,3 +797,187 @@ securityContext: {}
 # Applied to every pod this chart creates.
 commonLabels: {}
 commonAnnotations: {}
+
+# COPILOTKIT INTELLIGENCE, INSTALLED WITH OPENBOT.
+#
+# OpenBot keeps its conversations, memory and history in Intelligence and does not run without one,
+# so by default this chart installs it: the published Intelligence chart, self-hosted, on its own
+# bundled PostgreSQL and Redis, with nothing outside the cluster. The chart then does the rest of
+# what a person would otherwise do by hand:
+#
+#   - points the OpenBot server at Intelligence's services inside the cluster;
+#   - carries the browser's gateway socket through OpenBot's own address, so one port-forward or one
+#     Ingress host reaches everything;
+#   - creates an organization and a project in it (`bootstrap` below), with the project's runtime
+#     key generated by this chart into the Secret `openbot-intel-api-key` and read from there by both
+#     Intelligence and the OpenBot server, so nobody signs in to make one;
+#   - generates every credential Intelligence needs (database and Redis passwords, session and
+#     gateway secrets) as Secrets kept across upgrades and uninstalls, never as values;
+#   - hands it the licence given once in `secrets.licenseToken`.
+#
+# Everything under this key except `enabled` is the Intelligence chart's own values, passed to it
+# unchanged: its README (`helm show readme oci://ghcr.io/copilotkit/charts/intelligence --version
+# 0.16.0-rc.3`) documents every one, and anything it documents can be set here.
+#
+# THE SECRET NAMES BELOW ARE FIXED, NOT DERIVED FROM THE RELEASE, because the Intelligence chart takes
+# them as plain names. This chart creates each one under exactly the name written here, so changing a
+# name here changes both sides. Two OpenBot releases in one namespace would share them: give each
+# release its own namespace. `openbot-intel-` rather than `<release>-intelligence-`, because the
+# Intelligence chart names objects of its own that way and reserves `<that>-license`.
+#
+# `intelligence.enabled: false` is the other deployment: an Intelligence that already runs, named
+# in `config.intelligence` with `secrets.intelligenceApiKey`.
+intelligence:
+  enabled: true
+
+  auth:
+    deploymentMode: self_hosted
+    # NOBODY SIGNS IN TO THE BUNDLED INTELLIGENCE, so it names no identity provider: OpenBot reaches it
+    # with a project key, and its own dashboard is not installed (`appFrontend` below). Set `issuer`,
+    # with `appFrontend` and an Ingress, if people are to sign in to Intelligence itself.
+    # Generated by this chart: `auth-secret`, which signs Intelligence's own sessions.
+    existingSecret: openbot-intel-auth
+
+  # Intelligence's own dashboard, which nobody can sign in to here (see `auth` above). Without it,
+  # OpenBot's Admin → Automatic learning is where proposed skills are reviewed and published.
+  appFrontend:
+    enabled: false
+  ingress:
+    enabled: false
+  externalSecrets:
+    enabled: false
+
+  # AUTOMATIC LEARNING, WHICH OPENBOT HAS ON BY DEFAULT. Intelligence ships it off: with it off every
+  # Learning route answers 404 and OpenBot's Learning collects nothing.
+  learning:
+    enabled: true
+    # Self-hosted Intelligence admits an organization to Learning through a rollout list or this
+    # switch, and only then reads the licence. This Intelligence has one organization, OpenBot's.
+    globalEnabled: true
+    # Runs Learning by itself: first after 15 finished conversations, then after every 15 more
+    # (Intelligence's own thresholds, `automation.firstRunThreshold` and `subsequentRunThreshold`).
+    # Admin → Automatic learning → Learn now runs it at any time.
+    automation:
+      enabled: true
+    agent:
+      # SPENDS YOUR MODEL KEY. The Learning agent reads finished conversations and writes proposed
+      # skills with this model, on `secrets.modelApiKey`: this chart copies that key (or `model-api-key`
+      # from `secrets.existingSecret`, read at install and upgrade) into the Secret below. With the key
+      # in a store instead (`externalSecrets`), point `env` at a Secret that holds it.
+      model: openai/gpt-5.5
+      # Generated by this chart: `learning-agent-token`, and `openai-api-key` from your model key.
+      tokenSecret:
+        existingSecret: openbot-intel-learning
+        key: learning-agent-token
+      env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openbot-intel-learning
+              key: openai-api-key
+              # So a deployment with no model key still installs. Learning runs fail until it has one.
+              optional: true
+
+  # Where Learning keeps its snapshots and proposed skills: an S3-compatible store Intelligence runs
+  # in this release, which its services find by themselves. Learning does not start without one.
+  localObjectStorage:
+    enabled: true
+  objectStorage:
+    enabled: true
+    bucket: openbot-learning
+    # Generated by this chart: `s3-access-key` and `s3-secret-key`, the store's own credentials.
+    existingSecret: openbot-intel-object-storage
+
+  # Intelligence's own PostgreSQL, separate from OpenBot's.
+  postgresql:
+    enabled: true
+    # RENAMED, AND NOT FOR STYLE. Bitnami names a PostgreSQL subchart `<release>-postgresql`, which is
+    # exactly the name of OpenBot's own bundled database: with both on, the two would render one
+    # StatefulSet, one Service and one Secret with two different passwords between them.
+    nameOverride: intelligence-postgresql
+    auth:
+      # THE SUPERUSER, as OpenBot's own bundled database does, and for a reason of the same kind: an
+      # ordinary user makes the Bitnami chart demand that user's current password as a literal on
+      # every `helm template --is-upgrade`, which is the render an OpenBot upgrade checks before it
+      # touches anything. This database belongs to this Intelligence alone.
+      username: postgres
+      database: intelligence
+      # Generated by this chart: `postgres-password`, with `database-url` beside it for the services
+      # (see `database` below).
+      existingSecret: openbot-intel-postgresql
+    primary:
+      persistence:
+        enabled: true
+        # Empty means the cluster's default class, as everywhere in this chart.
+        storageClass: ""
+        size: 20Gi
+      # Its connection limit is Intelligence's own default (600, room for Learning), which
+      # Intelligence's connection-budget check reads from this same server, so nothing is set here.
+  # How Intelligence's services reach that database. The same Secret, because the Intelligence chart
+  # would otherwise build the URL itself from a host it assumes is `<release>-postgresql`, which is
+  # OpenBot's (see `nameOverride` above).
+  database:
+    existingSecret: openbot-intel-postgresql
+
+  # Intelligence's Redis.
+  redis-subchart:
+    enabled: true
+    architecture: standalone
+    auth:
+      enabled: true
+      # Generated by this chart: `redis-password`, with `redis-url` beside it (see `redis` below).
+      existingSecret: openbot-intel-redis
+      existingSecretPasswordKey: redis-password
+  redis:
+    existingSecret: openbot-intel-redis
+
+  # Generated by this chart: `runner-auth-secret`, `secret-key-base` and `release-cookie`.
+  realtimeGateway:
+    existingSecret: openbot-intel-gateway
+    beam:
+      cookieSecret:
+        name: openbot-intel-gateway
+        key: release-cookie
+
+  migrations:
+    enabled: true
+
+  # OpenBot's organization and project, created by Intelligence's bootstrap Job on every install and
+  # upgrade, with nobody signing in.
+  bootstrap:
+    enabled: true
+    organizations:
+      - id: org_openbot
+        slug: openbot
+        name: OpenBot
+    projects:
+      - organizationSlug: openbot
+        slug: openbot
+        name: OpenBot
+        # THE RUNTIME KEY, generated by this chart (`cpk-openbot_<short>_<long>`) into the Secret
+        # named here and kept across upgrades. Intelligence stores its hash; the OpenBot server reads
+        # the same Secret as INTELLIGENCE_API_KEY. The Secret is the source of truth: put a different
+        # key in it and the next upgrade stores that one and revokes the old.
+        apiKey:
+          existingSecret: openbot-intel-api-key
+          key: api-key
+          name: OpenBot server
+        # The container Automatic Learning assigns by default, there from the first install.
+        learningContainers:
+          - id: openbot
+            name: OpenBot
+
+  appApi:
+    # The licence. This chart writes `secrets.licenseToken` into the Secret named here. With the
+    # licence in a Secret of your own instead (`secrets.existingSecret`), name that Secret here and
+    # the key that holds it, and both sides read the one Secret.
+    licenseSecret:
+      existingSecret: openbot-intel-license
+      key: license-token
+
+  # TRAJECTORIES: the sessions the Recorder captures, and Learning's second source beside
+  # conversations. One switch in Intelligence's chart turns them on in its API, its gateway and
+  # Learning together; the gateway's token for asking the API about them is generated by
+  # Intelligence's own chart. The licence must carry `trajectories`.
+  trajectories:
+    enabled: true

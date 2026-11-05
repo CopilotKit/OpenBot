@@ -1,0 +1,26 @@
+! Names for the keysyms Ubuntu 24.04's keyboard data uses and its libX11 does not know yet.
+!
+! xkeyboard-config 2.41 maps Linux key codes to keysyms that xorgproto added after the libX11 in
+! the image was built, so xkbcomp cannot resolve them and the X server prints a "Could not resolve
+! keysym" warning for each at every start. libX11 reads this file for keysym names it was not
+! built with. Values from xorgproto's XF86keysym.h: _EVDEVK(code) = 0x10081000 + code.
+!
+! Harmless either way: every one of these sits on a key code above 255, which X11's core protocol
+! cannot carry, so none of them is ever on the keymap a Bot's browser types through.
+XF86CameraAccessEnable	:1008124B
+XF86CameraAccessDisable	:1008124C
+XF86CameraAccessToggle	:1008124D
+XF86NextElement	:1008127B
+XF86PreviousElement	:1008127C
+XF86AutopilotEngageToggle	:1008127D
+XF86MarkWaypoint	:1008127E
+XF86Sos	:1008127F
+XF86NavChart	:10081280
+XF86FishingChart	:10081281
+XF86SingleRangeRadar	:10081282
+XF86DualRangeRadar	:10081283
+XF86RadarOverlay	:10081284
+XF86TraditionalSonar	:10081285
+XF86ClearvuSonar	:10081286
+XF86SidevuSonar	:10081287
+XF86NavInfo	:10081288

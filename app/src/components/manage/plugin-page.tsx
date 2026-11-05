@@ -593,7 +593,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
       title={title}
     >
       {error ? (
-        <p className="text-destructive text-sm" role="alert">
+        <p className="break-words text-destructive text-sm" role="alert">
           {error}
         </p>
       ) : null}

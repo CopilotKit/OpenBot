@@ -1230,7 +1230,7 @@ fn promote(root: &Path, journal: &mut Journal) -> Result<Value, String> {
             return Err("candidate source identity changed during startup".into());
         }
         checkpoint(root, journal, "verified")?;
-        deployment::record(root, &journal.to_version).map_err(io)?;
+        deployment::record(root, &journal.to_version, false).map_err(io)?;
         crate::preparation::rebind_after_runtime_update(root).map_err(|p| p.said)?;
         write_json(&root.join(BASELINE), &journal.next)?;
         write_json(&root.join(RELEASE), &journal.candidate)?;
@@ -1448,7 +1448,12 @@ mod tests {
             ("server/src/main.ts", contents.into()),
             ("app/src/main.ts", contents.into()),
             ("worker/src/main.ts", contents.into()),
-            ("docker-compose.yml", "services: {}".into()),
+            // A release from after OpenBot's server and worker became Compose services (see
+            // `deployment::predates_containers`).
+            (
+                "docker-compose.yml",
+                "services:\n  server: {}\n  worker: {}\n".into(),
+            ),
             (
                 "server/drizzle/meta/_journal.json",
                 "{\"entries\":[{\"tag\":\"openbot-db-1\",\"when\":1}]}".into(),
@@ -1502,7 +1507,7 @@ mod tests {
             },
         )
         .unwrap();
-        deployment::record(&root, "v0.2.0").unwrap();
+        deployment::record(&root, "v0.2.0", false).unwrap();
         write(&root, "container-images.json", b"previous images");
         write(
             &root,

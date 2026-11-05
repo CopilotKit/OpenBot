@@ -88,8 +88,10 @@ Two settings carry this:
   about where the worker process runs rather than a fact about the deployment, so it is read from the
   environment directly rather than from the rest of the deployment's configuration.
 
-On Kubernetes, `routines.enabled` turns on a CronJob running `fire-routines.ts` on `routines.schedule`,
-the same way the computer culler is a CronJob rather than a timer inside the API — a timer fires in
+On Kubernetes, the chart runs a CronJob of `fire-routines.ts` on `routines.schedule`, on by default
+(`routines.enabled`), and generates the shared secret for it and the API server unless one is
+supplied (see [the chart's routines sweep](../charts/openbot/README.md#the-routines-sweep)). It is a
+CronJob the same way the computer culler is a CronJob rather than a timer inside the API: a timer fires in
 every replica, and a CronJob's single run does the whole sweep once. On a laptop, `scripts/start.sh`
 starts a worker process that runs that same sweep in a loop instead of once and exiting, so the two
 shapes are the same code doing the same thing on two different clocks, not two implementations to keep
