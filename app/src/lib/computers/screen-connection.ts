@@ -73,9 +73,7 @@ export function connectScreen(options: Options) {
     };
     current.onmessage = (event) => {
       if (!owns()) return;
-      let message:
-        | { type?: string; error?: string; fatal?: boolean }
-        | undefined;
+      let message: { type?: string; error?: string } | undefined;
       try {
         message = JSON.parse(String(event.data));
       } catch {
@@ -85,7 +83,7 @@ export function connectScreen(options: Options) {
         // The server deliberately leaves superseded sockets open. Never compete with the other tab.
         // A fatal error is one no retry will change (a computer that runs no commands has no terminal).
         if (
-          message.fatal === true ||
+          (message as { fatal?: unknown }).fatal === true ||
           /superseded|another (?:viewer|screen)|opened elsewhere|watched somewhere else|another tab/i.test(
             message.error ?? "",
           )
