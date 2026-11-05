@@ -2669,6 +2669,7 @@ const channelSummaries = {
   queue: createWorkQueue(database),
   transcript: routineIntelligence,
   title: createChannelTitler({
+    provider: runtimeModel.provider,
     model: runtimeModel.defaultModel,
     resolveApiKey: resolveRuntimeModelApiKey,
   }),
