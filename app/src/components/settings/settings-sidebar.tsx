@@ -100,7 +100,7 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     title: "This computer",
     icon: IconDeviceDesktop,
     desktopOnly: true,
-    linkOptions: { to: "/settings/computer" },
+    linkOptions: { to: "/settings/this-computer" },
   },
   {
     /* The same mark Admin gives UI Components. It is the same subject seen from the other side. */

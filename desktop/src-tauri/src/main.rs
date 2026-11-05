@@ -4272,7 +4272,10 @@ fn show_status_window(app: &tauri::AppHandle) {
 }
 
 /// Where OpenBot's Settings → This computer lives, in releases that have it.
-const COMPUTER_SETTINGS_PATH: &str = "/settings/computer";
+///
+/// Not `/settings/computer`: the personal edition's Computers page (the Bots' computers) has that
+/// address, and its guard sends every other edition to General.
+const COMPUTER_SETTINGS_PATH: &str = "/settings/this-computer";
 
 /**
 Status in OpenBot itself, Settings → This computer, when the OpenBot running here has that page:
@@ -4282,7 +4285,7 @@ without the page, the Status window does the job.
 fn show_status_in_app(app: &tauri::AppHandle) -> bool {
     let root = cleanup_root(&app.state::<Shell>(), &stack::default_root());
     if !root
-        .join("app/src/routes/_authed/settings/computer.tsx")
+        .join("app/src/routes/_authed/settings/this-computer.tsx")
         .is_file()
     {
         return false;

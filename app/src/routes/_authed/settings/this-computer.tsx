@@ -44,7 +44,7 @@ import {
 } from "@/lib/desktop/queries";
 import { queryClient } from "@/query-client";
 
-export const Route = createFileRoute("/_authed/settings/computer")({
+export const Route = createFileRoute("/_authed/settings/this-computer")({
   component: ComputerPage,
 });
 
