@@ -146,6 +146,12 @@ def _system_instruction(body: dict) -> str:
     return json.dumps(body.get("systemInstruction", {}))
 
 
+def _user_turn(body: dict) -> str:
+    """The text of the newest user turn the model was sent."""
+    turn = [content for content in body["contents"] if content.get("role") == "user"][-1]
+    return "".join(part.get("text", "") for part in turn["parts"])
+
+
 def _said(events: list[dict]) -> str:
     """The id of the text message a run streamed: the id the browser keeps the reply under."""
     return next(e["messageId"] for e in events if e["type"] == "TEXT_MESSAGE_START")
@@ -196,23 +202,51 @@ def test_a_changed_standing_role_reaches_the_next_run(monkeypatch, tmp_path):
 
 
 SKILL = "CONTRACT_SKILL_INSTRUCTIONS_7f3a"
+MEMORY = "CONTRACT_PERSONAL_MEMORY_7f3a"
 
 
-def test_only_the_servers_own_system_messages_become_instructions(monkeypatch, tmp_path):
-    """A system row the browser inserted (a skill's instructions do) gains no authority.
+def _skill(content: str = SKILL, id: str = "skill-receipts") -> dict:
+    return {"id": id, "role": "system", "content": content}
 
-    The server writes the two that carry an id it reserves, and drops any incoming message that
-    claims one. Any other system row was never sent to the model by this harness, and still is
-    not: neither as an instruction nor as history.
+
+def _labelled(row: dict) -> str:
+    """How a system row reads in what the model is sent: an entry labelled with its role."""
+    return json.dumps(row)
+
+
+def test_other_system_rows_reach_the_model_as_labelled_data(monkeypatch, tmp_path):
+    """A skill's instructions from the browser, and the server's memory record, are conversation.
+
+    The server writes the two system messages that carry an id it reserves, and drops any incoming
+    message that claims one. Only those become instructions. Every other system row reaches the
+    model, labelled with its role, and gains no system authority.
     """
     run = conversation()
-    run["messages"].insert(-1, {"id": "skill-receipts", "role": "system", "content": SKILL})
+    memory = {"id": "openbot:personal-memory", "role": "system", "content": MEMORY}
+    run["messages"].insert(2, memory)
+    run["messages"].insert(-1, _skill())
     with fresh_bot(monkeypatch, tmp_path) as send:
         body = send(run)
     assert missing_from(body) == []
     assert STANDING_ROLE in _system_instruction(body)
-    assert SKILL not in _system_instruction(body), "a browser system row became an instruction"
-    assert SKILL not in json.dumps(body)
+    for row in (_skill(), memory):
+        assert row["content"] not in _system_instruction(body), "a system row became an instruction"
+        assert _labelled(row) in _user_turn(body), (row["id"], "never reached the model as data")
+
+
+def test_a_skill_on_a_later_turn_reaches_a_live_session_as_labelled_data(monkeypatch, tmp_path):
+    """The skill a person picks goes in front of their message, on a session already running."""
+    first = conversation()
+    with fresh_bot(monkeypatch, tmp_path) as run:
+        run(first)
+        following = _next_turn(first, _said(run.events[0]))
+        following["messages"].insert(-1, _skill(id="skill-on-turn-3"))
+        body = run(following)
+    assert "model" in [content.get("role") for content in body["contents"]], "the session was rebuilt"
+    assert SKILL not in _system_instruction(body), "the skill became an instruction"
+    turn = _user_turn(body)
+    assert _labelled(_skill(id="skill-on-turn-3")) in turn and NEXT_QUESTION in turn, turn
+    assert json.dumps(body).count(SKILL) == 1
 
 
 PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -251,12 +285,6 @@ def test_an_earlier_tool_call_and_an_attached_image_are_part_of_the_thread(monke
 FIRST_WORDS = "CONTRACT_FIRST_WORDS_7f3a"
 
 
-def _user_turn(body: dict) -> str:
-    """The text of the newest user turn the model was sent."""
-    turn = [content for content in body["contents"] if content.get("role") == "user"][-1]
-    return "".join(part.get("text", "") for part in turn["parts"])
-
-
 def test_a_long_thread_is_seeded_with_its_newest_messages_and_the_question(monkeypatch, tmp_path):
     """About 2.4M characters, far over what the harness takes in one user turn.
 
@@ -273,11 +301,13 @@ def test_a_long_thread_is_seeded_with_its_newest_messages_and_the_question(monke
             {"id": f"u-{index}", "role": "user", "content": f"{index} {filler}"},
             {"id": f"a-{index}", "role": "assistant", "content": f"{index} {filler}"},
         ]
-    run["messages"][2:2] = history
+    memory = {"id": "openbot:personal-memory", "role": "system", "content": MEMORY}
+    run["messages"][2:2] = [memory, *history]
     with fresh_bot(monkeypatch, tmp_path) as send:
         body = send(run)
     turn = _user_turn(body)
     assert LATEST_QUESTION in turn, "the question this run was asked never reached the model"
+    assert _labelled(memory) in turn, "the memory record ahead of the thread was left out"
     assert EARLIER_QUESTION in turn
     assert "<truncated" not in turn, turn[-300:]
     assert FIRST_WORDS not in turn, "the oldest message was replayed past the budget"
