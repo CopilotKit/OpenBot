@@ -139,8 +139,11 @@ test("intelligence-cli.json pins the hashes nodejs.org lists", () => {
     readFileSync(join(import.meta.dir, "..", "intelligence-cli.json"), "utf8"),
   );
   expect(choice.node.version).toBe("26.13.0");
+  // Every installer that bundles the CLI: desktop-build.yml's Apple silicon and Windows ones, and
+  // the signed Intel Mac one Desktop macOS signing builds.
   for (const [platform, arch] of [
     ["darwin", "arm64"],
+    ["darwin", "x64"],
     ["win32", "x64"],
   ] as const) {
     const asset = nodeAsset(platform, arch, choice.node.version);

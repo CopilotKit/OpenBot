@@ -46,9 +46,10 @@ env:
   OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
 
 jobs:
-  # The three artifacts. Not `bundle`, which signs and notarizes: that is S7 and needs certificates
-  # this workflow deliberately does not hold. This proves the tree builds into an app on each
-  # platform, which is the thing that breaks when a dependency is not portable.
+  # The three artifacts, ad-hoc signed on macOS and unsigned on Windows. Signing and notarizing
+  # need certificates this workflow deliberately does not hold; Desktop macOS signing and Desktop
+  # Windows signing have them. This proves the tree builds into an app on each platform, which is
+  # the thing that breaks when a dependency is not portable.
   app:
     name: app (${{ matrix.platform }})
     runs-on: ${{ matrix.platform == 'macos' && 'macos-latest' || matrix.platform == 'windows' && 'windows-latest' || 'ubuntu-latest' }}
@@ -72,13 +73,19 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+      # No cache, Rust or Bun, for a release: its installers are attached to the release, and they
+      # must come from the tree and the lockfiles, not from anything an earlier run left behind. A
+      # run on a release branch can restore caches written on main. The same rule as the signing
+      # workflows and the tag-and-release job.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
+          no-cache: ${{ inputs.channel == 'release' }}
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - if: inputs.channel != 'release'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: desktop/src-tauri
           key: ${{ matrix.platform }}

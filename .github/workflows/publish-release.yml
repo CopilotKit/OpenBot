@@ -183,12 +183,17 @@ jobs:
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
         run: bun scripts/release-candidate-check.ts "$GITHUB_SHA" "${VERSION#v}"
-      # Whether this release becomes the latest one, decided once, before anything is built, so the
-      # `latest` image tag and the GitHub release's Latest mark always agree. A candidate or beta
-      # never does. A stable release does only when nothing newer already is. A patch from main can
-      # be cut while a newer final from a release branch is out, before the merge back lands, and
-      # customer installers and whoever pulls `latest` must not be moved back to it. A re-run of an
-      # older release likewise leaves Latest where it is.
+      # Whether this release becomes the latest one, decided once, before anything is built. A
+      # candidate or beta never does. A stable release does only when nothing newer already is. A
+      # patch from main can be cut while a newer final from a release branch is out, before the
+      # merge back lands, and customer installers and whoever pulls `latest` must not be moved back
+      # to it. A re-run of an older release likewise leaves Latest where it is.
+      #
+      # The `latest` image tag follows this decision when the images are pushed. The GitHub
+      # release's Latest mark follows it too, but later: the release is published not Latest, and
+      # Desktop macOS signing marks it Latest once its signed installers are attached, so
+      # `releases/latest` never serves an installer macOS refuses (scripts/release-becomes-latest.sh
+      # is asked again there, so a newer release published meanwhile keeps Latest).
       - id: latest
         name: Decide whether this becomes the latest release
         env:
@@ -197,26 +202,7 @@ jobs:
           PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
         run: |
           set -euo pipefail
-          if [ "$PRERELEASE" = true ]; then
-            becomes_latest=false
-          else
-            # Only a 404 means there is no release yet. A rate limit or a server error must stop
-            # the run: reading it as "no Latest" would let a stable release take Latest by mistake.
-            if out="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>&1)"; then
-              current="$out"
-            elif grep -q 'HTTP 404' <<<"$out"; then
-              current=""
-            else
-              echo "::error::Could not read the current latest release: $out"
-              exit 1
-            fi
-            highest="$(printf '%s\n%s\n' "${current#v}" "${VERSION#v}" | sort -V | tail -n 1)"
-            if [ -z "$current" ] || [ "$highest" = "${VERSION#v}" ]; then
-              becomes_latest=true
-            else
-              becomes_latest=false
-            fi
-          fi
+          becomes_latest="$(scripts/release-becomes-latest.sh)"
           echo "becomes_latest=$becomes_latest" >> "$GITHUB_OUTPUT"
           echo "$VERSION becomes the latest release: $becomes_latest."
 
@@ -254,8 +240,9 @@ jobs:
   # The macOS and Windows installers, built from the commit that passed the checks, with the CLI
   # bundled. A candidate or beta pins the images built above, so whoever tests it runs exactly what
   # the final will ship. A stable release is what customers install, and it is not pinned. These are
-  # ad-hoc signed and not notarized, the same as every CI build: this workflow holds no signing
-  # certificate. The signing workflows dispatched at the end of `github-release` replace them.
+  # ad-hoc signed or unsigned, because this workflow holds no signing certificate. Desktop macOS
+  # signing and Desktop Windows signing, dispatched at the end of `github-release`, replace them
+  # with signed ones built the same way, pinned or not (desktop/scripts/signed-build.ts).
   desktop:
     name: desktop
     needs: [metadata, verify, checks, images]
@@ -305,7 +292,8 @@ jobs:
         with:
           name: ${{ needs.images.outputs.manifest-artifact }}
       # The installers the desktop job built, one folder per platform under `installers/`, where the
-      # step below attaches them to the release. They are ad-hoc and unsigned, like every CI build.
+      # step below attaches them to the release. They are ad-hoc and unsigned, like every CI build,
+      # until the signing runs replace them.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: openbot-desktop-*
@@ -376,16 +364,17 @@ jobs:
           if [ "$PRERELEASE" = true ]; then
             section="## Unreleased"
             # A prerelease is marked as one and never becomes the repository's latest release.
-            flags=(--prerelease --latest=false)
+            create_flags=(--prerelease --latest=false)
+            edit_flags=(--prerelease --latest=false)
           else
             section="## ${VERSION#v}"
-            # Latest follows the one decision made in `verify`, the same one the `latest` image
-            # tag followed.
-            if [ "$BECOMES_LATEST" = true ]; then
-              flags=(--latest)
-            else
-              flags=(--latest=false)
-            fi
+            # Never Latest here. The installers attached below are ad-hoc, and macOS refuses
+            # them, so `releases/latest` keeps serving the previous release's signed installers
+            # until Desktop macOS signing attaches this one's and marks it Latest, following
+            # `verify`'s decision (BECOMES_LATEST). A re-run leaves Latest as it is: the signing
+            # run may already have moved it here.
+            create_flags=(--latest=false)
+            edit_flags=()
           fi
           awk -v v="$section" '$0==v{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md > notes.md
           test -s notes.md
@@ -406,7 +395,7 @@ jobs:
             # content and kept above, so it is byte-identical here. The one exception is the
             # provenance bundle, replaced only when the published one attests assets that were
             # never published.
-            gh release edit "$VERSION" --title "$VERSION" --notes-file notes.md "${flags[@]}"
+            gh release edit "$VERSION" --title "$VERSION" --notes-file notes.md "${edit_flags[@]}"
             for artifact in container-images.json release-assets/*; do
               name="$(basename "$artifact")"
               published="$OPENBOT_PUBLISHED_ASSETS/$name"
@@ -422,61 +411,17 @@ jobs:
             done
           else
             gh release create "$VERSION" container-images.json release-assets/* \
-              --title "$VERSION" --notes-file notes.md "${flags[@]}"
+              --title "$VERSION" --notes-file notes.md "${create_flags[@]}"
           fi
 
           # The installers are rebuilt on every run, so a rerun produces new bytes. They are kept
           # out of the check above, which holds the release's source, chart and manifest to what
-          # was first published.
-          # Every installer the desktop job built. A release without them is not the release that
-          # was asked for, so none at all is a failure.
-          installers=()
-          while IFS= read -r installer; do
-            installers+=("$installer")
-          done < <(find installers -type f \( -name '*.dmg' -o -name '*.exe' \) | sort)
-          if [ "${#installers[@]}" -eq 0 ]; then
-            echo "::error::No .dmg or .exe was downloaded into installers/, so there is nothing to attach."
-            exit 1
-          fi
-
-          # Each installer is attached twice: under the name Tauri gave it, which carries the
-          # version, and under a fixed name from scripts/release-download-names.ts, so a web page
-          # can link to `releases/latest/download/<fixed name>` across releases.
-          #
-          # What is already published wins. The signing workflows replace an installer with a
-          # signed one under both names, and a re-run of this job must not put the unsigned build
-          # back. So an installer an earlier attempt or a signing run attached is kept, and the
-          # fixed-name copy is made from those published bytes, not from this run's build. A
-          # fixed-name copy that differs from its installer, such as one left behind by an
-          # interrupted upload, is replaced. `--clobber` replaces an asset a failed upload left
-          # half-written.
-          published="${OPENBOT_PUBLISHED_ASSETS:-$RUNNER_TEMP/nothing-published}"
-          fixed_dir="$RUNNER_TEMP/download-names"
-          mkdir -p "$fixed_dir"
-          attached=()
-          for installer in "${installers[@]}"; do
-            name="$(basename "$installer")"
-            fixed="$(bun scripts/release-download-names.ts "$name")"
-            if [ -e "$fixed_dir/$fixed.name" ]; then
-              echo "::error::$name and $(cat "$fixed_dir/$fixed.name") would both be published as $fixed."
-              exit 1
-            fi
-            echo "$name" > "$fixed_dir/$fixed.name"
-            attached+=("\`$name\`, also as \`$fixed\`")
-            if [ -f "$published/$name" ]; then
-              echo "$name is already published; keeping it."
-              copy_from="$published/$name"
-            else
-              gh release upload "$VERSION" "$installer" --clobber
-              copy_from="$installer"
-            fi
-            if [ -f "$published/$fixed" ] && cmp -s "$copy_from" "$published/$fixed"; then
-              echo "$fixed is already a copy of $name."
-            else
-              cp "$copy_from" "$fixed_dir/$fixed"
-              gh release upload "$VERSION" "$fixed_dir/$fixed" --clobber
-            fi
-          done
+          # was first published. An installer already on the release, such as a signed one a
+          # signing run attached, is kept, so a re-run never puts the unsigned build back. Each
+          # installer is also attached under its fixed download name, copied from what is on the
+          # release (scripts/release-download-names.sh).
+          attached_list="$RUNNER_TEMP/attached-installers.txt"
+          ATTACHED_LIST="$attached_list" scripts/release-attach-installers.sh "$VERSION" installers
 
           # Say which CLI the installers carry. Every platform bundles the same one, so the first
           # build-version.json that names a CLI is the answer.
@@ -492,9 +437,9 @@ jobs:
           {
             echo "### Installers for $VERSION"
             echo ""
-            for line in "${attached[@]}"; do
-              echo "- $line"
-            done
+            while read -r name fixed; do
+              echo "- \`$name\`, also as \`$fixed\`"
+            done < "$attached_list"
             echo ""
             echo "- CLI: $cli"
             if [ -n "$node" ]; then
@@ -507,19 +452,25 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
       # The tag above was created with GITHUB_TOKEN, and GitHub starts no workflow from that push, so
-      # signing is dispatched explicitly; a dispatch is the one event GITHUB_TOKEN may start. On
+      # Mac signing is dispatched explicitly; a dispatch is the one event GITHUB_TOKEN may start. On
       # the tag, so the signed build is this commit and carries the release version. The
-      # `macos-signing` and `windows-signing` environments' required reviewers still approve the
-      # signing itself. Each signing run attaches its signed installers to the release under both
-      # names, replacing the unsigned ones attached above.
+      # `macos-signing` environment's required reviewers still approve the signing itself. A
+      # candidate's signed build is pinned to this release's images, like its ad-hoc one. A stable
+      # release becomes Latest there, once its signed installers are attached, when `verify` said
+      # it should. Each signing run attaches its signed installers under both their names, replacing
+      # the unsigned ones attached above.
       - name: Start signing the Mac build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.metadata.outputs.version }}
+          BECOMES_LATEST: ${{ needs.verify.outputs.becomes_latest }}
         run: |
           set -euo pipefail
           gh workflow run desktop-macos-signing.yml -R "$GITHUB_REPOSITORY" --ref "$VERSION" \
-            -f signing-mode=developer-id -f release-tag="$VERSION"
+            -f signing-mode=developer-id -f release-tag="$VERSION" -f make-latest="$BECOMES_LATEST"
+      # Windows signing, started the same way and for the same reason. It attaches the signed
+      # -setup.exe, pinned like the unsigned one for a candidate, and never moves Latest: that
+      # stays with Mac signing.
       - name: Start signing the Windows build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

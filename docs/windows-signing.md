@@ -50,23 +50,26 @@ workflow from a push made with `GITHUB_TOKEN`, and this workflow has no tag trig
 The run still waits for a `windows-signing` reviewer to approve it.
 
 On a tag, the build carries the plain release version, the same as the unsigned installer
-the release was published with. After the signing job verifies the installer, a separate
+the release was published with, and is built by
+[`desktop/scripts/signed-build.ts`](../desktop/scripts/signed-build.ts), as the signed Mac
+build is. A candidate or beta is pinned to its release's own `container-images.json`, like
+its unsigned installer, and the Intelligence CLI is bundled whenever the tree has
+`tauri.bundled-cli.conf.json`. After the signing job verifies the installer, a separate
 job with permission to write to the repository attaches it to the release with `--clobber`,
 twice: as `OpenBot_<version>_x64-setup.exe`, which replaces the unsigned installer of the
 same name, and as `OpenBot-windows-x64-setup.exe`, the fixed name a web page links to. See
 [Download links](releasing.md#download-links). The signing job itself never holds that
-permission.
+permission. Windows signing never marks a release Latest; Mac signing does that. See
+[Which release is Latest](releasing.md#which-release-is-latest).
 
 To sign a release again by hand, use **Actions → Desktop Windows signing → Run workflow**,
 choose the release tag under **Use workflow from**, set `signing-mode` to `keyvault`, and
-set `release-tag` to the same tag. The attach job fails if the run is not on that tag, or if
-the signed installer's version is not the tag's version. To attach again after the signing
-job succeeded, re-run only the failed attach job: it uses the installer that attempt signed.
-
-The signed installer does not bundle the Intelligence CLI or pin the candidate's images,
-because this workflow builds neither. Neither does Mac signing. Today no tree has
-`desktop/src-tauri/tauri.bundled-cli.conf.json`, so the unsigned installer bundles no CLI
-either; a candidate's unsigned installer is pinned, and its signed replacement is not.
+set `release-tag` to the same tag. A run from anywhere else builds an internal version, and
+the attach job refuses it, because its version is not the tag's. A candidate's signing run
+also refuses a `container-images.json` from another commit. To attach again after the
+signing job succeeded, re-run only the failed attach job: it uses the installer that attempt
+signed. [`desktop/scripts/publish-signed-windows.sh`](../desktop/scripts/publish-signed-windows.sh)
+is the attach step.
 
 ## One-time infrastructure setup
 

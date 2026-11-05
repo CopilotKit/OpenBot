@@ -45,7 +45,7 @@ There are three kinds of build:
 |---|---|---|---|---|
 | Internal build | **Internal build** workflow | Yes | No | Workflow artifacts, kept 30 days |
 | Release candidate or beta | **Create release PR**, then merge | Yes | After approval | GitHub prerelease |
-| Stable release | **Create release PR**, then merge | No: it installs the latest release | After approval | GitHub release marked Latest |
+| Stable release | **Create release PR**, then merge | No: it installs the latest release | After approval | GitHub release, marked Latest once Mac signing attaches its signed installers |
 
 A release is made only by merging its release PR. Do not push a `v*` tag by hand: that builds and
 publishes nothing. It only starts Mac signing, which then has no release to attach to.
@@ -128,16 +128,20 @@ Use a candidate to test what will become a release. The details are in
    archive, the chart, the release manifest, and the Mac and Windows installers.
 5. Approve **Desktop macOS signing** and **Desktop Windows signing** when they ask. These need a
    `macos-signing` and a `windows-signing` approver.
-   **Expected:** the signed `.dmg` files replace the ad-hoc one on the release, and the signed
-   `-setup.exe` replaces the unsigned one, each under its versioned name and its fixed name. The
-   release now also has `OpenBot-mac-x64.dmg`, for Intel Macs.
+   **Expected:** the signed Apple silicon `.dmg` replaces the ad-hoc one on the release, a signed
+   Intel `.dmg` is added, and the signed `-setup.exe` replaces the unsigned one. Each is attached
+   under its versioned name and its fixed name. For a candidate all three are pinned to the
+   candidate's images, like the unsigned ones. A stable release also gets `latest.json` and becomes
+   Latest when Mac signing finishes, so approve Windows signing too, or the fixed Windows address
+   gives the unsigned installer.
 6. Test the candidate with [Install and test](#3-install-and-test) and
    [Check a build](#4-check-a-build).
 7. For a fix, merge it into `release/X.Y`, then run **Create release PR** from that branch with
    `kind=rc` for the next candidate.
 8. To finish, run **Create release PR** from `release/X.Y` with `kind=final`, then merge. A final may
    not differ from its last candidate except in the version, the changelog and the policy's
-   version. **Expected:** the release becomes Latest, and a merge-back PR into `main` opens.
+   version. **Expected:** a merge-back PR into `main` opens. The release becomes Latest once you
+   approve Mac signing for it (step 5).
 
 A stable release from `main` (`kind=stable`) follows steps 1 to 5 without a release branch. Its
 installers are not pinned: they install the latest release. When it becomes Latest, the fixed
@@ -290,8 +294,10 @@ results in the PR or the issue for the build.
 | An image job fails | Open the failed job's log and read the first error. A Dockerfile error is a code problem on the branch. Do not run it again until you know the cause. |
 | The build fails with `the pinned deployment manifest ... has commit ..., but this build compiles ...` | The installer is being built from a different commit than its images. Build both from the same commit. |
 | A signing run waits | It needs an approver from the table in [Before you start](#before-you-start). |
-| A fixed download address gives the unsigned build | That platform's signing run was not approved, or failed. Approve it, or re-run it; its attach step replaces both names. |
-| A fixed download address gives an older release | `latest/download` follows the release marked Latest. A candidate or beta is never Latest, and a patch released while a newer release is out does not become Latest. |
+| A stable release is published but is not Latest | It becomes Latest once Mac signing attaches its signed installers. Approve the signing run. If that run failed, run **Desktop macOS signing** again from the release tag with `signing-mode: developer-id`, `release-tag` set and `make-latest` on. |
+| Mac or Windows signing of a candidate fails with `container-images.json ... was built from ...` | The signing run is not on the candidate's tag. Run it from the tag the release was published from. |
+| A fixed download address gives the unsigned build | That platform's signing run was not approved, or failed. Approve it, or run it again from the release tag with `release-tag` set; its attach step replaces both names. |
+| A fixed download address gives an older release | `latest/download` follows the release marked Latest. A candidate or beta is never Latest, a stable release becomes Latest only once Mac signing has attached its installers, and a patch released while a newer release is out does not become Latest. |
 | Windows setup stops with a virtualization message | The machine cannot run WSL 2. Use an x64 PC or an x64 VM with nested virtualization. |
 | Setup returns to Install after sign-in | The saved sign-in no longer works. Sign in again. |
 | A step shows **Retry** | Select it once. If it fails again, open **Technical details** and copy them into the issue. |
