@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's work in a conversation reads as one line. A subtask is a step in the same line as the
+  searches and pages beside it ("Searched the web, read 5 pages and ran 2 subtasks"), and opens to
+  its task, its answer and its steps. A subtask that stopped before an action needing approval says
+  "Handed back" instead of showing a "Needs your approval" badge with nothing to press.
+- Built-in Bots are told today's date (UTC), so "this quarter" or "last week" no longer starts a
+  guess or a `date` command that waits for approval. They use subtasks only for requests that split
+  into several independent parts, not for one question or one search, and draw a table or chart
+  once, with the result.
+- A built-in Bot's run always ends with an answer. Its last allowed step is sent without tools, so a
+  Bot that spent its steps searching answers from what it found instead of stopping in silence
+  ("the turn finished without saying anything").
 - Sending a message from the home page opens its conversation at once. The message shows while a
   Bot is picked and the conversation is made, and the real conversation replaces it when it exists.
   A start that fails goes back to the home page with the message in the box and the reason under it.
