@@ -285,7 +285,6 @@ describe("the boot check on a first install, while Intelligence is still startin
     const clock = fakeClock();
     const client = createIntelligenceClient(intelligence.settings);
     await reportIntelligenceEntitlement({
-      intelligence: intelligence.settings,
       entitlements: () => client.getRuntimeEntitlements(),
       log: (line) => lines.push(line),
       note: (line) => notes.push(line),
@@ -307,7 +306,7 @@ describe("the boot check on a first install, while Intelligence is still startin
     expect(found.notes).toEqual([
       expect.objectContaining({
         type: "intelligence-entitlement-waiting",
-        reason: "Intelligence answered HTTP 500",
+        reason: "Runtime entitlement request failed with status 500",
       }),
     ]);
     expect(found.printed).toEqual([]);

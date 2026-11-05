@@ -1,5 +1,3 @@
-import type { IntelligenceSettings } from "./config";
-import { runtimeEntitlementStatus } from "./intelligence-client";
 import {
   askWhileIntelligenceStarts,
   INTELLIGENCE_STARTUP_WINDOW_MS,
@@ -84,8 +82,9 @@ type Read =
 
 /**
  * A failed read. The runtime client's errors carry the HTTP status and whether it may pass
- * (`PlatformRequestError`), and `runtimeEntitlementStatus` marks a request nothing answered as one
- * that may. Anything else never reached an answer either, so it is treated the same way.
+ * (`PlatformRequestError`), as do the ones the client boundary throws while Intelligence has not
+ * answered yet (intelligence-client.ts). Anything else never reached an answer either, so it is
+ * treated the same way.
  */
 function failed(error: unknown): Read {
   const { status, retryable } =
@@ -118,14 +117,12 @@ function refused(read: Read): boolean {
  * Intelligence was seen starting first: on a first install its bootstrap stores the key only after
  * the migrations, so the same good key is refused for a few seconds in between.
  *
- * With `intelligence`, whether Intelligence answers yet is asked without the runtime client first
- * (`runtimeEntitlementStatus`), so the failures expected while it starts never reach the client,
- * which prints every one of them.
+ * Given a client from intelligence-client.ts, the reads that fail while Intelligence starts never
+ * reach the runtime client's own read, which prints every failure: see `quietUntilAnswered`.
  */
 export async function reportIntelligenceEntitlement(
   options: {
     entitlements: () => Promise<RuntimeEntitlementResponse>;
-    intelligence?: Pick<IntelligenceSettings, "apiUrl" | "apiKey">;
     log?: (message: string) => void;
     /** The one quiet line said while waiting. */
     note?: (message: string) => void;
@@ -133,25 +130,11 @@ export async function reportIntelligenceEntitlement(
 ): Promise<void> {
   const log = options.log ?? ((message: string) => console.warn(message));
   const note = options.note ?? ((message: string) => console.info(message));
-  const { intelligence, sleep, now } = options;
+  const { sleep, now } = options;
   const windowMs = options.windowMs ?? INTELLIGENCE_STARTUP_WINDOW_MS;
   const minutes = Math.round(windowMs / 60_000);
 
   const readOnce = async (): Promise<Read> => {
-    if (intelligence) {
-      try {
-        const status = await runtimeEntitlementStatus(intelligence);
-        if (status !== 200)
-          return {
-            kind: "failed",
-            reason: `Intelligence answered HTTP ${status}`,
-            status,
-            transient: transientStatus(status),
-          };
-      } catch (error) {
-        return failed(error);
-      }
-    }
     try {
       return { kind: "answer", response: await options.entitlements() };
     } catch (error) {
