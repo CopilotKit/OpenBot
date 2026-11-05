@@ -16,7 +16,7 @@
  * Never throws: a listing that cannot be read leaves the deployment's own model and nothing to pick.
  */
 import { Hono, type MiddlewareHandler } from "hono";
-import type { AppVariables } from "./auth/guards";
+import { type AppVariables, requireAdmin } from "./auth/guards";
 import type { RuntimeModel } from "./copilot";
 
 export type ModelOption = {
@@ -40,6 +40,16 @@ export type ModelCatalogue = {
    * the listing could not be read.
    */
   choosable: boolean;
+};
+
+/** What an admin picks the model allowlist from: the whole listing, before the allowlist. */
+export type AvailableModels = {
+  provider: RuntimeModel["provider"];
+  default: string;
+  /** Newest first. Always holds the default. */
+  models: ModelOption[];
+  /** False when the listing could not be read, so only the default is known. */
+  listed: boolean;
 };
 
 type Listed = { id: string; label?: string; created: number };
@@ -291,19 +301,17 @@ export function createModelCatalogue(options: {
     return inFlight;
   }
 
-  async function read(): Promise<ModelCatalogue> {
-    const fallback = {
-      provider,
-      default: defaultModel,
-      models: [option(defaultModel)],
-      choosable: false,
-    };
+  /**
+   * The listing, newest first, with the default always in it. Narrowed to the admin's allowlist
+   * unless `everything`, which is what an admin picks the allowlist from.
+   */
+  async function offered(everything: boolean): Promise<ModelOption[] | null> {
     // A plan's harness picks the model itself and is never sent one, so there is nothing to offer.
-    if (options.model.plan) return fallback;
+    if (options.model.plan) return null;
     const found = await listed();
-    if (!found) return fallback;
+    if (!found) return null;
 
-    const allowlist = options.allowlist?.();
+    const allowlist = everything ? undefined : options.allowlist?.();
     const allowed = (id: string) =>
       id === defaultModel ||
       !allowlist?.enabled ||
@@ -314,7 +322,19 @@ export function createModelCatalogue(options: {
       .filter((entry) => allowed(entry.id))
       .map((entry) => option(entry.id, entry.label));
     if (!models.some((model) => model.id === defaultModel))
-      models.unshift(fallback.models[0] as ModelOption);
+      models.unshift(option(defaultModel));
+    return models;
+  }
+
+  async function read(): Promise<ModelCatalogue> {
+    const models = await offered(false);
+    if (!models)
+      return {
+        provider,
+        default: defaultModel,
+        models: [option(defaultModel)],
+        choosable: false,
+      };
     return {
       provider,
       default: defaultModel,
@@ -323,8 +343,23 @@ export function createModelCatalogue(options: {
     };
   }
 
+  /**
+   * Every model the listing offers, whatever the allowlist and the switch say, for an admin to pick
+   * the allowlist from. Only the deployment's own model when the listing cannot be read.
+   */
+  async function available(): Promise<AvailableModels> {
+    const models = await offered(true);
+    return {
+      provider,
+      default: defaultModel,
+      models: models ?? [option(defaultModel)],
+      listed: models !== null,
+    };
+  }
+
   return {
     read,
+    available,
     /** Whether a run may use this model: only ever one this catalogue would offer. */
     async allows(id: string): Promise<boolean> {
       const catalogue = await read();
@@ -338,6 +373,7 @@ export type ModelCatalogueReader = ReturnType<typeof createModelCatalogue>;
 /**
  * `GET /api/models`: what the composer's model picker offers. Signed in, like every other read of
  * this deployment's configuration. Never fails: the catalogue already falls back to the default.
+ * `GET /api/models/available`: the whole listing for an admin choosing the model allowlist.
  */
 export function createModelRoutes(
   catalogue: ModelCatalogueReader,
@@ -346,5 +382,11 @@ export function createModelRoutes(
   const routes = new Hono<{ Variables: AppVariables }>();
   routes.use("*", requireUser);
   routes.get("/", async (context) => context.json(await catalogue.read()));
+  // The whole listing, for the admin's model allowlist; `/` is already narrowed to it.
+  routes.get("/available", async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    return context.json(await catalogue.available());
+  });
   return routes;
 }

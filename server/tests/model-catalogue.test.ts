@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import type { MiddlewareHandler } from "hono";
+import type { AppVariables } from "../src/auth/guards";
 import {
   chatModelIds,
   createModelCatalogue,
+  createModelRoutes,
   modelLabel,
   modelsUrl,
   modelVendor,
@@ -395,5 +398,81 @@ describe("the catalogue a deployment offers", () => {
     expect(await catalogue.allows("gpt-4o")).toBe(false);
     expect(await catalogue.allows("text-embedding-3-small")).toBe(false);
     expect(await catalogue.allows("anthropic/claude-opus-5-5")).toBe(false);
+  });
+
+  test("an admin sees every model the listing offers, whatever the allowlist says", async () => {
+    const { fetcher } = provider(
+      openAIListing(["gpt-4o", "gpt-5.5", "gpt-6-sol"]),
+    );
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "gpt-5.5" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+      allowlist: () => ({ enabled: true, models: ["openai/gpt-5.5"] }),
+      enabled: () => false,
+    });
+    expect(await catalogue.available()).toEqual({
+      provider: "openai",
+      default: "gpt-5.5",
+      listed: true,
+      models: [
+        { id: "gpt-6-sol", label: "GPT-6 Sol", vendor: "openai" },
+        { id: "gpt-5.5", label: "GPT-5.5", vendor: "openai" },
+        { id: "gpt-4o", label: "GPT-4o", vendor: "openai" },
+      ],
+    });
+  });
+
+  test("an unreadable listing leaves an admin only the deployment's model", async () => {
+    const { fetcher } = provider({ error: "down" }, 503);
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "gpt-5.5" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+      log: () => undefined,
+    });
+    expect(await catalogue.available()).toEqual({
+      provider: "openai",
+      default: "gpt-5.5",
+      listed: false,
+      models: [{ id: "gpt-5.5", label: "GPT-5.5", vendor: "openai" }],
+    });
+  });
+});
+
+describe("GET /api/models/available", () => {
+  const catalogue = createModelCatalogue({
+    model: { provider: "openai", defaultModel: "gpt-5.5" },
+    apiKey: async () => KEY,
+    environment: {},
+    fetch: provider(openAIListing(["gpt-4o", "gpt-5.5"])).fetcher,
+    allowlist: () => ({ enabled: true, models: ["openai/gpt-5.5"] }),
+  });
+  const as =
+    (role: "admin" | "user"): MiddlewareHandler<{ Variables: AppVariables }> =>
+    async (context, next) => {
+      context.set("actor", { id: "someone", role } as AppVariables["actor"]);
+      await next();
+    };
+
+  test("answers an admin with the whole listing", async () => {
+    const response = await createModelRoutes(catalogue, as("admin")).request(
+      "/available",
+    );
+    expect(response.status).toBe(200);
+    expect(
+      ((await response.json()) as { models: { id: string }[] }).models.map(
+        (model) => model.id,
+      ),
+    ).toEqual(["gpt-5.5", "gpt-4o"]);
+  });
+
+  test("refuses anybody else", async () => {
+    const response = await createModelRoutes(catalogue, as("user")).request(
+      "/available",
+    );
+    expect(response.status).toBe(403);
   });
 });
