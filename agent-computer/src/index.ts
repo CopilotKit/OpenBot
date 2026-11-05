@@ -86,9 +86,12 @@ import {
   WorkspaceFileTooLargeError,
   WorkspacePathError,
 } from "./workspace";
-import type { ViewerHandle } from "./live-shell";
-import { parseTerminalMessage, TERMINAL_UNAVAILABLE } from "./terminal-socket";
-import { createWorkspaces, type Shell } from "./workspaces";
+import {
+  createTerminalSockets,
+  TERMINAL_UNAVAILABLE,
+  type TerminalSocketData,
+} from "./terminal-socket";
+import { createWorkspaces } from "./workspaces";
 
 /**
  * The Bot's computer: one long-lived browser, reachable over HTTP.
@@ -305,6 +308,14 @@ const workspaces = createWorkspaces(
   process.env.WORKSPACE_DIR?.trim() || "/workspace",
   process.env.COMPUTER_SEPARATE_WORKSPACES?.trim().toLowerCase() === "on",
 );
+
+/** Each seat's live shell, as a terminal a person watches and, holding the wheel, types into. */
+const terminalSockets = createTerminalSockets<StreamData & TerminalSocketData>({
+  shellFor: async (seat) => (await workspaces.for(seat)).shell.terminal,
+  mayType: (seat) => sessions.for(seat).control.humanMayDrive(),
+  takeControlFirst: TAKE_CONTROL_FIRST,
+  describe,
+});
 
 /**
  * Who has the wheel, as a state machine in its own module.
@@ -739,87 +750,12 @@ async function notePersonFilled(
   }
 }
 
-/** What a live-screen or terminal socket carries: the Bot whose screen or shell it is showing. */
+/** What a live-screen socket carries: the Bot whose screen it is showing. */
 type StreamData = {
   botId: string;
   /** The person's input so far, applied one message after another. */
   inputs?: Promise<void>;
-  /** A terminal rather than the screen. */
-  kind?: "terminal";
-  /** Why this computer shows no terminal, said once the socket opens. */
-  refused?: string;
-  /** The shell a terminal socket watches, and its place among the viewers. */
-  shell?: Shell;
-  viewer?: ViewerHandle;
-  closed?: boolean;
 };
-
-/**
- * Watch the seat's live shell: the screen as it is, then every byte as it arrives (live-shell.ts).
- *
- * Watching needs nothing more than the socket. Typing needs the wheel, asked of the control state on
- * every message, the same question the live screen asks.
- */
-async function openTerminal(ws: ServerWebSocket<StreamData>): Promise<void> {
-  if (ws.data.refused) {
-    ws.send(
-      JSON.stringify({ type: "error", error: ws.data.refused, fatal: true }),
-    );
-    ws.close();
-    return;
-  }
-  try {
-    const { shell } = await workspaces.for(ws.data.botId);
-    if (ws.data.closed) return;
-    ws.data.shell = shell;
-    ws.data.viewer = shell.terminal.attach({
-      binary: (bytes) => {
-        // Bun answers 0 for a message it dropped because the socket has gone.
-        if (ws.send(bytes) === 0 && bytes.byteLength > 0)
-          throw new Error("The socket is closed.");
-      },
-      text: (message) => {
-        ws.send(JSON.stringify(message));
-      },
-    });
-  } catch (error) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        error: describe(error, "The terminal could not be started."),
-      }),
-    );
-    ws.close();
-  }
-}
-
-function applyTerminalMessage(
-  ws: ServerWebSocket<StreamData>,
-  raw: string | Buffer,
-): void {
-  const parsed = parseTerminalMessage(raw);
-  if (!parsed.ok) {
-    ws.send(JSON.stringify({ type: "error", error: parsed.error }));
-    return;
-  }
-  const { message } = parsed;
-  const shell = ws.data.shell;
-  if (!shell) return;
-  if (message.type === "ack") {
-    ws.data.viewer?.ack(message.bytes);
-    return;
-  }
-  if (message.type === "resize") {
-    shell.terminal.resize(message.cols, message.rows);
-    return;
-  }
-  // The person's own keystrokes, only while they hold the wheel. Never a Bot's action, so never audited as one.
-  if (!sessions.for(ws.data.botId).control.humanMayDrive()) {
-    ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
-    return;
-  }
-  shell.terminal.input(message.data);
-}
 
 /**
  * Apply one thing the person did on the live screen, after asking whether the screen is theirs and
@@ -908,7 +844,7 @@ async function applyInput(
   }
 }
 
-serve<StreamData>({
+serve<StreamData & TerminalSocketData>({
   port: PORT,
   ...(RUNTIME.hostname ? { hostname: RUNTIME.hostname } : {}),
   idleTimeout: 120,
@@ -919,9 +855,8 @@ serve<StreamData>({
    * page changes and input goes back over the same connection. See screencast.ts for why polling was
    * not good enough once a person had to type into this.
    */
-  websocket: {
+  websocket: terminalSockets.around({
     async open(ws) {
-      if (ws.data.kind === "terminal") return openTerminal(ws);
       const session = sessions.for(ws.data.botId);
       /*
        * Claimed before anything is awaited, and that order is the fix.
@@ -996,10 +931,6 @@ serve<StreamData>({
      * message, and a message refused or failed says so and lets the next one through.
      */
     message(ws, raw) {
-      if (ws.data.kind === "terminal") {
-        applyTerminalMessage(ws, raw);
-        return;
-      }
       ws.data.inputs = (ws.data.inputs ?? Promise.resolve())
         .then(() => applyInput(ws, raw))
         .catch((error: unknown) => {
@@ -1013,11 +944,6 @@ serve<StreamData>({
     },
 
     async close(ws) {
-      if (ws.data.kind === "terminal") {
-        ws.data.closed = true;
-        ws.data.viewer?.detach();
-        return;
-      }
       // Names the socket, so it can only ever give up its own screen. A superseded socket closing
       // after its replacement has started releases nothing; see viewer.ts.
       //
@@ -1026,7 +952,7 @@ serve<StreamData>({
       // map is meant to shrink in.
       await sessions.get(ws.data.botId)?.viewer.release(ws);
     },
-  },
+  }),
   async fetch(request, server) {
     const url = new URL(request.url);
 

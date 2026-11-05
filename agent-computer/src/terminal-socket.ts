@@ -1,3 +1,6 @@
+import type { ServerWebSocket, WebSocketHandler } from "bun";
+import type { LiveShell, ViewerHandle } from "./live-shell";
+
 /**
  * What a terminal viewer may send the computer, read and bounded before anything acts on it.
  *
@@ -12,7 +15,8 @@
  * wheel), `resize` (the size the viewer's terminal fits, which the shell takes), and `ack` (bytes the
  * viewer has drawn, which is the flow control in live-shell.ts).
  *
- * Its own file so the rules can be tested without importing `index.ts`, which starts a server.
+ * Its own file so the rules can be tested without importing `index.ts`, which starts a server, and so
+ * the live screen's handlers there stay the live screen's.
  */
 
 export type TerminalMessage =
@@ -79,4 +83,124 @@ export function parseTerminalMessage(
     default:
       return { ok: false, error: "That message is not a terminal message." };
   }
+}
+
+/** What a terminal socket carries, beside whatever the computer's other sockets carry. */
+export type TerminalSocketData = {
+  /** A terminal rather than the live screen. */
+  kind?: "terminal";
+  /** Why this computer shows no terminal, said once the socket opens. */
+  refused?: string;
+  /** The shell a terminal socket watches, and its place among the viewers. */
+  shell?: LiveShell;
+  viewer?: ViewerHandle;
+  closed?: boolean;
+};
+
+/**
+ * The computer's terminal sockets, and how they share the one WebSocket handler Bun allows.
+ *
+ * `around` takes the live screen's handlers and answers a terminal socket itself, leaving every other
+ * socket to them untouched, so the two never reach into each other's code.
+ *
+ * Watching needs nothing more than the socket. Typing needs the wheel, asked of the control state on
+ * every message, the same question the live screen asks.
+ */
+export function createTerminalSockets<
+  T extends TerminalSocketData & { botId: string },
+>(deps: {
+  /** The seat's live shell, started if it has none. */
+  shellFor: (seat: string) => Promise<LiveShell>;
+  /** Whether a person holds this seat's wheel, with nothing of the Bot's still running. */
+  mayType: (seat: string) => boolean;
+  /** What a keystroke without the wheel is told. */
+  takeControlFirst: string;
+  describe: (error: unknown, fallback: string) => string;
+}) {
+  async function open(ws: ServerWebSocket<T>): Promise<void> {
+    if (ws.data.refused) {
+      ws.send(
+        JSON.stringify({ type: "error", error: ws.data.refused, fatal: true }),
+      );
+      ws.close();
+      return;
+    }
+    try {
+      const shell = await deps.shellFor(ws.data.botId);
+      if (ws.data.closed) return;
+      ws.data.shell = shell;
+      ws.data.viewer = shell.attach({
+        binary: (bytes) => {
+          // Bun answers 0 for a message it dropped because the socket has gone.
+          if (ws.send(bytes) === 0 && bytes.byteLength > 0)
+            throw new Error("The socket is closed.");
+        },
+        text: (message) => {
+          ws.send(JSON.stringify(message));
+        },
+      });
+    } catch (error) {
+      ws.send(
+        JSON.stringify({
+          type: "error",
+          error: deps.describe(error, "The terminal could not be started."),
+        }),
+      );
+      ws.close();
+    }
+  }
+
+  function message(ws: ServerWebSocket<T>, raw: string | Buffer): void {
+    const parsed = parseTerminalMessage(raw);
+    if (!parsed.ok) {
+      ws.send(JSON.stringify({ type: "error", error: parsed.error }));
+      return;
+    }
+    const { message } = parsed;
+    const shell = ws.data.shell;
+    if (!shell) return;
+    if (message.type === "ack") {
+      ws.data.viewer?.ack(message.bytes);
+      return;
+    }
+    if (message.type === "resize") {
+      shell.resize(message.cols, message.rows);
+      return;
+    }
+    // The person's own keystrokes, only while they hold the wheel. Never a Bot's action, so never audited as one.
+    if (!deps.mayType(ws.data.botId)) {
+      ws.send(JSON.stringify({ type: "error", error: deps.takeControlFirst }));
+      return;
+    }
+    shell.input(message.data);
+  }
+
+  function close(ws: ServerWebSocket<T>): void {
+    ws.data.closed = true;
+    ws.data.viewer?.detach();
+  }
+
+  return {
+    around(screen: WebSocketHandler<T>): WebSocketHandler<T> {
+      return {
+        ...screen,
+        open(ws) {
+          if (ws.data.kind === "terminal") return open(ws);
+          return screen.open?.(ws);
+        },
+        message(ws, raw) {
+          if (ws.data.kind === "terminal") return message(ws, raw);
+          return screen.message(ws, raw);
+        },
+        close(ws, code, reason) {
+          if (ws.data.kind === "terminal") return close(ws);
+          return screen.close?.(ws, code, reason);
+        },
+        drain(ws) {
+          if (ws.data.kind === "terminal") return;
+          return screen.drain?.(ws);
+        },
+      };
+    },
+  };
 }

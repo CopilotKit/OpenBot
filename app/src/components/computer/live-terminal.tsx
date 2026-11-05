@@ -232,12 +232,8 @@ export function LiveTerminal({
       },
       // Watching needs nothing more than the socket; typing is the wheel's question.
       verifyOwnership: async () => true,
-      onReady: (ready) => {
-        if (!ready) return;
-        // A new connection: say the size again, since the shell may have taken someone else's.
-        sent = { cols: 0, rows: 0 };
-        refit();
-      },
+      // The size is said once the computer says `ready`, below: by then every hop is open.
+      onReady: () => undefined,
       onProblem: (problem) => problemRef.current?.(problem),
       onReconnecting: (reconnecting) => reconnectingRef.current?.(reconnecting),
       onDisconnect: () => setLive(false),
@@ -258,7 +254,12 @@ export function LiveTerminal({
         if (message?.type === "snapshot") {
           terminal.reset();
           terminal.write(SHOW_CURSOR);
-        } else if (message?.type === "ready") setLive(true);
+        } else if (message?.type === "ready") {
+          setLive(true);
+          // Live from here: say the size again, since the shell may have taken someone else's.
+          sent = { cols: 0, rows: 0 };
+          refit();
+        }
       },
       disconnected: "The terminal is disconnected. Retry to reconnect.",
     });

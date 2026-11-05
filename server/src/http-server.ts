@@ -38,8 +38,6 @@ import {
 type StreamData = {
   upstream: string;
   inward?: WebSocket;
-  /** Messages the person sent before the computer's side had opened, sent once it has. */
-  early?: Array<string | ArrayBuffer | Uint8Array>;
 };
 
 /**
@@ -50,6 +48,44 @@ type StreamData = {
  * viewer a reconnect, which redraws its terminal from the computer's copy of the screen.
  */
 const MAX_PROXY_BUFFER = 8 * 1024 * 1024;
+
+/** Whether a proxied socket is a Bot's terminal rather than its live screen, from where it goes. */
+function isTerminalUpstream(upstream: string): boolean {
+  try {
+    return new URL(upstream).pathname.endsWith("/terminal");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Carry a terminal's frames outward as they came: its output binary, its control messages text. The
+ * terminal's own flow control keeps what is in flight small; a person's side holding more than
+ * `MAX_PROXY_BUFFER` has stopped reading, and is closed so its terminal reconnects and is redrawn.
+ */
+function carryTerminal(
+  ws: {
+    send(data: string | Uint8Array): number;
+    getBufferedAmount(): number;
+    close(): void;
+  },
+  inward: WebSocket,
+): void {
+  inward.binaryType = "arraybuffer";
+  inward.onmessage = (event) => {
+    try {
+      const data = event.data;
+      const sent = ws.send(
+        typeof data === "string" ? data : new Uint8Array(data as ArrayBuffer),
+      );
+      if (sent === 0 || ws.getBufferedAmount() > MAX_PROXY_BUFFER)
+        throw new Error("The person's side has stopped reading.");
+    } catch {
+      inward.close();
+      ws.close();
+    }
+  };
+}
 
 /**
  * Bun takes exactly one WebSocket handler for the server, and three features need one: the app
@@ -285,30 +321,20 @@ export function startHttpServer(deps: {
         }
         const stream = ws.data;
         const inward = new WebSocket(stream.upstream);
-        // The terminal's output is binary; the screen's frames are text. Each is passed on as it came.
-        inward.binaryType = "arraybuffer";
         stream.inward = inward;
         // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
         // should be dropped, not queued, because a stale frame is worse than a missing one.
         inward.onmessage = (event) => {
           try {
-            const data = event.data;
-            const sent = ws.send(
-              typeof data === "string" ? data : new Uint8Array(data),
-            );
-            if (sent === 0 || ws.getBufferedAmount() > MAX_PROXY_BUFFER)
-              throw new Error("The person's side has stopped reading.");
+            ws.send(String(event.data));
           } catch {
             inward.close();
-            ws.close();
           }
-        };
-        inward.onopen = () => {
-          for (const message of stream.early ?? []) inward.send(message);
-          stream.early = undefined;
         };
         inward.onclose = () => ws.close();
         inward.onerror = () => ws.close();
+        // The terminal's output is binary, and is carried as it came rather than as the screen's text.
+        if (isTerminalUpstream(stream.upstream)) carryTerminal(ws, inward);
       },
       message(ws, raw) {
         if (isGatewaySocket(ws.data)) {
@@ -322,14 +348,7 @@ export function startHttpServer(deps: {
           channelSocket.message(asChannelSocket(ws), raw);
           return;
         }
-        // What the person sent, as it came. Held until the computer's side opens: a terminal says
-        // its size the moment it connects, before this server has reached the computer.
-        const forwarded = typeof raw === "string" ? raw : new Uint8Array(raw);
-        if (ws.data.inward?.readyState === 1) ws.data.inward.send(forwarded);
-        else if (ws.data.inward?.readyState === 0) {
-          ws.data.early ??= [];
-          if (ws.data.early.length < 64) ws.data.early.push(forwarded);
-        }
+        if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
       },
       close(ws, code, reason) {
         if (isGatewaySocket(ws.data)) {
