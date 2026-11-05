@@ -153,9 +153,7 @@ function Setup() {
   const returningToInstallation = savedLaunch.current === installationKey;
   const [running, setRunning] = useState(false);
   const visibleSetupStep =
-    checkingResume || blockerFailure || blocker || running
-      ? null
-      : step;
+    checkingResume || blockerFailure || blocker || running ? null : step;
   const lastViewedStep = useRef<SetupStep | null>(null);
   useEffect(() => {
     if (visibleSetupStep === lastViewedStep.current) return;

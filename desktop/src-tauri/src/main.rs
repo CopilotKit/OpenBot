@@ -693,7 +693,7 @@ async fn stage_runtime_update(
         for (index,image) in images.iter().enumerate() {
             let detail=format!("Staging update software ({}/{}).",index+1,images.len());
             report_running(&handle,"update-images",&detail,None);
-            pull_metrics::pull_image(&address,image,|bytes|report_running(&handle,"update-images",&detail,Some(bytes)),|metrics|desktop_telemetry::pull_completed(&handle,metrics))?;
+            pull_metrics::pull_image(&address,image,|bytes|report_running(&handle,"update-images",&detail,Some(bytes.bytes)),|metrics|desktop_telemetry::pull_completed(&handle,metrics))?;
         }
         updates::mark_images_staged(&root,saved)?;
         Ok::<_,Problem>(staged)

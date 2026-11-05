@@ -1420,7 +1420,10 @@ test("a provider sign-in can be tried again on the AI step without installing ag
 });
 
 test("a failed automatic reopen offers recovery without retrying or installing", async () => {
-  setupConnectedLocalStack("/tmp/reopen-failure", localStatus("ready", "valid"));
+  setupConnectedLocalStack(
+    "/tmp/reopen-failure",
+    localStatus("ready", "valid"),
+  );
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
     if (command === "start_stack")
@@ -2568,9 +2571,7 @@ test("mount leaves setup visible when the shared port answers without selected r
 
   const view = await renderApp();
 
-  expect(
-    await view.findByRole("button", { name: "Install" }),
-  ).toBeTruthy();
+  expect(await view.findByRole("button", { name: "Install" })).toBeTruthy();
   expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(
     false,
   );
