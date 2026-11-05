@@ -222,6 +222,9 @@ bundles nothing and the installer carries no CLI.
 
 ## Internal builds
 
+For the step-by-step procedure, with what to check at each step, see the
+[installer runbook](installer-runbook.md).
+
 An internal build is an installer for the team to try, made from any branch. Nothing is published:
 no release, no tag, and nothing on the Releases page.
 
