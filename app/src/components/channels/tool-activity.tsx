@@ -488,7 +488,11 @@ function subtaskDetails(
     pages: 0,
     inputs: [],
     ...(output ? { output } : {}),
-    subtask: { toolCallId: step.toolCall.id, ...(task ? { task } : {}), result },
+    subtask: {
+      toolCallId: step.toolCall.id,
+      ...(task ? { task } : {}),
+      result,
+    },
   };
 }
 
@@ -537,9 +541,7 @@ export function summarise(steps: readonly StepDetails[]): string {
     );
   const subtasks = of("subtask").length;
   if (subtasks)
-    phrases.push(
-      subtasks === 1 ? "ran a subtask" : `ran ${subtasks} subtasks`,
-    );
+    phrases.push(subtasks === 1 ? "ran a subtask" : `ran ${subtasks} subtasks`);
   const tools = of("tool").length;
   if (tools) phrases.push(`used ${plural(tools, "tool", "tools")}`);
   const sentence = joinPhrases(phrases);
@@ -625,7 +627,8 @@ export function StepRow({
   step: StepDetails;
   active: boolean;
 }) {
-  if (step.kind === "subtask") return <SubtaskStep active={active} step={step} />;
+  if (step.kind === "subtask")
+    return <SubtaskStep active={active} step={step} />;
   const line = (
     <span className="flex min-w-0 items-center gap-2">
       <StepIcon kind={step.kind} />

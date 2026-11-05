@@ -179,7 +179,9 @@ test("an action it handed back is said plainly, and nothing asks for an approval
   expect(view.queryByText("Needs your approval")).toBeNull();
   const row = await subtaskRow(view);
   const notice = within(row.getByRole("region", { name: "Handed back" }));
-  expect(notice.getByText(/the Bot asks you in this conversation/)).toBeTruthy();
+  expect(
+    notice.getByText(/the Bot asks you in this conversation/),
+  ).toBeTruthy();
   expect(notice.getByText("List open tickets on accounts")).toBeTruthy();
   expect(notice.getByText("Acme Robotics")).toBeTruthy();
 });

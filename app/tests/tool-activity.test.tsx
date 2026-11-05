@@ -77,7 +77,12 @@ test("a subtask folds into the same line as the searches beside it, even though 
       JSON.stringify({ answer: "Five companies.", threadId: "t", steps: 9 }),
     ),
   );
-  const items = [subtask, search(), fetch(["https://a.example/1"]), text("answer")];
+  const items = [
+    subtask,
+    search(),
+    fetch(["https://a.example/1"]),
+    text("answer"),
+  ];
   const grouped = groupToolSteps(items, () => true);
   expect(grouped.map((item) => item.kind)).toEqual(["tools", "text"]);
   const steps = items.slice(0, 3).map((item) => stepDetails(item as ToolItem));
@@ -88,10 +93,12 @@ test("a subtask folds into the same line as the searches beside it, even though 
     output: "Five companies.",
     failed: false,
   });
-  expect(summarise(steps)).toBe("Searched the web, read 1 page and ran a subtask");
-  expect(summarise([steps[0], steps[0]].filter((step) => step !== undefined))).toBe(
-    "Ran 2 subtasks",
+  expect(summarise(steps)).toBe(
+    "Searched the web, read 1 page and ran a subtask",
   );
+  expect(
+    summarise([steps[0], steps[0]].filter((step) => step !== undefined)),
+  ).toBe("Ran 2 subtasks");
 });
 
 test("one connector call keeps its own line, and anything the app draws stays where it is", () => {

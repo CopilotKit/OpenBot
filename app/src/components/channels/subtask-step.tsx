@@ -68,7 +68,8 @@ export function SubtaskStep({
     .filter((item): item is ToolItem => item.kind === "tool")
     .map(stepDetails);
   const count = Math.max(steps.length, result?.steps ?? 0);
-  const handedBack = result && "handedBack" in result ? result.handedBack : null;
+  const handedBack =
+    result && "handedBack" in result ? result.handedBack : null;
 
   return (
     <li className="min-w-0">
@@ -140,7 +141,9 @@ function SubtaskStatus({
       </span>
     );
   if (step.pending)
-    return <span className="shrink-0 text-muted-foreground">Not completed</span>;
+    return (
+      <span className="shrink-0 text-muted-foreground">Not completed</span>
+    );
   if (step.refused)
     return <span className="shrink-0 text-destructive">Blocked</span>;
   if (handedBack)
