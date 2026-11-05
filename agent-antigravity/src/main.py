@@ -21,6 +21,10 @@ That url is the API ROOT, with no version path on it — `http://host:4141`, not
 itself, and a url carrying the version already gets it twice and 404s, which the harness reports
 as the unplaceable `agent executor error: Error 0, Message: Not found`. Measured against a logging
 proxy, because that message names neither the url nor the status.
+
+THE CONVERSATION is the server's, sent whole on every run. The integration keeps it in the harness
+and forwards only the newest line, so `whole_thread.py` starts every harness session from the
+thread the server sent, with its system messages as the instructions.
 """
 
 import hmac
@@ -33,10 +37,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import SPEC, bot_settings
 
-from ag_ui_antigravity import AntigravityAgent, create_antigravity_app
+from ag_ui_antigravity import create_antigravity_app
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from google.antigravity.models import GeminiAPIEndpoint
+
+from .whole_thread import OpenBotAntigravityAgent
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -68,7 +74,7 @@ def _api_key() -> str | None:
     return None
 
 
-def _agent() -> AntigravityAgent:
+def _agent() -> OpenBotAntigravityAgent:
     """The harness, pointed at whatever Gemini this deployment runs.
 
     With a base url the endpoint is spelled out: `AntigravityAgent(base_url=...)` is a DIFFERENT
@@ -79,13 +85,13 @@ def _agent() -> AntigravityAgent:
     model, api_key = _model(), _api_key()
     base_url = (os.environ.get(_GOOGLE["base_url_variable"]) or "").strip()
     if base_url:
-        return AntigravityAgent(
+        return OpenBotAntigravityAgent(
             model=model,
             endpoint=GeminiAPIEndpoint(base_url=base_url, api_key=api_key),
         )
     # Named rather than left to the SDK's own environment read, so a missing key is this Bot's
     # failure at start-up rather than a stream that opens and dies.
-    return AntigravityAgent(model=model, api_key=api_key)
+    return OpenBotAntigravityAgent(model=model, api_key=api_key)
 
 
 app = create_antigravity_app(_agent(), path="/")
