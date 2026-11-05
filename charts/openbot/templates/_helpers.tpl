@@ -630,8 +630,8 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   One definition, for the same reason `openbot.databaseUrlEnv` is one (see its comment above): the
   API server needs this value to RECOGNISE the worker, and the routines CronJob needs the same value
   to BE the worker. Two definitions could drift; this can't. Gated on `routines.enabled` so a
-  deployment that never turns routines on gets no env var pointing at a key its secret store may not
-  hold.
+  deployment that switches routines off gets no env var pointing at a Secret nothing writes. Where
+  the value lives is `openbot.workerSecretRef`, below.
 
   Above `config.extraEnv`, not below it: Kubernetes takes the last of a duplicate name, and this must
   lose to an operator's own value, not win over it. Below it, this chart's own secretKeyRef would
@@ -639,15 +639,50 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   someone would need it for.
 */}}
 {{- if (.Values.routines).enabled }}
+{{- $worker := include "openbot.workerSecretRef" . | fromYaml }}
 - name: WORKER_SHARED_SECRET
   valueFrom:
     secretKeyRef:
-      name: {{ include "openbot.secretName" . }}
-      key: worker-shared-secret
+      name: {{ $worker.name }}
+      key: {{ $worker.key }}
 {{- end }}
 {{- with .Values.config.extraEnv }}
 {{ toYaml . }}
 {{- end }}
+{{- end -}}
+
+{{/*
+Where WORKER_SHARED_SECRET lives, as YAML {name, key}, with `write: true` when this chart writes it
+(templates/routines/secret.yaml).
+
+It is a credential between two pods of this release, the routines CronJob that presents it and the
+API server that checks it, and nobody else ever needs to know it. So nobody has to make one. A key
+the operator already holds wins: `worker-shared-secret` named in `externalSecrets.data`, or present in
+`secrets.existingSecret`. Then `secrets.workerSharedSecret`. Otherwise the chart generates one, once,
+and keeps it across upgrades (`openbot.keptValue`).
+
+It used to be required, and routines were off by default for that reason alone: a default install
+stored, scheduled and showed every routine a Bot was asked for, and never ran one.
+
+The operator's own Secret is looked inside with `lookup`, at install and upgrade. `helm template` and
+a client-side dry run cannot look, so they render the generated Secret instead.
+*/}}
+{{- define "openbot.workerSecretRef" -}}
+{{- $key := "worker-shared-secret" -}}
+{{- $own := "" -}}
+{{- if .Values.externalSecrets.enabled -}}
+{{- range .Values.externalSecrets.data -}}
+{{- if eq .secretKey $key }}{{ $own = include "openbot.secretName" $ }}{{ end -}}
+{{- end -}}
+{{- else if .Values.secrets.existingSecret -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace .Values.secrets.existingSecret -}}
+{{- if hasKey (($existing | default dict).data | default dict) $key }}{{ $own = .Values.secrets.existingSecret }}{{ end -}}
+{{- end -}}
+{{- if $own -}}
+{{- toYaml (dict "name" $own "key" $key) -}}
+{{- else -}}
+{{- toYaml (dict "name" (printf "%s-worker-secret" (include "openbot.fullname" .)) "key" $key "write" true) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

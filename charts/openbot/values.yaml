@@ -509,9 +509,12 @@ computers:
 # Standing instructions a Bot runs on a schedule. The sweep offers due routines to the shared work
 # queue and hands each firing to the API server, which runs the turn as the person who scheduled it.
 routines:
-  # Off by default, because it needs a secret. Without `secrets.workerSharedSecret` the API server
-  # refuses every handoff, and a CronJob whose every run is a 401 is worse than no CronJob at all.
-  enabled: false
+  # ON BY DEFAULT, because every Bot can be asked for a routine, and with no sweep it is stored,
+  # scheduled and shown with a next run time, and never runs. The sweep presents a secret the API
+  # server checks; nobody has to make one. A key you hold wins (`worker-shared-secret` in your store
+  # or in `secrets.existingSecret`), then `secrets.workerSharedSecret`, and otherwise the chart
+  # generates one into `<release>-worker-secret` and keeps it across upgrades.
+  enabled: true
   # Pause new scheduled runs during an operator-controlled maintenance window. Existing Jobs
   # retain their lease/timeout behavior; suspension does not cancel work already in flight.
   suspend: false
@@ -533,9 +536,9 @@ routines:
 # anybody who reaches 32 can attach nothing, in any channel, for good.
 attachments:
   culler:
-    # On by default, unlike `routines` above: this needs nothing but the database, which every
+    # On by default, like `routines` above: this needs nothing but the database, which every
     # deployment already has, so there is no failure mode where enabling it does more harm than the
-    # rows it was written to remove. Nothing but the database is meant literally — the script reads
+    # rows it was written to remove. Nothing but the database is meant literally: the script reads
     # `DATABASE_URL` and no other variable, which is why this CronJob carries no secret at all.
     enabled: true
     # Hourly, not the five-minute schedule the other two CronJobs use: nothing here is time-sensitive
@@ -664,8 +667,11 @@ secrets:
   composioApiKey: ""
   # Sent to `config.managedAgent.url` on every call. Required when that url is set.
   managedAgentToken: ""
-  # Required when `routines.enabled`: what the CronJob presents to the API server to be recognised
-  # as the worker rather than as an unauthenticated caller.
+  # Optional. What the routines CronJob presents to the API server to be recognised as the worker
+  # rather than as an unauthenticated caller. Empty, the chart generates one and keeps it (see
+  # `routines` above). Set it when something outside this chart fires routines too, or when the chart
+  # is rendered by a tool that cannot read the cluster (Argo CD's `helm template`), where a generated
+  # value would change on every render.
   workerSharedSecret: ""
   # The client secret for whichever provider is configured above.
   googleClientSecret: ""

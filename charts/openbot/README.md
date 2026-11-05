@@ -68,6 +68,11 @@ install too.
 `openbot-intelligence-bootstrap` Job says what Intelligence set up. The browser reaches Intelligence's
 gateway through OpenBot's own address, so the one port-forward is all it needs.
 
+**Routines run.** A Bot asked to do something on a schedule stores a routine, and the
+`openbot-routines` CronJob fires whatever is due every five minutes. It proves itself to the server
+with a secret the chart generates into `openbot-worker-secret` and keeps across upgrades, so there is
+nothing to add to your file for it. See [The routines sweep](#the-routines-sweep).
+
 **Automatic Learning spends your model key.** Learning is on in OpenBot and in the bundled
 Intelligence, whose Learning agent reads finished conversations and proposes skills with
 `openai/gpt-5.5` on the key in `secrets.modelApiKey`. See [Automatic Learning](#automatic-learning).
@@ -78,7 +83,9 @@ database password under `postgres-password` and set `postgresql.auth.existingSec
 Secret; and set `intelligence.appApi.licenseSecret.existingSecret` to it too, so Intelligence reads the
 same licence. Intelligence's Learning agent reads `model-api-key` from that Secret as well: the chart
 copies it at install and on every upgrade, so a new key there reaches Learning on the next
-`helm upgrade`. `values.yaml` under `intelligence` explains every value the bundle sets.
+`helm upgrade`. `worker-shared-secret` is optional in it: put one there only if something outside this
+chart fires routines too, and otherwise the chart generates one. `values.yaml` under `intelligence`
+explains every value the bundle sets.
 
 ## What a cluster needs first
 
@@ -465,13 +472,9 @@ asked for inside more than one API replica; `networkPolicy.enabled` is set with 
 and no `networkPolicy.extraEgress`, or with `computers.mode: sandbox` and no
 `networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks, or
 `computers.egressProxy` is turned on with policies and no `networkPolicy.computerExtraEgress`, or with
-no `secrets.egressProxyUrl` where this chart writes the Secret; or
-`routines.enabled` is set with no `secrets.workerSharedSecret` — and, on `externalSecrets`, no
-`worker-shared-secret` key named for it to read instead. One combination gets no refusal at all:
-`secrets.existingSecret` with `routines.enabled`, because the Secret this chart would otherwise
-validate is somebody else's to create — put `worker-shared-secret` in it yourself, or every pod that
-mounts it fails to start — the routines CronJob, the culler, and the API server itself — with nothing
-at install time to say so.
+no `secrets.egressProxyUrl` where this chart writes the Secret. The routines worker's secret is not
+on this list: the chart generates one wherever nobody else holds one (see
+[The routines sweep](#the-routines-sweep)).
 
 ## Your own Bot
 
@@ -642,22 +645,39 @@ PostgreSQL with `select ... for update skip locked`, so whichever pod runs the s
 nobody else holds, and one that dies mid-suspend hands its work back when the lease expires. The
 decision is re-checked at the moment of acting, because somebody may have come back in between.
 
-A second CronJob shares that same mechanism for a different job: `routines.enabled` turns on the
-sweep that fires standing instructions a Bot was asked to carry out on a schedule, on
-`routines.schedule`. It needs `secrets.workerSharedSecret` — the credential it presents to the API
-server to be recognised as the worker rather than an arbitrary caller — and is off by default because
-turning it on with no secret set is a CronJob whose every run is refused. See the routines refusal
-below, and [docs/routines.md](../../docs/routines.md).
+### The routines sweep
 
-A third CronJob **deletes data, is on by default, and is the only one of the three that does**:
+A second CronJob shares that same mechanism for a different job: it fires the standing instructions
+a Bot was asked to carry out on a schedule, every five minutes (`routines.schedule`). It is on by
+default (`routines.enabled`), because every Bot can be asked for a routine, and without the sweep a
+routine is stored, scheduled and shown with a next run time, and never runs.
+
+The sweep hands each firing to the API server, and a shared secret, `WORKER_SHARED_SECRET`, is what
+tells the server the request came from the worker rather than an arbitrary caller. Both pods read it
+from one Secret, and nobody has to make it. The chart uses, in this order:
+
+1. `worker-shared-secret` from your store, when `externalSecrets.data` names it, or from
+   `secrets.existingSecret`, when that Secret holds it (looked up at install and upgrade);
+2. `secrets.workerSharedSecret`;
+3. otherwise a random value it generates once into `<release>-worker-secret` and reads back on every
+   upgrade.
+
+Set one yourself when something outside this chart fires routines too, or when the chart is rendered
+by a tool that cannot read the cluster, such as Argo CD's `helm template`: there a generated value
+changes on every render, while the server keeps the one it started with. Set `routines.enabled: false`
+to have no sweep. See [docs/routines.md](../../docs/routines.md).
+
+### The staged-attachment sweep
+
+A third CronJob is the only one of the three that **deletes data**, and it is on by default:
 `attachments.culler` sweeps staged attachments that were never sent. A file uploaded into the
 composer is stored the moment it is pasted or dropped, before anybody presses send — so closing the
 tab, or changing your mind, leaves bytes in the database that no message will ever point at. The
 sweep removes those, hourly (`attachments.culler.schedule`), once they are older than
 `attachments.culler.olderThanHours` — **24 hours by default**.
 
-It is on by default where the other two are off, because it needs nothing but the database that
-every deployment already has, and because the alternative is a table of blobs that only grows. What
+It is on by default because it needs nothing but the database that every deployment already has,
+and because the alternative is a table of blobs that only grows. What
 it will never remove is an attachment that was sent: those are stamped when the message they ride on
 goes out, and the sweep asks only for unstamped rows. The window matters, though — a person who
 uploads a file, leaves it in the composer overnight and comes back to send it will find it gone.
