@@ -33,7 +33,7 @@ your own machine.
 You can get started with OpenBot in three ways.
 
 - **Use the open-source template.** Clone the MIT-licensed application and make it your own. Replace the example tenant package under `examples/` with your own coworkers, channels, and skills. The [quick start](#quick-start) runs the template from source.
-- **Download Personal Edition.** The self-contained OpenBot desktop app runs the workspace and CopilotKit Intelligence locally on your [Mac or Windows PC](https://github.com/CopilotKit/OpenBot/releases/latest). Connect your model and start with the built-in Personal Assistant. Your model provider bills for usage separately.
+- **Download Personal Edition.** Choose your installer for [Mac (Apple silicon)](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg), [Mac (Intel)](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg), or [Windows (x64)](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe). The desktop app runs the workspace and CopilotKit Intelligence locally on your computer. Connect your model and start with the built-in Personal Assistant. Your model provider bills for usage separately.
 - **OpenBot for Business.** Deploy on your infrastructure with the [Helm chart](charts/openbot/README.md) or have CopilotKit host your workspace. Both options are in [early access](https://openbot.co/business). Our engineers can help you deploy and customize OpenBot for your team. [**Start the conversation**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme).
 
 ## What it is
