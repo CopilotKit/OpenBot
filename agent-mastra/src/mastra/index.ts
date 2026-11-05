@@ -131,8 +131,11 @@ function isUsableEntry(entry: unknown): entry is ContextEntry {
  * Every other `OpenBot …` entry is for this process, not the model: the Bot id, the deployment's
  * tool list, and the signed run assertion, which is a credential. The server keeps callers out of
  * that namespace (`RESERVED_MASTRA_CONTEXT_DESCRIPTIONS` in server/src/copilot.ts), so the prefix
- * is a safe line to draw. Caller context used to be dropped here altogether, although the server
- * forwards it and every other harness puts it in front of the model.
+ * is a safe line to draw. `OpenBot personal memory` is for the model, but as untrusted data, not
+ * as an instruction: the server sends the same records as a quoted conversation row
+ * (`quotedConversationRow` in server/src/copilot.ts), so it stays out of here too. Caller context
+ * used to be dropped here altogether, although the server forwards it and every other harness puts
+ * it in front of the model.
  */
 export function buildOpenBotInstructions({
   requestContext,

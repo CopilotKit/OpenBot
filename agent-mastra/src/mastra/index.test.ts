@@ -244,6 +244,8 @@ describe("OpenBot Mastra receiver instructions", () => {
         },
         { description: "OpenBot Bot id", value: "packaged-mastra-managed" },
         { description: "OpenBot deployment tools", value: '["message_bot"]' },
+        // Untrusted data: it reaches the model as a quoted conversation row, never as instructions.
+        { description: "OpenBot personal memory", value: "QUOTED_MEMORY" },
         { description: "Blank", value: "   " },
       ]),
     });
