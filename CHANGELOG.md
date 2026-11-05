@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A person can export a conversation as a Markdown file, from a download button in the
+  conversation's header. The file is built from the conversation's durable history, read fresh when
+  the button is pressed, through the same reader the transcript restores with. What lands in the
+  file is what the transcript shows: the words each side said, each tool call with the arguments it
+  was given and the result that answered it, and the files a person attached. Turns the history
+  holds but cannot read are counted at the head of the file rather than quietly absent; a long tool
+  result is cut at a size that keeps the file readable, with a line saying it was cut. The file name
+  is the conversation's own name, made safe for a download dialog.
 - People can pick the model a built-in Bot answers on, per conversation, from a brain icon in the
   composer, including before the first message. The list is read from the model provider, or from
   the gateway in `OPENAI_BASE_URL`, filtered to chat models and to the model allowlist. The pick is
