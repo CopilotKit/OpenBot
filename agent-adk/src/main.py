@@ -16,13 +16,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
 
-from ag_ui.core import DeveloperMessage, RunAgentInput, SystemMessage, UserMessage
+from ag_ui.core import (
+    AssistantMessage,
+    DeveloperMessage,
+    RunAgentInput,
+    SystemMessage,
+    ToolMessage,
+    UserMessage,
+)
 from ag_ui_adk import ADKAgent, AGUIToolset, add_adk_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from google.adk.agents import Agent
+from google.adk.events import Event
 from google.adk.models.lite_llm import LiteLlm
 from google.adk.sessions import InMemorySessionService
+from google.genai import types
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -213,9 +222,100 @@ class WholeThreadADKAgent(ADKAgent):
         if _missed_a_turn(messages, seen, pending):
             await manager._delete_session(session)
 
+    async def _hold_the_calls_this_run_answers(self, input: RunAgentInput) -> None:
+        """Rebuild this process's session waiting on the calls this run brings results for.
+
+        The server runs a call the Bot makes, then sends the thread back with its result in a new
+        request (`HeadlessToolsMiddleware`), and that request may reach a process that never saw
+        the call: another replica, or this one after a restart. Its session is not waiting on the
+        call, so `ag_ui_adk` takes the newest user message as new work and the model answers it
+        again: a fresh session calls the tool again, and the server runs it a second time; a live
+        one skips the result and says nothing. Instead the session is rebuilt from the thread as
+        the process that made the call holds it, everything up to the call seeded and the call
+        pending, and the library applies the result through its own resume path, as it would there.
+        """
+        messages = input.messages
+        results = []
+        for message in reversed(messages):
+            if not isinstance(message, ToolMessage):
+                break
+            results.insert(0, message)
+        if not results:
+            return
+        app_name, user_id = self._get_app_name(input), self._get_user_id(input)
+        manager = self._session_manager
+        seen = manager.get_processed_message_ids(app_name, input.thread_id, user_id=user_id)
+        if any(m.id in seen or m.tool_call_id in seen for m in results):
+            return  # Already taken here; the library knows what to do with it.
+        waiting = [m.tool_call_id for m in results]
+        session = await manager.get_session(input.thread_id, app_name, user_id)
+        pending = set((session.state or {}).get("pending_tool_calls") or []) if session else set()
+        if set(waiting) <= pending:
+            return  # This session made the calls.
+        calls = {
+            call.id: call
+            for message in messages
+            if isinstance(message, AssistantMessage)
+            for call in message.tool_calls or []
+        }
+        if any(call_id not in calls for call_id in waiting):
+            return  # A result for no call in the thread: nothing to rebuild it from.
+        if session is not None:
+            await manager._delete_session(session)
+        session, session_id = await self._ensure_session_exists(
+            app_name, user_id, input.thread_id, {}
+        )
+        await self._seed_session_history(
+            input,
+            session,
+            session_id,
+            app_name,
+            user_id,
+            author=self._adk_agent.name,
+            messages=messages[: len(messages) - len(results)],
+        )
+        # The seed keeps only calls answered within it, so the ones this run answers are added as
+        # the model made them, long-running, which is what a resume finds them by.
+        parts = []
+        for call_id in waiting:
+            call = calls[call_id]
+            try:
+                args = json.loads(call.function.arguments or "{}")
+            except ValueError:
+                args = {}
+            parts.append(
+                types.Part(
+                    function_call=types.FunctionCall(
+                        id=call_id,
+                        name=call.function.name,
+                        args=args if isinstance(args, dict) else {"value": args},
+                    )
+                )
+            )
+        session = await manager.get_session(session_id, app_name, user_id)
+        await manager._session_service.append_event(
+            session,
+            Event(
+                invocation_id=f"agui-resume-{input.run_id}",
+                author=self._adk_agent.name,
+                content=types.Content(role="model", parts=parts),
+                long_running_tool_ids=set(waiting),
+            ),
+        )
+        manager.invalidate_session(session_id, app_name, user_id)
+        await manager.set_state_value(
+            session_id=session_id,
+            app_name=app_name,
+            user_id=user_id,
+            key="pending_tool_calls",
+            value=list(waiting),
+        )
+
     async def run(self, input: RunAgentInput):
         await self._drop_a_session_that_missed_a_turn(input)
-        async with aclosing(super().run(_role_first(input))) as events:
+        prepared = _role_first(input)
+        await self._hold_the_calls_this_run_answers(prepared)
+        async with aclosing(super().run(prepared)) as events:
             async for event in events:
                 yield event
 

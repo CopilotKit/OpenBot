@@ -293,8 +293,8 @@ ANSWERED_ELSEWHERE = "CONTRACT_ANSWERED_ELSEWHERE_adk"
 
 
 @contextmanager
-def _tool_provider(parallel=1):
-    """A Chat Completions model that calls `TOOL_NAME` when asked to and has no result yet.
+def _tool_provider(parallel=1, rounds=1):
+    """A Chat Completions model that calls `TOOL_NAME` when asked to, until it has `rounds` results.
 
     It makes `parallel` calls at once. Yields `(base_url, bodies)`, every request body in arrival
     order.
@@ -310,7 +310,7 @@ def _tool_provider(parallel=1):
             bodies.append(body)
             messages = body["messages"]
             asked = TOOL_TRIGGER in json.dumps([m for m in messages if m["role"] == "user"][-1:])
-            answered = any(m["role"] == "tool" for m in messages)
+            answered = len([m for m in messages if m["role"] == "tool"]) >= rounds * parallel
             delta, reason = {"role": "assistant", "content": "ok"}, "stop"
             if asked and not answered:
                 delta = {
@@ -318,7 +318,8 @@ def _tool_provider(parallel=1):
                     "tool_calls": [
                         {
                             "index": n,
-                            "id": f"call_probe_{n}",
+                            # A new id on every response, as a real model mints one.
+                            "id": f"call_probe_{len(bodies)}_{n}",
                             "type": "function",
                             "function": {"name": TOOL_NAME, "arguments": f'{{"request_id":"probe-{n}"}}'},
                         }
@@ -541,3 +542,184 @@ def test_parallel_tool_results_for_this_process_continue_its_session(monkeypatch
     results = [m for m in body["messages"] if m["role"] == "tool"]
     assert len(results) == 2, body
     assert missing_from(body) == []
+
+
+def _replica(monkeypatch, base):
+    """A harness process of its own: a fresh import builds its own agent, sessions and ledger."""
+    main = _app(monkeypatch, openai_environment, base)
+    return main.app, main.agent
+
+
+@pytest.mark.parametrize("other", ["fresh", "warm", "restarted"])
+def test_a_tool_result_another_replica_brings_is_not_run_again(monkeypatch, other):
+    """The server runs a call and sends its result back in a new request, which may reach another replica.
+
+    That replica never saw the call. It must continue from the result the thread already records,
+    not answer the person's message again: answering again calls the tool again, and the server
+    runs whatever the Bot calls, so the side effect happened twice. `fresh` never served the thread,
+    `warm` answered its earlier turn, `restarted` is the replica that made the call, after a restart.
+    """
+    thread = f"replica-continuation-{other}"
+    with _tool_provider() as (base, bodies):
+        app_a, _ = _replica(monkeypatch, base)
+        app_b, _ = _replica(monkeypatch, base)
+
+        async def turns():
+            transport = lambda app: httpx.ASGITransport(app=app)  # noqa: E731
+            async with httpx.AsyncClient(transport=transport(app_a), base_url="http://a") as a, \
+                    httpx.AsyncClient(transport=transport(app_b), base_url="http://b") as b:
+                opening = conversation(thread_id=thread, run_id=f"{thread}-1")
+                opening["tools"] = [TOOL]
+                if other == "warm":
+                    # B answers the thread's first turn, so it holds a live session for it.
+                    early = {**opening, "messages": opening["messages"][:3]}
+                    await _post(b, early)
+                opening["messages"][-1]["content"] += f" {TOOL_TRIGGER}"
+                caller = a
+                events = await _post(caller, opening)
+                calls = [e for e in events if e["type"] == "TOOL_CALL_START"]
+                assert len(calls) == 1, events
+                call = calls[0]
+                arguments = "".join(
+                    e["delta"] for e in events
+                    if e["type"] == "TOOL_CALL_ARGS" and e["toolCallId"] == call["toolCallId"]
+                )
+                # The server runs the call once and sends its result back, as `HeadlessToolsMiddleware` does.
+                executed = [call["toolCallId"]]
+                messages = [
+                    *opening["messages"],
+                    {
+                        "id": call.get("parentMessageId") or "assistant-tool-call",
+                        "role": "assistant",
+                        "toolCalls": [{
+                            "id": call["toolCallId"],
+                            "type": "function",
+                            "function": {"name": TOOL_NAME, "arguments": arguments},
+                        }],
+                    },
+                    {"id": "tool-result", "role": "tool", "toolCallId": call["toolCallId"], "content": '{"value": 7}'},
+                ]
+                if other == "restarted":
+                    fresh_app, _ = _replica(monkeypatch, base)
+                    target = httpx.AsyncClient(transport=transport(fresh_app), base_url="http://a2")
+                else:
+                    target = b
+                called = len(bodies)
+                async with target if other == "restarted" else _noop(target) as replica:
+                    events = await _post(replica, {**opening, "runId": f"{thread}-1", "messages": messages})
+                again = [e for e in events if e["type"] == "TOOL_CALL_START"]
+                executed += [e["toolCallId"] for e in again]
+                text = "".join(e["delta"] for e in events if e["type"] == "TEXT_MESSAGE_CONTENT")
+                return executed, bodies[called:], text
+
+        executed, requests, text = asyncio.run(asyncio.wait_for(turns(), timeout=60))
+    assert len(executed) == 1, f"the tool ran {len(executed)} times: {executed}"
+    assert requests, "the model was never asked to continue from the result"
+    assert all(any(m["role"] == "tool" for m in r["messages"]) for r in requests), (
+        "the model answered the person's message again without the result"
+    )
+    assert text, "the replica said nothing after the result"
+
+
+class _noop:
+    """`async with` around a client the caller already manages."""
+
+    def __init__(self, client):
+        self.client = client
+
+    async def __aenter__(self):
+        return self.client
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.mark.parametrize("shape", ["grouped", "interleaved"])
+def test_parallel_results_another_replica_brings_are_not_run_again(monkeypatch, shape):
+    """Two calls made together on one replica, their results brought to another."""
+    thread = f"replica-parallel-{shape}"
+    with _tool_provider(parallel=2) as (base, bodies):
+        app_a, _ = _replica(monkeypatch, base)
+        app_b, _ = _replica(monkeypatch, base)
+
+        async def turns():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_a), base_url="http://a") as a, \
+                    httpx.AsyncClient(transport=httpx.ASGITransport(app=app_b), base_url="http://b") as b:
+                opening = conversation(thread_id=thread, run_id=f"{thread}-1")
+                opening["tools"] = [TOOL]
+                opening["messages"][-1]["content"] += f" {TOOL_TRIGGER}"
+                events = await _post(a, opening)
+                calls = [e for e in events if e["type"] == "TOOL_CALL_START"]
+                assert len(calls) == 2, events
+
+                def made(n, c):
+                    arguments = "".join(
+                        e["delta"] for e in events
+                        if e["type"] == "TOOL_CALL_ARGS" and e["toolCallId"] == c["toolCallId"]
+                    )
+                    return {"id": f"assistant-call-{n}", "role": "assistant", "toolCalls": [{
+                        "id": c["toolCallId"], "type": "function",
+                        "function": {"name": TOOL_NAME, "arguments": arguments},
+                    }]}
+
+                def result(n, c):
+                    return {"id": f"result-{n}", "role": "tool", "toolCallId": c["toolCallId"], "content": f'{{"value": {n}}}'}
+
+                tail = {
+                    "grouped": [made(0, calls[0]), made(1, calls[1]), result(0, calls[0]), result(1, calls[1])],
+                    "interleaved": [made(0, calls[0]), result(0, calls[0]), made(1, calls[1]), result(1, calls[1])],
+                }[shape]
+                called = len(bodies)
+                events = await _post(b, {**opening, "messages": [*opening["messages"], *tail]})
+                return [e for e in events if e["type"] == "TOOL_CALL_START"], bodies[called:]
+
+        again, requests = asyncio.run(asyncio.wait_for(turns(), timeout=60))
+    assert again == [], f"the tools were called again: {again}"
+    assert requests, "the model was never asked to continue from the results"
+    assert len([m for m in requests[0]["messages"] if m["role"] == "tool"]) == 2, requests[0]
+
+
+def test_a_call_made_after_resuming_elsewhere_is_answered_where_it_lands(monkeypatch):
+    """A makes a call; B resumes from its result and makes the next; that result reaches A.
+
+    Each call runs once: A's session, still waiting on the first, is rebuilt waiting on the second.
+    """
+    thread = "replica-chain"
+    with _tool_provider(rounds=2) as (base, bodies):
+        app_a, _ = _replica(monkeypatch, base)
+        app_b, _ = _replica(monkeypatch, base)
+
+        def answered(events, n):
+            call = next(e for e in events if e["type"] == "TOOL_CALL_START")
+            arguments = "".join(
+                e["delta"] for e in events
+                if e["type"] == "TOOL_CALL_ARGS" and e["toolCallId"] == call["toolCallId"]
+            )
+            return call["toolCallId"], [
+                {"id": f"assistant-call-{n}", "role": "assistant", "toolCalls": [{
+                    "id": call["toolCallId"], "type": "function",
+                    "function": {"name": TOOL_NAME, "arguments": arguments},
+                }]},
+                {"id": f"result-{n}", "role": "tool", "toolCallId": call["toolCallId"], "content": f'{{"value": {n}}}'},
+            ]
+
+        async def turns():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_a), base_url="http://a") as a, \
+                    httpx.AsyncClient(transport=httpx.ASGITransport(app=app_b), base_url="http://b") as b:
+                opening = conversation(thread_id=thread, run_id=f"{thread}-1")
+                opening["tools"] = [TOOL]
+                opening["messages"][-1]["content"] += f" {TOOL_TRIGGER}"
+                first, tail = answered(await _post(a, opening), 1)
+                messages = [*opening["messages"], *tail]
+                second, tail = answered(await _post(b, {**opening, "messages": messages}), 2)
+                messages += tail
+                called = len(bodies)
+                events = await _post(a, {**opening, "messages": messages})
+                return [first, second], events, bodies[called:]
+
+        executed, events, requests = asyncio.run(asyncio.wait_for(turns(), timeout=60))
+    assert len(set(executed)) == 2, executed
+    again = [e["toolCallId"] for e in events if e["type"] == "TOOL_CALL_START"]
+    assert again == [], f"A called the tool again: {again}"
+    assert requests and len([m for m in requests[0]["messages"] if m["role"] == "tool"]) == 2, requests
+    assert "".join(e["delta"] for e in events if e["type"] == "TEXT_MESSAGE_CONTENT"), events
