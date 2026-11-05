@@ -120,8 +120,12 @@ const SAFETY_REQUIREMENTS: readonly {
      * Moving money and buying, by what the action is called. A transfer, a payout or an order says
      * so in its tool's name or on the button pressed, and nowhere in its arguments, so these words
      * are matched on the name alone: a note that says "transfer" or "buy" is still an ordinary edit.
+     *
+     * A transfer of something that is not money ("transfer a repository", "transfer ownership") is
+     * left out, with or without an article in front of it. "Pay" counts only with what is paid
+     * after it ("pay invoice", "pay order"): payroll apps use it as a noun ("update pay schedule").
      */
-    tool: /\b(payouts?|transfers?(?! (ownership|of ownership|files?|domains?|calls?|chats?|conversations?))|withdraw(als?)?|charges?|buy|purchases?|remit|(create|place|submit) (an? )?order|send money)\b/,
+    tool: /\b(payouts?|transfers?(?! (an? |the )?(ownership|of ownership|files?|domains?|calls?|chats?|conversations?|repositor(y|ies)|repos?)\b)|withdraw(als?)?|charges?|buy|purchases?|remit|pay (an? |the )?(invoices?|orders?|bills?|balances?)|(create|place|submit) (an? )?order|send money)\b/,
     click: new RegExp(
       `^${CONFIRMING}(transfer|withdraw|pay|buy|send money)\\b|^${CONFIRMING}(send|pay|transfer|donate|tip)\\b.*[$€£¥₹]\\s?\\d|\\b(place (your )?order|(complete|confirm|submit) (your )?(purchase|order)|order now|buy now|buy it now)\\b`,
     ),
@@ -397,6 +401,14 @@ const RECIPIENT_KEYS = new Set([
 ]);
 
 /**
+ * Or an argument whose name says it holds the people an invitation goes to, however the broker
+ * spells it: Composio's `attendees`, Arcade's `attendee_emails`, Composio's Outlook `attendees_info`,
+ * Zoom's `settings__meeting__invitees`. A setting such as `guestsCanModify` or
+ * `send_notifications_to_attendees` holds no address, so the address test below leaves it out.
+ */
+const INVITED = /(^|_)(attendees?|invitees?|guests?)(_|$)/;
+
+/**
  * Whether a connector call names somebody to send it to by email address: a calendar event with
  * attendees sends them an invitation, whatever its tool is called. Only top-level arguments, and
  * only an address, so a `to` that names a folder is not a recipient.
@@ -406,7 +418,9 @@ function addressesPeople(args: unknown): boolean {
     return false;
   return Object.entries(args as Record<string, unknown>).some(
     ([key, value]) =>
-      RECIPIENT_KEYS.has(key.toLowerCase()) && /\S@\S/.test(flatten(value)),
+      (RECIPIENT_KEYS.has(key.toLowerCase()) ||
+        INVITED.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase())) &&
+      /\S@\S/.test(flatten(value)),
   );
 }
 

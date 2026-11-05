@@ -127,6 +127,12 @@ const CONSEQUENTIAL = {
         "Transfer",
       ),
       click("https://venmo.com/pay", "button", "Send $20"),
+      // Paying an invoice or an order says so in the tool's name, and nowhere in its arguments.
+      tool("composio-stripe", "STRIPE_PAY_INVOICE", { invoice: "in_1" }),
+      tool("composio-square", "SQUARE_PAY_ORDER", {
+        order_id: "ord_1",
+        idempotency_key: "k1",
+      }),
     ],
   },
   buying: {
@@ -179,6 +185,25 @@ const CONSEQUENTIAL = {
         summary: "Spec review",
         start_datetime: "2026-11-06T10:00",
         attendees: ["sam@example.com"],
+      }),
+      // The same invitation through Arcade's Google Calendar, Composio's Outlook and Arcade's
+      // Teams, which name their attendees differently.
+      tool("arcade-GoogleCalendar", "CreateEvent", {
+        summary: "Spec review",
+        start_datetime: "2026-11-06T10:00:00",
+        end_datetime: "2026-11-06T10:30:00",
+        attendee_emails: ["sam@example.com"],
+      }),
+      tool("composio-outlook", "OUTLOOK_CALENDAR_CREATE_EVENT", {
+        subject: "Spec review",
+        start_datetime: "2026-11-06T10:00:00",
+        end_datetime: "2026-11-06T10:30:00",
+        attendees_info: [{ email: "sam@example.com", type: "required" }],
+      }),
+      tool("arcade-MicrosoftTeams", "CreateMeeting", {
+        subject: "Spec review",
+        start_date_time: "2026-11-06T10:00:00",
+        attendee_emails: ["sam@example.com"],
       }),
     ],
   },
@@ -262,6 +287,22 @@ const ORDINARY = {
   ),
 } as const;
 
+/** Named like money, and moving none: a repository changing owner, a wallet set up, a payroll date. */
+const NOT_MONEY = [
+  tool("composio-github", "GITHUB_TRANSFER_A_REPOSITORY", {
+    owner: "me",
+    repo: "notes",
+    new_owner: "my-org",
+  }),
+  tool("composio-stripe", "STRIPE_CREATE_APPLE_PAY_DOMAIN", {
+    domain_name: "shop.example.com",
+  }),
+  tool("composio-gusto", "GUSTO_UPDATE_PAY_SCHEDULE", {
+    pay_schedule_id: "ps_1",
+    frequency: "Every other week",
+  }),
+];
+
 afterEach(() => setEdition("team"));
 afterAll(async () => {
   if (people.length)
@@ -318,6 +359,18 @@ describe.each(EDITIONS)("the %s edition", (edition) => {
       expect(await gate(owner, action)).toBeUndefined();
     });
   }
+
+  // A hand-off means the Bot can't do it at all, so one that moves no money must not get one.
+  test("a transfer or a 'pay' that moves no money is not handed to the person as a payment", async () => {
+    setEdition(edition);
+    for (const action of NOT_MONEY) {
+      const request = await gate(owner, action);
+      expect({
+        action: action.toolRef,
+        behaviour: request?.action.policy?.behaviour,
+      }).not.toMatchObject({ behaviour: "hand_off" });
+    }
+  });
 });
 
 describe("the personal edition's default", () => {
