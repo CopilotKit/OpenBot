@@ -265,14 +265,19 @@ class WholeThreadADKAgent(ADKAgent):
         session, session_id = await self._ensure_session_exists(
             app_name, user_id, input.thread_id, {}
         )
-        await self._seed_session_history(
-            input,
-            session,
-            session_id,
+        # Everything before the results, as the library seeds a new session's history, except
+        # that a message whose id is one of the calls stays unseen: `@ag-ui/client` names an
+        # assistant message after its first call when the harness sends no parent id, and the
+        # library takes a result whose call id it has seen as already taken.
+        paused = messages[: len(messages) - len(results)]
+        for event in self._history_seed_events(input.thread_id, self._adk_agent.name, paused):
+            await manager._session_service.append_event(session, event)
+        manager.invalidate_session(session_id, app_name, user_id)
+        manager.mark_messages_processed(
             app_name,
-            user_id,
-            author=self._adk_agent.name,
-            messages=messages[: len(messages) - len(results)],
+            input.thread_id,
+            [m.id for m in paused if m.id and m.id not in waiting],
+            user_id=user_id,
         )
         # The seed keeps only calls answered within it, so the ones this run answers are added as
         # the model made them, long-running, which is what a resume finds them by.

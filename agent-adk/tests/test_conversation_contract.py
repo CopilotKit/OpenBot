@@ -289,6 +289,8 @@ TOOL = {
     "parameters": {"type": "object", "properties": {"request_id": {"type": "string"}}},
 }
 TOOL_TRIGGER = "CONTRACT_CALL_THE_TOOL_adk"
+# The thread records a call in an assistant message whose id is the event's `parentMessageId`, or,
+# when the harness sends none, the call's own id: `@ag-ui/client` names it that way.
 ANSWERED_ELSEWHERE = "CONTRACT_ANSWERED_ELSEWHERE_adk"
 
 
@@ -391,7 +393,7 @@ def _after_a_tool_call(monkeypatch, thread, *runs):
                 messages = [
                     *first["messages"],
                     {
-                        "id": call.get("parentMessageId") or "assistant-tool-call",
+                        "id": call.get("parentMessageId") or call["toolCallId"],
                         "role": "assistant",
                         "toolCalls": [{
                             "id": call["toolCallId"],
@@ -525,7 +527,7 @@ def test_parallel_tool_results_for_this_process_continue_its_session(monkeypatch
                     return {"id": f"result-{n}", "role": "tool", "toolCallId": c["toolCallId"], "content": f'{{"value": {n}}}'}
 
                 def assistant(n, cs):
-                    return {"id": f"assistant-call-{n}", "role": "assistant", "toolCalls": [tool_call(c) for c in cs]}
+                    return {"id": cs[0]["toolCallId"], "role": "assistant", "toolCalls": [tool_call(c) for c in cs]}
 
                 tail = {
                     "one message": [assistant(0, calls), result(0, calls[0]), result(1, calls[1])],
@@ -589,7 +591,7 @@ def test_a_tool_result_another_replica_brings_is_not_run_again(monkeypatch, othe
                 messages = [
                     *opening["messages"],
                     {
-                        "id": call.get("parentMessageId") or "assistant-tool-call",
+                        "id": call.get("parentMessageId") or call["toolCallId"],
                         "role": "assistant",
                         "toolCalls": [{
                             "id": call["toolCallId"],
@@ -657,7 +659,7 @@ def test_parallel_results_another_replica_brings_are_not_run_again(monkeypatch, 
                         e["delta"] for e in events
                         if e["type"] == "TOOL_CALL_ARGS" and e["toolCallId"] == c["toolCallId"]
                     )
-                    return {"id": f"assistant-call-{n}", "role": "assistant", "toolCalls": [{
+                    return {"id": c.get("parentMessageId") or c["toolCallId"], "role": "assistant", "toolCalls": [{
                         "id": c["toolCallId"], "type": "function",
                         "function": {"name": TOOL_NAME, "arguments": arguments},
                     }]}
@@ -696,7 +698,7 @@ def test_a_call_made_after_resuming_elsewhere_is_answered_where_it_lands(monkeyp
                 if e["type"] == "TOOL_CALL_ARGS" and e["toolCallId"] == call["toolCallId"]
             )
             return call["toolCallId"], [
-                {"id": f"assistant-call-{n}", "role": "assistant", "toolCalls": [{
+                {"id": call.get("parentMessageId") or call["toolCallId"], "role": "assistant", "toolCalls": [{
                     "id": call["toolCallId"], "type": "function",
                     "function": {"name": TOOL_NAME, "arguments": arguments},
                 }]},
