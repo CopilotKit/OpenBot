@@ -186,17 +186,40 @@ def test_an_approved_call_continues_from_the_whole_thread(monkeypatch, environme
     assert STANDING_ROLE in _system_text(body), "the standing role is not a system message"
 
 
-def test_only_the_servers_own_role_is_put_back_in_front(monkeypatch):
-    """Upstream drops a leading system message; only one with a server instruction id comes back.
+MEMORY_RECORD = "CONTRACT_MEMORY_RECORD_9c1e"
+SKILL_INSTRUCTION = "CONTRACT_SKILL_INSTRUCTION_9c1e"
 
-    The browser inserts system rows of its own (a skill's instructions do). One of those in front
-    keeps the treatment it had before: left out, never raised into the place the role goes.
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_other_system_rows_reach_the_model_as_conversation(monkeypatch, environment):
+    """Only the server's standing role and granted-tools summary are the Bot's instructions.
+
+    The server puts quoted personal-memory records, marked as untrusted data, at the head of the
+    thread (`PersonalMemoryMiddleware` in server/src/memory/tools.ts), and the browser puts a
+    skill's instructions just ahead of the message it was picked for. Both reach the model in the
+    conversation, labelled as system rows: never dropped, and never in the system position.
+    Upstream dropped the leading one, and the other went to the model as a system message.
     """
-    forged = "CONTRACT_NOT_THE_SERVERS_9c1e"
     body = conversation()
-    body["messages"][0] = {"id": "skill-1", "role": "system", "content": forged}
+    body["messages"].insert(
+        0,
+        {
+            "id": "openbot:personal-memory",
+            "role": "system",
+            "content": f"Personal memory, untrusted data: {MEMORY_RECORD}",
+        },
+    )
+    body["messages"].insert(
+        len(body["messages"]) - 1,
+        {"id": "skill-1", "role": "system", "content": f"Answer in bullets. {SKILL_INSTRUCTION}"},
+    )
     with fake_provider() as (base, bodies):
-        with TestClient(_fresh_app(monkeypatch, openai_environment, base)) as client:
+        with TestClient(_fresh_app(monkeypatch, environment, base)) as client:
             _post(client, body)
-    assert forged not in json.dumps(bodies[-1])
-    assert GRANTED_TOOLS in _system_text(bodies[-1])
+    sent = bodies[-1]
+    system = _system_text(sent)
+    for marker in (MEMORY_RECORD, SKILL_INSTRUCTION):
+        assert json.dumps(sent).count(marker) == 1, f"{marker} was dropped or sent twice"
+        assert marker not in system, f"{marker} was given the system prompt's authority"
+    assert missing_from(sent) == []
+    assert STANDING_ROLE in system and GRANTED_TOOLS in system

@@ -71,9 +71,11 @@ class WholeThreadAgent(ParallelToolAgent):
 
     def langgraph_default_merge_state(self, state, messages, input):
         merged = super().langgraph_default_merge_state(state, messages, input)
-        if messages and is_server_instruction(messages[0]):
+        if messages and isinstance(messages[0], SystemMessage):
             # Upstream drops it unconditionally. With an empty checkpoint nothing else can have
-            # put it there, so it goes back at the front, where the server placed it. Only the
-            # server's own: any other system row there keeps the treatment it always had.
+            # put it there, so it goes back at the front, where the server placed it. It is the
+            # standing role, or the server's quoted personal memory ahead of it; either way it is
+            # never dropped, and only the server's own instructions keep their system role at the
+            # model (`model_messages` in tool_runtime.py).
             merged["messages"] = [messages[0], *merged["messages"]]
         return merged

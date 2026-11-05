@@ -172,14 +172,15 @@ def _system_turns_first(messages):
 
     ANTHROPIC TAKES ONE SYSTEM PROMPT, AT THE TOP. `langchain-anthropic` joins system messages that
     follow one another into it, and refuses one that comes after a conversation turn: "Received
-    multiple non-consecutive system messages." A skill somebody picks arrives as a system turn just
-    ahead of their message and stays in the thread, so from then on every run in that conversation
-    failed on Anthropic before the model was asked.
+    multiple non-consecutive system messages." A skill somebody picked used to arrive here as a
+    system turn just ahead of their message, and failed every later run in that conversation on
+    Anthropic before the model was asked. A skill now reaches the model as a labelled conversation
+    entry (`model_messages`), but the server's quoted personal memory does too, ahead of the
+    standing role, so the server's own instructions can still follow a conversation turn.
 
     Moved rather than merged, because the integration already joins the ones that are adjacent.
-    Only for Anthropic: OpenAI takes a system turn anywhere, so a skill stays beside the message it
-    was picked for, and `langchain-google-genai` already gathers every system message into Gemini's
-    one system instruction by itself.
+    Only for Anthropic: OpenAI takes a system turn anywhere, and `langchain-google-genai` already
+    gathers every system message into Gemini's one system instruction by itself.
     """
     from langchain_core.messages import SystemMessage, convert_to_messages
 
