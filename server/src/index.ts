@@ -243,6 +243,7 @@ import {
 } from "./plugins/personal-defaults";
 import {
   arcadeVerifierNotice,
+  ownsBrokerProject,
   selectProviderWiring,
   storedProvider,
 } from "./plugins/provider-wiring";
@@ -961,11 +962,16 @@ if (wiredProvider) {
   assertActivatable(wiredProvider, otherProviderRows);
 }
 /*
- * Arcade's verifier is set by hand in Arcade's dashboard and cannot be read back, so an Arcade
- * deployment says once, at startup, which address it must be set to. See `arcadeVerifierNotice`.
+ * Arcade's client checks its project's user verifier names this deployment before every consent it
+ * mints, and a single-user install, which owns its project, points it here when it does not. A
+ * deployment that signs people in only checks, and one that does not know its origin can do
+ * neither; both say so once, at startup. See `arcadeVerifierNotice`.
  */
 if (wiredProvider === "arcade") {
-  console.warn(arcadeVerifierNotice(config.publicUrl));
+  const notice = arcadeVerifierNotice(config.publicUrl, {
+    ownsProject: ownsBrokerProject(config),
+  });
+  if (notice) console.warn(notice);
 }
 
 /**

@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Connecting an app through Arcade on a single-user or personal install now brings you back to the OpenBot you started from, wherever it runs. After the consent screen, Arcade sends you to the address its project names as its user verifier, which used to be set by hand in Arcade's dashboard, so any OpenBot at another address (anything but `localhost:3001` on a shared key) landed on a page that does not exist. A single-user install now points that setting at its own `OPENBOT_PUBLIC_URL` (or `BETTER_AUTH_URL`) before each Connect or Authorize and reads it back; several on one key take turns, and the latest Connect decides where people come back. A deployment that signs people in treats its Arcade project as shared and never changes the setting: it checks it before each Connect and, until it names this deployment, refuses before anybody signs in, with the exact address to set in Arcade's dashboard. It also names that address at startup. See [Arcade](docs/plugins/arcade.md#the-verifier-url).
 - A Bot's work in a conversation reads as one line. A subtask is a step in the same line as the
   searches and pages beside it ("Searched the web, read 5 pages and ran 2 subtasks"), and opens to
   its task, its answer and its steps. A subtask that stopped before an action needing approval says

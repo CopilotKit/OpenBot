@@ -147,7 +147,7 @@ export function ConnectAppCard({
             </p>
           ) : null}
           {error ? (
-            <p className="text-destructive text-sm" role="status">
+            <p className="break-words text-destructive text-sm" role="status">
               {error}
             </p>
           ) : null}
