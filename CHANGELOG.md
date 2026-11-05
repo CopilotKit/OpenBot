@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Skills (Admin → Skills, and Settings → Skills in the personal edition) lists each skill as one
+  row with its command and how many Bots offer it, and the row opens the skill's own page. There,
+  each Bot has a switch, the skill's words can be edited, and deleting asks first. **New skill** is
+  a page of its own, and saving it opens the skill's page to choose its Bots. The personal edition's
+  entry is called Skills.
 - The desktop installers are served from `downloads.copilotkit.ai`, the address the website links
   to. `https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg`, `OpenBot-mac-x64.dmg` and
   `OpenBot-windows-x64-setup.exe` give the signed installers of the Latest stable release, never a

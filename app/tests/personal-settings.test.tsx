@@ -56,7 +56,7 @@ function clientFor(edition: "team" | "personal" | undefined) {
 const PERSONAL_ENTRIES = [
   ["Saved logins", "/settings/passwords"],
   ["Keys", "/settings/credentials"],
-  ["Skills for every Bot", "/settings/skills"],
+  ["Skills", "/settings/skills"],
   ["Computer", "/settings/computer"],
   ["Activity", "/settings/activity"],
 ] as const;
@@ -156,7 +156,7 @@ describe("the personal pages under Settings", () => {
     }
   });
 
-  test("name the skills page apart from a person's own skills", async () => {
+  test("call the skills page Skills, with nothing about every Bot", async () => {
     const client = clientFor("personal");
     client.setQueryData(["plugins", "page"], {
       catalogue: [],
@@ -176,9 +176,8 @@ describe("the personal pages under Settings", () => {
         <RouterProvider router={router as never} />
       </QueryClientProvider>,
     );
-    expect(
-      await view.findByRole("heading", { name: "Skills for every Bot" }),
-    ).toBeTruthy();
+    expect(await view.findByRole("heading", { name: "Skills" })).toBeTruthy();
+    expect(view.container.textContent).not.toContain("every Bot");
   });
 
   test("link to each other under Settings, not Admin", async () => {

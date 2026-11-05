@@ -102,7 +102,7 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
 
 /**
  * What the personal edition keeps of Admin. There is no Admin there, and the one person still stores
- * keys, writes skills for every Bot, resets the computer and reads the trail. Apps are not here:
+ * keys, writes skills, resets the computer and reads the trail. Apps are not here:
  * adding one and connecting it are the same step, on Connections, which also links here for keys and
  * saved logins.
  */
@@ -113,7 +113,7 @@ const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     linkOptions: { to: "/settings/credentials" },
   },
   {
-    title: "Skills for every Bot",
+    title: "Skills",
     icon: IconBook,
     linkOptions: { to: "/settings/skills" },
   },
