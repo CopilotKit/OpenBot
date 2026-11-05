@@ -1,5 +1,5 @@
 {
-  "cli": "latest",
+  "cli": "https://pkg.pr.new/CopilotKit/Intelligence/copilotkit@256cc68",
   "node": {
     "version": "26.13.0",
     "sha256": {
