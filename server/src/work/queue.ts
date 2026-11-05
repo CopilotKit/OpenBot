@@ -133,11 +133,17 @@ export type WorkQueue = {
   }) => Promise<boolean>;
   /**
    * Done. False means the lease had already gone to somebody else, so this was not ours to finish.
+   *
+   * `reason` is for work that is over without having been done, such as a hop dropped because its
+   * Bot was paused: kept on the row, as `release` keeps its own, so whatever reads the row later can
+   * tell "finished" from "finished with, and never run". Null clears a reason an earlier attempt
+   * left, for work that was done in the end; absent leaves the column as it is.
    */
   finish: (input: {
     kind: string;
     key: string;
     owner: string;
+    reason?: string | null;
   }) => Promise<boolean>;
   /** Not done, and worth another go after `delayMs`. False means it was no longer ours. */
   release: (input: {
@@ -345,7 +351,7 @@ export function createWorkQueue(database: Database): WorkQueue {
       return Boolean(renewed);
     },
 
-    async finish({ kind, key, owner }) {
+    async finish({ kind, key, owner, reason }) {
       const [finished] = await database
         .update(workItems)
         /*
@@ -358,6 +364,7 @@ export function createWorkQueue(database: Database): WorkQueue {
           claimedBy: null,
           leaseUntil: null,
           updatedAt: sql`now()`,
+          ...(reason === undefined ? {} : { lastError: reason }),
         })
         .where(ours(kind, key, owner))
         .returning({ key: workItems.key });

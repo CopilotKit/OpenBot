@@ -375,6 +375,17 @@ not on this deployment's network allowlist", whatever the rule said. The server 
 with its port still attached against the allowlist's domains. It now compares the host and the port
 separately, as the computer's own filter already did, so the rule's domain and ports decide.
 
+### Pausing a Bot also stops the work it already handed on
+
+A Bot's queued request to another Bot is now dropped when its person pauses the Bot that asked, as
+it already was when they paused the Bot being asked. Before, a hop queued just before its asking Bot
+was paused still ran the other Bot's turn, spending a model call in the paused Bot's name, and the
+answer was then thrown away on the way back. An answer already coming home is still delivered.
+
+A hop a pause stopped now reads as "skipped" in the Bot's Activity, where it read as "delivered", and
+writes an `agent.handoff_skipped` row to the audit trail, shown there as something that did not
+happen.
+
 ### The server image starts again
 
 The `server` image left out `agent-computer/src/egress.ts`, which the server imports to check a

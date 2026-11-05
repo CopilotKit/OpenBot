@@ -20,7 +20,11 @@ import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
 import { isEndpointRefusal } from "./endpoint";
 import { HANDOFF_KIND } from "./handoff";
 import { ThreadBusyError } from "./handoff-delivery";
-import { BOT_PAUSED_REASON, isBotPaused } from "./lifecycle";
+import {
+  ASKING_BOT_PAUSED_REASON,
+  BOT_PAUSED_REASON,
+  isBotPaused,
+} from "./lifecycle";
 
 /** What a hop carries, as `handoff.ts` wrote it. */
 export type HandoffWork = {
@@ -157,6 +161,25 @@ export function createHandoffRunner(options: {
       // A conversation that has not heard is corrected by its next event or its next read; a hop
       // reported as failed for it would be run again.
     }
+  };
+
+  /**
+   * Why this hop must not run, if a pause says so. Null means it may.
+   *
+   * BOTH ENDS OF A FORWARD HOP. Pause is enforced where work starts, and a hop is work the asking Bot
+   * started: checked only against the Bot being asked, a hop queued just before its asker was paused
+   * still ran the other Bot, in the paused Bot's name, and its answer was then dropped on the way
+   * home. A model call for a Bot that was meant to have stopped, and nothing anybody could see.
+   *
+   * ONLY THE ADDRESSED END OF A RELAY OR A NOTICE. Those carry `answerIn` and run the Bot that asked,
+   * which is `toBotId` on them; the Bot named in `fromBotId` has already answered, or failed to, and
+   * pausing it afterwards is no reason to lose what it said.
+   */
+  const pausedReason = async (work: HandoffWork): Promise<string | null> => {
+    if (await isBotPaused(work.actorId, work.toBotId)) return BOT_PAUSED_REASON;
+    if (!work.answerIn && (await isBotPaused(work.actorId, work.fromBotId)))
+      return ASKING_BOT_PAUSED_REASON;
+    return null;
   };
 
   /**
@@ -314,12 +337,44 @@ export function createHandoffRunner(options: {
             report.skipped.push({ key: item.key, reason: "not a hop" });
             continue;
           }
-          // A hop to a Bot its person paused is dropped, not delivered. See agents/lifecycle.ts.
-          if (await isBotPaused(work.actorId, work.toBotId)) {
-            await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
+          // A hop to a Bot its person paused is dropped, not delivered, and so is one a paused Bot
+          // asked for. See agents/lifecycle.ts and `pausedReason` above.
+          const paused = await pausedReason(work);
+          if (paused) {
+            const kept = await queue.finish({
+              kind: HANDOFF_KIND,
+              key: item.key,
+              owner,
+              reason: paused,
+            });
             ours.delete(item.key);
-            report.skipped.push({ key: item.key, reason: BOT_PAUSED_REASON });
+            // Gone to another replica, which reads the pause for itself and says what it decided.
+            // Recorded here as well, the trail would carry two skips for one hop, or a skip for a
+            // hop the other delivered after a resume.
+            if (!kept) {
+              report.skipped.push({ key: item.key, reason: "lease lost" });
+              continue;
+            }
+            report.skipped.push({ key: item.key, reason: paused });
+            // Settled before the trail is written, in the same order as a delivery below, so a
+            // trail that cannot be written does not leave the conversation reading "Asking…".
             await settled(work);
+            await recordAuditEvent(auditStore, {
+              eventType: "agent.handoff_skipped",
+              targetType: "agent",
+              targetId: work.toBotId,
+              ...(work.actorId ? { actorUserId: work.actorId } : {}),
+              initiator: { kind: "handoff", id: work.fromBotId },
+              payload: {
+                // See the same key on `agent.handoff_delivered` below: the Audit screen's Bot
+                // column reads `payload.bot`, so a row without it names no Bot.
+                bot: work.fromBotId,
+                from: work.fromBotId,
+                to: work.toBotId,
+                run: work.runId,
+                reason: paused,
+              },
+            });
             continue;
           }
 
@@ -395,6 +450,9 @@ export function createHandoffRunner(options: {
               kind: HANDOFF_KIND,
               key: item.key,
               owner,
+              // Delivered after all: a reason an earlier attempt left, such as a pause that has
+              // since been lifted, no longer describes this row, and Activity reads it.
+              reason: null,
             });
             ours.delete(item.key);
             /*
@@ -498,7 +556,12 @@ export function createHandoffRunner(options: {
              * controls is the exception: it is final, so the work ends here.
              */
             if (refused)
-              await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
+              await queue.finish({
+                kind: HANDOFF_KIND,
+                key: item.key,
+                owner,
+                reason,
+              });
             else
               await queue.release({
                 kind: HANDOFF_KIND,

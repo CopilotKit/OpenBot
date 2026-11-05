@@ -51,6 +51,8 @@ describe("what the trail says a row was", () => {
   test("tells a hop that never landed from one that was refused", () => {
     // Nothing was refused: the hop was accepted, tried, and ran out of attempts.
     expect(outcomeOf("agent.handoff_failed")).toBe("did-not-happen");
+    // Nor here: the hop was accepted, and a pause stopped it before it ran.
+    expect(outcomeOf("agent.handoff_skipped")).toBe("did-not-happen");
     // And a question that reached nobody, which nothing else anywhere records.
     expect(outcomeOf("agent.escalation_failed")).toBe("did-not-happen");
     expect(outcomeOf("computer.action_failed")).toBe("did-not-happen");

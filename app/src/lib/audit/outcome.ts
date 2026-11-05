@@ -65,6 +65,8 @@ export const DID_NOT_HAPPEN_EVENT_TYPES = [
   "agent.stream_stalled",
   /** A hop that was accepted, ran out of attempts, and never became the other Bot's turn. */
   "agent.handoff_failed",
+  /** A hop a pause stopped before it ran: the Bot it was for, or the one that asked, was paused. */
+  "agent.handoff_skipped",
   /** A question that reached nobody: the Bot stopped, and the person was never asked. */
   "agent.escalation_failed",
   /*

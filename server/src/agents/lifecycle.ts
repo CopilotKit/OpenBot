@@ -21,6 +21,13 @@ import { botLifecycle, updateRoutingPreferences } from "../db/schema/lifecycle";
 /** The sentence every skipped dispatch records, so the trail and the run rows say the same thing. */
 export const BOT_PAUSED_REASON = "The Bot is paused, so it did not run.";
 
+/**
+ * What a hop records when the Bot that asked for it was paused after asking. The Bot it was for is
+ * not paused, so the sentence above would name the wrong one.
+ */
+export const ASKING_BOT_PAUSED_REASON =
+  "The Bot that asked is paused, so this was not passed on.";
+
 export class BotPausedError extends Error {
   override name = "BotPausedError";
   constructor() {
