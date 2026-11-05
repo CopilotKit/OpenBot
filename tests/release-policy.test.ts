@@ -75,13 +75,18 @@ function journal(repo: string, last: string) {
 }
 /**
  * The upstream repository publishing a release: earlier releases tagged with the last migration
- * each shipped, then the release commit with its own last migration and the given policy.
+ * each shipped, then the release commit with its own last migration and the given policy. By
+ * default the fixture's migrations are the ones the committed policy names, so writing the next
+ * release's policy never breaks these tests.
  */
 function publisher(
   committed: unknown,
   {
-    tags = { "v0.3.0": "0053_identity_links" } as Record<string, string>,
-    migration = "0074_single_user_identity",
+    tags = { "v0.3.0": policy.compatibility.database.from[0] } as Record<
+      string,
+      string
+    >,
+    migration = policy.compatibility.database.to,
   } = {},
 ) {
   const repo = mkdtempSync(join(tmpdir(), "openbot-policy-"));
