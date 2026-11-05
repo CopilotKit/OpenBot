@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- When OpenBot asks before a Bot uses an app (sending an invitation, deleting a file), the card with Allow once and Deny now appears in the conversation, where the call is. It used to show only on the Bots page, and the conversation showed the call still running. A browser step's card already appeared in the conversation.
 - A calendar event or meeting with attendees now asks first through every app that sends one, not only Composio's Google Calendar. Arcade's Google Calendar, Outlook Calendar and Teams, and Composio's Outlook, Zoom and Calendly name their attendees differently, so their invitations went out without asking.
 - Paying an invoice or an order through an app (Stripe's pay invoice, Square's pay order) is now handed to you, as a transfer or a payout is. It used to run without asking. Payroll settings that only mention pay, such as a pay schedule, are unchanged.
 - A transfer that moves no money, such as moving a GitHub repository to another owner, is no longer handed to you as a payment. A Bot can do it again, under your approval settings.
