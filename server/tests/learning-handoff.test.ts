@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
+import { IntelligenceKnowingANewThread } from "@openbot/toolkit/copilotkit/agents";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { createStallGuard } from "../src/channels/stall-guard";
 import { loadConfig } from "../src/config";
@@ -9,8 +10,9 @@ import { testEnvironment } from "./support/environment";
 
 test("delegation creates its scratch Thread with the addressed Bot's Learning assignment before locking", async () => {
   const order: string[] = [];
+  // The runtime's own client class answers these two itself (copilot.ts); the third it inherits.
   const reads = spyOn(
-    CopilotKitIntelligence.prototype,
+    IntelligenceKnowingANewThread.prototype,
     "getThread",
   ).mockImplementation(async () => {
     order.push("check-thread");
@@ -27,7 +29,7 @@ test("delegation creates its scratch Thread with the addressed Bot's Learning as
     return { thread: { id: input.threadId, name: null }, created: true };
   });
   const locked = spyOn(
-    CopilotKitIntelligence.prototype,
+    IntelligenceKnowingANewThread.prototype,
     "ɵacquireThreadLock",
   ).mockImplementation(async (input) => {
     order.push("lock");

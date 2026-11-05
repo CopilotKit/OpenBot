@@ -204,6 +204,7 @@ import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
 } from "./learning/personal-space";
+import { createInspectorLearningReader } from "./learning/inspector";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
 import {
@@ -351,32 +352,33 @@ const learningProbeIntelligence = createIntelligenceClient(
   config.runtime.intelligence,
 );
 /*
- * Who can create the `openbot` container here: never the runtime key. A service token the operator
- * configured (local evaluation installs), or a CopilotKit CLI login on this machine, which is what a
- * laptop running `bun run start` has. Neither, and the log and Admin say exactly what to run instead.
+ * Who can create a Learning container here. First the runtime key itself, on an Intelligence that
+ * lets a project key create one in its own project, at the address the server already uses (a
+ * Service in the cluster with the bundled Intelligence). On one that does not, a service token the
+ * operator configured (local evaluation installs), or a CopilotKit CLI login on this machine, which
+ * is what a laptop running `bun run start` has: those two only over HTTPS, or HTTP on loopback.
+ * None of them, and the log and Admin say exactly what to run instead.
  */
+const learningApiUrl = config.runtime.intelligence.apiUrl.replace(/\/+$/, "");
 const learningApiOrigin = (() => {
   try {
-    return intelligenceApiOrigin(config.runtime.intelligence.apiUrl);
+    return intelligenceApiOrigin(learningApiUrl);
   } catch {
     return undefined;
   }
 })();
-const learningCanCreate =
-  learningApiOrigin !== undefined &&
-  (config.learningSetup !== undefined || cliLoginPresent());
-/** The credential that can create a Learning container, for the `openbot` default and for each person's own space. */
-const learningCredentials = (apiUrl: string): LearningContainerCredentials => ({
+/** The credentials that can create a Learning container, for the `openbot` default and for each person's own space. */
+const learningCredentials = (): LearningContainerCredentials => ({
   directory: process.cwd(),
-  apiUrl,
+  apiUrl: learningApiOrigin ?? learningApiUrl,
   nonInteractive: true,
   key: keyIntelligence(
-    apiUrl,
+    learningApiUrl,
     config.runtime.intelligence.apiKey,
     config.runtime.intelligence.gatewayWsUrl,
   ),
-  cliLogin: cliLoginPresent(),
-  ...(config.learningSetup
+  cliLogin: learningApiOrigin !== undefined && cliLoginPresent(),
+  ...(config.learningSetup && learningApiOrigin
     ? {
         serviceToken: {
           token: config.learningSetup.serviceToken,
@@ -390,15 +392,8 @@ const learningAutoAssign = createLearningAutoAssign({
   store: learningSettingsStore,
   probe: (containerId) =>
     probeLearningContainer(learningProbeIntelligence, containerId),
-  ...(learningApiOrigin
-    ? { instructions: learningSetupInstructions(learningApiOrigin) }
-    : {}),
-  ...(learningCanCreate && learningApiOrigin
-    ? {
-        create: () =>
-          ensureLearningContainer(learningCredentials(learningApiOrigin)),
-      }
-    : {}),
+  instructions: learningSetupInstructions(learningApiOrigin ?? learningApiUrl),
+  create: () => ensureLearningContainer(learningCredentials()),
   audit: createAuditStore(database),
 });
 /*
@@ -410,15 +405,8 @@ const personalLearningSpaces = createPersonalLearningSpaces({
   readSettings: () => learningSettingsStore.read(),
   snapshots: learningProbeIntelligence,
   store: createPersonSpaceStore(database),
-  ...(learningCanCreate && learningApiOrigin
-    ? {
-        create: (container) =>
-          createLearningContainer({
-            ...learningCredentials(learningApiOrigin),
-            container,
-          }),
-      }
-    : {}),
+  create: (container) =>
+    createLearningContainer({ ...learningCredentials(), container }),
   nameFor: async (userId) =>
     (
       await database
@@ -1275,6 +1263,8 @@ const handoffDesk = createHandoffDesk({
         // would let a Bot address one nobody gave it because the database blinked.
         .catch(() => [] as string[])
     ).includes(toBotId),
+  // The same grants, listed, so a name that matches no Bot is answered with the ones it may ask.
+  addressable: (fromBotId) => pluginStore.botsReachableFrom(fromBotId),
   /*
    * Deferred rather than passed directly, because `actorFor` is defined further down with the rest
    * of the run-building collaborators. It is only ever called during a hop, long after this module
@@ -2679,6 +2669,7 @@ const channelSummaries = {
   queue: createWorkQueue(database),
   transcript: routineIntelligence,
   title: createChannelTitler({
+    provider: runtimeModel.provider,
     model: runtimeModel.defaultModel,
     resolveApiKey: resolveRuntimeModelApiKey,
   }),
@@ -2754,6 +2745,8 @@ const selfHostBannerIntelligence = createIntelligenceClient(
 
 // Said once, at boot, whether Intelligence will let this deployment use what it is licensed for. A
 // self-hosted Intelligence without a licence refuses memory quietly; this is the line that says why.
+// On a first install, an Intelligence installed beside this server is still running its migrations
+// when this first asks, so the check waits that out before it says anything (intelligence-startup.ts).
 void reportIntelligenceEntitlement({
   entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
 });
@@ -2896,7 +2889,11 @@ const app = createApp(
     store: learningSettings,
     autoAssign: learningAutoAssign,
     status: copilotRuntime.learning?.status,
-    inspect: copilotRuntime.learning?.inspect,
+    // Read directly: the runtime client refuses a snapshot without dashboard links.
+    inspect: copilotRuntime.learning
+      ? createInspectorLearningReader(config.runtime.intelligence)
+      : undefined,
+    manage: learningProbeIntelligence.experimental.learning,
   },
   {
     productTelemetry,

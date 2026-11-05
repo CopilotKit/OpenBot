@@ -1,25 +1,60 @@
 import type {
   LearningAutoAssignState,
+  LearningEvidence,
+  LearningProposal,
   LearningSettings,
   LearningTarget,
 } from "@openbot/shared/learning";
+import { IconChevronRight, IconSparkles } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { Fragment, useId, useState } from "react";
+import { Streamdown } from "streamdown";
 import { SkillSharingSection } from "@/components/admin/controls/skill-sharing-section";
-import { PageSection, PageShell } from "@/components/layout/page-shell";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+  PageShell,
+} from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import {
+  reviewLearningProposalMutationOptions,
+  startLearningRunMutationOptions,
+} from "@/lib/learning/mutations";
 import {
   createLearningContainer,
   learningAutomaticQueryOptions,
   learningDeliveryQueryOptions,
   learningKeys,
   learningOverviewQueryOptions,
+  learningProposalQueryOptions,
+  learningProposalsQueryOptions,
   learningSettingsQueryOptions,
   saveLearningSettings,
 } from "@/lib/learning/queries";
+import { markdownComponents } from "@/lib/markdown";
+import { queryClient as appQueryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/learning")({
   component: LearningPage,
@@ -41,6 +76,8 @@ function automaticMessage(
     return `This Intelligence project has no "${automatic.containerId}" Learning container yet. Nothing is collected.`;
   if (automatic.state === "not_entitled")
     return "This Intelligence project's plan doesn't include Learning. No container was assigned.";
+  if (automatic.state === "learning_off")
+    return "Learning is switched off in Intelligence. Nothing is collected until it's turned on there.";
   if (automatic.state === "unavailable")
     return "Couldn't reach Intelligence to find this project's Learning container. OpenBot will try again.";
   return undefined;
@@ -128,7 +165,7 @@ function ContainerSetup({
               : `Create the ${automatic.containerId} container`}
           </Button>
           <span className="text-muted-foreground">
-            Uses this deployment's credential, not the runtime key.
+            Uses this deployment's Intelligence credentials.
           </span>
         </div>
       )}
@@ -332,7 +369,7 @@ export function LearningPage() {
       </PageSection>
       <PageSection
         title="Review and publish"
-        description="Intelligence studies finished conversations and proposes skills. Review and publish them in Intelligence. Bots only use published skills."
+        description="Intelligence studies finished conversations and proposes skills. Review and publish them below. Bots only use published skills."
       >
         <div className="grid gap-4">
           <label className="grid gap-2 text-sm">
@@ -368,32 +405,22 @@ export function LearningPage() {
                       : "No Learning container is assigned."}
               </p>
               <dl className="grid grid-cols-2 gap-4 rounded-lg border p-4 text-sm">
-                <div>
-                  <dt className="text-muted-foreground">Threads ready</dt>
-                  <dd className="font-semibold text-xl">
-                    {snapshot.pendingThreadCount}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">
-                    Candidates to review
-                  </dt>
-                  <dd className="font-semibold text-xl">
-                    {snapshot.pendingCandidateCount}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Published skills</dt>
-                  <dd className="font-semibold text-xl">
-                    {snapshot.publishedSkillCount}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Insights</dt>
-                  <dd className="font-semibold text-xl">
-                    {snapshot.insightCount}
-                  </dd>
-                </div>
+                {(
+                  [
+                    ["Threads ready", snapshot.pendingThreadCount],
+                    ["Candidates to review", snapshot.pendingCandidateCount],
+                    ["Published skills", snapshot.publishedSkillCount],
+                    ["Insights", snapshot.insightCount],
+                  ] as const
+                ).map(([label, count]) =>
+                  // An older Intelligence with no dashboard does not count these for a project key.
+                  count === null ? null : (
+                    <div key={label}>
+                      <dt className="text-muted-foreground">{label}</dt>
+                      <dd className="font-semibold text-xl">{count}</dd>
+                    </div>
+                  ),
+                )}
               </dl>
               <p className="text-sm">
                 {snapshot.hasActiveRun
@@ -402,33 +429,40 @@ export function LearningPage() {
                     ? `Latest analysis: ${snapshot.latestRunStatus}.`
                     : "No analysis has run yet."}
               </p>
-              <div className="flex flex-wrap gap-4 text-sm underline">
-                <a
-                  href={snapshot.links.learning}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Manage Learning in Intelligence
-                </a>
-                {snapshot.links.candidates && (
-                  <a
-                    href={snapshot.links.candidates}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Review skill candidates
-                  </a>
-                )}
-                {snapshot.links.runs && (
-                  <a
-                    href={snapshot.links.runs}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    View analysis runs
-                  </a>
-                )}
-              </div>
+              {/* Links into Intelligence's dashboard, where there is one to link to. */}
+              {(snapshot.links.learning ||
+                snapshot.links.candidates ||
+                snapshot.links.runs) && (
+                <div className="flex flex-wrap gap-4 text-sm underline">
+                  {snapshot.links.learning && (
+                    <a
+                      href={snapshot.links.learning}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Manage Learning in Intelligence
+                    </a>
+                  )}
+                  {snapshot.links.candidates && (
+                    <a
+                      href={snapshot.links.candidates}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Review skill candidates
+                    </a>
+                  )}
+                  {snapshot.links.runs && (
+                    <a
+                      href={snapshot.links.runs}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      View analysis runs
+                    </a>
+                  )}
+                </div>
+              )}
             </>
           )}
           {selected && (
@@ -479,14 +513,293 @@ export function LearningPage() {
             Refresh status
           </Button>
           <p className="text-muted-foreground text-sm">
-            Managing Learning needs your Intelligence account and project
-            access. OpenBot keeps project credentials on the server. Turning
-            Learning off here keeps settings and conversation assignments.
-            Schedules and publishing stay in Intelligence.
+            OpenBot keeps project credentials on the server. Turning Learning
+            off here keeps settings and conversation assignments. Schedules stay
+            in Intelligence.
           </p>
         </div>
       </PageSection>
+      <ProposedSkills agentId={selected || undefined} />
       <SkillSharingSection />
     </PageShell>
+  );
+}
+
+const STATUS: Record<LearningProposal["status"], string> = {
+  pending_review: "To review",
+  approved: "Published",
+  rejected: "Rejected",
+};
+
+/**
+ * The skills Intelligence proposed for the container shown above, to approve (which publishes it to
+ * that container's Bots) or reject, and Learn now. Here because a bundled Intelligence has no
+ * dashboard of its own to do it in.
+ */
+function ProposedSkills({ agentId }: { agentId?: string }) {
+  const proposals = useQuery(learningProposalsQueryOptions(agentId));
+  const learnNow = useMutation(startLearningRunMutationOptions(appQueryClient));
+  const [open, setOpen] = useState<string | null>(null);
+  const containerId = proposals.data?.containerId ?? null;
+  return (
+    <PageSection
+      title="Proposed skills"
+      description="Approve a skill to publish it to the Bots that use this container. Each decision is recorded in the audit log."
+      action={
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!containerId || learnNow.isPending}
+          onClick={() => learnNow.mutate(agentId)}
+        >
+          {learnNow.isPending ? "Starting…" : "Learn now"}
+        </Button>
+      }
+    >
+      {learnNow.isSuccess && (
+        <p role="status" className="mt-4 text-sm">
+          Learning started. New skills appear here when it finishes.
+        </p>
+      )}
+      {learnNow.error && (
+        <p role="alert" className="mt-4 text-destructive text-sm">
+          {learnNow.error.message}
+        </p>
+      )}
+      {proposals.isPending ? null : proposals.error ? (
+        <p role="alert" className="mt-4 text-destructive text-sm">
+          {proposals.error.message}
+        </p>
+      ) : !containerId ? (
+        <PageEmpty icon={IconSparkles} title="No container">
+          Choose a container under Participation to see the skills Intelligence
+          proposes for it.
+        </PageEmpty>
+      ) : proposals.data.proposals.length === 0 ? (
+        <PageEmpty icon={IconSparkles} title="No proposed skills yet">
+          Intelligence proposes skills once it has learned from finished
+          conversations. Learn now starts it.
+        </PageEmpty>
+      ) : (
+        <PageRows>
+          {proposals.data.proposals.map((proposal, index) => (
+            <Fragment key={proposal.id}>
+              {index > 0 ? <Separator /> : null}
+              <Item
+                render={
+                  <button onClick={() => setOpen(proposal.id)} type="button" />
+                }
+                size="sm"
+              >
+                <ItemMedia variant="icon">
+                  <IconSparkles />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{proposal.title}</ItemTitle>
+                  <ItemDescription>{proposal.description}</ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-sm">
+                    {STATUS[proposal.status]}
+                  </span>
+                  <IconChevronRight className="size-4 text-muted-foreground" />
+                </ItemActions>
+              </Item>
+            </Fragment>
+          ))}
+        </PageRows>
+      )}
+      {open && (
+        <ProposalDialog
+          agentId={agentId}
+          onClose={() => setOpen(null)}
+          proposalId={open}
+        />
+      )}
+    </PageSection>
+  );
+}
+
+/** SKILL.md without its front matter, whose name and description the dialog's header already shows. */
+function skillBody(markdown: string): string {
+  return markdown.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+}
+
+/** What one Insight was learned from: the messages a conversation was cited for, or a recording. */
+function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
+  if (evidence === null)
+    return (
+      <p className="text-muted-foreground text-sm">
+        Couldn't load the evidence for this.
+      </p>
+    );
+  return (
+    <ul className="grid gap-3">
+      {evidence.map((entry) => (
+        <li
+          className="grid gap-1.5 rounded-md bg-muted p-3 text-sm"
+          key={`${entry.kind}:${entry.id}`}
+        >
+          {entry.kind === "conversation" ? (
+            <>
+              <p className="font-medium">
+                {entry.title ?? "A conversation"}
+                {entry.available ? "" : " (no longer available)"}
+              </p>
+              {entry.messages.map((message) => (
+                <p className="text-pretty" key={message.id}>
+                  <span className="text-muted-foreground">
+                    {message.role === "user"
+                      ? "Person: "
+                      : message.role === "assistant"
+                        ? "Bot: "
+                        : "Tool: "}
+                  </span>
+                  {message.content}
+                </p>
+              ))}
+            </>
+          ) : (
+            <p>
+              {`A recording${entry.available ? "" : " (no longer available)"}: ${entry.events.join(", ") || `${entry.eventCount} steps`}`}
+            </p>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** One proposed skill: the SKILL.md it publishes, why, and the evidence, with Approve and Reject. */
+function ProposalDialog({
+  agentId,
+  onClose,
+  proposalId,
+}: {
+  agentId?: string;
+  onClose: () => void;
+  proposalId: string;
+}) {
+  const detail = useQuery(learningProposalQueryOptions(proposalId, agentId));
+  const review = useMutation(
+    reviewLearningProposalMutationOptions(appQueryClient),
+  );
+  const proposal = detail.data;
+  const skill = proposal?.files.find((file) => file.path === "SKILL.md");
+  const others = proposal?.files.filter((file) => file.path !== "SKILL.md");
+  const decide = (decision: "approve" | "reject") =>
+    review.mutate({ proposalId, decision, ...(agentId ? { agentId } : {}) });
+  const decided = review.data?.status ?? proposal?.status;
+  return (
+    <Dialog onOpenChange={(next) => (next ? undefined : onClose())} open>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{proposal?.title ?? "Proposed skill"}</DialogTitle>
+          {proposal && (
+            <DialogDescription>{proposal.description}</DialogDescription>
+          )}
+        </DialogHeader>
+        <DialogBody className="mt-4 gap-5 overflow-y-auto">
+          {detail.isPending ? null : detail.error ? (
+            <p role="alert" className="text-destructive text-sm">
+              {detail.error.message}
+            </p>
+          ) : (
+            <>
+              <section className="grid gap-1.5">
+                <h3 className="font-medium text-sm">Why</h3>
+                <p className="text-pretty text-sm">{proposal?.reason}</p>
+              </section>
+              {skill && (
+                <section className="grid gap-1.5">
+                  <h3 className="font-medium text-sm">SKILL.md</h3>
+                  <div className="rounded-md border p-3">
+                    <Streamdown
+                      className="min-w-0 text-sm [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_li]:my-0 [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                      components={markdownComponents}
+                      mode="static"
+                    >
+                      {skillBody(skill.content)}
+                    </Streamdown>
+                  </div>
+                </section>
+              )}
+              {others && others.length > 0 && (
+                <section className="grid gap-1.5">
+                  <h3 className="font-medium text-sm">Other files</h3>
+                  {others.map((file) => (
+                    <details
+                      className="rounded-md border p-3 text-sm"
+                      key={file.path}
+                    >
+                      <summary className="cursor-pointer">{file.path}</summary>
+                      <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-xs">
+                        {file.content}
+                      </pre>
+                    </details>
+                  ))}
+                </section>
+              )}
+              {proposal && proposal.insights.length > 0 && (
+                <section className="grid gap-3">
+                  <h3 className="font-medium text-sm">Learned from</h3>
+                  {proposal.insights.map((insight) => (
+                    <div className="grid gap-2" key={insight.id}>
+                      <p className="text-pretty text-sm">{insight.statement}</p>
+                      <EvidenceList evidence={insight.evidence} />
+                    </div>
+                  ))}
+                </section>
+              )}
+            </>
+          )}
+          {review.error && (
+            <p role="alert" className="text-destructive text-sm">
+              {review.error.message}
+            </p>
+          )}
+        </DialogBody>
+        <DialogFooter className="mt-4">
+          {decided === "pending_review" ? (
+            <>
+              <Button
+                disabled={review.isPending}
+                onClick={() => decide("reject")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Reject
+              </Button>
+              <Button
+                disabled={review.isPending}
+                onClick={() => decide("approve")}
+                size="sm"
+                type="button"
+              >
+                {review.isPending ? "Saving…" : "Approve and publish"}
+              </Button>
+            </>
+          ) : (
+            <>
+              {decided && (
+                <span
+                  className="mr-auto text-muted-foreground text-sm"
+                  role="status"
+                >
+                  {decided === "approved"
+                    ? "Published. Bots on this container use it from their next conversation."
+                    : "Rejected. It won't be published."}
+                </span>
+              )}
+              <Button onClick={onClose} size="sm" type="button">
+                Done
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

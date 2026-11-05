@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   type CopilotKitIntelligence,
   LearnedSkillsError,
@@ -10,11 +10,22 @@ import {
   classifyProbeError,
   createLearningAutoAssign,
   keyProject,
+  type LearningAutoAssign,
   probeLearningContainer,
+  runtimeKeyClient,
   withLearningAutoAssign,
 } from "../src/learning/auto-assign";
+import {
+  ensureLearningContainer,
+  keyIntelligence,
+} from "../src/learning/ensure-container";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { skillSnapshot } from "./fixtures/learned-skills";
+import {
+  type FakeIntelligence,
+  fakeIntelligence,
+  RUNTIME_KEY,
+} from "./support/intelligence-learning";
 
 function harness(
   options: {
@@ -299,11 +310,12 @@ describe("automatic Learning container assignment", () => {
       create: async () => "skipped",
     });
     const state = await h.autoAssign.check();
+    // Nothing here could create it, so a button would do nothing: Admin shows the steps alone.
     expect(state).toEqual({
       state: "absent",
       containerId: "openbot",
       instructions,
-      canCreate: true,
+      canCreate: false,
     });
     await h.autoAssign.check();
     expect(h.logs).toHaveLength(1);
@@ -466,5 +478,157 @@ describe("reading settings nudges assignment", () => {
     await store.read();
     await Bun.sleep(0);
     expect(h.probes).toEqual([]);
+  });
+});
+
+describe("what an Intelligence that is up but not learning says, read through the runtime client", () => {
+  const served: FakeIntelligence[] = [];
+  afterEach(() => {
+    for (const intelligence of served.splice(0)) intelligence.stop();
+  });
+  const client = (version: Parameters<typeof fakeIntelligence>[0]) => {
+    const intelligence = fakeIntelligence(version);
+    served.push(intelligence);
+    return runtimeKeyClient(intelligence.url, RUNTIME_KEY, "ws://127.0.0.1:9");
+  };
+
+  test("Learning switched off is off, not Intelligence out of reach", async () => {
+    const intelligence = client("learning-off");
+    expect(await probeLearningContainer(intelligence, "openbot")).toBe(
+      "learning_off",
+    );
+    const logs: Record<string, unknown>[] = [];
+    const autoAssign = createLearningAutoAssign({
+      enabled: true,
+      store: createLearningSettingsStore(),
+      probe: (containerId) => probeLearningContainer(intelligence, containerId),
+      log: (entry) => logs.push(entry),
+    });
+    expect(await autoAssign.check()).toEqual({ state: "learning_off" });
+    expect(logs.map((entry) => entry.outcome)).toEqual(["learning_off"]);
+    expect(String(logs[0]?.message)).toContain("switched off");
+    expect(String(logs[0]?.message)).not.toContain("could not be asked");
+  });
+
+  test("Learning on but not admitted for the organization is not entitled", async () => {
+    expect(
+      await probeLearningContainer(client("rollout-closed"), "openbot"),
+    ).toBe("not_entitled");
+  });
+
+  test("an Intelligence that is not there at all is still unavailable", async () => {
+    const intelligence = fakeIntelligence("current");
+    intelligence.stop();
+    expect(
+      await probeLearningContainer(
+        runtimeKeyClient(intelligence.url, RUNTIME_KEY, "ws://127.0.0.1:9"),
+        "openbot",
+      ),
+    ).toBe("unavailable");
+  });
+});
+
+/*
+ * Kink 17 of the Helm bundle build. OpenBot's server is up before Intelligence's migrations and
+ * bootstrap run, by design. The boot check asked once, logged "Intelligence could not be asked about
+ * the Learning container" on every first install, and looked again only ten minutes later or when
+ * something read the settings. Real HTTP and the real runtime client, on a clock that moves only
+ * when the boot check sleeps.
+ */
+describe("the boot check on a first install, while Intelligence is still starting", () => {
+  const served: FakeIntelligence[] = [];
+  const stops: (() => void)[] = [];
+  afterEach(() => {
+    for (const stop of stops.splice(0)) stop();
+    for (const intelligence of served.splice(0)) intelligence.stop();
+  });
+
+  function boot(
+    intelligence: FakeIntelligence,
+    create?: () => Promise<ContainerCreation>,
+  ) {
+    served.push(intelligence);
+    const client = runtimeKeyClient(
+      intelligence.url,
+      RUNTIME_KEY,
+      "ws://127.0.0.1:9",
+    );
+    let at = 0;
+    const logs: Record<string, unknown>[] = [];
+    const autoAssign = createLearningAutoAssign({
+      enabled: true,
+      store: createLearningSettingsStore(),
+      probe: (containerId) => probeLearningContainer(client, containerId),
+      ...(create ? { create } : {}),
+      log: (entry) => logs.push(entry),
+      startup: {
+        now: () => at,
+        sleep: async (ms) => {
+          at += ms;
+        },
+      },
+    });
+    stops.push(() => autoAssign.stop());
+    autoAssign.start();
+    return { autoAssign, logs };
+  }
+
+  async function settled(autoAssign: LearningAutoAssign) {
+    for (let i = 0; i < 400 && autoAssign.state().state !== "assigned"; i++)
+      await Bun.sleep(5);
+    return autoAssign.state();
+  }
+
+  test("the migrations and the wait for the bootstrap pass quietly, then its container is assigned", async () => {
+    const intelligence = fakeIntelligence("current", {
+      containers: ["openbot"],
+      starting: { migrating: 4, keyless: 2 },
+    });
+    const { autoAssign, logs } = boot(intelligence);
+    expect(await settled(autoAssign)).toEqual({
+      state: "assigned",
+      containerId: "openbot",
+    });
+    expect(logs.map((entry) => entry.outcome)).toEqual(["assigned"]);
+  });
+
+  test("a creation Intelligence could not answer is tried again, not given up on", async () => {
+    const intelligence = fakeIntelligence("current", { failCreates: 1 });
+    const key = keyIntelligence(
+      intelligence.url,
+      RUNTIME_KEY,
+      "ws://127.0.0.1:9",
+    );
+    const { autoAssign, logs } = boot(intelligence, () =>
+      ensureLearningContainer({
+        directory: process.cwd(),
+        apiUrl: intelligence.url,
+        nonInteractive: true,
+        cliLogin: false,
+        key,
+      }),
+    );
+    expect(await settled(autoAssign)).toEqual({
+      state: "assigned",
+      containerId: "openbot",
+    });
+    expect(
+      intelligence.requests.filter((request) => request.method === "POST"),
+    ).toHaveLength(2);
+    expect(logs.map((entry) => entry.outcome)).toEqual([
+      "container_created",
+      "assigned",
+    ]);
+  });
+
+  test("an Intelligence still unavailable when the window closes is said to be, once", async () => {
+    const intelligence = fakeIntelligence("current", {
+      containers: ["openbot"],
+    });
+    intelligence.stop();
+    const { autoAssign, logs } = boot(intelligence);
+    for (let i = 0; i < 400 && logs.length === 0; i++) await Bun.sleep(5);
+    expect(autoAssign.state()).toEqual({ state: "unavailable" });
+    expect(logs.map((entry) => entry.outcome)).toEqual(["unavailable"]);
   });
 });

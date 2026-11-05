@@ -65,7 +65,7 @@ test("the signed Mac build goes through signed-build.ts and checks the CLI it ca
 test("the signed Windows build goes through signed-build.ts and checks the installer has the CLI", () => {
   const text = workflow("desktop-signing.yml");
   expect(step(text, "Build and sign")).toContain(
-    "bun desktop/scripts/signed-build.ts win32 x64",
+    "signed-build.ts win32 x64",
   );
   const verify = step(
     text,

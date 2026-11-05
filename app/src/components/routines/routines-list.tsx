@@ -341,7 +341,7 @@ export function RoutinesList({
                           to="/channel/$channelId"
                         >
                           <Chip className="text-muted-foreground transition-colors hover:text-foreground">
-                            {routine.channel.name ?? "Untitled conversation"}
+                            {routine.channel.title ?? "Untitled conversation"}
                           </Chip>
                         </Link>
                       )}

@@ -156,7 +156,16 @@ type RoutineDto = {
   schedule: string;
   timezone: string;
   instruction: string;
-  channel: { id: string; name: string | null; gone: boolean };
+  /**
+   * Where it posts. `title` is the conversation as the sidebar titles it, which is what a person
+   * recognises it by; `name` is only its Bots' names, the same for every conversation with them.
+   */
+  channel: {
+    id: string;
+    name: string | null;
+    title: string | null;
+    gone: boolean;
+  };
   enabled: boolean;
   nextRunAt: string;
   lastRun: { status: RoutineRunOutcome | null; at: string | null } | null;
@@ -187,6 +196,7 @@ function routineDto(routine: RoutineSummary): RoutineDto {
     channel: {
       id: routine.channelId,
       name: routine.channelName,
+      title: routine.channelTitle,
       gone: routine.channelDeleted,
     },
     enabled: routine.enabled,

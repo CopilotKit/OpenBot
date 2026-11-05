@@ -15,12 +15,13 @@ This template renders nothing.
 {{- /*
   The bundled database, without a password anybody can produce again.
 
-  The subchart generates one on install and then refuses to render on upgrade without being handed
-  the current value, so a release installed without one cannot be upgraded, only reinstalled. That
-  failure arrives on the second deploy, which is the worst time to find it.
+  By default this chart writes the password itself and keeps it (templates/postgresql/secret.yaml).
+  With `postgresql.auth.existingSecret` emptied, as on a release upgraded with `--reuse-values` from
+  before that, the subchart makes its own instead, which a reinstall onto the surviving volume cannot
+  reproduce. So that shape still needs a password somebody can supply again.
 */}}
 {{- if and .Values.postgresql.enabled (not .Values.postgresql.auth.password) (not .Values.postgresql.auth.existingSecret) }}
-{{- fail "The bundled database needs a password you can supply again on upgrade. Set postgresql.auth.password, or postgresql.auth.existingSecret to name one you made. Generate one with: openssl rand -hex 24" }}
+{{- fail "The bundled database needs a password you can supply again on upgrade. Set postgresql.auth.password, or postgresql.auth.existingSecret to name one you made, or leave postgresql.auth.existingSecret at its default ({{ .Release.Name }}-postgresql) for this chart to generate and keep one. Generate one with: openssl rand -hex 24" }}
 {{- end }}
 
 {{- if and .Values.postgresql.enabled (or .Values.database.url .Values.database.existingSecret) }}
@@ -68,17 +69,52 @@ This template renders nothing.
 {{- end }}
 
 {{- /*
-  Intelligence, which is not optional.
+  Intelligence, which is not optional: the one this chart installs, or one that already runs.
 
-  The three addressing values are required together and the server refuses to start on a partial
-  set, so the same rule is applied here: caught at install with the values named, rather than in a
-  crash loop whose message is in a log nobody has opened.
+  A RELEASE FROM BEFORE THE BUNDLED INTELLIGENCE, upgraded with `--reuse-values`, has no
+  `intelligence` key at all, and Helm turns a dependency ON when its condition is missing. That
+  would install an Intelligence on the subchart's bare defaults beside the one the release already
+  uses, and render cleanly doing it. So it is refused by name.
 
-  `secrets.licenseToken` is NOT among them. Managed Intelligence issues no licence token, so
-  requiring one here would block an install the server would have accepted.
+  WITH THE BUNDLED ONE, an address in `config.intelligence` or a key in `secrets.intelligenceApiKey`
+  is somebody who meant a different Intelligence, which is the release that existed before this
+  chart bundled one. Refused rather than ignored, because ignoring it moves their conversations to an
+  empty Intelligence without a word.
+
+  The bundled Intelligence is self-hosted, and a self-hosted Intelligence needs the licence on its own
+  deployment, so with it the licence is required. Given as `secrets.licenseToken`, this chart writes
+  it to both sides. In a Secret of the operator's (or a store's), the chart cannot read it, so
+  `intelligence.appApi.licenseSecret` has to name that Secret instead of the one the chart would write.
+
+  WITHOUT IT, the three addressing values are required together and the server refuses to start on a
+  partial set, so the same rule is applied here: caught at install with the values named, rather than
+  in a crash loop whose message is in a log nobody has opened. `secrets.licenseToken` is NOT among
+  them: managed Intelligence issues no licence token.
 */}}
-{{- if or (not .Values.config.intelligence.apiUrl) (not .Values.config.intelligence.gatewayWsUrl) }}
-{{- fail "OpenBot requires CopilotKit Intelligence. Set config.intelligence.apiUrl and config.intelligence.gatewayWsUrl, and the matching secrets.intelligenceApiKey." }}
+{{- if not (hasKey (.Values.intelligence | default dict) "enabled") }}
+{{- fail "This chart now installs CopilotKit Intelligence with OpenBot, and this release's values have no `intelligence` key, which is what `helm upgrade --reuse-values` from an earlier chart leaves. To keep the Intelligence in config.intelligence, add --set intelligence.enabled=false. To move to the bundled one, upgrade with --reset-then-reuse-values (Helm 3.14 or later) and read the chart README first: it is a new, empty Intelligence." }}
+{{- end }}
+{{- if include "openbot.intelligenceBundled" . }}
+{{- if or .Values.config.intelligence.apiUrl .Values.config.intelligence.gatewayWsUrl .Values.secrets.intelligenceApiKey }}
+{{- fail "config.intelligence.apiUrl, config.intelligence.gatewayWsUrl or secrets.intelligenceApiKey name an Intelligence of your own, and this chart installs one too (intelligence.enabled is true). To keep yours, set intelligence.enabled=false. To use the bundled one, clear those three: the chart wires it itself, and it is a new, empty Intelligence." }}
+{{- end }}
+{{- $licenseSecret := ((.Values.intelligence.appApi | default dict).licenseSecret | default dict) }}
+{{- if not $licenseSecret.existingSecret }}
+{{- fail "intelligence.appApi.licenseSecret.existingSecret is empty. The bundled Intelligence reads the CopilotKit licence from that Secret; leave it at the chart's default and set secrets.licenseToken, or name the Secret of your own that holds it." }}
+{{- end }}
+{{- if and (not .Values.secrets.licenseToken) (eq $licenseSecret.existingSecret "openbot-intel-license") }}
+{{- fail "The bundled Intelligence is self-hosted and needs the CopilotKit licence. Set secrets.licenseToken and the chart gives it to both OpenBot and Intelligence. If the licence is in a Secret of your own (secrets.existingSecret, or a store), also set intelligence.appApi.licenseSecret.existingSecret to that Secret's name and intelligence.appApi.licenseSecret.key to its key, so Intelligence reads the same one." }}
+{{- end }}
+{{- /*
+  OpenBot's runtime key: a project in `intelligence.bootstrap.projects` with an `apiKey`, which this
+  chart generates and the server reads. Without one the server would wait forever for a Secret
+  nothing writes.
+*/}}
+{{- if not (include "openbot.intelligenceKeyRef" . | fromYaml).name }}
+{{- fail "intelligence.bootstrap.projects has no project with an apiKey. The bundled Intelligence gives OpenBot its runtime key through one: keep the chart's `openbot` project, or give yours apiKey.existingSecret and apiKey.key." }}
+{{- end }}
+{{- else if or (not .Values.config.intelligence.apiUrl) (not .Values.config.intelligence.gatewayWsUrl) }}
+{{- fail "OpenBot requires CopilotKit Intelligence. With intelligence.enabled=false, set config.intelligence.apiUrl and config.intelligence.gatewayWsUrl, and the matching secrets.intelligenceApiKey." }}
 {{- end }}
 
 {{- /*
@@ -89,7 +125,8 @@ This template renders nothing.
   `external` with no address is a deployment whose Bots have no computer at all, which fails at the
   first browser action rather than at install.
 */}}
-{{- if and (ne .Values.computers.mode "external") (not .Values.secrets.computerToken) (not .Values.computers.existingTokenSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- /* With the bundled database the chart generates one (templates/secret.yaml), so only a database of your own gets here. */}}
+{{- if and (ne .Values.computers.mode "external") (not .Values.secrets.computerToken) (not .Values.computers.existingTokenSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) (not (include "openbot.generatesCredentials" .)) }}
 {{- fail "A computer needs a token, which is the only thing standing between it and anybody who can reach its port. Set secrets.computerToken. Generate one with: openssl rand -hex 32" }}
 {{- end }}
 
@@ -309,23 +346,10 @@ This template renders nothing.
 {{- end }}
 
 {{- /*
-  The same requirement, for the worker's shared secret.
-
-  `secret.yaml`, where `WORKER_SHARED_SECRET` would otherwise be required into existence, is skipped
-  entirely when `externalSecrets.enabled` — that Secret is the store's to create, not this chart's.
-  So a cloud operator who turns on `routines.enabled` without adding this key to
-  `externalSecrets.data` gets a clean install: the API server and the CronJob both reference a key
-  that is never coming, and every pod that mounts it fails to start. Checked the same way as
-  `managed-agent-token` and `better-auth-secret` above: the value is not readable at template time,
-  but the list of keys is, and a store that never mentions this key cannot be holding one.
+  Nothing to refuse for the routines worker's secret. A store that does not name
+  `worker-shared-secret` used to be refused here; the chart now writes one of its own instead
+  (`openbot.workerSecretRef`), so the store is read only when it does name the key.
 */}}
-{{- if and (.Values.routines).enabled .Values.externalSecrets.enabled }}
-{{- $named := list }}
-{{- range .Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end }}
-{{- if not (has "worker-shared-secret" $named) }}
-{{- fail "routines.enabled but externalSecrets.data does not name worker-shared-secret. The API server reads it to recognise the worker and the CronJob reads it to be one, so every pod that mounts it fails to start." }}
-{{- end }}
-{{- end }}
 
 {{- /*
   Delivery, the directory and OpenTelemetry export: the refusals the server makes at boot.
@@ -372,7 +396,7 @@ This template renders nothing.
 {{- end }}
 {{- /*
   The same secrets, for a deployment whose secrets come from a store: the value is not readable at
-  template time, but the list of keys is, checked the way `worker-shared-secret` is above.
+  template time, but the list of keys is, checked the way `better-auth-secret` is above.
 */}}
 {{- if .Values.externalSecrets.enabled }}
 {{- $named := list }}

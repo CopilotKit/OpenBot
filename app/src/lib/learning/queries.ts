@@ -2,6 +2,8 @@ import type {
   LearningAutoAssignState,
   LearningDeliveryStatus,
   LearningOverview,
+  LearningProposal,
+  LearningProposalDetail,
   LearningSettings,
   PersonalLearningSharing,
 } from "@openbot/shared/learning";
@@ -13,7 +15,15 @@ export const learningKeys = {
   settings: ["learning", "settings"] as const,
   automatic: ["learning", "automatic"] as const,
   personal: ["learning", "personal"] as const,
+  proposals: (agentId?: string) =>
+    ["learning", "proposals", { agentId: agentId ?? null }] as const,
+  proposal: (proposalId: string, agentId?: string) =>
+    ["learning", "proposal", { proposalId, agentId: agentId ?? null }] as const,
 };
+
+/** `?agentId=…` for a Bot's own container, nothing for the deployment default. */
+const forBot = (agentId?: string) =>
+  agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
 /**
  * Settings, Learning: who else's Bots use the Skills learned from your own recordings, and the Skills in your own
  * Learning space (null when Intelligence did not deliver them).
@@ -92,5 +102,42 @@ export function saveLearningSettings(
     method: "PUT",
     body: settings,
     fallback: "Learning settings could not be saved.",
+  });
+}
+
+/** The container a proposal list is for, and its proposed skills, newest first, reviewed ones included. */
+export type LearningProposals = {
+  containerId: string | null;
+  proposals: LearningProposal[];
+};
+
+/** Admin → Automatic learning: the skills Intelligence proposed for a Bot's container, or the default. */
+export function learningProposalsQueryOptions(agentId?: string) {
+  return queryOptions({
+    queryKey: learningKeys.proposals(agentId),
+    retry: false,
+    queryFn: async (): Promise<LearningProposals> =>
+      (
+        await client(`/api/admin/learning/proposals${forBot(agentId)}`, {
+          fallback: "Couldn't load proposed skills. Try again.",
+        })
+      ).json(),
+  });
+}
+
+/** One proposed skill with every file it publishes and the evidence behind it. */
+export function learningProposalQueryOptions(
+  proposalId: string,
+  agentId?: string,
+) {
+  return queryOptions({
+    queryKey: learningKeys.proposal(proposalId, agentId),
+    retry: false,
+    queryFn: (): Promise<LearningProposalDetail> =>
+      client(
+        `/api/admin/learning/proposals/${encodeURIComponent(proposalId)}${forBot(agentId)}`,
+        "proposal",
+        { fallback: "Couldn't load this skill. Try again." },
+      ),
   });
 }

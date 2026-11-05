@@ -17,7 +17,14 @@ export type LearningDeliveryStatus = {
   error?: { code: string; message: string; retryable: boolean };
 };
 
-/** A small projection of Inspector: evidence and credentials stay in Intelligence. */
+/**
+ * A small projection of Inspector: evidence and credentials stay in Intelligence.
+ *
+ * Read from Intelligence's Inspector panel where it serves one. An Intelligence with no dashboard
+ * serves none, and the same answer is read from the project key's own Learning routes, which do
+ * not count waiting conversations, published Skills or Insights: those are null then, and so is
+ * every link, since there is no dashboard to link to.
+ */
 export type LearningOverview = {
   configuration:
     | "not_configured"
@@ -25,13 +32,68 @@ export type LearningOverview = {
     | "configured"
     | "selection_required";
   container?: { id: string; name: string };
-  pendingThreadCount: number;
+  pendingThreadCount: number | null;
   pendingCandidateCount: number;
-  publishedSkillCount: number;
-  insightCount: number;
+  publishedSkillCount: number | null;
+  insightCount: number | null;
   hasActiveRun: boolean;
   latestRunStatus: string | null;
-  links: { learning: string; candidates: string | null; runs: string | null };
+  links: {
+    learning: string | null;
+    candidates: string | null;
+    runs: string | null;
+  };
+};
+
+/** A Skill change Intelligence proposed, as Admin → Automatic learning lists it. */
+export type LearningProposal = {
+  id: string;
+  title: string;
+  description: string;
+  /** Why Intelligence proposes it. */
+  reason: string;
+  operation: "add" | "update" | "remove";
+  status: "pending_review" | "approved" | "rejected";
+  createdAt: string;
+  reviewedAt: string | null;
+};
+
+/** One piece of what a proposal was learned from: a conversation's cited messages, or a recording. */
+export type LearningEvidence =
+  | {
+      kind: "conversation";
+      /** Intelligence's id for the conversation. */
+      id: string;
+      title: string | null;
+      /** False when the conversation is gone or could not be read. */
+      available: boolean;
+      messages: {
+        id: string;
+        role: "user" | "assistant" | "tool";
+        content: string;
+      }[];
+    }
+  | {
+      kind: "recording";
+      /** Intelligence's id for the recording. */
+      id: string;
+      available: boolean;
+      eventCount: number;
+      /** The names of the cited events, in order. */
+      events: string[];
+    };
+
+/** Everything a person needs to decide on a proposal: the files it publishes and why. */
+export type LearningProposalDetail = LearningProposal & {
+  /** Every file the Skill would publish. SKILL.md first. */
+  files: { path: string; content: string }[];
+  /** The Insights behind it, each with its evidence, or null where that could not be read. */
+  insights: {
+    id: string;
+    statement: string;
+    impact: string;
+    evidence: LearningEvidence[] | null;
+  }[];
 };
 
 /**
@@ -50,11 +112,21 @@ export const AUTOMATIC_LEARNING_CONTAINER_ID = "openbot";
  * - `assigned`: this process assigned the container.
  * - `absent`: this Intelligence project has no such container yet.
  * - `not_entitled`: the project's plan does not include Learning.
+ * - `learning_off`: Intelligence answered, and has Learning switched off: its Learning routes are not
+ *   there at all. Not the same as `unavailable`, which is Intelligence not answering.
  * - `unavailable`: Intelligence could not be asked; it is tried again.
  * - `pending`: not asked yet.
  */
 export type LearningAutoAssignState =
-  | { state: "off" | "saved" | "not_entitled" | "unavailable" | "pending" }
+  | {
+      state:
+        | "off"
+        | "saved"
+        | "not_entitled"
+        | "learning_off"
+        | "unavailable"
+        | "pending";
+    }
   | { state: "assigned"; containerId: string }
   | {
       state: "absent";
