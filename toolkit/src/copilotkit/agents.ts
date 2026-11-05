@@ -500,19 +500,23 @@ export class UnavailableAgent extends AbstractAgent {
 export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
   readonly #browserClientWsUrl: string | undefined;
   readonly #ownOrigin: (() => string | undefined) | undefined;
+  readonly #lockConflictWaitMs: number;
 
   constructor(
     config: ConstructorParameters<typeof CopilotKitIntelligence>[0] & {
       browserWsUrl?: string;
       /** The server's own origin (`http://127.0.0.1:3101`) for the request being answered, if it may be named. */
       ownOrigin?: () => string | undefined;
+      /** How long a lock refused as retryable is asked for again. See `LOCK_CONFLICT_WAIT_MS`. */
+      lockConflictWaitMs?: number;
     },
   ) {
-    const { browserWsUrl, ownOrigin, ...platform } = config;
+    const { browserWsUrl, ownOrigin, lockConflictWaitMs, ...platform } = config;
     super(platform);
     const browser = browserWsUrl?.trim();
     this.#browserClientWsUrl = browser ? clientSocket(browser) : undefined;
     this.#ownOrigin = ownOrigin;
+    this.#lockConflictWaitMs = lockConflictWaitMs ?? LOCK_CONFLICT_WAIT_MS;
   }
 
   override ɵgetClientWsUrl(): string {
@@ -566,11 +570,44 @@ export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
    *
    * The body is the base client's, field for field: what the runtime's own runs send and what a
    * hop sends must be the same request, and a test sends both and compares them.
+   *
+   * A REFUSAL THE PLATFORM CALLS RETRYABLE IS ASKED AGAIN, for a few seconds, before it is given
+   * back. A Bot's computer tools run in the browser, so each command ends the run and the browser
+   * starts the next one with the result at once, while the platform is still letting go of the
+   * run before: that follow-up was refused (THREAD_LOCK_FAILED, retryable), the runtime answered
+   * the browser 409, and the browser stopped there, a command short and with no answer. The base
+   * client gives the refusal back at once and always did; the run before usually let go in time.
    */
   override async ɵacquireThreadLock(
     params: Parameters<CopilotKitIntelligence["ɵacquireThreadLock"]>[0],
   ): ReturnType<CopilotKitIntelligence["ɵacquireThreadLock"]> {
-    const answer = await askPlatform(this, {
+    const giveUpAt = Date.now() + this.#lockConflictWaitMs;
+    let delayMs = LOCK_CONFLICT_RETRY_FIRST_MS;
+    for (;;) {
+      const answer = await this.#askForLock(params);
+      if (answer?.status === 409) {
+        const left = giveUpAt - Date.now();
+        const refusal = expectedRefusal(answer);
+        if (refusal.retryable !== true || left <= 0) throw refusal;
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(delayMs, left)),
+        );
+        delayMs = Math.min(delayMs * 2, LOCK_CONFLICT_RETRY_MAX_MS);
+        continue;
+      }
+      if (answered(answer))
+        return bodyOf<
+          Awaited<ReturnType<CopilotKitIntelligence["ɵacquireThreadLock"]>>
+        >(answer);
+      return super.ɵacquireThreadLock(params);
+    }
+  }
+
+  /** The base client's lock request, unprinted. */
+  #askForLock(
+    params: Parameters<CopilotKitIntelligence["ɵacquireThreadLock"]>[0],
+  ) {
+    return askPlatform(this, {
       method: "POST",
       path: `/api/threads/${encodeURIComponent(params.threadId)}/lock`,
       body: {
@@ -599,14 +636,19 @@ export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
           }
         : {}),
     });
-    if (answer?.status === 409) throw expectedRefusal(answer);
-    if (answered(answer))
-      return bodyOf<
-        Awaited<ReturnType<CopilotKitIntelligence["ɵacquireThreadLock"]>>
-      >(answer);
-    return super.ɵacquireThreadLock(params);
   }
 }
+
+/**
+ * How long a lock refused as retryable is asked for again before the refusal is given back.
+ *
+ * Long enough for the platform to let go of the run before (well under a second when it was seen),
+ * short enough that a conversation somebody is genuinely running in is refused about as promptly as
+ * before. The first look again is quick, then doubling to the cap.
+ */
+const LOCK_CONFLICT_WAIT_MS = 5_000;
+const LOCK_CONFLICT_RETRY_FIRST_MS = 100;
+const LOCK_CONFLICT_RETRY_MAX_MS = 1_000;
 
 /**
  * The gateway's client socket, from any of the three addresses the platform names it by.
