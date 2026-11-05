@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.3.0
+
 **Before upgrading.** Forty things change for an existing deployment:
 - Migrations `0066_recorder_extension`, `0067_recorder_activity` and
   `0068_recorder_organization_session_expiry` add six tables for the OpenBot Recorder and each
