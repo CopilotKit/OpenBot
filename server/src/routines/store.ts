@@ -21,6 +21,7 @@
  * implementations of the same hard thing, one of which nobody tests.
  */
 
+import { untitledLine } from "@openbot/shared/conversation-title";
 import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
 import {
   and,
@@ -344,6 +345,7 @@ function nextRunFor(cron: string, timezone: string, after: Date): Date {
 type Conversation = {
   id: string;
   summary: string | null;
+  opening: string | null;
   lastMessage: string | null;
 };
 
@@ -351,22 +353,23 @@ type Conversation = {
 const MAX_TITLE_GRAPHEMES = 60;
 
 /**
- * A conversation as the sidebar names it: its title once it has one, the last thing said until
- * then, and "New conversation" before anything was.
+ * A conversation as the sidebar names it: its title once it has one, the person's first words until
+ * then (the last thing said where nobody spoke first), and "New conversation" before anything was.
  *
  * The same rule as the sidebar row (`threadTitle` in app/src/components/app-sidebar/channel.tsx),
- * read from the same two columns, because the person picks from this list by recognising what they
+ * read from the same columns, because the person picks from this list by recognising what they
  * see in the sidebar. The channel's NAME is never used: it is only its Bots' names, which is how a
  * real account came to be offered six conversations all called "General Assistant".
  */
 function conversationTitle(conversation: {
   summary: string | null;
+  opening: string | null;
   lastMessage: string | null;
 }): string {
   const summary = conversation.summary?.trim();
   if (summary) return oneLine(summary, MAX_TITLE_GRAPHEMES);
-  const last = conversation.lastMessage?.trim();
-  if (last) return oneLine(last, MAX_TITLE_GRAPHEMES);
+  const untitled = untitledLine(conversation);
+  if (untitled) return oneLine(untitled, MAX_TITLE_GRAPHEMES);
   return "New conversation";
 }
 
@@ -537,6 +540,7 @@ export function createRoutineStore(database: Database): RoutineStore {
       .select({
         id: channels.id,
         summary: channels.summary,
+        opening: channels.opening,
         lastMessage: channels.lastMessage,
       })
       .from(channels)
@@ -738,6 +742,7 @@ export function createRoutineStore(database: Database): RoutineStore {
           routine: routines,
           channelName: channels.name,
           channelSummary: channels.summary,
+          channelOpening: channels.opening,
           channelLastMessage: channels.lastMessage,
           channelDeletedAt: channels.deletedAt,
           // A left join, and the id is selected to tell "no channel row at all" (a hard delete
@@ -786,6 +791,7 @@ export function createRoutineStore(database: Database): RoutineStore {
           routine,
           channelName,
           channelSummary,
+          channelOpening,
           channelLastMessage,
           channelDeletedAt,
           channelExists,
@@ -804,6 +810,7 @@ export function createRoutineStore(database: Database): RoutineStore {
               ? null
               : conversationTitle({
                   summary: channelSummary,
+                  opening: channelOpening,
                   lastMessage: channelLastMessage,
                 }),
           channelDeleted: channelExists === null || channelDeletedAt !== null,
