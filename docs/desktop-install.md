@@ -108,6 +108,9 @@ fill a gap. Three rules hold that boundary:
 - **Images download in parallel, with progress.** Four images download at once
   (`IMAGE_PULLS_AT_ONCE`). The screen shows what is downloading and how fast, so a slow network
   looks slow, not stuck.
+- **A dropped download is tried again.** A file download whose connection fails, or whose server
+  answers 5xx or 429, is tried up to three times (`deployment::get`). A 404 is reported at once.
+  `install.rs` still checks the digest of whatever arrives.
 - **Secrets stay out of `.env`.** `.env` holds settings a person can read. Model keys and service
   tokens go to an owner-only file on macOS and Linux and to DPAPI on Windows, and reach processes
   only as environment (`src-tauri/src/vault.rs`). A value never goes on a command line.
