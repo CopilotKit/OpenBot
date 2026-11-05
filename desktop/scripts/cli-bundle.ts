@@ -230,7 +230,9 @@ export function packCli(
 
   runChecked(
     run,
-    ["tar", "-xzf", join(workDir, filename), "-C", workDir],
+    // Relative to the work folder: Git's GNU tar, which a bash step on Windows runs, reads
+    // `D:\...` as a remote host.
+    ["tar", "-xzf", filename, "-C", "."],
     workDir,
   );
   const pkgDir = join(workDir, "package");
