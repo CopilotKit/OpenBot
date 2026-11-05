@@ -76,13 +76,10 @@ export function connectScreen(options: Options) {
       let message:
         | { type?: string; error?: string; fatal?: boolean }
         | undefined;
-      // Binary frames (the terminal's output) are never control messages.
-      if (typeof event.data === "string") {
-        try {
-          message = JSON.parse(event.data);
-        } catch {
-          /* Frame parser handles malformed input. */
-        }
+      try {
+        message = JSON.parse(String(event.data));
+      } catch {
+        /* Frame parser handles malformed input. */
       }
       if (message?.type === "error") {
         // The server deliberately leaves superseded sockets open. Never compete with the other tab.
