@@ -15,12 +15,13 @@ This template renders nothing.
 {{- /*
   The bundled database, without a password anybody can produce again.
 
-  The subchart generates one on install and then refuses to render on upgrade without being handed
-  the current value, so a release installed without one cannot be upgraded, only reinstalled. That
-  failure arrives on the second deploy, which is the worst time to find it.
+  By default this chart writes the password itself and keeps it (templates/postgresql/secret.yaml).
+  With `postgresql.auth.existingSecret` emptied, as on a release upgraded with `--reuse-values` from
+  before that, the subchart makes its own instead, which a reinstall onto the surviving volume cannot
+  reproduce. So that shape still needs a password somebody can supply again.
 */}}
 {{- if and .Values.postgresql.enabled (not .Values.postgresql.auth.password) (not .Values.postgresql.auth.existingSecret) }}
-{{- fail "The bundled database needs a password you can supply again on upgrade. Set postgresql.auth.password, or postgresql.auth.existingSecret to name one you made. Generate one with: openssl rand -hex 24" }}
+{{- fail "The bundled database needs a password you can supply again on upgrade. Set postgresql.auth.password, or postgresql.auth.existingSecret to name one you made, or leave postgresql.auth.existingSecret at its default ({{ .Release.Name }}-postgresql) for this chart to generate and keep one. Generate one with: openssl rand -hex 24" }}
 {{- end }}
 
 {{- if and .Values.postgresql.enabled (or .Values.database.url .Values.database.existingSecret) }}
@@ -124,7 +125,8 @@ This template renders nothing.
   `external` with no address is a deployment whose Bots have no computer at all, which fails at the
   first browser action rather than at install.
 */}}
-{{- if and (ne .Values.computers.mode "external") (not .Values.secrets.computerToken) (not .Values.computers.existingTokenSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- /* With the bundled database the chart generates one (templates/secret.yaml), so only a database of your own gets here. */}}
+{{- if and (ne .Values.computers.mode "external") (not .Values.secrets.computerToken) (not .Values.computers.existingTokenSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) (not (include "openbot.generatesCredentials" .)) }}
 {{- fail "A computer needs a token, which is the only thing standing between it and anybody who can reach its port. Set secrets.computerToken. Generate one with: openssl rand -hex 32" }}
 {{- end }}
 
@@ -344,23 +346,10 @@ This template renders nothing.
 {{- end }}
 
 {{- /*
-  The same requirement, for the worker's shared secret.
-
-  `secret.yaml`, where `WORKER_SHARED_SECRET` would otherwise be required into existence, is skipped
-  entirely when `externalSecrets.enabled` — that Secret is the store's to create, not this chart's.
-  So a cloud operator who turns on `routines.enabled` without adding this key to
-  `externalSecrets.data` gets a clean install: the API server and the CronJob both reference a key
-  that is never coming, and every pod that mounts it fails to start. Checked the same way as
-  `managed-agent-token` and `better-auth-secret` above: the value is not readable at template time,
-  but the list of keys is, and a store that never mentions this key cannot be holding one.
+  Nothing to refuse for the routines worker's secret. A store that does not name
+  `worker-shared-secret` used to be refused here; the chart now writes one of its own instead
+  (`openbot.workerSecretRef`), so the store is read only when it does name the key.
 */}}
-{{- if and (.Values.routines).enabled .Values.externalSecrets.enabled }}
-{{- $named := list }}
-{{- range .Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end }}
-{{- if not (has "worker-shared-secret" $named) }}
-{{- fail "routines.enabled but externalSecrets.data does not name worker-shared-secret. The API server reads it to recognise the worker and the CronJob reads it to be one, so every pod that mounts it fails to start." }}
-{{- end }}
-{{- end }}
 
 {{- /*
   Delivery, the directory and OpenTelemetry export: the refusals the server makes at boot.
@@ -407,7 +396,7 @@ This template renders nothing.
 {{- end }}
 {{- /*
   The same secrets, for a deployment whose secrets come from a store: the value is not readable at
-  template time, but the list of keys is, checked the way `worker-shared-secret` is above.
+  template time, but the list of keys is, checked the way `better-auth-secret` is above.
 */}}
 {{- if .Values.externalSecrets.enabled }}
 {{- $named := list }}

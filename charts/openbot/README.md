@@ -15,22 +15,26 @@ One person, from their own computer, on any cluster with a default StorageClass 
 OpenBot image is amd64 only, and so is the embeddings image Intelligence runs). From a checkout of
 this repository:
 
-**1. Write your secrets into a file you keep and never commit.** The licence and the model key are
-yours; the other three are generated once here and must stay the same on every upgrade, which is why
-they live in a file rather than on the command line.
+**1. Write your licence and model key into a file you keep and never commit.**
 
 ```sh
 cat > openbot-secrets.yaml <<EOF
 secrets:
   licenseToken: "<your CopilotKit licence>"
   modelApiKey: "<your OpenAI API key>"
-  keyEncryptionKey: "$(openssl rand -base64 32)"
-  computerToken: "$(openssl rand -hex 32)"
-postgresql:
-  auth:
-    password: "$(openssl rand -hex 24)"
 EOF
 ```
+
+Nothing else is yours to make. On the first install the chart generates the key the credential vault
+is encrypted with and the computer token into the Secret `openbot-secrets`, and the database password
+into `openbot-postgresql`. Each is read back on every upgrade and kept on uninstall, beside the
+database it belongs to.
+
+To choose them yourself, add `secrets.keyEncryptionKey` (`openssl rand -base64 32`),
+`secrets.computerToken` (`openssl rand -hex 32`) and `postgresql.auth.password` to the file. A value
+given always wins, so give the same one on every upgrade. Anybody restoring a backup of this database
+elsewhere needs the key too:
+`kubectl -n openbot get secret openbot-secrets -o jsonpath='{.data.key-encryption-key}' | base64 -d`.
 
 **2. Install.**
 
@@ -53,8 +57,8 @@ Then open <http://127.0.0.1:3001>. You are its one administrator: `config.single
 reaches the server with no sign-in, which is why it is only ever reached through a port-forward on
 your own computer, and why the chart refuses it with a public URL or an open LoadBalancer.
 
-`ci/vanilla-values.yaml` is single-user mode, OpenBot's bundled database, and a placeholder for each
-secret that your file replaces. CI renders exactly this install on every change.
+`ci/vanilla-values.yaml` is single-user mode, OpenBot's bundled database, and a placeholder for the
+licence and the model key your file replaces. CI renders exactly this install on every change.
 
 **What happens, so a first install that takes a few minutes is not a surprise.** The chart installs
 Intelligence, generates every credential it needs as Secrets that are kept across upgrades and
@@ -68,6 +72,11 @@ install too.
 `openbot-intelligence-bootstrap` Job says what Intelligence set up. The browser reaches Intelligence's
 gateway through OpenBot's own address, so the one port-forward is all it needs.
 
+**Routines run.** A Bot asked to do something on a schedule stores a routine, and the
+`openbot-routines` CronJob fires whatever is due every five minutes. It proves itself to the server
+with a secret the chart generates into `openbot-worker-secret` and keeps across upgrades, so there is
+nothing to add to your file for it. See [The routines sweep](#the-routines-sweep).
+
 **Automatic Learning spends your model key.** Learning is on in OpenBot and in the bundled
 Intelligence, whose Learning agent reads finished conversations and proposes skills with
 `openai/gpt-5.5` on the key in `secrets.modelApiKey`. See [Automatic Learning](#automatic-learning).
@@ -78,7 +87,9 @@ database password under `postgres-password` and set `postgresql.auth.existingSec
 Secret; and set `intelligence.appApi.licenseSecret.existingSecret` to it too, so Intelligence reads the
 same licence. Intelligence's Learning agent reads `model-api-key` from that Secret as well: the chart
 copies it at install and on every upgrade, so a new key there reaches Learning on the next
-`helm upgrade`. `values.yaml` under `intelligence` explains every value the bundle sets.
+`helm upgrade`. `worker-shared-secret` is optional in it: put one there only if something outside this
+chart fires routines too, and otherwise the chart generates one. `values.yaml` under `intelligence`
+explains every value the bundle sets.
 
 ## What a cluster needs first
 
@@ -263,9 +274,11 @@ than install a second, empty Intelligence beside yours. Add `--set intelligence.
 the Intelligence you have. The same applies with `--reuse-values`, which keeps the old values and
 drops the new chart's defaults.
 
-`secrets.keyEncryptionKey` encrypts the credential vault. Generate it once, keep it, and do not put
-it in a file anybody commits. The chart marks the Secret it creates `helm.sh/resource-policy: keep`,
-so an uninstall does not take the key that every stored credential was encrypted with.
+`secrets.keyEncryptionKey` encrypts the credential vault. With the bundled database the chart
+generates it; with a database of your own it is required, because that database outlives the
+namespace and a generated key would not: generate it once, keep it, and do not put it in a file
+anybody commits. The chart marks the Secret it creates `helm.sh/resource-policy: keep`, so an
+uninstall does not take the key that every stored credential was encrypted with.
 
 ### Pin the image by digest
 
@@ -457,21 +470,19 @@ public LoadBalancer; with `intelligence.enabled: false`, the Intelligence URLs o
 `secrets.intelligenceApiKey` are missing; with the bundled Intelligence, an Intelligence address or key
 of your own is named beside it, the licence is missing, or the release predates it (no
 `intelligence.enabled` at all);
-`secrets.keyEncryptionKey` is not a base64 32-byte value, or is the public example key; there is no
-`secrets.computerToken`; `computers.mode` is `external` with no `computers.url`, or `sandbox` on a
-cluster with no Sandbox CRD; both an Ingress and an HTTPRoute are enabled; both `externalSecrets` and
-an existing Secret are named; a Bot endpoint is named with no token to call it with; a browser is
-asked for inside more than one API replica; `networkPolicy.enabled` is set with an external database
-and no `networkPolicy.extraEgress`, or with `computers.mode: sandbox` and no
+`secrets.keyEncryptionKey` is not a base64 32-byte value, or is the public example key; with a
+database of your own, there is no `secrets.keyEncryptionKey` or no `secrets.computerToken`;
+`computers.mode` is `external` with no `computers.url`, or `sandbox` on a cluster with no Sandbox
+CRD; both an Ingress and an HTTPRoute are enabled; both `externalSecrets` and an existing Secret are
+named; a Bot endpoint is named with no token to call it with; a browser is asked for inside more than
+one API replica; `networkPolicy.enabled` is set with an external database and no
+`networkPolicy.extraEgress`, or with `computers.mode: sandbox` and no
 `networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks, or
 `computers.egressProxy` is turned on with policies and no `networkPolicy.computerExtraEgress`, or with
-no `secrets.egressProxyUrl` where this chart writes the Secret; or
-`routines.enabled` is set with no `secrets.workerSharedSecret` — and, on `externalSecrets`, no
-`worker-shared-secret` key named for it to read instead. One combination gets no refusal at all:
-`secrets.existingSecret` with `routines.enabled`, because the Secret this chart would otherwise
-validate is somebody else's to create — put `worker-shared-secret` in it yourself, or every pod that
-mounts it fails to start — the routines CronJob, the culler, and the API server itself — with nothing
-at install time to say so.
+no `secrets.egressProxyUrl` where this chart writes the Secret. Not on this list, because the chart
+generates them wherever nobody else holds one: the routines worker's secret (see
+[The routines sweep](#the-routines-sweep)), and, with the bundled database, the key encryption key,
+the computer token and the database password.
 
 ## Your own Bot
 
@@ -642,22 +653,39 @@ PostgreSQL with `select ... for update skip locked`, so whichever pod runs the s
 nobody else holds, and one that dies mid-suspend hands its work back when the lease expires. The
 decision is re-checked at the moment of acting, because somebody may have come back in between.
 
-A second CronJob shares that same mechanism for a different job: `routines.enabled` turns on the
-sweep that fires standing instructions a Bot was asked to carry out on a schedule, on
-`routines.schedule`. It needs `secrets.workerSharedSecret` — the credential it presents to the API
-server to be recognised as the worker rather than an arbitrary caller — and is off by default because
-turning it on with no secret set is a CronJob whose every run is refused. See the routines refusal
-below, and [docs/routines.md](../../docs/routines.md).
+### The routines sweep
 
-A third CronJob **deletes data, is on by default, and is the only one of the three that does**:
+A second CronJob shares that same mechanism for a different job: it fires the standing instructions
+a Bot was asked to carry out on a schedule, every five minutes (`routines.schedule`). It is on by
+default (`routines.enabled`), because every Bot can be asked for a routine, and without the sweep a
+routine is stored, scheduled and shown with a next run time, and never runs.
+
+The sweep hands each firing to the API server, and a shared secret, `WORKER_SHARED_SECRET`, is what
+tells the server the request came from the worker rather than an arbitrary caller. Both pods read it
+from one Secret, and nobody has to make it. The chart uses, in this order:
+
+1. `worker-shared-secret` from your store, when `externalSecrets.data` names it, or from
+   `secrets.existingSecret`, when that Secret holds it (looked up at install and upgrade);
+2. `secrets.workerSharedSecret`;
+3. otherwise a random value it generates once into `<release>-worker-secret` and reads back on every
+   upgrade.
+
+Set one yourself when something outside this chart fires routines too, or when the chart is rendered
+by a tool that cannot read the cluster, such as Argo CD's `helm template`: there a generated value
+changes on every render, while the server keeps the one it started with. Set `routines.enabled: false`
+to have no sweep. See [docs/routines.md](../../docs/routines.md).
+
+### The staged-attachment sweep
+
+A third CronJob is the only one of the three that **deletes data**, and it is on by default:
 `attachments.culler` sweeps staged attachments that were never sent. A file uploaded into the
 composer is stored the moment it is pasted or dropped, before anybody presses send — so closing the
 tab, or changing your mind, leaves bytes in the database that no message will ever point at. The
 sweep removes those, hourly (`attachments.culler.schedule`), once they are older than
 `attachments.culler.olderThanHours` — **24 hours by default**.
 
-It is on by default where the other two are off, because it needs nothing but the database that
-every deployment already has, and because the alternative is a table of blobs that only grows. What
+It is on by default because it needs nothing but the database that every deployment already has,
+and because the alternative is a table of blobs that only grows. What
 it will never remove is an attachment that was sent: those are stamped when the message they ride on
 goes out, and the sweep asks only for unstamped rows. The window matters, though — a person who
 uploads a file, leaves it in the composer overnight and comes back to send it will find it gone.

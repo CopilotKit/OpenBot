@@ -81,7 +81,7 @@ at `agent-langgraph` on a laptop.
 | `AGENT_TOOL_TOKEN`   | unset; `start.sh` generates one    | The secret a framework Bot presents when it calls a granted tool back through this server. |
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
-| `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
+| `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default; the Helm chart generates one | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
 | `OPENBOT_ACCESSIBILITY_DISABLED` | unset | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
@@ -158,7 +158,9 @@ else the caller says, so a well-known value from a public repository gates nothi
 `AGENT_TOOL_TOKEN` is generated fresh and written to `.env` precisely because it is not that: it is
 copied into every Bot container, and a framework Bot holding it may be running on a machine of its
 own, so a fixed default there would be no boundary at all. Production deployments must set a real
-`WORKER_SHARED_SECRET`.
+`WORKER_SHARED_SECRET`; the Helm chart generates one and gives it to both the server and its routines
+CronJob, unless one is supplied (see
+[the chart's routines sweep](../charts/openbot/README.md#the-routines-sweep)).
 
 **`SERVER_INTERNAL_URL`** is read by the worker, not by the API server, so it is not in the table
 above: it says where the worker's own process can reach this deployment's API, which is a fact about
