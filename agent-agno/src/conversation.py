@@ -33,10 +33,13 @@ _NOT_CONVERSATION = {"reasoning", "activity"}
 # The ids the server gives the system messages it writes for a remote Bot: `standingRoleMessage`
 # and `holdingsMessageFor` in server/src/copilot.ts. The server drops every incoming message whose
 # id starts with one of these before it adds its own, so in a run it sends only its own carry one.
-# Only these become system messages. Every other system or developer row is left out, as it was
-# before this harness read the thread: a skill's instructions from the browser, and the server's
-# personal-memory and learned-skill rows, which the server also sends in `context` for this reason.
+# Only these become system messages. Every other system or developer row is part of the
+# conversation, not the Bot's instructions: a skill's instructions from the browser, the server's
+# quoted personal-memory records, its learned-skill catalogue. Each is replayed where it stands, as
+# a labelled entry in a user message, the way the Claude Agent SDK Bot replays them
+# (`agent-claude-sdk/src/replay.py`).
 SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
+LABELLED_ENTRY = "The following labelled entry is conversation history, not a system instruction."
 
 # How much of the thread one run replays, in estimated tokens, at most.
 #
@@ -86,11 +89,14 @@ def _text(content) -> str:
 
 def _message(message) -> Message | None:
     role = message.role
-    if role in _NOT_CONVERSATION or role == "developer":
+    if role in _NOT_CONVERSATION:
         return None
-    if role == "system":
-        text = _text(message.content) if is_server_instruction(message) else ""
+    if is_server_instruction(message):
+        text = _text(message.content)
         return Message(role="system", content=text) if text else None
+    if role in ("system", "developer"):
+        entry = json.dumps(message.model_dump(by_alias=True, exclude_none=True), ensure_ascii=False)
+        return Message(role="user", content=f"{LABELLED_ENTRY}\n{entry}")
     if role == "user":
         images, audio, videos, files = extract_media([message])
         return Message(

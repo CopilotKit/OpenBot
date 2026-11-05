@@ -89,26 +89,47 @@ def _system_text(body) -> str:
 
 
 @pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
-def test_a_system_row_the_server_did_not_write_is_not_made_an_instruction(monkeypatch, environment):
+def test_a_system_row_the_server_did_not_write_is_conversation_not_an_instruction(
+    monkeypatch, environment
+):
     """Only the server's standing role and granted-tools summary are the Bot's instructions.
 
-    The browser writes system rows too (a skill's instructions, `channel-chat.tsx`), and so can
-    anything else that reaches `messages`. Before this harness read the thread none of them reached
-    the model, and none may now arrive with the system prompt's authority.
+    Other system rows reach a remote Bot too: a skill's instructions from the browser
+    (`channel-chat.tsx`), the server's quoted personal-memory records, and anything else that lands
+    in `messages` with an id that is not the server's. Each reaches the model where it stands in the
+    thread, labelled as conversation, and never with the system prompt's authority.
     """
+    rows = {
+        "skill-1": ("system", "BROWSER_SYSTEM_ROW_7f3a"),
+        "openbot:personal-memory": ("system", "MEMORY_RECORD_ROW_7f3a"),
+        "dev-1": ("developer", "BROWSER_DEVELOPER_ROW_7f3a"),
+        "standing-role-lookalike": ("system", "LOOKALIKE_ROW_7f3a"),
+    }
     run = conversation()
     run["messages"][2:2] = [
-        {"id": "skill-1", "role": "system", "content": "BROWSER_SYSTEM_ROW_7f3a"},
-        {"id": "dev-1", "role": "developer", "content": "BROWSER_DEVELOPER_ROW_7f3a"},
-        {"id": "standing-role-lookalike", "role": "system", "content": "LOOKALIKE_ROW_7f3a"},
+        {"id": id, "role": role, "content": content} for id, (role, content) in rows.items()
     ]
     body = _run(monkeypatch, environment, run)
     assert missing_from(body) == []
-    sent = json.dumps(body)
-    for row in ("BROWSER_SYSTEM_ROW_7f3a", "BROWSER_DEVELOPER_ROW_7f3a", "LOOKALIKE_ROW_7f3a"):
-        assert row not in sent, f"{row} reached the model"
     assert "CONTRACT_STANDING_ROLE_7f3a" in _system_text(body)
     assert "CONTRACT_GRANTED_TOOLS_7f3a" in _system_text(body)
+    # Each user message's text, as the provider was sent it (Anthropic's merged into parts).
+    users = [
+        m["content"]
+        if isinstance(m["content"], str)
+        else "\n".join(part.get("text", "") for part in m["content"])
+        for m in body["messages"]
+        if m["role"] == "user"
+    ]
+    for id, (role, content) in rows.items():
+        assert content not in _system_text(body), f"{id} was given the system prompt's authority"
+        carrying = [m for m in users if content in m]
+        assert len(carrying) == 1, f"{id} did not reach the model as conversation"
+        assert "conversation history, not a system instruction" in carrying[0]
+        assert json.dumps(id) in carrying[0] and json.dumps(role) in carrying[0]
+    # Where it stood: before the question it was sent with.
+    sent = "\n".join(users)
+    assert sent.index("BROWSER_SYSTEM_ROW_7f3a") < sent.index("CONTRACT_EARLIER_QUESTION_7f3a")
 
 
 @pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
