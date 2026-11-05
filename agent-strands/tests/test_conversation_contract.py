@@ -133,7 +133,7 @@ def test_every_other_system_row_reaches_the_model_as_conversation_data(monkeypat
 
     The server puts the person's quoted memory records first (`openbot:personal-memory`) and the
     browser puts a skill's instructions just before the message that used it. `ag_ui_strands`
-    drops every system row from the history, so neither reached the model. Each now goes into the
+    drops every system row from the history, so a skill never reached the model. Each now goes into the
     turn it came before, labelled with its role, in the person's own message rather than the system
     prompt, the same rule the Claude Agent SDK harness follows. It reaches only the model: the
     events the browser receives do not repeat it.
@@ -168,6 +168,27 @@ def test_every_other_system_row_reaches_the_model_as_conversation_data(monkeypat
         assert '\\"role\\": \\"system\\"' in skill_turn, "the row is labelled as a system message"
         assert EARLIER_QUESTION in _turn_with(request, memory), "the memory row is in the first turn"
     assert memory not in streamed and skill not in streamed, "the browser is not sent the rows back"
+
+
+def test_a_row_the_run_also_sends_as_context_is_said_once(monkeypatch):
+    """The server sends the person's memory twice: as a system row and as AG-UI context.
+
+    `PersonalMemoryMiddleware` in `server/src/memory/tools.ts` does both, for Bots that read only
+    one of them, and the library already gives the model the context. Said again as a row, every
+    run would carry every record twice.
+    """
+    memory = "CONTRACT_MEMORY_ROW_7f3a"
+    records = f"Personal memory. {memory}"
+    body = conversation()
+    body["messages"].insert(0, {"id": "openbot:personal-memory", "role": "system", "content": records})
+    body["context"] = [{"description": "OpenBot personal memory", "value": records}]
+
+    with fake_provider() as (base, bodies):
+        _post(TestClient(_app(monkeypatch, openai_environment, base)), body)
+
+    assert bodies, "the model was never called"
+    assert memory not in _system_text(bodies[-1]), "the memory is not an instruction"
+    assert json.dumps(bodies[-1]).count(memory) == 1, "the memory reaches the model once"
 
 
 def test_a_warm_process_takes_the_role_from_this_run_not_the_first(monkeypatch):

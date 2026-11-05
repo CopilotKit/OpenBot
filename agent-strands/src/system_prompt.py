@@ -13,12 +13,13 @@ in order. `RunSystemPrompt` is a Strands hook on `BeforeInvocationEvent`, which 
 agent receives: it sets that agent's system prompt from the run's invocation state before the
 first model call, so nothing from an earlier run remains.
 
-Only those two are instructions. Other system rows are part of the conversation: the server puts
-the person's quoted memory records in one (`openbot:personal-memory`), and the browser puts a
-skill's instructions in one, just before the message that used it. The library dropped those too,
-so a Strands Bot never saw a skill or a memory. They now reach the model the way the Claude Agent
-SDK harness replays them (`agent-claude-sdk/src/replay.py`): as labelled data, with their role,
-never in the system prompt. Each goes into the person's turn it came before, for each model call
+Only those two are instructions. Other system rows are part of the conversation: the browser puts
+a skill's instructions in one, just before the message that used it, and the server puts the
+person's quoted memory records in one (`openbot:personal-memory`). The library dropped those too,
+so a Strands Bot never saw a skill; the memory reached it only because the server also sends it as
+AG-UI context. They now reach the model the way the Claude Agent SDK harness replays them
+(`agent-claude-sdk/src/replay.py`): as labelled data, with their role, never in the system prompt,
+and a row the run also sends as context is not said twice. Each goes into the person's turn it came before, for each model call
 only, the way the library adds AG-UI context: the history the library keeps, the snapshots it
 sends the browser and what Intelligence stores never carry it.
 """
@@ -82,12 +83,21 @@ def system_text(messages: Any) -> list[str]:
     return found
 
 
-def conversation_rows(messages: Any) -> dict[str, Any]:
+def conversation_rows(messages: Any, context: Any = None) -> dict[str, Any]:
     """Every other system or developer row, labelled, with the person's turn it came before.
 
     `before` counts the user messages ahead of the row, so it is the index of the next one; a row
     after the last user message has `before == users`.
+
+    A row whose text is also this run's AG-UI context is left out: the library already gives the
+    model the context. The server sends the person's memory both ways (`PersonalMemoryMiddleware`
+    in server/src/memory/tools.ts), and said twice every run would carry every record twice.
     """
+    given = {
+        value.strip()
+        for entry in context or []
+        if isinstance(value := getattr(entry, "value", None), str)
+    }
     rows = []
     users = 0
     for message in messages or []:
@@ -96,7 +106,7 @@ def conversation_rows(messages: Any) -> dict[str, Any]:
             users += 1
         elif role in ("system", "developer") and not is_server_instruction(message):
             content = _text(getattr(message, "content", None))
-            if content.strip():
+            if content.strip() and content.strip() not in given:
                 entry = {"id": getattr(message, "id", None), "role": role, "content": content}
                 rows.append({"before": users, "text": f"{ROW_LABEL}\n{json.dumps(entry, ensure_ascii=False)}"})
     return {"users": users, "rows": rows}
@@ -104,7 +114,10 @@ def conversation_rows(messages: Any) -> dict[str, Any]:
 
 def invocation_state(_request: Any, input_data: Any) -> dict[str, Any]:
     messages = getattr(input_data, "messages", None)
-    return {KEY: system_text(messages), ROWS_KEY: conversation_rows(messages)}
+    return {
+        KEY: system_text(messages),
+        ROWS_KEY: conversation_rows(messages, getattr(input_data, "context", None)),
+    }
 
 
 def _is_question(message: Any) -> bool:
