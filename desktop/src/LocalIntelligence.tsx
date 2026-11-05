@@ -494,18 +494,30 @@ export function LocalIntelligence({
 export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
   if (!sequence.stopped) return null;
   const needs = needsPerson(sequence);
+  // Stopped at Start: Intelligence got as far as ready and licensed, and OpenBot is what failed.
+  const openBot = !needs && sequence.at === "start";
   return (
     <section
       className={`local-alert${needs ? " needs" : ""}`}
       role="alert"
-      aria-label="Intelligence"
+      aria-label={openBot ? "OpenBot" : "Intelligence"}
     >
-      <h2>{needs ? "Intelligence needs you" : "Intelligence stopped"}</h2>
+      <h2>
+        {needs
+          ? "Intelligence needs you"
+          : openBot
+            ? "OpenBot did not start"
+            : "Intelligence stopped"}
+      </h2>
       {needs ? (
         <LocalNeeds sequence={sequence} />
       ) : (
         <>
-          <p>{sequence.blocked?.said ?? sequence.problem?.said}</p>
+          <p>
+            {openBot
+              ? "Intelligence is ready. Retry starts OpenBot again."
+              : (sequence.blocked?.said ?? sequence.problem?.said)}
+          </p>
           <div className="row">
             <button type="button" onClick={sequence.retry}>
               Retry

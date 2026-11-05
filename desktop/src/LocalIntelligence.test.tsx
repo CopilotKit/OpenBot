@@ -98,6 +98,8 @@ type Props = {
   auto?: boolean;
   /** Runs up to ready on arrival, without the go-ahead, under its status line. */
   prepare?: boolean;
+  /** Shows the status card another screen shows, whatever runs. */
+  status?: boolean;
   onStart?: (startable: Startable) => Promise<boolean>;
   pollDelays?: number[];
 };
@@ -118,7 +120,7 @@ function Holder(props: Props) {
   }, []);
   return (
     <>
-      {props.prepare && <LocalStatus sequence={sequence} />}
+      {(props.prepare || props.status) && <LocalStatus sequence={sequence} />}
       <LocalIntelligence sequence={sequence} offerStart />
     </>
   );
@@ -526,6 +528,25 @@ test("a start that fails stops at its row, and Retry starts again without asking
   await userEvent.click(screen.getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(starts).toBe(2));
   expect(statusCalls()).toHaveLength(1);
+});
+
+/**
+ * OpenBot itself failing to start is not Intelligence stopping. After a refused Start the AI screen
+ * said "Intelligence stopped" over a stack the CLI reported ready and licensed.
+ */
+test("a start that fails says OpenBot did not start, not that Intelligence stopped", async () => {
+  invokeHandler = answers({ run_local_eval: [ready] });
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    status: true,
+    onStart: async () => false,
+  });
+  const card = await screen.findByRole("alert", { name: "OpenBot" });
+  expect(card.textContent).toContain("OpenBot did not start");
+  expect(card.textContent).toContain("Intelligence is ready");
+  expect(card.textContent).not.toContain("Intelligence stopped");
+  expect(within(card).getByRole("button", { name: "Retry" })).toBeTruthy();
 });
 
 test("without auto, nothing runs until Start OpenBot is chosen", async () => {
