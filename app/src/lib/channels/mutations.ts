@@ -93,6 +93,28 @@ export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
 }
 
 /**
+ * Name a conversation by hand, in the one title column the roster reads.
+ *
+ * The roster only, not the channel detail: the detail read carries no title, and the row is the
+ * only surface that shows one. The server also announces the rename to every member over the
+ * activity socket, so other tabs patch the row without waiting for this refetch — the invalidation
+ * is for the tab that made the change when its socket is not connected, and costs one list read.
+ */
+export function renameChannelMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: { channelId: string; name: string }) => {
+      await client(`/api/channels/${variables.channelId}/name`, {
+        method: "PUT",
+        body: { name: variables.name },
+        fallback: "Couldn't rename this conversation.",
+      });
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
+  });
+}
+
+/**
  * Stamp a channel read for this member, patching the cache before the wire answers.
  *
  * Patched in onMutate rather than refetched on success: the dot must clear the instant the channel

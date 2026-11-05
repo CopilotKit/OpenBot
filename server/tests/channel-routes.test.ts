@@ -29,6 +29,8 @@ import {
   parseChannelInput,
 } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
+import { MAX_SUMMARY_GRAPHEMES } from "../src/channels/summary";
+import { oneLine } from "../src/channels/text";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import {
@@ -1378,6 +1380,140 @@ describe("channel pinning", () => {
         (channel) => channel.id === created.id,
       )?.pinned,
     ).toBe(false);
+  });
+});
+
+describe("channel renaming", () => {
+  test("writes the title and stamps summary_at on the channel row", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Namable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await persistentStore.rename(actor, created.id, "Fix the login flow");
+    const [row] = await database
+      .select({ summary: channels.summary, summaryAt: channels.summaryAt })
+      .from(channels)
+      .where(eq(channels.id, created.id));
+    expect(row?.summary).toBe("Fix the login flow");
+    expect(row?.summaryAt).not.toBeNull();
+  });
+
+  test("refuses to name a channel the caller is not a member of", async () => {
+    const member = await createPersistentUser();
+    const outsider = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Members-only agent",
+      owner: member,
+    });
+    const created = await persistentStore.create(member, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await expect(
+      persistentStore.rename(outsider, created.id, "Someone else's chat"),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+  });
+
+  test("renames through the caller's own membership and a later write wins", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Namable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await persistentStore.rename(actor, created.id, "Fix the login flow");
+    let page = await persistentStore.list(actor);
+    expect(
+      page.channels.find((channel) => channel.id === created.id)?.summary,
+    ).toBe("Fix the login flow");
+
+    await persistentStore.rename(actor, created.id, "Rewrite the onboarding");
+    page = await persistentStore.list(actor);
+    expect(
+      page.channels.find((channel) => channel.id === created.id)?.summary,
+    ).toBe("Rewrite the onboarding");
+  });
+
+  test("one member's name is visible to every member", async () => {
+    const namer = await createPersistentUser();
+    const other = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Shared namable agent",
+      owner: namer,
+      visibility: "public",
+    });
+    const created = await persistentStore.create(namer, [agentId]);
+    createdChannelIds.push(created.id);
+    await database.insert(channelMemberships).values({
+      channelId: created.id,
+      userId: other.id,
+    });
+    await database.insert(intelligenceChannelMappings).values({
+      userId: other.id,
+      channelId: created.id,
+      threadId: randomUUID(),
+    });
+
+    await persistentStore.rename(namer, created.id, "Shared chat");
+
+    const otherPage = await persistentStore.list(other);
+    expect(
+      otherPage.channels.find((channel) => channel.id === created.id)?.summary,
+    ).toBe("Shared chat");
+  });
+
+  test("cuts a title at the titler's cap, same as a generated one", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Namable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    const over = "a".repeat(200);
+    await persistentStore.rename(actor, created.id, over);
+    const [row] = await database
+      .select({ summary: channels.summary })
+      .from(channels)
+      .where(eq(channels.id, created.id));
+    // The titler cuts to MAX_SUMMARY_GRAPHEMES graphemes with an ellipsis; so does a hand name.
+    expect(row?.summary).toHaveLength(MAX_SUMMARY_GRAPHEMES);
+    expect(row?.summary).toBe(oneLine(over, MAX_SUMMARY_GRAPHEMES));
+  });
+
+  test("refuses an empty name", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Namable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await expect(
+      persistentStore.rename(actor, created.id, "   \n   "),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+  });
+
+  test("refuses to name a deleted channel", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Namable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+    await persistentStore.softDelete(actor, created.id);
+
+    await expect(
+      persistentStore.rename(actor, created.id, "After the end"),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
   });
 });
 

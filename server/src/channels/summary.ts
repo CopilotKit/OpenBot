@@ -23,8 +23,14 @@ import { oneLine } from "./text";
 
 export const CHANNEL_SUMMARY_KIND = "channel.summary";
 
-/** A title long enough to truncate says no more than the preview it replaced. */
-const MAX_SUMMARY_GRAPHEMES = 60;
+/**
+ * A title long enough to truncate says no more than the preview it replaced.
+ *
+ * Exported because a hand-given name takes the same cap: one number for both writers is what keeps
+ * a person's title and a model's title interchangeable in a roster row, and two constants named
+ * apart would be two numbers to forget to keep in step.
+ */
+export const MAX_SUMMARY_GRAPHEMES = 60;
 
 /** How much of the opening exchange the model is shown. Enough to see the topic, not the whole run. */
 const MAX_EXCERPT_GRAPHEMES = 600;
