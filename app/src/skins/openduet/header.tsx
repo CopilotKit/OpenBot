@@ -17,7 +17,7 @@ import {
 } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { useNavigationItems } from "@/lib/navigation";
+import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { IconMenuShort } from "./icons";
 import { DISC, FOCUS } from "./kit";
@@ -94,7 +94,9 @@ export function TabHeader({
 }) {
   const { data: user } = useQuery(currentUserQueryOptions());
   // Settings, from OpenBot's one navigation list, behind the person's initial.
-  const settings = useNavigationItems().find((item) => item.id === "settings");
+  const settings = useNavigationItems()
+    .filter(isNavigationLink)
+    .find((item) => item.id === "settings");
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
   const canDictate = capabilities.data?.transcription === true;
   const presence = useComposerPresence(main);

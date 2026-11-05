@@ -1,7 +1,14 @@
-import { Link, type LinkOptions, useMatchRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import {
+  Link,
+  type LinkOptions,
+  linkOptions,
+  useMatchRoute,
+} from "@tanstack/react-router";
 import type * as React from "react";
 import { PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
  * What a person gives their own Bots beyond the apps they connect: the skills they write and what
@@ -51,6 +58,27 @@ export function CapabilitiesTabs() {
  * open.
  */
 export function CapabilitiesShell({ children }: { children: React.ReactNode }) {
+  const matchRoute = useMatchRoute();
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  /*
+   * The personal edition has no Capabilities page: Skills and Memory open from the Bots page, so
+   * each is titled for itself and goes back there, with no tabs to a page that isn't in the menu.
+   */
+  if (personal) {
+    const tab =
+      TABS.find((item) => matchRoute({ ...item.linkOptions, fuzzy: true })) ??
+      TABS[0];
+    return (
+      <PageShell
+        backButton={{ label: "Bots", linkProps: linkOptions({ to: "/bots" }) }}
+        className="@container"
+        title={tab.label}
+      >
+        {children}
+      </PageShell>
+    );
+  }
   return (
     <PageShell className="@container" title="Capabilities">
       <CapabilitiesTabs />

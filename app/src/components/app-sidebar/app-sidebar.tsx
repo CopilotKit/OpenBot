@@ -31,10 +31,11 @@ import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
+import { untitledLine } from "@/lib/channels/label";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
-import { navigationFor } from "@/lib/navigation";
+import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
   type MessageListEmphasis,
@@ -42,6 +43,7 @@ import {
 } from "@/lib/settings/message-list";
 import { BotsNavBadge } from "../bot-profile/attention";
 import { BrowserNavItem } from "../browser/browser-nav-item";
+import { navigationRender } from "../edition/team-features-dialog";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -77,11 +79,12 @@ const MAX_ANIMATED_ROWS = 60;
 /**
  * The roster, narrowed to what the person typed.
  *
- * Matches the channel's name, its summary, and the last message, because those are the things the
- * row can actually show — searching against something invisible returns results a person cannot
- * account for. The last message is included because it is still what the second line draws until the
- * conversation has been named. Message history beyond that line is not here to search: it lives in
- * the thread store, and reaching for it is a server endpoint rather than a filter.
+ * Matches the channel's name, its summary, its opening and the last message, because those are the
+ * things the row can actually show — searching against something invisible returns results a person
+ * cannot account for. The opening and the last message are included because one of them is what the
+ * second line draws until the conversation has been named. Message history beyond that line is not
+ * here to search: it lives in the thread store, and reaching for it is a server endpoint rather than
+ * a filter.
  *
  * An empty query returns the input array unchanged rather than a copy, so typing and clearing does
  * not hand `AnimatePresence` a new array identity and restage the whole list.
@@ -98,8 +101,8 @@ export function matchingChannels(
     return channels;
   }
   return channels.filter((channel) =>
-    [channel.name, channel.summary, channel.lastMessage].some((field) =>
-      field?.toLowerCase().includes(needle),
+    [channel.name, channel.summary, channel.opening, channel.lastMessage].some(
+      (field) => field?.toLowerCase().includes(needle),
     ),
   );
 }
@@ -183,7 +186,7 @@ function ChannelRow({
         participantIds={channel.agentIds}
         name={channel.name}
         summary={channel.summary ?? undefined}
-        lastMessage={channel.lastMessage ?? undefined}
+        untitled={untitledLine(channel)}
         lastMessageAt={
           channel.lastMessageAt
             ? relativeTimeShort(channel.lastMessageAt)
@@ -217,7 +220,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
    */
   const animateOrder =
     !searching && (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
-  const navigation = navigationFor(currentUser?.role);
+  const navigation = useNavigationItems();
 
   return (
     <Sidebar variant="inset" {...props}>
@@ -325,6 +328,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarFooter>
         <SidebarMenu className="gap-px">
           {navigation
+            .filter(isNavigationLink)
             .filter((item) => item.section === "primary")
             .map((item) => (
               <SidebarMenuItem key={item.id}>
@@ -373,7 +377,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     <DropdownMenuItem
                       className={userMenuItemClassName}
                       key={item.id}
-                      render={<Link to={item.to} />}
+                      nativeButton={item.kind === "dialog"}
+                      render={navigationRender(item)}
                     >
                       <item.icon />
                       {item.label}

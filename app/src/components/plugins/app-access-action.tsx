@@ -1,7 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
+import {
+  type ConnectInNewTab,
+  useConnectInNewTab,
+} from "@/components/plugins/connect-in-new-tab";
 import { Button } from "@/components/ui/button";
 import { agentQueryOptions } from "@/lib/agents/queries";
 import {
@@ -12,6 +15,8 @@ import {
 } from "@/lib/app-access/mutations";
 import { type AppAccess, appAccessKeys } from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useManagePaths } from "@/lib/manage-paths";
 import { queryClient } from "@/query-client";
 
 /**
@@ -40,9 +45,24 @@ import { queryClient } from "@/query-client";
  * What the person is told about one app, in words that say whose move it is. `bot` is the Bot's name,
  * for the one state that asks the person a question about it.
  */
-export function appAccessSentence(access: AppAccess, bot?: string): string {
+export function appAccessSentence(
+  access: AppAccess,
+  bot?: string,
+  edition: "team" | "personal" = "team",
+): string {
   const name = access.displayName;
   const owners = access.accountHolder === "owner";
+  /*
+   * No admin in the personal edition: the button beside this turns the app on and connects it
+   * (`PersonalConnectAction`), so the sentence says what is missing, not who to ask.
+   */
+  if (
+    edition === "personal" &&
+    (access.state === "not_granted" ||
+      (access.state === "disabled" &&
+        (access.unavailable === null || access.unavailable === "absent")))
+  )
+    return `${name} isn't connected yet.`;
   switch (access.state) {
     case "ready":
       if (owners)
@@ -61,7 +81,7 @@ export function appAccessSentence(access: AppAccess, bot?: string): string {
     case "shared_not_approved":
       return `This Bot reaches more people than an admin approved for your organisation's ${name} account. Only an admin can approve it.`;
     case "disabled":
-      return disabledSentence(access);
+      return disabledSentence(access, edition);
     case "not_granted":
       return `This Bot hasn't been given ${name}. Only an admin can give it.`;
     case "owner_grantable": {
@@ -78,8 +98,17 @@ export function appAccessSentence(access: AppAccess, bot?: string): string {
  * The unconfigured-broker case says what the app's page under Connections says about the same app,
  * so the two screens never disagree about it.
  */
-function disabledSentence(access: AppAccess): string {
+function disabledSentence(
+  access: AppAccess,
+  edition: "team" | "personal",
+): string {
   const name = access.displayName;
+  // Nobody else to ask in the personal edition: the person is told what is missing, and Set it up
+  // beside the sentence goes to where it is fixed.
+  if (edition === "personal")
+    return access.unavailable === "composio_unconfigured"
+      ? `${name} isn't set up yet. It needs your ${access.provider === "arcade" ? "Arcade" : "Composio"} key first.`
+      : `${name} isn't fully set up yet. Set it up to finish.`;
   switch (access.unavailable) {
     case "composio_unconfigured":
       return `${name} isn't set up yet. An admin has to turn it on.`;
@@ -120,15 +149,33 @@ export function AppAccessAction({
    * the one press 403 for anybody else, and `SharedAppNotice` already reads the role the same way.
    */
   const me = useQuery(currentUserQueryOptions()).data;
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  /*
+   * ONE TAB FOR EVERY BUTTON BELOW. The personal edition's Connect turns the app on and then asks
+   * for the sign-in; turning it on refetches this app, which swaps `PersonalConnectAction` for
+   * `ConnectAction` while the sign-in is still being asked for. Held here, the tab survives the
+   * swap: it is navigated, and the button that replaced the first one goes on waiting for it.
+   */
+  const tab = useConnectInNewTab();
   if (access.state === "ready" || access.state === "shared_not_approved")
     return null;
+  if (
+    personal &&
+    (access.state === "not_granted" ||
+      (access.state === "disabled" &&
+        (access.unavailable === null || access.unavailable === "absent")))
+  )
+    return (
+      <PersonalConnectAction access={access} agentId={agentId} tab={tab} />
+    );
   if (access.state === "reconnect" && access.accountHolder === "owner")
     return null;
   if (access.state === "not_connected" || access.state === "reconnect")
-    return <ConnectAction access={access} />;
+    return <ConnectAction access={access} tab={tab} />;
   // Theirs to give, admin or not: an owner's grant keeps every call on the asker's own account.
   if (access.state === "owner_grantable")
-    return <OwnerGiveAction access={access} agentId={agentId} />;
+    return <OwnerGiveAction access={access} agentId={agentId} tab={tab} />;
   if (me?.role === "admin")
     return <AdminAction agentId={agentId} access={access} />;
   return <RequestAction agentId={agentId} access={access} />;
@@ -154,6 +201,7 @@ function AdminAction({
   agentId: string;
   access: AppAccess;
 }) {
+  const paths = useManagePaths();
   const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
   const approve = useMutation(approveBotAppMutationOptions(queryClient));
   const name = access.displayName;
@@ -212,16 +260,18 @@ function AdminAction({
       : access.requestKind
         ? ["Connect the team account", `Connect the team ${name} account`]
         : ["Reconnect the team account", `Reconnect the team ${name} account`];
+  /*
+   * A broker with no key is set up on its directory, which is a page of its own in the personal
+   * edition. There `/connections/composio` would read as an app called "composio" and say there is
+   * none; the team edition's `/admin/plugins/composio` happens to be that directory already.
+   */
+  const target =
+    page === "composio" || page === "arcade"
+      ? paths.brokerDirectory(page)
+      : paths.plugin(page);
   return (
     <Button
-      render={
-        <Link
-          params={{ key: page }}
-          rel="noreferrer"
-          target="_blank"
-          to="/admin/plugins/$key"
-        />
-      }
+      render={<Link {...target} rel="noreferrer" target="_blank" />}
       aria-label={spoken}
       size="sm"
     >
@@ -249,13 +299,14 @@ function AdminAction({
 function OwnerGiveAction({
   agentId,
   access,
+  tab,
 }: {
   agentId: string;
   access: AppAccess;
+  tab: ConnectInNewTab;
 }) {
   const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
   const give = useMutation(giveBotAppMutationOptions(queryClient));
-  const tab = useConnectInNewTab();
   const { waiting, stopWaiting } = tab;
   const name = access.displayName;
   /** Pressed while the account still had to be connected: give it as soon as it is. */
@@ -355,10 +406,115 @@ function OwnerGiveAction({
   );
 }
 
+/**
+ * The personal edition's one press, for an app the one person hasn't turned on yet: turn it on and,
+ * where it signs in, start the sign-in in a new tab, all on the same press. Turning it on goes
+ * through the same approval an administrator's "Turn on and give it" does, catalogue and broker
+ * apps alike, and the server then gives every Bot every tool (`personal-defaults.ts`). An app that
+ * needs a key typed opens its page instead, which is where the key goes.
+ */
+function PersonalConnectAction({
+  agentId,
+  access,
+  tab,
+}: {
+  agentId: string;
+  access: AppAccess;
+  tab: ConnectInNewTab;
+}) {
+  const approve = useMutation(approveBotAppMutationOptions(queryClient));
+  const { waiting } = tab;
+  const name = access.displayName;
+  const signsIn = access.connect === "oauth" || access.connect === "consent";
+
+  // Watched as `ConnectAction` watches: the card reads the app again until it is ready.
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: appAccessKeys.all });
+    }, 2_000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+
+  const turnOn = () => approve.mutateAsync({ agentId, app: access.key });
+
+  if (access.connect === "key" || tab.needsKey)
+    return (
+      <Button
+        render={<Link params={{ key: access.key }} to="/connections/$key" />}
+        aria-label={`Set up ${name}`}
+        size="sm"
+      >
+        Set up
+      </Button>
+    );
+
+  const error = approve.error?.message ?? tab.error;
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {error ? (
+        <p className="text-destructive text-xs" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {tab.blockedUrl ? (
+        <p className="text-xs" role="status">
+          This browser blocked the tab.{" "}
+          <a
+            className="underline underline-offset-2"
+            href={tab.blockedUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open {name}'s sign-in
+          </a>
+          .
+        </p>
+      ) : waiting ? (
+        <p className="text-muted-foreground text-xs" role="status">
+          Finish in the tab that opened.
+        </p>
+      ) : null}
+      <Button
+        aria-label={
+          waiting || approve.isPending
+            ? undefined
+            : `${signsIn ? "Connect" : "Turn on"} ${name}`
+        }
+        disabled={approve.isPending || tab.pending}
+        onClick={() => {
+          approve.reset();
+          if (signsIn) {
+            tab.stopWaiting();
+            tab.open(access.key, turnOn);
+            return;
+          }
+          // Nothing to sign in to: on is ready, and every query is read again for the next turn.
+          void turnOn().then(() => queryClient.invalidateQueries());
+        }}
+        size="sm"
+      >
+        {waiting
+          ? `Waiting for ${name}…`
+          : approve.isPending
+            ? "Turning on…"
+            : signsIn
+              ? "Connect"
+              : "Turn on"}
+      </Button>
+    </div>
+  );
+}
+
 /** The person's own account: connect it, or reconnect it. */
-function ConnectAction({ access }: { access: AppAccess }) {
+function ConnectAction({
+  access,
+  tab,
+}: {
+  access: AppAccess;
+  tab: ConnectInNewTab;
+}) {
   const label = access.state === "reconnect" ? "Reconnect" : "Connect";
-  const tab = useConnectInNewTab();
   const { waiting, stopWaiting } = tab;
 
   /*

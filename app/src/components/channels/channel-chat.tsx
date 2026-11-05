@@ -8,11 +8,20 @@ import {
 } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BotOrb } from "@/components/agents/bot-orb";
+import {
+  answerMessage,
+  QuestionNotice,
+  shownAnswer,
+  useConversationQuestion,
+} from "@/components/approvals/question-notice";
 import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
+import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
+import { ProgressRow } from "@/components/channels/progress-row";
 import {
   seedMessage,
   takeFirstMessage,
@@ -21,6 +30,7 @@ import {
 import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { answerPersonQuestionMutationOptions } from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
   recordChannelActivityMutationOptions,
@@ -48,7 +58,12 @@ import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { readThreadMessages } from "@/lib/copilot/thread-messages";
-import { useSkillCommands } from "@/lib/plugins/skill-commands";
+import { modelCatalogueQueryOptions } from "@/lib/models/queries";
+import { useConversationModel } from "@/lib/models/run-model";
+import {
+  skillInstructionsFor,
+  useSkillCommands,
+} from "@/lib/plugins/skill-commands";
 import {
   askChannelAgent,
   messageText,
@@ -369,14 +384,19 @@ export function ChannelChat({
    * First-message seed from the compose screen. It is taken once per mount and retained until the
    * agent has its own messages because joining a fresh thread can temporarily empty the agent.
    */
-  const [seed] = useState<Message | null>(() => {
+  const [first] = useState(() => {
     const pending = takeFirstMessage(channel.id);
-    return pending ? seedMessage(pending, newId()) : null;
+    return pending
+      ? {
+          seed: seedMessage(pending.text, newId()),
+          skillInstructions: pending.skillInstructions,
+        }
+      : null;
   });
+  const seed = first?.seed ?? null;
 
   /** Cleared by the send-on-mount effect without restarting it. */
-  const seedRef = useRef(seed);
-  seedRef.current = seed;
+  const seedRef = useRef(first);
 
   /** Promise gate for ordering the first message after the thread join when possible. */
   const openJoinGate = useRef<() => void>(() => {});
@@ -623,6 +643,18 @@ export function ChannelChat({
   useConversationActivity(runtimeAgentId, agent.messages);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
+  /*
+   * The model this conversation's Bot answers on. Only a Bot that runs inside OpenBot uses OpenBot's
+   * model, so only it gets a picker; a Bot on its own framework picks its own model.
+   */
+  const models = useQuery({
+    ...modelCatalogueQueryOptions(),
+    enabled: botProfile?.runsOnOpenBotModel === true,
+  });
+  const runModel = useConversationModel(
+    channel.id,
+    botProfile?.runsOnOpenBotModel ? models.data : undefined,
+  );
   /*
    * History is the snapshot, the stored thread AND the voice archive. The transcript shows none of
    * it until all three are in, so it lands once at the bottom instead of drawing the conversation
@@ -986,7 +1018,16 @@ export function ChannelChat({
       // both is not told two different things about the same silence.
       onRunErrorEvent: ({ event }) => fail(stoppedReason(event?.message)),
       onRunFailed: ({ error }) => fail(stoppedReason(error)),
-      onRunFinishedEvent: () => {
+      onRunFinishedEvent: ({ event }) => {
+        /*
+         * A run the server stopped to ask the person (an app's call OpenBot asks about) draws its
+         * card now, not on the inbox's next poll, as a computer step's does.
+         */
+        if (
+          (event as { outcome?: { type?: unknown } } | undefined)?.outcome
+            ?.type === "interrupt"
+        )
+          void queryClient.invalidateQueries({ queryKey: ["approvals"] });
         const wasOurs = awaitingReply.current;
         awaitingReply.current = false;
         /*
@@ -1016,6 +1057,35 @@ export function ChannelChat({
   }, [agent, runtimeAgentId]);
 
   /** Stable reference for effects and component callbacks. */
+  /*
+   * A question the Bot is waiting on in this conversation. While there is one, what the person sends
+   * is their answer to it: it goes through the answer path, which resumes the turn that asked (a
+   * routine's, with the routine's tools) and closes the question, rather than starting a new turn
+   * that leaves it open. Their words are drawn at once under the id the server stores them under;
+   * the Bot's reply arrives as any turn run away from this tab does, through the history read above.
+   */
+  const question = useConversationQuestion(channel.id, channel.threadId);
+  const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
+  const [answeredId, setAnsweredId] = useState<string | null>(null);
+  const answerTo = async (text: string) => {
+    if (!question) return;
+    await answer.mutateAsync({ id: question.id, response: text });
+    const sent = answerMessage(question, text);
+    setAnsweredId(sent.id);
+    agent.setMessages([...agent.messages, sent]);
+  };
+  // Until a Bot message lands after the answer, the Bot is reading it.
+  const answeredAt = answeredId
+    ? agent.messages.findIndex((message) => message.id === answeredId)
+    : -1;
+  const readingAnswer =
+    answeredAt !== -1 &&
+    !agent.messages
+      .slice(answeredAt + 1)
+      .some((message) => message.role === "assistant");
+  const botName = botProfile?.name ?? channel.name;
+  const botSeed = botProfile?.avatarSeed || runtimeAgentId;
+
   const sayRef = useRef(say);
   sayRef.current = say;
   const stopEpoch = useRef(0);
@@ -1074,8 +1144,12 @@ export function ChannelChat({
     // Swallowed for the reason `askFromComponent` above records: `say` throws on a failed turn, and
     // the seed has no box to go back into — it was typed on a screen that has already navigated
     // away. The transcript keeps the seeded message and the notice under it says what happened.
+    // Its `/` skills go with it, so they arrive in front of it as they do for a message typed here.
     void sayRef
-      .current(typeof pending.content === "string" ? pending.content : "")
+      .current(
+        typeof pending.seed.content === "string" ? pending.seed.content : "",
+        pending.skillInstructions,
+      )
       .catch(() => undefined);
 
     // Keep `seed` in state; transcriptMessages gives it up once the agent holds a user turn.
@@ -1103,6 +1177,8 @@ export function ChannelChat({
             taskRunning={agent.isRunning || runsInFlight > 0}
           />
           <ConversationView
+            // Remounted per conversation, so opening one puts the caret in its composer once.
+            autoFocus
             threadId={channel.threadId}
             voiceCall={
               call.available
@@ -1127,12 +1203,33 @@ export function ChannelChat({
             busy={agent.isRunning || turnsInFlight > 0}
             // The `/` menu exposes only skills granted to this Bot.
             commands={skillCommands}
+            modelPicker={
+              <ModelPicker
+                catalogue={
+                  botProfile?.runsOnOpenBotModel ? models.data : undefined
+                }
+                disabled={!channel.active}
+                onChange={runModel.choose}
+                saving={runModel.saving}
+                value={runModel.value}
+              />
+            }
             // Readiness is handled by `say`; deletion is the only disabled-chat state.
             disabled={!channel.active}
             messages={withVoiceChats(
-              transcriptMessages(agent.messages, seed),
+              transcriptMessages(agent.messages, seed).map(shownAnswer),
               voiceArchive.entries,
             )}
+            attached={
+              question && channel.active ? (
+                <QuestionNotice
+                  avatarSeed={botSeed}
+                  botName={botName}
+                  onAnswered={answerTo}
+                  question={question}
+                />
+              ) : undefined
+            }
             notice={
               /*
                * Two things can be worth saying at once — a deleted coworker and a history with holes in
@@ -1175,6 +1272,11 @@ export function ChannelChat({
                     {historyNotice}
                   </p>
                 ) : null}
+                {answer.error ? (
+                  <p className="pb-2 text-sm text-destructive" role="alert">
+                    {answer.error.message}
+                  </p>
+                ) : null}
                 {channel.active ? null : (
                   <p
                     className="pb-2 text-sm text-muted-foreground"
@@ -1187,23 +1289,27 @@ export function ChannelChat({
               </>
             }
             onSubmit={async (draft) => {
+              await runModel.beforeSend();
               // `draft.agentId` carries the @mentioned coworker, but nothing routes on it yet: this
               // channel is pinned to one `runtimeAgentId` for the life of its thread, so honouring a
               // per-message mention is a change to that binding, not to the composer.
               //
               // `commandIds` are the `/` chips that survived into the send, in the order they were
-              // typed. Resolved against the same list the menu was built from, so a chip left over from
-              // a skill that has since been revoked resolves to nothing rather than to a stale
-              // instruction — the menu is refetched, and this reads from it.
-              const skillInstructions = draft.commandIds
-                .map(
-                  (id) =>
-                    skillCommands.find((command) => command.id === id)?.prompt,
-                )
-                .filter((instruction): instruction is string =>
-                  Boolean(instruction),
-                );
+              // typed; see `skillInstructionsFor`.
+              const skillInstructions = skillInstructionsFor(
+                draft.commandIds,
+                skillCommands,
+              );
 
+              // An answer is words only: a draft carrying files or a skill is sent as a turn.
+              if (
+                question &&
+                draft.attachments.length === 0 &&
+                skillInstructions.length === 0
+              ) {
+                await answerTo(draft.text);
+                return;
+              }
               await say(draft.text, skillInstructions, draft.attachments);
             }}
             /**
@@ -1252,12 +1358,20 @@ export function ChannelChat({
              */
             working={
               agent.isRunning || turnsInFlight > 0 ? null : (
-                <ChannelWorkRows
-                  botOf={(botId) =>
-                    agentProfiles?.find((profile) => profile.id === botId)
-                  }
-                  work={channel.work}
-                />
+                <>
+                  {readingAnswer ? (
+                    <ProgressRow
+                      label={`${botName} is reading your answer…`}
+                      media={<BotOrb name={botName} seed={botSeed} size={20} />}
+                    />
+                  ) : null}
+                  <ChannelWorkRows
+                    botOf={(botId) =>
+                      agentProfiles?.find((profile) => profile.id === botId)
+                    }
+                    work={channel.work}
+                  />
+                </>
               )
             }
           />

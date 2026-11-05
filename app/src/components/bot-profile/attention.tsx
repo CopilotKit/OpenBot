@@ -32,11 +32,13 @@ export function asksOf(bot: BotAttention): number {
 }
 
 /**
- * Everything from this Bot that waits on the person: what `asksOf` counts, the items its check-ins
- * found, and its tasks with a reply to read or a failure to try again.
+ * What this Bot is stopped on until the person acts: what `asksOf` counts, and its tasks with a
+ * reply to read or a failure to try again. Not what its check-ins found: that is something the
+ * person may act on or not, listed under From check-ins and shown as a dot, never counted, so the
+ * number means a Bot is blocked.
  */
 export function waitingOnYou(bot: BotAttention): number {
-  return asksOf(bot) + bot.items + bot.tasks.ready + bot.tasks.failed;
+  return asksOf(bot) + bot.tasks.ready + bot.tasks.failed;
 }
 
 const count = (total: number, one: string, many: string) =>
@@ -241,10 +243,14 @@ export function BotsNavBadge() {
       </span>
     );
   }
-  if (bots.some((bot) => bot.unread > 0)) {
+  if (bots.some((bot) => bot.unread > 0 || bot.items > 0)) {
     return (
       <span
-        aria-label="Unread messages"
+        aria-label={
+          bots.some((bot) => bot.unread > 0)
+            ? "Unread messages"
+            : "Your check-ins found something"
+        }
         className="ml-auto size-2 rounded-full bg-primary"
         role="img"
       />

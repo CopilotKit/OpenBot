@@ -110,6 +110,32 @@ test("an approved connector call goes out on the account the Team Bot's credenti
   ]);
 });
 
+test("an approved routine is made for the conversation it was asked in", async () => {
+  // Approved later, from a sweep, the call is no longer inside the run that asked: the conversation
+  // has to travel with the action, or "post it here" becomes "which conversation?".
+  const args = { instruction: "Reply with the time.", cron: "*/15 * * * *" };
+  const action = approvalAction({
+    actorId: "person",
+    botId: "general",
+    toolRef: "routines/create_routine",
+    effect: "write",
+    scope: "routines",
+    args,
+    target: { serverId: "routines", toolName: "create_routine" },
+    continuation: continuation("mcp__routines__create_routine", args),
+  });
+  const { execute, calls } = harness({
+    credentialActorFor: async (actorId) => actorId,
+  });
+  await execute(action);
+  expect(calls).toEqual([
+    expect.objectContaining({
+      ref: "routines/create_routine",
+      threadId: "thread",
+    }),
+  ]);
+});
+
 test("a connector refusal during an approved action's re-check is a refusal the Bot is told, not a retryable failure", async () => {
   const { PluginRefusedError } = await import("../src/plugins/store");
   const { ApprovalRefusedError } = await import("../src/approvals/types");

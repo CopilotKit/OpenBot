@@ -18,8 +18,13 @@
  * So the DOM is registered here, that one module is evaluated against it, and the DOM is taken away
  * again. Nothing else is left holding browser globals: server and worker tests run exactly as
  * before, and each DOM test file still registers and unregisters its own happy-dom.
+ *
+ * `./react-teardown` comes first: it has to evaluate React's scheduler before anything else does,
+ * and from then on every `GlobalRegistrator.unregister()` settles React's work before the document
+ * goes.
  */
 
+import "./react-teardown";
 import { mock } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 

@@ -6,7 +6,9 @@ import { readFileSync } from "node:fs";
  *
  * What it answers is OpenAI's, not made up here. The two streams in `fixtures/openai-wire/` are OpenAI's own bytes,
  * one streamed answer from each API with a function tool offered (`gpt-5.6-terra` on `/v1/responses`, `gpt-5.5` on
- * `/v1/chat/completions`, recorded 2026-10-28). The refusals below are OpenAI's own bodies, word for word, from the
+ * `/v1/chat/completions`, recorded 2026-10-28). The `routine-asked-*` streams are OpenAI's too: `gpt-5.6-terra` on
+ * `/v1/responses` calling a Bot's routine tool and then answering what it returned, one stream per request, recorded
+ * 2026-11-05 through a forwarding proxy from the runs in routine-conversation.integration.test.ts. The refusals below are OpenAI's own bodies, word for word, from the
  * same day: every model of OpenAI's catalogue asked for a tool on both APIs.
  *
  * It stands for a gateway or a proxy in front of OpenAI (LiteLLM, Portkey, a company's own proxy): it sits at an
@@ -62,6 +64,12 @@ export type OpenAICompatibleEndpoint = {
   /** What `OPENAI_BASE_URL` is set to, `/v1` included, as `.env.example` documents it. */
   baseUrl: string;
   requests: EndpointRequest[];
+  /**
+   * The conversation each request sent, in the same order as `requests`: the Responses API's `input`
+   * or Chat Completions' `messages`, exactly as it arrived. What a Bot was actually shown is a
+   * question only the request on the wire answers.
+   */
+  conversations: unknown[];
   stop(): Promise<void>;
 };
 
@@ -84,10 +92,22 @@ function stream(name: string) {
 }
 
 export function startOpenAICompatibleEndpoint(
-  options: { responsesApi?: boolean } = {},
+  options: {
+    responsesApi?: boolean;
+    /**
+     * A recorded conversation to replay on the Responses API, one stream per request in the order
+     * OpenAI answered them: a tool call, then what the model said once it had the tool's answer. The
+     * last one answers any request past the end. Absent answers every request with the single
+     * recorded answer above.
+     */
+    responses?: readonly string[];
+  } = {},
 ): OpenAICompatibleEndpoint {
   const responsesApi = options.responsesApi ?? true;
+  const recorded = options.responses ?? [];
+  let answered = 0;
   const requests: EndpointRequest[] = [];
+  const conversations: unknown[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -106,6 +126,8 @@ export function startOpenAICompatibleEndpoint(
         model?: unknown;
         tools?: unknown;
         reasoning_effort?: unknown;
+        input?: unknown;
+        messages?: unknown;
       };
       const model = typeof body.model === "string" ? body.model : "";
       // Chat Completions nests a tool's name under `function`; the Responses API does not.
@@ -114,7 +136,14 @@ export function startOpenAICompatibleEndpoint(
           String(tool.function?.name ?? tool.name),
       );
       requests.push({ api, model, tools });
-      if (api === "responses") return stream("responses-stream.sse");
+      conversations.push(api === "responses" ? body.input : body.messages);
+      if (api === "responses") {
+        const next =
+          recorded[Math.min(answered, recorded.length - 1)] ??
+          "responses-stream.sse";
+        answered += 1;
+        return stream(next);
+      }
       const name = model.split("/").at(-1) ?? "";
       const notServed = NOT_ON_CHAT[name];
       if (notServed) return openAIError(404, notServed, "model");
@@ -141,6 +170,7 @@ export function startOpenAICompatibleEndpoint(
   return {
     baseUrl: `http://127.0.0.1:${server.port}/v1`,
     requests,
+    conversations,
     stop: () => server.stop(true),
   };
 }

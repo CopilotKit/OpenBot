@@ -1,0 +1,390 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_0b9b7732afe76546006aec32243d6887d1a62585029e67f8ac","object":"response","created_at":1793864228,"status":"in_progress","access_programs":null,"background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"image":{"context_compression":"disabled"},"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-terra","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"function","description":"Ask the person to pick one of several options, and WAIT for their answer. Use when you cannot sensibly guess which one they meant. You are given the id of the option they chose.","name":"askChoice","output_schema":null,"parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"title":{"type":"string","description":"The question being asked"},"summary":{"description":"Any context the person needs to choose","type":"string"},"options":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","description":"What comes back to you when this one is picked"},"label":{"type":"string"},"description":{"type":"string"}},"required":["id","label","description"],"additionalProperties":false},"description":"The options, in the order they should be offered"}},"required":["title","summary","options"],"additionalProperties":false},"strict":true},{"type":"function","description":"Set up a standing instruction that you carry out on a schedule for the person you are talking to.\n\nWrite the `instruction` as the work of ONE firing, in the imperative, and do not restate the schedule\ninside it: `Append the current UTC time to the page \"Log\"`, not `Every 15 minutes, append the current\nUTC time to the page \"Log\"`. The schedule belongs in `cron`, and the instruction is handed to a turn\nthat has already fired on it — an instruction that describes a schedule reads as a request to set one\nup, and gets answered instead of carried out.\n\nThe schedule is a five-field cron expression, in the order `minute hour day-of-month month day-of-week`.\n`0 9 * * 1-5` is weekdays at nine in the morning. `30 18 * * *` is every day at half past six in the\nevening. `0 9 1 * *` is the first of the month at nine. A routine may run at most every 15 minutes;\nanything more frequent is refused.\n\nPass the person's IANA timezone (`America/New_York`, `Europe/Madrid`) whenever they speak in local\ntime — the default is UTC and there is no deployment timezone to inherit, so a schedule set without\none fires at a UTC hour rather than at theirs.\n\nThe routine posts its reply into a conversation. Leave `channelId` out and it posts into this\nconversation, the one you are being asked in. Pass a `channelId` only when the person asks for a\ndifferent conversation. Where there is no conversation here and you share more than one with this\nperson, you are given them by title and id: ask the person which one, offering each by its title,\nand pass the id they choose.\n\nIt takes no owner and no Bot. The routine belongs to the person you are talking to and runs as you;\nboth are taken from the run itself, and there is no field for either.","name":"mcp__routines__create_routine","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"cron":{"type":"string"},"timezone":{"type":"string"},"channelId":{"type":"string"},"instruction":{"type":"string"}},"required":["cron","timezone","channelId","instruction"],"additionalProperties":false},"strict":true},{"type":"function","description":"Add an event trigger to one of this person's responsibilities that you carry out, so an outside\nevent starts a real run of it. Kinds: `webhook` (any system POSTs to a URL), `github`, `linear`,\n`sentry`, `pagerduty` (the vendor's signed webhook), `email` (mail to a dedicated address), `slack`\n(messages in Slack channels the person is in).\n\nNarrow it: `eventTypes` such as `issues.opened`, `Issue.create`, `issue.created`,\n`incident.triggered` (a prefix like `issues` matches every issues event), and optionally one\n`fieldPath`/`fieldEquals` pair such as `data.team.key` = `ENG`.\n\nYou never see or handle a secret. The result gives the URL (or address); tell the person to open\nthe responsibility's card on the Bot's Responsibilities page to copy the key, or to paste the vendor's\nsigning secret there for Linear, Sentry and PagerDuty. Never ask them to paste a secret into chat.\n\nSlack needs `teamId` and `mode` (`mention`, `phrase` with `phrases`, `reaction` with optional\n`reactions`, or `message`), optional `channels` (Slack channel ids; empty is every channel the Bot\nis in). It is refused unless the person has linked their own Slack account in that workspace and\nis a member of each channel.","name":"mcp__routines__create_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"kind":{"type":"string","enum":["webhook","github","linear","sentry","pagerduty","email","slack"]},"mode":{"type":"string","enum":["mention","phrase","reaction","message"]},"teamId":{"type":"string"},"phrases":{"type":"array","items":{"type":"string"}},"channels":{"type":"array","items":{"type":"string"}},"fieldPath":{"type":"string"},"reactions":{"type":"array","items":{"type":"string"}},"eventTypes":{"type":"array","items":{"type":"string"}},"repository":{"type":"string"},"fieldEquals":{"type":"string"},"allowedSenders":{"type":"array","items":{"type":"string"}},"responsibilityId":{"type":"string"}},"required":["kind","mode","teamId","phrases","channels","fieldPath","reactions","eventTypes","repository","fieldEquals","allowedSenders","responsibilityId"],"additionalProperties":false},"strict":true},{"type":"function","description":"Delete one of this person's routines, by the id from `list_routines`. It stops for good and there is\nnothing to undo. When they might want it back, switch it off with `update_routine` instead.","name":"mcp__routines__delete_routine","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"Delete one trigger for good. Its URL stops working and its key is revoked.","name":"mcp__routines__delete_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"List the standing instructions this person has: each one's id, its schedule in words, its timezone,\nthe channel it posts into, when it next runs and how the last run went.\n\nTake the id from here before changing or deleting one. It lists only this person's own routines.","name":"mcp__routines__list_routines","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{},"additionalProperties":false,"required":[]},"strict":true},{"type":"function","description":"List the event triggers on this person's responsibilities that you carry out: id, kind, responsibility, what it listens for, whether it is paused, and its URL or address. Keys are never listed.","name":"mcp__routines__list_triggers","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{},"additionalProperties":false,"required":[]},"strict":true},{"type":"function","description":"Pause one trigger: deliveries are acknowledged but start no run until it is resumed.","name":"mcp__routines__pause_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"Resume a paused trigger.","name":"mcp__routines__resume_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"Change one of this person's routines: its instruction, its schedule, its timezone, the channel it\nposts into, or whether it is switched on.\n\nGive the id from `list_routines` and only the fields that change; anything left out stays as it is. A\nnew `cron` follows exactly the same five-field rules as `create_routine`, and a routine switched back\non is scheduled from now rather than from wherever it left off.\n\nA new `instruction` follows the same rule as `create_routine`'s: the work of one firing, imperative, and\ndo not restate the schedule inside it — `Append the current UTC time to the page \"Log\"`, not `Every 15\nminutes, append the current UTC time to the page \"Log\"`.","name":"mcp__routines__update_routine","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"},"cron":{"type":"string"},"enabled":{"type":"boolean"},"timezone":{"type":"string"},"channelId":{"type":"string"},"instruction":{"type":"string"}},"required":["id","cron","enabled","timezone","channelId","instruction"],"additionalProperties":false},"strict":true},{"type":"function","description":"Replace the entire application state with a new snapshot","name":"AGUISendStateSnapshot","output_schema":null,"parameters":{"type":"object","properties":{"snapshot":{"description":"The complete new state object"}},"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"},"strict":false},{"type":"function","description":"Apply incremental updates to application state using JSON Patch operations","name":"AGUISendStateDelta","output_schema":null,"parameters":{"type":"object","properties":{"delta":{"type":"array","items":{"type":"object","properties":{"op":{"type":"string","enum":["add","replace","remove"],"description":"The operation to perform"},"path":{"type":"string","description":"JSON Pointer path (e.g., '/foo/bar')"},"value":{"description":"The value to set. Required for 'add' and 'replace' operations, ignored for 'remove'."}},"required":["op","path"],"additionalProperties":false},"description":"Array of JSON Patch operations"}},"required":["delta"],"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"},"strict":false}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_0b9b7732afe76546006aec32243d6887d1a62585029e67f8ac","object":"response","created_at":1793864228,"status":"in_progress","access_programs":null,"background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"image":{"context_compression":"disabled"},"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-terra","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"function","description":"Ask the person to pick one of several options, and WAIT for their answer. Use when you cannot sensibly guess which one they meant. You are given the id of the option they chose.","name":"askChoice","output_schema":null,"parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"title":{"type":"string","description":"The question being asked"},"summary":{"description":"Any context the person needs to choose","type":"string"},"options":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","description":"What comes back to you when this one is picked"},"label":{"type":"string"},"description":{"type":"string"}},"required":["id","label","description"],"additionalProperties":false},"description":"The options, in the order they should be offered"}},"required":["title","summary","options"],"additionalProperties":false},"strict":true},{"type":"function","description":"Set up a standing instruction that you carry out on a schedule for the person you are talking to.\n\nWrite the `instruction` as the work of ONE firing, in the imperative, and do not restate the schedule\ninside it: `Append the current UTC time to the page \"Log\"`, not `Every 15 minutes, append the current\nUTC time to the page \"Log\"`. The schedule belongs in `cron`, and the instruction is handed to a turn\nthat has already fired on it — an instruction that describes a schedule reads as a request to set one\nup, and gets answered instead of carried out.\n\nThe schedule is a five-field cron expression, in the order `minute hour day-of-month month day-of-week`.\n`0 9 * * 1-5` is weekdays at nine in the morning. `30 18 * * *` is every day at half past six in the\nevening. `0 9 1 * *` is the first of the month at nine. A routine may run at most every 15 minutes;\nanything more frequent is refused.\n\nPass the person's IANA timezone (`America/New_York`, `Europe/Madrid`) whenever they speak in local\ntime — the default is UTC and there is no deployment timezone to inherit, so a schedule set without\none fires at a UTC hour rather than at theirs.\n\nThe routine posts its reply into a conversation. Leave `channelId` out and it posts into this\nconversation, the one you are being asked in. Pass a `channelId` only when the person asks for a\ndifferent conversation. Where there is no conversation here and you share more than one with this\nperson, you are given them by title and id: ask the person which one, offering each by its title,\nand pass the id they choose.\n\nIt takes no owner and no Bot. The routine belongs to the person you are talking to and runs as you;\nboth are taken from the run itself, and there is no field for either.","name":"mcp__routines__create_routine","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"cron":{"type":"string"},"timezone":{"type":"string"},"channelId":{"type":"string"},"instruction":{"type":"string"}},"required":["cron","timezone","channelId","instruction"],"additionalProperties":false},"strict":true},{"type":"function","description":"Add an event trigger to one of this person's responsibilities that you carry out, so an outside\nevent starts a real run of it. Kinds: `webhook` (any system POSTs to a URL), `github`, `linear`,\n`sentry`, `pagerduty` (the vendor's signed webhook), `email` (mail to a dedicated address), `slack`\n(messages in Slack channels the person is in).\n\nNarrow it: `eventTypes` such as `issues.opened`, `Issue.create`, `issue.created`,\n`incident.triggered` (a prefix like `issues` matches every issues event), and optionally one\n`fieldPath`/`fieldEquals` pair such as `data.team.key` = `ENG`.\n\nYou never see or handle a secret. The result gives the URL (or address); tell the person to open\nthe responsibility's card on the Bot's Responsibilities page to copy the key, or to paste the vendor's\nsigning secret there for Linear, Sentry and PagerDuty. Never ask them to paste a secret into chat.\n\nSlack needs `teamId` and `mode` (`mention`, `phrase` with `phrases`, `reaction` with optional\n`reactions`, or `message`), optional `channels` (Slack channel ids; empty is every channel the Bot\nis in). It is refused unless the person has linked their own Slack account in that workspace and\nis a member of each channel.","name":"mcp__routines__create_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"kind":{"type":"string","enum":["webhook","github","linear","sentry","pagerduty","email","slack"]},"mode":{"type":"string","enum":["mention","phrase","reaction","message"]},"teamId":{"type":"string"},"phrases":{"type":"array","items":{"type":"string"}},"channels":{"type":"array","items":{"type":"string"}},"fieldPath":{"type":"string"},"reactions":{"type":"array","items":{"type":"string"}},"eventTypes":{"type":"array","items":{"type":"string"}},"repository":{"type":"string"},"fieldEquals":{"type":"string"},"allowedSenders":{"type":"array","items":{"type":"string"}},"responsibilityId":{"type":"string"}},"required":["kind","mode","teamId","phrases","channels","fieldPath","reactions","eventTypes","repository","fieldEquals","allowedSenders","responsibilityId"],"additionalProperties":false},"strict":true},{"type":"function","description":"Delete one of this person's routines, by the id from `list_routines`. It stops for good and there is\nnothing to undo. When they might want it back, switch it off with `update_routine` instead.","name":"mcp__routines__delete_routine","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"Delete one trigger for good. Its URL stops working and its key is revoked.","name":"mcp__routines__delete_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"List the standing instructions this person has: each one's id, its schedule in words, its timezone,\nthe channel it posts into, when it next runs and how the last run went.\n\nTake the id from here before changing or deleting one. It lists only this person's own routines.","name":"mcp__routines__list_routines","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{},"additionalProperties":false,"required":[]},"strict":true},{"type":"function","description":"List the event triggers on this person's responsibilities that you carry out: id, kind, responsibility, what it listens for, whether it is paused, and its URL or address. Keys are never listed.","name":"mcp__routines__list_triggers","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{},"additionalProperties":false,"required":[]},"strict":true},{"type":"function","description":"Pause one trigger: deliveries are acknowledged but start no run until it is resumed.","name":"mcp__routines__pause_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"Resume a paused trigger.","name":"mcp__routines__resume_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"Change one of this person's routines: its instruction, its schedule, its timezone, the channel it\nposts into, or whether it is switched on.\n\nGive the id from `list_routines` and only the fields that change; anything left out stays as it is. A\nnew `cron` follows exactly the same five-field rules as `create_routine`, and a routine switched back\non is scheduled from now rather than from wherever it left off.\n\nA new `instruction` follows the same rule as `create_routine`'s: the work of one firing, imperative, and\ndo not restate the schedule inside it — `Append the current UTC time to the page \"Log\"`, not `Every 15\nminutes, append the current UTC time to the page \"Log\"`.","name":"mcp__routines__update_routine","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"},"cron":{"type":"string"},"enabled":{"type":"boolean"},"timezone":{"type":"string"},"channelId":{"type":"string"},"instruction":{"type":"string"}},"required":["id","cron","enabled","timezone","channelId","instruction"],"additionalProperties":false},"strict":true},{"type":"function","description":"Replace the entire application state with a new snapshot","name":"AGUISendStateSnapshot","output_schema":null,"parameters":{"type":"object","properties":{"snapshot":{"description":"The complete new state object"}},"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"},"strict":false},{"type":"function","description":"Apply incremental updates to application state using JSON Patch operations","name":"AGUISendStateDelta","output_schema":null,"parameters":{"type":"object","properties":{"delta":{"type":"array","items":{"type":"object","properties":{"op":{"type":"string","enum":["add","replace","remove"],"description":"The operation to perform"},"path":{"type":"string","description":"JSON Pointer path (e.g., '/foo/bar')"},"value":{"description":"The value to set. Required for 'add' and 'replace' operations, ignored for 'remove'."}},"required":["op","path"],"additionalProperties":false},"description":"Array of JSON Patch operations"}},"required":["delta"],"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"},"strict":false}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"rs_0b9b7732afe76546006aec3224e5ac87d1b3f6e39bc8ecca37","type":"reasoning","content":[],"encrypted_content":"gAAAAABq7DIkp-ynA9owuUFzQBMup_0tSJquBnVCdeFjGskc5aBmdaYt-LP7KL1WVkn8Jql7Zzbd2IOqQpQ6j0MVBiJrRP-DfBSreHvpMj3NAbzf4-K0Ov5MaZAzSCd2TdbHuKZ5lSNT9I0lbRlyL7Jax676yV6hImcQRgvextqgZaL9PPxD3bhbb6lkNaDN8roFZ41R24AkkEdcmBI2Thch4GaPMkkf9n_JrcShPgFnbsnHA0XyolkKg9sKAZ8OA3LQ7byPTHnuTpS60JMY97d8ezOohqVrpzGqajMKMvOk2Af2ifKsGize-Yxz2phLPpN3GAqy-NYz1zXXKcYS4203X0X_V1saRfwOX4vJ0L3RGTQLv-807U9YC99dVu3LHfYordAxb_yDgUYWOeVBKyGZDAPeOH5ZqronUhooiqryaAsEPFgPX8ds0NRiTOkTVDtLGqYDoGwWwshAF_L4W8pyED0YEXPFBvT9_C42zTE-a5QyjAk-oyXe87sbAJrHs55MJ_zkWhJFF7_aGIQqBCLDVv6yTxKndN-LGQDcZ2SxQi7me5tDDB6rw4gwNs3YjkDMx1ksTI1HaU1lRkuOINfTLDIyqvw33QB0ysnVZ-bkZpHADVHCz7argJNNXjWQ9PBX0G-oBGJNv6hJnoAuDhriBw7EfISIN7OVevoUlr9WU1l9Yh8PL1XMWxCdCX1F0WHbbZQZwx-JMFcpFuJy3FcrrWqEgHJGpRyXxf0IDgIYHS2-S2R_MG81ggwYdg_42L_E-ln9UzWhZfpW3Wdbphferp0GjdhPHnrERkVoSUEk4ZtCUkWi2ITc9yXs6tUxDmxOTi-mdqXzFbawHioaahuxZ4M9v3x8s4ctZLtmRH685QxvkHInnblXZ0q9fXOMN-LnxZxTDpOcSF_3GkSxxzIuS0lmDOx4JHNgMX5zlY0RlEkeCCg-pzRij69-lPkakySff8RR7QMU7u361KuPDQre7Bpyulhw3TEleVGyLWVulguCWSW2dhA4qu76Y5R4TmSgwBxygOw6-eNQQVRAnp0auTjIrAj3_zsdLdt4wef9r0Zl_dSCOYW8w1lx5cXzIqXuzviVXEVDX9uDVT2prVdfuR5Ykm9NGTHJVAG2sE1Kf7ewNzCh8Wu4BqfS1c4kEUhflNq7bJ7nRtgNwzQBwvKxtv0uF0ehiK7m93s2dApfFuvr3Wk4I08kgE-pqvtK-qlGzg8pfwIY","summary":[]},"output_index":0,"sequence_number":2}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"rs_0b9b7732afe76546006aec3224e5ac87d1b3f6e39bc8ecca37","type":"reasoning","content":[],"encrypted_content":"gAAAAABq7DIlbv2sXsyRmoDKNt29oO_YZ485-k58ZN2PC1MS5-xazY0_ZzaxnhxQEeRmnf9O4ZuykY9dx7csvWfY91hR8qWKLWs5RcpIrgEzc_FAJPPL1rYoQDD0W7T_BIv6VaOczWlC2AggjnOU8B57NDd7_2WoF3wVVF77cwVSWoUkuG13zcT8pcL7DmD-UsGLOiZkXppLPDk-JS-Lunmiw56A72GP6osymcuOQBXh2STLDbQwN7b_i-QITBTAcjqNT_zRfkDxEpcoT-dhN99nmpuhTOTgCLyeYfKuPtoLKG1UUWqkVbltU1AztvOmXeQGPQmSTr7jypMrblx6WqQWvpK2pQ5Lw5bjJZvCunNJsU5tg1OWiK59PutSjb7WjiCHPBrOkQHhQcb3IjjGttlaSDT2HkgrWTSaYe7JVBgYlP-XPoANkqJuDeHSzDtFFhZL2K6qC2DDYotm_rwECbC8lAtZcG1YXeFXJqNM1x3YjK-D47e-pmzEaL6FBqwqsK5Xb4VkMI8wYAJ6Q-0cmwpMsZQksoYdWzjMSnMCwcdFZg7dDBW4vjp5tR5lKT21Muohz9UnpCKJSzmQ-lO-AfQcV27MItp2RaPBjXe3Z0uYKSwaNk06IK8bKmtTu5YbPo915d9Jz-94CmPMZ2e3e3Nt-K9cWpDacUXDDai2TgdQZr1zsfapIQI5gan3vJFbxxVhuqAflK7VtT7pcQ6lCmL_PMmYs9C04he3kTlelX6neAod4Twq9FHQyJ1TbdyiUF53-T_i6zavkY_YtmoyUDapCIc8IKypr_pEu2MM8KgiIVqgTpqQzdqWvhO4x5-v15hVd_Zmr9sKvMG1rX6hvariQX8JQxT8WWlonU_JM27JlcZ5TfJUyBgC_UBVUf6p7MqZj4UAcjdldfCZP4xxakFVJtHu2ShBedQsKtPrRO_w9Om_X4Xf26ZkQVkgB88xo9CJSTBZlKUq53bIGK5pSuPb7q0Thc5odMUb0-iwDMmxtPsl-xY1w-T9gTHv1gImm8mzOUAVgoW-JduY0s6r0T2OH0426cIVAp1f0dWC-a8-rH_qctkECOiVo_mj9OUAGGA2NW1QT3_QpFrBitHswcy01CyjNhzDOP6vU0TPF2AsvRg1FZpYiFjVoD7ZK5NITIKvyqlQtF0T6XlUcaVg5kpjwmb_0WHwRh3ChSFdJTKMnNoTBXUQ2RMBgowEb2YdlKwq68kpk1EUYXhS5weJh262Ajt7n8z2DpDCBXY_SFq7vlnhsu26jRn6CvluYnkfbrwWHlOLlzK9x2JF_wkPaSUHi7g-TW2hLj6oIxeXyjlVJIiITmwbXBx5tpZyFjPdphStT2KPtvzyDktR6OX0GtdJGMfNS9Lu9ZlPC_jCNBVmnn7Z29Chv3uipjIESGnntXfwSgj1z-iV7dtqCBkALnUGTMHhYg7tWYTILdTcl4M2D30S5WEauHnbjKsH1tQDdD-VBNPVtAWHIUN8-IIgs5lCyhgGX2Tof63tQpMohgXi9J46YInVGcE=","summary":[]},"output_index":0,"sequence_number":3}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","type":"function_call","status":"in_progress","arguments":"","call_id":"call_Y5unFl2nz4eWJEGQ6njQmR4a","name":"askChoice"},"output_index":1,"sequence_number":4}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"{\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"yUik2T26QRSxUm","output_index":1,"sequence_number":5}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"title","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"Ivr1hOo426Y","output_index":1,"sequence_number":6}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"r9WdIXGnGQRo6","output_index":1,"sequence_number":7}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"Choose","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"OckkZfdhIo","output_index":1,"sequence_number":8}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" a","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"UHuvs9Z8OaE3p9","output_index":1,"sequence_number":9}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" conversation","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"N9y","output_index":1,"sequence_number":10}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\",\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"kpN0qPwb9LEiJ","output_index":1,"sequence_number":11}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"summary","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"BD83ylBuU","output_index":1,"sequence_number":12}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"ySYkPJ3gGNsYe","output_index":1,"sequence_number":13}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"I","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"FeRUWTpvBkuGHuM","output_index":1,"sequence_number":14}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" can","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"BqnGklzgWCY7","output_index":1,"sequence_number":15}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" run","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"2pblVLc13vJS","output_index":1,"sequence_number":16}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" the","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"2AlAYqvFDpiu","output_index":1,"sequence_number":17}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" check","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"iBEqAqGm4b","output_index":1,"sequence_number":18}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" every","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"AVJe65mVrb","output_index":1,"sequence_number":19}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" ","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"wnBtgCcyuMbTSsv","output_index":1,"sequence_number":20}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"15","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"C5ix3GtGhQq0qM","output_index":1,"sequence_number":21}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" minutes","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"IGyQig2g","output_index":1,"sequence_number":22}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" in","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"lfKuynB9PAIvM","output_index":1,"sequence_number":23}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" UTC","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"fR2iuafXj78H","output_index":1,"sequence_number":24}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":",","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"J5VqNxMBN2iQ3fS","output_index":1,"sequence_number":25}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" but","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"9b05QO4qnte1","output_index":1,"sequence_number":26}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" you","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"7MNSqmYqiiNW","output_index":1,"sequence_number":27}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" have","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"1fpoXWzEQgz","output_index":1,"sequence_number":28}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" multiple","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"nAb99PL","output_index":1,"sequence_number":29}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" conversations","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"5I","output_index":1,"sequence_number":30}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" and","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"4qHja1sW71sy","output_index":1,"sequence_number":31}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" need","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"GHlHNXVQWFG","output_index":1,"sequence_number":32}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" to","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"5nTV3vbXx3fE5","output_index":1,"sequence_number":33}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" choose","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"do4vlvX88","output_index":1,"sequence_number":34}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" where","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"moOu0MkaAC","output_index":1,"sequence_number":35}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" each","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"TTdWnPuNAJd","output_index":1,"sequence_number":36}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" reply","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"yxoaxYPb7O","output_index":1,"sequence_number":37}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" should","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"56hR9yGmi","output_index":1,"sequence_number":38}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" be","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"dgYFtn0bxPpZJ","output_index":1,"sequence_number":39}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" posted","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"wYF5pMY0a","output_index":1,"sequence_number":40}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":".\",\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"Q8VNVDzD4fkH","output_index":1,"sequence_number":41}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"options","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"yI0up7XnG","output_index":1,"sequence_number":42}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":[","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"vfuv50ioGZM5V","output_index":1,"sequence_number":43}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"{\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"zw3JyjGHWZ9fMS","output_index":1,"sequence_number":44}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"id","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"skxTFBrJY0De01","output_index":1,"sequence_number":45}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"KqthgPu0ZNixD","output_index":1,"sequence_number":46}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"routine","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"fPmOEDYQ0","output_index":1,"sequence_number":47}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"-con","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"wDnyrrFYSn1k","output_index":1,"sequence_number":48}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"versation","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"PaXVy71","output_index":1,"sequence_number":49}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"-","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"Q17F1RtBZR2g7e6","output_index":1,"sequence_number":50}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"eks","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"Z9COVuxikjmca","output_index":1,"sequence_number":51}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\",\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"B0RWeKIkJ5s7f","output_index":1,"sequence_number":52}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"label","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"Ekg066QclL9","output_index":1,"sequence_number":53}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"74EESuwUSW9Qx","output_index":1,"sequence_number":54}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"15","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"VCnpM9ia71aVsh","output_index":1,"sequence_number":55}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"-Min","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"MgpyXxmlClKc","output_index":1,"sequence_number":56}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"ute","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"U1ciM4B9ZXKrG","output_index":1,"sequence_number":57}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" E","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"7Xwk0OBrxIQ78F","output_index":1,"sequence_number":58}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"KS","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"Ez4wOn1EalActF","output_index":1,"sequence_number":59}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" UTC","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"u5fo1ZtI4Mi7","output_index":1,"sequence_number":60}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" Routine","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"5KsOYYfR","output_index":1,"sequence_number":61}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\",\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"YMk9LuNeXZtmZ","output_index":1,"sequence_number":62}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"description","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"xtHYZ","output_index":1,"sequence_number":63}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"5vBO4F1RNTs4c","output_index":1,"sequence_number":64}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"Post","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"vrxsaOjz8foI","output_index":1,"sequence_number":65}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" the","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"w1GuQv4nIiln","output_index":1,"sequence_number":66}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" UTC","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"7jmo15pyasMo","output_index":1,"sequence_number":67}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" routine","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"Mkbrwetr","output_index":1,"sequence_number":68}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" check","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"HFLFKpoAdK","output_index":1,"sequence_number":69}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" here","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"OmgyZCk44OG","output_index":1,"sequence_number":70}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":".\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"Dyzt9ijBLNs1pe","output_index":1,"sequence_number":71}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"},{\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"mkAUUp4iZybp","output_index":1,"sequence_number":72}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"id","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"jinpL7KdjmXknr","output_index":1,"sequence_number":73}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"0TkQfnHL6Plfq","output_index":1,"sequence_number":74}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"routine","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"5YQNTzFaC","output_index":1,"sequence_number":75}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"-con","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"m7Qe6104J4EP","output_index":1,"sequence_number":76}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"versation","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"rL3GFUF","output_index":1,"sequence_number":77}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"-re","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"PaWCI0i4MYapq","output_index":1,"sequence_number":78}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"versal","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"XrDJjO3ULb","output_index":1,"sequence_number":79}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\",\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"SzFaASAlvOIez","output_index":1,"sequence_number":80}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"label","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"YSEjinxRjxb","output_index":1,"sequence_number":81}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"pqgwjLUJDUDa2","output_index":1,"sequence_number":82}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"Knowledge","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"ykSJg4l","output_index":1,"sequence_number":83}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" Bot","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"61A3FzEtXLbL","output_index":1,"sequence_number":84}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" String","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"UABapHy0q","output_index":1,"sequence_number":85}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" Re","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"8iVBjnXWlMUot","output_index":1,"sequence_number":86}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"versal","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"I1s7L78z3Q","output_index":1,"sequence_number":87}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\",\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"JoiNh9ipXFa9w","output_index":1,"sequence_number":88}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"description","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"xhork","output_index":1,"sequence_number":89}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"PFPIp5ktntS9P","output_index":1,"sequence_number":90}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"Post","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"GYnRBNFa9sSe","output_index":1,"sequence_number":91}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" the","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"1TMiegTLlv0R","output_index":1,"sequence_number":92}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" UTC","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"kuyasUQPdv5q","output_index":1,"sequence_number":93}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" routine","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"aBTlXdRi","output_index":1,"sequence_number":94}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" check","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"WBMsZPER2s","output_index":1,"sequence_number":95}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" here","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"I9yRYmmGJSc","output_index":1,"sequence_number":96}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":".\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"hdBQFXcY9MVlkf","output_index":1,"sequence_number":97}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"},{\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"ZyeylXqpOleg","output_index":1,"sequence_number":98}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"id","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"BipvltX2AYfdJb","output_index":1,"sequence_number":99}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"DPC73fogJi8We","output_index":1,"sequence_number":100}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"routine","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"FJosud4e4","output_index":1,"sequence_number":101}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"-con","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"szYaRGI9wtQ3","output_index":1,"sequence_number":102}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"versation","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"1Aqb6jd","output_index":1,"sequence_number":103}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"-k","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"cM6oKVY8GRUq3p","output_index":1,"sequence_number":104}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"ub","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"5ofLhmFJGXF6U4","output_index":1,"sequence_number":105}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"ectl","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"UXXwxf0p6i4X","output_index":1,"sequence_number":106}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\",\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"ZVTR5aZpjXbKd","output_index":1,"sequence_number":107}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"label","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"7coWKXebuf9","output_index":1,"sequence_number":108}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"TmhDLxvlwUdhv","output_index":1,"sequence_number":109}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"Latest","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"i62euQq59L","output_index":1,"sequence_number":110}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" Stable","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"9GQGrSYjC","output_index":1,"sequence_number":111}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" kub","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"bnCUvWboHFcz","output_index":1,"sequence_number":112}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"ectl","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"Wi702XC5ioH7","output_index":1,"sequence_number":113}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" Release","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"gbR2LSgd","output_index":1,"sequence_number":114}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\",\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"treSkdsCt8gzB","output_index":1,"sequence_number":115}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"description","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"gSohY","output_index":1,"sequence_number":116}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"lPvbeVMWRufQ4","output_index":1,"sequence_number":117}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"Post","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"7FWgtTZkKRja","output_index":1,"sequence_number":118}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" the","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"05djiDNbfLBi","output_index":1,"sequence_number":119}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" UTC","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"jknV7Rfvj59o","output_index":1,"sequence_number":120}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" routine","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"Iyvd2knJ","output_index":1,"sequence_number":121}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" check","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"mWo5hrH1h4","output_index":1,"sequence_number":122}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" here","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"aHW6wLHD56W","output_index":1,"sequence_number":123}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":".\"","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"r5ip92QBaTZHKU","output_index":1,"sequence_number":124}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"}","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"dBCT7Ir6fWhAKbT","output_index":1,"sequence_number":125}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"]}","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","obfuscation":"5kWpL9yN2EsgQW","output_index":1,"sequence_number":126}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","arguments":"{\"title\":\"Choose a conversation\",\"summary\":\"I can run the check every 15 minutes in UTC, but you have multiple conversations and need to choose where each reply should be posted.\",\"options\":[{\"id\":\"routine-conversation-eks\",\"label\":\"15-Minute EKS UTC Routine\",\"description\":\"Post the UTC routine check here.\"},{\"id\":\"routine-conversation-reversal\",\"label\":\"Knowledge Bot String Reversal\",\"description\":\"Post the UTC routine check here.\"},{\"id\":\"routine-conversation-kubectl\",\"label\":\"Latest Stable kubectl Release\",\"description\":\"Post the UTC routine check here.\"}]}","item_id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","output_index":1,"sequence_number":127}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","type":"function_call","status":"completed","arguments":"{\"title\":\"Choose a conversation\",\"summary\":\"I can run the check every 15 minutes in UTC, but you have multiple conversations and need to choose where each reply should be posted.\",\"options\":[{\"id\":\"routine-conversation-eks\",\"label\":\"15-Minute EKS UTC Routine\",\"description\":\"Post the UTC routine check here.\"},{\"id\":\"routine-conversation-reversal\",\"label\":\"Knowledge Bot String Reversal\",\"description\":\"Post the UTC routine check here.\"},{\"id\":\"routine-conversation-kubectl\",\"label\":\"Latest Stable kubectl Release\",\"description\":\"Post the UTC routine check here.\"}]}","call_id":"call_Y5unFl2nz4eWJEGQ6njQmR4a","name":"askChoice"},"output_index":1,"sequence_number":128}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_0b9b7732afe76546006aec32243d6887d1a62585029e67f8ac","object":"response","created_at":1793864228,"status":"completed","access_programs":null,"background":false,"completed_at":1793864230,"error":null,"frequency_penalty":0.0,"image":{"context_compression":"disabled"},"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-terra","moderation":null,"output":[{"id":"rs_0b9b7732afe76546006aec3224e5ac87d1b3f6e39bc8ecca37","type":"reasoning","content":[],"encrypted_content":"gAAAAABq7DImu6zMnZdd3xWwLJPhtek_OWdAZ6p_EzpLbS44f4g99KhywqPpcjc8P-mNNAN4Gve3SIPG-INBOY2z8sp3zCAt9TXofA8RyKgqY2Z58f8UIavIxR8rk2ZjN15k4C-FCVk2SxZITDe5b6KF9hyA4LEfls8HMPpfuvplsRisCFlD7iyyG5e5TLBYu0UZpzDWIA4LcHOlRH6jDkkbBKtn4tIbjSnNd2U4NnzHwXrkPAvS3ssPkV12ic___o5pzGippXShai1TCz3LgrRGXCiCySU7I7_zaIogHEWnozaLotOWJeZp_6VeVPmNM8E-O9x6oPnJBB1iO9GaTxYO3Qvdu6etO2iBb0uBw7S_NorRjAAT1NIewr9gxw9xzgiGbnpSmNCPYkOEidMQ9qwWznAi7xsh3onhJd8_-7Qsvhi_UKduTnSFAT4QOlIpZ1AaihYxcrkpGXjjZxxJh8FSikQM6fpYGXUgm-bD8F9iQ3Rw3pYlw9VurFVugVavGkLJa-t9yg3bSN5gMpPjQ7f0SYI_CpwrAKC68oW2sJ-RD5PJfuUnpZ_slkt8bamDDIrFbYaqwyAcft98_qioKflm8bVfUDi9dwnt2hZbMVkOAeIOQB0xXqgY4Lc9JZncuXKaZFXULd1LqtEYTn1cDbm0Rw2ka9paxDqBeRNG6RW1vAl5mtnzg4rIhN9__XcNgG-MpKFIuBlVn42cvGCje_yzZTHsWUlxsPGxdPKFCaz6FDjCdX74ssHDcc18HZh-cBaIrkmrsIPUvdY4w8bwGNKAuERf93qCf9HrPMY1sDDGxAlV_dC6TN3rJMRZ81FSPZvEgGTaMeFYeeN5CvfCdP46D9VStCc0k1W2R2v5E3MtO5qBi-r-cVQB3EW99Ny0dZD0hSlQMgahaoymiJwGb3phFN_i1zfZtMiiVrb_ZLSXYhXIrkjemfj3s7ptTZQfTYjXk3f7Q8kCVmmEKOTfVALukjyXErzDCHoegxcHOWuStL9kK0tBZZ-vkjTHXIYnTeyGOI5xlp5E8EWEnJGE_jovjjU365pDKnEPZcdVX2qyehpH5gDGukJmwo2ESiOw9fGcX6GpE5Fw5U_oeU64jrdsGSZ8GbBlQxIawupqxrwlQb74iQf1BozZPF0a06eXJfutNym9MKu1v4QKy13M3dHXYLm7OGd_dwAl0PC5aSR67gKnM8Vkkuq1a2haYgv_PFgzNxKeSaTPIUsxhrXsM0n6VHPvgtxexgxSfzu-a1Azi8k5rSd7KOR9GNwtk85iKvROWiJmnmZsXIx45yy5jho5gMf_XjekBIPYYsbuDCl8fqDNGUl7qb0225nuYOnKl_l5E2F41SxDgFLr7ixTRh-8PpLlrWohyXbpiaYwWZGbM1VoYlwO7FYkw5yXxvqybBmYMIu72T7cufPiH8NiA_iZWl96ThgJDN4c12LhkK1I9q4u4cfqCn5Y3pV93wC5IPy0LiIkijCdHmWBt_WGPS_UGZqqHmeRZ4PAWwsf94wj2o5H2PooQsE=","summary":[]},{"id":"fc_0b9b7732afe76546006aec3225038087d1806d7bf16c85ee6f","type":"function_call","status":"completed","arguments":"{\"title\":\"Choose a conversation\",\"summary\":\"I can run the check every 15 minutes in UTC, but you have multiple conversations and need to choose where each reply should be posted.\",\"options\":[{\"id\":\"routine-conversation-eks\",\"label\":\"15-Minute EKS UTC Routine\",\"description\":\"Post the UTC routine check here.\"},{\"id\":\"routine-conversation-reversal\",\"label\":\"Knowledge Bot String Reversal\",\"description\":\"Post the UTC routine check here.\"},{\"id\":\"routine-conversation-kubectl\",\"label\":\"Latest Stable kubectl Release\",\"description\":\"Post the UTC routine check here.\"}]}","call_id":"call_Y5unFl2nz4eWJEGQ6njQmR4a","name":"askChoice"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"function","description":"Ask the person to pick one of several options, and WAIT for their answer. Use when you cannot sensibly guess which one they meant. You are given the id of the option they chose.","name":"askChoice","output_schema":null,"parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"title":{"type":"string","description":"The question being asked"},"summary":{"description":"Any context the person needs to choose","type":"string"},"options":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","description":"What comes back to you when this one is picked"},"label":{"type":"string"},"description":{"type":"string"}},"required":["id","label","description"],"additionalProperties":false},"description":"The options, in the order they should be offered"}},"required":["title","summary","options"],"additionalProperties":false},"strict":true},{"type":"function","description":"Set up a standing instruction that you carry out on a schedule for the person you are talking to.\n\nWrite the `instruction` as the work of ONE firing, in the imperative, and do not restate the schedule\ninside it: `Append the current UTC time to the page \"Log\"`, not `Every 15 minutes, append the current\nUTC time to the page \"Log\"`. The schedule belongs in `cron`, and the instruction is handed to a turn\nthat has already fired on it — an instruction that describes a schedule reads as a request to set one\nup, and gets answered instead of carried out.\n\nThe schedule is a five-field cron expression, in the order `minute hour day-of-month month day-of-week`.\n`0 9 * * 1-5` is weekdays at nine in the morning. `30 18 * * *` is every day at half past six in the\nevening. `0 9 1 * *` is the first of the month at nine. A routine may run at most every 15 minutes;\nanything more frequent is refused.\n\nPass the person's IANA timezone (`America/New_York`, `Europe/Madrid`) whenever they speak in local\ntime — the default is UTC and there is no deployment timezone to inherit, so a schedule set without\none fires at a UTC hour rather than at theirs.\n\nThe routine posts its reply into a conversation. Leave `channelId` out and it posts into this\nconversation, the one you are being asked in. Pass a `channelId` only when the person asks for a\ndifferent conversation. Where there is no conversation here and you share more than one with this\nperson, you are given them by title and id: ask the person which one, offering each by its title,\nand pass the id they choose.\n\nIt takes no owner and no Bot. The routine belongs to the person you are talking to and runs as you;\nboth are taken from the run itself, and there is no field for either.","name":"mcp__routines__create_routine","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"cron":{"type":"string"},"timezone":{"type":"string"},"channelId":{"type":"string"},"instruction":{"type":"string"}},"required":["cron","timezone","channelId","instruction"],"additionalProperties":false},"strict":true},{"type":"function","description":"Add an event trigger to one of this person's responsibilities that you carry out, so an outside\nevent starts a real run of it. Kinds: `webhook` (any system POSTs to a URL), `github`, `linear`,\n`sentry`, `pagerduty` (the vendor's signed webhook), `email` (mail to a dedicated address), `slack`\n(messages in Slack channels the person is in).\n\nNarrow it: `eventTypes` such as `issues.opened`, `Issue.create`, `issue.created`,\n`incident.triggered` (a prefix like `issues` matches every issues event), and optionally one\n`fieldPath`/`fieldEquals` pair such as `data.team.key` = `ENG`.\n\nYou never see or handle a secret. The result gives the URL (or address); tell the person to open\nthe responsibility's card on the Bot's Responsibilities page to copy the key, or to paste the vendor's\nsigning secret there for Linear, Sentry and PagerDuty. Never ask them to paste a secret into chat.\n\nSlack needs `teamId` and `mode` (`mention`, `phrase` with `phrases`, `reaction` with optional\n`reactions`, or `message`), optional `channels` (Slack channel ids; empty is every channel the Bot\nis in). It is refused unless the person has linked their own Slack account in that workspace and\nis a member of each channel.","name":"mcp__routines__create_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"kind":{"type":"string","enum":["webhook","github","linear","sentry","pagerduty","email","slack"]},"mode":{"type":"string","enum":["mention","phrase","reaction","message"]},"teamId":{"type":"string"},"phrases":{"type":"array","items":{"type":"string"}},"channels":{"type":"array","items":{"type":"string"}},"fieldPath":{"type":"string"},"reactions":{"type":"array","items":{"type":"string"}},"eventTypes":{"type":"array","items":{"type":"string"}},"repository":{"type":"string"},"fieldEquals":{"type":"string"},"allowedSenders":{"type":"array","items":{"type":"string"}},"responsibilityId":{"type":"string"}},"required":["kind","mode","teamId","phrases","channels","fieldPath","reactions","eventTypes","repository","fieldEquals","allowedSenders","responsibilityId"],"additionalProperties":false},"strict":true},{"type":"function","description":"Delete one of this person's routines, by the id from `list_routines`. It stops for good and there is\nnothing to undo. When they might want it back, switch it off with `update_routine` instead.","name":"mcp__routines__delete_routine","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"Delete one trigger for good. Its URL stops working and its key is revoked.","name":"mcp__routines__delete_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"List the standing instructions this person has: each one's id, its schedule in words, its timezone,\nthe channel it posts into, when it next runs and how the last run went.\n\nTake the id from here before changing or deleting one. It lists only this person's own routines.","name":"mcp__routines__list_routines","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{},"additionalProperties":false,"required":[]},"strict":true},{"type":"function","description":"List the event triggers on this person's responsibilities that you carry out: id, kind, responsibility, what it listens for, whether it is paused, and its URL or address. Keys are never listed.","name":"mcp__routines__list_triggers","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{},"additionalProperties":false,"required":[]},"strict":true},{"type":"function","description":"Pause one trigger: deliveries are acknowledged but start no run until it is resumed.","name":"mcp__routines__pause_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"Resume a paused trigger.","name":"mcp__routines__resume_trigger","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false},"strict":true},{"type":"function","description":"Change one of this person's routines: its instruction, its schedule, its timezone, the channel it\nposts into, or whether it is switched on.\n\nGive the id from `list_routines` and only the fields that change; anything left out stays as it is. A\nnew `cron` follows exactly the same five-field rules as `create_routine`, and a routine switched back\non is scheduled from now rather than from wherever it left off.\n\nA new `instruction` follows the same rule as `create_routine`'s: the work of one firing, imperative, and\ndo not restate the schedule inside it — `Append the current UTC time to the page \"Log\"`, not `Every 15\nminutes, append the current UTC time to the page \"Log\"`.","name":"mcp__routines__update_routine","output_schema":null,"parameters":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"id":{"type":"string"},"cron":{"type":"string"},"enabled":{"type":"boolean"},"timezone":{"type":"string"},"channelId":{"type":"string"},"instruction":{"type":"string"}},"required":["id","cron","enabled","timezone","channelId","instruction"],"additionalProperties":false},"strict":true},{"type":"function","description":"Replace the entire application state with a new snapshot","name":"AGUISendStateSnapshot","output_schema":null,"parameters":{"type":"object","properties":{"snapshot":{"description":"The complete new state object"}},"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"},"strict":false},{"type":"function","description":"Apply incremental updates to application state using JSON Patch operations","name":"AGUISendStateDelta","output_schema":null,"parameters":{"type":"object","properties":{"delta":{"type":"array","items":{"type":"object","properties":{"op":{"type":"string","enum":["add","replace","remove"],"description":"The operation to perform"},"path":{"type":"string","description":"JSON Pointer path (e.g., '/foo/bar')"},"value":{"description":"The value to set. Required for 'add' and 'replace' operations, ignored for 'remove'."}},"required":["op","path"],"additionalProperties":false},"description":"Array of JSON Patch operations"}},"required":["delta"],"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"},"strict":false}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":{"input_tokens":3081,"input_tokens_details":{"cache_write_tokens":267,"cached_tokens":2811},"output_tokens":145,"output_tokens_details":{"reasoning_tokens":8},"total_tokens":3226},"user":null,"metadata":{}},"sequence_number":129}
+

@@ -18,7 +18,12 @@ import { pluginKeys } from "@/lib/plugins/queries";
  *
  * Lifted out of `ConnectAppCard`, which had it inline, so the Bot page and the app-access card start
  * a connection with the same code rather than a second copy of the popup rules below.
+ *
+ * Held by whoever draws the buttons for every state an app passes through on the way to connected
+ * (`AppAccessAction`), not by each button: one press can turn an app on and connect it, and the
+ * button that pressed it is swapped for another between the two.
  */
+
 export function useConnectInNewTab() {
   /*
    * The provider's client, which is the one whoever drew the button reads from. In the app it is
@@ -104,45 +109,71 @@ export function useConnectInNewTab() {
     return tab;
   };
 
-  const open = (serverId: string) => {
+  /**
+   * `first` runs between claiming the tab and asking for the consent, for a press that has to turn
+   * the app on before it can be connected (the personal edition's chat card). The tab is claimed
+   * before it, on the click, for the reason above; if it fails, the tab goes and `first`'s caller
+   * shows why.
+   */
+  const open = (serverId: string, first?: () => Promise<unknown>) => {
     const tab = claimTab();
     handle.current = tab;
-    connect.mutate(serverId, {
-      onSuccess: (start) => {
-        /*
-         * ALREADY CONNECTED: the account was held at the vendor with no row here, and the route
-         * recorded it on this press. There is no page to visit, so the claimed tab goes, and every
-         * query is refetched once, as the card does on its own connected edge. Whoever drew the
-         * button reads the new row there, and the Bot's next turn is asked against it.
-         */
-        if (start !== null && "connected" in start) {
+    if (first) {
+      first().then(
+        () => void ask(serverId, tab),
+        () => {
           tab?.close();
           handle.current = null;
-          void queryClient.invalidateQueries();
-          return;
-        }
-        /*
-         * No url means this app is connected by typing a key rather than by visiting a page — the
-         * route answers `{ fields }` and the mutation unwraps nothing. Saying so, with the page
-         * that has the form, beats a button that silently does nothing.
-         */
-        if (start === null) {
-          tab?.close();
-          handle.current = null;
-          setNeedsKey(true);
-          return;
-        }
-        const { authorizationUrl } = start;
-        setWaiting(true);
-        if (tab) tab.location.replace(authorizationUrl);
-        // The tab was blocked. The url is still good, so offer it as something to click.
-        else setBlockedUrl(authorizationUrl);
-      },
-      onError: () => {
-        tab?.close();
-        handle.current = null;
-      },
-    });
+        },
+      );
+      return;
+    }
+    void ask(serverId, tab);
+  };
+
+  /*
+   * AWAITED, NOT GIVEN CALLBACKS. TanStack Query drops the callbacks passed to `mutate()` once
+   * nothing is listening to the mutation, and turning an app on can swap the button that pressed
+   * this for another before the url arrives — so the tab was left blank. The promise settles
+   * whoever is still mounted; the error is still read from `connect` for whoever is.
+   */
+  const ask = async (serverId: string, tab: Window | null) => {
+    let start: Awaited<ReturnType<typeof connect.mutateAsync>>;
+    try {
+      start = await connect.mutateAsync(serverId);
+    } catch {
+      tab?.close();
+      handle.current = null;
+      return;
+    }
+    /*
+     * ALREADY CONNECTED: the account was held at the vendor with no row here, and the route
+     * recorded it on this press. There is no page to visit, so the claimed tab goes, and every
+     * query is refetched once, as the card does on its own connected edge. Whoever drew the
+     * button reads the new row there, and the Bot's next turn is asked against it.
+     */
+    if (start !== null && "connected" in start) {
+      tab?.close();
+      handle.current = null;
+      void queryClient.invalidateQueries();
+      return;
+    }
+    /*
+     * No url means this app is connected by typing a key rather than by visiting a page — the
+     * route answers `{ fields }` and the mutation unwraps nothing. Saying so, with the page
+     * that has the form, beats a button that silently does nothing.
+     */
+    if (start === null) {
+      tab?.close();
+      handle.current = null;
+      setNeedsKey(true);
+      return;
+    }
+    const { authorizationUrl } = start;
+    setWaiting(true);
+    if (tab) tab.location.replace(authorizationUrl);
+    // The tab was blocked. The url is still good, so offer it as something to click.
+    else setBlockedUrl(authorizationUrl);
   };
 
   return {
@@ -162,3 +193,6 @@ export function useConnectInNewTab() {
       : null,
   };
 }
+
+/** What `useConnectInNewTab` hands whoever draws a button with it. */
+export type ConnectInNewTab = ReturnType<typeof useConnectInNewTab>;

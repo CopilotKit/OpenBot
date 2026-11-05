@@ -16,6 +16,7 @@ import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { waitingOnYou } from "@/components/bot-profile/attention";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -33,13 +34,14 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
+import { untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { useNavigationItems } from "@/lib/navigation";
+import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { useMessageListEmphasis } from "@/lib/settings/message-list";
 import { cn } from "@/lib/utils";
@@ -107,7 +109,9 @@ export function MenuSheet({
   const conversations = pinnedFirst(channels.data ?? []);
   // OpenBot's one navigation list, for this person: Settings on its own, the rest under Manage.
   const navigation = useNavigationItems();
-  const settings = navigation.find((item) => item.id === "settings");
+  const settings = navigation
+    .filter(isNavigationLink)
+    .find((item) => item.id === "settings");
   const places = navigation.filter((item) => item.id !== "settings");
 
   return (
@@ -220,17 +224,17 @@ export function MenuSheet({
               id={manageId}
             >
               {places.map((place) => (
-                <Link
+                <NavigationTarget
                   activeProps={HERE}
                   className={ROW}
+                  item={place}
                   key={place.id}
                   onClick={close}
-                  to={place.to}
                 >
                   <place.icon size={22} stroke={1.8} />
                   {place.label}
                   {place.id === "bots" ? <AccentBadge /> : null}
-                </Link>
+                </NavigationTarget>
               ))}
             </div>
             {settings ? (
@@ -352,7 +356,7 @@ function ConversationRow({
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const title = channel.summary || channel.lastMessage || "New conversation";
+  const title = channel.summary || untitledLine(channel) || "New conversation";
   const when = channel.lastMessageAt
     ? relativeTime(channel.lastMessageAt)
     : null;

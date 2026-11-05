@@ -4,6 +4,7 @@ Start with the root [README](../README.md), then use these references:
 
 - [Architecture](architecture.md): services, ports, browser governance, computers, components, plugins, knowledge, and security boundaries.
 - [Configuration](configuration.md): environment variables and tenant package YAML.
+- [Personal edition](personal-edition.md): OpenBot for one person, with no sign-in and no Admin.
 - [Development](development.md): local setup, migrations, ports, and quality checks.
 - [Coworkers](coworkers.md): durable Bot profiles, channels, visibility, deletion, and external AG-UI registration.
 - [Routines](routines.md): standing instructions a Bot runs on a schedule, the worker that fires them, and who they run as.
@@ -16,7 +17,9 @@ Start with the root [README](../README.md), then use these references:
 - [Deployment](deployment.md): the container, what is in the image, minimum sizes, and the platform notes.
 - [Kubernetes](../charts/openbot/README.md): the Helm chart, what a cluster needs before it, and the values that differ per cloud.
 - [Releasing](releasing.md): how a release is proposed, reviewed and published.
+- [Installer runbook](installer-runbook.md): build an installer, release it, install it on a clean machine, and check that it is the build you meant.
 - [Windows desktop signing](windows-signing.md): protected Azure Key Vault signing and verification of the app and NSIS installer.
+- [Desktop install](desktop-install.md): the desktop app's setup flow, who owns each step, and the decisions behind it.
 - [Desktop provider OAuth](../desktop/PROVIDER_OAUTH.md): what a distributor configures to offer Google and xAI sign-in in a desktop build.
 - [Desktop telemetry](../desktop/TELEMETRY.md): every event the desktop app sends, and what it carries.
 

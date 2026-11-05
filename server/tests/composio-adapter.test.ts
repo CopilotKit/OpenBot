@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Composio, telemetry } from "@composio/core";
 import {
   BrokerAccountGoneError,
@@ -1975,6 +1976,92 @@ describe("the config each kind of app is enabled with", () => {
         },
       ],
     ]);
+  });
+
+  test("a server-to-server app's config carries the deployment's own client", async () => {
+    const created: unknown[] = [];
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        authConfigs: {
+          list: configsOf("shopify", []),
+          create: async (...call: unknown[]) => {
+            created.push(call);
+            return CREATED;
+          },
+        },
+      }),
+    );
+
+    process.env.COMPOSIO_SHOPIFY_CLIENT_ID = "deployment-client-id";
+    process.env.COMPOSIO_SHOPIFY_CLIENT_SECRET = "deployment-client-secret";
+    try {
+      await broker.ensureAuthConfig({
+        toolkit: "shopify",
+        name: "Shopify",
+        connection: { kind: "fields", authScheme: "S2S_OAUTH2" },
+      });
+    } finally {
+      delete process.env.COMPOSIO_SHOPIFY_CLIENT_ID;
+      delete process.env.COMPOSIO_SHOPIFY_CLIENT_SECRET;
+    }
+
+    /*
+     * THE ONE CONFIG THAT CARRIES A SECRET, AND IT IS NOBODY'S ACCOUNT. A client-credentials grant
+     * is exchanged by Composio for the token at connect time, so the client belongs on the config,
+     * and it is the one whoever runs this deployment registered.
+     */
+    expect(created).toEqual([
+      [
+        "shopify",
+        {
+          type: "use_custom_auth",
+          authScheme: "S2S_OAUTH2",
+          name: "Shopify (OpenBot)",
+          credentials: {
+            client_id: "deployment-client-id",
+            client_secret: "deployment-client-secret",
+          },
+        },
+      ],
+    ]);
+  });
+
+  test("a server-to-server app whose client is missing at enable is refused, and nothing is created", async () => {
+    /*
+     * THE VARIABLES CAN GO BETWEEN THE DIRECTORY READ AND THE ENABLE. `connectionOf` offered the
+     * scheme while they were set; created now, the config would carry no client, Composio would
+     * accept it, and every connect against it would fail. So the enable is refused by name.
+     */
+    const created: unknown[] = [];
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        authConfigs: {
+          list: configsOf("shopify", []),
+          create: async (...call: unknown[]) => {
+            created.push(call);
+            return CREATED;
+          },
+        },
+      }),
+    );
+
+    delete process.env.COMPOSIO_SHOPIFY_CLIENT_ID;
+    process.env.COMPOSIO_SHOPIFY_CLIENT_SECRET = "deployment-client-secret";
+    try {
+      await expect(
+        broker.ensureAuthConfig({
+          toolkit: "shopify",
+          name: "Shopify",
+          connection: { kind: "fields", authScheme: "S2S_OAUTH2" },
+        }),
+      ).rejects.toThrow(
+        "Set COMPOSIO_SHOPIFY_CLIENT_ID and COMPOSIO_SHOPIFY_CLIENT_SECRET on this deployment and enable it again.",
+      );
+    } finally {
+      delete process.env.COMPOSIO_SHOPIFY_CLIENT_SECRET;
+    }
+
+    expect(created).toEqual([]);
   });
 
   test("a no-auth app gets no config at all, because Composio refuses one", async () => {
@@ -6641,6 +6728,19 @@ describe("the key becoming a vendor, and which delete that vendor carries", () =
  * is opened either way, and the assertions are lists of what the vendor TRIED — which is the fact
  * worth pinning, since a flag flipped back would be a try that succeeded in production.
  *
+ * AND THE RECORDERS RECORD ONLY THE VENDOR UNDER TEST, because both globals belong to the whole
+ * process and `bun test` runs every test file in that one process. Work an EARLIER file left
+ * running reaches the same `fetch`: the browser extension's tests leave its activity heartbeat,
+ * its connection check and its streamer's reconnect timers behind, and those keep posting to
+ * `http://127.0.0.1:…/api/recorder/…` minutes after their own files have finished. One of them
+ * landing inside the second-and-a-half the raw client spends retrying below was recorded as an
+ * attempt with no key, to a host that is not Composio's, and failed this suite on CI while the
+ * vendor itself was behaving. So the body runs inside an `AsyncLocalStorage` scope, which every
+ * microtask, timer and promise it starts inherits, and anything calling either global from
+ * outside that scope is passed straight through to the real one, untouched and unrecorded, as if
+ * this test were not running. The scope holds only while `body` waits the ordinary way, which is
+ * why the helper says how it must wait.
+ *
  * THE HANDLER HALF WOULD HAVE BEEN A VACUOUS ASSERTION AND IS NOT, which is worth knowing before
  * anybody simplifies it. `registerExitHandlers` guards on an `exitHandlersRegistered` flag held by
  * a MODULE-LEVEL singleton (`src/telemetry/Telemetry.ts:46,315-321`), so it fires at most once per
@@ -6655,7 +6755,15 @@ describe("what constructing the vendor is allowed to do on boot", () => {
   type Attempt = { url: string; apiKey: string | null };
 
   /**
-   * Runs `body` with the network and the process's own listener registry replaced by recorders.
+   * Runs `body` with the network and the process's own listener registry replaced by recorders,
+   * for `body` and whatever it sets going, and for nothing else in the process.
+   *
+   * `body` MUST WAIT WITH A PLAIN `await`, NEVER WITH `expect(...).rejects` OR `.resolves`. Bun
+   * waits for the promise those are given by running the event loop inside the call, so every
+   * other file's timer that falls due meanwhile runs nested in `body`'s scope, inherits it, and is
+   * recorded as the vendor's own. That was observed with Bun 1.4.3: with the scope below in place
+   * and `expect(broker.listApps()).rejects` still in the test, the extension streamer's reconnect
+   * was recorded with no key, its stack running through `run` and this file's `body`.
    *
    * `NODE_ENV` is forced away from `test` for the duration because the SDK's own
    * `shouldSendTelemetry()` short-circuits on `test` and `ci`
@@ -6674,7 +6782,18 @@ describe("what constructing the vendor is allowed to do on boot", () => {
     const memo = telemetry as unknown as { exitHandlersRegistered: boolean };
     const realMemo = memo.exitHandlersRegistered;
 
+    /*
+     * WHOSE CALL IT IS, WHICH IS WHAT MAKES THE RECORDING THIS TEST'S. A fresh scope per run, so
+     * `getStore()` is true only in `body`'s own async descendants: the client it constructs, the
+     * request it builds, the raw client's retry timers, and the SDK's deferred telemetry. A caller
+     * outside it is some other file's leftover work (see the describe's header), and it gets the
+     * real global back as though nothing here were installed.
+     */
+    const vendorUnderTest = new AsyncLocalStorage<true>();
+
     globalThis.fetch = ((input: unknown, init?: RequestInit) => {
+      if (!vendorUnderTest.getStore())
+        return realFetch(input as Parameters<typeof fetch>[0], init);
       const request = input as { url?: string; headers?: HeadersInit };
       const headers = new Headers(init?.headers ?? request?.headers ?? {});
       attempts.push({
@@ -6686,8 +6805,10 @@ describe("what constructing the vendor is allowed to do on boot", () => {
       return Promise.reject(new Error("no network in this test"));
     }) as typeof globalThis.fetch;
 
-    process.on = ((event: string) => {
-      events.push(event);
+    process.on = ((...registration: Parameters<typeof process.on>) => {
+      if (!vendorUnderTest.getStore())
+        return realOn.apply(process, registration);
+      events.push(String(registration[0]));
       return process;
     }) as typeof process.on;
 
@@ -6706,11 +6827,13 @@ describe("what constructing the vendor is allowed to do on boot", () => {
     memo.exitHandlersRegistered = false;
 
     try {
-      await body();
-      // One turn of the macrotask queue, because the SDK defers its initialisation metric through
-      // `queueMicrotask` (`src/telemetry/Telemetry.ts:241-257`) — a `setTimeout` lands after every
-      // microtask that defer could have queued, so the recorder sees the POST before it is undone.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vendorUnderTest.run(true, async () => {
+        await body();
+        // One turn of the macrotask queue, because the SDK defers its initialisation metric through
+        // `queueMicrotask` (`src/telemetry/Telemetry.ts:241-257`) — a `setTimeout` lands after every
+        // microtask that defer could have queued, so the recorder sees the POST before it is undone.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
     } finally {
       globalThis.fetch = realFetch;
       process.on = realOn;
@@ -6751,12 +6874,18 @@ describe("what constructing the vendor is allowed to do on boot", () => {
   });
 
   test("the key it was given is the key the vendor sends, to Composio's own host", async () => {
+    let refusal: unknown;
     const { attempts } = await withRecordedTransport(async () => {
       const { broker } = createComposioClient("never-dialled");
       // It rejects because the transport above rejects; what is under test is the request that was
-      // built before it did, not the refusal that comes back.
-      await expect(broker.listApps()).rejects.toThrow();
+      // built before it did, not the refusal that comes back. Caught with a plain `await` and not
+      // `expect(...).rejects` for the reason given on `withRecordedTransport`.
+      refusal = await broker.listApps().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
     });
+    expect(refusal).toBeInstanceOf(Error);
 
     /*
      * EVERY attempt, not the first one, because the claim worth making is about all of them. The
@@ -8322,6 +8451,51 @@ describe("connecting one person with the secret they typed", () => {
             // The word this deployment sets, whatever arrived beside it under the same name.
             val: { generic_api_key: TYPED_SECRET, status: "ACTIVE" },
           },
+        },
+      },
+    ]);
+  });
+
+  test("a server-to-server connection is sent with no status, so Composio exchanges the client itself", async () => {
+    /*
+     * `ACTIVE` CLAIMS THE TOKEN IS ALREADY HERE. For `S2S_OAUTH2` it is not, and Composio refuses
+     * that request for the missing `access_token`; left without a status, Composio performs the
+     * client-credentials exchange itself. A value arriving as `status` is still not sent.
+     */
+    const asked: unknown[] = [];
+    const shopifyConfig = {
+      id: "ac_shopify",
+      name: "Shopify (OpenBot)",
+      status: "ENABLED",
+    };
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        authConfigs: { list: configsOf("shopify", [shopifyConfig]) },
+        connectedAccounts: {
+          create: async (body: unknown) => {
+            asked.push(body);
+            return { id: "ca_new", status: "ACTIVE" };
+          },
+        },
+      }),
+    );
+
+    expect(
+      await broker.connectWithFields({
+        // The deployment's shared account: a person's own is refused one layer up, in the store.
+        account: { holder: "deployment", vendorUserId: VENDOR_USER },
+        toolkit: "shopify",
+        authScheme: "S2S_OAUTH2",
+        values: { subdomain: "acme-dev", status: "ACTIVE" },
+      }),
+    ).toEqual({ accountId: "ca_new" });
+
+    expect(asked).toEqual([
+      {
+        auth_config: { id: shopifyConfig.id },
+        connection: {
+          user_id: VENDOR_USER,
+          state: { authScheme: "S2S_OAUTH2", val: { subdomain: "acme-dev" } },
         },
       },
     ]);

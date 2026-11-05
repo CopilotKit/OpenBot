@@ -27,6 +27,7 @@ async function writeExecutable(path: string, contents: string) {
  * all.
  */
 type Run = {
+  otherWorker?: boolean;
   shell?: "bash" | "sh";
   omitFromEnv?: readonly string[];
   settings?: Record<string, string>;
@@ -41,6 +42,7 @@ type Run = {
 async function runStartWithStaleServerProbe(
   status: 401 | 404,
   {
+    otherWorker = false,
     shell = "bash",
     omitFromEnv = [],
     settings = {},
@@ -155,7 +157,7 @@ exit 1
   );
   await writeExecutable(
     join(fakeBin, "lsof"),
-    '#!/usr/bin/env bash\necho "p123"\necho "cbun"\necho "n*:3001"\n',
+    `#!/usr/bin/env bash\nif [[ "$*" == *"-d cwd"* ]]; then\n  printf 'p888\\nn/another/openbot\\n'\nelse\n  echo "p123"; echo "cbun"; echo "n*:3001"\nfi\n`,
   );
   await writeExecutable(
     join(fakeBin, "curl"),
@@ -192,7 +194,7 @@ exit 0
   );
   await writeExecutable(
     join(fakeBin, "pgrep"),
-    "#!/usr/bin/env bash\nexit 0\n",
+    `#!/usr/bin/env bash\n${otherWorker ? "echo 888" : ""}\nexit 0\n`,
   );
   await writeExecutable(
     join(fakeBin, "pkill"),
@@ -655,4 +657,12 @@ describe("start.sh selected provider services", () => {
     expect(result.stdout).toContain("agent-langgraph never became ready");
     expect(result.stdout).not.toContain("Ready. http://localhost:3010");
   });
+});
+
+test("an unrelated routine worker does not suppress this checkout's worker startup", async () => {
+  const result = await runStartWithStaleServerProbe(401, { otherWorker: true });
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain("worker: started (routine sweep loop)");
+  expect(result.stdout).not.toContain("worker: already running");
+  expect(result.pkillLog).not.toContain("worker/src/index.ts");
 });

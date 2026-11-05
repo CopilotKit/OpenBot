@@ -9,6 +9,7 @@ import {
   learningSettings,
   learningThreadBindings,
 } from "../db/schema/learning";
+import { currentEdition } from "../edition";
 
 export type LearningSettingsStore = {
   read(): Promise<LearningSettings>;
@@ -101,6 +102,18 @@ export function createLearningSettingsStore(
   let current = structuredClone(fallback);
   let written = false;
   const bindings = new Map<string, string | null>();
+  const stored = async (): Promise<LearningSettings> => {
+    if (!database) return structuredClone(current);
+    const [row] = await database
+      .select()
+      .from(learningSettings)
+      .where(eq(learningSettings.id, "current"))
+      .limit(1);
+    if (!row) return structuredClone(fallback);
+    const parsed = parseLearningSettings(row.settings);
+    if (!parsed.ok) throw new Error("Stored learning settings are invalid.");
+    return parsed.settings;
+  };
   return {
     async saved() {
       if (!database) return written;
@@ -133,16 +146,11 @@ export function createLearningSettingsStore(
       return inserted.length > 0;
     },
     async read() {
-      if (!database) return structuredClone(current);
-      const [row] = await database
-        .select()
-        .from(learningSettings)
-        .where(eq(learningSettings.id, "current"))
-        .limit(1);
-      if (!row) return structuredClone(fallback);
-      const parsed = parseLearningSettings(row.settings);
-      if (!parsed.ok) throw new Error("Stored learning settings are invalid.");
-      return parsed.settings;
+      const settings = await stored();
+      // The pause lives on an Admin screen the personal edition does not have, so it never applies.
+      return currentEdition() === "personal"
+        ? { ...settings, enabled: true }
+        : settings;
     },
     async write(settings) {
       const parsed = parseLearningSettings(settings);

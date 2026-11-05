@@ -4,9 +4,11 @@
  * Both used to start only when a person set them up by hand, one Bot and one app at a time, so on a
  * fresh deployment a Bot remembered what it was told and nothing else. Now:
  *
- * - A person who talks to one of their Bots in a conversation with that Bot alone gets check-ins
- *   from it: the same read-only run (`proactive/restriction.ts`), hourly, first run one interval
- *   after the conversation so it never races it. A Bot they never talked to alone stays quiet.
+ * - Only with OPENBOT_PROACTIVE_DEFAULTS=true: a person who talks to one of their Bots in a
+ *   conversation with that Bot alone gets check-ins from it: the same read-only run
+ *   (`proactive/restriction.ts`), hourly, first run one interval after the conversation so it never
+ *   races it. Otherwise a Bot offers a check-in on one thing in the conversation
+ *   (`proactive/offer-tool.ts`), and nothing runs until the person accepts.
  * - Each app the person connected in their own account, that the Bot can read, becomes a memory
  *   source for that Bot: one per app, read as the person, through the same authorization a source
  *   made by hand passes (`MemoryIngestion.defaultSourceCandidates`).
@@ -259,6 +261,20 @@ export function createMemoryDefaults(options: {
         ).size
       )
         return false;
+      // One default per person and Bot: any check-in already there, on or off, is the person's
+      // choice. Checked under the lock, since a Bot can now hold several and nothing else stops a
+      // second.
+      const [existing] = await transaction
+        .select({ id: proactiveSettings.id })
+        .from(proactiveSettings)
+        .where(
+          and(
+            eq(proactiveSettings.ownerUserId, ownerUserId),
+            eq(proactiveSettings.agentId, agentId),
+          ),
+        )
+        .limit(1);
+      if (existing) return false;
       const rows = await transaction
         .insert(proactiveSettings)
         .values({
@@ -273,8 +289,6 @@ export function createMemoryDefaults(options: {
             now() + DEFAULT_RESEARCH_INTERVAL_MINUTES * 60_000,
           ),
         })
-        // One per person and Bot: a row already there, on or off, is the person's choice.
-        .onConflictDoNothing()
         .returning({ id: proactiveSettings.id });
       return rows.length > 0;
     });

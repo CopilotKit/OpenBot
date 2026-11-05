@@ -65,6 +65,9 @@ spec:
     metadata:
       labels:
 {{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 8 }}
+      annotations:
+        {{- /* Roll when the token changes, so the computer and the server never disagree on it. */}}
+        checksum/computer-token: {{ include "openbot.computerTokenChecksum" . }}
     spec:
       {{- /*
         No cluster credential in the one pod running a browser and a shell.

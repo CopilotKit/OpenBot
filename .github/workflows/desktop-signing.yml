@@ -9,6 +9,20 @@ on:
         options: [none, keyvault]
         default: none
         required: true
+      release-tag:
+        description: Attach the signed installer to this existing release. Run from that tag.
+        type: string
+        default: ""
+        required: false
+      # publish-release.yml says whether the release becomes Latest. A stable release becomes
+      # Latest once both this and Desktop macOS signing have attached their signed installers,
+      # in whichever finishes second. Signing a release again by hand leaves Latest alone unless
+      # this is set.
+      make-latest:
+        description: Mark the release Latest once every signed installer is attached, unless a newer release already is
+        type: boolean
+        default: false
+        required: false
   # A label permits validation before this workflow exists on main. New pushes
   # run only the checks: remove/reapply the label to request signing a new head.
   pull_request:
@@ -17,6 +31,8 @@ on:
       - desktop/**
       - package.json
       - .github/workflows/desktop-signing.yml
+      - .github/workflows/publish-release.yml
+      - scripts/release-*
       - docs/windows-signing.md
 
 permissions:
@@ -45,10 +61,24 @@ jobs:
       - name: PowerShell signing regressions
         shell: pwsh
         run: ./desktop/scripts/test-windows-signing.ps1
+      # A stable release becomes Latest only once this workflow's signed installer is on it too, so
+      # the Windows download link never serves the unsigned one. The scripts behind it run in
+      # Updater regressions (no Apple access) and the main test suite; this checks the wiring here.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      - name: Latest waits for the signed Windows installer
+        run: bun test scripts/signing-workflows.test.ts
+        working-directory: desktop
 
   sign:
     name: Sign and verify app and NSIS installer
     needs: checks
+    outputs:
+      # The artifact of the attempt that signed, so a re-run of `publish` alone attaches the
+      # installer that attempt verified, not one from an earlier attempt.
+      artifact: openbot-windows-signed-${{ github.run_id }}-${{ github.run_attempt }}
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.signing-mode == 'keyvault') ||
       (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
@@ -93,17 +123,16 @@ jobs:
         run: |
           az keyvault certificate show --id "$env:AZURE_KEY_VAULT_URL/certificates/$env:CODE_SIGNING_CERT_NAME" --query id --output tsv --only-show-errors
           if ($LASTEXITCODE -ne 0) { throw 'Could not read signing certificate.' }
+      # No caches in this job, Rust or Bun: a release attaches what it builds, and a signed
+      # installer must come from the tree and the lockfiles, not from anything an earlier run left
+      # behind. The same rule as Desktop macOS signing.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
+          no-cache: true
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: desktop/src-tauri
-          key: windows-signing
-          save-if: false
       - name: Install pinned AzureSignTool
         run: |
           $toolDirectory = Join-Path $env:RUNNER_TEMP 'azuresigntool-7.0.1'
@@ -118,16 +147,31 @@ jobs:
         working-directory: desktop
       - run: bun run typecheck
         working-directory: desktop
-      - name: Prepare internal build version
-        run: bun scripts/desktop-version.ts internal
+      # A tag is a release, and its installer carries the release version, as the unsigned one
+      # it replaces does. Anything else is an internal build named after its commit.
+      - name: Prepare the build version
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            bun scripts/desktop-version.ts release
+          } else {
+            bun scripts/desktop-version.ts internal
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not prepare the build version.' }
+          Get-Content build-version.json
         working-directory: desktop
+      # signed-build.ts builds what desktop-build.yml built for the same release: a candidate or
+      # beta pinned to its release's images, and the CLI whenever the tree can bundle one. On a
+      # release this signed installer replaces the unsigned one, so it must be the same product.
+      # Anything else (a pull request, a branch) is an ordinary internal build, as before.
       - name: Build and sign
         env:
           WINDOWS_SIGNING: keyvault
+          # To read the release's container-images.json when this build is a candidate.
+          GH_TOKEN: ${{ github.token }}
           OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
           OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
           OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
-        run: bun run tauri build --config src-tauri/tauri.windows-signing.conf.json --config src-tauri/tauri.build-version.conf.json --bundles nsis
+        run: bun scripts/signed-build.ts win32 x64 src-tauri/tauri.windows-signing.conf.json --bundles nsis
         working-directory: desktop
       # Tauri restores the unsigned build output after bundling. Verify the app
       # employees receive by extracting its signed payload from the installer.
@@ -137,6 +181,15 @@ jobs:
           if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer.' }
           & 7z e $installers[0].FullName '-odesktop/signed-app' '-r' '-y' 'openbot-desktop.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Could not extract signed app from NSIS installer.' }
+      # The CLI is in what people install, not only in the build folder.
+      - name: Verify the installer carries the Intelligence CLI
+        run: |
+          $installers = @(Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' -File)
+          $listing = & 7z l $installers[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list the NSIS installer.' }
+          foreach ($file in @('cli-bundle\runtime\node.exe', 'cli-bundle\cli\index.js')) {
+            if (-not ($listing | Select-String -SimpleMatch $file)) { throw "The installer has no $file." }
+          }
       - name: Verify publisher, trust, and timestamp on both executables
         run: |
           $build = Get-Content desktop/build-version.json -Raw | ConvertFrom-Json
@@ -159,3 +212,44 @@ jobs:
           path: desktop/signing-evidence/
           if-no-files-found: warn
           retention-days: 14
+
+  # The signed installer onto the release, from a job of its own so the signing job never holds a
+  # token that can write to the repository. It replaces the unsigned installer the release was
+  # published with, under the name Tauri gave it and under the fixed name a web page links to
+  # (scripts/release-download-names.sh). Both, or the stable link keeps serving the unsigned build.
+  # `--clobber` makes a re-run replace them again. The details are in
+  # desktop/scripts/publish-signed-windows.sh.
+  publish:
+    name: Attach to the release
+    needs: sign
+    # One attach job at a time per release, across Desktop macOS signing and Desktop Windows
+    # signing: each ends by asking whether every signed installer is on the release, and the one
+    # that runs second must see what the first attached, or neither would make it Latest. Same
+    # group in both workflows; an attach that is running is never cancelled.
+    concurrency:
+      group: release-attach-${{ inputs.release-tag || github.ref_name }}
+      cancel-in-progress: false
+    if: github.event_name == 'workflow_dispatch' && inputs.release-tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # `actions: write` to start Downloads sync when this run makes the release Latest
+    # (scripts/release-make-latest.sh).
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.release-tag }}
+      MAKE_LATEST: ${{ inputs.make-latest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.sign.outputs.artifact }}
+          path: artifacts
+      - name: Attach to the release
+        env:
+          ARTIFACTS: artifacts
+        run: desktop/scripts/publish-signed-windows.sh

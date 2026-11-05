@@ -185,6 +185,62 @@ describe("deployment configuration", () => {
     ).toThrow("INTELLIGENCE_BROWSER_GATEWAY_WS_URL must be a valid URL");
   });
 
+  // Intelligence installed in the cluster beside OpenBot has no address a browser can reach, and the
+  // browser opens the gateway's socket itself. With the proxy on, the browser is told OpenBot's own
+  // address for it: a path, resolved against the page, or on the public URL when there is one.
+  test("tells the browser OpenBot's own address for the gateway when the server carries its socket", () => {
+    const proxied = loadConfig({
+      ...baseEnvironment,
+      INTELLIGENCE_GATEWAY_WS_URL:
+        "ws://openbot-intelligence-realtime-gateway:4401",
+      INTELLIGENCE_GATEWAY_PROXY: "on",
+    });
+    if (proxied.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(proxied.runtime.intelligence.gatewayProxy).toBe(true);
+    expect(proxied.runtime.intelligence.browserGatewayWsUrl).toBe(
+      "/api/intelligence/client",
+    );
+    // The server still reaches the gateway where it is.
+    expect(proxied.runtime.intelligence.gatewayWsUrl).toBe(
+      "ws://openbot-intelligence-realtime-gateway:4401",
+    );
+
+    const published = loadConfig({
+      ...baseEnvironment,
+      INTELLIGENCE_GATEWAY_PROXY: "on",
+      OPENBOT_PUBLIC_URL: "https://openbot.example.com/",
+    });
+    if (published.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(published.runtime.intelligence.browserGatewayWsUrl).toBe(
+      "wss://openbot.example.com/api/intelligence/client",
+    );
+
+    const off = loadConfig({
+      ...baseEnvironment,
+      INTELLIGENCE_GATEWAY_PROXY: "off",
+    });
+    if (off.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(off.runtime.intelligence.gatewayProxy).toBeUndefined();
+    expect(off.runtime.intelligence.browserGatewayWsUrl).toBeUndefined();
+
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_GATEWAY_PROXY: "on",
+        INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://localhost:14401",
+      }),
+    ).toThrow("Set one of them");
+    expect(() =>
+      loadConfig({ ...baseEnvironment, INTELLIGENCE_GATEWAY_PROXY: "yes" }),
+    ).toThrow('INTELLIGENCE_GATEWAY_PROXY must be "on" or "off"');
+  });
+
   test("still forwards a licence token when a deployment sets one", () => {
     const config = loadConfig({
       ...baseEnvironment,
@@ -1155,23 +1211,29 @@ describe("automatic Learning container assignment", () => {
 });
 
 describe("memory sources and background research", () => {
-  test("are on by default for a fresh deployment", () => {
+  test("memory sources are on by default; background research is asked for in a conversation", () => {
     expect(loadConfig(baseEnvironment).memoryDefaults).toEqual({
       sources: true,
-      research: true,
+      research: false,
     });
   });
 
-  test.each(["false", "0"])("each switches off on its own with %p", (value) => {
+  test.each(["false", "0"])("memory sources switch off with %p", (value) => {
     expect(
       loadConfig({ ...baseEnvironment, OPENBOT_MEMORY_SOURCE_DEFAULTS: value })
         .memoryDefaults,
-    ).toEqual({ sources: false, research: true });
-    expect(
-      loadConfig({ ...baseEnvironment, OPENBOT_PROACTIVE_DEFAULTS: value })
-        .memoryDefaults,
-    ).toEqual({ sources: true, research: false });
+    ).toEqual({ sources: false, research: false });
   });
+
+  test.each(["true", "1"])(
+    "research by default comes back only with %p",
+    (value) => {
+      expect(
+        loadConfig({ ...baseEnvironment, OPENBOT_PROACTIVE_DEFAULTS: value })
+          .memoryDefaults,
+      ).toEqual({ sources: true, research: true });
+    },
+  );
 });
 
 /**
@@ -1307,4 +1369,69 @@ test("an Arcade key and a broker provider are read, and an unknown provider is r
   expect(() =>
     loadConfig({ ...baseEnvironment, OPENBOT_BROKER_PROVIDER: "zapier" }),
   ).toThrow(/OPENBOT_BROKER_PROVIDER must be "composio" or "arcade"/);
+});
+
+/**
+ * The personal edition: one person on their own machine, with no sign-in and the one shared
+ * computer. Each refusal names the variable to change, because the combinations it refuses are the
+ * ones somebody gets by copying a team deployment's `.env`.
+ */
+describe("edition", () => {
+  const personalEnvironment = {
+    ...withoutSignIn,
+    OPENBOT_EDITION: "personal",
+    OPENBOT_SINGLE_USER: "true",
+    AGENT_COMPUTER_URL: "http://127.0.0.1:7000",
+  };
+
+  test("defaults to team", () => {
+    expect(loadConfig(baseEnvironment).edition).toBe("team");
+    expect(
+      loadConfig({ ...baseEnvironment, OPENBOT_EDITION: "" }).edition,
+    ).toBe("team");
+  });
+
+  test("personal edition loads with single user and a shared computer", () => {
+    const config = loadConfig(personalEnvironment);
+    expect(config.edition).toBe("personal");
+    expect(config.computer?.provider).toBe("shared");
+  });
+
+  test("refuses an unknown value", () => {
+    expect(() =>
+      loadConfig({ ...personalEnvironment, OPENBOT_EDITION: "consumer" }),
+    ).toThrow(/OPENBOT_EDITION.*"team".*"personal"/);
+  });
+
+  test("personal edition refuses without single-user mode", () => {
+    const { OPENBOT_SINGLE_USER: _, ...environment } = personalEnvironment;
+    expect(() => loadConfig(environment)).toThrow("OPENBOT_SINGLE_USER=true");
+  });
+
+  test("personal edition refuses an identity provider", () => {
+    expect(() =>
+      loadConfig({
+        ...personalEnvironment,
+        GOOGLE_OAUTH_CLIENT_ID: "google-client-id",
+        GOOGLE_OAUTH_CLIENT_SECRET: "google-client-secret",
+        BETTER_AUTH_SECRET: baseEnvironment.BETTER_AUTH_SECRET,
+        BETTER_AUTH_URL: baseEnvironment.BETTER_AUTH_URL,
+        INITIAL_ADMIN_EMAILS: baseEnvironment.INITIAL_ADMIN_EMAILS,
+      }),
+    ).toThrow("GOOGLE_OAUTH_CLIENT_ID");
+  });
+
+  test("personal edition refuses the Docker supervisor", () => {
+    expect(() =>
+      loadConfig({
+        ...personalEnvironment,
+        COMPUTER_SUPERVISOR_URL: "http://127.0.0.1:7001",
+      }),
+    ).toThrow(/COMPUTER_SUPERVISOR_URL.*AGENT_COMPUTER_URL/);
+  });
+
+  test("personal edition refuses a deployment with no computer", () => {
+    const { AGENT_COMPUTER_URL: _, ...environment } = personalEnvironment;
+    expect(() => loadConfig(environment)).toThrow("AGENT_COMPUTER_URL");
+  });
 });

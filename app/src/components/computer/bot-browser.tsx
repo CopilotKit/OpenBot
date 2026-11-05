@@ -379,7 +379,6 @@ function RecordPanel({
             <Separator />
             <NarrationRow
               narration={narration}
-              choice={choice.narration}
               language={language}
               recording={listening}
               onChange={(on) => {

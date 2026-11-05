@@ -1,4 +1,5 @@
 import type { BrokerApp, FieldScheme } from "../broker";
+import type { DeploymentClient } from "../deployment-clients";
 import type { ComposioResult } from "../composio";
 import type {
   AccountRow,
@@ -288,9 +289,9 @@ export type ComposioVendor = {
        * THE UNION, BECAUSE THE MANAGED TYPE IS RIGHT FOR ONE KIND OF APP AND WAS SENT FOR ALL OF
        * THEM. A self-registering app has no Composio-owned OAuth client behind it and a key app
        * has no consent screen to send anybody to, so both are created as custom configs — carrying
-       * the scheme, and never a credential, which is per-connection rather than per-config. The
-       * managed shape has no field to name a scheme with, which is why this is a union of two
-       * shapes rather than one shape with an optional field.
+       * the scheme, and never a PERSON's credential, which is per-connection rather than
+       * per-config. The managed shape has no field to name a scheme with, which is why this is a
+       * union of two shapes rather than one shape with an optional field.
        */
       options:
         | { type: "use_composio_managed_auth"; name: string }
@@ -311,8 +312,12 @@ export type ComposioVendor = {
              * vendor's package with no request made at all. The empty record is what carries
              * nothing THROUGH that check, and the type says so rather than leaving the next reader
              * to discover it from a failed enable.
+             *
+             * THE ONE CONFIG THAT DOES CARRY A SECRET IS A SERVER-TO-SERVER GRANT'S, and the secret
+             * is the deployment's own OAuth client rather than anybody's account: Composio exchanges
+             * it for the token at connect time (`deployment-clients.ts`).
              */
-            credentials: Record<string, never>;
+            credentials: Record<string, never> | DeploymentClient;
           },
     ): Promise<{ id?: unknown } | null>;
     /**

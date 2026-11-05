@@ -6,10 +6,11 @@ import { verifyDist } from "../scripts/verify-dist";
 
 const release = { variant: "release", rootVersion: "0.2.0" } as const;
 
-const manifest = (version: string) =>
+const manifest = (version: string, versionName?: string) =>
   JSON.stringify({
     manifest_version: 3,
     version,
+    ...(versionName === undefined ? {} : { version_name: versionName }),
     background: { service_worker: "service-worker.js", type: "module" },
     action: {
       default_popup: "popup.html",
@@ -161,4 +162,51 @@ describe("verifyDist", () => {
       "manifest version 0.1.0 is not the release version 0.2.0",
     ]);
   });
+
+  test("an adapted prerelease artifact retains the full root identity", () => {
+    const rootVersion = "0.2.0-rehearsal.2";
+    const dir = fixture({ "manifest.json": manifest("0.2.0", rootVersion) });
+    expect(verifyDist(dir, { ...release, rootVersion })).toEqual([]);
+  });
+
+  test("the original raw prerelease artifact fails even when it equals the root version", () => {
+    const rootVersion = "0.2.0-rehearsal.2";
+    const dir = fixture({
+      "manifest.json": manifest(rootVersion, rootVersion),
+    });
+    expect(verifyDist(dir, { ...release, rootVersion })).toEqual([
+      "manifest version 0.2.0-rehearsal.2 is not the release version 0.2.0",
+    ]);
+  });
+
+  test.each([undefined, "0.2.0-rehearsal.1"])(
+    "a prerelease artifact with display identity %j is rejected",
+    (versionName) => {
+      const dir = fixture({ "manifest.json": manifest("0.2.0", versionName) });
+      expect(
+        verifyDist(dir, { ...release, rootVersion: "0.2.0-rehearsal.2" }),
+      ).toEqual([
+        `manifest version_name ${String(versionName)} is not the release version_name 0.2.0-rehearsal.2`,
+      ]);
+    },
+  );
+
+  test("a stable artifact cannot carry a stale prerelease display identity", () => {
+    const dir = fixture({
+      "manifest.json": manifest("0.2.0", "0.2.0-rehearsal.2"),
+    });
+    expect(verifyDist(dir, release)).toEqual([
+      "manifest version_name 0.2.0-rehearsal.2 is not the release version_name undefined",
+    ]);
+  });
+
+  test.each(["0.0.0", "0.65536.0", "0.02.0", "0.2.0-rehearsal..2"])(
+    "an invalid root identity %s cannot validate a matching artifact",
+    (rootVersion) => {
+      const dir = fixture({ "manifest.json": manifest(rootVersion) });
+      expect(() => verifyDist(dir, { ...release, rootVersion })).toThrow(
+        "Invalid Recorder release version",
+      );
+    },
+  );
 });

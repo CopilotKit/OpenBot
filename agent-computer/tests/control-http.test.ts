@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 import type { ComputerControlState } from "../../shared/computer-control";
 
 // A real HTTP dispatcher and shell lease, without launching Chromium. Opt in like live-screen tests
@@ -48,13 +49,7 @@ async function until(check: () => Promise<boolean>) {
 beforeAll(async () => {
   if (!asked) return;
   root = await mkdtemp(join(tmpdir(), "control-http-"));
-  const probe = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: () => new Response(),
-  });
-  const port = probe.port;
-  await probe.stop(true);
+  const port = await reservePort();
   base = `http://127.0.0.1:${port}`;
   child = Bun.spawn([process.execPath, "src/index.ts"], {
     cwd: join(import.meta.dir, ".."),

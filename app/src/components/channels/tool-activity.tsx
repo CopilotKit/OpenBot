@@ -5,24 +5,36 @@ import {
 } from "@openbot/shared/connect-prompt";
 import { researchRoleOfTool } from "@openbot/shared/research";
 import {
-  IconFileText,
-  IconFolder,
-  IconPlug,
-  IconSearch,
-  IconTool,
-  IconWorld,
-} from "@tabler/icons-react";
-import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
-import { Streamdown } from "streamdown";
-import { PendingApprovals } from "@/components/approvals/inline-approval";
-import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
-import { markdownComponents, markdownPlugins } from "@/lib/markdown";
+  readSubagentResult,
+  SUBAGENT_TOOL,
+  type SubagentResult,
+} from "@openbot/shared/subagent";
 import {
   connectorName,
   humanise,
   ownToolLabel,
   readToolName,
 } from "@openbot/shared/tool-name";
+import {
+  IconFileText,
+  IconFolder,
+  IconPlug,
+  IconSearch,
+  IconSubtask,
+  IconTool,
+  IconWorld,
+} from "@tabler/icons-react";
+import {
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { Streamdown } from "streamdown";
+import { PendingApprovals } from "@/components/approvals/inline-approval";
+import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
+import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import {
   asText,
   forDisplay,
@@ -31,8 +43,9 @@ import {
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { browserStepDetails, isBrowserStep } from "./browser-activity";
-import { codingOutcome, lookStep } from "./coding-tool-cards";
 import type { VisibleChatItem } from "./chat-messages";
+import { codingOutcome, lookStep } from "./coding-tool-cards";
+import { SubtaskStep } from "./subtask-step";
 import { ToolLine } from "./tool-line";
 
 type ToolItem = Extract<VisibleChatItem, { kind: "tool" }>;
@@ -131,6 +144,12 @@ function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {
   const name = item.toolCall.function.name;
   const args = item.toolCall.function.arguments;
   if (codingLook(name, args) !== null) return true;
+  /*
+   * A subtask is work, like a search, so it folds into the same line. It used to be drawn as a card
+   * of its own, task and answer and steps, and a Bot that started three of them beside a search put
+   * five boxes between a question and its answer. Its row opens to all of that instead.
+   */
+  if (name === SUBAGENT_TOOL) return true;
   // Another harness's tool under one of Claude Code's names is not drawn as Claude Code's.
   if (
     !name.startsWith("mcp__") &&
@@ -238,7 +257,9 @@ type StepKind =
   // A coding harness's reads and searches, counted as Claude Code counts them.
   | "file"
   | "pattern"
-  | "directory";
+  | "directory"
+  // Part of the work given to a subagent: a fresh run of the same Bot. See `SubtaskStep`.
+  | "subtask";
 
 export type StepDetails = {
   id: string;
@@ -259,6 +280,13 @@ export type StepDetails = {
   output?: string;
   /** The output is a file, a command's output or a search's matches: drawn as it came, not as markdown. */
   verbatim?: boolean;
+  /** A subtask's own facts, which its row reads to find and draw the steps it took. */
+  subtask?: {
+    toolCallId: string;
+    task?: string;
+    /** Null while it works, after a turn that stopped before it answered, or when it was refused. */
+    result: SubagentResult | null;
+  };
 };
 
 function objectOf(value: string | undefined): Record<string, unknown> {
@@ -329,6 +357,7 @@ export function stepDetails(step: ToolItem): StepDetails {
   }
 
   const name = step.toolCall.function.name;
+  if (name === SUBAGENT_TOOL) return subtaskDetails(step, args);
   const look = codingLook(name, step.toolCall.function.arguments);
   if (look !== null) {
     // Running whenever it has no result: whether the turn still is, the step's status says.
@@ -358,7 +387,9 @@ export function stepDetails(step: ToolItem): StepDetails {
     pending: step.result === undefined,
     failed: !refused && toolResultFailed(step.result),
     refused,
-    inputs,
+    // Neither what it was given nor what it said: both were for the model (a tool search's query
+    // and limit), so the line says what it did and does not open.
+    inputs: own ? [] : inputs,
     ...(body && !own ? { output: body } : {}),
   };
   // Not a connector: one of this deployment's own tools, or one an external agent runs itself.
@@ -416,6 +447,55 @@ export function stepDetails(step: ToolItem): StepDetails {
   };
 }
 
+/**
+ * A subtask as a step: what it was asked to do, and how it ended.
+ *
+ * Stopping before an action that needs approval is not a failure. Nothing was done, and the Bot that
+ * started it does that action itself, in the conversation, where the person is asked. So the row
+ * says it was handed back and nothing more urgent: the approval card, when there is one, is the
+ * Bot's own, further down.
+ */
+function subtaskDetails(
+  step: ToolItem,
+  args: Record<string, unknown>,
+): StepDetails {
+  const task =
+    typeof args.task === "string" && args.task.trim()
+      ? args.task.trim()
+      : undefined;
+  const answer = step.result === undefined ? undefined : asText(step.result);
+  const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
+  const result =
+    answer === undefined || refused ? null : readSubagentResult(answer);
+  const output = refused
+    ? answer?.slice(REFUSAL_MARKER.length).trim()
+    : result && "answer" in result
+      ? result.answer
+      : result && "error" in result
+        ? result.error
+        : undefined;
+  return {
+    id: step.id,
+    kind: "subtask",
+    label: "Subtask",
+    ...(task ? { detail: task } : {}),
+    pending: answer === undefined,
+    failed:
+      !refused &&
+      answer !== undefined &&
+      (result === null || "error" in result),
+    refused,
+    pages: 0,
+    inputs: [],
+    ...(output ? { output } : {}),
+    subtask: {
+      toolCallId: step.toolCall.id,
+      ...(task ? { task } : {}),
+      result,
+    },
+  };
+}
+
 function joinPhrases(phrases: string[]): string {
   if (phrases.length <= 1) return phrases[0] ?? "";
   return `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`;
@@ -459,6 +539,9 @@ export function summarise(steps: readonly StepDetails[]): string {
     phrases.push(
       `used ${plural(connectors.length, "connector", "connectors")}`,
     );
+  const subtasks = of("subtask").length;
+  if (subtasks)
+    phrases.push(subtasks === 1 ? "ran a subtask" : `ran ${subtasks} subtasks`);
   const tools = of("tool").length;
   if (tools) phrases.push(`used ${plural(tools, "tool", "tools")}`);
   const sentence = joinPhrases(phrases);
@@ -474,9 +557,10 @@ const KIND_ICONS = {
   file: IconFileText,
   pattern: IconSearch,
   directory: IconFolder,
+  subtask: IconSubtask,
 } as const;
 
-function StepIcon({
+export function StepIcon({
   kind,
   size = "size-4",
 }: {
@@ -511,7 +595,13 @@ function IconStack({ kinds }: { kinds: StepKind[] }) {
   );
 }
 
-function StepStatus({ step, active }: { step: StepDetails; active: boolean }) {
+export function StepStatus({
+  step,
+  active,
+}: {
+  step: StepDetails;
+  active: boolean;
+}) {
   if (step.pending)
     return (
       <span className="shrink-0 text-muted-foreground">
@@ -537,6 +627,8 @@ export function StepRow({
   step: StepDetails;
   active: boolean;
 }) {
+  if (step.kind === "subtask")
+    return <SubtaskStep active={active} step={step} />;
   const line = (
     <span className="flex min-w-0 items-center gap-2">
       <StepIcon kind={step.kind} />
@@ -585,32 +677,77 @@ export function StepRow({
         </summary>
         <div className="mt-1.5 space-y-2 pl-5">
           {step.inputs.length ? (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-muted-foreground">
               {step.inputs.map(([key, value]) => (
                 <div className="contents" key={key}>
-                  <dt className="text-muted-foreground">{key}</dt>
-                  <dd className="min-w-0 break-words">{value}</dd>
+                  <dt>{key}</dt>
+                  <dd className="min-w-0 break-words text-foreground/80">
+                    {value}
+                  </dd>
                 </div>
               ))}
             </dl>
           ) : null}
-          {step.output && step.verbatim ? (
-            <pre className="max-h-60 overflow-auto border-l pl-3 font-mono whitespace-pre-wrap break-words">
-              {step.output}
-            </pre>
-          ) : step.output ? (
-            <div className="max-h-60 overflow-auto border-l pl-3 [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
-              <Streamdown
-                components={markdownComponents}
-                plugins={markdownPlugins}
-              >
-                {forDisplay(step.output)}
-              </Streamdown>
-            </div>
+          {step.output ? (
+            <StepOutput output={step.output} verbatim={step.verbatim} />
           ) : null}
         </div>
       </details>
     </li>
+  );
+}
+
+/**
+ * What a step got back, in a soft box cut to a few lines and faded at the foot, with Show all to
+ * read the rest. Not a scrolling box: inside the group's own list, a second scrollbar beside the
+ * first was the hardest thing on the screen to read past.
+ */
+export function StepOutput({
+  output,
+  verbatim,
+}: {
+  output: string;
+  verbatim?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [long, setLong] = useState(false);
+  const measure = useCallback((element: HTMLDivElement | null) => {
+    if (element) setLong(element.scrollHeight > element.clientHeight + 1);
+  }, []);
+  return (
+    <div className="rounded-md bg-muted/50 px-3 py-2">
+      <div
+        className={`relative ${open ? "" : "max-h-40 overflow-hidden"}`}
+        ref={measure}
+      >
+        {verbatim ? (
+          <pre className="font-mono whitespace-pre-wrap break-words">
+            {output}
+          </pre>
+        ) : (
+          <div className="[&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
+            <Streamdown
+              components={markdownComponents}
+              plugins={markdownPlugins}
+            >
+              {forDisplay(output)}
+            </Streamdown>
+          </div>
+        )}
+        {long && !open ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-muted to-transparent" />
+        ) : null}
+      </div>
+      {long ? (
+        <button
+          className="mt-1 text-muted-foreground hover:text-foreground"
+          onClick={() => setOpen(!open)}
+          type="button"
+        >
+          {open ? "Show less" : "Show all"}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -625,14 +762,26 @@ export function ToolActivity({
   const steps = group.steps.map(stepDetails);
   const running = active && steps.some((step) => step.pending);
   const current = steps.find((step) => step.pending);
+  const working = steps.filter(
+    (step) => step.pending && step.kind === "subtask",
+  ).length;
   const issues = steps.filter((step) => step.failed || step.refused).length;
   const kinds = [...new Set(steps.map((step) => step.kind))];
   // The folded line draws its own steps, so a waiting approval gets its card beside it, not inside.
   return (
     <>
       <ToolLine
+        bare
         icon={<IconStack kinds={kinds} />}
-        label={running && current ? `${current.label}…` : summarise(steps)}
+        label={
+          running && working
+            ? working === 1
+              ? "Working on a subtask…"
+              : `Working on ${working} subtasks…`
+            : running && current
+              ? `${current.label}…`
+              : summarise(steps)
+        }
         detail={issues ? plural(issues, "issue", "issues") : undefined}
         running={running}
       >

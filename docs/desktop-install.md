@@ -1,0 +1,193 @@
+# Desktop install: the flow and why it is built this way
+
+This page is for the people and agents who change the desktop app's setup. It describes what
+happens from the first click to an open OpenBot, which part owns each step, and the decisions
+behind the design. The code comments named here hold the details; this page is the map.
+
+## What the desktop app is
+
+The desktop app installs and runs OpenBot for one person on one computer, with CopilotKit
+Intelligence running on the same computer. The person needs no terminal, no developer tools and no
+container engine of their own. The app is standalone: there is no hosted or self-hosted
+Intelligence option, no organization sign-in and no Bot picker. It installs the default Bot.
+
+First-release platforms are Apple silicon macOS and Windows x64. Windows on ARM cannot run
+WSL 2 inside a virtual machine on Apple silicon, so test Windows builds on an x64 machine.
+
+## The flow
+
+The window shows four sections: **Account**, **Install**, **AI** and **Start**
+(`desktop/src/Sections.tsx`). Some work runs in parallel behind them.
+
+```mermaid
+sequenceDiagram
+  participant P as Person
+  participant W as Window (App.tsx)
+  participant N as Native side (src-tauri)
+  participant C as Intelligence CLI (bundled)
+  P->>W: Get started (Welcome)
+  W->>N: prepare_installation (Install starts at once)
+  N->>N: engine, deployment download, image pulls
+  P->>W: Sign in to CopilotKit (Account)
+  W->>N: sign_in_to_copilotkit, local_eval_terms
+  N->>C: local login, terms
+  P->>W: Accept the evaluation agreement
+  Note over W,N: Once the engine answers, Intelligence setup is queued
+  W->>N: set_up_local_eval
+  N->>C: local setup
+  P->>W: Choose an AI provider and key (AI)
+  P->>W: Continue
+  W->>N: connect_local_eval, run_local_eval
+  N->>C: local connect, local start / status
+  W->>N: start_stack
+  W->>N: show_openbot
+  Note over W: The window becomes OpenBot
+```
+
+1. **Welcome.** The first click starts Install in the default folder, `~/OpenBot`. Install needs
+   no account, so it runs while the person signs in.
+2. **Account.** The person signs in to CopilotKit in the browser and accepts the local evaluation
+   agreement. Nothing licensed is set up before this acceptance.
+3. **Install.** The app makes a container engine answer, lays out the deployment, and pulls the
+   images. The screen shows each image, its size and the download speed
+   (`desktop/src/SetupProgress.tsx`, `src-tauri/src/pull_metrics.rs`). Intelligence setup starts
+   as soon as the engine answers, not after the whole install, because Intelligence runs on the
+   same engine.
+4. **AI.** The person chooses a provider and gives a key or signs in with that provider. If Start
+   is later refused because of the model, the person comes back here and changes it.
+5. **Start.** Continue starts everything in order: connect OpenBot to the local Intelligence, start
+   Intelligence, start OpenBot, then open it. The window becomes OpenBot as soon as the stack
+   answers. There is no question step before the handover.
+
+A return visit with a recorded local stack goes straight to Start. Any other saved state,
+including an installation that an earlier app connected to a hosted Intelligence, starts at the
+first screen and keeps its finished install.
+
+## Who owns what
+
+| Owner | Owns |
+|---|---|
+| Window (`desktop/src`) | Screens, order, what the person reads. Holds no credentials. |
+| Native side (`desktop/src-tauri`) | Engine install, deployment layout, images, Compose, host processes, secrets, Stop and Quit. |
+| Intelligence CLI (`copilotkit`, bundled) | Intelligence topology, sign-in, licence, readiness and its endpoints. |
+
+**The CLI owns Intelligence.** The app runs the CLI as a bounded child process
+(`src-tauri/src/local_eval.rs`) and never reads its credential files or probes its containers to
+fill a gap. Three rules hold that boundary:
+
+- **Nothing unverified runs.** The CLI and its Node runtime are bundled into the installer and
+  checked by SHA-256. There is no fallback to `PATH`, `npx` or a global install.
+- **Arguments are fixed.** Only known subcommands, a validated stack id and `--json`, with no
+  shell. The CLI's `resumeCommand` text is never executed. The account sign-in adds
+  `--mode openbot`, so the sign-in page explains OpenBot's setup, only when the CLI's own
+  `login --help` lists it: an older CLI refuses an unknown flag.
+- **Only allowlisted facts cross into the window.** Raw stdout and stderr never reach the window or
+  a log. Readiness and licence come only from the exact values of `local status`; anything else
+  reads as unknown, and unknown keeps chat closed.
+
+## Decisions and the reasons for them
+
+- **Install before sign-in.** Downloading software needs no account, and it is the slow part.
+  Starting it on the first click means the person signs in while it runs.
+- **Licence work after acceptance.** Intelligence setup waits for the evaluation agreement, and
+  uses the version of the terms the person accepted.
+- **One engine for both.** OpenBot and Intelligence share one container engine. The app uses, in
+  order: a Docker that answers; on macOS and Windows a stopped Docker Desktop that has run before,
+  which it opens; otherwise Podman, which it installs and runs as a rootful machine, because k3d
+  needs a rootful engine. The choice is saved with the installation, and later runs use only that
+  engine (`src-tauri/src/install.rs`, `acquire.rs`).
+- **Everything fetched is pinned.** Engine installers, Compose, the CLI and Node are pinned by
+  digest. A mismatch is refused, never run.
+- **A small installer, a downloaded deployment.** The installer is the app and the bundled CLI.
+  The deployment (`docker-compose.yml`, server, app, worker, tenant package) is the release's
+  source tarball at a tag, laid out under the installation folder, and its images are named by
+  digest in that release's `container-images.json` (`src-tauri/src/deployment.rs`). A new
+  deployment takes the latest release. An existing one keeps its version until the person applies
+  an explicit runtime update.
+- **The app's own Compose project.** Every new installation runs as the Compose project
+  `openbot-desktop`, not the folder's name. A source checkout called `openbot` would otherwise share
+  containers and volumes with the app (`src-tauri/src/stack.rs`, `project`).
+- **An upgrade keeps its data.** An installation an earlier app made ran as its folder's name
+  (`openbot` for `~/OpenBot`), and Stop and Quit took its containers down. It keeps that project,
+  and with it its database and its Bots' computers, when an earlier app finished installing in the
+  folder and the project's database volume is still on the engine. If another folder is running
+  that project right now, Install says so and decides nothing until it stops. Nothing is deleted.
+- **Images download in parallel, with progress.** Four images download at once
+  (`IMAGE_PULLS_AT_ONCE`). The screen shows what is downloading and how fast, so a slow network
+  looks slow, not stuck.
+- **A dropped download is tried again.** A file download whose connection fails, or whose server
+  answers 5xx or 429, is tried up to three times (`deployment::get`). A 404 is reported at once.
+  `install.rs` still checks the digest of whatever arrives.
+- **Secrets stay out of `.env`.** `.env` holds settings a person can read. Model keys and service
+  tokens go to an owner-only file on macOS and Linux and to DPAPI on Windows, and reach processes
+  only as environment (`src-tauri/src/vault.rs`). A value never goes on a command line.
+- **Open as soon as it answers.** An earlier design asked the Bot a test question before the
+  handover. It was removed: the stack answering is the signal, and a failure inside OpenBot is
+  shown there.
+- **A stale sign-in goes back to Install.** If the saved CopilotKit sign-in no longer works, the
+  app returns the person to the step that can fix it instead of stopping on the AI step.
+- **Changing the AI retries a refused Start.** If Start was refused because of the model, choosing
+  another one runs Start again with it.
+- **Failures in two registers.** Every failure has `said`, a sentence a person reads, and
+  `detail`, the real output behind a disclosure (`src-tauri/src/problem.rs`). Raw engine output is
+  never the headline.
+
+## Stop, Quit and uninstall
+
+- **Stop** stops OpenBot first, then the local Intelligence stack that OpenBot created. A stack
+  OpenBot did not create is left alone.
+- **Quit** runs the same order with time limits: host processes, Compose down, then Intelligence,
+  with up to 120 seconds for the CLI. The screen reports each part, and a part that did not stop
+  always gets its row (`exit_cleanup_reporting` in `src-tauri/src/main.rs`).
+- **Windows install and uninstall** first stop every process running from the installation's own
+  `cli-bundle`. The CLI's background sign-in service keeps `node.exe` open, and Windows cannot
+  replace or delete an open file. No other `node.exe` is touched (`src-tauri/windows/hooks.nsh`).
+
+## Where things are on disk
+
+| Path | What |
+|---|---|
+| `~/OpenBot/` | The installation: deployment, `.env` settings, `.openbot-*` records |
+| `~/OpenBot/.openbot-project.json` | The Compose project this installation runs as |
+| `~/OpenBot/.env` | Settings only. A person's own `COMPOSIO_API_KEY` goes here and always wins |
+| Protected store (see `vault.rs`) | Model keys and service tokens |
+| `%LOCALAPPDATA%\OpenBot` (Windows) | Recorder host files and the local browser profile |
+
+## Apps through Composio
+
+A person's own Composio key, in `.env` or the environment, is passed to the server at Start and is
+never moved or rewritten (`src-tauri/src/composio.rs`, `resolve`). The app can also ask CopilotKit
+Ops for a project key with a CopilotKit session (`provision`), but nothing in the standalone flow
+calls it yet: the backend route it needs is not live. Until it is, web search and app connections
+need a key in `~/OpenBot/.env`.
+
+## Builds
+
+An installer bundles the Intelligence CLI chosen in `desktop/intelligence-cli.json` and a Node
+runtime pinned by version and SHA-256. Internal builds and release candidates also pin the
+deployment and its images to the exact commit they were built from, and refuse to start a
+deployment from another release; see [Releasing](releasing.md) once that change is merged.
+
+## Where to start in the code
+
+| Area | Files |
+|---|---|
+| Screens and order | `desktop/src/App.tsx`, `Welcome.tsx`, `CopilotKitAccount.tsx`, `ProviderPicker.tsx`, `LocalIntelligence.tsx` |
+| CLI calls from the window | `desktop/src/localEvalCli.ts` |
+| CLI process boundary | `desktop/src-tauri/src/local_eval.rs`, `local_eval_state.rs` |
+| Engine | `desktop/src-tauri/src/install.rs`, `acquire.rs`, `docker_desktop.rs`, `engine.rs` |
+| Deployment and release | `desktop/src-tauri/src/deployment.rs`, `deployment_release.rs`, `preparation.rs` |
+| Compose and processes | `desktop/src-tauri/src/stack.rs`, `supervise.rs` |
+| Image downloads | `desktop/src-tauri/src/pull_metrics.rs`, `desktop/src/SetupProgress.tsx` |
+| Secrets | `desktop/src-tauri/src/vault.rs`, `saved_intent.rs` |
+| Windows installer hooks | `desktop/src-tauri/windows/hooks.nsh` |
+
+## Testing a change
+
+- `desktop/src/App.test.tsx` covers the flow screen by screen. Run `bun test src` in `desktop`.
+- Rust: in `desktop/src-tauri`, run `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
+  and `cargo test --locked --lib --bins`.
+- To test a real first run, remove what the previous run left: the containers and volumes of the
+  `openbot-desktop` project, the local Intelligence stack the app created (`copilotkit local
+  delete`), `~/OpenBot`, and the CLI sign-in (`copilotkit logout`). Otherwise the app resumes
+  instead of starting fresh.

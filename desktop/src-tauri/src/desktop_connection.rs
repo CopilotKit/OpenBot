@@ -46,9 +46,6 @@ pub fn poll(client: &Client, port: u16, token: &str) -> Result<Option<Connection
             ("intelligence", "intelligence_authentication_failed") => {
                 Ok(Some(Connection::Intelligence))
             }
-            ("organization", "organization_authentication_failed") => {
-                Ok(Some(Connection::Organization))
-            }
             _ => Err("Connection status response contained an unsupported failure.".into()),
         },
     }
@@ -77,7 +74,7 @@ mod tests {
             (
                 200,
                 r#"{"connection":"organization","code":"organization_authentication_failed"}"#,
-                Ok(Some(Connection::Organization)),
+                Err(()),
             ),
             (404, "", Ok(None)),
             (401, "provider auth failed", Err(())),

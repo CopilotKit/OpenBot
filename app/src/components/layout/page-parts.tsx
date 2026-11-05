@@ -12,8 +12,8 @@ import {
 /**
  * `prose` is the default because configuration is mostly reading, and every screen uses it so none is
  * wider than another. It is `max-w-3xl`, 768px: room for a row's label
- * and its control side by side. Sentences are held to `max-w-prose` (around 65 characters) inside it,
- * which is where reading stays comfortable, so the column widening does not stretch them.
+ * and its control side by side. Page and section descriptions use the column's full width, so they line
+ * up with the rows under them.
  *
  * `full` exists for one page. An audit log is a table you scan, and forcing it into the prose column
  * would wrap every row. The page is exactly the window's height and does not scroll: the title sits
@@ -100,7 +100,7 @@ export function PageHeader({
         {action}
       </div>
       {description ? (
-        <p className="max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
+        <p className="text-pretty text-muted-foreground text-sm leading-relaxed">
           {description}
         </p>
       ) : null}
@@ -141,7 +141,7 @@ export function PageSection({
         </div>
       ) : null}
       {description ? (
-        <p className="mt-1 max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
+        <p className="mt-1 text-pretty text-muted-foreground text-sm leading-relaxed">
           {description}
         </p>
       ) : null}

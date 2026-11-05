@@ -1,6 +1,6 @@
 import { IconListCheck } from "@tabler/icons-react";
-import { BotNeedsYou } from "@/components/approvals/waiting";
 import { BotActivitySections } from "@/components/bot-profile/activity";
+import { BotNeedsYou } from "@/components/needs-you/board";
 import { useMuse } from "../context";
 import { MuseEmpty, MuseScreen } from "../ui";
 

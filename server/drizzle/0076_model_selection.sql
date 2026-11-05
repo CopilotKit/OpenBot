@@ -1,0 +1,1 @@
+ALTER TABLE "intelligence_channel_mappings" ADD COLUMN "model_selection" jsonb;

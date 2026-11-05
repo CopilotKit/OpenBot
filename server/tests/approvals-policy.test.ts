@@ -36,10 +36,12 @@ const candidate = (
 ): ApprovalCandidate => ({
   actorId: "owner",
   botId: "bot",
-  toolRef: "mcp/gmail/send_email",
+  // An ordinary change. Sending, deleting, sharing and publishing ask whatever the rules say
+  // (see "consequential actions" below), so the rule layers are shown on one that does not.
+  toolRef: "mcp/gmail/create_label",
   effect: "write",
   scope: "gmail",
-  args: { to: "sam@example.com", subject: "Notes" },
+  args: { name: "Notes" },
   ...over,
 });
 const rule = (
@@ -542,7 +544,7 @@ describe("auto-review", () => {
       ),
     });
     expect(calls[0]).toContain("<request>\nSend Sam my notes\n</request>");
-    expect(calls[0]).toContain('"tool": "mcp/gmail/send_email"');
+    expect(calls[0]).toContain('"tool": "mcp/gmail/create_label"');
   });
 });
 
