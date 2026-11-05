@@ -519,6 +519,11 @@ fieldset.picker.providers {
   position: relative;
 }
 
+/* The chosen row's own text stops short of Change rather than running under it. */
+.tile.beside-change {
+  padding-right: 84px;
+}
+
 /* Sits on the one chosen row, so going back is where the eye already is. */
 button.text-link.change-provider {
   position: absolute;

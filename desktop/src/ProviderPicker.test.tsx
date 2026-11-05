@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
@@ -1145,4 +1147,25 @@ test("a chosen provider stands alone, and Change or Escape shows them all again"
   expect(view.getAllByRole("radio")).toHaveLength(1);
   fireEvent.keyDown(window, { key: "Escape" });
   expect(view.getAllByRole("radio")).toHaveLength(everyRow);
+});
+
+/**
+ * The chosen row's own text ran under Change: "…vLLM or your own." sat behind the button on the
+ * compatible endpoint's row. The lone row keeps the room Change takes at its right.
+ */
+test("a chosen provider's text leaves room for Change", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    return null;
+  };
+  const view = await renderPicker();
+  await view.findAllByRole("radio");
+  await userEvent.click(view.getByRole("radio", { name: /Anthropic/ }));
+  const row = view.getByRole("radio").closest("label");
+  expect(row?.className).toContain("beside-change");
+  const styles = readFileSync(join(import.meta.dir, "styles.css"), "utf8");
+  const rule = styles.match(/\.tile\.beside-change\s*\{([^}]*)\}/)?.[1] ?? "";
+  const room = Number(rule.match(/padding-right:\s*(\d+)px/)?.[1] ?? 0);
+  // Change is about 50px wide, 16px in from the edge, with a gap before the text.
+  expect(room).toBeGreaterThanOrEqual(80);
 });

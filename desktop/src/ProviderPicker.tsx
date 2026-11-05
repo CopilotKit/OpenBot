@@ -585,7 +585,7 @@ export function ProviderPicker({
         {(row ? [row] : rows).map((r) => (
           <label
             key={r.id}
-            className={`tile wide${open === r.id ? " chosen" : ""}`}
+            className={`tile wide${open === r.id ? " chosen" : ""}${row ? " beside-change" : ""}`}
           >
             <input
               type="radio"
