@@ -84,11 +84,12 @@ def _answer(events, after):
     ]
 
 
-def _two_turns(monkeypatch, thread, between=None, second=None):
+def _two_turns(monkeypatch, thread, between=None, second=None, first=None):
     """Run the contract conversation, then the next turn on the same thread, in one process.
 
-    `between(main)` runs between the turns; `second(messages)` edits the second run's thread.
-    Returns the body the model received on the second turn.
+    `first(messages)` edits the first run's thread; `between(main)` runs between the turns;
+    `second(messages)` edits the second run's thread. Returns the body the model received on the
+    second turn.
     """
     with fake_provider() as (base, bodies):
         main = _app(monkeypatch, openai_environment, base)
@@ -97,19 +98,21 @@ def _two_turns(monkeypatch, thread, between=None, second=None):
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=main.app), base_url="http://harness"
             ) as client:
-                first = conversation(thread_id=thread, run_id=f"{thread}-1")
-                events = await _post(client, first)
+                opening = conversation(thread_id=thread, run_id=f"{thread}-1")
+                if first is not None:
+                    first(opening["messages"])
+                events = await _post(client, opening)
                 assert bodies, "the model was never called"
                 assert missing_from(bodies[-1]) == []
                 if between is not None:
                     await between(main)
-                messages = _answer(events, first["messages"]) + [
+                messages = _answer(events, opening["messages"]) + [
                     {"id": "u3", "role": "user", "content": f"And now? {NEWER_QUESTION}"}
                 ]
                 if second is not None:
                     second(messages)
                 called = len(bodies)
-                await _post(client, {**first, "runId": f"{thread}-2", "messages": messages})
+                await _post(client, {**opening, "runId": f"{thread}-2", "messages": messages})
                 assert len(bodies) > called, "the model was not called for the second turn"
                 return bodies[-1]
 
@@ -214,6 +217,8 @@ def test_a_live_session_is_not_rebuilt_on_every_turn(monkeypatch):
 
 
 SKILL = "CONTRACT_SKILL_INSTRUCTION_adk"
+MEMORY = "CONTRACT_PERSONAL_MEMORY_adk"
+NEWER_MEMORY = "CONTRACT_NEWER_PERSONAL_MEMORY_adk"
 
 
 def _system_prompt(body):
@@ -223,12 +228,20 @@ def _system_prompt(body):
     )
 
 
-def test_only_the_servers_own_system_messages_become_the_bots_instructions(monkeypatch):
-    """A system row the browser adds (a skill's instructions arrive as one) is not an instruction.
+def _conversation_part(body):
+    """Everything else the model was sent: the conversation, outside its instructions."""
+    return json.dumps(
+        [m for m in body.get("messages", []) if m.get("role") not in ("system", "developer")]
+    )
+
+
+def test_a_browser_system_row_reaches_the_model_as_conversation_not_instructions(monkeypatch):
+    """A system row the browser adds (a skill's instructions arrive as one) is conversation data.
 
     The server drops any incoming message that uses its own ids, so only the standing role and the
-    granted-tools summary it writes carry them. Every other system row reached the model the way
-    the library treats one after `messages[0]`, which is not at all, and must not be promoted.
+    granted-tools summary it writes may be the Bot's instructions. Any other system row reaches the
+    model labelled as part of the conversation, never with system authority, and never dropped:
+    the library has no place for one, so before this it never reached the model at all.
     """
 
     def skill(messages):
@@ -238,6 +251,35 @@ def test_only_the_servers_own_system_messages_become_the_bots_instructions(monke
     assert STANDING_ROLE in _system_prompt(body)
     assert GRANTED_TOOLS in _system_prompt(body)
     assert SKILL not in _system_prompt(body), "a browser system row became the Bot's instructions"
+    assert SKILL in _conversation_part(body), "a browser system row never reached the model"
+    assert '\\"role\\": \\"system\\"' in _conversation_part(body), "the row was not labelled"
+    assert NEWER_QUESTION in _conversation_part(body)
+
+
+def test_personal_memory_reaches_every_turn_as_data_not_instructions(monkeypatch):
+    """The server's quoted personal-memory records, rewritten on every run, reach every turn.
+
+    `PersonalMemoryMiddleware` puts them first, as a system row, with what the person's memory
+    holds now. They are untrusted data: never the Bot's instructions, and never dropped. A warm
+    session already holds the first turn, so they have to come with the turn being answered.
+    """
+
+    def memory(content):
+        return {"id": "openbot:personal-memory", "role": "system", "content": f"Personal memory. {content}"}
+
+    def first(messages):
+        messages.insert(0, memory(MEMORY))
+
+    def newer(messages):
+        messages[:] = [m for m in messages if m["id"] != "openbot:personal-memory"]
+        messages.insert(0, memory(NEWER_MEMORY))
+
+    body = _two_turns(monkeypatch, "memory-thread", first=first, second=newer)
+    assert NEWER_MEMORY in _conversation_part(body), "this run's personal memory never reached the model"
+    assert NEWER_MEMORY not in _system_prompt(body), "personal memory became the Bot's instructions"
+    assert MEMORY not in _system_prompt(body)
+    assert STANDING_ROLE in _system_prompt(body)
+    assert missing_from(body) == []
 
 
 TOOL_NAME = "read_probe_value"
