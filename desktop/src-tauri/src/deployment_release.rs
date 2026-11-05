@@ -9,7 +9,9 @@ use crate::deployment;
 
 /// A pinned build always uses the version it was pinned to and never consults GitHub. Any other
 /// build keeps the release it already follows, so restarts and repairs retain that version; only a
-/// new deployment, or one left behind by a pinned build, asks this distribution for its latest
+/// new deployment, one left behind by a pinned build, or a release from before the server and
+/// worker were Compose services (`deployment::predates_containers`, which this app cannot run and
+/// a repair at its own version would only lay out again) asks this distribution for its latest
 /// release. The fetcher records the exact tag after the source and image manifest have both
 /// downloaded. Uses blocking HTTP, so callers in an async runtime must use a blocking task.
 pub fn resolve_version(root: &Path) -> Result<String, String> {
@@ -33,7 +35,9 @@ fn resolve_version_with(
         return Ok(pin.version.clone());
     }
     match deployment::installed(root) {
-        Some(installed) if !installed.pinned => Ok(installed.version),
+        Some(installed) if !installed.pinned && !deployment::predates_containers(root) => {
+            Ok(installed.version)
+        }
         _ => latest(),
     }
 }
@@ -81,6 +85,22 @@ mod tests {
         let version = resolve_version_with(&root, None, || panic!("must work offline")).unwrap();
         assert_eq!(version, "v0.0.7");
         assert!(!deployment::needs_fetch(&root, &version));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_pinned_release_whose_server_ran_on_the_host_is_upgraded_to_latest() {
+        let root = scratch("release-host-server");
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  postgres: {}\n  supervisor: {}\n",
+        )
+        .unwrap();
+        std::fs::write(deployment::images_path(&root), "{}").unwrap();
+        deployment::record(&root, "v0.0.15", false).unwrap();
+        let version = resolve_version_with(&root, None, || Ok("v0.0.16".into())).unwrap();
+        assert_eq!(version, "v0.0.16");
+        assert!(deployment::needs_fetch(&root, &version));
         std::fs::remove_dir_all(root).unwrap();
     }
 

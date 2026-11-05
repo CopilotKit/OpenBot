@@ -1448,7 +1448,12 @@ mod tests {
             ("server/src/main.ts", contents.into()),
             ("app/src/main.ts", contents.into()),
             ("worker/src/main.ts", contents.into()),
-            ("docker-compose.yml", "services: {}".into()),
+            // A release from after OpenBot's server and worker became Compose services (see
+            // `deployment::predates_containers`).
+            (
+                "docker-compose.yml",
+                "services:\n  server: {}\n  worker: {}\n".into(),
+            ),
             (
                 "server/drizzle/meta/_journal.json",
                 "{\"entries\":[{\"tag\":\"openbot-db-1\",\"when\":1}]}".into(),

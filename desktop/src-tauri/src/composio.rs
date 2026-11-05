@@ -156,12 +156,13 @@ pub enum Provisioned {
     New(ProvisionedKey),
 }
 
-/// Ask Ops for this installation's project key. Only the installation identity is written.
-pub fn provision(
-    root: &Path,
-    session: &crate::intelligence::OpsSession,
-) -> Result<Provisioned, Problem> {
-    provision_at(root, session.bearer(), crate::intelligence::OPS_API)
+/// Where CopilotKit Ops answers for an installation's project connection.
+const OPS_API: &str = "https://api.operations.copilotkit.ai";
+
+/// Ask Ops for this installation's project key, with a CopilotKit Ops session's bearer token. Only
+/// the installation identity is written.
+pub fn provision(root: &Path, bearer: &str) -> Result<Provisioned, Problem> {
+    provision_at(root, bearer, OPS_API)
 }
 
 fn provision_at(root: &Path, session: &str, origin: &str) -> Result<Provisioned, Problem> {

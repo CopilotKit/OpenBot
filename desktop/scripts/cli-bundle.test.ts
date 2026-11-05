@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   bundleCli,
   downloadNode,
@@ -304,7 +304,7 @@ function fakePackRun(pkg: {
       return { code: 0, stdout: out, stderr: "" };
     }
     if (cmd[0] === "tar") {
-      const dir = join(cmd[cmd.indexOf("-C") + 1], "package");
+      const dir = join(resolve(cwd, cmd[cmd.indexOf("-C") + 1]), "package");
       mkdirSync(dir, { recursive: true });
       writeFileSync(
         join(dir, "package.json"),
@@ -341,6 +341,25 @@ function packDirs() {
   const root = tempDir("pack-cli-");
   return { workDir: join(root, "work"), cliDir: join(root, "cli") };
 }
+
+/**
+ * Windows: the build step runs in Git's bash, whose GNU tar reads `D:\\a\\...\\copilotkit.tgz` as the
+ * host `D` and fails ("Cannot connect to D: resolve failed"). The tarball is named relative to the
+ * work folder it is unpacked in, which every tar reads as a file.
+ */
+test("unpacks the CLI by paths relative to its work folder", () => {
+  const { workDir, cliDir } = packDirs();
+  mkdirSync(workDir, { recursive: true });
+  const { run, calls } = fakePackRun({
+    name: "copilotkit",
+    version: "4.33.1",
+    bin: { copilotkit: "index.js" },
+  });
+  packCli({ kind: "npm", spec: "copilotkit@latest" }, workDir, cliDir, run);
+  const tar = calls.find((call) => call.cmd[0] === "tar");
+  expect(tar?.cmd).toEqual(["tar", "-xzf", "copilotkit-4.33.1.tgz", "-C", "."]);
+  expect(tar?.cwd).toBe(workDir);
+});
 
 test("packs a preview and reports the package's own name and version", () => {
   const { workDir, cliDir } = packDirs();

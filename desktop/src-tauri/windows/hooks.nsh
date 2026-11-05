@@ -14,6 +14,27 @@
 ; HKCU Extensions key, with which the browser takes the Recorder it installed back out, and Desktop's note of them.
 ; There is one DeleteRegKey per store id set in shared/recorder-extension.json, and a test holds the two in step;
 ; none while the ids are empty.
+; The bundled Intelligence CLI starts a background sign-in service with the bundled node.exe, detached, so it outlives
+; the app. While it runs Windows will not let an install or an uninstall replace or delete
+; $INSTDIR\cli-bundle\runtime\node.exe, and the uninstaller failed on exactly that. Before either, stop every
+; process running from this installation's own cli-bundle, and nothing else: another node.exe is never touched.
+; Intelligence brings the service back the next time it starts.
+; The folder reaches PowerShell as data, in OPENBOT_CLI_BUNDLE, never inside the script: a profile folder like
+; C:\Users\O'Brien would end a quoted string there, and [ and ] are wildcards to -like.
+!macro OPENBOT_STOP_BUNDLED_CLI
+  System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("OPENBOT_CLI_BUNDLE", "$INSTDIR\cli-bundle")'
+  nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$bundle = $$env:OPENBOT_CLI_BUNDLE.TrimEnd('\') + '\'; Get-Process -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and $$_.Path.StartsWith($$bundle, [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue"`
+  Pop $0
+!macroend
+
+!macro NSIS_HOOK_PREINSTALL
+  !insertmacro OPENBOT_STOP_BUNDLED_CLI
+!macroend
+
+!macro NSIS_HOOK_PREUNINSTALL
+  !insertmacro OPENBOT_STOP_BUNDLED_CLI
+!macroend
+
 !macro NSIS_HOOK_POSTUNINSTALL
   ${If} $UpdateMode <> 1
     DeleteRegKey HKCU "Software\Google\Chrome\NativeMessagingHosts\ai.copilotkit.openbot.recorder"

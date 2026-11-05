@@ -10,7 +10,11 @@ export const Route = createFileRoute("/_authed/settings")({
 function RouteComponent() {
   return (
     // The same inset panel as the app's shell; see `_app.tsx`.
-    <SidebarShell className="h-svh overflow-hidden" width="300px">
+    <SidebarShell
+      className="h-svh overflow-hidden"
+      name="settings"
+      width="300px"
+    >
       <SettingsSidebar />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
         <Outlet />
