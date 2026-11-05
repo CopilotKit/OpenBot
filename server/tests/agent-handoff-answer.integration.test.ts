@@ -325,6 +325,9 @@ function lockingIntelligence() {
           apiUrl: `http://127.0.0.1:${server.port}`,
           wsUrl: `ws://127.0.0.1:${server.port}`,
           apiKey: "cpk-test-key",
+          // The hop's own wait is what these tests drive; the client's few seconds of asking again
+          // (follow-up-run-lock.test.ts) would only stretch each busy try.
+          lockConflictWaitMs: 0,
         }),
       ),
     }),

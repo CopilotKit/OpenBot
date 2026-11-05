@@ -104,6 +104,8 @@ function intelligence() {
   return {
     url: `http://127.0.0.1:${server.port}`,
     broken,
+    /** The run holding a thread lets go, as the platform does once that run is over. */
+    release: (threadId: string) => locks.delete(threadId),
     stop: () => server.stop(true),
   };
 }
@@ -205,7 +207,9 @@ test("a new conversation opens, is assigned to Learning and runs, and nothing is
   expect(await reader(threadId, USER)).toBe("known");
   expect(await copilot.history({ threadId, actorId: USER })).toHaveLength(1);
 
-  // A second run while the first holds it is busy, not broken, and not printed either.
+  // A second run while the first still holds it is refused as retryable, asked again until the
+  // first lets go, and gets it; none of the refusals is printed.
+  const letGo = setTimeout(() => platform.release(threadId), 300);
   expect(
     await copilot.threadLock.acquire({
       threadId,
@@ -213,7 +217,8 @@ test("a new conversation opens, is assigned to Learning and runs, and nothing is
       userId: USER,
       agentId: BOT,
     }),
-  ).toBeNull();
+  ).toEqual({ runId: "run-2" });
+  clearTimeout(letGo);
   expect(failedReads()).toEqual([]);
 });
 
