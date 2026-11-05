@@ -8,11 +8,15 @@ never saw its role, and a prompt set on the first run of a thread would be the p
 later run, though the summary changes whenever a grant does.
 
 Two seams the library supports carry it instead. `invocation_state(request, input_data)` is the
-endpoint's `invocation_state_provider`: it reads the system and developer messages from this run,
+endpoint's `invocation_state_provider`: it reads the server's own system messages from this run,
 in order. `RunSystemPrompt` is a Strands hook on `BeforeInvocationEvent`, which every per-thread
 agent receives: it sets that agent's system prompt from the run's invocation state before the
 first model call, so nothing from an earlier run remains. The messages stay out of the replayed
 history, where the library already leaves them.
+
+Only those two are instructions. The browser inserts system rows of its own (a skill's
+instructions arrive that way), and those are not the server's to vouch for: they keep the
+treatment they had before, which in this harness is that the library leaves them out.
 """
 
 from typing import Any
@@ -22,6 +26,11 @@ from strands.hooks import BeforeInvocationEvent
 # Keys of the invocation state are stripped from every RAW event the library forwards, so the
 # prompt does not reach the browser by this route.
 KEY = "openbot_system_prompt"
+
+# The ids the server gives the system messages it writes for a remote Bot: `standingRoleMessage`
+# and `holdingsMessageFor` in server/src/copilot.ts. The server drops every incoming message whose
+# id starts with one of these before it adds its own, so in a run only its own copies carry one.
+SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
 
 
 def _text(content: Any) -> str:
@@ -36,11 +45,20 @@ def _text(content: Any) -> str:
     return ""
 
 
+def is_server_instruction(message: Any) -> bool:
+    message_id = getattr(message, "id", None)
+    return (
+        getattr(message, "role", None) == "system"
+        and isinstance(message_id, str)
+        and message_id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+    )
+
+
 def system_text(messages: Any) -> list[str]:
-    """The text of each system or developer message, in the order the run sent them."""
+    """The text of each of the server's own system messages, in the order the run sent them."""
     found = []
     for message in messages or []:
-        if getattr(message, "role", None) in ("system", "developer"):
+        if is_server_instruction(message):
             text = _text(getattr(message, "content", None)).strip()
             if text:
                 found.append(text)
