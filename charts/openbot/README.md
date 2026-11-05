@@ -8,11 +8,12 @@ only difference between them is values.
 Four things this chart assumes and does not create.
 
 **An image the cluster can pull.** A release publishes `ghcr.io/copilotkit/openbot:vX.Y.Z`
-publicly, and that tag is what `image.tag` wants. It is built for **`linux/amd64` only**, so an
-arm64 node group (Graviton on EKS, Tau T2A on GKE, Ampere on AKS) cannot run it: the pods sit in
-`ImagePullBackOff`, which is the same thing a wrong tag or a missing pull secret looks like, so the
-node pool being the wrong shape is the last thing anybody checks. Either run amd64 nodes, or build the image for the
-architecture you have and push it somewhere the cluster can reach. Check before assuming:
+publicly, and that tag is what `image.tag` wants. It is built for `linux/amd64` and `linux/arm64`,
+so an amd64 or an arm64 node group (Graviton on EKS, Tau T2A on GKE, Ampere on AKS) pulls its own
+architecture from the same tag. Releases up to and including v0.2.0 are **`linux/amd64` only**: on
+an arm64 node group those pods sit in `ImagePullBackOff`, which is the same thing a wrong tag or a
+missing pull secret looks like, so the node pool being the wrong shape is the last thing anybody
+checks. Check the release you are installing before assuming:
 
 ```sh
 docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.9 | grep architecture
@@ -81,7 +82,8 @@ addons:
     wellKnownPolicies: { ebsCSIController: true }
 managedNodeGroups:
   - name: workers
-    # amd64: the published image has no arm64 variant. See the image note above.
+    # amd64 works with every release; arm64 (e.g. t4g.large) only with one newer than v0.2.0. See
+    # the image note above.
     instanceType: t3.large
     desiredCapacity: 2
     minSize: 2

@@ -150,7 +150,8 @@ Then, in order:
 - the version in the tree is checked against the branch that is publishing it, and the changelog is
   checked for a section with that number
 - one image is built and pushed to `ghcr.io/copilotkit/openbot`, tagged with the version, the commit
-  and `latest`
+  and `latest`. It is `linux/amd64` and `linux/arm64`, built on native runners of each architecture
+  and joined into one manifest list, the same way as the services below
 - the services `docker-compose.yml` can build are published too, one image each, at
   `ghcr.io/copilotkit/openbot-<service>`. Those are `linux/amd64` and `linux/arm64`, built on native
   runners of each architecture and joined into one manifest list, because the machines pulling them

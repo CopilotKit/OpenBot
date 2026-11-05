@@ -136,22 +136,32 @@ jobs:
     permissions:
       contents: read
 
-  # One image, built once. Everything downstream refers to it by digest, so what was tested is what
-  # is deployed and there is no second build to disagree with the first.
+  # One image, built once per architecture from this commit. Everything downstream refers to it by
+  # digest, so what was tested is what is deployed and there is no second build to disagree with the
+  # first.
+  #
+  # Both architectures for the same reason as the component images below: README, `prompt.txt` and
+  # `docs/deployment.md` all start a deployment with this image, and an arm64 machine (any Apple
+  # Silicon Mac, Graviton, Ampere) pulling an amd64-only image runs it under emulation, or not at
+  # all. Native runners rather than QEMU, as below.
   image:
-    name: image
+    name: image ${{ matrix.platform.arch }}
     needs: [metadata, verify, checks]
     if: needs.metadata.outputs.is_release == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.platform.runner }}
     permissions:
       contents: read
       packages: write
-      # The attestation is signed with the workflow's own OIDC identity, so there is no key to hold
-      # and the signature says which workflow, repository and commit produced the image.
-      id-token: write
-      attestations: write
-    outputs:
-      digest: ${{ steps.push.outputs.digest }}
+    strategy:
+      # Pushed untagged, so a leg that fails leaves nothing deployable behind; the tags are written by
+      # the job below only once both architectures exist.
+      fail-fast: false
+      matrix:
+        platform:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -163,35 +173,111 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # By digest and untagged, for the reason given on `component-images`: a tag written here would
+      # name one architecture. gzip, the default, rather than their zstd: this image is pulled by
+      # servers with whatever client they have.
       - id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          push: true
+          platforms: linux/${{ matrix.platform.arch }}
           build-args: |
             OPENBOT_BUILD_VERSION=${{ needs.metadata.outputs.version }}
             OPENBOT_BUILD_COMMIT=${{ github.sha }}
             OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
             OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
             OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
-          # The version, the commit, and a moving latest. The version tag is the one to deploy; the
-          # commit tag is how you find out what a running image actually contains.
-          tags: |
-            ${{ needs.verify.outputs.image_repository }}:${{ needs.metadata.outputs.version }}
-            ${{ needs.verify.outputs.image_repository }}:${{ github.sha }}
-            ${{ needs.verify.outputs.image_repository }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          outputs: type=image,name=${{ needs.verify.outputs.image_repository }},push-by-digest=true,name-canonical=true,push=true
+          # The unscoped cache is the one CI's `image` job writes on every push to main, so the amd64
+          # leg still starts warm. Each leg writes only its own scope, so the two never overwrite
+          # each other.
+          cache-from: |
+            type=gha
+            type=gha,scope=openbot-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=openbot-${{ matrix.platform.arch }}
           provenance: true
           sbom: true
-      # BuildKit's own attestations above travel inside the image. This one is the record GitHub
-      # holds, and it is what `gh attestation verify oci://${{ needs.verify.outputs.image_repository }}:vX.Y.Z
-      # -R CopilotKit/OpenBot` checks before anybody deploys it. Bound to the digest, never a tag,
-      # because a tag can be moved to point at something else afterwards.
+      - name: Record the digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          ARCH: ${{ matrix.platform.arch }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir -p digests
+          echo "$DIGEST" > "digests/$ARCH"
+      # `digest-openbot-*`, never `manifest-*`: `github-release` counts those against the component
+      # list and refuses to publish if they disagree.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-openbot-${{ matrix.platform.arch }}
+          path: digests/
+          retention-days: 1
+
+  # The two architectures become the one reference the docs tell people to run, the same way
+  # `component-manifests` joins the component images.
+  image-manifest:
+    name: image manifest
+    needs: [metadata, verify, checks, image]
+    if: needs.metadata.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # The attestation is signed with the workflow's own OIDC identity, so there is no key to hold
+      # and the signature says which workflow, repository and commit produced the image.
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.merge.outputs.digest }}
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: digest-openbot-amd64
+          path: digests
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: digest-openbot-arm64
+          path: digests
+      - id: merge
+        name: Write the tags over both architectures
+        env:
+          REPOSITORY: ${{ needs.verify.outputs.image_repository }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          refs=()
+          for arch in amd64 arm64; do
+            digest="$(cat "digests/$arch")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            refs+=("$REPOSITORY@$digest")
+          done
+          # The version, the commit, and a moving latest. The version tag is the one to deploy; the
+          # commit tag is how you find out what a running image actually contains.
+          docker buildx imagetools create \
+            --tag "$REPOSITORY:$VERSION" \
+            --tag "$REPOSITORY:$COMMIT" \
+            --tag "$REPOSITORY:latest" \
+            "${refs[@]}"
+          digest="$(docker buildx imagetools inspect "$REPOSITORY:$VERSION" --format '{{.Manifest.Digest}}')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      # BuildKit's own attestations travel inside each architecture's image. This one is the record
+      # GitHub holds, and it is what `gh attestation verify oci://${{ needs.verify.outputs.image_repository }}:vX.Y.Z
+      # -R CopilotKit/OpenBot` checks before anybody deploys it. Bound to the list's digest, never a
+      # tag, because a tag can be moved to point at something else afterwards; the list is what the
+      # tag resolves to, so that command and a deploy by digest name the same thing.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ needs.verify.outputs.image_repository }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ steps.merge.outputs.digest }}
           push-to-registry: true
 
   # The images the installer pulls instead of building. `docker-compose.yml` builds these from
@@ -382,7 +468,7 @@ jobs:
   # tag somebody could move.
   github-release:
     name: tag and release
-    needs: [metadata, verify, checks, image, component-manifests]
+    needs: [metadata, verify, checks, image-manifest, component-manifests]
     if: needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -410,7 +496,7 @@ jobs:
       - name: Write the image manifest
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
-          DIGEST: ${{ needs.image.outputs.digest }}
+          DIGEST: ${{ needs.image-manifest.outputs.digest }}
           COMMIT: ${{ github.sha }}
           COMPONENTS: ${{ needs.verify.outputs.components }}
         run: |
