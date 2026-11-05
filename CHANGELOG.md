@@ -8,6 +8,24 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop now runs OpenBot for one person on one computer with CopilotKit Intelligence on
+  the same computer, set up from the app alone: Account, Install, AI, Start. The Intelligence CLI
+  and its Node runtime ship inside the app, pinned by SHA-256. **Before upgrading:** the Desktop app
+  no longer connects to a hosted or self-hosted Intelligence, has no organization sign-in and no
+  Bot picker. An installation an earlier app connected to a hosted Intelligence starts at the first
+  screen and keeps its finished install, its database and its Bots; its conversations stay in that
+  hosted Intelligence.
+- OpenBot Desktop runs every new installation as Compose project `openbot-desktop`, never a source
+  checkout's. An installation an earlier app made keeps its own project, and with it its database
+  and its Bots' computers, even when Stop or Quit took its containers down. If another OpenBot on
+  the computer, such as a source checkout called `openbot`, is running that project, Install says so
+  and waits for it to stop rather than starting with an empty database. Nothing is deleted either
+  way.
+- Settings → This computer, inside OpenBot Desktop, shows what runs, the memory each part takes, and
+  Restart and Stop for OpenBot and the local Intelligence. Only OpenBot's own page gets those
+  controls: a page on another port of this computer that opens in the window gets none of them.
+- The Windows installer and uninstaller stop the bundled CLI's background service before they
+  replace or remove it, including when the installation folder has an apostrophe in its name.
 - A Bot's work in a conversation reads as one line. A subtask is a step in the same line as the
   searches and pages beside it ("Searched the web, read 5 pages and ran 2 subtasks"), and opens to
   its task, its answer and its steps. A subtask that stopped before an action needing approval says
@@ -73,10 +91,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the Bot's permissions, out of sight, and kept going after Stop. A person's own runs, the subagents
   they start, headless turns and hops keep every tool as before. A remote Bot's naming run is also
   sent no signed run, so a callback from it is refused.
-- The sign-in page the Desktop app opens now explains OpenBot setup — you are setting up a
-  CopilotKit account for the personal edition of OpenBot, and your data stays on your computer —
-  instead of the generic CopilotKit pitch. The app adds `mode=openbot` to the sign-in URL it opens;
-  sign-in itself is unchanged, and an older hosted page ignores the mode.
+- The sign-in page the Desktop app opens explains OpenBot setup (you are setting up a CopilotKit
+  account for the personal edition of OpenBot, and your data stays on your computer) instead of the
+  generic CopilotKit pitch. The app signs in through the bundled Intelligence CLI and asks it for
+  that page with `copilotkit login --mode openbot` whenever the CLI's own `login --help` lists the
+  flag. A CLI from before the flag signs you in exactly as before, with the generic page. Sign-in
+  itself is unchanged either way.
 - Choosing Anthropic in the Desktop setup screen, or setting `BOT_PROVIDER=anthropic` without a `BOT_MODEL`, now runs `claude-sonnet-5-5` instead of `claude-sonnet-4-5`, which Anthropic retires on 2026-11-30. A deployment that pins `BOT_MODEL` is unaffected.
 - Code and markdown in a Bot's interface are drawn the way a reply draws them: highlighted in the light and dark themes, with the same copy and download buttons, tables and Doc links. They were plain monospace before, and nearly unreadable in dark mode.
 - The Computer panel's Activity lists every command the Bot runs and every file it reads, saves or lists, with what it printed, whether the step ran at once, after you allowed it, or before the page was opened. It had stayed empty for anything that went through approval. A step that was not done shows why in your words ("You declined it."), not the sentence the Bot is told, and the line in the conversation says the same. A command you decline on the Bot's own approval card is listed too. A step you did yourself shows as done by you. A step shows the time it ran only when the page saw it run, never the time the page was opened. Resetting a computer from Admin clears the Activity of every Bot that ran on it, and a reload or another tab no longer brings it back.

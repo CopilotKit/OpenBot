@@ -78,7 +78,9 @@ fill a gap. Three rules hold that boundary:
 - **Nothing unverified runs.** The CLI and its Node runtime are bundled into the installer and
   checked by SHA-256. There is no fallback to `PATH`, `npx` or a global install.
 - **Arguments are fixed.** Only known subcommands, a validated stack id and `--json`, with no
-  shell. The CLI's `resumeCommand` text is never executed.
+  shell. The CLI's `resumeCommand` text is never executed. The account sign-in adds
+  `--mode openbot`, so the sign-in page explains OpenBot's setup, only when the CLI's own
+  `login --help` lists it: an older CLI refuses an unknown flag.
 - **Only allowlisted facts cross into the window.** Raw stdout and stderr never reach the window or
   a log. Readiness and licence come only from the exact values of `local status`; anything else
   reads as unknown, and unknown keeps chat closed.
@@ -102,9 +104,14 @@ fill a gap. Three rules hold that boundary:
   digest in that release's `container-images.json` (`src-tauri/src/deployment.rs`). A new
   deployment takes the latest release. An existing one keeps its version until the person applies
   an explicit runtime update.
-- **The app's own Compose project.** Every installation runs as the Compose project
+- **The app's own Compose project.** Every new installation runs as the Compose project
   `openbot-desktop`, not the folder's name. A source checkout called `openbot` would otherwise share
   containers and volumes with the app (`src-tauri/src/stack.rs`, `project`).
+- **An upgrade keeps its data.** An installation an earlier app made ran as its folder's name
+  (`openbot` for `~/OpenBot`), and Stop and Quit took its containers down. It keeps that project,
+  and with it its database and its Bots' computers, when an earlier app finished installing in the
+  folder and the project's database volume is still on the engine. If another folder is running
+  that project right now, Install says so and decides nothing until it stops. Nothing is deleted.
 - **Images download in parallel, with progress.** Four images download at once
   (`IMAGE_PULLS_AT_ONCE`). The screen shows what is downloading and how fast, so a slow network
   looks slow, not stuck.
