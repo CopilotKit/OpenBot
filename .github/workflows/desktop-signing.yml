@@ -223,8 +223,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.release-tag != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # `actions: write` to start Downloads sync when this run makes the release Latest
+    # (scripts/release-make-latest.sh).
     permissions:
       contents: write
+      actions: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_TAG: ${{ inputs.release-tag }}
