@@ -15,7 +15,7 @@ import {
   createChannelMutationOptions,
   deleteChannelMutationOptions,
 } from "./mutations";
-import { pendingStartPath } from "./pending-start";
+import { pendingStartPath, settlePendingStart } from "./pending-start";
 import { channelKeys } from "./queries";
 import { routeMessage } from "./route";
 
@@ -115,7 +115,8 @@ export async function startWithModel(input: {
  * Started from a placeholder (`pendingId`, see `pending-start.ts`), the conversation replaces the
  * placeholder only while the person is still looking at it. Somebody who went elsewhere while it
  * was being made is not pulled back; the conversation is in their sidebar, and its first message
- * stays stashed until they open it, which is when it is sent.
+ * stays stashed until they open it, which is when it is sent. Going back to the placeholder opens
+ * it too (`settlePendingStart`).
  */
 export function useStartChannel() {
   const queryClient = useQueryClient();
@@ -148,11 +149,12 @@ export function useStartChannel() {
       },
       open: async (channelId) => {
         stashFirstMessage(channelId, text, skillInstructions);
-        if (
-          pendingId !== undefined &&
-          router.state.location.pathname !== pendingStartPath(pendingId)
-        )
-          return;
+        if (pendingId !== undefined) {
+          // Remembered whether or not they are looking, so coming back to the placeholder opens it.
+          settlePendingStart(pendingId, channelId);
+          if (router.state.location.pathname !== pendingStartPath(pendingId))
+            return;
+        }
         await navigate({
           params: { channelId },
           replace: true,

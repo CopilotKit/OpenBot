@@ -36,6 +36,26 @@ export function pendingStartPath(id: string): string {
 }
 
 /**
+ * The conversation each finished start became, by the placeholder's id.
+ *
+ * Somebody who leaves the placeholder while it is being made, and comes back to it (the browser's
+ * Back button, mostly), is coming back to that conversation. The start has forgotten itself by
+ * then, and a placeholder that knows nothing sends them home, to an empty composer, while the
+ * conversation they asked for sits in the sidebar with their first message still waiting to go.
+ * Kept for the life of the tab, like the pending starts: one id and one channel id per message
+ * sent from home.
+ */
+const startedChannels = new Map<string, string>();
+
+export function settlePendingStart(id: string, channelId: string): void {
+  startedChannels.set(id, channelId);
+}
+
+export function startedChannelFor(id: string): string | null {
+  return startedChannels.get(id) ?? null;
+}
+
+/**
  * A start that failed, waiting for the home composer to put its words back.
  *
  * The composer used to keep a failed draft in the box itself, with the reason under it. The box is
@@ -46,8 +66,26 @@ export type FailedStart = { text: string; error: string };
 
 let failedStart: FailedStart | null = null;
 
+/**
+ * Home pages that are open while a start fails behind them.
+ *
+ * Somebody can go back to home before the start fails: home's own link, from the placeholder. That
+ * home page took what was stashed when it mounted, which was nothing, and a failure after that has
+ * no next home page to wait for. It is the page they are looking at, so it is told.
+ */
+const failedStartListeners = new Set<() => void>();
+
 export function stashFailedStart(failed: FailedStart): void {
   failedStart = failed;
+  for (const listener of failedStartListeners) listener();
+}
+
+/** Called when a start fails; returns the unsubscribe. The listener takes the failure itself. */
+export function onFailedStart(listener: () => void): () => void {
+  failedStartListeners.add(listener);
+  return () => {
+    failedStartListeners.delete(listener);
+  };
 }
 
 export function takeFailedStart(): FailedStart | null {

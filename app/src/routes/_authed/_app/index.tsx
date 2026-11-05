@@ -5,7 +5,7 @@ import {
   useNavigate,
   useRouter,
 } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AgentCard } from "@/components/agents/agent-card";
 import {
   Composer,
@@ -22,6 +22,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   beginPendingStart,
   endPendingStart,
+  onFailedStart,
   pendingStartPath,
   stashFailedStart,
   takeFailedStart,
@@ -54,9 +55,28 @@ function RouteComponent() {
   const router = useRouter();
   const navigate = useNavigate();
   // A start that failed behind its placeholder comes back here: its words in the box, its reason
-  // under it, the way a failed send always left them. Taken once, on mount.
-  const [restored] = useState(takeFailedStart);
+  // under it, the way a failed send always left them. Taken on mount, and again whenever one fails
+  // while this page is open (somebody who came back here before it failed is looking at it).
+  const [restored, setRestored] = useState(takeFailedStart);
+  const [restores, setRestores] = useState(0);
   const [error, setError] = useState<string | null>(restored?.error ?? null);
+  /*
+   * Whether the person has typed in the box since it was last filled. A start that fails while they
+   * are writing something else does not overwrite it: it stays stashed, for the next home page.
+   */
+  const typed = useRef(false);
+  useEffect(
+    () =>
+      onFailedStart(() => {
+        if (typed.current) return;
+        const failed = takeFailedStart();
+        if (!failed) return;
+        setRestored(failed);
+        setRestores((count) => count + 1);
+        setError(failed.error);
+      }),
+    [],
+  );
 
   /** Default recipient when the composer draft has no mention. */
   const fallback = defaultAgentProfile(
@@ -123,11 +143,22 @@ function RouteComponent() {
             )}
           </h1>
         </div>
-        <div className="mt-8 w-full flex flex-col items-center">
+        <div
+          className="mt-8 w-full flex flex-col items-center"
+          onKeyDownCapture={() => {
+            typed.current = true;
+          }}
+          onPasteCapture={() => {
+            typed.current = true;
+          }}
+        >
           <Composer
             agents={toAgentOptions(agents)}
             className="w-full max-w-2xl"
             disabled={!fallback}
+            // The box reads its words once, when it mounts; a start that fails while this page is
+            // open is a new box with them in it.
+            key={restores}
             {...(restored ? { initialValue: restored.text } : {})}
             onSubmit={async (draft) => {
               // The conversation opens NOW, as a placeholder showing the message, and the Bot is
