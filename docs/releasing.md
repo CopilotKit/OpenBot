@@ -142,6 +142,8 @@ Latest. A stable release is published **not** Latest, and becomes Latest only on
 runs have attached their signed installers: Desktop macOS signing its `.dmg` files and `latest.json`,
 and Desktop Windows signing its `-setup.exe`, each under its fixed download name too. Whichever
 finishes second marks it ([`scripts/release-make-latest.sh`](../scripts/release-make-latest.sh)).
+The two attach jobs share the concurrency group `release-attach-<tag>`, so they run one after the
+other and the second always sees what the first attached.
 Until then the previous release stays Latest, with its signed installers, so `releases/latest` never
 serves an unsigned Windows installer, or an ad-hoc installer that
 macOS refuses, or a release with no Intel installer.

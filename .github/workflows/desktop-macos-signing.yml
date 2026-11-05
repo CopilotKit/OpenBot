@@ -395,6 +395,13 @@ jobs:
   publish:
     name: Publish latest.json
     needs: sign
+    # One attach job at a time per release, across Desktop macOS signing and Desktop Windows
+    # signing: each ends by asking whether every signed installer is on the release, and the one
+    # that runs second must see what the first attached, or neither would make it Latest. Same
+    # group in both workflows; an attach that is running is never cancelled.
+    concurrency:
+      group: release-attach-${{ inputs.release-tag || github.ref_name }}
+      cancel-in-progress: false
     if: >-
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && inputs.release-tag != '')

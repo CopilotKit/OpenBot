@@ -17,7 +17,14 @@ const read = (path: string) => readFileSync(join(root, path), "utf8");
 type Step = { name?: string; run?: string; env?: Record<string, string> };
 type Workflow = {
   on: { workflow_dispatch?: { inputs?: Record<string, { type?: string }> } };
-  jobs: Record<string, { env?: Record<string, string>; steps?: Step[] }>;
+  jobs: Record<
+    string,
+    {
+      env?: Record<string, string>;
+      steps?: Step[];
+      concurrency?: { group?: string; "cancel-in-progress"?: boolean };
+    }
+  >;
 };
 const workflow = (path: string) => Bun.YAML.parse(read(path)) as Workflow;
 /** A workflow expression, as the YAML holds it. */
@@ -71,4 +78,25 @@ test("a stable release waits for every signed installer, and the publish workflo
   expect(read("scripts/release-attach-installers.sh")).toContain(
     'if [[ "$version" != *-* ]]; then',
   );
+});
+
+// The two attach jobs of one release run one after the other, so the second always sees what the
+// first attached and makes the release Latest. Without the shared group they can both look before
+// either has uploaded, and the release would stay not Latest.
+test("the Mac and Windows attach jobs of one release never run at the same time", () => {
+  for (const path of [
+    ".github/workflows/desktop-macos-signing.yml",
+    ".github/workflows/desktop-signing.yml",
+  ]) {
+    const publish = workflow(path).jobs.publish;
+    expect(publish?.concurrency?.group).toBe(
+      `release-attach-${expression("inputs.release-tag || github.ref_name")}`,
+    );
+    expect(publish?.concurrency?.["cancel-in-progress"]).toBe(false);
+    expect(
+      publish?.steps?.some((step) =>
+        /publish-signed-(mac|windows)\.sh/.test(step.run ?? ""),
+      ),
+    ).toBe(true);
+  }
 });
