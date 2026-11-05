@@ -10,13 +10,14 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import postgres from "postgres";
 import { createAuditStore } from "../src/audit";
 import {
   createDevRequireUser,
   initializeDevActorUser,
 } from "../src/auth/dev-actor";
+import type { AppVariables } from "../src/auth/guards";
 import { applyMigrations } from "../src/db/apply-migrations";
 import { createDatabase, type Database } from "../src/db/client";
 import { brokeredConnections, mcpServers, mcpTools } from "../src/db/schema";
@@ -29,6 +30,7 @@ import { ensureSingleUserIdentity } from "../src/plugins/single-user-identity";
 import { createPluginStore } from "../src/plugins/store";
 import fixture from "./fixtures/arcade-catalogue.json";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { seedPeople } from "./support/people";
 
 /**
  * AN ARCADE CONNECT ONLY CAME BACK TO A DEPLOYMENT AT THE ONE ADDRESS ARCADE'S PROJECT NAMED.
@@ -45,11 +47,13 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * and the answer. Arcade's own templates set the verifier this way with a project key and read it
  * back. A live, read-only `GET` with this project's key answered the `localhost:3001` address.
  *
- * WHAT IS ASSERTED. A Connect points the project's verifier at the deployment that started it
- * before minting, so the browser comes back to that deployment's verify route and the connection is
- * recorded; two deployments on one key each get their own people back; a verifier already pointing
- * here is only read; and a setting Arcade would not take refuses the Connect before anybody is sent
- * to a consent screen.
+ * WHAT IS ASSERTED. A single-user install owns its Arcade project: its Connect points the
+ * project's verifier at it before minting, so the browser comes back to its verify route and the
+ * connection is recorded; two such installs on one key each get their own people back; a verifier
+ * already pointing here is only read; and a setting Arcade would not take refuses the Connect before
+ * anybody is sent to a consent screen, naming the address to set. A deployment that signs people in
+ * treats the project as shared: it never writes the verifier, refuses with the exact address an
+ * admin sets when the project names somewhere else, and connects normally when it names this one.
  *
  * REAL DATABASE, REAL WIRING, REAL ROUTES, REAL STORE, REAL ADAPTER AND THE REAL SDK. The client is
  * built through `selectProviderWiring`, as `index.ts` builds it from configuration. Arcade is faked
@@ -334,29 +338,45 @@ afterAll(async () => {
 
 /* ------------------------------------------------------------------ a deployment, booted */
 
+/** A guard that signs one named person in, as a deployment that signs people in does. */
+const signedInAs =
+  (id: string): MiddlewareHandler<{ Variables: AppVariables }> =>
+  async (context, next) => {
+    context.set("actor", { id, email: `${id}@example.test`, role: "user" });
+    await next();
+  };
+
 /**
- * A single-user deployment starting at `publicUrl` on the shared key: its Arcade client built by the
- * same wiring `index.ts` runs, its name at Arcade settled, and Gmail turned on as a Personal app.
+ * A deployment starting at `publicUrl` on the shared key: its Arcade client built by the same wiring
+ * `index.ts` runs, from the same two settings, and Gmail turned on as a Personal app. Single-user,
+ * with its name at Arcade settled, unless a signed-in person is named.
  */
-async function deploymentAt(publicUrl: string) {
+async function deploymentAt(
+  publicUrl: string,
+  { signedIn }: { signedIn?: string } = {},
+) {
+  const singleUser = signedIn === undefined;
   const database = createDatabase(await freshDatabase(), TEST_POOL);
   opened.push(database);
-  await initializeDevActorUser(database, true);
+  await initializeDevActorUser(database, singleUser);
+  if (signedIn) await seedPeople(database, [signedIn]);
   const wiring = selectProviderWiring(
     {
       arcadeApiKey: `arcade-test-key-${suite}`,
       brokerProvider: "arcade",
       publicUrl,
+      singleUser,
     },
     { composio: createComposioClient, arcade: createArcadeClient },
   );
   const broker = wiring.broker;
   if (!broker) throw new Error("Arcade was not wired.");
   useArcadeClient(wiring.install.arcade);
-  const identity = await ensureSingleUserIdentity(database, {
-    singleUser: true,
-    provider: "arcade",
-  });
+  const identity =
+    (await ensureSingleUserIdentity(database, {
+      singleUser,
+      provider: "arcade",
+    })) ?? signedIn;
   const store = createPluginStore({
     brokerProvider: "arcade",
     database,
@@ -371,7 +391,7 @@ async function deploymentAt(publicUrl: string) {
     "/api/plugins",
     createPluginRoutes(
       store,
-      createDevRequireUser(),
+      signedIn ? signedInAs(signedIn) : createDevRequireUser(),
       async () => true,
       {
         publicUrl,
@@ -438,7 +458,7 @@ const rowsIn = (database: Database) =>
     })
     .from(brokeredConnections);
 
-describe("Arcade's verifier follows the deployment that starts a Connect", () => {
+describe("a single-user install owns its Arcade project and points the verifier at itself", () => {
   test("a deployment that is not at localhost:3001 gets the browser back after consent, and the connection is recorded", async () => {
     const here = await deploymentAt("http://127.0.0.1:48711");
 
@@ -506,6 +526,8 @@ describe("Arcade's verifier follows the deployment that starts a Connect", () =>
     expect(response.status).toBe(503);
     const { error } = (await response.json()) as { error: string };
     expect(error).toContain("Couldn't start connecting Gmail");
+    // The address to set by hand, since OpenBot could not set it.
+    expect(error).toContain(here.verifier);
     expect(error).not.toContain("expires within fifteen minutes");
     expect(project.requests).not.toContain("POST /v1/auth/authorize");
     expect(project.settings.verifier_url).toBe(LOCALHOST_VERIFIER);
@@ -521,5 +543,46 @@ describe("Arcade's verifier follows the deployment that starts a Connect", () =>
     // Nothing was minted, so nothing holds this person: a second press is not "already connecting".
     const again = await pressConnect(here);
     expect(again.status).toBe(503);
+  });
+});
+
+describe("a deployment that signs people in treats its Arcade project as shared", () => {
+  test("it never changes the verifier, and refuses before any consent with the exact address an admin sets", async () => {
+    const here = await deploymentAt("http://127.0.0.1:48717", {
+      signedIn: `person-${suite}-a`,
+    });
+
+    const response = await pressConnect(here);
+    expect(response.status).toBe(503);
+    const { error } = (await response.json()) as { error: string };
+    expect(error).toBe(
+      `Couldn't start connecting Gmail. Arcade would send you back somewhere else after you sign in. Ask an admin to set the custom verifier in Arcade's dashboard to ${here.verifier}`,
+    );
+
+    // Read, never written, and nobody was sent to a consent screen.
+    expect(project.requests).toContain(`GET ${SETTINGS}`);
+    expect(project.puts).toEqual([]);
+    expect(project.requests).not.toContain("POST /v1/auth/authorize");
+    expect(project.settings.verifier_url).toBe(LOCALHOST_VERIFIER);
+
+    // Nothing was minted, so nothing holds this person: a second press is refused the same way.
+    expect((await pressConnect(here)).status).toBe(503);
+    expect(project.puts).toEqual([]);
+  });
+
+  test("it connects normally when the shared project already names it", async () => {
+    const here = await deploymentAt("http://127.0.0.1:48718", {
+      signedIn: `person-${suite}-b`,
+    });
+    project.settings.verifier_url = here.verifier;
+
+    const { sentTo, landed } = await connectAndReturn(here);
+    expect(sentTo).toStartWith(`${here.verifier}?flow_id=`);
+    expect(landed).toBe(`${APP_URL}/connections/${ROW}`);
+    expect(await rowsIn(here.database)).toEqual([
+      { app: TOOLKIT, vendorUserId: `person-${suite}-b` },
+    ]);
+    expect(project.puts).toEqual([]);
+    expect(project.unexpected).toEqual([]);
   });
 });

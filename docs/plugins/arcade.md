@@ -74,11 +74,12 @@ Four refusals protect this, and all four are deliberate:
 ### One Arcade project per deployment
 
 Create one Arcade project for each deployment where you can. The verifier URL (below) is a setting
-of the **project**, one address for the whole project. Each deployment points it at itself before
-every consent it starts, so deployments sharing a project (several single-user OpenBots on one key,
-say) take turns: whichever started the latest consent is where Arcade sends people back. A consent
-started in one deployment while another's is still open on its consent screen comes back to the
-later one, which refuses it, and the person presses Connect again.
+of the **project**, one address for the whole project. A single-user install points it at itself
+before every consent it starts, so single-user installs sharing a project (several on one key, say)
+take turns: whichever started the latest consent is where Arcade sends people back. A consent
+started in one while another's is still open on its consent screen comes back to the later one,
+which refuses it, and the person presses Connect again. A deployment that signs people in never
+changes the setting; see below.
 
 ### An OAuth app of your own, per provider
 
@@ -107,9 +108,8 @@ Arcade's admin API can create the OAuth provider, so that part can be scripted.
 
 ### The verifier URL
 
-**OpenBot sets the project's verifier URL itself.** After somebody finishes an app's consent, Arcade
-sends their browser to the project's custom user verifier, and that has to be this deployment's
-verify route:
+**After somebody finishes an app's consent, Arcade sends their browser to the project's custom user
+verifier, and that has to be this deployment's verify route:**
 
 ```
 <this deployment's public origin>/api/plugins/arcade/verify
@@ -121,23 +121,36 @@ is sent on to the Connections page, with a reason beside it if the consent was r
 
 Before every Connect or Authorize, the deployment reads the project's setting through Arcade's admin
 API (`GET /v1/admin/settings/session_verification`, in [Arcade's OpenAPI](https://api.arcade.dev/v1/swagger)).
-Where it names another address, or is set to skip verification, the deployment sets it to its own
-verify address with the custom verifier on (`PUT` on the same path), reads it back, and only then
-mints the consent. It logs `arcade-verifier-pointed` with the address it replaced. Arcade has one
-verifier per project and refuses a per-request return address (`next_uri`) on a mint, so this is
-how a consent finds its way back to the deployment that started it, wherever that runs. Nothing
-needs pasting into Arcade's dashboard, and a deployment is not tied to `localhost:3001` or any other
-address somebody once typed there.
+Where it already names this deployment's verify route, the consent goes ahead. Arcade has one
+verifier per project and refuses a per-request return address (`next_uri`) on a mint, so this
+setting is the only way a consent finds its way back. What happens when it names somewhere else
+depends on whether the install owns its Arcade project.
 
-**Where it cannot, the Connect is refused before anybody is sent to a consent screen.** If Arcade
-refuses the read or the write, or reads back something other than this deployment's address, the
-person sees _"Couldn't start connecting Gmail. OpenBot couldn't make sure you'd come back here after
-signing in, so nothing was started."_ and the log has an `arcade-verifier-not-pointed` line naming
-the address. The key has to be a project key that can use Arcade's admin API, which every other
-admin call here (auth providers, user connections) already needs. A consent minted anyway would be
-spent on a page that does not exist.
+**A single-user install owns its project and sets the verifier itself.** It has its own name at
+Arcade (see [configuration](../configuration.md)), its one person is its admin, and the personal
+edition is one of these. Where the setting names another address, or is set to skip verification,
+it sets it to its own verify address with the custom verifier on (`PUT` on the same path), reads it
+back, and only then mints the consent. It logs `arcade-verifier-pointed` with the address it
+replaced. Nothing needs pasting into Arcade's dashboard, and the install is not tied to
+`localhost:3001` or any other address somebody once typed there. If Arcade refuses the write, or
+reads back something else, the person sees _"Couldn't start connecting Gmail. OpenBot couldn't set
+Arcade to send you back here after you sign in. Set the custom verifier in Arcade's dashboard to
+`<address>`"_, and the log has an `arcade-verifier-not-pointed` line.
 
-**A deployment that does not know its own origin leaves the setting alone.** With neither
+**A deployment that signs people in treats its project as shared and never changes it.** Rewriting
+the setting there would send another deployment's people here. Set the custom verifier in Arcade's
+dashboard (Auth, Settings) to this deployment's verify address. It says which address at startup,
+and until the project names it, Connect is refused before anybody is sent to a consent screen:
+_"Couldn't start connecting Gmail. Arcade would send you back somewhere else after you sign in. Ask
+an admin to set the custom verifier in Arcade's dashboard to `<address>`"_. The log has an
+`arcade-verifier-elsewhere` line naming the address it found.
+
+**A setting that cannot be read refuses the Connect too**, on either kind of deployment, with an
+`arcade-verifier-unread` line in the log. The key has to be a project key that can use Arcade's
+admin API, which every other admin call here (auth providers, user connections) already needs. A
+consent minted without the check could be spent on a page that does not exist.
+
+**A deployment that does not know its own origin cannot check the setting.** With neither
 `OPENBOT_PUBLIC_URL` nor `BETTER_AUTH_URL` set, it logs a warning at startup naming the variable to
 set, and consents come back to whatever address the project names.
 
@@ -147,8 +160,8 @@ that the identity returning is the one the attempt was minted for, records the c
 its `mcp.account_connected` audit entry. What was observed by hand (see the top of this page) is that
 Arcade's built-in verifier refuses a consent for any `user_id` that is not a member of the Arcade
 project, and the ids this deployment sends are its own internal ids, not project members, so in
-practice nobody could connect. That is why the deployment turns the custom verifier on rather than
-only checking the address.
+practice nobody could connect. That is why a single-user install turns the custom verifier on rather
+than only setting the address.
 
 ## What an administrator does
 

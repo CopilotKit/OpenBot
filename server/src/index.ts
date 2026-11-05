@@ -243,6 +243,7 @@ import {
 } from "./plugins/personal-defaults";
 import {
   arcadeVerifierNotice,
+  ownsBrokerProject,
   selectProviderWiring,
   storedProvider,
 } from "./plugins/provider-wiring";
@@ -961,12 +962,15 @@ if (wiredProvider) {
   assertActivatable(wiredProvider, otherProviderRows);
 }
 /*
- * Arcade's client points its project's user verifier at this deployment before every consent it
- * mints, from the public origin handed to `selectProviderWiring` above. A deployment that does not
- * know its origin cannot, and says so once, at startup. See `arcadeVerifierNotice`.
+ * Arcade's client checks its project's user verifier names this deployment before every consent it
+ * mints, and a single-user install, which owns its project, points it here when it does not. A
+ * deployment that signs people in only checks, and one that does not know its origin can do
+ * neither; both say so once, at startup. See `arcadeVerifierNotice`.
  */
 if (wiredProvider === "arcade") {
-  const notice = arcadeVerifierNotice(config.publicUrl);
+  const notice = arcadeVerifierNotice(config.publicUrl, {
+    ownsProject: ownsBrokerProject(config),
+  });
   if (notice) console.warn(notice);
 }
 
