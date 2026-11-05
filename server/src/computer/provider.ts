@@ -165,6 +165,13 @@ export interface ComputerProvider {
    * the one computer everybody shares holds, and which only ever goes to that computer.
    */
   tokenFor?(key: ComputerKey, deploymentToken: string): string;
+  /**
+   * Forget which network policies went to which computers on the way to an action, so each Bot's goes
+   * again ahead of its next one. The enterprise controls call it on every read of their settings,
+   * after which any Bot's policy may differ from the one its computer holds. Only the provider that
+   * pushes on the way has anything to forget (policy-network.ts `withPolicyPushOnWake`).
+   */
+  forgetPushedPolicies?(): void;
 }
 
 export type SharedComputerProviderOptions = {

@@ -1,8 +1,3 @@
-import {
-  productHandoffAnalyticsContext,
-  productHandoffInput,
-} from "../telemetry/product-boundaries";
-import type { ProductTelemetry } from "../telemetry/product";
 import { randomUUID } from "node:crypto";
 import { IntelligenceAgentRunner } from "@copilotkit/runtime/v2";
 import { workOwner } from "@openbot/shared/work-owner";
@@ -14,7 +9,17 @@ import type { ThreadIdentity } from "../channels/thread-identity";
 import type { DeploymentConfig } from "../config";
 import type { mountCopilotRuntime } from "../copilot";
 import type { Database } from "../db/client";
-import { intelligenceChannelMappings } from "../db/schema";
+import {
+  agentProfiles,
+  channels,
+  groupBotThreads,
+  intelligenceChannelMappings,
+} from "../db/schema";
+import type { ProductTelemetry } from "../telemetry/product";
+import {
+  productHandoffAnalyticsContext,
+  productHandoffInput,
+} from "../telemetry/product-boundaries";
 import { repeatAfterEach } from "../work/loop";
 import {
   createWorkQueue,
@@ -23,10 +28,51 @@ import {
 } from "../work/queue";
 import { HANDOFF_KIND } from "./handoff";
 import { createHandoffDelivery } from "./handoff-delivery";
-import { createHandoffRunner } from "./handoff-runner";
+import { createHandoffRunner, type HandoffWork } from "./handoff-runner";
 import { signHandoffDeliveryRun } from "./handoff-signing";
 import type { AgentActor } from "./profile-types";
 import { serverTurnAdmission } from "./turn-admission";
+
+/**
+ * Why a hop waiting on its busy conversation has nowhere left to go, read from this deployment's
+ * own rows, or null while it does.
+ *
+ * Only a hop that answers in a conversation (`answerIn`) waits on one. Gone means positively gone:
+ * the Bot that would speak was deleted, or the conversation the thread belongs to was. A thread this
+ * cannot place is waited for, since a lock nobody renews lapses on its own within two minutes.
+ */
+export function answerGoneFrom(database: Database) {
+  return async (work: HandoffWork): Promise<string | null> => {
+    const threadId = work.answerIn;
+    if (!threadId) return null;
+    const [bot] = await database
+      .select({ deletedAt: agentProfiles.deletedAt })
+      .from(agentProfiles)
+      .where(eq(agentProfiles.agentId, work.toBotId))
+      .limit(1);
+    if (bot?.deletedAt) return "the Bot it was to speak as was deleted";
+    const [direct] = await database
+      .select({ deletedAt: channels.deletedAt })
+      .from(intelligenceChannelMappings)
+      .innerJoin(
+        channels,
+        eq(channels.id, intelligenceChannelMappings.channelId),
+      )
+      .where(eq(intelligenceChannelMappings.threadId, threadId))
+      .limit(1);
+    const [group] = direct
+      ? []
+      : await database
+          .select({ deletedAt: channels.deletedAt })
+          .from(groupBotThreads)
+          .innerJoin(channels, eq(channels.id, groupBotThreads.channelId))
+          .where(eq(groupBotThreads.threadId, threadId))
+          .limit(1);
+    if ((direct ?? group)?.deletedAt)
+      return "the conversation it was going to was deleted";
+    return null;
+  };
+}
 
 /**
  * Handing work between Bots, started on this replica: the runner that claims hops, the delivery
@@ -69,6 +115,7 @@ export async function startHandoffDelivery(deps: {
       signHandoffDeliveryRun(work, config.keyEncryptionKey, undefined, claim),
     // The asking conversation, told what it is waiting on once the queue has moved for a hop.
     onSettled: (work) => channelStore.signalWork(work.threadId),
+    answerGone: answerGoneFrom(database),
     delivery: createHandoffDelivery({
       ...(productTelemetry
         ? {
@@ -116,9 +163,9 @@ export async function startHandoffDelivery(deps: {
        *
        * An Intelligence thread has exactly one agent, so a second Bot cannot answer inside the first
        * Bot's conversation however it asks. Its turn runs here instead, unmapped to any channel, and
-       * what it said comes back to the conversation that asked through the relay — in the asking
-       * Bot's voice, which is the only voice that thread admits. Minted with the deployment's own
-       * identity, like every thread this deployment starts.
+       * what it said comes back to the conversation that asked through the relay, written there
+       * word for word as its own message. Minted with the deployment's own identity, like every
+       * thread this deployment starts.
        */
       mintThreadId: () => threadIdentity.mint(),
       /*
@@ -132,9 +179,15 @@ export async function startHandoffDelivery(deps: {
           .from(intelligenceChannelMappings)
           .where(eq(intelligenceChannelMappings.threadId, input.threadId))
           .limit(1);
-        // A Bot's group thread maps to no channel; its answer goes to the shared transcript.
+        // A Bot's group thread maps to no channel; its answer goes to the shared transcript, marked
+        // as the answering Bot's rather than the thread's own.
         if (!mapped) {
-          await groupConversations.announceHandoff(input);
+          await groupConversations.announceHandoff({
+            threadId: input.threadId,
+            actorId: input.actorId,
+            agentId: input.answeredBy ?? input.agentId,
+            text: input.text,
+          });
           return;
         }
         const actor = await actorFor(input.actorId).catch(() => null);

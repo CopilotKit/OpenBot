@@ -74,14 +74,10 @@ spec:
             - name: npm_config_cache
               value: /tmp/npm
             - name: INTELLIGENCE_API_URL
-              value: {{ .Values.config.intelligence.apiUrl | quote }}
+              value: {{ include "openbot.intelligenceApiUrl" . | quote }}
             - name: INTELLIGENCE_GATEWAY_WS_URL
-              value: {{ .Values.config.intelligence.gatewayWsUrl | quote }}
-            - name: INTELLIGENCE_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "openbot.secretName" . }}
-                  key: intelligence-api-key
+              value: {{ include "openbot.intelligenceGatewayWsUrl" . | quote }}
+            {{- include "openbot.intelligenceApiKeyEnv" . | nindent 12 }}
             {{- if $cli.name }}
             - name: COPILOTKIT_CONFIG_DIR
               value: /var/run/copilotkit

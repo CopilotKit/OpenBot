@@ -100,9 +100,11 @@ const TOOLS: readonly McpTool[] = Object.freeze([
       "time — the default is UTC and there is no deployment timezone to inherit, so a schedule set without",
       "one fires at a UTC hour rather than at theirs.",
       "",
-      "The routine posts its reply into a channel. Leave `channelId` out and it goes to the one channel you",
-      "share with this person; when you share more than one you will be told so and asked to pick, and the",
-      "answer to that is to ask them which.",
+      "The routine posts its reply into a conversation. Leave `channelId` out and it posts into this",
+      "conversation, the one you are being asked in. Pass a `channelId` only when the person asks for a",
+      "different conversation. Where there is no conversation here and you share more than one with this",
+      "person, you are given them by title and id: ask the person which one, offering each by its title,",
+      "and pass the id they choose.",
       "",
       "It takes no owner and no Bot. The routine belongs to the person you are talking to and runs as you;",
       "both are taken from the run itself, and there is no field for either.",
@@ -128,7 +130,7 @@ const TOOLS: readonly McpTool[] = Object.freeze([
         channelId: {
           type: "string",
           description:
-            "Where the reply is posted. Omit for the one channel you share with this person.",
+            "The id of the conversation the reply is posted into. Omit it to post into this conversation.",
         },
       },
       required: ["instruction", "cron"],
@@ -182,7 +184,7 @@ const TOOLS: readonly McpTool[] = Object.freeze([
         channelId: {
           type: "string",
           description:
-            "A different channel to post into. Must be one you and this person share.",
+            "The id of a different conversation to post into. Must be one you and this person share.",
         },
         enabled: {
           type: "boolean",
@@ -213,16 +215,21 @@ const TOOLS: readonly McpTool[] = Object.freeze([
 ]);
 
 /**
- * Who this call is for, and which Bot is making it.
+ * Who this call is for, which Bot is making it, and which conversation it was asked in.
  *
  * `url` and `token` are the shared connection shape and are both unused here: there is no host to
- * dial and no credential to send. The two that matter are the two a model never supplies.
+ * dial and no credential to send. The ones that matter are the ones a model never supplies.
  */
 type Connection = {
   url: string;
   token?: string;
   actorId?: string;
   botId?: string;
+  /**
+   * The run's own thread, which is where "post it here" points. A hint the store checks against
+   * the owner's own conversations, never a channel by itself; see `RoutineInput.threadId`.
+   */
+  threadId?: string;
 };
 
 /**
@@ -268,12 +275,19 @@ function stringArg(
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-/** The target channel as something a person would recognise. A broken one is named as broken. */
+/**
+ * The target conversation as the person would recognise it: by the title the sidebar shows, since
+ * its name is only its Bots' names and every conversation with this Bot shares it. A broken one is
+ * named as broken.
+ */
 function channelOf(summary: RoutineSummary): string {
+  const title = summary.channelTitle
+    ? `"${summary.channelTitle}"`
+    : summary.channelName;
   if (summary.channelDeleted) {
-    return `${summary.channelName ?? "a channel"} (which no longer exists, so it cannot post)`;
+    return `${title ?? "a conversation"} (which no longer exists, so it cannot post)`;
   }
-  return summary.channelName ?? summary.channelId;
+  return title ?? summary.channelId;
 }
 
 /** The last firing, in the plainest true words. Null status with a null finish means in flight. */
@@ -421,6 +435,8 @@ export async function callTool(
         // zone nobody chose on a routine that then fires at the wrong hour for ever.
         timezone: stringArg(args, "timezone"),
         channelId: stringArg(args, "channelId"),
+        // From the run, like the owner and the Bot: the conversation it was asked in.
+        threadId: connection.threadId?.trim() || undefined,
       });
       return await describeWritten(
         tools,
@@ -491,9 +507,9 @@ export async function callTool(
     );
   } catch (error) {
     /*
-     * The store's sentence, unchanged and unprefixed. It is written for a model to act on — the
-     * frequency floor, the channel it is not in, the several channels it must choose between — and
-     * rewording it here would turn an actionable refusal into a vague one.
+     * The store's sentence, unchanged and unprefixed. It is written for a model to act on: the
+     * frequency floor, the conversation it is not in, the conversations it must ask the person to
+     * choose between. Rewording it here would turn an actionable refusal into a vague one.
      */
     if (error instanceof RoutineRefusedError) return failure(error.message);
     // A routine that is not yours is a routine that does not exist, which is the store's rule; this

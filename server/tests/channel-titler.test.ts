@@ -129,3 +129,72 @@ describe("asking the model for a title", () => {
     expect(answer).toBeNull();
   });
 });
+
+describe("a deployment whose Bots run on Anthropic", () => {
+  // The titler always spoke OpenAI's Chat Completions, so with BOT_PROVIDER=anthropic it sent the
+  // Anthropic key to OpenAI, got a 401, and no conversation was ever named.
+  function anthropicAnswer(text: string) {
+    const calls: {
+      url: string;
+      headers: Headers;
+      body: Record<string, unknown>;
+    }[] = [];
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        headers: new Headers(init?.headers),
+        body: JSON.parse(String(init?.body ?? "{}")),
+      });
+      // The shape the Messages API answers with.
+      return Response.json({
+        id: "msg_01",
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet-5-5",
+        content: [{ type: "text", text }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 40, output_tokens: 6 },
+      });
+    }) as unknown as typeof fetch;
+    return { calls, fetchImpl };
+  }
+
+  test("names the conversation on Anthropic's Messages API, with the key in its own header", async () => {
+    const { calls, fetchImpl } = anthropicAnswer("Lisbon trip planning");
+
+    const answer = await createChannelTitler({
+      provider: "anthropic",
+      model: "claude-sonnet-5-5",
+      resolveApiKey: async () => "sk-ant-test",
+      environment: {},
+      fetchImpl,
+    })("Asked: plan three days in Lisbon.");
+
+    expect(answer).toBe("Lisbon trip planning");
+    expect(calls[0]?.url).toBe("https://api.anthropic.com/v1/messages");
+    expect(calls[0]?.headers.get("x-api-key")).toBe("sk-ant-test");
+    expect(calls[0]?.headers.get("anthropic-version")).toBe("2023-06-01");
+    expect(calls[0]?.headers.get("authorization")).toBeNull();
+    expect(calls[0]?.body.model).toBe("claude-sonnet-5-5");
+    expect(typeof calls[0]?.body.system).toBe("string");
+    expect(calls[0]?.body.messages).toEqual([
+      { role: "user", content: "Asked: plan three days in Lisbon." },
+    ]);
+  });
+
+  test("asks the endpoint ANTHROPIC_BASE_URL names", async () => {
+    const { calls, fetchImpl } = anthropicAnswer("Lisbon trip planning");
+
+    await createChannelTitler({
+      provider: "anthropic",
+      model: "claude-sonnet-5-5",
+      resolveApiKey: async () => "sk-ant-test",
+      environment: { ANTHROPIC_BASE_URL: "https://gateway.internal/v1" },
+      fetchImpl,
+    })("Asked: plan three days in Lisbon.");
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://gateway.internal/v1/messages",
+    ]);
+  });
+});

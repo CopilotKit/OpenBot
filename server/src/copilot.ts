@@ -81,6 +81,7 @@ import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
+import { capturePassOrigin } from "./intelligence-gateway-proxy";
 import { RemoteLearnedSkillsMiddleware } from "./learning/remote";
 import {
   type AcquireLearnedSkills,
@@ -2315,6 +2316,9 @@ export function mountCopilotRuntime(
         apiUrl: intelligence.apiUrl,
         wsUrl: intelligence.gatewayWsUrl,
         browserWsUrl: intelligence.browserGatewayWsUrl,
+        // Where the browser's address is a path (this server carries the socket, and has no public
+        // URL), the Recorder's capture pass is handed it whole. See intelligence-gateway-proxy.ts.
+        ownOrigin: capturePassOrigin,
         apiKey: intelligence.apiKey,
         getLearningContainerId: async ({
           agentId,

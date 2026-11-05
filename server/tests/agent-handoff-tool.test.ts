@@ -80,6 +80,7 @@ describe("the handoff tool", () => {
         from: { ...FROM, depth: 1 },
         hasSomebodyToAsk: true,
         maxDepth: 1,
+        maxPerRun: 3,
       }),
     ).toBe(null);
   });
@@ -112,6 +113,7 @@ describe("the handoff tool", () => {
       from: FROM,
       hasSomebodyToAsk: true,
       maxDepth: 1,
+      maxPerRun: 3,
     });
 
     await expect(tool?.execute({ bot: "payroll", task: "t" })).resolves.toBe(

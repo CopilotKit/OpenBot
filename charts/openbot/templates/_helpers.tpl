@@ -263,7 +263,7 @@ migrated one database while the API talked to another is a failure that looks li
 - name: POSTGRES_PASSWORD
   valueFrom:
     secretKeyRef:
-      name: {{ default (printf "%s-postgresql" .Release.Name) .Values.postgresql.auth.existingSecret }}
+      name: {{ include "openbot.postgresqlSecretName" . }}
       {{- /* The subchart keeps the superuser's password under its own key, not `password`. */}}
       key: {{ eq .Values.postgresql.auth.username "postgres" | ternary "postgres-password" "password" }}
 - name: DATABASE_URL
@@ -278,6 +278,104 @@ migrated one database while the API talked to another is a failure that looks li
 - name: DATABASE_URL
   value: {{ .Values.database.url | quote }}
 {{- end -}}
+{{- end -}}
+
+{{/*
+The init container that holds a workload until OpenBot's database can serve it.
+
+Every workload that reads the database carries it: the API server and each scheduled Job. It runs
+`files/wait-for-database.mjs`, which lets go only when the database accepts the workload's own
+connection AND holds every migration in the workload's own image. A first install with the bundled
+database starts the server beside a PostgreSQL that is not up yet and a migrations Job that has not
+run yet; without this the server connected anyway, logged `Failed to connect` and a failed
+`insert into "users"` on every first install, and could serve against a schema the migrations had
+not reached.
+
+IT NEVER WAITS FOR SOMETHING BEHIND IT, which is what keeps `helm install --wait` from deadlocking.
+On a first install with the bundled database the migrations Job is an ordinary resource created in
+the same pass as the server, so it runs while the server waits. In every other case it is a
+pre-install or pre-upgrade hook that has finished before the server's new pods exist, and the wait
+passes at once. A rollout whose migrations have not run (hooks skipped, or `migrations.enabled`
+false) holds its new pods here, saying which migration is missing, while the old ones keep serving.
+Old pods that restart after an upgrade migrated pass, because the database holds every migration
+their image carries and more.
+
+The OpenBot image itself, so there is nothing new to pull, from /app/server, the directory the
+migrations Job migrates from. The address and credentials are `openbot.databaseUrlEnv`, the same
+definition the container it holds reads.
+
+BOUNDED, and loud when the bound runs out: it says what it last saw and exits 1, so a Deployment's
+pod restarts it and a Job records the failure.
+
+Called with (dict "root" . "seconds" <how long> "securityContext" <the main container's, or nil>).
+*/}}
+{{- define "openbot.waitForDatabase" -}}
+{{- $root := .root -}}
+- name: wait-for-database
+  image: {{ include "openbot.image" $root }}
+  imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+  workingDir: /app/server
+  command:
+    - /usr/local/bin/bun
+    - -e
+    - |
+{{ $root.Files.Get "files/wait-for-database.mjs" | indent 6 }}
+  env:
+{{ include "openbot.databaseUrlEnv" $root | indent 4 }}
+    - name: OPENBOT_DATABASE_WAIT_SECONDS
+      value: {{ .seconds | int64 | quote }}
+    - name: OPENBOT_DATABASE_WAIT_HINT
+      {{- if $root.Values.migrations.enabled }}
+      value: {{ printf "This release's migrations run in the %s-<revision> Job, whose log says why they have not been applied: kubectl logs job/%s-<revision>." (include "openbot.componentName" (dict "root" $root "component" "migrations")) (include "openbot.componentName" (dict "root" $root "component" "migrations")) | quote }}
+      {{- else }}
+      value: "This chart does not run the migrations (migrations.enabled is false), so apply them yourself with this image: bun scripts/migrate.ts from /app/server, with this DATABASE_URL."
+      {{- end }}
+  {{- with .securityContext }}
+  securityContext:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+{{- end -}}
+
+{{/*
+The Secret the bundled database's password is in, named the way the subchart names it: whatever
+`postgresql.auth.existingSecret` renders to (the subchart passes it through `tpl`, so the default
+`{{ .Release.Name }}-postgresql` is a name per release), or the subchart's own when that is empty.
+*/}}
+{{- define "openbot.postgresqlSecretName" -}}
+{{- with (.Values.postgresql.auth).existingSecret -}}
+{{- tpl . $ -}}
+{{- else -}}
+{{- printf "%s-postgresql" .Release.Name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether this chart writes the bundled database's password Secret (templates/postgresql/secret.yaml):
+when `postgresql.auth.existingSecret` names the Secret the subchart would otherwise have made itself,
+which is the default. A Secret of the operator's has another name and is left alone; and if one of
+theirs did carry that name, Helm refuses to take it over rather than overwrite it.
+*/}}
+{{- define "openbot.postgresqlSecretWritten" -}}
+{{- if and .Values.postgresql.enabled (.Values.postgresql.auth).existingSecret (eq (include "openbot.postgresqlSecretName" .) (printf "%s-postgresql" .Release.Name)) -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether this chart generates the credentials an operator would otherwise have to make by hand, the
+key encryption key and the computer token, when they are not given: only with the bundled database.
+Both are kept in this chart's Secret, which lives in this namespace, and so does the bundled database
+they belong to. A database of the operator's outlives the namespace, and a key generated here would
+not, so there they are required (templates/secret.yaml, validation.yaml).
+*/}}
+{{- define "openbot.generatesCredentials" -}}
+{{- if .Values.postgresql.enabled -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -410,14 +508,19 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   value: "false"
 {{- end }}
 - name: INTELLIGENCE_API_URL
-  value: {{ .Values.config.intelligence.apiUrl | quote }}
+  value: {{ include "openbot.intelligenceApiUrl" . | quote }}
 - name: INTELLIGENCE_GATEWAY_WS_URL
-  value: {{ .Values.config.intelligence.gatewayWsUrl | quote }}
-- name: INTELLIGENCE_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "openbot.secretName" . }}
-      key: intelligence-api-key
+  value: {{ include "openbot.intelligenceGatewayWsUrl" . | quote }}
+{{ include "openbot.intelligenceApiKeyEnv" . }}
+{{- if include "openbot.intelligenceBundled" . }}
+{{- /*
+  The bundled Intelligence has no address a browser can reach, only Services in this cluster, and
+  the browser opens the gateway's socket itself. So the server carries it, on its own address, and
+  tells the browser that address (server/src/intelligence-gateway-proxy.ts).
+*/}}
+- name: INTELLIGENCE_GATEWAY_PROXY
+  value: "on"
+{{- end }}
 {{- /* From a store or an existingSecret too: emitted for the literal alone, a synced token reached
      the Secret and never the pod, and a self-hosted Intelligence ran unlicensed. */}}
 {{- $license := include "openbot.secretKeySource" (dict "root" . "key" "license-token" "literal" .Values.secrets.licenseToken) }}
@@ -625,8 +728,8 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   One definition, for the same reason `openbot.databaseUrlEnv` is one (see its comment above): the
   API server needs this value to RECOGNISE the worker, and the routines CronJob needs the same value
   to BE the worker. Two definitions could drift; this can't. Gated on `routines.enabled` so a
-  deployment that never turns routines on gets no env var pointing at a key its secret store may not
-  hold.
+  deployment that switches routines off gets no env var pointing at a Secret nothing writes. Where
+  the value lives is `openbot.workerSecretRef`, below.
 
   Above `config.extraEnv`, not below it: Kubernetes takes the last of a duplicate name, and this must
   lose to an operator's own value, not win over it. Below it, this chart's own secretKeyRef would
@@ -634,15 +737,50 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   someone would need it for.
 */}}
 {{- if (.Values.routines).enabled }}
+{{- $worker := include "openbot.workerSecretRef" . | fromYaml }}
 - name: WORKER_SHARED_SECRET
   valueFrom:
     secretKeyRef:
-      name: {{ include "openbot.secretName" . }}
-      key: worker-shared-secret
+      name: {{ $worker.name }}
+      key: {{ $worker.key }}
 {{- end }}
 {{- with .Values.config.extraEnv }}
 {{ toYaml . }}
 {{- end }}
+{{- end -}}
+
+{{/*
+Where WORKER_SHARED_SECRET lives, as YAML {name, key}, with `write: true` when this chart writes it
+(templates/routines/secret.yaml).
+
+It is a credential between two pods of this release, the routines CronJob that presents it and the
+API server that checks it, and nobody else ever needs to know it. So nobody has to make one. A key
+the operator already holds wins: `worker-shared-secret` named in `externalSecrets.data`, or present in
+`secrets.existingSecret`. Then `secrets.workerSharedSecret`. Otherwise the chart generates one, once,
+and keeps it across upgrades (`openbot.keptValue`).
+
+It used to be required, and routines were off by default for that reason alone: a default install
+stored, scheduled and showed every routine a Bot was asked for, and never ran one.
+
+The operator's own Secret is looked inside with `lookup`, at install and upgrade. `helm template` and
+a client-side dry run cannot look, so they render the generated Secret instead.
+*/}}
+{{- define "openbot.workerSecretRef" -}}
+{{- $key := "worker-shared-secret" -}}
+{{- $own := "" -}}
+{{- if .Values.externalSecrets.enabled -}}
+{{- range .Values.externalSecrets.data -}}
+{{- if eq .secretKey $key }}{{ $own = include "openbot.secretName" $ }}{{ end -}}
+{{- end -}}
+{{- else if .Values.secrets.existingSecret -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace .Values.secrets.existingSecret -}}
+{{- if hasKey (($existing | default dict).data | default dict) $key }}{{ $own = .Values.secrets.existingSecret }}{{ end -}}
+{{- end -}}
+{{- if $own -}}
+{{- toYaml (dict "name" $own "key" $key) -}}
+{{- else -}}
+{{- toYaml (dict "name" (printf "%s-worker-secret" (include "openbot.fullname" .)) "key" $key "write" true) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -861,4 +999,144 @@ than anything that names the cause.
 {{- if kindIs "float64" . -}}
 {{- if eq . (floor .) -}}{{ int64 . }}{{- else -}}{{ . }}{{- end -}}
 {{- else -}}{{ . }}{{- end -}}
+{{- end -}}
+
+{{/*
+Whether this release installs Intelligence itself (`intelligence.enabled`), answered the way Helm
+answers it for the dependency: only a boolean false turns it off.
+
+With no `intelligence.enabled` at all, which is what `helm upgrade --reuse-values` from a chart
+before it leaves, Helm turns the dependency ON (and `.Values.intelligence` still holds that chart's
+own defaults, so the map is never simply missing). That release is refused by name in
+validation.yaml, and this answers false for it so nothing else fails first with a message about a
+value nobody set.
+*/}}
+{{- define "openbot.intelligenceBundled" -}}
+{{- $values := .Values.intelligence | default dict -}}
+{{- if hasKey $values "enabled" -}}
+{{- if not (and (kindIs "bool" $values.enabled) (not $values.enabled)) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+A name the bundled Intelligence chart gives one of its objects, worked out the way that chart and its
+Bitnami subcharts work it out, so the addresses here are the Services there. Called with
+(dict "root" . "values" <that chart's values> "chart" <its chart name>).
+*/}}
+{{- define "openbot.subchartFullname" -}}
+{{- $values := .values | default dict -}}
+{{- if $values.fullnameOverride -}}
+{{- $values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default .chart $values.nameOverride -}}
+{{- if contains $name .root.Release.Name -}}
+{{- .root.Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .root.Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "openbot.intelligenceFullname" -}}
+{{- include "openbot.subchartFullname" (dict "root" . "values" .Values.intelligence "chart" "intelligence") -}}
+{{- end -}}
+
+{{/* Intelligence's API and gateway, as the OpenBot server reaches them inside the cluster. */}}
+{{- define "openbot.intelligenceApiUrl" -}}
+{{- if include "openbot.intelligenceBundled" . -}}
+{{- $appApi := (.Values.intelligence | default dict).appApi | default dict -}}
+{{- $port := (($appApi.service | default dict).port | default 4201) -}}
+{{- printf "http://%s-app-api:%v" (include "openbot.intelligenceFullname" .) $port -}}
+{{- else -}}
+{{- .Values.config.intelligence.apiUrl -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "openbot.intelligenceGatewayWsUrl" -}}
+{{- if include "openbot.intelligenceBundled" . -}}
+{{- $gateway := (.Values.intelligence | default dict).realtimeGateway | default dict -}}
+{{- $port := (($gateway.service | default dict).port | default 4401) -}}
+{{- printf "ws://%s-realtime-gateway:%v" (include "openbot.intelligenceFullname" .) $port -}}
+{{- else -}}
+{{- .Values.config.intelligence.gatewayWsUrl -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Where the bundled Intelligence's runtime key lives, as YAML {name, key}: the first
+`intelligence.bootstrap.projects` entry with an `apiKey`. This chart generates the key into that
+Secret (templates/intelligence/secrets.yaml), Intelligence's bootstrap Job stores its hash, and the
+server reads it, so all three name one Secret. Empty when no project carries a key, which
+validation.yaml refuses.
+*/}}
+{{- define "openbot.intelligenceKeyRef" -}}
+{{- $values := .Values.intelligence | default dict -}}
+{{- $ref := dict -}}
+{{- range (($values.bootstrap | default dict).projects | default list) -}}
+{{- $apiKey := .apiKey | default dict -}}
+{{- if and (not $ref.name) $apiKey.existingSecret -}}
+{{- $ref = dict "name" $apiKey.existingSecret "key" ($apiKey.key | default "api-key") -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $ref -}}
+{{- end -}}
+
+{{/*
+INTELLIGENCE_API_KEY, from wherever it is: the bundled Intelligence's project key Secret (see
+`openbot.intelligenceKeyRef`), or `secrets.intelligenceApiKey` in this chart's Secret for one that
+already runs.
+*/}}
+{{- define "openbot.intelligenceApiKeyEnv" -}}
+{{- $ref := include "openbot.intelligenceKeyRef" . | fromYaml -}}
+- name: INTELLIGENCE_API_KEY
+  valueFrom:
+    secretKeyRef:
+      {{- if include "openbot.intelligenceBundled" . }}
+      name: {{ $ref.name }}
+      key: {{ $ref.key }}
+      {{- else }}
+      name: {{ include "openbot.secretName" . }}
+      key: intelligence-api-key
+      {{- end }}
+{{- end -}}
+
+{{/*
+A generated credential that stays what it was.
+
+Read back from the Secret already in the cluster when there is one, so an upgrade does not hand
+PostgreSQL a password it was never initialized with. `lookup` sees nothing under `helm template`
+or a client-side dry run, so those render a fresh value, which is what they should show.
+Called with (dict "root" . "secret" <name> "key" <key> "generate" <a fresh value>).
+*/}}
+{{- /*
+  A hash of every secret an operator gives this chart, for the pods that read them to roll on.
+
+  A changed Secret does not change a pod, so without this an upgrade with a new model key or licence
+  left every replica on the old one: the release looked upgraded and every Bot turn kept failing on
+  the key it was meant to replace. The values given are hashed rather than the rendered Secret,
+  because a generated value is drawn afresh on every render until `lookup` finds it kept, and hashing
+  that would roll the pods on the first upgrade for nothing. Generated values never change, by design,
+  so what the operator gives is the whole of what can. A Secret of the operator's own
+  (`existingSecret`, External Secrets) changes outside Helm and rolls nothing; that is theirs to roll.
+*/}}
+{{- define "openbot.secretsChecksum" -}}
+{{- .Values.secrets | toJson | sha256sum -}}
+{{- end -}}
+
+{{- /*
+  The same, for the computer: only what it reads, which is its token. A model key or licence change
+  must not restart it, because that drops every browser and shell session on it.
+*/}}
+{{- define "openbot.computerTokenChecksum" -}}
+{{- list .Values.secrets.computerToken .Values.secrets.existingSecret .Values.computers.existingTokenSecret | toJson | sha256sum -}}
+{{- end -}}
+
+{{- define "openbot.keptValue" -}}
+{{- $existing := lookup "v1" "Secret" .root.Release.Namespace .secret -}}
+{{- $data := ($existing | default dict).data | default dict -}}
+{{- if hasKey $data .key -}}
+{{- index $data .key | b64dec -}}
+{{- else -}}
+{{- .generate -}}
+{{- end -}}
 {{- end -}}

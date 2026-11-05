@@ -106,6 +106,12 @@ export type VendorTransport = {
       actorId?: string;
       /** The Bot the run belongs to. A routine runs as its Bot, which is never a name a model supplies. */
       botId?: string;
+      /**
+       * The thread of the run making the call, when it runs in one. Read by Routines only, as the
+       * conversation a routine asked for "here" posts into, and checked there against the actor's
+       * own conversations. Like the two above it, it comes from the run and never from `args`.
+       */
+      threadId?: string;
     },
     toolName: string,
     args: Record<string, unknown>,
