@@ -311,6 +311,11 @@ export function createShell(
       const outBuffer = collect();
       const errBuffer = collect();
 
+      // Decoded as a stream, so a character whose bytes arrive in two reads is held until it is whole
+      // rather than decoded half at a time into two replacement characters.
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+
       child.stdout.on("data", (chunk) => {
         outBuffer.add(chunk);
       });
