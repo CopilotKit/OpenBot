@@ -10,7 +10,8 @@
 //! - **Nothing unverified runs.** The CLI is pinned by SHA-256, like every other program this app
 //!   fetches (`install.rs`). There is no fallback to `PATH`, `npx` or a global install.
 //! - **Arguments are fixed.** Only `status`, `start`, `stop` and `login`, a validated stack id and
-//!   `--json`, plus the constant `list`, `setup` and `connect` lists, as separate arguments with no shell. The CLI's `resumeCommand` strings are text for a
+//!   `--json`, plus the constant `list`, `setup`, `connect` and `login --help` lists and the sign-in's
+//!   `--mode openbot`, as separate arguments with no shell. The CLI's `resumeCommand` strings are text for a
 //!   terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
 //!   cross IPC or reach a log. Failures are static categories with no payload.
@@ -332,6 +333,32 @@ impl EulaVersion {
 /// `copilotkit login --json`: the CopilotKit account sign-in local evaluation needs for its
 /// licence. A device authorization grant; the CLI opens the approval page itself.
 pub const ACCOUNT_SIGN_IN_ARGUMENTS: [&str; 2] = ["login", "--json"];
+
+/// What `login` adds so the hosted sign-in page explains OpenBot's setup instead of the generic
+/// CopilotKit pitch (`source=cli&mode=openbot`, Intelligence#2214 and #2240). Display only: who
+/// signs in, what is approved and the token are the same either way.
+pub const OPENBOT_SIGN_IN_MODE: [&str; 2] = ["--mode", "openbot"];
+
+/// `copilotkit login --help`, read only, to learn whether this CLI takes `OPENBOT_SIGN_IN_MODE`.
+pub const LOGIN_HELP_ARGUMENTS: [&str; 2] = ["login", "--help"];
+
+/// The account sign-in's arguments: with `OPENBOT_SIGN_IN_MODE` only for a CLI that takes it. A
+/// CLI from before the flag refuses it with a usage error and signs nobody in.
+pub fn account_sign_in_arguments(takes_mode: bool) -> Vec<&'static str> {
+    let mut arguments = ACCOUNT_SIGN_IN_ARGUMENTS.to_vec();
+    if takes_mode {
+        arguments.extend(OPENBOT_SIGN_IN_MODE);
+    }
+    arguments
+}
+
+/// Whether `login --help` lists `--mode openbot`. Help is the CLI's own fixed text, read here and
+/// never passed on.
+pub fn help_lists_openbot_mode(exit_code: i32, stdout: &[u8]) -> bool {
+    exit_code == 0
+        && stdout.len() <= MAX_OUTPUT
+        && std::str::from_utf8(stdout).is_ok_and(|help| help.contains("--mode openbot"))
+}
 
 /// The evaluation agreement, read only: `onboard local-terms --json`.
 pub const TERMS_ARGUMENTS: [&str; 3] = ["onboard", "local-terms", "--json"];
@@ -1395,8 +1422,45 @@ pub fn account_sign_in(
     limits: Limits,
     cancel: &Cancel,
 ) -> Result<AccountSignIn, Failure> {
-    let (code, bytes) = execute(cli, &ACCOUNT_SIGN_IN_ARGUMENTS, None, limits, cancel)?;
+    let arguments = account_sign_in_arguments(login_takes_mode(cli, cancel)?);
+    let (code, bytes) = execute(cli, &arguments, None, limits, cancel)?;
     normalize_account_sign_in(code, &bytes)
+}
+
+/**
+Whether this CLI takes `OPENBOT_SIGN_IN_MODE`, asked of its own `login --help` once per CLI.
+
+The CLI is pinned by digest, so the answer holds for as long as those bytes run from that path. A help call that
+fails or times out reads as no: the sign-in then runs as it always did, with the generic page. A
+cancelled one is the sign-in cancelled.
+*/
+fn login_takes_mode(cli: &PinnedCli, cancel: &Cancel) -> Result<bool, Failure> {
+    type Seen = (PathBuf, String, bool);
+    static KNOWN: std::sync::Mutex<Vec<Seen>> = std::sync::Mutex::new(Vec::new());
+    let seen = |found: &Seen| found.0 == cli.program && found.1 == cli.sha256;
+    if let Some((_, _, takes)) = KNOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .find(|found| seen(found))
+    {
+        return Ok(*takes);
+    }
+    let limits = Limits {
+        timeout: Duration::from_secs(30),
+        grace: Duration::from_secs(2),
+        output: 64 * 1024,
+    };
+    let takes = match execute(cli, &LOGIN_HELP_ARGUMENTS, None, limits, cancel) {
+        Ok((code, bytes)) => help_lists_openbot_mode(code, &bytes),
+        Err(Failure::Cancelled) => return Err(Failure::Cancelled),
+        Err(_) => return Ok(false),
+    };
+    KNOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push((cli.program.clone(), cli.sha256.clone(), takes));
+    Ok(takes)
 }
 
 /// `onboard local-terms --json`, within the limits of `status`.
@@ -3512,6 +3576,16 @@ fn main() {
         }
         _ => {}
     }
+    // The CLI's help for `login`: `help` beside the program, or a CLI from before `--mode`.
+    if args == ["login", "--help"] {
+        let asked = std::fs::read_to_string(dir.join("help-asked")).unwrap_or_default();
+        std::fs::write(dir.join("help-asked"), format!("{asked}x")).unwrap();
+        let help = std::fs::read_to_string(dir.join("help")).unwrap_or_else(|_| {
+            "Usage: copilotkit login [--json [--force] | --device]\n".to_owned()
+        });
+        print!("{help}");
+        return;
+    }
     std::fs::write(dir.join("argv"), args.join("\n")).unwrap();
     std::fs::write(dir.join("cwd"), std::env::current_dir().unwrap().display().to_string()).unwrap();
     let inherited = |name: &str| format!("{name}={}", std::env::var(name).is_ok());
@@ -4045,6 +4119,68 @@ fn main() {
                 "{refused:?}"
             );
         }
+    }
+
+    /// #991: the sign-in page a person sees explains OpenBot's setup. The CLI carries that as
+    /// `login --mode openbot`, once it has the flag; an older one would refuse it and sign nobody in.
+    #[test]
+    fn the_account_sign_in_asks_for_openbots_sign_in_page_when_the_cli_takes_it() {
+        let signed_in = "0\n{\"type\":\"completed\"}\n";
+        let current = Fixture::new("local-eval-sign-in-mode", signed_in);
+        std::fs::write(
+            current.root.join("help"),
+            "Usage: copilotkit login [--json [--force] | --device] [--mode openbot]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            account_sign_in(
+                &current.cli(),
+                Limits::for_account_sign_in(),
+                &Cancel::default()
+            ),
+            Ok(AccountSignIn { signed_in: true })
+        );
+        assert_eq!(
+            current.argv().as_deref(),
+            Some("login\n--json\n--mode\nopenbot")
+        );
+
+        let older = Fixture::new("local-eval-sign-in-no-mode", signed_in);
+        assert_eq!(
+            account_sign_in(
+                &older.cli(),
+                Limits::for_account_sign_in(),
+                &Cancel::default()
+            ),
+            Ok(AccountSignIn { signed_in: true })
+        );
+        assert_eq!(older.argv().as_deref(), Some("login\n--json"));
+
+        // Asked once per CLI: these bytes do not change while they run.
+        account_sign_in(
+            &current.cli(),
+            Limits::for_account_sign_in(),
+            &Cancel::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(current.root.join("help-asked")).unwrap(),
+            "x"
+        );
+    }
+
+    #[test]
+    fn only_a_help_that_lists_the_openbot_mode_says_the_cli_takes_it() {
+        assert!(help_lists_openbot_mode(
+            0,
+            b"  --mode openbot  Show the OpenBot setup text\n"
+        ));
+        assert!(!help_lists_openbot_mode(
+            0,
+            b"Usage: copilotkit login [--json | --device]\n"
+        ));
+        assert!(!help_lists_openbot_mode(1, b"--mode openbot"));
+        assert!(!help_lists_openbot_mode(0, &[0xff, 0xfe]));
     }
 
     #[test]
