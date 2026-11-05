@@ -2698,7 +2698,10 @@ const selfHostBannerIntelligence = createIntelligenceClient(
 
 // Said once, at boot, whether Intelligence will let this deployment use what it is licensed for. A
 // self-hosted Intelligence without a licence refuses memory quietly; this is the line that says why.
+// On a first install, an Intelligence installed beside this server is still running its migrations
+// when this first asks, so the check waits that out before it says anything (intelligence-startup.ts).
 void reportIntelligenceEntitlement({
+  intelligence: config.runtime.intelligence,
   entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
 });
 

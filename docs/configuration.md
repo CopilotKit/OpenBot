@@ -45,8 +45,11 @@ Recorder reached OpenBot at, and only where that is this machine's loopback, as 
 `COPILOTKIT_LICENSE_TOKEN` is optional: managed Intelligence issues no licence token, and a
 self-hosted Intelligence that has one sets this and has it forwarded to the runtime. That
 Intelligence needs the same licence on its own deployment as well, or it refuses memory and the
-other licensed features while conversations carry on. OpenBot asks Intelligence once at boot and
-logs `intelligence-entitlement-not-ready`, naming the fix, when the answer is not ready.
+other licensed features while conversations carry on. OpenBot asks Intelligence at boot and logs
+`intelligence-entitlement-not-ready`, naming the fix, when the answer is not ready. An
+Intelligence still starting, as one installed beside OpenBot is while its migrations run, is asked
+again for up to ten minutes, with one `intelligence-entitlement-waiting` line; only one still not
+answering then is logged as `intelligence-entitlement-unreadable`. A refused key is logged at once.
 
 `MANAGED_AGENT_AG_UI_URL` names the Bot in the box: the default endpoint for coworkers created in
 the product. It needs `MANAGED_AGENT_TOKEN` beside it, or the server refuses to start. Unset, the

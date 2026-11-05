@@ -56,6 +56,52 @@ export function observeIntelligenceAuthentication<
 }
 
 /**
+ * The HTTP status Intelligence answers the runtime entitlement read with, asked without the runtime
+ * client, which is still what reads the answer itself.
+ *
+ * The client prints every failed read to the console as a multi-line object before it throws
+ * (`logger.error({ status, path }, "Runtime entitlement request failed")`, and its logger is
+ * `console`). That is right for a read that should have worked, and wrong for the boot check, whose
+ * reads are expected to fail while Intelligence is still starting (see intelligence-startup.ts):
+ * this asks first, and the client is asked only once Intelligence answers 200. Rejects, marked
+ * `retryable`, when nothing answered at all. A 401 is observed here as the client's would be.
+ */
+export async function runtimeEntitlementStatus(
+  settings: Pick<IntelligenceSettings, "apiUrl" | "apiKey">,
+  timeoutMs = 5_000,
+): Promise<number> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `${settings.apiUrl.trim().replace(/\/+$/, "")}/api/entitlements/runtime`,
+      {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${settings.apiKey}`,
+        },
+        redirect: "error",
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    );
+  } catch (error) {
+    throw Object.assign(
+      new Error(
+        `Intelligence did not answer (${error instanceof Error ? error.message : String(error)})`,
+      ),
+      { retryable: true },
+    );
+  }
+  await response.body?.cancel().catch(() => {});
+  if (response.status === 401) {
+    recordDesktopConnectionFailure({
+      connection: "intelligence",
+      code: "intelligence_authentication_failed",
+    });
+  }
+  return response.status;
+}
+
+/**
  * A client through which this deployment can ask Intelligence a question of its own.
  *
  * The runtime already holds one of these, built where it is mounted, and everything a conversation

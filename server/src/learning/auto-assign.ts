@@ -8,6 +8,10 @@ import {
   DEPLOYMENT_INITIATOR,
   recordAuditEvent,
 } from "../audit";
+import {
+  askWhileIntelligenceStarts,
+  type StartupClock,
+} from "../intelligence-startup";
 import type { LearningSettingsStore } from "./settings";
 
 /**
@@ -248,7 +252,10 @@ export type LearningAutoAssign = {
   kick(): void;
   /** The last answer, without asking. */
   state(): LearningAutoAssignState;
-  /** Check at boot, then keep checking every `retryMs` until there is nothing left to do. */
+  /**
+   * Check at boot, asking again while Intelligence is still starting (see intelligence-startup.ts),
+   * then keep checking every `retryMs` until there is nothing left to do.
+   */
   start(): void;
   stop(): void;
 };
@@ -274,6 +281,9 @@ const MIN_INTERVAL_MS = 60_000;
  * - It is safe on many replicas: the write is a conditional insert, so the first one wins and the
  *   rest see a saved setting. Only the winner writes the audit row.
  * - It never blocks startup or a turn. Every failure is logged once per kind and tried again later.
+ * - It waits out an Intelligence that is still starting at boot: while the boot check finds it
+ *   unavailable it asks again, quietly, and says it could not be asked only if that is still so
+ *   when the startup window closes.
  */
 export function createLearningAutoAssign(options: {
   /** False when the operator switched this off or the environment names a container. */
@@ -290,6 +300,8 @@ export function createLearningAutoAssign(options: {
   minIntervalMs?: number;
   now?: () => number;
   log?: (entry: Record<string, unknown>) => void;
+  /** How long the boot check gives a starting Intelligence, and the clock it waits on. */
+  startup?: StartupClock;
 }): LearningAutoAssign {
   const containerId = options.containerId ?? AUTOMATIC_LEARNING_CONTAINER_ID;
   const now = options.now ?? Date.now;
@@ -302,6 +314,11 @@ export function createLearningAutoAssign(options: {
   let lastStartedAt = Number.NEGATIVE_INFINITY;
   let timer: ReturnType<typeof setInterval> | undefined;
   const logged = new Set<string>();
+  /** The boot check is waiting for Intelligence to finish starting: "unavailable" is expected, so not logged. */
+  let starting = false;
+  /** The last check found Intelligence unavailable while that went unsaid, for the boot check to say if it stays so. */
+  let unsaid = false;
+  let stopped = false;
 
   const settled = (state: LearningAutoAssignState) =>
     state.state === "off" ||
@@ -325,8 +342,12 @@ export function createLearningAutoAssign(options: {
    */
   let createSkipped = false;
 
-  /** Create it with the configured credential, once. True when it is there now. */
-  const tryCreate = async (): Promise<boolean> => {
+  /**
+   * Create it with the configured credential, once. True when it is there now. `unavailable` when
+   * Intelligence could not answer just then (a 5xx, nothing answering), which is not this
+   * credential's one try: the next check tries again.
+   */
+  const tryCreate = async (): Promise<boolean | "unavailable"> => {
     if (!options.create || createTried) return false;
     createTried = true;
     try {
@@ -345,6 +366,15 @@ export function createLearningAutoAssign(options: {
       });
       return true;
     } catch (error) {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "retryable" in error &&
+        error.retryable === true
+      ) {
+        createTried = false;
+        return "unavailable";
+      }
       createError =
         error instanceof Error
           ? error.message.slice(0, 500)
@@ -353,6 +383,12 @@ export function createLearningAutoAssign(options: {
       return false;
     }
   };
+
+  const sayUnavailable = () =>
+    once("unavailable", {
+      message:
+        "Intelligence could not be asked about the Learning container. OpenBot tries again.",
+    });
 
   const absent = (): LearningAutoAssignState => ({
     state: "absent",
@@ -363,11 +399,15 @@ export function createLearningAutoAssign(options: {
   });
 
   const run = async (): Promise<LearningAutoAssignState> => {
+    unsaid = false;
     if (!options.enabled) return { state: "off" };
     if (await options.store.saved()) return { state: "saved" };
     let found = await options.probe(containerId);
-    if (found === "absent" && (await tryCreate()))
-      found = await options.probe(containerId);
+    if (found === "absent") {
+      const created = await tryCreate();
+      if (created === "unavailable") found = "unavailable";
+      else if (created) found = await options.probe(containerId);
+    }
     if (found === "absent") {
       once("absent", {
         message: `This Intelligence project has no "${containerId}" Learning container, so Automatic Learning collects nothing yet. ${instructions}`,
@@ -389,10 +429,8 @@ export function createLearningAutoAssign(options: {
       return { state: "learning_off" };
     }
     if (found === "unavailable") {
-      once("unavailable", {
-        message:
-          "Intelligence could not be asked about the Learning container. OpenBot tries again.",
-      });
+      if (starting) unsaid = true;
+      else sayUnavailable();
       return { state: "unavailable" };
     }
     if (!(await options.store.adoptDefault({ containerId })))
@@ -447,6 +485,21 @@ export function createLearningAutoAssign(options: {
     timer = undefined;
   };
 
+  /** The boot check: ask until Intelligence answers or the startup window closes, then say what is still so. */
+  const startup = async () => {
+    starting = true;
+    try {
+      await askWhileIntelligenceStarts(
+        check,
+        (state) => !stopped && state.state === "unavailable",
+        options.startup,
+      );
+    } finally {
+      starting = false;
+    }
+    if (unsaid && current.state === "unavailable") sayUnavailable();
+  };
+
   return {
     check,
     async createNow() {
@@ -465,12 +518,15 @@ export function createLearningAutoAssign(options: {
     state: () => current,
     start() {
       if (!options.enabled) return;
-      void check();
+      void startup();
       timer = setInterval(() => void check(), options.retryMs ?? RETRY_MS);
       // Never keep the process alive for this alone.
       timer.unref?.();
     },
-    stop: stopTimer,
+    stop() {
+      stopped = true;
+      stopTimer();
+    },
   };
 }
 
