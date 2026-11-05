@@ -27,6 +27,7 @@ function summary(overrides: Partial<RoutineSummary> = {}): RoutineSummary {
     nextRunAt: new Date("2026-08-27T09:00:00.000Z"),
     channelId: "channel-1",
     channelName: "Assistant channel",
+    channelTitle: "Standup notes",
     channelDeleted: false,
     lastRun: {
       status: "succeeded",

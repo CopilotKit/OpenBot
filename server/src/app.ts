@@ -2002,6 +2002,8 @@ export function createApp(
           // From the assertion, never the body: this is the name the audit row will carry.
           actorId: verdict.actorId,
           ...(verdict.initiator ? { initiator: verdict.initiator } : {}),
+          // The conversation this run is in, signed with the rest: where a routine asked for "here" posts.
+          ...(verdict.run.threadId ? { threadId: verdict.run.threadId } : {}),
         });
         // Worded by the helper the in-process door uses, so a framework Bot's model reads a vendor's
         // error as the vendor's and not as a result. Neither Bot words it on its way through.
