@@ -428,11 +428,13 @@ function Setup() {
    * Bot is not installed again.
    */
   const localInstall = useRef<Promise<boolean> | null>(null);
-  function beginLocalInstall(): Promise<boolean> {
+  /** `again`: what was recorded as installed is not what this app starts, so install anyway. */
+  function beginLocalInstall(again = false): Promise<boolean> {
     if (localInstall.current) return localInstall.current;
     const choice = { id: DEFAULT_HARNESS };
     setHarness(choice);
     if (
+      !again &&
       preparation?.key === installationKeyFor(root, choice) &&
       preparation.status === "complete"
     ) {
@@ -449,18 +451,19 @@ function Setup() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per refused Start.
   useEffect(() => {
-    if (!reinstall) return;
+    // Once the refused Start has let go: Install will not begin while the window is busy.
+    if (!reinstall || busy) return;
     setReinstall(false);
     // What was recorded as installed is not what this app starts, so it is installed again.
     localInstall.current = null;
     setPreparation(null);
-    void installLocally();
-  }, [reinstall]);
+    void installLocally(true);
+  }, [reinstall, busy]);
 
   /** Shows the install until it completes, then the AI provider screen. */
-  async function installLocally() {
+  async function installLocally(again = false) {
     setStep("install");
-    if (await beginLocalInstall()) {
+    if (await beginLocalInstall(again)) {
       setSteps([]);
       setStep("model");
     }

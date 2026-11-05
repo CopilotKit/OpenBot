@@ -1670,7 +1670,11 @@ test.each(["model", "intelligence"])(
  */
 test("a Start refused until Install runs again goes back to Install by itself", async () => {
   const root = "/tmp/installed-upgrade";
-  setupConnectedLocalStack(root, localStatus("ready", "valid"));
+  // Installed with the default Bot, as the window itself installs: what it recorded as finished
+  // has to be installed again all the same.
+  setupConnectedLocalStack(root, localStatus("ready", "valid"), {
+    launch: { harness: { id: "langgraph" } },
+  });
   const previous = invokeHandler;
   let starts = 0;
   invokeHandler = async (command, args) => {
