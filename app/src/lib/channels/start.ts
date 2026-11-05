@@ -34,11 +34,17 @@ import { routeMessage } from "./route";
 export async function startWithChosen(input: {
   agentId: string;
   text: string;
+  /** The first message's `/` skills; see `FirstMessage`. */
+  skillInstructions?: readonly string[];
   record: (text: string, agentId: string) => Promise<unknown>;
-  start: (agentId: string, text: string) => Promise<void>;
+  start: (
+    agentId: string,
+    text: string,
+    skillInstructions: readonly string[],
+  ) => Promise<void>;
 }): Promise<void> {
   await input.record(input.text, input.agentId).catch(() => undefined);
-  await input.start(input.agentId, input.text);
+  await input.start(input.agentId, input.text, input.skillInstructions ?? []);
 }
 
 /**
@@ -82,10 +88,14 @@ export function useStartChannel() {
   const createGroup = useMutation(createGroupMutationOptions(queryClient));
   const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
 
-  const start = async (agentId: string, text: string) => {
+  const start = async (
+    agentId: string,
+    text: string,
+    skillInstructions: readonly string[] = [],
+  ) => {
     const channel = await createChannel.mutateAsync([agentId]);
     queryClient.setQueryData(channelKeys.detail(channel.id), channel);
-    stashFirstMessage(channel.id, text);
+    stashFirstMessage(channel.id, text, skillInstructions);
     await navigate({
       params: { channelId: channel.id },
       replace: true,
@@ -126,7 +136,17 @@ export function useStartChannel() {
     startGroup,
     start,
     /** `start`, for a coworker the person chose: the choice is recorded first. */
-    startChosen: (agentId: string, text: string) =>
-      startWithChosen({ agentId, text, record: routeMessage, start }),
+    startChosen: (
+      agentId: string,
+      text: string,
+      skillInstructions: readonly string[] = [],
+    ) =>
+      startWithChosen({
+        agentId,
+        text,
+        skillInstructions,
+        record: routeMessage,
+        start,
+      }),
   };
 }
