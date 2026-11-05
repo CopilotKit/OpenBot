@@ -91,7 +91,8 @@ function RouteComponent() {
         if (caught instanceof CoworkerRoutingRefusedError) throw caught;
         agentId = fallback?.id;
       }
-      if (!agentId) throw new Error("There's no Bot to send this to. Reload the page.");
+      if (!agentId)
+        throw new Error("There's no Bot to send this to. Reload the page.");
       await start(agentId, draft.text, [], undefined, pendingId);
     } catch (caught) {
       stashFailedStart({
