@@ -7,7 +7,7 @@ import { botBrowserRequestSeconds } from "./browser/bot-browser";
 import { browserRequestSeconds } from "./browser/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import type { ComputerGateway } from "./computer/gateway";
-import { streamPathBotId } from "./computer/stream-path";
+import { computerSocketPath } from "./computer/stream-path";
 import type { DeploymentConfig } from "./config";
 import {
   closeGatewaySocket,
@@ -38,7 +38,18 @@ import {
 type StreamData = {
   upstream: string;
   inward?: WebSocket;
+  /** Messages the person sent before the computer's side had opened, sent once it has. */
+  early?: Array<string | ArrayBuffer | Uint8Array>;
 };
+
+/**
+ * How much a proxied socket may hold for a person who is not reading it, before it is closed.
+ *
+ * The terminal's own flow control (agent-computer/src/live-shell.ts) keeps what is in flight far
+ * below this. A socket past it is a browser that has stopped reading, and closing it costs that
+ * viewer a reconnect, which redraws its terminal from the computer's copy of the screen.
+ */
+const MAX_PROXY_BUFFER = 8 * 1024 * 1024;
 
 /**
  * Bun takes exactly one WebSocket handler for the server, and three features need one: the app
@@ -89,6 +100,7 @@ export function startHttpServer(deps: {
     baseUrl: string,
     seat: { botId: string; personId?: string },
     token: string | undefined,
+    socket: "stream" | "terminal" = "stream",
   ) =>
     // The Bot travels in the query, because a websocket upgrade carries no custom header for the
     // computer to read and every call it serves is per Bot. So does the person, on the one computer
@@ -96,7 +108,7 @@ export function startHttpServer(deps: {
     // same reason, this socket is the one a person can type into, so it is the last thing that should
     // be reachable without it. The secret of that computer, which on a computer of one person's own
     // is its own token and never the deployment's (computer/computer-token.ts).
-    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(token ?? "")}`;
+    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/${socket}?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(token ?? "")}`;
 
   const trusted = trustedOrigin(config);
 
@@ -177,8 +189,15 @@ export function startHttpServer(deps: {
         }
         return new Response("Expected a WebSocket upgrade.", { status: 400 });
       }
-      const streamBotId = streamPathBotId(url.pathname);
+      /*
+       * The live screen and the terminal (the Bot's live shell). The same doors for both: whoever may
+       * watch a Bot's screen may watch its terminal, and typing into either is the computer's own
+       * question, asked of the wheel.
+       */
+      const named = computerSocketPath(url.pathname);
+      const streamBotId = named?.botId ?? null;
       if (
+        named &&
         streamBotId !== null &&
         request.headers.get("upgrade")?.toLowerCase() === "websocket"
       ) {
@@ -235,6 +254,7 @@ export function startHttpServer(deps: {
             streamBase,
             computerGateway.addressOf(seat),
             computerGateway.tokenFor(seat),
+            named.socket,
           );
         } catch (error) {
           // Said out loud rather than falling back to another Bot's computer, which is the failure this
@@ -265,15 +285,27 @@ export function startHttpServer(deps: {
         }
         const stream = ws.data;
         const inward = new WebSocket(stream.upstream);
+        // The terminal's output is binary; the screen's frames are text. Each is passed on as it came.
+        inward.binaryType = "arraybuffer";
         stream.inward = inward;
         // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
         // should be dropped, not queued, because a stale frame is worse than a missing one.
         inward.onmessage = (event) => {
           try {
-            ws.send(String(event.data));
+            const data = event.data;
+            const sent = ws.send(
+              typeof data === "string" ? data : new Uint8Array(data),
+            );
+            if (sent === 0 || ws.getBufferedAmount() > MAX_PROXY_BUFFER)
+              throw new Error("The person's side has stopped reading.");
           } catch {
             inward.close();
+            ws.close();
           }
+        };
+        inward.onopen = () => {
+          for (const message of stream.early ?? []) inward.send(message);
+          stream.early = undefined;
         };
         inward.onclose = () => ws.close();
         inward.onerror = () => ws.close();
@@ -290,7 +322,14 @@ export function startHttpServer(deps: {
           channelSocket.message(asChannelSocket(ws), raw);
           return;
         }
-        if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
+        // What the person sent, as it came. Held until the computer's side opens: a terminal says
+        // its size the moment it connects, before this server has reached the computer.
+        const forwarded = typeof raw === "string" ? raw : new Uint8Array(raw);
+        if (ws.data.inward?.readyState === 1) ws.data.inward.send(forwarded);
+        else if (ws.data.inward?.readyState === 0) {
+          ws.data.early ??= [];
+          if (ws.data.early.length < 64) ws.data.early.push(forwarded);
+        }
       },
       close(ws, code, reason) {
         if (isGatewaySocket(ws.data)) {
