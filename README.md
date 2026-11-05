@@ -30,16 +30,11 @@ your own machine.
 
 </div>
 
-> **Use the open-source template.** Clone the MIT-licensed application and make it your own. Replace the example tenant package under `examples/` with your own coworkers, channels, and skills. The [quick start](#quick-start) runs the template from source.
+You can get started with OpenBot in three ways.
 
-> **Download Personal Edition.** The self-contained OpenBot desktop app runs the workspace and CopilotKit Intelligence locally on your [Mac or Windows PC](https://github.com/CopilotKit/OpenBot/releases/latest). Connect your model and start with the built-in Personal Assistant. Your model provider bills for usage separately.
-
-> **Running the template on your laptop?** The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the app as a local administrator. Configure [sign-in](#sign-in) before giving anyone else access.
-
-> **OpenBot for Business.** Deploy on your infrastructure with the [Helm chart](charts/openbot/README.md) or have CopilotKit host your workspace. Both options are in [early access](https://openbot.co/business). Our engineers can help you deploy and customize OpenBot for your team. [**Start the conversation**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme).
->
-> In the meantime, run all of it on your laptop, Intelligence included: CopilotKit's free Developer plan
-> covers [running Intelligence locally](#intelligence-on-your-own-machine) in Docker on a Mac.
+- **Use the open-source template.** Clone the MIT-licensed application and make it your own. Replace the example tenant package under `examples/` with your own coworkers, channels, and skills. The [quick start](#quick-start) runs the template from source.
+- **Download Personal Edition.** The self-contained OpenBot desktop app runs the workspace and CopilotKit Intelligence locally on your [Mac or Windows PC](https://github.com/CopilotKit/OpenBot/releases/latest). Connect your model and start with the built-in Personal Assistant. Your model provider bills for usage separately.
+- **OpenBot for Business.** Deploy on your infrastructure with the [Helm chart](charts/openbot/README.md) or have CopilotKit host your workspace. Both options are in [early access](https://openbot.co/business). Our engineers can help you deploy and customize OpenBot for your team. [**Start the conversation**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme).
 
 ## What it is
 
@@ -70,6 +65,8 @@ To run the open-source template locally, you’ll need the following.
 - A model key. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google.
 
 ## Quick start
+
+The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the app as a local administrator. Configure [sign-in](#sign-in) before giving anyone else access. On a Mac, the free Developer plan also covers [running Intelligence locally](#intelligence-on-your-own-machine) with Docker.
 
 > **Setting up with an AI assistant?** Paste [`prompt.txt`](prompt.txt) into it first. It carries the
 > same steps as below plus the things that are easy to get wrong: which of the blank keys in
