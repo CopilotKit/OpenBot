@@ -563,6 +563,11 @@ export const auditEventTypes = [
   "routines.run_requested",
   /** An authenticated trigger (webhook, provider, email, Slack) queued a responsibility run. */
   "responsibility.triggered",
+  /**
+   * A Bot closed a responsibility, with the evidence it gave that the success criteria were met.
+   * A person closing one from its page is not this row: that is their own decision.
+   */
+  "responsibility.completed",
   /*
    * The approval gate and the person, kept apart so a reader never mistakes one for the other.
    *

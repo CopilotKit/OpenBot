@@ -90,6 +90,7 @@ export function createServerResponsibilityEngine(deps: {
           agentId: context.agentId,
           channelId: context.channelId,
           responsibilityRunId: context.runId,
+          auditStore: bootAuditStore,
         });
         const runner = createTurnRunner({
           ...(deps.productTelemetry

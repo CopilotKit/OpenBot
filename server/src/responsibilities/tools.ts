@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
+import { type AuditStore, recordAuditEvent } from "../audit";
 import type { ResponsibilityEngine } from "./engine";
 import {
   ResponsibilityNotFoundError,
@@ -18,6 +19,8 @@ export function responsibilityTools(options: {
   agentId: string;
   channelId: string;
   responsibilityRunId?: string;
+  /** Where a Bot closing a goal is recorded, with its evidence. Absent records nothing. */
+  auditStore?: AuditStore;
 }): GrantedTool[] {
   const {
     store,
@@ -26,12 +29,76 @@ export function responsibilityTools(options: {
     agentId,
     channelId,
     responsibilityRunId,
+    auditStore,
   } = options;
   const identity = z.object({ id: z.string().trim().min(1).max(128) });
   async function owned(id: string) {
     const goal = await store.get(ownerUserId, id);
     if (goal.agentId !== agentId) throw new ResponsibilityNotFoundError();
     return goal;
+  }
+  /**
+   * What shows the success criteria were met. Required whenever a Bot closes a goal.
+   *
+   * PROOF, NOT A CLAIM. The criteria are free text that no code can check, so the Bot has to say
+   * what it checked them against: a link, a file, a test name, a number. It is kept on the goal and
+   * on the trail, so a person reading a closed goal can see why it closed and check it themselves.
+   */
+  const evidenceSchema = z
+    .string()
+    .trim()
+    .min(1, "Say what shows the success criteria were met.")
+    .max(2000);
+
+  /** What the store keeps of a goal's progress, the summary and the evidence together. */
+  const PROGRESS_MAX = 6000;
+
+  async function close(id: string, summary: string, evidence: string) {
+    const goal = await owned(id);
+    // The evidence is kept whole: it is what a person checks. A long summary gives way to it.
+    const tail = `\n\nEvidence: ${evidence}`;
+    const room = PROGRESS_MAX - tail.length;
+    const kept =
+      summary.length > room
+        ? `${summary.slice(0, room - 1).trimEnd()}…`
+        : summary;
+    const closed = await store.recordProgress(
+      ownerUserId,
+      id,
+      {
+        summary: `${kept}${tail}`,
+        complete: true,
+        sourceRunId: responsibilityRunId,
+      },
+      agentId,
+    );
+    /*
+     * After the goal is closed, and its failure only logged, the same as a trigger's row: the goal
+     * did close, and telling the Bot otherwise would have it try to close a closed goal again.
+     */
+    if (auditStore)
+      await recordAuditEvent(auditStore, {
+        eventType: "responsibility.completed",
+        targetType: "responsibility",
+        targetId: id,
+        actorUserId: ownerUserId,
+        initiator: { kind: "responsibility", id },
+        payload: {
+          bot: agentId,
+          criteria: goal.successCriteria,
+          evidence,
+          ...(responsibilityRunId ? { run: responsibilityRunId } : {}),
+        },
+      }).catch((error) =>
+        console.error(
+          JSON.stringify({
+            type: "responsibility-completion-audit-failed",
+            responsibilityId: id,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        ),
+      );
+    return closed;
   }
   function tool<T>(
     name: string,
@@ -88,12 +155,19 @@ export function responsibilityTools(options: {
     ),
     tool(
       "report_responsibility_progress",
-      "Record concrete progress and evidence for a responsibility. Mark complete only when its success criteria have been met.",
-      identity.extend({
-        summary: z.string().trim().min(1).max(6000),
-        complete: z.boolean().optional(),
-      }),
-      async ({ id, summary, complete }) => {
+      "Record concrete progress for a responsibility. Mark complete only when its success criteria have been met, and then pass evidence: what you checked the criteria against (a link, a file, a test, a number).",
+      identity
+        .extend({
+          summary: z.string().trim().min(1).max(PROGRESS_MAX),
+          complete: z.boolean().optional(),
+          evidence: evidenceSchema.optional(),
+        })
+        .refine((value) => !value.complete || value.evidence, {
+          message:
+            "Pass evidence that the success criteria were met before marking the responsibility complete.",
+        }),
+      async ({ id, summary, complete, evidence }) => {
+        if (complete && evidence) return close(id, summary, evidence);
         await owned(id);
         return store.recordProgress(
           ownerUserId,
@@ -120,10 +194,17 @@ export function responsibilityTools(options: {
       },
     ),
   ];
+  tools.push(
+    tool(
+      "complete_responsibility",
+      "Close this Bot's owned responsibility once its success criteria are met. Pass evidence: what you checked the criteria against (a link, a file, a test, a number).",
+      identity.extend({ evidence: evidenceSchema }),
+      ({ id, evidence }) => close(id, "Completed.", evidence),
+    ),
+  );
   for (const [action, status] of [
     ["pause", "paused"],
     ["resume", "active"],
-    ["complete", "completed"],
   ] as const) {
     tools.push(
       tool(

@@ -150,6 +150,7 @@ test("an answer to a responsibility's question resumes it with its own tools, ru
           id: goal.id,
           summary: "Lunch: ramen",
           complete: true,
+          evidence: "The person answered: Ramen, please.",
         });
         return { replyText: "Ramen it is. Recorded." };
       };
@@ -176,7 +177,12 @@ test("an answer to a responsibility's question resumes it with its own tools, ru
     [
       owner,
       responsibility.id,
-      { summary: "Lunch: ramen", complete: true, sourceRunId: "run-latest" },
+      {
+        summary:
+          "Lunch: ramen\n\nEvidence: The person answered: Ramen, please.",
+        complete: true,
+        sourceRunId: "run-latest",
+      },
       "general-assistant",
     ],
   ]);

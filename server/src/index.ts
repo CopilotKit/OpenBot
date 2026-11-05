@@ -2105,6 +2105,7 @@ const responsibilityAnswerTurn = ({
     agentId: responsibility.agentId,
     channelId: responsibility.channelId,
     ...(responsibilityRunId ? { responsibilityRunId } : {}),
+    auditStore: bootAuditStore,
   });
   return createTurnRunner({
     prepareRunInput: prepareProductRunInput,
