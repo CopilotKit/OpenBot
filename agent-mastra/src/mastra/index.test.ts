@@ -224,6 +224,41 @@ describe("OpenBot Mastra receiver instructions", () => {
     );
   });
 
+  test("delivers the caller's context after OpenBot's, and never OpenBot's machine-only entries", () => {
+    // The server forwards whatever context the surface sent (`callerMastraContext` in
+    // server/src/copilot.ts). Every other harness puts it in front of the model; dropping it here
+    // left a Mastra Bot without, say, the component catalogue the surface asked it to draw from.
+    const instructions = buildOpenBotInstructions({
+      requestContext: requestContextWith([
+        {
+          description: "Components you can draw",
+          value: "CALLER_CATALOG_MARKER",
+        },
+        {
+          description: "OpenBot standing role",
+          value: "Follow company policy.",
+        },
+        {
+          description: "OpenBot signed run assertion",
+          value: "secret-assertion",
+        },
+        { description: "OpenBot Bot id", value: "packaged-mastra-managed" },
+        { description: "OpenBot deployment tools", value: '["message_bot"]' },
+        // Untrusted data: it reaches the model as a quoted conversation row, never as instructions.
+        { description: "OpenBot personal memory", value: "QUOTED_MEMORY" },
+        { description: "Blank", value: "   " },
+      ]),
+    });
+
+    expect(instructions).toBe(
+      [
+        openbotBaseInstructions,
+        "Follow company policy.",
+        "Components you can draw: CALLER_CATALOG_MARKER",
+      ].join("\n\n"),
+    );
+  });
+
   test("keeps ordinary Mastra calls on the base receiver instruction", () => {
     expect(buildOpenBotInstructions()).toBe(openbotBaseInstructions);
     expect(
