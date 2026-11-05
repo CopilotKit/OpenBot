@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot creates its Learning containers with the runtime key it already holds: the project's
+  `openbot` default at start (and from **Admin → Automatic Learning**), and each person's own space
+  when they connect a browser. This needs Intelligence 0.16.0 or later. The other ways of creating
+  them are gone: the CopilotKit CLI login on the machine, `INTELLIGENCE_SERVICE_TOKEN` with
+  `INTELLIGENCE_PROJECT_ID`, the Helm chart's Learning setup Job with
+  `config.learning.setup.cliLoginSecret` or `serviceTokenSecret`, and the Learning check
+  `scripts/start.sh` ran on every start. Those settings are now ignored, and can be removed. On an
+  older Intelligence the server log and the Admin page say to upgrade, or to create a container with
+  ID `openbot` in Intelligence by hand. See [Creating the container](docs/automatic-learning.md#creating-the-container).
 - The desktop installers are served from `downloads.copilotkit.ai`, the address the website links
   to. `https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg`, `OpenBot-mac-x64.dmg` and
   `OpenBot-windows-x64-setup.exe` give the signed installers of the Latest stable release, never a
