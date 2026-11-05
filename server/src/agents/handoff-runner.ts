@@ -106,6 +106,13 @@ export type HandoffRunReport = {
 const RENEW_EVERY_MS = 20_000;
 
 /**
+ * The waits between tries of a hop whose conversation is busy: five seconds, doubling, never more
+ * than a minute. The delivery has already waited up to `BUSY_WAIT_MS` for it each time.
+ */
+const BUSY_RETRY_FIRST_MS = 5_000;
+const BUSY_RETRY_MAX_MS = 60_000;
+
+/**
  * How long a hop that is over is kept before it is dropped.
  *
  * Long past the point where its key still has to stop a duplicate — that is the asking run's own
@@ -129,6 +136,16 @@ export function createHandoffRunner(options: {
   limit?: number;
   /** After how many tries a hop is given up on. Told to `claim` as well as gating the notice. */
   maxAttempts?: number;
+  /**
+   * Why a hop waiting on a busy conversation is no longer wanted there, or null while it is.
+   *
+   * A busy conversation is waited out for as long as it takes, so something has to say when there
+   * is no longer anything to wait for: the conversation was deleted, or the Bot that would speak in
+   * it was. Answered only from positive evidence; a conversation it cannot place is waited for.
+   */
+  answerGone?: (work: HandoffWork) => Promise<string | null>;
+  /** The first wait after a busy conversation, doubled each time up to `BUSY_RETRY_MAX_MS`. */
+  busyRetryFirstMs?: number;
   /**
    * How often a claim is refreshed. Comfortably inside the lease.
    *
@@ -155,8 +172,43 @@ export function createHandoffRunner(options: {
     limit = 5,
     maxAttempts = DEFAULT_MAX_ATTEMPTS,
     renewEveryMs = RENEW_EVERY_MS,
+    busyRetryFirstMs = BUSY_RETRY_FIRST_MS,
+    answerGone,
     onSettled,
   } = options;
+
+  /**
+   * The hop recorded as never delivered, and over. The row a person's unanswered question ends on,
+   * so it says why in words: never a silent drop.
+   */
+  const notDelivered = async (
+    report: HandoffRunReport,
+    work: HandoffWork,
+    item: { key: string; attempts: number },
+    reason: string,
+    startedAt?: number,
+  ) => {
+    await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
+    report.skipped.push({ key: item.key, reason });
+    await settled(work);
+    await recordAuditEvent(auditStore, {
+      eventType: "agent.handoff_failed",
+      targetType: "agent",
+      targetId: work.toBotId,
+      ...(work.actorId ? { actorUserId: work.actorId } : {}),
+      initiator: { kind: "handoff", id: work.fromBotId },
+      payload: {
+        bot: work.fromBotId,
+        from: work.fromBotId,
+        to: work.toBotId,
+        run: work.runId,
+        attempt: item.attempts,
+        reason: `not delivered: ${reason}`,
+        final: true,
+        ...(startedAt === undefined ? {} : { ms: Date.now() - startedAt }),
+      },
+    });
+  };
 
   const settled = async (work: HandoffWork) => {
     try {
@@ -332,12 +384,11 @@ export function createHandoffRunner(options: {
             report.skipped.push({ key: item.key, reason: "not a hop" });
             continue;
           }
-          // A hop to a Bot its person paused is dropped, not delivered. See agents/lifecycle.ts.
+          // A hop to a Bot its person paused is dropped, not delivered, and recorded as such. See
+          // agents/lifecycle.ts.
           if (await isBotPaused(work.actorId, work.toBotId)) {
-            await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
             ours.delete(item.key);
-            report.skipped.push({ key: item.key, reason: BOT_PAUSED_REASON });
-            await settled(work);
+            await notDelivered(report, work, item, BOT_PAUSED_REASON);
             continue;
           }
 
@@ -485,6 +536,41 @@ export function createHandoffRunner(options: {
             const reason =
               error instanceof Error ? error.message : "could not be delivered";
             /*
+             * A CONVERSATION SOMEBODY ELSE IS RUNNING IN IS NOT A FAILURE, and does not spend an
+             * attempt: nothing was started, and the attempts are for things that went wrong. A
+             * relay counted down by a person's long run used to run out of attempts and was dropped
+             * with nobody told, the answer lost. Now it is put back uncounted and tried again,
+             * backing off to a minute between tries, until the conversation frees, or until there
+             * is no conversation or Bot left to answer in, which is recorded as not delivered.
+             */
+            if (error instanceof ThreadBusyError) {
+              ours.delete(item.key);
+              const gone = await answerGone?.(work).catch(() => null);
+              if (gone) {
+                await notDelivered(report, work, item, gone, startedAt);
+                continue;
+              }
+              const waited = Number(
+                (item.payload as { busyRetries?: unknown }).busyRetries ?? 0,
+              );
+              const busyRetries = Number.isFinite(waited) ? waited : 0;
+              await queue.release({
+                kind: HANDOFF_KIND,
+                key: item.key,
+                owner,
+                delayMs: Math.min(
+                  busyRetryFirstMs * 2 ** busyRetries,
+                  BUSY_RETRY_MAX_MS,
+                ),
+                reason,
+                uncounted: true,
+                payload: { busyRetries: busyRetries + 1 },
+              });
+              report.skipped.push({ key: item.key, reason });
+              await settled(work);
+              continue;
+            }
+            /*
              * The last try, so the person is told rather than left waiting.
              *
              * Enqueued before the release, because the release is what makes this attempt the last
@@ -522,14 +608,7 @@ export function createHandoffRunner(options: {
                 kind: HANDOFF_KIND,
                 key: item.key,
                 owner,
-                // The delivery already waited for a busy conversation (`BUSY_WAIT_MS` in
-                // handoff-delivery.ts), so one still busy is a longer run; the first retry still
-                // comes quickly, and later tries keep the minute, so a person mid-conversation still
-                // gets the same few minutes of patience.
-                delayMs:
-                  error instanceof ThreadBusyError && item.attempts <= 1
-                    ? 5_000
-                    : 60_000,
+                delayMs: 60_000,
                 reason,
               });
             ours.delete(item.key);

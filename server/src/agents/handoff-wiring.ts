@@ -9,7 +9,12 @@ import type { ThreadIdentity } from "../channels/thread-identity";
 import type { DeploymentConfig } from "../config";
 import type { mountCopilotRuntime } from "../copilot";
 import type { Database } from "../db/client";
-import { intelligenceChannelMappings } from "../db/schema";
+import {
+  agentProfiles,
+  channels,
+  groupBotThreads,
+  intelligenceChannelMappings,
+} from "../db/schema";
 import type { ProductTelemetry } from "../telemetry/product";
 import {
   productHandoffAnalyticsContext,
@@ -23,10 +28,51 @@ import {
 } from "../work/queue";
 import { HANDOFF_KIND } from "./handoff";
 import { createHandoffDelivery } from "./handoff-delivery";
-import { createHandoffRunner } from "./handoff-runner";
+import { createHandoffRunner, type HandoffWork } from "./handoff-runner";
 import { signHandoffDeliveryRun } from "./handoff-signing";
 import type { AgentActor } from "./profile-types";
 import { serverTurnAdmission } from "./turn-admission";
+
+/**
+ * Why a hop waiting on its busy conversation has nowhere left to go, read from this deployment's
+ * own rows, or null while it does.
+ *
+ * Only a hop that answers in a conversation (`answerIn`) waits on one. Gone means positively gone:
+ * the Bot that would speak was deleted, or the conversation the thread belongs to was. A thread this
+ * cannot place is waited for, since a lock nobody renews lapses on its own within two minutes.
+ */
+export function answerGoneFrom(database: Database) {
+  return async (work: HandoffWork): Promise<string | null> => {
+    const threadId = work.answerIn;
+    if (!threadId) return null;
+    const [bot] = await database
+      .select({ deletedAt: agentProfiles.deletedAt })
+      .from(agentProfiles)
+      .where(eq(agentProfiles.agentId, work.toBotId))
+      .limit(1);
+    if (bot?.deletedAt) return "the Bot it was to speak as was deleted";
+    const [direct] = await database
+      .select({ deletedAt: channels.deletedAt })
+      .from(intelligenceChannelMappings)
+      .innerJoin(
+        channels,
+        eq(channels.id, intelligenceChannelMappings.channelId),
+      )
+      .where(eq(intelligenceChannelMappings.threadId, threadId))
+      .limit(1);
+    const [group] = direct
+      ? []
+      : await database
+          .select({ deletedAt: channels.deletedAt })
+          .from(groupBotThreads)
+          .innerJoin(channels, eq(channels.id, groupBotThreads.channelId))
+          .where(eq(groupBotThreads.threadId, threadId))
+          .limit(1);
+    if ((direct ?? group)?.deletedAt)
+      return "the conversation it was going to was deleted";
+    return null;
+  };
+}
 
 /**
  * Handing work between Bots, started on this replica: the runner that claims hops, the delivery
@@ -69,6 +115,7 @@ export async function startHandoffDelivery(deps: {
       signHandoffDeliveryRun(work, config.keyEncryptionKey, undefined, claim),
     // The asking conversation, told what it is waiting on once the queue has moved for a hop.
     onSettled: (work) => channelStore.signalWork(work.threadId),
+    answerGone: answerGoneFrom(database),
     delivery: createHandoffDelivery({
       ...(productTelemetry
         ? {

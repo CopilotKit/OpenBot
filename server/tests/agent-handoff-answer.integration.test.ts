@@ -12,7 +12,7 @@ import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
 import { answeredBy } from "@openbot/shared/handoff-markers";
 import { IntelligenceKnowingANewThread } from "@openbot/toolkit/copilotkit/agents";
 import { createIntelligenceThreadLock } from "@openbot/toolkit/copilotkit/thread-lock";
-import { and, eq, like, sql } from "drizzle-orm";
+import { and, eq, gte, like, sql } from "drizzle-orm";
 import { Observable } from "rxjs";
 import { z } from "zod";
 import { askTheirOwnPerson } from "../src/agents/escalation";
@@ -22,6 +22,7 @@ import {
   type ThreadRunner,
 } from "../src/agents/handoff-delivery";
 import { createHandoffRunner } from "../src/agents/handoff-runner";
+import { answerGoneFrom } from "../src/agents/handoff-wiring";
 import {
   createCoordinationTools,
   handoffTool,
@@ -713,7 +714,51 @@ describe("an answer that comes home while the asking Bot is still finishing", ()
         ),
       );
 
+  const relayKey = and(
+    eq(workItems.kind, HANDOFF_KIND),
+    like(workItems.key, "relay:%"),
+    sql`${workItems.payload}->>'actorId' = ${ACTOR}`,
+  );
+  const relayRows = async () =>
+    (
+      await database
+        .select({
+          attempts: workItems.attempts,
+          // Measured on the database's clock, which is the one that set it.
+          waitS: sql<number>`extract(epoch from (${workItems.runAt} - now()))::float8`,
+          payload: workItems.payload,
+        })
+        .from(workItems)
+        .where(relayKey)
+    ).map((row) => ({
+      ...row,
+      payload: row.payload as { busyRetries?: number },
+    }));
+  /** The relay due now, rather than after its backoff, so a test of many tries takes no minutes. */
+  const dueNow = () =>
+    database
+      .update(workItems)
+      .set({ runAt: sql`now() - interval '1 second'` })
+      .where(relayKey);
+  /** When this test began, so the trail read is this test's own. */
+  let since = new Date();
+  /** The failure rows written for this person's hops in this test. */
+  const failureRows = async () =>
+    (
+      await database
+        .select({ payload: auditEvents.payload })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.actorUserId, ACTOR),
+            eq(auditEvents.eventType, "agent.handoff_failed"),
+            gte(auditEvents.createdAt, since),
+          ),
+        )
+    ).map((row) => row.payload as Record<string, unknown>);
+
   async function handedToKnowledge() {
+    since = new Date();
     endpoint = startOpenAICompatibleEndpoint();
     const built = await botsAgainst(endpoint.baseUrl);
     const intelligence = platform();
@@ -728,6 +773,8 @@ describe("an answer that comes home while the asking Bot is still finishing", ()
         owner,
         sign: () => "signed",
         auditStore,
+        // The server's own check, and the queue's real attempt budget (five).
+        answerGone: answerGoneFrom(database),
         delivery: createHandoffDelivery({
           admission: serverTurnAdmission,
           agentFor: async ({ botId }) =>
@@ -799,50 +846,97 @@ describe("an answer that comes home while the asking Bot is still finishing", ()
     }
   });
 
-  test("busy past the wait, it goes back on the queue, is not lost, and lands once when free", async () => {
+  /*
+   * The bug after the first fix: a conversation busy for longer than the queue's five attempts ran
+   * the relay out of attempts, and the answer was dropped with nobody told. A held lock is not a
+   * failure: it spends no attempt, and the relay keeps trying, backing off, until the lock frees.
+   */
+  test("busy for longer than five attempts, it spends none, is not lost, and lands once when free", async () => {
     const { intelligence, locks, replica } = await handedToKnowledge();
     const printed = spyOn(console, "error").mockImplementation(() => {});
     try {
       expect(
-        (await replica(`replica-a-${suite}`, 300).sweep()).delivered,
+        (await replica(`replica-a-${suite}`, 20).sweep()).delivered,
       ).toContain(KNOWLEDGE);
 
-      // The person is mid-question in that conversation for longer than a hop waits.
-      const busy = await replica(`replica-b-${suite}`, 300).sweep();
-      expect(busy.delivered).toEqual([]);
-      expect(busy.skipped).toEqual([
-        expect.objectContaining({
-          reason: expect.stringContaining("busy with another run"),
-        }),
-      ]);
+      // The person runs in that conversation across eight tries, more than the five the queue allows.
+      for (let attempt = 1; attempt <= 8; attempt++) {
+        const busy = await replica(
+          `replica-${attempt % 2 ? "b" : "a"}-${suite}`,
+          20,
+        ).sweep();
+        expect(busy.delivered).toEqual([]);
+        expect(busy.skipped).toEqual([
+          expect.objectContaining({
+            reason: expect.stringContaining("busy with another run"),
+          }),
+        ]);
+        // Nothing spent, and the wait before the next try grows: 5 s, 10 s, 20 s, 40 s, then a minute.
+        const [row] = await relayRows();
+        expect(row?.attempts).toBe(0);
+        expect(row?.payload.busyRetries).toBe(attempt);
+        const expected = Math.min(5 * 2 ** (attempt - 1), 60);
+        expect(Number(row?.waitS)).toBeLessThanOrEqual(expected);
+        expect(Number(row?.waitS)).toBeGreaterThan(expected - 5);
+        await dueNow();
+      }
       expect(answersIn(intelligence, THREAD)).toEqual([]);
-      expect(await relays()).toEqual([{ attempts: 1, finishedAt: null }]);
+      // Waiting is not failing: no failure row for any of those tries.
+      expect(await failureRows()).toEqual([]);
 
-      // Their run ends; the hop is due again (made due now rather than in five seconds).
+      // Their run ends.
       locks.free(THREAD);
-      await database
-        .update(workItems)
-        .set({ runAt: new Date() })
-        .where(
-          and(
-            eq(workItems.kind, HANDOFF_KIND),
-            like(workItems.key, "relay:%"),
-            sql`${workItems.payload}->>'actorId' = ${ACTOR}`,
-          ),
-        );
-      const later = await replica(`replica-a-${suite}`, 300).sweep();
+      const later = await replica(`replica-a-${suite}`, 20).sweep();
       expect(later).toEqual({ delivered: [ASKER], skipped: [] });
 
       const answers = answersIn(intelligence, THREAD);
       expect(answers).toHaveLength(1);
       expect(answeredBy(answers[0]?.id ?? "")).toBe(KNOWLEDGE);
+      expect(await relays()).toEqual([
+        { attempts: 1, finishedAt: expect.any(Date) },
+      ]);
       expect(
-        (await replica(`replica-b-${suite}`, 300).sweep()).delivered,
+        (await replica(`replica-b-${suite}`, 20).sweep()).delivered,
       ).toEqual([]);
       expect(answersIn(intelligence, THREAD)).toHaveLength(1);
       expect(failedPrints(printed)).toEqual([]);
     } finally {
       printed.mockRestore();
     }
+  });
+
+  test("a Bot deleted while its conversation is busy is recorded as not delivered, never silently dropped", async () => {
+    const { intelligence, replica } = await handedToKnowledge();
+    expect(
+      (await replica(`replica-a-${suite}`, 20).sweep()).delivered,
+    ).toContain(KNOWLEDGE);
+    expect((await replica(`replica-b-${suite}`, 20).sweep()).delivered).toEqual(
+      [],
+    );
+
+    // The person deletes General Assistant, whose conversation the answer was going to.
+    await database
+      .update(agentProfiles)
+      .set({ deletedAt: new Date() })
+      .where(eq(agentProfiles.agentId, ASKER));
+    await dueNow();
+    const over = await replica(`replica-a-${suite}`, 20).sweep();
+    expect(over.delivered).toEqual([]);
+    expect(over.skipped).toEqual([
+      expect.objectContaining({
+        reason: "the Bot it was to speak as was deleted",
+      }),
+    ]);
+    expect(await relays()).toEqual([
+      { attempts: 1, finishedAt: expect.any(Date) },
+    ]);
+    expect(await failureRows()).toEqual([
+      expect.objectContaining({
+        reason: "not delivered: the Bot it was to speak as was deleted",
+        final: true,
+        to: ASKER,
+      }),
+    ]);
+    expect(answersIn(intelligence, THREAD)).toEqual([]);
   });
 });
