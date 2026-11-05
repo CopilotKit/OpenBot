@@ -153,18 +153,30 @@ def _role_first(input: RunAgentInput) -> RunAgentInput:
     return input.model_copy(update={"messages": rest})
 
 
+def _answer_from_elsewhere(message, pending) -> bool:
+    """Whether `message` is an assistant reply a session waiting on calls `pending` did not make."""
+    if message.role != "assistant":
+        return False
+    calls = [call.id for call in message.tool_calls or []]
+    if calls:
+        return any(call not in pending for call in calls)
+    return bool(message.content)
+
+
 def _missed_a_turn(messages, seen, pending) -> bool:
     """Whether a session with ledger `seen`, waiting on tool calls `pending`, missed part of the thread.
 
     It did when an earlier user message is not in its ledger, unless this run brings the result of
     a call it waits on (after the newest user message): that result belongs to the session's
     pending call. It also did when the thread already holds an answer after the result of a call it
-    still waits on: another replica took that result and replied.
+    still waits on: another replica took that result and replied. An assistant message that carries
+    only calls the session waits on is not an answer but its own turn: the thread may record calls
+    the model made together one message each, between their results.
     """
     users = [i for i, m in enumerate(messages) if m.role == "user" and m.id]
     latest = users[-1] if users else -1
     results = [i for i, m in enumerate(messages) if m.role == "tool" and m.tool_call_id in pending]
-    if any(m.role == "assistant" for i in results for m in messages[i + 1:]):
+    if any(_answer_from_elsewhere(m, pending) for i in results for m in messages[i + 1:]):
         return True
     if all(messages[i].id in seen for i in users[:-1]):
         return False

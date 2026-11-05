@@ -293,10 +293,11 @@ ANSWERED_ELSEWHERE = "CONTRACT_ANSWERED_ELSEWHERE_adk"
 
 
 @contextmanager
-def _tool_provider():
+def _tool_provider(parallel=1):
     """A Chat Completions model that calls `TOOL_NAME` when asked to and has no result yet.
 
-    Yields `(base_url, bodies)`, every request body in arrival order.
+    It makes `parallel` calls at once. Yields `(base_url, bodies)`, every request body in arrival
+    order.
     """
     bodies = []
 
@@ -314,12 +315,15 @@ def _tool_provider():
             if asked and not answered:
                 delta = {
                     "role": "assistant",
-                    "tool_calls": [{
-                        "index": 0,
-                        "id": "call_probe",
-                        "type": "function",
-                        "function": {"name": TOOL_NAME, "arguments": '{"request_id":"probe"}'},
-                    }],
+                    "tool_calls": [
+                        {
+                            "index": n,
+                            "id": f"call_probe_{n}",
+                            "type": "function",
+                            "function": {"name": TOOL_NAME, "arguments": f'{{"request_id":"probe-{n}"}}'},
+                        }
+                        for n in range(parallel)
+                    ],
                 }
                 reason = "tool_calls"
             base = {"id": "c", "object": "chat.completion.chunk", "created": 0, "model": body["model"]}
@@ -468,4 +472,72 @@ def test_a_tool_result_for_this_process_continues_its_session(monkeypatch):
     assert continued == [[]], "the answered call was still pending"
     assert [m for m in body["messages"] if m["role"] == "tool"], body
     assert NEWER_QUESTION in json.dumps(body)
+    assert missing_from(body) == []
+
+
+@pytest.mark.parametrize("shape", ["one message", "grouped", "interleaved"])
+def test_parallel_tool_results_for_this_process_continue_its_session(monkeypatch, shape):
+    """Two calls at once, and their results sent back: the session goes on, and is not rebuilt.
+
+    The thread may hold the calls in one assistant message or one each, and an assistant message
+    carrying a call this session waits on is part of its own turn, not an answer from elsewhere.
+    """
+    with _tool_provider(parallel=2) as (base, bodies):
+        main = _app(monkeypatch, openai_environment, base)
+        manager = _session_manager(main)
+        deleted = []
+        original = manager._delete_session
+
+        async def recording(session):
+            deleted.append(session.id)
+            await original(session)
+
+        monkeypatch.setattr(manager, "_delete_session", recording)
+
+        async def turns():
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=main.app), base_url="http://harness"
+            ) as client:
+                first = conversation(thread_id=f"parallel-{shape}", run_id="r1")
+                first["tools"] = [TOOL]
+                first["messages"][-1]["content"] += f" {TOOL_TRIGGER}"
+                events = await _post(client, first)
+                calls = [e for e in events if e["type"] == "TOOL_CALL_START"]
+                assert len(calls) == 2, events
+                session = await manager.get_session(f"parallel-{shape}", "openbot", "openbot")
+                assert sorted(session.state.get("pending_tool_calls")) == sorted(
+                    c["toolCallId"] for c in calls
+                )
+
+                def tool_call(c):
+                    arguments = "".join(
+                        e["delta"] for e in events
+                        if e["type"] == "TOOL_CALL_ARGS" and e["toolCallId"] == c["toolCallId"]
+                    )
+                    return {
+                        "id": c["toolCallId"],
+                        "type": "function",
+                        "function": {"name": TOOL_NAME, "arguments": arguments},
+                    }
+
+                def result(n, c):
+                    return {"id": f"result-{n}", "role": "tool", "toolCallId": c["toolCallId"], "content": f'{{"value": {n}}}'}
+
+                def assistant(n, cs):
+                    return {"id": f"assistant-call-{n}", "role": "assistant", "toolCalls": [tool_call(c) for c in cs]}
+
+                tail = {
+                    "one message": [assistant(0, calls), result(0, calls[0]), result(1, calls[1])],
+                    "grouped": [assistant(0, calls[:1]), assistant(1, calls[1:]), result(0, calls[0]), result(1, calls[1])],
+                    "interleaved": [assistant(0, calls[:1]), result(0, calls[0]), assistant(1, calls[1:]), result(1, calls[1])],
+                }[shape]
+                called = len(bodies)
+                await _post(client, {**first, "runId": "r2", "messages": [*first["messages"], *tail]})
+                assert len(bodies) > called, "the model was not called with the results"
+                return bodies[-1]
+
+        body = asyncio.run(asyncio.wait_for(turns(), timeout=60))
+    assert deleted == [], "the session waiting on both calls was rebuilt"
+    results = [m for m in body["messages"] if m["role"] == "tool"]
+    assert len(results) == 2, body
     assert missing_from(body) == []
