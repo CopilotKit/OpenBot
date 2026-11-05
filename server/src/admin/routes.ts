@@ -121,7 +121,7 @@ export function createEnterpriseAdminRoutes(
 
   const unavailable = (context: Context) =>
     context.json(
-      { error: "Enterprise controls are not running on this server." },
+      { error: "Admin settings aren't available on this server." },
       503,
     );
 
@@ -483,7 +483,7 @@ export function createProactiveAdminRoutes(
     const controls = enterpriseControls();
     if (!controls)
       return context.json(
-        { error: "Enterprise controls are not running on this server." },
+        { error: "Admin settings aren't available on this server." },
         503,
       );
     const parsed = parseMetricsDays(context.req.query("days") ?? null);

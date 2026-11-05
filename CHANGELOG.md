@@ -12,10 +12,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   composer, including before the first message. The list is read from the model provider, or from
   the gateway in `OPENAI_BASE_URL`, filtered to chat models and to the model allowlist. The pick is
   kept per person and conversation, and every run there uses it, including routines. Off by default
-  in the team edition: an admin turns it on under Admin, Enterprise controls, Models, "Let people
-  choose a model". Turning it off puts every run back on the configured model and keeps the saved
+  in the team edition: an admin turns it on under Admin, Providers, "Let people choose a model".
+  Turning it off puts every run back on the configured model and keeps the saved
   picks. Always on in the personal edition. Adds a nullable column (migration
   `0076_model_selection`). Bots on their own framework, plans, and groups keep their own model.
+- Admin's Enterprise controls page is gone. Each of its sections now sits on the page it governs:
+  what people may do is on the new **Permissions** page; the model switch, the model allowlist and
+  model usage are on the new **Providers** page, beside the provider that serves the models; Require
+  SSO and SCIM are on Identity providers; the network policy and stopping idle computers are on
+  Computers; the MCP server allowlist is on Plugins; Skill sharing is on Automatic learning; and
+  Action Recording and the OpenTelemetry export are on Audit. Both new pages are in the Admin
+  sidebar. An old link to Enterprise controls opens the Admin overview.
+- The model allowlist is picked from the provider's own list of models, searchable, with the
+  configured model marked. A model the list doesn't have, such as a remote Bot's, is added by its
+  `provider/model` name.
 - The conversation composer is two rows: the message box, then attach and the model on the left,
   dictation and send on the right. It no longer draws a focus ring, and opening a conversation puts
   the caret in it.

@@ -160,7 +160,7 @@ export function enterpriseControls(): EnterpriseControls | undefined {
 }
 
 /**
- * Skill sharing (Admin, Enterprise controls): whether people may open their Skills to every Bot. Off until the
+ * Skill sharing (Admin, Automatic learning): whether people may open their Skills to every Bot. Off until the
  * controls have read it, like every switch here. For a person's change, read fresh from the database.
  */
 export async function skillSharingAllowed(): Promise<boolean> {
