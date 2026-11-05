@@ -16,12 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
 
 from agno.agent import Agent
-from agno.db.in_memory import InMemoryDb
 from agno.models.litellm import LiteLLM
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
 from fastapi import Request
 from fastapi.responses import JSONResponse
+
+from .conversation import PausedRunsDb, add_run_context
+from .conversation import install as answer_from_the_whole_thread
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -43,10 +45,16 @@ def _model_id() -> str:
     return f"{provider}/{model}"
 
 
+# Before the app is built: Agno's AG-UI router would otherwise send the model only the newest line.
+answer_from_the_whole_thread(_model_id())
+
 agent = Agent(
     # In memory, because a Bot's history lives in OpenBot's database and not in the harness. Two
-    # places remembering the same conversation is how they come to disagree.
-    db=InMemoryDb(),
+    # places remembering the same conversation is how they come to disagree. The server sends all
+    # of it on every run, and `conversation.py` is what hands it to the model. The store holds only
+    # a run that is waiting for a client tool's result, which is what the router resumes from.
+    db=PausedRunsDb(),
+    pre_hooks=[add_run_context],
     # `drop_params`, because Agno sends a temperature and a `top_p` on every request and LiteLLM
     # refuses both for a reasoning model, the default `gpt-5.5` among them: every run on an OpenAI
     # key failed before it reached OpenAI. A parameter a model does not take is dropped instead,
