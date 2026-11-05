@@ -77,6 +77,7 @@ export function createApprovalResumeTick(deps: {
             headlessTurnRefusal({
               ownerUserId: action.actorId,
               agentId: action.botId,
+              threadId: action.threadId,
             }),
           validate: (action) =>
             approvalService.validateReentry(action, () =>

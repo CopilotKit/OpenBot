@@ -231,6 +231,7 @@ export function createHandoffDelivery(options: {
       const paused = await admission({
         ownerUserId: work.actorId,
         agentId: work.toBotId,
+        threadId: work.answerIn ?? undefined,
       });
       /*
        * An answer going home is said, not generated. The Bot that was asked has already answered;

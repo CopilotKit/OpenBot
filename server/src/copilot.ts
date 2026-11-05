@@ -79,8 +79,6 @@ import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
-import type { ProductTelemetry } from "./telemetry/product";
-import { productRuntimeHook } from "./telemetry/product-boundaries";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { capturePassOrigin } from "./intelligence-gateway-proxy";
 import { RemoteLearnedSkillsMiddleware } from "./learning/remote";
@@ -105,6 +103,8 @@ import {
 } from "./plugins/selection";
 import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
+import type { ProductTelemetry } from "./telemetry/product";
+import { productRuntimeHook } from "./telemetry/product-boundaries";
 import { inlineToolImages } from "./tool-images";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
@@ -736,6 +736,11 @@ export async function buildAgents(
    * every Bot this deployment runs itself; the runtime's own map passes {@link isAskedRun}.
    */
   holdsTools?: HoldsTools,
+  /**
+   * The model the person picked for the conversation a run answers in. Appended last for the
+   * positional reason `loadInstructions` gives. Absent, every run uses the deployment's model.
+   */
+  pickedModel?: PickedModel,
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -794,6 +799,7 @@ export async function buildAgents(
           acquireLearnedSkills,
           recordToolLimitRefusal,
           holdsTools,
+          pickedModel,
         );
         if (loadPersonalMemory)
           built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
@@ -1060,6 +1066,8 @@ async function buildAgent(
   recordToolLimitRefusal?: RecordToolLimitRefusal,
   /** Which runs may hold the Bot's tools. See {@link buildAgents}. */
   holdsTools?: HoldsTools,
+  /** The model the person picked for this conversation. See {@link buildAgents}. */
+  pickedModel?: PickedModel,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -1194,10 +1202,11 @@ async function buildAgent(
    * over the limit fails on every message until somebody looks, and nobody looks at what they cannot
    * see. Ported from #948, with the limit read from the API the runtime resolves.
    */
-  const limit = model.plan ? null : toolLimitFor(model, apiKey ?? undefined);
-  const admitTools = (waiting: ReadonlySet<string>) => {
+  const limitFor = (runModel: RuntimeModel) =>
+    runModel.plan ? null : toolLimitFor(runModel, apiKey ?? undefined);
+  const admitTools = (waiting: ReadonlySet<string>, runModel: RuntimeModel) => {
     const capacity =
-      limit ??
+      limitFor(runModel) ??
       (waiting.size > 0
         ? { provider: OPENBOT_TOOL_LIMIT, limit: MODEL_TOOL_LIMIT }
         : null);
@@ -1239,6 +1248,8 @@ async function buildAgent(
     signal?: AbortSignal,
     learnedSkills?: LearnedSkillInvocation,
     pinned?: ReadonlySet<string>,
+    /** The model this run asked for and was allowed, or the deployment's. */
+    runModel: RuntimeModel = model,
   ) => {
     /*
      * What waits behind a search, decided where the run's tools are final. The count includes what
@@ -1254,7 +1265,7 @@ async function buildAgent(
     });
     const configuration = builtInAgentConfiguration(
       agent,
-      model,
+      runModel,
       apiKey,
       tools,
       computerGuidance,
@@ -1278,7 +1289,7 @@ async function buildAgent(
     )
       ? waiting
       : new Set<string>();
-    const admit = admitTools(held);
+    const admit = admitTools(held, runModel);
     return new BuiltInAgentWithSaneHistory(configuration, {
       observe: observeModelConnection,
       ...(admit ? { admitTools: admit } : {}),
@@ -1305,6 +1316,7 @@ async function buildAgent(
   const whole = withTools(granted);
   // Even a small app grant may need search once the client's tools arrive with the run.
   if (
+    !pickedModel &&
     !narrowing &&
     !handoff &&
     !model.plan &&
@@ -1318,12 +1330,16 @@ async function buildAgent(
     { agentId: agent.id, description: agent.name },
     whole,
     async (input, signal) => {
+      const runModel = await modelForRun(model, input, pickedModel);
+      signal.throwIfAborted();
       /*
        * A run the runtime makes for itself holds nothing of the Bot's: no grant, no subagent, no
        * handoff, no learned Skill. Built again with none, rather than told not to call them, so a
        * model that asks for one anyway asks for a tool this run does not have. See `isAskedRun`.
+       * It still answers on the conversation's model, which is the one the gate judged and recorded.
        */
-      if (holdsTools && !holdsTools(input)) return withTools([], input, signal);
+      if (holdsTools && !holdsTools(input))
+        return withTools([], input, signal, undefined, undefined, runModel);
       const learnedSkills = await acquireLearnedSkills?.(agent.id, signal);
       signal.throwIfAborted();
       if (
@@ -1354,13 +1370,14 @@ async function buildAgent(
       // Nothing added and nothing narrowed means nothing to rebuild, and reusing the agent already
       // built for this request keeps that path allocation-for-allocation what it was.
       return !model.plan &&
+        runModel === model &&
         !learnedSkills &&
         tools.length === granted.length &&
         passing.length === 0 &&
         pinned.size === 0 &&
         input.tools.length === 0
         ? whole
-        : withTools(tools, input, signal, learnedSkills, pinned);
+        : withTools(tools, input, signal, learnedSkills, pinned, runModel);
     },
   );
 }
@@ -1992,8 +2009,13 @@ export async function resolveRuntimeAgents(
   loadPersonalMemory?: LoadPersonalMemory,
   /** Appended after `loadPersonalMemory`, for the positional reason `loadInstructions` gives. */
   recordToolLimitRefusal?: RecordToolLimitRefusal,
-  /** Appended last, for the same positional reason. See {@link buildAgents}. */
+  /** After `recordToolLimitRefusal`, for the same positional reason. See {@link buildAgents}. */
   holdsTools?: HoldsTools,
+  /**
+   * The model the person picked for the conversation a run answers in. Appended last for the
+   * positional reason `loadInstructions` gives. Absent, every run uses the deployment's model.
+   */
+  pickedModel?: PickedModel,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -2032,7 +2054,37 @@ export async function resolveRuntimeAgents(
     loadPersonalMemory,
     recordToolLimitRefusal,
     holdsTools,
+    pickedModel,
   );
+}
+
+/**
+ * The model the person picked for the conversation this run answers in, already checked against
+ * what the deployment offers, or undefined for the configured one. Read by the server from its own
+ * record of the pick (`channels/model-choice.ts`), never from anything the request carries.
+ */
+export type PickedModel = (input: RunAgentInput) => Promise<string | undefined>;
+
+/**
+ * The model one run of a built-in Bot uses: the person's pick for this conversation, or the
+ * deployment's own.
+ *
+ * Decided here, on the server, and never by the runtime's own `forwardedProps.model` override. That
+ * one takes any `provider/model` string from the browser and sends it with this deployment's key,
+ * past the allowlist and past the tool-search wrapper this file puts around the model. Here the pick
+ * comes from the server's own record and goes through the same configuration as the default.
+ *
+ * A plan's harness picks its own model and is sent none, so a plan ignores the pick.
+ */
+export async function modelForRun(
+  model: RuntimeModel,
+  input: RunAgentInput,
+  pickedModel: PickedModel | undefined,
+): Promise<RuntimeModel> {
+  if (!pickedModel || model.plan) return model;
+  const picked = await pickedModel(input);
+  if (!picked || picked === model.defaultModel) return model;
+  return { ...model, defaultModel: picked };
 }
 
 /** What one Bot may call, for the person whose request this is. */

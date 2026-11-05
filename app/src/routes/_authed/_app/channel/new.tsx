@@ -11,6 +11,7 @@ import {
   startsGroup,
   toFieldChange,
 } from "@/components/channels/compose-state";
+import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
@@ -31,7 +32,12 @@ import {
   agentQueryOptions,
 } from "@/lib/agents/queries";
 import { useStartChannel } from "@/lib/channels/start";
-import { useSkillCommands } from "@/lib/plugins/skill-commands";
+import { modelCatalogueQueryOptions } from "@/lib/models/queries";
+import { useDraftModel } from "@/lib/models/run-model";
+import {
+  skillInstructionsFor,
+  useSkillCommands,
+} from "@/lib/plugins/skill-commands";
 import { searchTextEntry } from "@/lib/search-text";
 import { newId } from "../../../../lib/new-id";
 
@@ -115,6 +121,17 @@ function RouteComponent() {
     name: profile.name,
   }));
   const group = startsGroup(recipients);
+  /*
+   * A model can be picked before the first message when the conversation is with one Bot that runs
+   * on OpenBot's own model. The pick is saved with the conversation, before the message runs.
+   */
+  const pickable =
+    !group && selected.length === 1 && selected[0]?.runsOnOpenBotModel === true;
+  const models = useQuery({
+    ...modelCatalogueQueryOptions(),
+    enabled: pickable,
+  });
+  const draftModel = useDraftModel(pickable ? models.data : undefined);
   // A group's first message goes to all of its Bots, so no one Bot's commands are offered.
   const skillCommands = useSkillCommands(
     group ? "" : (recipients[0]?.id ?? ""),
@@ -245,6 +262,13 @@ function RouteComponent() {
         autoFocus
         // Commands must be loaded before the first channel message is sent.
         commands={skillCommands}
+        modelPicker={
+          <ModelPicker
+            catalogue={pickable ? models.data : undefined}
+            onChange={draftModel.choose}
+            value={draftModel.value}
+          />
+        }
         disabled={
           Boolean(loadError) || waitingForUrlAgent || recipients.length === 0
         }
@@ -283,7 +307,14 @@ function RouteComponent() {
           try {
             // Recorded, then started: a coworker picked here is as much a choice as an `@` on the
             // home screen, and the trail has to say so for both.
-            await startChosen(recipient.id, draft.text);
+            // With its `/` skills, which the conversation puts in front of it as it does for every
+            // later message; handing over only the text sent the chip and dropped the skill.
+            await startChosen(
+              recipient.id,
+              draft.text,
+              skillInstructionsFor(draft.commandIds, skillCommands),
+              draftModel.requested,
+            );
           } catch (caught) {
             // Preserve the unsent draft when channel creation fails.
             setSent(null);

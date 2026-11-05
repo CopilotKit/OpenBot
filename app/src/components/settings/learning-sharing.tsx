@@ -88,7 +88,7 @@ function emptySentence(data: PersonalLearningSharing): string {
  * Settings, Learning: every recording a person makes goes into their own Learning space, and the Skills learned there
  * reach every Bot they use. Here they choose who else's Bots may draw on them: none (the default), all, or the Skills
  * they open one by one. Each change takes effect when it is made; there is no save. Sharing waits for an administrator
- * (Admin, Enterprise controls, Skill sharing): until then nothing can be opened, and what was opened can still be closed.
+ * (Admin, Automatic learning, Skill sharing): until then nothing can be opened, and what was opened can still be closed.
  */
 export function LearningSharing() {
   const sharing = useQuery(personalLearningQueryOptions());

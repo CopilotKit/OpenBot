@@ -1,5 +1,5 @@
 {
-  "id": "3f196bca-accf-4605-b428-a956598123b4",
+  "id": "810d6c9c-5de1-4578-a22d-aba9d7653fdd",
   "prevId": "aa323cfd-01f2-4d18-a546-1bf361c7bc85",
   "version": "7",
   "dialect": "postgresql",
@@ -800,12 +800,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "opening": {
-          "name": "opening",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "last_message": {
           "name": "last_message",
           "type": "text",
@@ -1092,6 +1086,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "model_selection": {
+          "name": "model_selection",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

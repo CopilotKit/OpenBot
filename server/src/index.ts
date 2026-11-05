@@ -106,6 +106,7 @@ import {
   createGroupStore,
   groupSourceForRun,
 } from "./channels/group";
+import { createModelChoices, modelSelectionOn } from "./channels/model-choice";
 import { type ChannelStore, createChannelStore } from "./channels/routes";
 import { createStallGuard } from "./channels/stall-guard";
 import {
@@ -216,6 +217,7 @@ import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { memoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
+import { createModelCatalogue } from "./model-catalogue";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
@@ -1414,6 +1416,24 @@ const resolveRuntimeModelApiKey = () =>
     environment: process.env,
   });
 
+/**
+ * The models a person may pick for a built-in Bot's run, asked of whatever serves the model: the
+ * provider, or the gateway in OPENAI_BASE_URL. Narrowed by the admin's allowlist when it is on.
+ */
+const modelCatalogue = createModelCatalogue({
+  model: runtimeModel,
+  apiKey: resolveRuntimeModelApiKey,
+  allowlist: () => enterpriseControls()?.snapshot()?.settings.modelAllowlist,
+  enabled: modelSelectionOn,
+});
+
+/** Each person's pick per conversation, saved through `/api/channels/:id/model` and read per run. */
+const modelChoices = createModelChoices({
+  database,
+  model: runtimeModel,
+  catalogue: modelCatalogue,
+});
+
 const hostAccessBroker = createHostAccessBroker(Date.now, {
   approvalGate: approvalService.gate,
   commandPolicy: (actorId) => approvalService.hostCommandPolicy(actorId),
@@ -1969,6 +1989,8 @@ const actorAgentResolver = createActorAgentResolver({
   loadAgents: loadAgentsForActor,
   model: runtimeModel,
   resolveModelApiKey: resolveRuntimeModelApiKey,
+  pickedModelForActor: (actorId) => (input) =>
+    modelChoices.forRun(actorId, input.threadId),
   stallGuard,
   loadToolsForActor: (actorId, initiator) =>
     restrictToolsForRun(
@@ -2673,6 +2695,8 @@ await installEnterpriseControls({
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
   ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
   builtInModel: `${runtimeModel.provider}/${runtimeModel.defaultModel}`,
+  // The run gate records and judges the model a built-in run will use: the person's pick, if any.
+  pickedModel: (actorId, threadId) => modelChoices.forRun(actorId, threadId),
   people: peopleStore,
   initialAdminEmails: config.auth?.initialAdminEmails ?? [],
   recorders: {
@@ -2975,6 +2999,8 @@ const app = createApp(
       tasks: taskRunner,
       auditStore: bootAuditStore,
     },
+    models: modelCatalogue,
+    modelChoices,
     // The checklist onboarding ends on. Facts and verdicts about this configuration, never values.
     setup: createSetupSources({
       productName: tenantPackage.productName,

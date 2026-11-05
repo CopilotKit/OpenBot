@@ -998,7 +998,7 @@ default. Both the shared computer and the supervisor are given it: the computer 
 proxy from these names, and the supervisor forwards them into each computer it creates.
 
 Every computer runs its own filtering proxy on `127.0.0.1`, which applies the network policy an
-administrator sets under **Admin > Enterprise controls**, and it sets `HTTP_PROXY`, `HTTPS_PROXY` and
+administrator sets under **Admin > Computers > Network**, and it sets `HTTP_PROXY`, `HTTPS_PROXY` and
 `NO_PROXY` for itself and its shell to point at that filter. Do not set those three to reach an
 upstream proxy; use `EGRESS_PROXY_<BOT_ID>` or `EGRESS_PROXY_DEFAULT`, which the filter chains to.
 

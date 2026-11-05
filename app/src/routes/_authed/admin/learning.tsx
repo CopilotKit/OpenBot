@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
 import { Streamdown } from "streamdown";
+import { SkillSharingSection } from "@/components/admin/controls/skill-sharing-section";
 import {
   PageEmpty,
   PageRows,
@@ -519,6 +520,7 @@ export function LearningPage() {
         </div>
       </PageSection>
       <ProposedSkills agentId={selected || undefined} />
+      <SkillSharingSection />
     </PageShell>
   );
 }

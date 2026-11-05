@@ -101,9 +101,12 @@ export function partsAnswer(parts: readonly QuestionPart[], form: FormData) {
 }
 
 /**
- * A question of several decisions as a questionnaire: one decision at a time, its options as a
- * numbered list with a field for an answer in the person's own words, and Send on the last. What
- * is sent is one answer, a line per decision.
+ * A question asked in parts as a questionnaire: one decision at a time, its options as a numbered
+ * list with a field for an answer in the person's own words, and Send on the last. What is sent is
+ * one answer, a line per decision.
+ *
+ * One decision is a questionnaire of one, and reads as a single question: no "Question 1 of 1",
+ * and one answer to send rather than answers.
  */
 function QuestionParts({
   parts,
@@ -114,6 +117,7 @@ function QuestionParts({
 }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const several = parts.length > 1;
   return (
     <Questionnaire
       className="mt-1 gap-3"
@@ -169,10 +173,12 @@ function QuestionParts({
         <QuestionnairePrevious size="sm" variant="ghost">
           Back
         </QuestionnairePrevious>
-        <QuestionnaireProgress className="col-start-2 row-start-1 justify-self-end" />
+        {several ? (
+          <QuestionnaireProgress className="col-start-2 row-start-1 justify-self-end" />
+        ) : null}
         <QuestionnaireNext size="sm">Next</QuestionnaireNext>
         <QuestionnaireSubmit disabled={sending} size="sm">
-          {sending ? "Sending…" : "Send answers"}
+          {sending ? "Sending…" : several ? "Send answers" : "Send answer"}
         </QuestionnaireSubmit>
       </QuestionnaireActions>
       {error ? (
@@ -189,9 +195,9 @@ function QuestionParts({
  * written with the question in view however far the conversation has scrolled. Dismiss puts it down
  * with nothing sent.
  *
- * A question asked whole is answered by sending from the composer. A question of several decisions
- * is answered in the drawer, one decision at a time; a reply sent from the composer instead answers
- * it whole, in the person's own words.
+ * A question asked whole is answered by sending from the composer. A question asked in parts, one
+ * or several, is answered in the drawer, one decision at a time; a reply sent from the composer
+ * instead answers it whole, in the person's own words.
  */
 export function QuestionNotice({
   question,
