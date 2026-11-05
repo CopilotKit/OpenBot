@@ -9,7 +9,7 @@ import {
   IconSearch,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import { AuditTable } from "@/components/audit/audit-table";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
@@ -61,7 +61,11 @@ const FILTERS = [
   },
 ] as const;
 
-export function AuditPage() {
+/**
+ * `children` are sections only the team edition's Admin adds below the page's own (the admin's
+ * controls for these). The personal edition's Settings renders this page with none.
+ */
+export function AuditPage({ children }: { children?: ReactNode } = {}) {
   const [search, setSearch] = useState<string>(FILTERS[0].search);
   const [query, setQuery] = useState("");
   const events = useQuery(auditEventsQueryOptions(search));
@@ -221,6 +225,7 @@ export function AuditPage() {
           )}
         />
       )}
+      {children}
     </PageShell>
   );
 }

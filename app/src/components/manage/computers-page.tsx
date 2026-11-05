@@ -5,7 +5,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -52,7 +52,11 @@ function rowId(computer: ComputerProfile): string {
   return `${computer.computer}|${computer.botId ?? ""}`;
 }
 
-export function ComputersPage() {
+/**
+ * `children` are sections only the team edition's Admin adds below the page's own (the admin's
+ * controls for these). The personal edition's Settings renders this page with none.
+ */
+export function ComputersPage({ children }: { children?: ReactNode } = {}) {
   const paths = useManagePaths();
   /** The row currently running a stop/reset request. */
   const [busy, setBusy] = useState<string | null>(null);
@@ -378,6 +382,7 @@ export function ComputersPage() {
         </Link>
         .
       </p>
+      {children}
     </PageShell>
   );
 }

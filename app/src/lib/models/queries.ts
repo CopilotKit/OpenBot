@@ -25,9 +25,22 @@ export type ModelCatalogue = {
   choosable: boolean;
 };
 
+/**
+ * Every model the provider or gateway lists, before the admin's allowlist narrows it. What an admin
+ * picks the allowlist from. `listed` is false when the listing could not be read.
+ */
+export type AvailableModels = {
+  provider: "openai" | "anthropic";
+  default: string;
+  /** Newest first. Always holds the default. */
+  models: ModelOption[];
+  listed: boolean;
+};
+
 export const modelKeys = {
   all: ["models"] as const,
   catalogue: ["models", "catalogue"] as const,
+  available: ["models", "available"] as const,
   conversation: (channelId: string) =>
     ["models", "conversation", channelId] as const,
 };
@@ -40,6 +53,20 @@ export function modelCatalogueQueryOptions() {
         await client("/api/models", { fallback: "Couldn't load models" })
       ).json(),
     // The server keeps the provider's listing for ten minutes; asking more often learns nothing.
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Admin only: the whole listing, for choosing the model allowlist. */
+export function availableModelsQueryOptions() {
+  return queryOptions({
+    queryKey: modelKeys.available,
+    queryFn: async (): Promise<AvailableModels> =>
+      (
+        await client("/api/models/available", {
+          fallback: "Couldn't load the models",
+        })
+      ).json(),
     staleTime: 5 * 60_000,
   });
 }
