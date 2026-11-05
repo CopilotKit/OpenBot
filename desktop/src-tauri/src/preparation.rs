@@ -157,7 +157,7 @@ pub fn selected_root(config: &Path) -> Option<PathBuf> {
 }
 
 pub fn required(detail: impl Into<String>) -> Problem {
-    Problem::with(REQUIRED, detail)
+    Problem::with(REQUIRED, detail).connection(crate::problem::Connection::Installation)
 }
 
 fn hash_files(root: &Path, files: impl IntoIterator<Item = PathBuf>) -> Result<String, Problem> {
@@ -933,7 +933,12 @@ fn main() {
             format!("{COMPOSE}  x: {{}}\n"),
         )
         .unwrap();
-        assert!(require_with(&f.root, Some(&chosen), None, |_| Ok(())).is_err());
+        let refused = require_with(&f.root, Some(&chosen), None, |_| Ok(())).unwrap_err();
+        // The window goes back to Install for it rather than stopping on the sentence.
+        assert_eq!(
+            refused.connection,
+            Some(crate::problem::Connection::Installation)
+        );
     }
 
     #[test]

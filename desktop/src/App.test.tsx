@@ -1662,6 +1662,39 @@ test.each(["model", "intelligence"])(
   },
 );
 
+/**
+ * The upgrade every earlier installation makes: its deployment is one this app cannot start (a
+ * release from before the server ran in a container), so Start is refused until Install lays out
+ * the new one. The window used to stop there with "Return to Install and try again" beside a button
+ * that said Repair installation. It now goes back to Install by itself.
+ */
+test("a Start refused until Install runs again goes back to Install by itself", async () => {
+  const root = "/tmp/installed-upgrade";
+  setupConnectedLocalStack(root, localStatus("ready", "valid"));
+  const previous = invokeHandler;
+  let starts = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack" && starts++ === 0)
+      throw {
+        said: "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.",
+        connection: "installation",
+      };
+    if (command === "prepare_installation") return null;
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "prepare_installation"),
+    ).toBe(true),
+  );
+  expect(
+    invokeCalls.find((call) => call.command === "prepare_installation")?.args,
+  ).toMatchObject({ root });
+  // Installed, it carries on to the AI screen, from which Start runs again.
+  await view.findByRole("heading", { name: /AI connection|Connect your AI/ });
+});
+
 test("a refused provider's failure sits in the AI card and goes when another provider is chosen", async () => {
   setupConnectedLocalStack(
     "/tmp/installed-switch-provider",

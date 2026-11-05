@@ -182,7 +182,11 @@ function Setup() {
       setRefreshIntelligence(true);
       setStep("connect");
     }
+    // Start was refused until Install runs again: an earlier app's deployment this app cannot
+    // start. Install does that by itself, as the person would otherwise be told to.
+    if (problem.connection === "installation") setReinstall(true);
   }, []);
+  const [reinstall, setReinstall] = useState(false);
   // A local Intelligence stack OpenBot could not stop. Shown, but it never holds a start.
   const [intelligenceNotice, setIntelligenceNotice] = useState<Problem | null>(
     null,
@@ -442,6 +446,16 @@ function Setup() {
     localInstall.current = started;
     return started;
   }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per refused Start.
+  useEffect(() => {
+    if (!reinstall) return;
+    setReinstall(false);
+    // What was recorded as installed is not what this app starts, so it is installed again.
+    localInstall.current = null;
+    setPreparation(null);
+    void installLocally();
+  }, [reinstall]);
 
   /** Shows the install until it completes, then the AI provider screen. */
   async function installLocally() {
