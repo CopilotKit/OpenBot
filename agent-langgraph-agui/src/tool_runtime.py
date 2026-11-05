@@ -17,7 +17,7 @@ from ag_ui.core import Context, EventType, RunAgentInput, RunErrorEvent, Tool
 from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.graph import END
 
-from .parallel_tools import ParallelToolAgent
+from .whole_thread import WholeThreadAgent
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ class UnofferedToolError(ValueError):
     pass
 
 
-class ToolAwareAgent(ParallelToolAgent):
+class ToolAwareAgent(WholeThreadAgent):
     async def run(self, input: RunAgentInput):
         props = input.forwarded_props if isinstance(input.forwarded_props, dict) else {}
         names = props.get("openbotDeploymentTools", [])

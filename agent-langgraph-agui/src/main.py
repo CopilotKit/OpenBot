@@ -229,9 +229,10 @@ builder.add_edge(START, "answer")
 builder.add_node("tools", execute_tools)
 builder.add_conditional_edges("answer", next_step)
 builder.add_edge("tools", "answer")
-# A checkpointer, because the AG-UI integration resumes a thread by id and LangGraph refuses to
-# without one. In memory rather than in Postgres: OpenBot's database is where a conversation lives,
-# and two stores remembering the same thread is how they come to disagree.
+# A checkpointer, because the AG-UI integration reads a thread's state by id and LangGraph refuses
+# to without one. In memory rather than in Postgres: OpenBot's database is where a conversation
+# lives, and two stores remembering the same thread is how they come to disagree. So this one is
+# never used across runs either: `WholeThreadAgent` gives every run its own, empty.
 graph = builder.compile(checkpointer=MemorySaver())
 
 app = FastAPI()
