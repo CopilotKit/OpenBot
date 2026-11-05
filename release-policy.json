@@ -1,0 +1,20 @@
+{
+  "$schema": "./shared/release-policy.schema.json",
+  "version": "v0.3.0",
+  "compatibility": {
+    "launcherApi": 1,
+    "configSchema": 1,
+    "extensionApi": 1,
+    "database": {
+      "from": ["0053_identity_links"],
+      "to": "0074_single_user_identity",
+      "rollbackCompatible": false
+    },
+    "intelligenceCapabilities": []
+  },
+  "upgrade": {
+    "fromVersions": ["v0.2.0"],
+    "requiresDowntime": true,
+    "recovery": "restore-backup"
+  }
+}

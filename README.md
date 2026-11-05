@@ -111,6 +111,17 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
    has a saved setting.
    Managed Intelligence needs no separate licence token.
 
+   The same CopilotKit CLI sign-in provisions Composio automatically when you run
+   `bash scripts/start.sh`. If that cannot complete, OpenBot still starts, with apps
+   unavailable. You can run `bun run setup:composio` first to prepare it separately, or
+   later to retry; it does not need a Learning container. The helper creates or reuses one
+   isolated Composio project for this installation and saves its project key to `.env`.
+   Existing Composio keys and Arcade configurations are preserved. Keep the private
+   `.env.openbot-installation-id` file across restarts and interrupted setup attempts;
+   do not copy it into a new installation. This needs a published CopilotKit CLI with
+   `integrations composio provision` and the hosted provisioning service enabled.
+   See [Composio setup](docs/plugins/composio.md#automatic-project-setup) for deployment preparation.
+
 3. Fill the remaining required values:
 
    - `OPENAI_API_KEY`
@@ -291,6 +302,7 @@ Settings worth knowing:
 | ------------------------------------ | ------------------------------------------------------------------------- |
 | `OPENBOT_SINGLE_USER`                | Admits every request as one administrator. Required when no identity provider is configured; `.env.example` ships it on. |
 | `OPENAI_BASE_URL`                    | Answers the OpenAI-shaped calls from somewhere else: a gateway, a proxy.  |
+| `COPILOTKIT_OPENAI_API`              | `responses` or `chat`: the OpenAI API the built-in Bots call behind that `OPENAI_BASE_URL`. Unset, models that take tools only through the Responses API (`gpt-5.6` and later) get `responses` and the rest get `chat`. |
 | `ANTHROPIC_BASE_URL`, `GOOGLE_GENERATIVE_AI_BASE_URL` | The same, for those two APIs.            |
 | `COMPUTER_TOKEN`                     | Secret every Bot computer request must present. `start.sh` falls back to a fixed dev value. |
 | `SUPERVISOR_TOKEN`                   | Secret the supervisor requires. `start.sh` falls back to a fixed dev value. |
@@ -441,6 +453,7 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 - [docs/README.md](docs/README.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/configuration.md](docs/configuration.md)
+- [docs/personal-edition.md](docs/personal-edition.md): OpenBot for one person, with no sign-in and no Admin
 - [docs/development.md](docs/development.md)
 - [docs/coworkers.md](docs/coworkers.md)
 - [docs/routines.md](docs/routines.md)

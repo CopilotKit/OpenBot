@@ -250,3 +250,28 @@ test("the notes file holds the whole Unreleased body, past what one env var can 
   expect(notes.length).toBeGreaterThan(200_000);
   expect(notes).toBe(line.repeat(20000).trim());
 });
+
+const policy = (version: string) =>
+  `{\n  "$schema": "./shared/release-policy.schema.json",\n  "version": "${version}",\n  "upgrade": { "fromVersions": ["v0.2.0"] }\n}\n`;
+
+test("a candidate carries the policy written for its release", () => {
+  const { root, read } = fixture("0.2.0");
+  writeFileSync(join(root, "release-policy.json"), policy("v0.3.0"));
+  const prepared = prepareRelease(root, "minor", "rc");
+  expect(prepared.version).toBe("0.3.0-rc.1");
+  expect(read("release-policy.json")).toBe(policy("v0.3.0-rc.1"));
+});
+
+test("the final takes over its candidate's policy", () => {
+  const { root, read } = fixture("0.3.0-rc.2");
+  writeFileSync(join(root, "release-policy.json"), policy("v0.3.0-rc.2"));
+  prepareRelease(root, "minor", "final");
+  expect(read("release-policy.json")).toBe(policy("v0.3.0"));
+});
+
+test("a policy written for another release is left for a person to rewrite", () => {
+  const { root, read } = fixture("0.2.0");
+  writeFileSync(join(root, "release-policy.json"), policy("v0.2.0"));
+  prepareRelease(root, "minor", "rc");
+  expect(read("release-policy.json")).toBe(policy("v0.2.0"));
+});

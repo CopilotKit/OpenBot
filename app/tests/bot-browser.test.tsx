@@ -974,10 +974,10 @@ test("Record on a Bot's screen asks whether to narrate before the person's first
   control = heldBy(ME);
   const recognitions = installChrome();
   const { view, dialog, user } = await openScreen();
-  // Nobody chose yet: the row says the microphone stays closed, and nothing listens.
+  // Nobody chose yet: the switch is off, and nothing listens.
   expect(
     await dialog.findByText(
-      "Not chosen yet. Record asks before your first recording, and the microphone stays closed until you say yes.",
+      "Talk through the task as you do it, and what you say is added to the recording.",
     ),
   ).toBeTruthy();
   expect(

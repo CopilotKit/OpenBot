@@ -4,6 +4,7 @@ Start with the root [README](../README.md), then use these references:
 
 - [Architecture](architecture.md): services, ports, browser governance, computers, components, plugins, knowledge, and security boundaries.
 - [Configuration](configuration.md): environment variables and tenant package YAML.
+- [Personal edition](personal-edition.md): OpenBot for one person, with no sign-in and no Admin.
 - [Development](development.md): local setup, migrations, ports, and quality checks.
 - [Coworkers](coworkers.md): durable Bot profiles, channels, visibility, deletion, and external AG-UI registration.
 - [Routines](routines.md): standing instructions a Bot runs on a schedule, the worker that fires them, and who they run as.

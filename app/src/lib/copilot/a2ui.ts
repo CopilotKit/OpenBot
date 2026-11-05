@@ -5,6 +5,7 @@ import {
   standardUI,
 } from "@copilotkit/react-core/v2/generative-ui";
 import { SERIES_COLOURS } from "@/components/gallery/palette";
+import { A2UICode, A2UIMarkdown } from "./a2ui-markdown";
 
 /**
  * The standard components a Bot is not given.
@@ -25,10 +26,19 @@ export const OMITTED_STANDARD_COMPONENTS = [
  * The components a Bot can draw an interface from: CopilotKit's standard catalog, which carries the
  * A2UI 1.0 basic components under their A2UI names, less the ones above. These are declarative
  * primitives, not the separately granted OpenBot gallery components.
+ *
+ * `Code` and `Markdown` are drawn by OpenBot rather than the SDK, through the renderer a reply uses,
+ * so code and prose in an interface look exactly as they do in a reply; see a2ui-markdown.tsx. An
+ * override replaces only the React component: the model sees the standard `Code` and `Markdown` with
+ * their descriptions and props unchanged, so what a Bot already writes keeps drawing.
  */
 export const OPENBOT_UI = createGenerativeUI({
   id: "openbot/ui@1",
   extends: [standardUI.omit([...OMITTED_STANDARD_COMPONENTS])],
+  overrides: {
+    Code: { component: A2UICode },
+    Markdown: { component: A2UIMarkdown },
+  },
   components: {},
 });
 

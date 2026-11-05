@@ -47,10 +47,14 @@ describe("whose computer it is", () => {
     ).toEqual({ browser: false, navigate: false, computer: false });
   });
 
-  test("a profile still loading offers everything", () => {
+  /*
+   * The offer is now decided per run, after the Bot's profile is read (bot-offer.ts), so there is no
+   * "still loading" any more: undefined is a profile nobody could read, or a run with no Bot.
+   */
+  test("a profile that could not be read offers nothing", () => {
     expect(
       computerToolsOffered({ profile: undefined, capabilities: everything }),
-    ).toEqual({ browser: true, navigate: true, computer: true });
+    ).toEqual({ browser: false, navigate: false, computer: false });
   });
 });
 

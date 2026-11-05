@@ -14,6 +14,7 @@ import {
   unreadableForm,
   VENDOR_SHAPE_REMEDY,
 } from "../composio-vendor";
+import { DEPLOYMENT_CLIENT_SCHEME } from "../deployment-clients";
 import type { ClientContext } from "./context";
 import { STATUSES_NAMED } from "./model";
 
@@ -624,10 +625,24 @@ export function fieldMethods(context: ClientContext) {
              * value under that name cannot come from a form, and the connect route sends only names
              * that list published. This method is callable without either, and what it protects is
              * the one field here that cannot be recovered from anything else in the request.
+             *
+             * EXCEPT A SERVER-TO-SERVER GRANT, WHICH CARRIES NO STATUS AT ALL. `ACTIVE` claims the
+             * token is already in hand, and for `S2S_OAUTH2` it is not: Composio refuses that
+             * request for the missing `access_token`. Left out, Composio exchanges the config's
+             * client (the deployment's, `deployment-clients.ts`) for the token itself. A value
+             * arriving under the name `status` is dropped rather than sent, so this branch keeps
+             * the second guard too: no typed value can say what state Composio is asked for.
              */
             state: {
               authScheme,
-              val: { ...values, status: "ACTIVE" },
+              val:
+                authScheme === DEPLOYMENT_CLIENT_SCHEME
+                  ? Object.fromEntries(
+                      Object.entries(values).filter(
+                        ([name]) => name !== "status",
+                      ),
+                    )
+                  : { ...values, status: "ACTIVE" },
             },
           },
         });

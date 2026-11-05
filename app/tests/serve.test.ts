@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer, type Socket } from "node:net";
-import { tmpdir } from "node:os";
+import { connect, createServer, type Socket } from "node:net";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 import {
   BunWebSocket,
   fileFor,
@@ -181,7 +182,7 @@ describe("which file a path names", () => {
   });
 
   test("a decoded NUL path is refused before it reaches Bun.file", async () => {
-    const proxy = await startProxy(await unusedPort());
+    const proxy = await startProxy(await reservePort());
     try {
       const response = await fetch(
         `http://127.0.0.1:${proxy.port}/assets/a%00b.js`,
@@ -238,23 +239,6 @@ type HeaderSnapshot = {
   origin: string | null;
 };
 
-async function unusedPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() => {
-        if (address && typeof address === "object") {
-          resolve(address.port);
-        } else {
-          reject(new Error("server did not receive a TCP port"));
-        }
-      });
-    });
-  });
-}
-
 function snapshotHeaders(request: Request): HeaderSnapshot {
   return {
     authorization: request.headers.get("authorization"),
@@ -309,12 +293,19 @@ async function waitForProxy(port: number) {
   throw new Error("proxy did not start");
 }
 
-async function startProxy(upstreamPort: number) {
-  const port = await unusedPort();
+async function startProxy(
+  upstreamPort: number,
+  environment: Record<string, string> = {},
+) {
+  const port = await reservePort();
   const child = Bun.spawn({
     cmd: [process.execPath, "--no-env-file", "serve.ts"],
     cwd: join(import.meta.dir, ".."),
-    env: { APP_PORT: String(port), SERVER_PORT: String(upstreamPort) },
+    env: {
+      APP_PORT: String(port),
+      SERVER_PORT: String(upstreamPort),
+      ...environment,
+    },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -450,7 +441,7 @@ async function waitForHandshake(
 }
 
 describe("api proxy", () => {
-  test("keeps upstream websocket forwarding to session and origin headers", () => {
+  test("keeps upstream websocket forwarding to session, origin and host headers", () => {
     const headers = upstreamWebSocketHeaders(
       new Headers({
         Authorization: "Bearer app-session",
@@ -466,12 +457,55 @@ describe("api proxy", () => {
     expect(Object.fromEntries(headers)).toEqual({
       authorization: "Bearer app-session",
       cookie: "openbot_session=valid",
+      host: "127.0.0.1:3010",
       origin: "http://openbot.local",
     });
   });
 
+  test("a socket reaches the server addressed as the browser addressed it, as a call does", async () => {
+    // The server takes a page's socket as its own when Origin names the Host it was opened to, so a
+    // bridge that swapped in its own address made the app's socket another site's.
+    const seen: { socket: boolean; host: string | null }[] = [];
+    const upstream = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(request, server) {
+        const socket =
+          request.headers.get("upgrade")?.toLowerCase() === "websocket";
+        seen.push({ socket, host: request.headers.get("host") });
+        if (socket && server.upgrade(request)) return undefined;
+        return new Response("answered");
+      },
+      websocket: { message() {} },
+    });
+    if (upstream.port === undefined) {
+      upstream.stop(true);
+      throw new Error("The test upstream did not bind a TCP port");
+    }
+    const proxy = await startProxy(upstream.port);
+    const host = `192.168.1.10:${proxy.port}`;
+    try {
+      const call = await fetch(`http://127.0.0.1:${proxy.port}/api/events`, {
+        headers: { host, origin: `http://${host}` },
+      });
+      expect(await call.text()).toBe("answered");
+      const socket = await connectWebSocket(
+        `ws://127.0.0.1:${proxy.port}/api/events`,
+        { host, origin: `http://${host}` },
+      );
+      socket.close();
+      expect(seen).toEqual([
+        { socket: false, host },
+        { socket: true, host },
+      ]);
+    } finally {
+      await proxy.stop();
+      upstream.stop(true);
+    }
+  });
+
   test("forwards session headers to authenticated upstream websocket handshakes", async () => {
-    const upstreamPort = await unusedPort();
+    const upstreamPort = await reservePort();
     const upstream = startAuthenticatedUpstream(upstreamPort);
     const proxy = await startProxy(upstreamPort);
     const proxyPort = proxy.port;
@@ -531,7 +565,7 @@ describe("api proxy", () => {
 
 describe("upstream websocket handshake", () => {
   test("an unavailable upstream never opens the downstream", async () => {
-    const proxy = await startProxy(await unusedPort());
+    const proxy = await startProxy(await reservePort());
     try {
       expect(
         await failedHandshake(`ws://127.0.0.1:${proxy.port}/api/events`),
@@ -549,7 +583,7 @@ describe("upstream websocket handshake", () => {
       socket.on("data", () => requests++);
       socket.on("close", () => sockets.delete(socket));
     });
-    const port = await unusedPort();
+    const port = await reservePort();
     await new Promise<void>((resolve) =>
       upstream.listen(port, "127.0.0.1", resolve),
     );
@@ -634,6 +668,63 @@ describe("upstream websocket handshake", () => {
     } finally {
       socket.terminate();
       upstream.stop(true);
+      await proxy.stop();
+    }
+  });
+});
+
+/** This machine's private address on its network: a connection to it arrives as another machine's would. */
+const lanAddress = Object.values(networkInterfaces())
+  .flat()
+  .find(
+    (entry) =>
+      entry !== undefined &&
+      !entry.internal &&
+      entry.family === "IPv4" &&
+      /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(entry.address),
+  )?.address;
+
+/** Whether anything accepts a connection at this address and port. A raw socket, as any client opens one. */
+function accepts(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket: Socket = connect({ host, port });
+    socket.setTimeout(2_000, () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
+  });
+}
+
+describe.skipIf(lanAddress === undefined)("where the app listens", () => {
+  /*
+   * Every `/api` call this passes on reaches the server from 127.0.0.1, and a single-user server admits
+   * a caller from this machine as its administrator. Listening on every interface made anybody on the
+   * same network that administrator, through here.
+   */
+  test("on this machine's two loopbacks and not on its network address", async () => {
+    const proxy = await startProxy(await reservePort());
+    try {
+      expect(await accepts("127.0.0.1", proxy.port)).toBe(true);
+      expect(await accepts("::1", proxy.port)).toBe(true);
+      expect(await accepts(lanAddress as string, proxy.port)).toBe(false);
+    } finally {
+      await proxy.stop();
+    }
+  });
+
+  test("on every interface when the deployment names an address on its network", async () => {
+    const proxy = await startProxy(await reservePort(), {
+      OPENBOT_APP_URL: `http://${lanAddress}:3010`,
+    });
+    try {
+      expect(await accepts(lanAddress as string, proxy.port)).toBe(true);
+      expect(await accepts("127.0.0.1", proxy.port)).toBe(true);
+    } finally {
       await proxy.stop();
     }
   });

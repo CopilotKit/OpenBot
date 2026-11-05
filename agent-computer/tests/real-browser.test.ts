@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 import {
   type RealBrowser,
   realBrowserComputerPaths,
@@ -756,23 +757,11 @@ type Computer = { base: string; child: ReturnType<typeof Bun.spawn> };
 const computers: Computer[] = [];
 let root = "";
 
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: () => new Response(),
-  });
-  const { port } = probe;
-  await probe.stop(true);
-  if (port === undefined) throw new Error("The port probe did not listen.");
-  return port;
-}
-
 async function startComputer(
   name: string,
   env: Record<string, string>,
 ): Promise<Computer> {
-  const port = await freePort();
+  const port = await reservePort();
   const base = `http://127.0.0.1:${port}`;
   const child = Bun.spawn([process.execPath, "src/index.ts"], {
     cwd: join(import.meta.dir, ".."),

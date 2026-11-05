@@ -78,6 +78,7 @@ function startContentScript() {
       mark = showIndicator({
         view,
         choose: (recorded) => port.post({ type: "content.site", recorded }),
+        stop: (save) => port.post({ type: "content.stop", save }),
       });
   };
 

@@ -13,6 +13,7 @@ import {
   type BindingTransport,
   type ChatTransport,
   type DeliveryBinding,
+  type DeliveryInbox,
   type DeliveryKind,
   DeliveryProviderError,
   DeliveryRefusedError,
@@ -91,7 +92,13 @@ export function createDeliveryRouter(deps: {
     agentId: string,
   ): Promise<DeliveryScope | null>;
   runTurn(
-    input: DeliveryScope & { runId: string; text: string; signal: AbortSignal },
+    input: DeliveryScope & {
+      runId: string;
+      text: string;
+      signal: AbortSignal;
+      /** Where the person wrote: the native app, or a chat or text platform. */
+      source: DeliveryInbox["source"];
+    },
   ): Promise<{
     replyText: string;
     components?: DrawnComponent[];
@@ -360,6 +367,7 @@ export function createDeliveryRouter(deps: {
         runId: row.id,
         text: input.text,
         signal: input.signal,
+        source: input.transport,
       });
       await deps.store.setInbox(row.id, "sent");
       await deps.audit?.({
@@ -485,6 +493,7 @@ export function createDeliveryRouter(deps: {
           runId: row.id,
           text: row.text,
           signal,
+          source: row.source,
         });
         if (!(await owns())) return;
         if (result.replyText)

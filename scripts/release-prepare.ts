@@ -99,6 +99,8 @@ export function prepareRelease(
     ),
   );
 
+  carryReleasePolicy(root, version);
+
   // The final release must bundle the CLI its candidate bundled. A candidate or beta whose
   // CLI names an npm dist-tag ("latest", "next", "alpha") would let the final pick up a newer
   // one, so they fix the tag to the exact version now. An exact version, and a pkg.pr.new URL
@@ -154,6 +156,36 @@ export function prepareRelease(
     base: kind === "stable" ? "main" : releaseBranch(version),
     notes,
   };
+}
+
+// release-policy.json is written by a person for one release: the versions it upgrades from, its
+// database transition, downtime and recovery. Publish refuses a policy that does not name the
+// version being released. The candidates, betas and final of one release share that policy, so
+// within one release (v0.3.0, v0.3.0-rc.1, v0.3.0-rc.2, ...) only its `version` moves, and only
+// that field is rewritten in the text. A policy written for another release is left as it is, so
+// publishing still asks for this release's own.
+export function carryReleasePolicy(root: string, version: string): boolean {
+  const policyPath = join(root, "release-policy.json");
+  if (!existsSync(policyPath)) return false;
+  const text = readFileSync(policyPath, "utf8");
+  const policy = JSON.parse(text);
+  const current = policy.version;
+  const next = `v${version}`;
+  const release = (v: string) => v.replace(/^v/, "").split(/[-+]/)[0];
+  if (typeof current !== "string" || current === next) return false;
+  if (release(current) !== release(next)) return false;
+  const updated = text.replace(
+    /("version"\s*:\s*)"(?:[^"\\]|\\.)*"/,
+    (_, key: string) => key + JSON.stringify(next),
+  );
+  if (
+    JSON.stringify(JSON.parse(updated)) !==
+    JSON.stringify({ ...policy, version: next })
+  ) {
+    throw new Error(`Could not rewrite the version field of ${policyPath}.`);
+  }
+  writeFileSync(policyPath, updated);
+  return true;
 }
 
 const exactVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;

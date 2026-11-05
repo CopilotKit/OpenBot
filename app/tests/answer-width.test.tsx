@@ -10,10 +10,11 @@ import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * A Bot's answers are drawn wider than the composer, 768px (`max-w-3xl`) against its 672px
- * (`max-w-2xl`), both centred in the same column and both the whole width of a small screen. 768px
- * is the reading width ChatGPT and Claude.ai give an answer; wider, a line of prose gets long enough
- * to be hard to read. Skins keep the column they were drawn with, as wide as their composer.
+ * A Bot's answers and the composer share one column, 768px (`max-w-3xl`), centred and the whole
+ * width of a small screen. 768px is the reading width ChatGPT and Claude.ai give an answer; wider, a
+ * line of prose gets long enough to be hard to read. The answers' text sits inset in that column, so
+ * the composer reaches a little past it on both sides, and a drawer on the composer lines up with
+ * the text. Skins keep the column they were drawn with, 672px for both.
  */
 
 class OfflineWebSocket extends EventTarget {
@@ -65,7 +66,7 @@ function centredUpTo(classes: string[], cap: string) {
   expect(classes.filter((name) => name.startsWith("max-w-"))).toEqual([cap]);
 }
 
-test("a conversation's answers are wider than its composer, which keeps its width", () => {
+test("a conversation's answers and its composer share one column", () => {
   for (const restoring of [false, true]) {
     const view = render(
       <ConversationView
@@ -77,7 +78,7 @@ test("a conversation's answers are wider than its composer, which keeps its widt
     );
     const { answers, composer } = columns(view.container);
     centredUpTo(answers, "max-w-3xl");
-    centredUpTo(composer, "max-w-2xl");
+    centredUpTo(composer, "max-w-3xl");
     cleanup();
   }
 });
@@ -101,13 +102,15 @@ test("a group conversation's answers are as wide as a conversation's", async () 
   centredUpTo(columns(view.container).answers, "max-w-3xl");
 });
 
-test("every skin keeps its answers as wide as its composer", () => {
+test("every skin keeps its answers and its composer in its own column", () => {
   const css = readFileSync(
     new URL("../src/skins/skins.css", import.meta.url),
     "utf8",
   ).replace(/\/\*[\s\S]*?\*\//g, "");
   const rule =
-    /:root\[data-skin\]\s+\[data-transcript-column\]\s*\{([^}]*)\}/.exec(css);
-  // `max-w-2xl`, the composer's own cap, read from the same theme token.
+    /:root\[data-skin\]\s+\[data-transcript-column\],\s*:root\[data-skin\]\s+\[data-slot="composer-column"\]\s*\{([^}]*)\}/.exec(
+      css,
+    );
+  // `max-w-2xl`, read from the theme token.
   expect(rule?.[1]?.trim()).toBe("max-width: var(--container-2xl);");
 });

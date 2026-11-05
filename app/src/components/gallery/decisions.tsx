@@ -37,6 +37,12 @@ export const ApprovalCardProps = z.object({
     .describe(
       "The facts they need in order to decide, e.g. amount, vendor, date",
     ),
+  command: z
+    .string()
+    .optional()
+    .describe(
+      "When you are asking before running a command on your computer: that command, exactly as you will run it. It is shown on the card, and listed with their answer in your computer's Activity.",
+    ),
   approveLabel: z.string().optional().describe("Defaults to Approve"),
   rejectLabel: z.string().optional().describe("Defaults to Decline"),
 });
@@ -65,6 +71,11 @@ export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
 
   const decided =
     status === "complete" ? readDecision(props.result) : undefined;
+  const command = args.command?.trim() || undefined;
+  // The command once: a Bot that also lists it among the facts would show it twice.
+  const details = (args.details ?? []).filter(
+    (detail) => !command || detail.value?.trim() !== command,
+  );
 
   return (
     <GalleryFrame
@@ -81,9 +92,17 @@ export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
     >
       <p className="text-sm">{args.summary}</p>
 
-      {args.details?.length ? (
+      {command || details.length ? (
         <dl className="mt-3 grid grid-cols-[minmax(0,9rem)_1fr] gap-x-4 gap-y-1.5 text-sm">
-          {byPosition(args.details).map(({ item: detail, key }) => (
+          {command ? (
+            <div className="contents">
+              <dt className="truncate text-muted-foreground">Command</dt>
+              <dd className="min-w-0">
+                <code className="break-all font-mono text-xs">{command}</code>
+              </dd>
+            </div>
+          ) : null}
+          {byPosition(details).map(({ item: detail, key }) => (
             <div className="contents" key={key}>
               <dt className="truncate text-muted-foreground">{detail.label}</dt>
               <dd className="min-w-0 break-words">{detail.value}</dd>
@@ -252,7 +271,7 @@ export const GALLERY: GalleryComponent[] = [
     title: "Approval",
     kind: "decision",
     description:
-      "Ask the person to approve or decline something, and WAIT for their answer. Use before doing anything you cannot undo, spending money, sending a message, changing a record. You are given their decision and any reason they typed.",
+      "Ask the person to approve or decline something, and WAIT for their answer. You are given their decision and any reason they typed. Use it for a decision that is theirs to make, or before something you cannot undo, unless your instructions say the person is already asked before that kind of action.",
     parameters: ApprovalCardProps,
     Component: ApprovalCard as GalleryComponent["Component"],
     preview: {

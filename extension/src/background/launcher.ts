@@ -209,6 +209,7 @@ export function lastStopped(
     stoppedAt: stopped.stoppedAt,
     actions: stopped.actions,
     phrases: stopped.phrases,
+    ...(stopped.discarded ? { discarded: true } : {}),
   };
 }
 

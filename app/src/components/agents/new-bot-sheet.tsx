@@ -11,6 +11,7 @@ import { MotionConfig, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -58,6 +59,7 @@ import {
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
 import { isComposing } from "@/lib/composing";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import { pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
@@ -152,6 +154,8 @@ function defaultInstructions(name: string, runtime: Runtime): string {
  * `min-h-0` and no overflow of its own shrinks and paints over the footer instead.
  */
 function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const createAgent = useMutation(createAgentMutationOptions(queryClient));
   /*
    * Assumed available while the answer loads, so the common deployment never sees the option flash
@@ -254,12 +258,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         title: "",
         roleDescription:
           instructions.trim() || defaultInstructions(name.trim(), chosen),
-        visibility,
+        visibility: personal ? "private" : visibility,
         // A Bot that runs here has no address; whatever was typed on the way past stays behind.
         endpoint: managed ? endpoint.trim() : "",
         authValue: managed ? key : "",
         // Only what the box shows: a tick the person can no longer change is not sent.
-        isolated: isolated && isolationAvailable && isolationAllowed,
+        isolated:
+          !personal && isolated && isolationAvailable && isolationAllowed,
       }),
     );
     /*
@@ -378,6 +383,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             {step === "about" ? (
               <>
                 <AboutStep
+                  personal={personal}
                   apps={giveable}
                   instructions={instructions}
                   leftOut={leftOut}
@@ -598,6 +604,7 @@ const VISIBILITY_OPTIONS: Array<{
  * These choices stay in the parent flow while navigating between screens.
  */
 function AboutStep({
+  personal,
   apps,
   leftOut,
   onApp,
@@ -621,6 +628,7 @@ function AboutStep({
   leftOut: Set<string>;
   onApp: (app: string, used: boolean) => void;
   isolation: IsolationChoice;
+  personal: boolean;
 }) {
   return (
     <FieldGroup>
@@ -662,34 +670,40 @@ function AboutStep({
           value={instructions}
         />
       </Field>
-      <FieldSet>
-        <FieldLegend variant="label">Who can see it</FieldLegend>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {VISIBILITY_OPTIONS.map((option) => {
-            const Icon = option.icon;
-            return (
-              <button
-                aria-pressed={visibility === option.value}
-                className={OPTION_CLASSES}
-                key={option.value}
-                onClick={() => onVisibility(option.value)}
-                type="button"
-              >
-                <Icon className="size-5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0">
-                  <span className="block font-medium text-sm">
-                    {option.title}
-                  </span>
-                  <span className="block text-pretty text-muted-foreground text-xs">
-                    {option.description}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </FieldSet>
-      <IsolatedOption isPublic={visibility === "public"} {...isolation} />
+      {personal ? (
+        <BusinessComputerLink />
+      ) : (
+        <>
+          <FieldSet>
+            <FieldLegend variant="label">Who can see it</FieldLegend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {VISIBILITY_OPTIONS.map((option) => {
+                const Icon = option.icon;
+                return (
+                  <button
+                    aria-pressed={visibility === option.value}
+                    className={OPTION_CLASSES}
+                    key={option.value}
+                    onClick={() => onVisibility(option.value)}
+                    type="button"
+                  >
+                    <Icon className="size-5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0">
+                      <span className="block font-medium text-sm">
+                        {option.title}
+                      </span>
+                      <span className="block text-pretty text-muted-foreground text-xs">
+                        {option.description}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </FieldSet>
+          <IsolatedOption isPublic={visibility === "public"} {...isolation} />
+        </>
+      )}
       {apps.length > 0 ? (
         <FieldSet>
           <FieldLegend variant="label">Apps it can use</FieldLegend>

@@ -48,8 +48,16 @@ function withoutDesktopVersion(text: string): string {
     .join("\n");
 }
 
+// The candidates and the final of one release share one policy, which names whichever of them it
+// was last prepared for. Everything else in it, what the release upgrades from and how, must be
+// what the candidate was tested with.
+function withoutPolicyVersion(text: string): string {
+  return withoutPackageVersion(text);
+}
+
 const VERSION_ONLY_RULES: Record<string, (text: string) => string> = {
   "package.json": withoutPackageVersion,
+  "release-policy.json": withoutPolicyVersion,
   "charts/openbot/Chart.yaml": withoutAppVersion,
   "desktop/src-tauri/Cargo.toml": withoutDesktopVersion,
   "desktop/src-tauri/Cargo.lock": withoutDesktopVersion,

@@ -394,6 +394,12 @@ const TOKEN_NAME = "COMPUTER_TOKEN";
  * A deployment that sets no token is not a mismatch. That is a computer with no door on it, which is
  * a choice the environment makes, and replacing a working browser over it would be this function
  * inventing a policy of its own.
+ *
+ * It is also how every computer moved off the deployment's token. Each computer is now given a token
+ * of its own (environment.ts), so one created before that, holding the deployment's token, holds a
+ * token this supervisor no longer hands out and is replaced here like any other, keeping its profile
+ * and workspace volumes. Left running, it would refuse the server's every call and go on carrying the
+ * one secret that opens every other person's computer.
  */
 function holdsCurrentToken(
   existingToken: string | undefined,

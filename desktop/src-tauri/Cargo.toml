@@ -3,7 +3,7 @@ name = "openbot-desktop"
 version = "0.2.0"
 description = "OpenBot Desktop"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.90"
 
 [lib]
 name = "openbot_desktop_lib"
@@ -17,6 +17,10 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 # Reads the pinned deployment manifest an internal or candidate build carries. See `build.rs`.
 serde_json = "1"
+
+[features]
+default = []
+shell-updater = []
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -36,6 +40,13 @@ tauri-plugin-single-instance = "2.0.0-rc.5"
 portable-pty = "0.9.0"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-dialog = "2"
+# Updating a signed Mac build in place. The plugin verifies the minisign signature beside
+# each artifact against the public key in `tauri.conf.json`, so an endpoint that is taken
+# over still cannot hand this app something to install. See `docs/releasing.md`.
+tauri-plugin-updater = "2"
+# Restarting into the version the updater just wrote. The updater can replace the bundle
+# but cannot relaunch it, and an update nobody is running is not an update.
+tauri-plugin-process = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

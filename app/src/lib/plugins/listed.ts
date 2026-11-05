@@ -18,7 +18,7 @@ const isBrokered = (server: PluginServer): boolean =>
  *
  * Exported as a function rather than left inline in the render, for the reason `matchingApps` on the
  * Composio picker is: the rule is the thing worth pinning and pinning it needs no DOM, no router and
- * no query client. See its one clause below.
+ * no query client. See its clauses below.
  */
 export function brokeredAccountsListedOn(
   servers: PluginServer[],
@@ -27,7 +27,9 @@ export function brokeredAccountsListedOn(
     (server) =>
       isBrokered(server) &&
       server.authScheme !== "NO_AUTH" &&
-      server.accountMode !== "shared",
+      server.accountMode !== "shared" &&
+      /* One that can only hold a shared account has nothing here for a person to connect. */
+      !server.sharedOnly,
   );
 }
 

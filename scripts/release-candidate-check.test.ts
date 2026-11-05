@@ -217,3 +217,29 @@ test("rejects a release whose parent is not tagged", () => {
   expect(code).toBe(1);
   expect(output).toContain("Cut a new candidate first");
 });
+
+test("allows a release policy change that only moves the version", () => {
+  const files = new Map([
+    [
+      "release-policy.json",
+      {
+        before: JSON.stringify({ version: "v0.3.0-rc.1", upgrade: { fromVersions: ["v0.2.0"] } }),
+        after: JSON.stringify({ version: "v0.3.0", upgrade: { fromVersions: ["v0.2.0"] } }),
+      },
+    ],
+  ]);
+  expect(allowedDiff(files)).toEqual([]);
+});
+
+test("rejects a release policy change beyond the version", () => {
+  const files = new Map([
+    [
+      "release-policy.json",
+      {
+        before: JSON.stringify({ version: "v0.3.0-rc.1", upgrade: { fromVersions: ["v0.2.0"] } }),
+        after: JSON.stringify({ version: "v0.3.0", upgrade: { fromVersions: ["v0.1.0"] } }),
+      },
+    ],
+  ]);
+  expect(allowedDiff(files)).toHaveLength(1);
+});

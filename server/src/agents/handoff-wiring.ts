@@ -1,4 +1,7 @@
-import { productHandoffInput } from "../telemetry/product-boundaries";
+import {
+  productHandoffAnalyticsContext,
+  productHandoffInput,
+} from "../telemetry/product-boundaries";
 import type { ProductTelemetry } from "../telemetry/product";
 import { randomUUID } from "node:crypto";
 import { IntelligenceAgentRunner } from "@copilotkit/runtime/v2";
@@ -76,6 +79,14 @@ export async function startHandoffDelivery(deps: {
                 work.actorId,
                 work.runId,
               ),
+            onKnownStop: productTelemetry.stopKnown,
+            analyticsContextFor: (run, work) =>
+              productHandoffAnalyticsContext(
+                productTelemetry,
+                run,
+                work.actorId,
+                work.runId,
+              ),
           }
         : {}),
       admission: serverTurnAdmission,
@@ -99,6 +110,7 @@ export async function startHandoffDelivery(deps: {
       },
       history: copilotRuntime.history,
       lock: copilotRuntime.threadLock,
+      recordStopFor: copilotRuntime.stopRecorder,
       /*
        * A scratch thread of the addressed Bot's own, one per hop.
        *

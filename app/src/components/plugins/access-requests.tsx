@@ -22,6 +22,7 @@ import {
   type AppAccessRequest,
   appAccessInboxQueryOptions,
 } from "@/lib/app-access/queries";
+import { useManagePaths } from "@/lib/manage-paths";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
 
@@ -164,17 +165,13 @@ function AccessRequestRow({ request }: { request: AppAccessRequest }) {
  * and so has that page; an app still to be switched on has none until the press that switches it on.
  */
 function GrantNote({ request }: { request: AppAccessRequest }) {
+  const paths = useManagePaths();
   if (request.kind === "connect_shared" || !request.agentId) return null;
   const bot = request.botName ?? "the Bot";
   const where = `the Bot's page under ${request.appTitle}`;
   const page =
     request.kind === "grant" ? (
-      <Link
-        params={{ agentId: request.agentId, key: request.appKey }}
-        to="/admin/plugins/$key/bots/$agentId"
-      >
-        {where}
-      </Link>
+      <Link {...paths.pluginBot(request.appKey, request.agentId)}>{where}</Link>
     ) : (
       where
     );

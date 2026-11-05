@@ -1,5 +1,6 @@
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, eq } from "drizzle-orm";
+import { safetyRequirement } from "../../approvals/policy";
 import { currentApprovalContext } from "../../approvals/types";
 import { type AuditInitiator, recordAuditEvent } from "../../audit";
 import {
@@ -400,7 +401,24 @@ export function callMethods(context: StoreContext) {
        * open chat both turn into a paused tool call; denied is a refusal like any other.
        */
       const share =
-        effect === "write" && options.privateShareCheck
+        effect === "write" &&
+        options.privateShareCheck &&
+        /*
+         * ONE ASK FOR ONE SEND. The approval gate below asks about every send, share and post on the
+         * safety policy's own floor, with what it sends, whatever any rule says. Asking here as well
+         * put two cards in front of the person for one message.
+         */
+        !(
+          options.approvalGate &&
+          safetyRequirement({
+            actorId: input.actorId,
+            botId: input.botId,
+            toolRef: input.ref,
+            effect,
+            scope: serverId,
+            args: vendorArgs,
+          })
+        )
           ? shareTargetOf(serverId, toolName, vendorArgs)
           : null;
       if (share && options.privateShareCheck) {

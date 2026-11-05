@@ -182,6 +182,7 @@ export function wireCoordination(deps: {
           args: {
             question: question.question,
             ...(question.why ? { why: question.why } : {}),
+            ...(question.parts ? { parts: question.parts } : {}),
           },
         },
       });

@@ -117,7 +117,7 @@ OpenAI path, put the model key in OPENAI_API_KEY. For Anthropic, set all three l
 
   ANTHROPIC_API_KEY=...
   BOT_PROVIDER=anthropic
-  BOT_MODEL=claude-sonnet-4-5
+  BOT_MODEL=claude-sonnet-5-5
 
 That BOT_MODEL line is not optional in the clone path: docker-compose defaults BOT_MODEL to an
 OpenAI model. For a compatible endpoint, set OPENAI_BASE_URL, OPENAI_API_KEY if that endpoint needs

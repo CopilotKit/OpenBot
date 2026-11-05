@@ -244,6 +244,13 @@ button {
   outline: none;
 }
 button:hover { background: var(--secondary); }
+button[hidden] { display: none; }
+/* The two buttons that end the recording read as such: Stop with a border, and Save as the answer it expects. */
+button[data-action="stop"] { flex: none; border-color: var(--border); }
+button[data-action="save"] { flex: none; background: var(--primary); color: var(--primary-foreground); }
+button[data-action="save"]:hover { background: color-mix(in oklch, var(--primary) 85%, transparent); }
+button[data-action="discard"], button[data-action="back"] { flex: none; }
+button:disabled { opacity: 0.5; cursor: default; }
 button:focus-visible { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 50%, transparent); }
 `;
 
@@ -266,10 +273,20 @@ export function indicatorWords(view: IndicatorView): {
   };
 }
 
+/** What the mark asks once the person pressed Stop on it, and its three answers. */
+export const STOP_WORDS = {
+  question: "Save this recording?",
+  save: "Save",
+  discard: "Discard",
+  back: "Keep recording",
+} as const;
+
 export function showIndicator(options: {
   view: IndicatorView;
   /** The person's click: false leaves the site out of every recording, true records it again. */
   choose(recorded: boolean): void;
+  /** The person's Stop on the mark, answered: true saves the recording, false discards it. */
+  stop(save: boolean): void;
   isTrusted?: (event: Event) => boolean;
   /** What the page shows at a point, under the mark: the browser's own hit test unless a test gives one. */
   under?: (x: number, y: number) => Element | null;
@@ -302,22 +319,77 @@ export function showIndicator(options: {
   voice.className = "voice";
   const button = document.createElement("button");
   button.type = "button";
-  mark.append(dot, label, voice, button);
+  const makeButton = (text: string, name: string) => {
+    const made = document.createElement("button");
+    made.type = "button";
+    made.textContent = text;
+    made.dataset.action = name;
+    return made;
+  };
+  // Stop asks first, in the mark itself: Save, Discard, or Keep recording, which takes the question away.
+  const stopButton = makeButton("Stop", "stop");
+  const saveButton = makeButton(STOP_WORDS.save, "save");
+  const discardButton = makeButton(STOP_WORDS.discard, "discard");
+  const backButton = makeButton(STOP_WORDS.back, "back");
+  mark.append(
+    dot,
+    label,
+    voice,
+    button,
+    stopButton,
+    saveButton,
+    discardButton,
+    backButton,
+  );
 
   let current = options.view;
+  /** The person pressed Stop and has not answered yet. */
+  let asking = false;
+  /** Answered: the recording is ending, and the mark goes with it. Nothing more is sent from it. */
+  let answered = false;
   button.addEventListener("click", (event) => {
     if (!trusted(event)) return;
     options.choose(current.excluded);
   });
+  stopButton.addEventListener("click", (event) => {
+    if (!trusted(event)) return;
+    asking = true;
+    update(current);
+    saveButton.focus();
+  });
+  backButton.addEventListener("click", (event) => {
+    if (!trusted(event)) return;
+    asking = false;
+    update(current);
+    stopButton.focus();
+  });
+  for (const [answer, save] of [
+    [saveButton, true],
+    [discardButton, false],
+  ] as const)
+    answer.addEventListener("click", (event) => {
+      if (!trusted(event) || answered) return;
+      answered = true;
+      for (const each of [saveButton, discardButton, backButton])
+        each.disabled = true;
+      options.stop(save);
+    });
 
   const update = (view: IndicatorView) => {
     current = view;
     const words = indicatorWords(view);
     mark.toggleAttribute("data-excluded", view.excluded);
-    label.textContent = words.label;
+    const question = asking && !view.excluded;
+    label.textContent = question ? STOP_WORDS.question : words.label;
     voice.textContent = words.voice ? `· ${words.voice}` : "";
-    voice.hidden = words.voice === null;
+    voice.hidden = question || words.voice === null;
     button.textContent = words.button;
+    button.hidden = question;
+    // Stop only where the tab is recorded: a site left out shows Record it alone.
+    stopButton.hidden = question || view.excluded;
+    saveButton.hidden = !question;
+    discardButton.hidden = !question;
+    backButton.hidden = !question;
   };
   update(options.view);
 
