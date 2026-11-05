@@ -11,7 +11,10 @@ import importlib
 import json
 import sys
 import time
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 from types import SimpleNamespace
 
 import httpx
@@ -24,6 +27,7 @@ from harness_contract import (
     EARLIER_QUESTION,
     GRANTED_TOOLS,
     LATEST_QUESTION,
+    STANDING_ROLE,
     anthropic_environment,
     conversation,
     fake_provider,
@@ -207,3 +211,219 @@ def test_a_live_session_is_not_rebuilt_on_every_turn(monkeypatch):
 
     _two_turns(monkeypatch, "healthy-thread", between=between)
     assert deleted == []
+
+
+SKILL = "CONTRACT_SKILL_INSTRUCTION_adk"
+
+
+def _system_prompt(body):
+    """What the model was given as instructions: the system and developer messages it was sent."""
+    return json.dumps(
+        [m for m in body.get("messages", []) if m.get("role") in ("system", "developer")]
+    )
+
+
+def test_only_the_servers_own_system_messages_become_the_bots_instructions(monkeypatch):
+    """A system row the browser adds (a skill's instructions arrive as one) is not an instruction.
+
+    The server drops any incoming message that uses its own ids, so only the standing role and the
+    granted-tools summary it writes carry them. Every other system row reached the model the way
+    the library treats one after `messages[0]`, which is not at all, and must not be promoted.
+    """
+
+    def skill(messages):
+        messages[-1:-1] = [{"id": "skill-row", "role": "system", "content": f"Use the skill. {SKILL}"}]
+
+    body = _two_turns(monkeypatch, "skill-thread", second=skill)
+    assert STANDING_ROLE in _system_prompt(body)
+    assert GRANTED_TOOLS in _system_prompt(body)
+    assert SKILL not in _system_prompt(body), "a browser system row became the Bot's instructions"
+
+
+TOOL_NAME = "read_probe_value"
+TOOL = {
+    "name": TOOL_NAME,
+    "description": "Read a validation value.",
+    "parameters": {"type": "object", "properties": {"request_id": {"type": "string"}}},
+}
+TOOL_TRIGGER = "CONTRACT_CALL_THE_TOOL_adk"
+ANSWERED_ELSEWHERE = "CONTRACT_ANSWERED_ELSEWHERE_adk"
+
+
+@contextmanager
+def _tool_provider():
+    """A Chat Completions model that calls `TOOL_NAME` when asked to and has no result yet.
+
+    Yields `(base_url, bodies)`, every request body in arrival order.
+    """
+    bodies = []
+
+    class Provider(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            bodies.append(body)
+            messages = body["messages"]
+            asked = TOOL_TRIGGER in json.dumps([m for m in messages if m["role"] == "user"][-1:])
+            answered = any(m["role"] == "tool" for m in messages)
+            delta, reason = {"role": "assistant", "content": "ok"}, "stop"
+            if asked and not answered:
+                delta = {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_probe",
+                        "type": "function",
+                        "function": {"name": TOOL_NAME, "arguments": '{"request_id":"probe"}'},
+                    }],
+                }
+                reason = "tool_calls"
+            base = {"id": "c", "object": "chat.completion.chunk", "created": 0, "model": body["model"]}
+            chunks = [
+                {**base, "choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
+                {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": reason}]},
+            ]
+            data = ("".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", bodies
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def _after_a_tool_call(monkeypatch, thread, *runs):
+    """This process calls a client tool on turn 1, then gets one run per callable in `runs`.
+
+    Turn 1 leaves this process's session waiting on the call. Each callable gets the thread as the
+    server stores it so far (turn 1's tool call is in, and each later run's answer), the call's id
+    and this process's session manager, and edits the thread in place into what the next run to
+    reach this process carries. Returns `(the body the model received on the last run, deleted)`,
+    where `deleted` lists the session ids this process dropped.
+    """
+    with _tool_provider() as (base, bodies):
+        main = _app(monkeypatch, openai_environment, base)
+        manager = _session_manager(main)
+        deleted = []
+        original = manager._delete_session
+
+        async def recording(session):
+            deleted.append(session.id)
+            await original(session)
+
+        monkeypatch.setattr(manager, "_delete_session", recording)
+
+        async def turns():
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=main.app), base_url="http://harness"
+            ) as client:
+                first = conversation(thread_id=thread, run_id=f"{thread}-1")
+                first["tools"] = [TOOL]
+                first["messages"][-1]["content"] += f" {TOOL_TRIGGER}"
+                events = await _post(client, first)
+                calls = [e for e in events if e["type"] == "TOOL_CALL_START"]
+                assert len(calls) == 1, events
+                call = calls[0]
+                arguments = "".join(
+                    e["delta"] for e in events
+                    if e["type"] == "TOOL_CALL_ARGS" and e["toolCallId"] == call["toolCallId"]
+                )
+                session = await manager.get_session(thread, "openbot", "openbot")
+                assert session.state.get("pending_tool_calls") == [call["toolCallId"]]
+                messages = [
+                    *first["messages"],
+                    {
+                        "id": call.get("parentMessageId") or "assistant-tool-call",
+                        "role": "assistant",
+                        "toolCalls": [{
+                            "id": call["toolCallId"],
+                            "type": "function",
+                            "function": {"name": TOOL_NAME, "arguments": arguments},
+                        }],
+                    },
+                ]
+                for number, run in enumerate(runs, start=2):
+                    await run(messages, call["toolCallId"], manager)
+                    called = len(bodies)
+                    events = await _post(
+                        client, {**first, "runId": f"{thread}-{number}", "messages": messages}
+                    )
+                    assert len(bodies) > called, "the model was not called"
+                    messages[:] = _answer(events, messages)
+                return bodies[-1]
+
+        return asyncio.run(asyncio.wait_for(turns(), timeout=60)), deleted
+
+
+def test_a_turn_answered_elsewhere_after_an_abandoned_tool_call_reaches_the_model(monkeypatch):
+    """The call this process waits on was never answered, and another replica took the next turn.
+
+    A session still waiting on a call is not one whose result this run brings, so the turn it
+    missed is not lost to it.
+    """
+
+    async def elsewhere(messages, call_id, manager):
+        messages += [
+            {"id": "u2b", "role": "user", "content": f"Never mind. {MISSED_QUESTION}"},
+            {"id": "a2b", "role": "assistant", "content": "Answered by another replica."},
+            {"id": "u3", "role": "user", "content": f"And now? {NEWER_QUESTION}"},
+        ]
+
+    body, deleted = _after_a_tool_call(monkeypatch, "abandoned-call-thread", elsewhere)
+    sent = json.dumps(body)
+    assert MISSED_QUESTION in sent, "the turn another replica answered never reached the model"
+    assert NEWER_QUESTION in sent
+    assert missing_from(body) == []
+
+
+def test_an_answer_another_replica_gave_after_a_tool_result_reaches_the_model(monkeypatch):
+    """Another replica took the tool result this process was waiting on, and answered it."""
+
+    async def elsewhere(messages, call_id, manager):
+        messages += [
+            {"id": "tool-result", "role": "tool", "toolCallId": call_id, "content": '{"value": 7}'},
+            {"id": "a2b", "role": "assistant", "content": f"The value is 7. {ANSWERED_ELSEWHERE}"},
+            {"id": "u3", "role": "user", "content": f"And now? {NEWER_QUESTION}"},
+        ]
+
+    body, deleted = _after_a_tool_call(monkeypatch, "result-elsewhere-thread", elsewhere)
+    sent = json.dumps(body)
+    assert ANSWERED_ELSEWHERE in sent, "the answer another replica gave never reached the model"
+    assert NEWER_QUESTION in sent
+    assert missing_from(body) == []
+
+
+def test_a_tool_result_for_this_process_continues_its_session(monkeypatch):
+    """The result this session waits on, sent to it: the session goes on, and is not rebuilt.
+
+    Nor on the turn after, once the call is answered and nothing waits on it.
+    """
+    continued = []
+
+    async def result(messages, call_id, manager):
+        messages.append(
+            {"id": "tool-result", "role": "tool", "toolCallId": call_id, "content": '{"value": 7}'}
+        )
+
+    async def next_turn(messages, call_id, manager):
+        session = await manager.get_session("continuation-thread", "openbot", "openbot")
+        continued.append(session.state.get("pending_tool_calls"))
+        messages.append({"id": "u3", "role": "user", "content": f"And now? {NEWER_QUESTION}"})
+
+    body, deleted = _after_a_tool_call(monkeypatch, "continuation-thread", result, next_turn)
+    assert deleted == []
+    assert continued == [[]], "the answered call was still pending"
+    assert [m for m in body["messages"] if m["role"] == "tool"], body
+    assert NEWER_QUESTION in json.dumps(body)
+    assert missing_from(body) == []

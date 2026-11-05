@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
 
-from ag_ui.core import DeveloperMessage, RunAgentInput, SystemMessage
+from ag_ui.core import RunAgentInput, SystemMessage
 from ag_ui_adk import ADKAgent, AGUIToolset, add_adk_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -53,17 +53,36 @@ class CompleteToolCallsLiteLlm(LiteLlm):
 
 
 
+# The ids of the system messages the server writes for a remote Bot: `standingRoleMessage` and
+# `holdingsMessageFor` in server/src/copilot.ts. The server drops every incoming message whose id
+# starts with one of these before it adds its own, so in a run only its own carry one. The browser
+# adds system rows too (a skill's instructions arrive as one), and those are not the Bot's
+# instructions.
+SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
+
+
+def _is_server_instruction(message) -> bool:
+    return (
+        isinstance(message, SystemMessage)
+        and isinstance(message.id, str)
+        and message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+    )
+
+
 def _role_first(input: RunAgentInput) -> RunAgentInput:
-    """Every system and developer message of this run, as the one system message ADK reads.
+    """The server's standing role and granted-tools summary, as the one system message ADK reads.
 
     `ag_ui_adk` appends `messages[0]` to the agent's instruction when it is a system message and
     drops every other one: history seeding has no place for them and only the newest user message
     is dispatched. The server sends two, the standing role and then the granted-tools summary, so
-    the summary never reached the model. Folding them into one, in order, puts all of them in the
+    the summary never reached the model. Folding them into one, in order, puts both in the
     instruction, rebuilt from this run's input on every run, so a grant that changed since the
     last run (same id, new content) is the one the model is told about.
+
+    Only those two. Any other system or developer message stays where it was, and the library
+    treats it as it always has.
     """
-    system = [m for m in input.messages if isinstance(m, (SystemMessage, DeveloperMessage))]
+    system = [m for m in input.messages if _is_server_instruction(m)]
     if not system:
         return input
     role = SystemMessage(
@@ -71,8 +90,26 @@ def _role_first(input: RunAgentInput) -> RunAgentInput:
         role="system",
         content="\n\n".join(m.content for m in system if m.content),
     )
-    rest = [m for m in input.messages if not isinstance(m, (SystemMessage, DeveloperMessage))]
+    rest = [m for m in input.messages if not _is_server_instruction(m)]
     return input.model_copy(update={"messages": [role, *rest]})
+
+
+def _missed_a_turn(messages, seen, pending) -> bool:
+    """Whether a session with ledger `seen`, waiting on tool calls `pending`, missed part of the thread.
+
+    It did when an earlier user message is not in its ledger, unless this run brings the result of
+    a call it waits on (after the newest user message): that result belongs to the session's
+    pending call. It also did when the thread already holds an answer after the result of a call it
+    still waits on: another replica took that result and replied.
+    """
+    users = [i for i, m in enumerate(messages) if m.role == "user" and m.id]
+    latest = users[-1] if users else -1
+    results = [i for i, m in enumerate(messages) if m.role == "tool" and m.tool_call_id in pending]
+    if any(m.role == "assistant" for i in results for m in messages[i + 1:]):
+        return True
+    if all(messages[i].id in seen for i in users[:-1]):
+        return False
+    return not any(i > latest for i in results)
 
 
 class WholeThreadADKAgent(ADKAgent):
@@ -81,24 +118,29 @@ class WholeThreadADKAgent(ADKAgent):
 
         `ag_ui_adk` sends the model the session's own history plus the messages its ledger has not
         seen, so a live session wins over the thread the server sent. A turn another replica
-        answered was never in this session, and the Bot answered as if it had not happened. Every
-        earlier user message of the thread must be in the ledger; when one is not, the session is
-        deleted (its ledger with it, since the session id is the thread id) and the library seeds a
-        new one from the whole thread, as after a restart. A session waiting on a client tool
-        result is kept: the result belongs to that session's pending call.
+        answered was never in this session, and the Bot answered as if it had not happened. When
+        the session missed one (see `_missed_a_turn`), it is deleted (its ledger with it, since the
+        session id is the thread id) and the library seeds a new one from the whole thread, as after
+        a restart.
         """
         app_name, user_id = self._get_app_name(input), self._get_user_id(input)
         manager = self._session_manager
         seen = manager.get_processed_message_ids(app_name, input.thread_id, user_id=user_id)
         if not seen:
             return
-        users = [m.id for m in input.messages if getattr(m, "role", None) == "user" and m.id]
-        if set(users[:-1]) <= seen:
+        messages = input.messages
+        unseen = any(
+            m.role in ("user", "tool") and m.id not in seen and m.id != messages[-1].id
+            for m in messages
+        )
+        if not unseen:
             return
         session = await manager.get_session(input.thread_id, app_name, user_id)
-        if session is None or (session.state or {}).get("pending_tool_calls"):
+        if session is None:
             return
-        await manager._delete_session(session)
+        pending = set((session.state or {}).get("pending_tool_calls") or [])
+        if _missed_a_turn(messages, seen, pending):
+            await manager._delete_session(session)
 
     async def run(self, input: RunAgentInput):
         await self._drop_a_session_that_missed_a_turn(input)
