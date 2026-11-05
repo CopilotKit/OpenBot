@@ -35,6 +35,11 @@ import {
   type ChannelActivityEvent,
   type ChannelEventHub,
 } from "./events";
+/*
+ * The titler's own cap, shared so a hand-given name and a generated one take the same cut. See the
+ * constant in `summary.ts`, which says why it is exported rather than repeated here.
+ */
+import { MAX_SUMMARY_GRAPHEMES } from "./summary";
 import { upgradeWebSocket } from "./socket";
 import { oneLine } from "./text";
 import type { ThreadIdentity } from "./thread-identity";
@@ -207,6 +212,16 @@ export type ChannelStore = {
     channelId: string,
     pinned: boolean,
   ): Promise<void>;
+  /**
+   * Name the channel's conversation by hand. Throws ChannelNotFoundError for a non-member.
+   *
+   * THE SAME COLUMN THE MODEL TITLER WRITES, and that is the whole of the design: `summary` is the
+   * one title a roster row has, and the titler's sweep only ever offers channels whose summary is
+   * null (`offerChannelsAwaitingSummary`), so a hand-given name cannot be overwritten by a later
+   * automatic one — not by an exception, but because the sweeper never sees the channel again.
+   * `summaryAt` is stamped beside it, exactly as the titler stamps its own.
+   */
+  rename(actor: AgentActor, channelId: string, title: string): Promise<void>;
   /** Stamp the caller's own membership as read now. Throws ChannelNotFoundError for a non-member. */
   markRead(actor: AgentActor, channelId: string): Promise<void>;
   /**
@@ -730,6 +745,81 @@ export function createChannelStore(
             lastMessageAt: null,
             lastMessageAgentId: null,
             pinned,
+          };
+          await transaction.execute(
+            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+          );
+        },
+        { isolationLevel: "read committed" },
+      );
+    },
+
+    async rename(actor, channelId, title) {
+      await database.transaction(
+        async (transaction) => {
+          /*
+           * The same flattening the titler applies (`oneLine` in server/src/channels/text.ts):
+           * control characters stripped, whitespace collapsed, cut on grapheme clusters at the
+           * titler's cap. The route flattens too, but the store guards its own write so a direct
+           * caller can't slip an empty or over-long title past it.
+           *
+           * An empty name is no name: there is nothing to write, so the operation refuses,
+           * matching what the route answers before it ever reaches here.
+           */
+          const flattened = oneLine(title, MAX_SUMMARY_GRAPHEMES);
+          if (!flattened) throw new ChannelNotFoundError(channelId);
+
+          const updated = await transaction
+            .update(channels)
+            .set({ summary: flattened, summaryAt: new Date() })
+            .where(
+              and(
+                eq(channels.id, channelId),
+                // A deleted channel is not there to name. The same guard `setPinned` carries, for
+                // the same reason: the row is gone from every roster, so nothing about it is
+                // nameable.
+                isNull(channels.deletedAt),
+                /*
+                 * Only a member names it. An update rather than a read-then-write, so the check and
+                 * the write are one statement against one snapshot: two people renaming at once
+                 * each land, last writer wins, and neither can write a channel they were removed
+                 * from between the check and the write.
+                 */
+                exists(
+                  transaction
+                    .select({ one: sql`1` })
+                    .from(channelMemberships)
+                    .where(
+                      and(
+                        eq(channelMemberships.channelId, channelId),
+                        eq(channelMemberships.userId, actor.id),
+                      ),
+                    ),
+                ),
+              ),
+            )
+            .returning({ id: channels.id });
+          // Not a member, no such channel, or a deleted one: the same answer every way, matching
+          // `setPinned` and `get`.
+          if (updated.length === 0) throw new ChannelNotFoundError(channelId);
+
+          /*
+           * Announced to every member, like the titler's own write (`summary.ts`): a title is a
+           * fact about the channel, not about the membership that changed it, and the roster patch
+           * that carries it (`use-channel-events.ts`) already knows what a `summary` event means.
+           * Inside the transaction, so a rename that rolls back is never announced.
+           */
+          const members = await transaction
+            .select({ userId: channelMemberships.userId })
+            .from(channelMemberships)
+            .where(eq(channelMemberships.channelId, channelId));
+          const event: ChannelActivityEvent = {
+            channelId,
+            memberIds: members.map((member) => member.userId),
+            lastMessage: null,
+            lastMessageAt: null,
+            lastMessageAgentId: null,
+            summary: flattened,
           };
           await transaction.execute(
             sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
@@ -1325,6 +1415,41 @@ export function createChannelRoutes(
         pinned,
       );
       return context.json({ pinned });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  /*
+   * A name a person gives the conversation, written where the roster reads a title from.
+   *
+   * Validated to the same shape the model titler writes: one line, control characters stripped,
+   * whitespace collapsed, cut on grapheme clusters at the titler's own cap, so a hand-given name
+   * and a generated one are indistinguishable to every reader of the column. The answer carries the
+   * title as it landed, cut and all, so a caller that typed more than the cap can see what the
+   * conversation is now called rather than guessing.
+   */
+  routes.put("/:channelId/name", requireUser, async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isChannelInputObject(body)) {
+      return context.json({ error: "Name input must be a JSON object." }, 400);
+    }
+    const { name } = body as { name?: unknown };
+    if (typeof name !== "string") {
+      return context.json({ error: "Name must be text." }, 400);
+    }
+    const title = oneLine(name, MAX_SUMMARY_GRAPHEMES);
+    if (!title) {
+      return context.json({ error: "Name can't be empty." }, 400);
+    }
+
+    try {
+      await store.rename(
+        context.var.actor,
+        context.req.param("channelId"),
+        title,
+      );
+      return context.json({ name: title });
     } catch (error) {
       return mapStoreError(context, error);
     }

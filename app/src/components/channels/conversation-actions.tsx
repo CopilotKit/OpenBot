@@ -1,4 +1,9 @@
-import { IconPin, IconPinnedOff, IconTrash } from "@tabler/icons-react";
+import {
+  IconPencil,
+  IconPin,
+  IconPinnedOff,
+  IconTrash,
+} from "@tabler/icons-react";
 import {
   useInfiniteQuery,
   useMutation,
@@ -9,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { DeleteConversationDialog } from "./delete-conversation-dialog";
+import { RenameConversationDialog } from "./rename-conversation-dialog";
 
 /**
  * Pin and Delete for the conversation that is open, in the Bot panel beside it.
@@ -31,17 +37,29 @@ export function ConversationActions({
   name: string;
 }) {
   const queryClient = useQueryClient();
-  const pinned = useInfiniteQuery({
+  /*
+   * The same list read the pin came from, widened to carry the title too: the roster's page is the
+   * only loaded copy of the conversation's summary, and the dialog opens with what the person last
+   * saw this conversation called. A conversation missing from the pages loaded so far is not pinned
+   * and has never been named — the list's first page always holds every pinned conversation, and a
+   * titled one is no more likely to be deep in the roster than any other.
+   */
+  const listed = useInfiniteQuery({
     ...channelListQueryOptions(),
-    select: (data) =>
-      data.pages.some((page) =>
-        page.channels.some(
-          (channel) => channel.id === channelId && channel.pinned,
-        ),
-      ),
+    select: (data) => {
+      const channel = data.pages
+        .flatMap((page) => page.channels)
+        .find((row) => row.id === channelId);
+      return {
+        pinned: channel?.pinned ?? false,
+        summary: channel?.summary ?? undefined,
+      };
+    },
   }).data;
+  const pinned = listed?.pinned;
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   return (
     <section className="grid gap-2">
@@ -60,6 +78,15 @@ export function ConversationActions({
         >
           {pinned ? <IconPinnedOff /> : <IconPin />}
           {pinned ? "Unpin" : "Pin"}
+        </Button>
+        <Button
+          aria-label="Rename conversation…"
+          className="w-full text-sm!"
+          onClick={() => setRenaming(true)}
+          variant="outline"
+        >
+          <IconPencil />
+          Rename…
         </Button>
         <Button
           aria-label="Delete conversation…"
@@ -83,6 +110,13 @@ export function ConversationActions({
         name={name}
         onOpenChange={setConfirming}
         open={confirming}
+      />
+      <RenameConversationDialog
+        channelId={channelId}
+        current={listed?.summary}
+        name={name}
+        onOpenChange={setRenaming}
+        open={renaming}
       />
     </section>
   );

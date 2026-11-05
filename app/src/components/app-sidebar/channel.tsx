@@ -1,8 +1,14 @@
-import { IconPin, IconPinnedOff, IconTrash } from "@tabler/icons-react";
+import {
+  IconPencil,
+  IconPin,
+  IconPinnedOff,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { memo, useState } from "react";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { RenameConversationDialog } from "@/components/channels/rename-conversation-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -69,6 +75,7 @@ export const Channel = memo(function Channel({
    * the next attempt.
    */
   const [pinProblem, setPinProblem] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
 
   return (
     <>
@@ -115,6 +122,10 @@ export const Channel = memo(function Channel({
             {pinned ? <IconPinnedOff /> : <IconPin />}
             {pinned ? "Unpin conversation" : "Pin conversation"}
           </ContextMenuItem>
+          <ContextMenuItem onClick={() => setRenaming(true)}>
+            <IconPencil />
+            Rename conversation…
+          </ContextMenuItem>
           <ContextMenuItem
             variant="destructive"
             onClick={() => setConfirming(true)}
@@ -136,6 +147,17 @@ export const Channel = memo(function Channel({
         name={name}
         onOpenChange={setConfirming}
         open={confirming}
+      />
+      {/*
+       * The title the row shows — the summary, never the Bot name — is what the box opens with, so
+       * renaming starts from what the person last saw this conversation called.
+       */}
+      <RenameConversationDialog
+        channelId={channelId}
+        current={summary}
+        name={name}
+        onOpenChange={setRenaming}
+        open={renaming}
       />
     </>
   );
