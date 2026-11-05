@@ -2702,7 +2702,6 @@ const selfHostBannerIntelligence = createIntelligenceClient(
 // On a first install, an Intelligence installed beside this server is still running its migrations
 // when this first asks, so the check waits that out before it says anything (intelligence-startup.ts).
 void reportIntelligenceEntitlement({
-  intelligence: config.runtime.intelligence,
   entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
 });
 
