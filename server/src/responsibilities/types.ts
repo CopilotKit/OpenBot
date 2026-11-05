@@ -46,6 +46,14 @@ export const responsibilityPatchSchema = responsibilityInputSchema
     subscriptions: true,
   })
   .partial()
+  .extend({
+    /*
+     * Re-declared without the input's `.default([])`. Zod 4 applies an inner default under
+     * `.partial()`, so the picked field turned every patch that left subscriptions out (a new title,
+     * from the edit dialog or `update_responsibility`) into "subscriptions: []" and wiped them.
+     */
+    subscriptions: z.array(subscriptionSchema).max(20).optional(),
+  })
   .strict();
 export const responsibilityEventSchema = z
   .object({
