@@ -474,23 +474,36 @@ export class UnavailableAgent extends AbstractAgent {
  * `host.docker.internal`, which a browser on the host cannot resolve, while the browser's
  * `localhost` is, inside the container, the container. Everything the server opens itself, the
  * runner and channel sockets, stays on `wsUrl`.
+ *
+ * `browserWsUrl` may be a path, where the server carries the socket on its own address and has no
+ * public URL to write before it: the page resolves a path against itself. The runtime also hands the
+ * same address to the Recorder in its capture pass, which is not on the page and which the runtime
+ * refuses a path for, so a path is made whole on `ownOrigin`, the server's own origin as that caller
+ * reached it, whenever the server has one it may name.
  */
 export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
   readonly #browserClientWsUrl: string | undefined;
+  readonly #ownOrigin: (() => string | undefined) | undefined;
 
   constructor(
     config: ConstructorParameters<typeof CopilotKitIntelligence>[0] & {
       browserWsUrl?: string;
+      /** The server's own origin (`http://127.0.0.1:3101`) for the request being answered, if it may be named. */
+      ownOrigin?: () => string | undefined;
     },
   ) {
-    const { browserWsUrl, ...platform } = config;
+    const { browserWsUrl, ownOrigin, ...platform } = config;
     super(platform);
     const browser = browserWsUrl?.trim();
     this.#browserClientWsUrl = browser ? clientSocket(browser) : undefined;
+    this.#ownOrigin = ownOrigin;
   }
 
   override ɵgetClientWsUrl(): string {
-    return this.#browserClientWsUrl ?? super.ɵgetClientWsUrl();
+    const address = this.#browserClientWsUrl ?? super.ɵgetClientWsUrl();
+    if (!address.startsWith("/")) return address;
+    const origin = this.#ownOrigin?.();
+    return origin ? `${origin.replace(/^http/, "ws")}${address}` : address;
   }
 
   override getThreadMessages(
