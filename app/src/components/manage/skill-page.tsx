@@ -1,6 +1,6 @@
 import { IconBolt, IconFileOff } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   PageEmpty,
@@ -188,42 +188,27 @@ export function SkillPage({ slug }: { slug: string }) {
         )}
       </PageSection>
 
-      <PageSection
-        description="Changes apply the next time someone uses this skill."
-        title="Skill"
-      >
-        <div className="mt-4">
-          <SkillFields
-            card={{
-              cancel: (
-                <Button
-                  render={(props) => <Link {...props} {...paths.skills()} />}
-                  variant="outline"
-                >
-                  Cancel
-                </Button>
-              ),
-            }}
-            defaultValues={{
-              slug: skill.slug,
-              title: skill.title,
-              summary: skill.summary ?? "",
-              instructions: skill.instructions,
-              // A skill written before this field existed opens with nothing ticked.
-              tools: skill.tools ?? [],
-            }}
-            error={saveSkill.error}
-            // Remounted after a save, so the form starts again from what the server now holds.
-            key={`${skill.title}\u0000${skill.summary}\u0000${skill.instructions}`}
-            onSubmit={async (values) => {
-              await saveSkill.mutateAsync({ ...values, global: true });
-              toast.add({ title: "Skill saved", type: "success" });
-            }}
-            slugLocked
-            submitLabel="Save changes"
-          />
-        </div>
-      </PageSection>
+      <SkillFields
+        // No Cancel: the Bots above save on their own, and Back is the way out.
+        sections={{}}
+        defaultValues={{
+          slug: skill.slug,
+          title: skill.title,
+          summary: skill.summary ?? "",
+          instructions: skill.instructions,
+          // A skill written before this field existed opens with nothing ticked.
+          tools: skill.tools ?? [],
+        }}
+        error={saveSkill.error}
+        // Remounted after a save, so the form starts again from what the server now holds.
+        key={`${skill.title}\u0000${skill.summary}\u0000${skill.instructions}`}
+        onSubmit={async (values) => {
+          await saveSkill.mutateAsync({ ...values, global: true });
+          toast.add({ title: "Skill saved", type: "success" });
+        }}
+        slugLocked
+        submitLabel="Save changes"
+      />
 
       <PageSection
         description="People can't run it any more, and no Bot offers it."

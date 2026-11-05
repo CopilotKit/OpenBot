@@ -27,7 +27,8 @@ export function NewSkillPage() {
       title="New skill"
     >
       <SkillFields
-        card={{
+        sections={{
+          flush: true,
           cancel: (
             <Button
               render={(props) => <Link {...props} {...paths.skills()} />}
