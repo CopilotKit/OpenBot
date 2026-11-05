@@ -72,18 +72,28 @@ export function strictestRule(
   return best;
 }
 
+/** A confirmation in front of the verb on a button: "Yes, delete", "Confirm transfer". */
+const CONFIRMING =
+  "(?:(?:yes|ok|okay|confirm|continue and|i want to|permanently)[,\\s]+)?";
+
 /**
  * Built-in safety requirements. These always hand the action to the person, before and regardless of
  * any rule, preference or reviewer verdict, and they are not configurable.
  *
- * Matched on the words of the action and its target, for effects that change something. A read is
- * never handed off here: reading a checkout page is not paying. Deliberately broad; a false hand-off
+ * Matched on the words of the action and its target, for effects that change something, and for
+ * payments also on what the action is called (see {@link actionName}). A read is never handed off
+ * here: reading a checkout page is not paying. Deliberately broad; a false hand-off
  * costs the person one click, a missed one costs them their account or their money.
  */
 const SAFETY_REQUIREMENTS: readonly {
   id: string;
   reason: string;
+  /** Matched on every word of the action: its tool, target, arguments and page. */
   pattern: RegExp;
+  /** Matched on a connector tool's own name only (see {@link actionName}). */
+  tool?: RegExp;
+  /** Matched on the label of the control a browser click presses only. */
+  click?: RegExp;
 }[] = [
   {
     id: "credentials",
@@ -106,6 +116,62 @@ const SAFETY_REQUIREMENTS: readonly {
       // A wire of money, not a news wire: "Business Wire" is where press releases go out, so a Bot
       // filling in where its research came from would otherwise hand that typing to the person.
       /payment|refund|\bpay(ing)?\b|pay[-_ ]?now|checkout|purchase|place[-_ ]?order|buy[-_ ]?now|(?<!\b(business|news|press)[-_ ]?)\bwire\b|bank[-_ ]?transfer|transfer[-_ ]?(money|funds)|send[-_ ]?money|credit[-_ ]?card|card[-_ ]?number|\bcvv\b|\biban\b|routing[-_ ]?number|billing/i,
+    /*
+     * Moving money and buying, by what the action is called. A transfer, a payout or an order says
+     * so in its tool's name or on the button pressed, and nowhere in its arguments, so these words
+     * are matched on the name alone: a note that says "transfer" or "buy" is still an ordinary edit.
+     */
+    tool: /\b(payouts?|transfers?(?! (ownership|of ownership|files?|domains?|calls?|chats?|conversations?))|withdraw(als?)?|charges?|buy|purchases?|remit|(create|place|submit) (an? )?order|send money)\b/,
+    click: new RegExp(
+      `^${CONFIRMING}(transfer|withdraw|pay|buy|send money)\\b|^${CONFIRMING}(send|pay|transfer|donate|tip)\\b.*[$€£¥₹]\\s?\\d|\\b(place (your )?order|(complete|confirm|submit) (your )?(purchase|order)|order now|buy now|buy it now)\\b`,
+    ),
+  },
+];
+
+/**
+ * Consequential actions: deleting, sending to other people, sharing and publishing. Each one asks,
+ * before and regardless of any rule, preference or reviewer verdict, in every edition, and it is not
+ * configurable. Unlike the requirements above the person can let the Bot do it, once: Allow once
+ * and Deny, never a standing "Always allow" (see `offersStandingRule`).
+ *
+ * Matched only on what the action is called (see {@link actionName}), never on what it carries.
+ * A tool name holds the verb anywhere ("GOOGLEDRIVE_DELETE_FILE"). A button holds it first
+ * ("Delete", "Send", "Post"), so a folder called "Sent", a tab called "Posts" or a list called
+ * "Shared with me" is browsing, not acting.
+ */
+const CONSEQUENTIAL: readonly {
+  id: string;
+  reason: string;
+  tool: RegExp;
+  click: RegExp;
+}[] = [
+  {
+    id: "deleting",
+    reason: "Deleting something always asks you first.",
+    tool: /\b(delete|deletes|trash|destroy|erase|purge|wipe|discard)\b/,
+    click: new RegExp(
+      `^${CONFIRMING}(delete|permanently delete|move to (the )?(trash|bin)|trash|empty (the )?(trash|bin)|discard|erase|destroy)\\b`,
+    ),
+  },
+  {
+    id: "sending",
+    reason: "Sending something to other people always asks you first.",
+    tool: /\b(send|sends|reply|replies|forward|respond|notify|broadcast|invite|invites|comment|comments|(create|post|add) (an? )?(chat )?message)\b/,
+    click: new RegExp(`^${CONFIRMING}send\\b`),
+  },
+  {
+    id: "sharing",
+    reason: "Sharing something with other people always asks you first.",
+    tool: /\b(share|shares|sharing|shared link|permission|permissions|collaborators?|acl|grant (access|role))\b/,
+    click: new RegExp(`^${CONFIRMING}(share|invite|add people)\\b`),
+  },
+  {
+    id: "publishing",
+    reason: "Posting or publishing something always asks you first.",
+    tool: /\b(publish|publishes|post|posts|tweet|retweet|repost|go live|(create|publish) (an? )?release)\b/,
+    click: new RegExp(
+      `^${CONFIRMING}(post|publish|tweet|repost|retweet|go live)\\b`,
+    ),
   },
 ];
 
@@ -176,7 +242,7 @@ const NOT_ACCOUNT_ACTIONS =
 
 export function safetyRequirement(
   candidate: ApprovalCandidate,
-): { id: string; reason: string } | undefined {
+): { id: string; reason: string; behaviour: "hand_off" | "ask" } | undefined {
   if (candidate.effect === "read") return undefined;
   if (NOT_ACCOUNT_ACTIONS.test(candidate.toolRef)) return undefined;
   // What a Bot types is content, as reading a checkout page is not paying: a CRM note about a
@@ -195,8 +261,153 @@ export function safetyRequirement(
     flatten(args),
     flatten(candidate.target),
   ].join(" ");
-  const hit = SAFETY_REQUIREMENTS.find((entry) => entry.pattern.test(words));
-  return hit ? { id: hit.id, reason: hit.reason } : undefined;
+  const named = actionName(candidate);
+  const matches = (entry: { tool?: RegExp; click?: RegExp }) =>
+    named !== undefined &&
+    (named.kind === "tool" ? entry.tool : entry.click)?.test(named.name) ===
+      true;
+  const handOff = SAFETY_REQUIREMENTS.find(
+    (entry) => entry.pattern.test(words) || matches(entry),
+  );
+  if (handOff)
+    return { id: handOff.id, reason: handOff.reason, behaviour: "hand_off" };
+  // The Bot's own memory and settings are its own, as auto-review treats them (see `reviewable`).
+  if (OWN_TOOLS.test(candidate.toolRef)) return undefined;
+  const asks =
+    CONSEQUENTIAL.find((entry) => {
+      if (!matches(entry)) return false;
+      // A draft is staged for the person, and sends nothing until somebody sends it.
+      return !(
+        entry.id === "sending" &&
+        named?.kind === "tool" &&
+        /\bdrafts?\b/.test(named.name) &&
+        !/\bsend\b/.test(named.name)
+      );
+    }) ??
+    (named?.kind === "tool" &&
+    !/\bdrafts?\b/.test(named.name) &&
+    addressesPeople(candidate.args)
+      ? CONSEQUENTIAL.find((entry) => entry.id === "sending")
+      : undefined) ??
+    (pressesSend(candidate)
+      ? CONSEQUENTIAL.find((entry) => entry.id === "sending")
+      : undefined);
+  return asks
+    ? { id: asks.id, reason: asks.reason, behaviour: "ask" }
+    : undefined;
+}
+
+/**
+ * Whether a keypress in the browser sends what is on the page: Cmd+Enter or Ctrl+Enter, which sends
+ * in most mail and chat apps, or Enter in a box for writing a message, a reply or a comment. A
+ * `computer_type` with `submit` presses Enter once the text is in, so it counts as Enter. Shift+Enter
+ * starts a new line there and is not a send. Ctrl+Enter also inserts a page break in some editors;
+ * asking about that costs one click.
+ */
+function pressesSend(candidate: ApprovalCandidate): boolean {
+  if (
+    candidate.toolRef !== "computer_key" &&
+    candidate.toolRef !== "computer_type"
+  )
+    return false;
+  const args = (candidate.args ?? {}) as { key?: unknown; submit?: unknown };
+  const key =
+    candidate.toolRef === "computer_key"
+      ? typeof args.key === "string"
+        ? args.key
+        : ""
+      : args.submit === true
+        ? "Enter"
+        : "";
+  const parts = key.split(/\+(?=.)/).map((part) => part.trim().toLowerCase());
+  const main = parts.at(-1) ?? "";
+  if (main !== "enter" && main !== "numpadenter" && main !== "return")
+    return false;
+  if (
+    parts
+      .slice(0, -1)
+      .some((part) =>
+        ["control", "ctrl", "meta", "cmd", "command", "controlormeta"].includes(
+          part,
+        ),
+      )
+  )
+    return true;
+  // Shift+Enter starts a new line in a box for writing a message.
+  if (parts.length > 1) return false;
+  const target = candidate.target as
+    | { element?: { name?: unknown } }
+    | undefined;
+  const field =
+    typeof target?.element?.name === "string"
+      ? target.element.name.toLowerCase()
+      : "";
+  return (
+    /\b(message|reply|comment|chat|compose|tweet|post)\b|what'?s happening/.test(
+      field,
+    ) && !/\bsearch\b/.test(field)
+  );
+}
+
+/** OpenBot's own memory and Bot-settings tools, which change only the Bot itself. */
+const OWN_TOOLS = /^memory\/|^bot\/[^/]*(settings|preferences)/i;
+
+/**
+ * What the action is called, apart from what it carries: a connector tool's own name, split into
+ * lower-case words ("GOOGLEDRIVE_DELETE_FILE" is "googledrive delete file"), or the label of the
+ * control a browser click presses ("Place your order"). Undefined for every other computer action,
+ * which presses nothing with a name.
+ */
+function actionName(
+  candidate: ApprovalCandidate,
+): { kind: "tool" | "click"; name: string } | undefined {
+  if (candidate.toolRef === "computer_click") {
+    const target = candidate.target as
+      | { element?: { name?: unknown } }
+      | undefined;
+    const name =
+      typeof target?.element?.name === "string" ? target.element.name : "";
+    const label = name.toLowerCase().replace(/\s+/g, " ").trim();
+    return label ? { kind: "click", name: label } : undefined;
+  }
+  if (candidate.toolRef.startsWith("computer_")) return undefined;
+  const tool = candidate.toolRef.split("/").pop() ?? "";
+  return {
+    kind: "tool",
+    name: tool
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[-_.\s]+/g, " ")
+      .toLowerCase()
+      .trim(),
+  };
+}
+
+/** The argument names a connector puts the people a message or an invitation goes to under. */
+const RECIPIENT_KEYS = new Set([
+  "to",
+  "cc",
+  "bcc",
+  "recipient",
+  "recipients",
+  "recipient_email",
+  "extra_recipients",
+  "attendees",
+  "invitees",
+  "guests",
+]);
+
+/**
+ * Whether a connector call names somebody to send it to by email address: a calendar event with
+ * attendees sends them an invitation, whatever its tool is called. Only top-level arguments, and
+ * only an address, so a `to` that names a folder is not a recipient.
+ */
+function addressesPeople(args: unknown): boolean {
+  if (args === null || typeof args !== "object" || Array.isArray(args))
+    return false;
+  return Object.entries(args as Record<string, unknown>).some(
+    ([key, value]) =>
+      RECIPIENT_KEYS.has(key.toLowerCase()) && /\S@\S/.test(flatten(value)),
+  );
 }
 
 /**
@@ -207,9 +418,7 @@ export function reviewable(candidate: ApprovalCandidate): boolean {
   if (candidate.effect === "read") return false;
   // OpenBot's own memory and Bot-settings tools only. Matched anywhere in the ref, "settings" also
   // exempted vendor tools such as `composio/GITHUB_UPDATE_REPOSITORY_SETTINGS`.
-  return !/^memory\/|^bot\/[^/]*(settings|preferences)/i.test(
-    candidate.toolRef,
-  );
+  return !OWN_TOOLS.test(candidate.toolRef);
 }
 
 /** The person's own words for this run: the user messages the Bot is acting on. */
@@ -345,7 +554,7 @@ export async function decideAction(input: {
   const safety = safetyRequirement(candidate);
   if (safety)
     return {
-      behaviour: "hand_off",
+      behaviour: safety.behaviour,
       source: "safety",
       reason: safety.reason,
     };

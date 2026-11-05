@@ -188,8 +188,9 @@ export function ApprovalSettings() {
           <>
             The strictest matching rule wins. An "ask" rule beats an "allow"
             rule.{personal ? " " : " Team rules are locked. "}Passwords,
-            security settings and payments are always handed to you. Rules for
-            one Bot are on{" "}
+            security settings and payments are always handed to you. Deleting,
+            sending, sharing and posting always ask first. Rules for one Bot are
+            on{" "}
             <Link className="underline underline-offset-4" to="/bots">
               that Bot's page
             </Link>

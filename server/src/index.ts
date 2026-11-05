@@ -234,7 +234,9 @@ import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import {
   ensureAlwaysOnApp,
+  personalDefaultAppsMemory,
   personalDefaultsDeps,
+  startPersonalDefaultApps,
   withPersonalDefaults,
 } from "./plugins/personal-defaults";
 import {
@@ -1153,6 +1155,16 @@ const routineStore = createRoutineStore(database);
 useRoutineTools(routineStore);
 // Routines is on from the start in every edition, for every Bot. See personal-defaults.ts.
 await ensureAlwaysOnApp(pluginStore, personalDefaultsDeps(database));
+/*
+ * The personal edition turns Parallel's keyless web search on once, on its first start. Not awaited:
+ * adding it asks search.parallel.ai for its tools, and an offline start must still start. It keeps
+ * retrying until the tools arrive. Does nothing in the team edition.
+ */
+startPersonalDefaultApps(
+  pluginStore,
+  personalDefaultsDeps(database),
+  personalDefaultAppsMemory(database),
+);
 const responsibilityStore = createResponsibilityStore(database, {
   resolveTarget: async (ownerUserId, agentId, channelId) => {
     const actor = await actorFor(ownerUserId);

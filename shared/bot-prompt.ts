@@ -290,6 +290,27 @@ export const ORCHESTRATION_GUIDANCE = asParagraphs(
 );
 
 /**
+ * Who asks the person before an action: OpenBot, not the Bot.
+ *
+ * OpenBot puts a card in front of the person before any delete, send, share or post, and hands any
+ * payment or purchase to them, whatever their settings (`server/src/approvals/policy.ts`). A Bot told
+ * by its approval card's description to ask "before sending a message" asked too, so the person was
+ * asked twice for one delete. The card OpenBot shows names the exact action, so it is the one that
+ * stays. Only for a Bot OpenBot runs, whose every tool goes through that gate: a remote Bot's own
+ * tools do not, and nothing here is said to one.
+ */
+const APPROVAL_GUIDANCE_LINES = [
+  "OpenBot asks the person itself before you delete, send, share or post anything, and before you",
+  "pay for or buy anything, on a card that shows exactly what you are about to do. It also asks before",
+  "every change when the person has turned that on. So do not ask them first, in words or with an",
+  "approval card: say what you are going to do and do it, and they are asked once, by OpenBot. Ask",
+  "for their decision yourself only when the choice is theirs to make, or before something that",
+  "cannot be undone and is none of these.",
+];
+
+export const APPROVAL_GUIDANCE = asParagraphs(APPROVAL_GUIDANCE_LINES);
+
+/**
  * What a tool call is given when its answer never came.
  *
  * A tool call the surface owns ends the run without a result on purpose: the surface draws it, or

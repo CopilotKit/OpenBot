@@ -71,17 +71,18 @@ function candidate(over: Partial<ApprovalCandidate> = {}): ApprovalCandidate {
   return {
     actorId: owner,
     botId: `${prefix}-bot`,
-    toolRef: "mcp/gmail/send_email",
+    // An ordinary change: sending, deleting, sharing and publishing ask whatever the rules say.
+    toolRef: "mcp/gmail/create_label",
     effect: "write",
     scope: "gmail",
-    args: { to: "sam@example.com" },
+    args: { name: "Receipts" },
     continuation: {
       runId: randomUUID(),
       // Its own conversation, so earlier answers in this file do not apply to it.
       threadId: `${prefix}-thread-${toolCallId}`,
       toolCallId,
-      toolName: "mcp/gmail/send_email",
-      args: { to: "sam@example.com" },
+      toolName: "mcp/gmail/create_label",
+      args: { name: "Receipts" },
       messages: [],
       state: {},
       context: [],
@@ -110,7 +111,7 @@ test("personal and team rules layer, the strictest wins, and switching custom ru
 
   const locked = await service.createTeamRule(admin, {
     botId: "*",
-    toolRef: "mcp/gmail/send_*",
+    toolRef: "mcp/gmail/create_*",
     effect: "write",
     scope: "*",
     behaviour: "ask",
@@ -164,7 +165,7 @@ test("a safety hand-off is stored, cannot be allowed, and is marked done by the 
 test("'Always allow here' saves a personal allow rule that the gate then honours", async () => {
   await store.policy?.setPreferences(owner, { enabled: true });
   await store.setEnabled(owner, true);
-  const first = candidate({ toolRef: "mcp/drive/share", scope: "drive" });
+  const first = candidate({ toolRef: "mcp/drive/rename_file", scope: "drive" });
   expect(await suspends(service.gate(first))).toBeTrue();
   const [request] = (await store.list(owner)).filter(
     (row) => row.action.toolCallId === first.continuation?.toolCallId,
@@ -173,10 +174,15 @@ test("'Always allow here' saves a personal allow rule that the gate then honours
   await service.decide(owner, request?.id as string, "allow_always");
   const rules = await store.rules(owner);
   expect(rules).toContainEqual(
-    expect.objectContaining({ toolRef: "mcp/drive/share", behaviour: "allow" }),
+    expect.objectContaining({
+      toolRef: "mcp/drive/rename_file",
+      behaviour: "allow",
+    }),
   );
   await expect(
-    service.gate(candidate({ toolRef: "mcp/drive/share", scope: "drive" })),
+    service.gate(
+      candidate({ toolRef: "mcp/drive/rename_file", scope: "drive" }),
+    ),
   ).resolves.toBeUndefined();
   await store.setEnabled(owner, false);
 });
