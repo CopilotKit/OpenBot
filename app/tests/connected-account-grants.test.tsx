@@ -119,6 +119,8 @@ type Setup = {
   /** Whether the grants read answers 500. */
   accountMode?: "shared" | null;
   role?: "admin" | "user";
+  /** The sentence Connect is refused with, answered as the server's 503. */
+  connectRefusal?: string;
 };
 
 const authorizeCalls: string[] = [];
@@ -147,6 +149,9 @@ function install(setup: Setup) {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";
     if (path.endsWith("/grants")) return json({ actions: setup.grants ?? [] });
+    if (path.endsWith("/connect") && setup.connectRefusal) {
+      return json({ error: setup.connectRefusal }, 503);
+    }
     if (path.endsWith("/authorize")) {
       authorizeCalls.push(String(init?.body));
       return json({ authorizationUrl: "https://vendor.invalid/consent" });
@@ -776,4 +781,31 @@ test("a broker that authorizes per action draws the grant list", async () => {
   const view = renderScreen();
   await waitFor(() => row(view, "Gmail.SendEmail"));
   expect(view.getByLabelText("Search actions")).toBeTruthy();
+});
+
+/*
+ * A REFUSED CONNECT CAN NAME AN ADDRESS, AND THE ADDRESS HAS TO STAY ON THE SCREEN. An Arcade
+ * deployment that signs people in refuses Connect with the exact verifier address an admin sets in
+ * Arcade's dashboard. A host with no hyphen in it is one word to the browser, and the notice did not
+ * wrap one: at phone width the address ran off the edge and was cut. The layout is not measured
+ * here (happy-dom draws nothing), so what is pinned is the rule that makes it wrap.
+ */
+test("a refused Connect that names an address shows it whole and lets it wrap", async () => {
+  const sentence =
+    "Couldn't start connecting Gmail. Arcade would send you back somewhere else after you sign in. Ask an admin to set the custom verifier in Arcade's dashboard to https://openbotproductiondeployment.examplecompany.com/api/plugins/arcade/verify";
+  install({ provider: "arcade", connected: false, connectRefusal: sentence });
+  const realOpen = window.open;
+  window.open = (() => ({
+    close() {},
+    location: { href: "" },
+  })) as unknown as typeof window.open;
+  try {
+    const view = renderScreen();
+    fireEvent.click(await view.findByRole("button", { name: "Connect" }));
+    const notice = await view.findByText(sentence);
+    expect(notice.getAttribute("role")).toBe("alert");
+    expect(notice.className.split(/\s+/)).toContain("break-words");
+  } finally {
+    window.open = realOpen;
+  }
 });
