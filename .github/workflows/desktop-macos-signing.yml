@@ -72,6 +72,12 @@ jobs:
       - name: Update offer regressions
         run: bun test src/UpdateOffer.test.tsx
         working-directory: desktop
+      # A release build without the CLI installs an app that cannot set up Intelligence, and the
+      # updater would put it on every Mac. This holds both signing workflows to bundling it, and runs
+      # the bundle's signing and verification on a stand-in.
+      - name: Release builds carry the Intelligence CLI
+        run: bun test scripts/release-cli-bundle.test.ts
+        working-directory: desktop
       - name: Importing the Developer ID intermediate twice succeeds
         # The first real signing run stopped here: the .p12 already carried the intermediate, and a
         # second import failed. The signing job runs this script on a keychain that may hold it.
@@ -252,6 +258,26 @@ jobs:
             bun desktop/scripts/desktop-version.ts internal
           fi
           cat desktop/build-version.json
+      # The Intelligence CLI and its Node runtime ship inside the app. Without them the app cannot
+      # set up Intelligence at all, and this is the build the in-place updater installs on every Mac.
+      - name: Bundle the Intelligence CLI
+        env:
+          TARGET: ${{ matrix.platform.target }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            darwin-aarch64) arch=arm64 ;;
+            darwin-x86_64) arch=x64 ;;
+            *) echo "::error::No CLI bundle for $TARGET"; exit 1 ;;
+          esac
+          bun desktop/scripts/cli-bundle.ts darwin "$arch"
+      # Before the build, which pins the runtime's digest: signing rewrites the file.
+      - name: Sign the bundled CLI's binaries
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          desktop/scripts/sign-cli-bundle.sh desktop/src-tauri/cli-bundle \
+            "$APPLE_SIGNING_IDENTITY" desktop/src-tauri/cli-bundle.entitlements.plist
       # The overlay carries `createUpdaterArtifacts` and the `app, dmg` targets, and only this job
       # passes it. The .dmg is what a person downloads and the .app is what becomes the
       # `.app.tar.gz` the updater installs; asking for the dmg alone would leave no .app to verify,
@@ -266,10 +292,12 @@ jobs:
           OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
           OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
           OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
+          OPENBOT_BUNDLED_CLI: "1"
         run: |
           bun run tauri build \
             --config src-tauri/tauri.macos-signing.conf.json \
-            --config src-tauri/tauri.build-version.conf.json
+            --config src-tauri/tauri.build-version.conf.json \
+            --config src-tauri/tauri.bundled-cli.conf.json
         working-directory: desktop
       # Tauri notarizes and staples the .app. The disk image is assembled afterwards, so it is
       # submitted here rather than assumed: a stapled image is the one that installs on a machine
@@ -311,6 +339,9 @@ jobs:
             echo '::error::The app is ad-hoc signed.'
             exit 1
           fi
+
+          # The CLI is in the app, and every Mach-O in it is ours, hardened and timestamped.
+          desktop/scripts/verify-cli-bundle.sh "$app" developer-id
       # Named by architecture because both runners produce `OpenBot.app.tar.gz`, and latest.json
       # points at one URL per platform.
       - name: Collect the artifacts
