@@ -600,12 +600,15 @@ postgresql:
     # of it. `CREATE EXTENSION IF NOT EXISTS` then passes for an ordinary user.
     username: postgres
     database: openbot
-    # SET ONE, OR UPGRADES FAIL. The subchart generates a password on install and then refuses to
-    # render on upgrade unless it is given the current one, which turns the second `helm upgrade`
-    # into an error about credentials. A password you chose, or a Secret you made, makes the release
-    # repeatable. The chart refuses to install without one rather than letting you find out later.
+    # OPTIONAL. Left empty, this chart generates one into the Secret below, once, reads it back on
+    # every upgrade and keeps it on uninstall, because PostgreSQL takes its password at first boot
+    # only and the volume outlives the release. Set it to choose the password yourself.
     password: ""
-    existingSecret: ""
+    # The Secret the database reads its password from (key `postgres-password`). By default it is the
+    # one this chart writes, under the name the subchart would have given its own. Name a Secret you
+    # made instead and the chart writes none. Empty hands the password back to the subchart, which
+    # then needs `password` above.
+    existingSecret: "{{ .Release.Name }}-postgresql"
   image:
     # Bitnami moved its unsupported images to this frozen mirror. Nothing new lands here, so the tag
     # is named rather than inherited from the subchart: with it inherited, bumping the subchart
@@ -644,9 +647,21 @@ secrets:
   # Created by the chart when `existingSecret` is empty. Pass with --set-string or a values file that
   # is not in version control; `KEY_ENCRYPTION_KEY` and the model credential are the two that matter
   # and neither should ever be a literal in a file anybody commits.
+  #
+  # The key the credential vault is encrypted with. With the bundled database (`postgresql.enabled`)
+  # it is optional: the chart generates one, reads it back on every upgrade and keeps it on uninstall,
+  # and it lives and dies with the database it unlocks, both in this namespace.
+  #
+  # REQUIRED WITH A DATABASE OF YOUR OWN. That database outlives this namespace, and a generated key
+  # does not: delete the namespace and reinstall, and every credential stored in the database is
+  # encrypted with a key nobody has any more. So it is a key you hold. Generate one with:
+  # openssl rand -base64 32
   keyEncryptionKey: ""
   betterAuthSecret: ""
   modelApiKey: ""
+  # What the API presents to a Bot's computer (`computers.mode` shared or sandbox). With the bundled
+  # database it is optional, generated and kept like `keyEncryptionKey`; with a database of your own,
+  # set one (`openssl rand -hex 32`), or name a Secret in `computers.existingTokenSecret`.
   computerToken: ""
   supervisorToken: ""
   # Only with `intelligence.enabled: false`. From the CopilotKit CLI: `npx --yes copilotkit@latest

@@ -15,12 +15,13 @@ This template renders nothing.
 {{- /*
   The bundled database, without a password anybody can produce again.
 
-  The subchart generates one on install and then refuses to render on upgrade without being handed
-  the current value, so a release installed without one cannot be upgraded, only reinstalled. That
-  failure arrives on the second deploy, which is the worst time to find it.
+  By default this chart writes the password itself and keeps it (templates/postgresql/secret.yaml).
+  With `postgresql.auth.existingSecret` emptied, as on a release upgraded with `--reuse-values` from
+  before that, the subchart makes its own instead, which a reinstall onto the surviving volume cannot
+  reproduce. So that shape still needs a password somebody can supply again.
 */}}
 {{- if and .Values.postgresql.enabled (not .Values.postgresql.auth.password) (not .Values.postgresql.auth.existingSecret) }}
-{{- fail "The bundled database needs a password you can supply again on upgrade. Set postgresql.auth.password, or postgresql.auth.existingSecret to name one you made. Generate one with: openssl rand -hex 24" }}
+{{- fail "The bundled database needs a password you can supply again on upgrade. Set postgresql.auth.password, or postgresql.auth.existingSecret to name one you made, or leave postgresql.auth.existingSecret at its default ({{ .Release.Name }}-postgresql) for this chart to generate and keep one. Generate one with: openssl rand -hex 24" }}
 {{- end }}
 
 {{- if and .Values.postgresql.enabled (or .Values.database.url .Values.database.existingSecret) }}
@@ -124,7 +125,8 @@ This template renders nothing.
   `external` with no address is a deployment whose Bots have no computer at all, which fails at the
   first browser action rather than at install.
 */}}
-{{- if and (ne .Values.computers.mode "external") (not .Values.secrets.computerToken) (not .Values.computers.existingTokenSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- /* With the bundled database the chart generates one (templates/secret.yaml), so only a database of your own gets here. */}}
+{{- if and (ne .Values.computers.mode "external") (not .Values.secrets.computerToken) (not .Values.computers.existingTokenSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) (not (include "openbot.generatesCredentials" .)) }}
 {{- fail "A computer needs a token, which is the only thing standing between it and anybody who can reach its port. Set secrets.computerToken. Generate one with: openssl rand -hex 32" }}
 {{- end }}
 

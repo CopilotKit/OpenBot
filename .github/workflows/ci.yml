@@ -203,6 +203,16 @@ jobs:
       # question: every secret key a container demands has to be one the chart actually writes.
       # Getting that wrong is invisible until a pod starts, and every shipped target had it wrong.
       - run: bun scripts/check-rendered-chart.ts rendered.yaml
+      # The README's vanilla secrets file is the licence and the model key and nothing else: with the
+      # bundled database the chart generates the rest. Rendered without a key encryption key, and held
+      # to the same coherence check, so that stays true.
+      - name: Renders from the licence and the model key alone
+        if: matrix.target == 'vanilla'
+        run: |
+          helm template ci charts/openbot \
+            --values charts/openbot/ci/vanilla-values.yaml \
+            > rendered-generated.yaml
+          bun scripts/check-rendered-chart.ts rendered-generated.yaml
       # No target names a Learning credential, so the setup Job renders nowhere above. Render it with
       # one of each, and hold it to the same coherence check.
       - name: Learning setup Job renders

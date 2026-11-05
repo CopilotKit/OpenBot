@@ -263,7 +263,7 @@ migrated one database while the API talked to another is a failure that looks li
 - name: POSTGRES_PASSWORD
   valueFrom:
     secretKeyRef:
-      name: {{ default (printf "%s-postgresql" .Release.Name) .Values.postgresql.auth.existingSecret }}
+      name: {{ include "openbot.postgresqlSecretName" . }}
       {{- /* The subchart keeps the superuser's password under its own key, not `password`. */}}
       key: {{ eq .Values.postgresql.auth.username "postgres" | ternary "postgres-password" "password" }}
 - name: DATABASE_URL
@@ -278,6 +278,42 @@ migrated one database while the API talked to another is a failure that looks li
 - name: DATABASE_URL
   value: {{ .Values.database.url | quote }}
 {{- end -}}
+{{- end -}}
+
+{{/*
+The Secret the bundled database's password is in, named the way the subchart names it: whatever
+`postgresql.auth.existingSecret` renders to (the subchart passes it through `tpl`, so the default
+`{{ .Release.Name }}-postgresql` is a name per release), or the subchart's own when that is empty.
+*/}}
+{{- define "openbot.postgresqlSecretName" -}}
+{{- with (.Values.postgresql.auth).existingSecret -}}
+{{- tpl . $ -}}
+{{- else -}}
+{{- printf "%s-postgresql" .Release.Name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether this chart writes the bundled database's password Secret (templates/postgresql/secret.yaml):
+when `postgresql.auth.existingSecret` names the Secret the subchart would otherwise have made itself,
+which is the default. A Secret of the operator's has another name and is left alone; and if one of
+theirs did carry that name, Helm refuses to take it over rather than overwrite it.
+*/}}
+{{- define "openbot.postgresqlSecretWritten" -}}
+{{- if and .Values.postgresql.enabled (.Values.postgresql.auth).existingSecret (eq (include "openbot.postgresqlSecretName" .) (printf "%s-postgresql" .Release.Name)) -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether this chart generates the credentials an operator would otherwise have to make by hand, the
+key encryption key and the computer token, when they are not given: only with the bundled database.
+Both are kept in this chart's Secret, which lives in this namespace, and so does the bundled database
+they belong to. A database of the operator's outlives the namespace, and a key generated here would
+not, so there they are required (templates/secret.yaml, validation.yaml).
+*/}}
+{{- define "openbot.generatesCredentials" -}}
+{{- if .Values.postgresql.enabled -}}true{{- end -}}
 {{- end -}}
 
 {{/*

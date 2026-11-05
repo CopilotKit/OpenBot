@@ -15,22 +15,26 @@ One person, from their own computer, on any cluster with a default StorageClass 
 OpenBot image is amd64 only, and so is the embeddings image Intelligence runs). From a checkout of
 this repository:
 
-**1. Write your secrets into a file you keep and never commit.** The licence and the model key are
-yours; the other three are generated once here and must stay the same on every upgrade, which is why
-they live in a file rather than on the command line.
+**1. Write your licence and model key into a file you keep and never commit.**
 
 ```sh
 cat > openbot-secrets.yaml <<EOF
 secrets:
   licenseToken: "<your CopilotKit licence>"
   modelApiKey: "<your OpenAI API key>"
-  keyEncryptionKey: "$(openssl rand -base64 32)"
-  computerToken: "$(openssl rand -hex 32)"
-postgresql:
-  auth:
-    password: "$(openssl rand -hex 24)"
 EOF
 ```
+
+Nothing else is yours to make. On the first install the chart generates the key the credential vault
+is encrypted with and the computer token into the Secret `openbot-secrets`, and the database password
+into `openbot-postgresql`. Each is read back on every upgrade and kept on uninstall, beside the
+database it belongs to.
+
+To choose them yourself, add `secrets.keyEncryptionKey` (`openssl rand -base64 32`),
+`secrets.computerToken` (`openssl rand -hex 32`) and `postgresql.auth.password` to the file. A value
+given always wins, so give the same one on every upgrade. Anybody restoring a backup of this database
+elsewhere needs the key too:
+`kubectl -n openbot get secret openbot-secrets -o jsonpath='{.data.key-encryption-key}' | base64 -d`.
 
 **2. Install.**
 
@@ -53,8 +57,8 @@ Then open <http://127.0.0.1:3001>. You are its one administrator: `config.single
 reaches the server with no sign-in, which is why it is only ever reached through a port-forward on
 your own computer, and why the chart refuses it with a public URL or an open LoadBalancer.
 
-`ci/vanilla-values.yaml` is single-user mode, OpenBot's bundled database, and a placeholder for each
-secret that your file replaces. CI renders exactly this install on every change.
+`ci/vanilla-values.yaml` is single-user mode, OpenBot's bundled database, and a placeholder for the
+licence and the model key your file replaces. CI renders exactly this install on every change.
 
 **What happens, so a first install that takes a few minutes is not a surprise.** The chart installs
 Intelligence, generates every credential it needs as Secrets that are kept across upgrades and
@@ -270,9 +274,11 @@ than install a second, empty Intelligence beside yours. Add `--set intelligence.
 the Intelligence you have. The same applies with `--reuse-values`, which keeps the old values and
 drops the new chart's defaults.
 
-`secrets.keyEncryptionKey` encrypts the credential vault. Generate it once, keep it, and do not put
-it in a file anybody commits. The chart marks the Secret it creates `helm.sh/resource-policy: keep`,
-so an uninstall does not take the key that every stored credential was encrypted with.
+`secrets.keyEncryptionKey` encrypts the credential vault. With the bundled database the chart
+generates it; with a database of your own it is required, because that database outlives the
+namespace and a generated key would not: generate it once, keep it, and do not put it in a file
+anybody commits. The chart marks the Secret it creates `helm.sh/resource-policy: keep`, so an
+uninstall does not take the key that every stored credential was encrypted with.
 
 ### Pin the image by digest
 
@@ -464,17 +470,19 @@ public LoadBalancer; with `intelligence.enabled: false`, the Intelligence URLs o
 `secrets.intelligenceApiKey` are missing; with the bundled Intelligence, an Intelligence address or key
 of your own is named beside it, the licence is missing, or the release predates it (no
 `intelligence.enabled` at all);
-`secrets.keyEncryptionKey` is not a base64 32-byte value, or is the public example key; there is no
-`secrets.computerToken`; `computers.mode` is `external` with no `computers.url`, or `sandbox` on a
-cluster with no Sandbox CRD; both an Ingress and an HTTPRoute are enabled; both `externalSecrets` and
-an existing Secret are named; a Bot endpoint is named with no token to call it with; a browser is
-asked for inside more than one API replica; `networkPolicy.enabled` is set with an external database
-and no `networkPolicy.extraEgress`, or with `computers.mode: sandbox` and no
+`secrets.keyEncryptionKey` is not a base64 32-byte value, or is the public example key; with a
+database of your own, there is no `secrets.keyEncryptionKey` or no `secrets.computerToken`;
+`computers.mode` is `external` with no `computers.url`, or `sandbox` on a cluster with no Sandbox
+CRD; both an Ingress and an HTTPRoute are enabled; both `externalSecrets` and an existing Secret are
+named; a Bot endpoint is named with no token to call it with; a browser is asked for inside more than
+one API replica; `networkPolicy.enabled` is set with an external database and no
+`networkPolicy.extraEgress`, or with `computers.mode: sandbox` and no
 `networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks, or
 `computers.egressProxy` is turned on with policies and no `networkPolicy.computerExtraEgress`, or with
-no `secrets.egressProxyUrl` where this chart writes the Secret. The routines worker's secret is not
-on this list: the chart generates one wherever nobody else holds one (see
-[The routines sweep](#the-routines-sweep)).
+no `secrets.egressProxyUrl` where this chart writes the Secret. Not on this list, because the chart
+generates them wherever nobody else holds one: the routines worker's secret (see
+[The routines sweep](#the-routines-sweep)), and, with the bundled database, the key encryption key,
+the computer token and the database password.
 
 ## Your own Bot
 
