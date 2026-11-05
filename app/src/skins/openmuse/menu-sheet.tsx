@@ -21,6 +21,7 @@ import {
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { navigationRender } from "@/components/edition/team-features-dialog";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
@@ -148,7 +149,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
             <LinkRow
               icon={item.icon}
               key={item.id}
-              render={<Link onClick={onClose} to={item.to} />}
+              render={navigationRender(item, { onClick: onClose })}
               tint={item.section === "account" ? "plain" : "sky"}
               title={item.label}
             />

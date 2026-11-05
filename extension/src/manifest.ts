@@ -22,6 +22,41 @@ const PERMISSIONS = [
   "nativeMessaging",
 ] as const; // alarms: the organization sign-in keep-alive (Decision 2); unlimitedStorage: Decision 7
 
+/** Chrome's numeric version is separate from a custom build's full display identity.
+ * This does not assign update ordering to prereleases that share a numeric base.
+ * https://developer.chrome.com/docs/extensions/reference/manifest/version
+ */
+export function toChromeManifestVersion(
+  releaseVersion: string,
+): Pick<chrome.runtime.ManifestV3, "version" | "version_name"> {
+  const match =
+    /^(\d+(?:\.\d+){0,3})(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(
+      releaseVersion,
+    );
+  const version = match?.[1];
+  const components = version?.split(".") ?? [];
+  const prerelease = match?.[2];
+  const hasIdentity = prerelease !== undefined || match?.[3] !== undefined;
+  if (
+    !match ||
+    match[0] !== releaseVersion ||
+    components.some(
+      (component) =>
+        !/^(0|[1-9]\d*)$/.test(component) || Number(component) > 65535,
+    ) ||
+    components.every((component) => Number(component) === 0) ||
+    (hasIdentity && components.length !== 3) ||
+    prerelease?.split(".").some((identifier) => /^0\d+$/.test(identifier))
+  ) {
+    throw new Error(
+      `Invalid Recorder release version ${JSON.stringify(releaseVersion)}: expected a nonzero Chrome numeric version (1–4 components, each 0..65535) or a SemVer identity with a valid Chrome base`,
+    );
+  }
+  return hasIdentity
+    ? { version: match[1], version_name: releaseVersion }
+    : { version: match[1] };
+}
+
 /** The same for every build variant: the e2e build differs only in the test hooks its code keeps (see verify-dist). */
 export function buildManifest(input: {
   version: string;
@@ -36,7 +71,7 @@ export function buildManifest(input: {
   return {
     manifest_version: 3,
     name: "OpenBot Recorder",
-    version: input.version,
+    ...toChromeManifestVersion(input.version),
     description:
       "Record a task in your browser so an OpenBot Bot can learn to do it.",
     minimum_chrome_version: MINIMUM_CHROME_VERSION,

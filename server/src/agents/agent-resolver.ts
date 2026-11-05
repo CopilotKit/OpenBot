@@ -4,12 +4,15 @@ import type { AuditInitiator } from "../audit";
 import type { AgentFetch, StallGuard } from "../channels/stall-guard";
 import {
   type HandoffForRun,
+  type HoldsTools,
   type LoadAgentsForActor,
   type LoadAttachment,
   type LoadInstructions,
   type LoadToolsForBot,
   type MarkAttachmentsSent,
   onOpenBotRunner,
+  type PickedModel,
+  type RecordToolLimitRefusal,
   type RuntimeModel,
   resolveRuntimeAgents,
   type SignRun,
@@ -19,6 +22,7 @@ import type { AcquireLearnedSkills } from "../learning/runtime";
 import type { LoadPersonalMemory } from "../memory/tools";
 import { NameContextMiddleware } from "../people/name-context";
 import { isProactiveInitiator } from "../proactive/initiator";
+import type { ProductTelemetry } from "../telemetry/product";
 import type { AgentActor } from "./profile-types";
 
 export type AgentResolutionContext = {
@@ -29,6 +33,11 @@ export type AgentResolutionContext = {
    * neither start a subagent of its own nor reach past itself to another Bot or a person.
    */
   subagent?: boolean;
+  /**
+   * Which runs on the Bots built may hold their tools. Absent means every run does. Set only for the
+   * runtime's own map, which it also runs for itself (`isAskedRun` in copilot.ts).
+   */
+  holdsTools?: HoldsTools;
 };
 
 export class CoworkerUnavailableError extends Error {}
@@ -36,6 +45,7 @@ export class CoworkerUnavailableError extends Error {}
 export type ActorAgentResolver = {
   resolveAgentsForActor(
     actor: AgentActor,
+    context?: AgentResolutionContext,
   ): Promise<Record<string, AbstractAgent>>;
   resolveAgentForActor(
     actor: AgentActor,
@@ -45,6 +55,7 @@ export type ActorAgentResolver = {
 };
 
 export type ActorAgentResolverDependencies = {
+  productTelemetry?: Pick<ProductTelemetry, "middleware">;
   loadNameForActor?: (actorId: string) => Promise<string | null>;
   loadAgents: LoadAgentsForActor;
   model: RuntimeModel;
@@ -79,6 +90,13 @@ export type ActorAgentResolverDependencies = {
   markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent;
   acquireLearnedSkills?: AcquireLearnedSkills;
   loadPersonalMemoryForActor?: (actorId: string) => LoadPersonalMemory;
+  /** The model a person picked for the conversation a run answers in. Absent, the deployment's. */
+  pickedModelForActor?: (actorId: string) => PickedModel;
+  /** Writes the row for a run refused for sending more tools than its model accepts. */
+  recordToolLimitRefusalForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+  ) => RecordToolLimitRefusal;
 };
 
 /**
@@ -144,6 +162,9 @@ export function createActorAgentResolver(
       deps.markAttachmentsSentForActor?.(actor.id),
       acquireForActor,
       deps.loadPersonalMemoryForActor?.(actor.id),
+      deps.recordToolLimitRefusalForActor?.(actor.id, context?.initiator),
+      context?.holdsTools,
+      deps.pickedModelForActor?.(actor.id),
     ).then((agents) => {
       const loadName = deps.loadNameForActor;
       if (loadName) {
@@ -154,12 +175,24 @@ export function createActorAgentResolver(
           );
         }
       }
+      if (deps.productTelemetry)
+        for (const agent of Object.values(agents)) {
+          agent.use(deps.productTelemetry.middleware(actor.id));
+        }
       return agents;
     });
   };
 
-  const resolveAgentsForActor = async (actor: AgentActor) =>
-    resolveRegisteredAgents(actor, await deps.loadAgents(actor));
+  const resolveAgentsForActor = async (
+    actor: AgentActor,
+    context?: AgentResolutionContext,
+  ) =>
+    resolveRegisteredAgents(
+      actor,
+      await deps.loadAgents(actor),
+      undefined,
+      context,
+    );
 
   return {
     resolveAgentsForActor,

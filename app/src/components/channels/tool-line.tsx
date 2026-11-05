@@ -10,6 +10,9 @@ import type { ReactNode } from "react";
  * While it is still running the text shimmers, which is the only signal that the Bot is working on
  * something with nothing to show yet.
  */
+/** A label this short stays on one line: "Asked you", "Searched the web", "Fetch". */
+const SHORT_LABEL = 32;
+
 export function ToolLine({
   icon,
   label,
@@ -18,6 +21,8 @@ export function ToolLine({
   refused,
   failed,
   notYet,
+  byYou,
+  bare,
   children,
 }: {
   /** Drawn before the label, small and muted. A group of steps puts its kinds here. */
@@ -37,8 +42,19 @@ export function ToolLine({
    * does not read as one.
    */
   notYet?: boolean;
+  /**
+   * The step was handed to the person and they did it themselves. Muted like a success, because it
+   * was done, and labelled so it does not read as the Bot having done it.
+   */
+  byYou?: boolean;
   /** Shown when the line is expanded. Without it the line is not expandable. */
   children?: ReactNode;
+  /**
+   * The expanded part grows with what it holds instead of scrolling, for children that bound
+   * themselves: a group's list of steps, each of which folds its own result. One scrolling box
+   * inside another left two scrollbars side by side.
+   */
+  bare?: boolean;
 }) {
   const tone = refused
     ? "text-destructive"
@@ -56,16 +72,24 @@ export function ToolLine({
       {/*
        * Free to shrink, so a long label (a folded run's "Read 1 file, searched for 2 patterns and
        * listed 1 directory") wraps in a phone-width column instead of running past it. The detail
-       * shrinks a hundred times faster, so it is truncated away before the label wraps.
+       * shrinks a hundred times faster, but even a hundred times faster still took a few pixels from
+       * the label, enough to break "Asked you" over two lines beside a long question. So a label of a
+       * few words never shrinks at all, and only a long one is left free to wrap.
        */}
-      <span className="min-w-0">
+      <span
+        className={
+          label.length <= SHORT_LABEL ? "shrink-0 whitespace-nowrap" : "min-w-0"
+        }
+      >
         {refused
           ? `Blocked: ${label}`
           : failed
             ? `${label}, didn't work`
             : notYet
               ? `${label}, not done yet`
-              : label}
+              : byYou
+                ? `${label}, done by you`
+                : label}
       </span>
       {detail ? (
         <span className="min-w-0 shrink-[100] truncate opacity-70">
@@ -96,7 +120,9 @@ export function ToolLine({
        * Headings are cut down to the size of the surrounding text. A tool result is markdown a
        * server wrote for a model, so its `#` is a section marker rather than a page title.
        */}
-      <div className="mt-2 max-h-80 overflow-auto border-l pl-3 text-xs [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
+      <div
+        className={`mt-2 border-l pl-3 text-xs ${bare ? "" : "max-h-80 overflow-auto"} [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium`}
+      >
         {children}
       </div>
     </details>

@@ -305,6 +305,53 @@ export function createProactiveStore(database: Database) {
     if (!row) throw new ProactiveNotFoundError();
     return row;
   }
+  async function update(
+    owner: string,
+    id: string,
+    input: unknown,
+    executor: Pick<Database, "update"> = database,
+  ) {
+    const patch = parseWith(proactiveSettingPatchSchema, input);
+    const minutes =
+      patch.intervalMinutes ?? sql`${proactiveSettings.intervalMinutes}`;
+    const oneIntervalOut = sql`now() + make_interval(mins => ${minutes}::int)`;
+    const kept =
+      patch.intervalMinutes === undefined
+        ? sql`${proactiveSettings.nextRunAt}`
+        : sql`least(${proactiveSettings.nextRunAt}, ${oneIntervalOut})`;
+    const [row] = await executor
+      .update(proactiveSettings)
+      .set({
+        ...patch,
+        nextRunAt:
+          patch.enabled === true
+            ? sql`case when ${proactiveSettings.enabled} then ${kept} else ${oneIntervalOut} end`
+            : kept,
+        updatedAt: new Date(),
+      })
+      .where(owned(owner, id))
+      .returning();
+    if (!row) throw new ProactiveNotFoundError();
+    return row;
+  }
+  async function runsToday(
+    ownerUserId: string,
+    agentId: string,
+    executor: Pick<Database, "select"> = database,
+  ): Promise<number> {
+    const [row] = await executor
+      .select({ count: sql<number>`count(*)::int` })
+      .from(proactiveRuns)
+      .where(
+        and(
+          eq(proactiveRuns.ownerUserId, ownerUserId),
+          eq(proactiveRuns.agentId, agentId),
+          ne(proactiveRuns.outcome, "skipped"),
+          gte(proactiveRuns.startedAt, sql`now() - interval '24 hours'`),
+        ),
+      );
+    return row?.count ?? 0;
+  }
   return {
     get,
     /** The person's hourly ping slot and the pings it lets through (`ping.ts`). */
@@ -342,8 +389,12 @@ export function createProactiveStore(database: Database) {
         .orderBy(desc(proactiveSettings.createdAt));
     },
     /**
-     * Check-ins turned on for a Bot. The first one runs an interval from now, as the default a first
-     * conversation writes does: turning them on is not asking for one now, which is Run now's job.
+     * A check-in on one thing for a Bot. The first one runs an interval from now: turning it on is
+     * not asking for one now, which is Run now's job.
+     *
+     * A Bot watches each thing once. Accepting an offer for something it already watches (the same
+     * link, or with no link the same subject) turns that one back on with the interval chosen now,
+     * rather than adding a second that reads the same page twice.
      */
     async create(
       owner: string,
@@ -351,22 +402,51 @@ export function createProactiveStore(database: Database) {
       threadId: string,
     ): Promise<ProactiveSetting> {
       const parsed = parseWith(proactiveSettingInputSchema, input);
-      const [row] = await database
-        .insert(proactiveSettings)
-        .values({
-          id: randomUUID(),
-          ownerUserId: owner,
-          threadId,
-          ...parsed,
-          nextRunAt: sql`now() + make_interval(mins => ${parsed.intervalMinutes}::int)`,
-        })
-        .onConflictDoNothing()
-        .returning();
-      if (!row)
-        throw new ProactiveRefusedError(
-          "Check-ins are already set up for this Bot.",
+      const sourceLink = parsed.sourceLink ?? null;
+      return database.transaction(async (transaction) => {
+        await lockDefaults(transaction, owner, parsed.agentId);
+        const same = (
+          await transaction
+            .select()
+            .from(proactiveSettings)
+            .where(
+              and(
+                eq(proactiveSettings.ownerUserId, owner),
+                eq(proactiveSettings.agentId, parsed.agentId),
+              ),
+            )
+        ).find((row) =>
+          sourceLink
+            ? row.sourceLink === sourceLink
+            : !row.sourceLink &&
+              row.subject.toLowerCase() === parsed.subject.toLowerCase(),
         );
-      return row;
+        if (same)
+          return update(
+            owner,
+            same.id,
+            {
+              enabled: true,
+              intervalMinutes: parsed.intervalMinutes,
+              ...(parsed.focus ? { focus: parsed.focus } : {}),
+            },
+            transaction,
+          );
+        const [row] = await transaction
+          .insert(proactiveSettings)
+          .values({
+            id: randomUUID(),
+            ownerUserId: owner,
+            threadId,
+            ...parsed,
+            sourceLink,
+            nextRunAt: sql`now() + make_interval(mins => ${parsed.intervalMinutes}::int)`,
+          })
+          .returning();
+        if (!row)
+          throw new ProactiveRefusedError("Couldn't set up that check-in.");
+        return row;
+      });
     },
     /**
      * Change only what was sent. Off stays off until the person turns it on, whatever else they
@@ -377,30 +457,8 @@ export function createProactiveStore(database: Database) {
      * a new interval while on, no later than one new interval out, so going from daily to hourly is
      * felt within the hour; anything else, as it was.
      */
-    async update(owner: string, id: string, input: unknown) {
-      const patch = parseWith(proactiveSettingPatchSchema, input);
-      const minutes =
-        patch.intervalMinutes ?? sql`${proactiveSettings.intervalMinutes}`;
-      const oneIntervalOut = sql`now() + make_interval(mins => ${minutes}::int)`;
-      const kept =
-        patch.intervalMinutes === undefined
-          ? sql`${proactiveSettings.nextRunAt}`
-          : sql`least(${proactiveSettings.nextRunAt}, ${oneIntervalOut})`;
-      const [row] = await database
-        .update(proactiveSettings)
-        .set({
-          ...patch,
-          nextRunAt:
-            patch.enabled === true
-              ? sql`case when ${proactiveSettings.enabled} then ${kept} else ${oneIntervalOut} end`
-              : kept,
-          updatedAt: new Date(),
-        })
-        .where(owned(owner, id))
-        .returning();
-      if (!row) throw new ProactiveNotFoundError();
-      return row;
-    },
+    update,
+
     /** Removing research is turning it down for this Bot: OpenBot never switches it back on. */
     async remove(owner: string, id: string) {
       const { agentId } = await get(owner, id);
@@ -642,7 +700,8 @@ export function createProactiveStore(database: Database) {
       });
     },
     /**
-     * Start a check-in: its `running` row. False when another is already running for this setting,
+     * Reserve a daily slot and start a check-in atomically for this person and Bot.
+     * `capped` when their shared daily allowance is exhausted. False when another is running for this setting,
      * on any replica, which the partial unique index decides.
      */
     async beginRun(input: {
@@ -650,17 +709,33 @@ export function createProactiveStore(database: Database) {
       setting: Pick<ProactiveSetting, "id" | "ownerUserId" | "agentId">;
       trigger: ProactiveRunTrigger;
       threadId: string;
-    }): Promise<boolean> {
+      dailyLimit: number;
+    }): Promise<boolean | "capped"> {
       try {
-        await database.insert(proactiveRuns).values({
-          id: input.id,
-          settingId: input.setting.id,
-          ownerUserId: input.setting.ownerUserId,
-          agentId: input.setting.agentId,
-          trigger: input.trigger,
-          threadId: input.threadId,
+        return await database.transaction(async (transaction) => {
+          await lockDefaults(
+            transaction,
+            input.setting.ownerUserId,
+            input.setting.agentId,
+          );
+          if (
+            (await runsToday(
+              input.setting.ownerUserId,
+              input.setting.agentId,
+              transaction,
+            )) >= input.dailyLimit
+          )
+            return "capped";
+          await transaction.insert(proactiveRuns).values({
+            id: input.id,
+            settingId: input.setting.id,
+            ownerUserId: input.setting.ownerUserId,
+            agentId: input.setting.agentId,
+            trigger: input.trigger,
+            threadId: input.threadId,
+          });
+          return true;
         });
-        return true;
       } catch (error) {
         if (violates(error, "proactive_runs_one_running_idx")) return false;
         throw error;
@@ -768,20 +843,9 @@ export function createProactiveStore(database: Database) {
         .limit(1);
       return Boolean(row);
     },
-    /** Check-ins this setting ran in the last day, for the daily cap. Skipped ones cost nothing. */
-    async runsToday(settingId: string): Promise<number> {
-      const [row] = await database
-        .select({ count: sql<number>`count(*)::int` })
-        .from(proactiveRuns)
-        .where(
-          and(
-            eq(proactiveRuns.settingId, settingId),
-            ne(proactiveRuns.outcome, "skipped"),
-            gte(proactiveRuns.startedAt, sql`now() - interval '24 hours'`),
-          ),
-        );
-      return row?.count ?? 0;
-    },
+    /** All non-skipped check-ins for this person and Bot in the last day. */
+    runsToday,
+
     /**
      * Drop what the ledger no longer needs, older than `days`, in batches: finished check-ins, and
      * pings no open item still names. An open item's ping is what keeps it from being pinged again,

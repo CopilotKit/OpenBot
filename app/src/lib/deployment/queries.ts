@@ -29,6 +29,11 @@ export type DeploymentCapabilities = {
    * deployment: single-user mode on the server, which only a local, unreachable install can be in.
    */
   localEvaluation: boolean;
+  /**
+   * Which product this is. `personal` is one person on their own machine: no Admin, and what they
+   * need of it under Settings. A server from before the switch reads as `team`.
+   */
+  edition: "team" | "personal";
   transcription?: boolean;
   voice?: boolean;
 };
@@ -68,6 +73,7 @@ export function deploymentCapabilitiesQueryOptions() {
         generativeUi?: boolean;
         selfHostBanner?: boolean;
         localEvaluation?: boolean;
+        edition?: string;
         transcription?: boolean;
         voice?: boolean;
       };
@@ -76,6 +82,7 @@ export function deploymentCapabilitiesQueryOptions() {
         generativeUi: body.generativeUi === true,
         selfHostBanner: body.selfHostBanner === true,
         localEvaluation: body.localEvaluation === true,
+        edition: body.edition === "personal" ? "personal" : "team",
         transcription: body.transcription === true,
         voice: body.voice === true,
       };

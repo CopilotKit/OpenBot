@@ -287,6 +287,46 @@ mod tests {
     }
 
     #[test]
+    fn model_telemetry_ipc_accepts_provider_categories_without_private_properties() {
+        let fixture = Fixture::new();
+        for (provider, credential_path) in [
+            ("openai", "subscription"),
+            ("openai", "api_key"),
+            ("anthropic", "subscription"),
+            ("anthropic", "api_key"),
+            ("google", "oauth"),
+            ("xai", "oauth"),
+            ("compatible", "api_key"),
+            ("compatible", "none"),
+            ("none", "none"),
+        ] {
+            let event = serde_json::json!({
+                "kind": "model_chosen",
+                "provider": provider,
+                "credential_path": credential_path,
+                "custom_base_url": provider == "compatible"
+            });
+            let queued_before = fixture.queued().len();
+            fixture.invoke(event.clone());
+            let queued = fixture.queued();
+            assert_eq!(queued.len(), queued_before + 1);
+            assert_eq!(serde_json::to_value(queued.last().unwrap()).unwrap(), event);
+
+            for property in ["apiKey", "token", "model", "baseUrl", "containerBaseUrl"] {
+                let mut private_event = event.clone();
+                private_event[property] = serde_json::json!("synthetic-private-value");
+                fixture.invoke(private_event);
+            }
+            for property in ["provider", "credential_path"] {
+                let mut unknown_event = event.clone();
+                unknown_event[property] = serde_json::json!("private-category");
+                fixture.invoke(unknown_event);
+            }
+            assert_eq!(fixture.queued(), queued);
+        }
+    }
+
+    #[test]
     fn setup_telemetry_ipc_accepts_only_frontend_setup_events() {
         let fixture = Fixture::new();
 

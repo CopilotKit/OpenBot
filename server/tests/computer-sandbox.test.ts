@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHmac } from "node:crypto";
 import { ComputerStillStartingError } from "../src/computer/client";
 import { botSeat, personSeat } from "../src/computer/computer-key";
 import {
@@ -255,16 +256,22 @@ function fakeCluster(initial: {
   mode: "Running" | "Suspended";
   image: string;
   volumes?: unknown;
+  /** The Sandbox's pod template, in place of one that names only the image. */
+  podTemplate?: unknown;
 }) {
   const state = {
     generation: 1,
     mode: initial.mode,
-    podTemplate: IMAGE(initial.image) as unknown,
+    podTemplate: (initial.podTemplate ?? IMAGE(initial.image)) as unknown,
     volumeClaimTemplates: initial.volumes ?? [
       { metadata: { name: "profile" } },
     ],
     /** The image the pod is running, or undefined when there is no pod. */
     pod: initial.mode === "Running" ? initial.image : undefined,
+    /** The template the running pod was cut from, which a running pod keeps whatever the Sandbox says now. */
+    podFrom: (initial.mode === "Running"
+      ? (initial.podTemplate ?? IMAGE(initial.image))
+      : undefined) as unknown,
     readyAt: "2026-09-29T00:00:00Z",
   };
   const patches: { contentType: string; body: unknown }[] = [];
@@ -275,14 +282,22 @@ function fakeCluster(initial: {
     );
   // What the controller would do on its next reconcile.
   const reconcile = () => {
-    if (state.mode === "Suspended") state.pod = undefined;
-    else if (!state.pod) {
+    if (state.mode === "Suspended") {
+      state.pod = undefined;
+      state.podFrom = undefined;
+    } else if (!state.pod) {
       state.pod = imageOf(state.podTemplate);
+      state.podFrom = state.podTemplate;
       state.readyAt = new Date().toISOString();
     }
   };
   const body = () => ({
-    metadata: { name: "bot-general-abc", generation: state.generation },
+    metadata: {
+      name: "bot-general-abc",
+      generation: state.generation,
+      // Whose computer, as `desired` writes it on every Sandbox the server creates.
+      annotations: { "openbot.dev/bot-id": "general" },
+    },
     spec: {
       operatingMode: state.mode,
       podTemplate: state.podTemplate,
@@ -690,6 +705,167 @@ describe("whose computer a Sandbox is", () => {
     expect(created).toHaveLength(1);
     expect((await provider.list()).map((computer) => computer.key)).toEqual([
       { kind: "person", personId: "ada" },
+    ]);
+  });
+});
+
+/**
+ * A computer's own token, never the deployment's.
+ *
+ * A Sandbox was cut from a template that handed every computer the deployment's `COMPUTER_TOKEN` from the chart's
+ * Secret, and a Bot can read what its computer's process was started with: one Bot's shell held the key to every
+ * person's computer in the cluster. Each Sandbox is now written a token of its own, derived from the deployment's and
+ * whose computer it is, which is what the server sends it.
+ */
+describe("the token a computer is given", () => {
+  const DEPLOYMENT = "deployment-computer-token";
+  /** `HMAC-SHA256(COMPUTER_TOKEN, "openbot computer token v1\n<kind>:<id>")`, from the documented scheme. */
+  const own = (computer: string) =>
+    createHmac("sha256", DEPLOYMENT)
+      .update(`openbot computer token v1\n${computer}`)
+      .digest("hex");
+  /** The chart's template before this change: the deployment's token, from its Secret. */
+  const fromSecret = (tag: string) => ({
+    spec: {
+      containers: [
+        {
+          name: "computer",
+          image: `openbot:${tag}`,
+          env: [
+            { name: "PORT", value: "4100" },
+            {
+              name: "COMPUTER_TOKEN",
+              valueFrom: {
+                secretKeyRef: {
+                  name: "openbot-secrets",
+                  key: "computer-token",
+                },
+              },
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const tokenIn = (template: unknown) =>
+    (
+      template as {
+        spec: {
+          containers: {
+            env?: { name: string; value?: string; valueFrom?: unknown }[];
+          }[];
+        };
+      }
+    ).spec.containers[0]?.env?.filter(
+      (entry) => entry.name === "COMPUTER_TOKEN",
+    );
+  const providerFor = (
+    cluster: ReturnType<typeof fakeCluster>,
+    template: unknown,
+  ) =>
+    createSandboxComputerProvider({
+      namespace: "openbot",
+      template: {
+        podTemplate: template,
+        volumeClaimTemplates: [{ metadata: { name: "profile" } }],
+      },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      resumeTimeoutMs: 5_000,
+      computerToken: DEPLOYMENT,
+      fetchImpl: cluster.fetchImpl,
+    });
+
+  test("a new computer's Sandbox holds its own token, and nothing of the deployment's", async () => {
+    const created: unknown[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        created.push(JSON.parse(String(init.body)));
+        return Response.json({});
+      }
+      if (created.length === 0) return new Response("", { status: 404 });
+      return Response.json(running("2026-11-03T00:00:00Z", "n", "1.2.3.4"));
+    }) as unknown as typeof fetch;
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      template: { podTemplate: fromSecret("new") },
+      idleAfterMs: 60_000,
+      apiServer: "https://kubernetes.default",
+      token: "t",
+      computerToken: DEPLOYMENT,
+      fetchImpl,
+    });
+    await provider.locate(personSeat("ada", "notes"));
+    const body = created[0] as { spec: { podTemplate: unknown } };
+    expect(tokenIn(body.spec.podTemplate)).toEqual([
+      { name: "COMPUTER_TOKEN", value: own("person:ada") },
+    ]);
+    expect(JSON.stringify(created)).not.toContain(DEPLOYMENT);
+    expect(JSON.stringify(created)).not.toContain("computer-token");
+    // The token the server sends that computer is the one it was given.
+    expect(
+      provider.tokenFor?.(personSeat("ada", "notes").key, DEPLOYMENT),
+    ).toBe(own("person:ada"));
+  });
+
+  test("a running computer from before, holding the deployment's token, restarts onto its own and keeps its volumes", async () => {
+    // Every call the server makes to it is refused, so it is not a working computer to be left alone mid-task.
+    const cluster = fakeCluster({
+      mode: "Running",
+      image: "same",
+      podTemplate: fromSecret("same"),
+    });
+    const volumes = cluster.state.volumeClaimTemplates;
+    const provider = providerFor(cluster, fromSecret("same"));
+    expect((await provider.list())[0]?.updateAvailable).toBe(true);
+
+    await provider.locate(botSeat("general"));
+
+    expect(cluster.state.mode).toBe("Running");
+    expect(tokenIn(cluster.state.podFrom)).toEqual([
+      { name: "COMPUTER_TOKEN", value: own("bot:general") },
+    ]);
+    expect(cluster.state.volumeClaimTemplates).toBe(volumes);
+    // Suspended with the new template, then resumed: the only way the controller replaces a pod.
+    const modes = cluster.patches.map((patch) =>
+      patch.contentType === "application/json-patch+json"
+        ? (patch.body as { path: string; value: unknown }[]).find(
+            (op) => op.path === "/spec/operatingMode",
+          )?.value
+        : (patch.body as { spec: { operatingMode: string } }).spec
+            .operatingMode,
+    );
+    expect(modes).toEqual(["Suspended", "Running"]);
+    expect((await provider.list())[0]?.updateAvailable).toBe(false);
+  });
+
+  test("a suspended computer from before wakes on its own token", async () => {
+    const cluster = fakeCluster({
+      mode: "Suspended",
+      image: "same",
+      podTemplate: fromSecret("same"),
+    });
+    await providerFor(cluster, fromSecret("same")).locate(
+      personSeat("ada", "notes"),
+    );
+    expect(cluster.state.mode).toBe("Running");
+    expect(tokenIn(cluster.state.podFrom)).toEqual([
+      { name: "COMPUTER_TOKEN", value: own("person:ada") },
+    ]);
+    // One write, with the template and the mode together, so the pod is never cut from the old one.
+    expect(cluster.patches).toHaveLength(1);
+  });
+
+  test("one already holding its own token is left alone", async () => {
+    const cluster = fakeCluster({ mode: "Suspended", image: "same" });
+    const provider = providerFor(cluster, fromSecret("same"));
+    await provider.locate(botSeat("general"));
+    const patches = cluster.patches.length;
+    await provider.locate(botSeat("general"));
+    expect(cluster.patches).toHaveLength(patches);
+    expect(tokenIn(cluster.state.podFrom)).toEqual([
+      { name: "COMPUTER_TOKEN", value: own("bot:general") },
     ]);
   });
 });

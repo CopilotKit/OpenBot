@@ -7,6 +7,7 @@ import {
   type Message,
   type RunAgentInput,
 } from "@ag-ui/client";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -644,7 +645,7 @@ describe("where a task stands", () => {
     });
   });
 
-  test("a task asks before every change though Ask before making changes is off, its reads of the person's own app run freely, and the person's own conversation is unchanged", async () => {
+  test("a task asks before every change though Ask before making changes is off, its reads of the person's own app run freely, and in the person's own conversation the send asks as every send does", async () => {
     const { owner, botId, own, item } = await seed();
     // The deployment's default: off, and the person never turned it on.
     expect(await approvalStore.enabled(owner.id)).toBe(false);
@@ -704,8 +705,9 @@ describe("where a task stands", () => {
       (await approvalStore.get(owner.id, waiting[0]?.id ?? "")).status,
     ).toBe("pending");
 
-    // The same send in the person's own conversation with the Bot goes, as their switch says.
-    await runTurn({
+    // The same send in the person's own conversation with the Bot asks too, as every send to other
+    // people does whatever the switch says: on the safety policy's floor, not as the task's.
+    const asked = await runTurn({
       ownerUserId: owner.id,
       routineId: `${prefix}-own-${randomUUID()}`,
       agentId: botId,
@@ -713,19 +715,21 @@ describe("where a task stands", () => {
       instruction: "Reply to Sam.",
       userMessage: { id: randomUUID(), role: "user", content: "Reply to Sam." },
       initiator: PERSON_INITIATOR,
-    });
-    expect(sent.length).toBe(sentBefore + 1);
-    expect(
-      await database
-        .select()
-        .from(approvalRequests)
-        .where(
-          and(
-            eq(approvalRequests.ownerUserId, owner.id),
-            eq(approvalRequests.status, "pending"),
-          ),
+    }).catch((error: unknown) => error);
+    expect(asked).toBeInstanceOf(HeadlessToolSuspension);
+    expect(sent.length).toBe(sentBefore);
+    const pending = await database
+      .select()
+      .from(approvalRequests)
+      .where(
+        and(
+          eq(approvalRequests.ownerUserId, owner.id),
+          eq(approvalRequests.status, "pending"),
         ),
-    ).toHaveLength(1);
+      );
+    expect(
+      pending.map((request) => request.action.policy?.source).sort(),
+    ).toEqual(["safety", "task"]);
   });
 
   test("with Ask before making changes on, a task's send still waits as the task's: no Always allow, and switching it off or saving an allow rule leaves it waiting", async () => {
@@ -897,6 +901,41 @@ describe("where a task stands", () => {
       status: "ready_for_review",
       resolvedAt: null,
     });
+  });
+
+  test("marked done while its Bot waits on a question reads done, and puts the question down", async () => {
+    const { owner, botId, item } = await seed();
+    script = (input) => reply(input, "Which launch date should I use?");
+    const task = await start(owner, item.id);
+    await tasks.idle();
+    const questionKey = `${prefix}-question-${randomUUID()}`;
+    await queue.offer({
+      kind: "person.question",
+      key: questionKey,
+      payload: {
+        actorId: owner.id,
+        botId,
+        channelId: task.channelId,
+        threadId: (await taskStore.get(owner.id, task.id)).threadId,
+        question: "Which launch date should I use?",
+      },
+    });
+    expect((await taskStore.get(owner.id, task.id)).status).toBe("needs_input");
+
+    const done = await (
+      await call(owner.id, `/${task.id}/resolve`, "POST")
+    ).json();
+    expect(done.task.status).toBe("resolved");
+    const [question] = await database
+      .select({ finishedAt: workItems.finishedAt })
+      .from(workItems)
+      .where(
+        and(
+          eq(workItems.kind, "person.question"),
+          eq(workItems.key, questionKey),
+        ),
+      );
+    expect(question?.finishedAt).not.toBeNull();
   });
 
   test("marked done stays done when earlier work is said after it, and reopens when the person speaks there", async () => {

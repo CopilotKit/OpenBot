@@ -56,6 +56,11 @@ export type BrowserComputers = {
   shows: BrowserWindow;
   /** The browser's computer, started when it must be. Throws when it cannot be reached. */
   locate(computerId: string): Promise<string>;
+  /**
+   * The token the browser's computer takes: its own where a provider made it for this browser alone, never the
+   * deployment's token there (computer/computer-token.ts).
+   */
+  tokenFor(computerId: string): string | undefined;
   /** Whether its computer is up, never starting it: the Browser page asks every few seconds, and asking must not start
    * a computer for everybody who opens OpenBot. */
   running(computerId: string): Promise<boolean>;
@@ -71,8 +76,6 @@ export type BrowserRouteDeps = {
    * their own installed Chrome or Edge (`OPENBOT_BROWSER_ABSENT`). Absent when there is nothing to explain.
    */
   note?: string;
-  /** The computer token, the same one every computer requires. */
-  token?: string;
   /** The Recorder's connections and what goes with them (recorder/wiring.ts). */
   recorder: Pick<
     RecorderExtensionDeps,
@@ -424,10 +427,11 @@ const NOT_ANSWERED = {
   unreachable: SENTENCES.unreachable,
 };
 
-/** One computer route for a person's browser (or a Bot's, browser/bot-browser.ts), under the computer token with the
- * browser in `x-openbot-bot-id`: a GET, or a POST of `body` (a POST with no body when `method` says so). */
+/** One computer route for a person's browser (or a Bot's, browser/bot-browser.ts), under that computer's token
+ * (`token`, which the caller names because the computer it goes to decides it) with the browser in `x-openbot-bot-id`:
+ * a GET, or a POST of `body` (a POST with no body when `method` says so). */
 export function computerCaller(
-  deps: Pick<BrowserRouteDeps, "token" | "fetchImpl" | "callTimeoutMs">,
+  deps: Pick<BrowserRouteDeps, "fetchImpl" | "callTimeoutMs">,
   words: { slow: string; unreachable: string } = NOT_ANSWERED,
 ) {
   const doFetch = deps.fetchImpl ?? fetch;
@@ -438,6 +442,8 @@ export function computerCaller(
     computerId: SeatAddress,
     path: string,
     options: {
+      /** The token of the computer at `base`. */
+      token?: string;
       body?: unknown;
       method?: "POST";
       timeoutMs?: number;
@@ -467,7 +473,9 @@ export function computerCaller(
         method: options.method ?? (body === undefined ? "GET" : "POST"),
         headers: {
           ...seatHeaders(computerId),
-          ...(deps.token ? { "x-openbot-computer-token": deps.token } : {}),
+          ...(options.token
+            ? { "x-openbot-computer-token": options.token }
+            : {}),
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -510,6 +518,25 @@ export function computerCaller(
       );
     }
     return { status: response.status, body: answered };
+  };
+}
+
+/** `computerCaller` for a person's own browser, under the token its computer takes. */
+function browserCaller(
+  deps: Pick<BrowserRouteDeps, "computers" | "fetchImpl" | "callTimeoutMs">,
+) {
+  const ask = computerCaller(deps);
+  return (
+    base: string,
+    computerId: string,
+    path: string,
+    options: Omit<NonNullable<Parameters<typeof ask>[3]>, "token"> = {},
+  ) => {
+    const token = deps.computers?.tokenFor(computerId);
+    return ask(base, computerId, path, {
+      ...options,
+      ...(token ? { token } : {}),
+    });
   };
 }
 
@@ -633,10 +660,10 @@ function lastHeardFrom<T extends ReportingConnection>(
 export function browserConnectionRevoked(
   deps: Pick<
     BrowserRouteDeps,
-    "computers" | "token" | "recorder" | "fetchImpl" | "callTimeoutMs"
+    "computers" | "recorder" | "fetchImpl" | "callTimeoutMs"
   >,
 ): (userId: string, connection: RecorderConnection) => Promise<void> {
-  const ask = computerCaller(deps);
+  const ask = browserCaller(deps);
   return async (userId, connection) => {
     const computers = deps.computers;
     const computerId = personBrowserId(userId);
@@ -755,7 +782,7 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
   /** The route's budget, from the request's arrival: every wait in it shares it (`answerBy`). */
   const openBudget = withBudget(deps.budgetMs?.open ?? OPEN_BUDGET_MS);
   const callBudget = withBudget(deps.budgetMs?.call ?? CALL_BUDGET_MS);
-  const ask = computerCaller(deps);
+  const ask = browserCaller(deps);
   /** What the person is told when OpenBot's own setup stops their browser opening: ask an admin, unless they are it. */
   const notSetUp = deps.singleUser
     ? SENTENCES.notSetUpSingleUser

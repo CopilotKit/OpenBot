@@ -17,6 +17,7 @@ import { createApp } from "../src/app";
 import type { AuditEventInput } from "../src/audit";
 import { loadConfig } from "../src/config";
 import {
+  ASKED_RUN,
   createRequestAgents,
   type RegisteredAgent,
   standingRoleMessage,
@@ -236,11 +237,17 @@ function catalogIn(value: unknown): string[] | undefined {
 }
 
 /** Runs a built Bot once and says which learned Skills the model was offered. */
+/**
+ * The run is marked as the runtime's run route marks a person's (`markAskedRun`): a run on the
+ * runtime's own map without it is one the runtime made for itself, which holds no Skills.
+ */
+const personsRun = { forwardedProps: { [ASKED_RUN]: true } };
+
 async function skillsOfferedBy(built: AbstractAgent): Promise<string[]> {
   const agent = built.clone();
   agent.setMessages([{ id: randomUUID(), role: "user", content: "Help me." }]);
   model.clearRequests();
-  await agent.runAgent();
+  await agent.runAgent(personsRun);
   const [request] = model.getRequests();
   return catalogIn(request?.body) ?? [];
 }
@@ -727,7 +734,7 @@ describe("every path that builds a Bot for a person gives its runs their Skills 
       { id: randomUUID(), role: "user", content: "Help me." },
     ]);
     remoteRuns.length = 0;
-    await agent.runAgent();
+    await agent.runAgent(personsRun);
     expect(remoteRuns).toHaveLength(1);
     expect(catalogIn(remoteRuns[0])).toEqual(["ada-only", "grace-picked"]);
   });

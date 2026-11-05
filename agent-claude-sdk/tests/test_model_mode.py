@@ -7,7 +7,7 @@ from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITra
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.adapter import OpenBotClaudeAgentAdapter
-from src.model_mode import conversation_content
+from src.replay import conversation_content
 
 
 def test_model_mode_disables_native_and_ambient_tools():

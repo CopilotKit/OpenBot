@@ -17,6 +17,8 @@ import type { AuditInitiator } from "./initiator";
 export type TurnAdmission = (input: {
   ownerUserId: string;
   agentId: string;
+  /** The conversation whose saved model the host should judge. Absent uses the default. */
+  threadId?: string;
   signal?: AbortSignal;
 }) => Promise<AbortSignal>;
 
@@ -60,6 +62,8 @@ export type ThreadLock = {
     runId: string;
     userId: string;
     agentId: string;
+    /** The run's analytics context, for the platform to record with the run. Never the agent's. */
+    analyticsContext?: Record<string, unknown>;
   }) => Promise<{ runId: string } | null>;
   /** Keep it while the addressed Bot works. The lock expires on its own otherwise. */
   renew: (input: { threadId: string; runId: string }) => Promise<void>;

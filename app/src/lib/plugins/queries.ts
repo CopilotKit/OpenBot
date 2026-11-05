@@ -125,6 +125,14 @@ export type PluginServer = {
    */
   sharedVendorConnected: boolean;
   /**
+   * Whether this app may only hold the deployment's one shared account: it connects on this
+   * deployment's own OAuth client, so a person's own account would be the organization's access
+   * under their name. Decided by the server from how the app connects; a screen offers no personal
+   * Connect where this is true, and the server refuses one anyway. Optional because a server
+   * replica older than this field does not send it, mid-rollout, and absent reads as false.
+   */
+  sharedOnly?: boolean;
+  /**
    * Who may give this app to a Bot: any Bot's owner, for their own Bot (`any`), or only an admin
    * (`admin`), with the default for its account filled in. Every person's own account defaults to
    * `any`, as do the built-in Routines; everything else to `admin`.
@@ -173,6 +181,11 @@ export type CatalogueItem = {
   auth: "none" | "deployment-bearer" | "user-oauth" | "builtin";
   /** True for a vendor that gives every customer their own hostname. */
   perInstance: boolean;
+  /**
+   * Whether connecting needs nothing typed first: no account, or an OAuth vendor the deployment
+   * registers itself with. Optional so an older server's answer still reads, as "no".
+   */
+  oneStep?: boolean;
 };
 
 /** One app in Composio's directory, as the picker shows it. */

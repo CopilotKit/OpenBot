@@ -1,3 +1,4 @@
+import { productHeadlessBoundary } from "../telemetry/product-boundaries";
 import { buildResponsibilityTurn } from "@openbot/shared/responsibility-turn";
 import type { ComponentCatalog } from "@openbot/toolkit/ports";
 import { responsibilityHistory } from "@openbot/toolkit/responsibility-history";
@@ -39,6 +40,7 @@ import type { ResponsibilityStore } from "./types";
  * this is created, and a reply reads it when it is posted, never when this is built.
  */
 export function createServerResponsibilityEngine(deps: {
+  productTelemetry?: import("../telemetry/product").ProductTelemetry;
   database: Database;
   responsibilityStore: ResponsibilityStore;
   routineIntelligence: IntelligenceLike;
@@ -91,6 +93,12 @@ export function createServerResponsibilityEngine(deps: {
           responsibilityRunId: context.runId,
         });
         const runner = createTurnRunner({
+          ...(deps.productTelemetry
+            ? {
+                prepareRunInput: productHeadlessBoundary(deps.productTelemetry),
+                onKnownStop: deps.productTelemetry.stopKnown,
+              }
+            : {}),
           admission: serverTurnAdmission,
           intelligence: routineIntelligence,
           runner: routineAgentRunner,

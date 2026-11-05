@@ -92,6 +92,8 @@ export type LauncherState = {
      * keeps what is not sent yet for the person's next connection here instead of sending it now.
      */
     sending?: boolean;
+    /** The person discarded it from the Recorder's mark in the browser rather than saving it. */
+    discarded?: boolean;
   };
 };
 

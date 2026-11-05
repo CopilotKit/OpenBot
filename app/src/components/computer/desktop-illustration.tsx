@@ -10,8 +10,17 @@ import { cn } from "@/lib/utils";
  * Built the way Tailark builds its workspace illustrations — theme tokens, thin borders, skeleton
  * bars where text would be — so it needs no asset, follows the theme, and never shows a stale
  * product screenshot. Decorative only: hidden from the tree and inert to the pointer.
+ *
+ * `still` holds the cursor where it rests, as reduced motion does: onboarding passes it while the
+ * picture is off screen or its tab is hidden, so a loop nobody can see does not keep running.
  */
-export function DesktopIllustration({ className }: { className?: string }) {
+export function DesktopIllustration({
+  className,
+  still = false,
+}: {
+  className?: string;
+  still?: boolean;
+}) {
   return (
     <div
       aria-hidden="true"
@@ -22,7 +31,7 @@ export function DesktopIllustration({ className }: { className?: string }) {
     >
       <BrowserWindow className="absolute top-[9%] left-[7%] w-[58%]" />
       <FinderWindow className="absolute right-[6%] bottom-[8%] w-[48%]" />
-      <PointerCursor />
+      <PointerCursor still={still} />
     </div>
   );
 }
@@ -70,8 +79,8 @@ const CLICK_EASE = [
  * Percentages rather than pixels, so the same journey fits whatever size the illustration is
  * drawn at.
  */
-function PointerCursor() {
-  const reducedMotion = useReducedMotion();
+function PointerCursor({ still }: { still: boolean }) {
+  const reducedMotion = useReducedMotion() || still;
 
   return (
     <motion.div

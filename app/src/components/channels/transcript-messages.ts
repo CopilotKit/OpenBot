@@ -36,15 +36,32 @@ export function seedMessage(text: string, id: string): Message {
  * Deliberately not persisted. A reload finds nothing here, which is correct, by then the message
  * is in the thread and arrives through the normal replay.
  */
-const firstMessages = new Map<string, string>();
+export type FirstMessage = {
+  text: string;
+  /**
+   * The instructions of the `/` skills the message was sent with, which the channel screen puts in
+   * front of it exactly as it does for a message typed there. Without them the first message of a
+   * new conversation showed its chip and reached the Bot with no skill at all.
+   */
+  skillInstructions: string[];
+};
 
-export function stashFirstMessage(channelId: string, text: string): void {
-  firstMessages.set(channelId, text);
+const firstMessages = new Map<string, FirstMessage>();
+
+export function stashFirstMessage(
+  channelId: string,
+  text: string,
+  skillInstructions: readonly string[] = [],
+): void {
+  firstMessages.set(channelId, {
+    text,
+    skillInstructions: [...skillInstructions],
+  });
 }
 
 /** Read the pending first message and forget it. Null for a channel opened any other way. */
-export function takeFirstMessage(channelId: string): string | null {
-  const text = firstMessages.get(channelId) ?? null;
+export function takeFirstMessage(channelId: string): FirstMessage | null {
+  const message = firstMessages.get(channelId) ?? null;
   firstMessages.delete(channelId);
-  return text;
+  return message;
 }

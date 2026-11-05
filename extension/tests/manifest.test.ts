@@ -48,6 +48,49 @@ test("website access comes with the install: <all_urls> is required, and nothing
   expect(manifest.optional_permissions).toBeUndefined();
 });
 
-test("the version is the release version", () => {
-  expect(buildManifest(base).version).toBe("0.2.0");
-});
+test.each(["1", "1.2", "0.2.0", "1.2.3.65535"])(
+  "a numeric Chrome version %s is preserved without a display override",
+  (version) => {
+    const manifest = buildManifest({ ...base, version });
+    expect(manifest.version).toBe(version);
+    expect(manifest).not.toHaveProperty("version_name");
+  },
+);
+
+test.each([
+  "0.2.0-rehearsal.2",
+  "0.2.0-rehearsal.2+private.001",
+  "0.2.0+build.2",
+])(
+  "release identity %s uses a numeric Chrome version and keeps its full display identity",
+  (version) => {
+    const manifest = buildManifest({ ...base, version });
+    expect(manifest.version).toBe("0.2.0");
+    expect(manifest.version_name).toBe(version);
+  },
+);
+
+test.each([
+  "",
+  "0.0.0",
+  "0.0.0-rehearsal.2",
+  "0.65536.0",
+  "0.2.0.65536",
+  "0.02.0",
+  "1.2.3.4.5",
+  "v0.2.0",
+  "0.2.0\n",
+  "0.2.0-",
+  "0.2.0-rehearsal..2",
+  "0.2.0-rehearsal.02",
+  "0.2.0+",
+  "0.2.0+build..2",
+  "1.2-rehearsal.2",
+])(
+  "unsupported release identity %j fails before a manifest is written",
+  (version) => {
+    expect(() => buildManifest({ ...base, version })).toThrow(
+      "Invalid Recorder release version",
+    );
+  },
+);

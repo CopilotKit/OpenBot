@@ -4,13 +4,19 @@ import {
   type BrowserWindow,
   isPersonBrowserId,
 } from "@openbot/shared/openbot-browser";
-import { botSeat, type ComputerSeat } from "../computer/computer-key";
+import {
+  botSeat,
+  type ComputerKey,
+  type ComputerSeat,
+} from "../computer/computer-key";
+import { computerTokenOf } from "../computer/computer-token";
 import type { ComputerGateway } from "../computer/gateway";
 import {
   type EgressPolicy,
   pushEgressPolicy,
 } from "../computer/policy-network";
 import { type ComputerProvider, ProviderError } from "../computer/provider";
+import type { Edition } from "../edition";
 import type { BrowserComputers, BrowserRouteDeps } from "./routes";
 
 /**
@@ -47,6 +53,10 @@ export function personBrowserRefusal(
  * prompt-injected Bot would hold a live connection into the person's Learning space. The person's own browser is
  * refused there for the same reason (`SHARED_COMPUTER`), and the computer refuses Record there too (agent-computer's
  * `bot-browser-host.ts`), so neither can be talked into it alone.
+ *
+ * The personal edition's one computer is the exception: every Bot on it is the one person's, as on a person's own
+ * computer (`per-person`), so the connection sits beside only their own Bots' work. Its computer is started as theirs
+ * (`COMPUTER_PERSON_ID`, scripts/start.sh) and allows Record for the same reason.
  */
 export const SHARED_COMPUTER_RECORD =
   "This OpenBot can't record in a Bot's browser, because its Bots share one computer.";
@@ -54,13 +64,15 @@ export const SHARED_COMPUTER_RECORD =
 /**
  * Why Record in a Bot's browser cannot run on these computers, or null where it can: a provider that gives every person
  * a computer of their own (`per-person`), where a Bot's browser sits on the recording person's own computer, beside
- * only their own Bots, or on an isolated Bot's computer of its own. Null too where there is no provider, where there is
- * no Bot's browser to record in.
+ * only their own Bots, or on an isolated Bot's computer of its own; and in the personal edition, where the one shared
+ * computer carries only the one person's Bots. Null too where there is no provider, where there is no Bot's browser to
+ * record in.
  */
 export function botRecordRefusal(
   provider: Pick<ComputerProvider, "isolation"> | undefined,
+  edition: Edition = "team",
 ): string | null {
-  if (!provider) return null;
+  if (!provider || edition === "personal") return null;
   return provider.isolation === "shared" ? SHARED_COMPUTER_RECORD : null;
 }
 
@@ -129,6 +141,14 @@ export function withPersonBrowsers(
     // Unknown rather than the Bots' computer's run, which would say nothing about this one.
     sessionOf: async (seat: ComputerSeat) =>
       isPersonBrowserId(seat.botId) ? undefined : provider.sessionOf?.(seat),
+    /*
+     * OpenBot Desktop starts its host-side computer with the deployment's token: it runs the person's own browsers and
+     * no Bot, on their own machine. Bots' computers take whatever their provider gave them.
+     */
+    tokenFor: (key: ComputerKey, deploymentToken: string) =>
+      key.kind === "bot" && isPersonBrowserId(key.botId)
+        ? deploymentToken
+        : (computerTokenOf(provider, key, deploymentToken) ?? deploymentToken),
   });
 }
 
@@ -148,13 +168,14 @@ export function personBrowserShows(
  * same `browserUrl`): every address checked as a computer's, and the person's network policy pushed on the way
  * (`withPolicyPushOnWake`). */
 export function gatewayBrowserComputers(
-  gateway: Pick<ComputerGateway, "locate" | "status">,
+  gateway: Pick<ComputerGateway, "locate" | "status" | "tokenFor">,
   browserUrl: string | undefined,
 ): BrowserComputers {
   return {
     shows: personBrowserShows(browserUrl),
     // A person's browser is a computer of its own, never a seat on the person's computer beside their Bots.
     locate: (computerId) => gateway.locate(botSeat(computerId)),
+    tokenFor: (computerId) => gateway.tokenFor(botSeat(computerId)),
     running: async (computerId) =>
       (await gateway.status(botSeat(computerId))).state === "ready",
   };
@@ -201,6 +222,8 @@ export function directBrowserComputers(input: {
       }
       return input.browserUrl;
     },
+    // OpenBot Desktop's host-side computer, started with the deployment's token: see `withPersonBrowsers`.
+    tokenFor: () => input.token,
     running: async () => true,
   };
 }

@@ -136,6 +136,29 @@ describe("asking at boot", () => {
     expect(calls).toHaveLength(0);
   });
 
+  test("checks the provider's own address the same as no address, wherever a deployment wrote it", async () => {
+    for (const [provider, base] of [
+      ["openai", "https://api.openai.com/v1"],
+      ["openai", "https://api.openai.com/v1/"],
+      ["anthropic", "https://api.anthropic.com"],
+    ] as const) {
+      const { fetcher, calls } = fakeFetch(200);
+      const outcome = await reportModelAvailability({
+        provider,
+        model: "m",
+        apiKey: async () => KEY,
+        environment:
+          provider === "openai"
+            ? { OPENAI_BASE_URL: base }
+            : { ANTHROPIC_BASE_URL: base },
+        fetch: fetcher,
+        log: () => {},
+      });
+      expect(outcome).toEqual({ kind: "available" });
+      expect(calls).toHaveLength(1);
+    }
+  });
+
   test("says nothing while no key is configured yet", async () => {
     const { fetcher, calls } = fakeFetch(200);
     const lines: string[] = [];

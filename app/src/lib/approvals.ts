@@ -67,8 +67,12 @@ export type ApprovalInboxData = {
     /** The Bot whose conversation this belongs to: for a hand-off, the Bot that handed it on. */
     conversationBotId?: string;
     threadId: string;
+    /** The conversation it was asked in, which is where it is answered. */
+    channelId?: string;
     question: string;
     why?: string;
+    /** The separate decisions inside the question, each answered on its own. */
+    parts?: { header: string; question: string; options?: string[] }[];
     createdAt: string;
   }[];
 };
@@ -160,6 +164,11 @@ export const answerPersonQuestion = (id: string, response: string) =>
     body: { response },
     fallback: "Your answer could not be saved.",
   });
+export const dismissPersonQuestion = (id: string) =>
+  client(`/api/approvals/questions/${encodeURIComponent(id)}/dismiss`, {
+    method: "POST",
+    fallback: "Couldn't dismiss that question.",
+  });
 export const updateApprovalRule = (
   id: string,
   input: Partial<ApprovalRuleInput>,
@@ -244,6 +253,15 @@ export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>
     mutationFn: ({ id, response }: { id: string; response: string }) =>
       answerPersonQuestion(id, response),
     onSuccess: settle(queryClient),
+  });
+
+/** Put a question down unanswered. Everything is read again: a task waiting on it moves on too. */
+export const dismissPersonQuestionMutationOptions = (
+  queryClient: QueryClient,
+) =>
+  mutationOptions({
+    mutationFn: ({ id }: { id: string }) => dismissPersonQuestion(id),
+    onSuccess: () => queryClient.invalidateQueries(),
   });
 
 /**

@@ -1,0 +1,98 @@
+name: Build signed desktop shell update artifacts
+
+# Dispatch from a release tag (Run workflow > Use workflow from > Tags). The run builds exactly
+# that ref. The desktop-shell-signing environment's deployment branch and tag rule is matched
+# against the dispatched ref (GITHUB_REF), so building any other ref would sign code the rule never
+# vetted: there is deliberately no input naming a ref.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-shell-updates-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-tag:
+    name: Dispatched from a release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # No environment and no secrets: a branch dispatch stops here, before reviewers are asked.
+    steps:
+      - name: Require a tag
+        env:
+          DISPATCHED_REF: ${{ github.ref }}
+          DISPATCHED_REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$DISPATCHED_REF_TYPE" != "tag" ] || [ "${DISPATCHED_REF#refs/tags/}" = "$DISPATCHED_REF" ]; then
+            echo "::error::Signed shell updates are built only from a release tag. Run this workflow from a tag, not from $DISPATCHED_REF."
+            exit 1
+          fi
+          echo "Building ${DISPATCHED_REF#refs/tags/} at $GITHUB_SHA"
+
+  signed-artifacts:
+    name: Signed updater (${{ matrix.platform.name }})
+    needs: release-tag
+    environment: desktop-shell-signing
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: macos
+            runner: macos-latest
+            bundle: app
+          - name: windows
+            runner: windows-latest
+            bundle: nsis
+          - name: linux
+            runner: ubuntu-latest
+            bundle: appimage
+    env:
+      OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID }}
+      OPENBOT_RELEASE_REPOSITORY: ${{ vars.OPENBOT_RELEASE_REPOSITORY }}
+      OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL }}
+      OPENBOT_SHELL_UPDATE_PUBLIC_KEY: ${{ vars.OPENBOT_SHELL_UPDATE_PUBLIC_KEY }}
+      OPENBOT_SHELL_UPDATE_ENDPOINT: ${{ vars.OPENBOT_SHELL_UPDATE_ENDPOINT }}
+      OPENBOT_SHELL_ASSET_BASE_URL: ${{ vars.OPENBOT_SHELL_ASSET_BASE_URL }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The dispatched tag's commit, the one the environment rule checked.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - name: Linux packaging dependencies
+        if: matrix.platform.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Check public release configuration
+        shell: bash
+        run: |
+          for name in OPENBOT_DISTRIBUTION_ID OPENBOT_RELEASE_REPOSITORY OPENBOT_RELEASE_CHANNEL OPENBOT_SHELL_UPDATE_PUBLIC_KEY OPENBOT_SHELL_UPDATE_ENDPOINT OPENBOT_SHELL_ASSET_BASE_URL; do
+            if [ -z "${!name}" ]; then echo "::error::Missing protected environment variable $name"; exit 1; fi
+          done
+      - name: Install native UI dependencies
+        working-directory: desktop
+        run: bun install --frozen-lockfile
+      - name: Build signed updater artifact
+        run: bun desktop/scripts/build-shell-update.ts --bundles ${{ matrix.platform.bundle }}
+      - name: Collect artifact, signature, and reviewed manifest fragment
+        run: bun desktop/scripts/collect-shell-update.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-shell-update-${{ matrix.platform.name }}
+          path: desktop/dist/shell-updates/
+          if-no-files-found: error
+          retention-days: 14

@@ -34,6 +34,7 @@ import type { AgentProfile } from "@/lib/agents/queries";
 import { approvalInboxOptions, ruleCoversBot } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deliveryQueryOptions } from "@/lib/delivery";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { memorySourcesQueryOptions } from "@/lib/memory";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
@@ -68,8 +69,12 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const teamBots = useQuery(teamBotsQueryOptions());
   const published = teamBots.data?.teamBots.find((bot) => bot.id === agent.id);
   // Its owner and administrators change it there; anyone it is published to finds its link there.
+  // The personal edition has one person and nobody to share with.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const canShare =
-    agent.mine || me?.role === "admin" || published !== undefined;
+    !personal &&
+    (agent.mine || me?.role === "admin" || published !== undefined);
 
   const goals = useQuery(responsibilitiesQueryOptions());
   const reach = useQuery(deliveryQueryOptions());
@@ -77,7 +82,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const research = useQuery(proactiveSettingsQueryOptions());
   const approvals = useQuery(approvalInboxOptions());
 
-  const rows: Row[] = [
+  const allRows: Row[] = [
     {
       to: "/bots/$agentId/responsibilities",
       title: "Responsibilities",
@@ -182,6 +187,22 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       summary: setupSummary(agent),
     },
   ];
+  /*
+   * FOUR ROWS IN THE PERSONAL EDITION. Approval rules and Responsibilities are sections of the
+   * access page there, renamed What it can do, so one page answers what a Bot can do. Reaching you
+   * is Slack, Teams and text, which the personal edition doesn't have.
+   */
+  const rows = personal
+    ? allRows.flatMap((row): Row[] =>
+        row.to === "/bots/$agentId/access"
+          ? [{ ...row, title: "What it can do" }]
+          : row.to === "/bots/$agentId/responsibilities" ||
+              row.to === "/bots/$agentId/reach" ||
+              row.to === "/bots/$agentId/approvals"
+            ? []
+            : [row],
+      )
+    : allRows;
 
   return (
     <PageSection title="Settings for this Bot">

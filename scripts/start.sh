@@ -13,6 +13,19 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+if [ -f "$ROOT/.openbot-update-journal.json" ]; then
+  # Only the exact in-flight updater operation may start before acceptance. A normal startup
+  # must not run source whose migration/activation was interrupted.
+  bun "$ROOT/scripts/update.ts" local assert-start --root "$ROOT"
+fi
+if [ -f "$ROOT/.openbot-release.json" ] && [ -z "${OPENBOT_UPDATE_OPERATION:-}" ]; then
+  # Keep ordinary host restarts on the accepted build identity. Quoting each export treats
+  # release strings as data; no shell text from metadata is evaluated.
+  release_environment="$(bun "$ROOT/scripts/update.ts" local build-environment --root "$ROOT")"
+  while IFS= read -r release_setting; do
+    export "$release_setting"
+  done <<< "$release_environment"
+fi
 LOGS="$ROOT/.logs"
 mkdir -p "$LOGS"
 
@@ -80,8 +93,19 @@ WORKER_SHARED_SECRET="$(setting WORKER_SHARED_SECRET openbot-dev-worker-secret)"
 # The laptop stack runs agent-langgraph on LANGGRAPH_PORT. The one-container image does not, so
 # this default stays in the script rather than in .env: a `docker run --env-file .env` must not
 # inherit a URL that points at a process the image does not contain.
-MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://localhost:${LANGGRAPH_PORT}/ag-ui")"
-export MANAGED_AGENT_AG_UI_URL
+#
+# The personal edition runs its Personal Assistant inside the server, so it starts no Bot process and
+# names no managed endpoint unless .env does. Its one computer carries only the one person's Bots, so
+# it is started as theirs, which lets them record in a Bot's browser (agent-computer's person-access.ts).
+EDITION="$(setting OPENBOT_EDITION team)"
+if [ "$EDITION" = "personal" ]; then
+  MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "")"
+  COMPUTER_PERSON_ID=personal
+else
+  MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://localhost:${LANGGRAPH_PORT}/ag-ui")"
+  COMPUTER_PERSON_ID=
+fi
+export MANAGED_AGENT_AG_UI_URL COMPUTER_PERSON_ID
 
 # Whether this run minted a secret that something already running may not have.
 #
@@ -220,6 +244,29 @@ echo
 echo "OpenBot"
 echo "======="
 
+# Provision the installation's Composio project with the existing CLI sign-in, independently of
+# Learning. The helper preserves supplied keys and Arcade. The server reads the resulting .env on
+# launch. Bun preserves exported values over .env, including empty strings. A child cannot change
+# this shell's environment, so clear only blank overrides before setup and later server processes.
+#
+# Best-effort, like Learning below. It used to run bare under `set -e`, so a checkout with no key
+# could not start at all while offline, signed out of the CLI, on a CLI without
+# `integrations composio provision`, or against an Ops without the provisioning service. A failure
+# is now the helper's one-line reason, and OpenBot starts with apps unavailable.
+if [[ "${COMPOSIO_API_KEY:-}" != *[![:space:]]* ]]; then
+  unset COMPOSIO_API_KEY
+fi
+COMPOSIO_BEFORE="$(setting COMPOSIO_API_KEY "")"
+if COMPOSIO_LINE="$(bun scripts/setup-composio.ts 2>&1 | tail -1)"; then
+  info "  $COMPOSIO_LINE"
+else
+  red "  Composio: apps are unavailable this run. ${COMPOSIO_LINE:-The Composio setup did not run.}"
+fi
+# Whatever the helper reported, a key that is new in .env must reach a server that is already up.
+if [ -z "$COMPOSIO_BEFORE" ] && [ -n "$(setting COMPOSIO_API_KEY "")" ]; then
+  SECRETS_ROTATED=true
+fi
+
 info "1/4  Docker services"
 SERVICES=(postgres)
 if [ "$ONE_COMPUTER_EACH" = "true" ]; then
@@ -244,12 +291,14 @@ fi
 SERVICES+=(agent-computer)
 # The managed coworker uses LangGraph. The separate legacy sample only accepts OpenAI keys,
 # so requiring it would prevent an Anthropic-only deployment from reaching its managed Bot.
-if [ "$BOT_PROVIDER" = "anthropic" ]; then
+if [ "$EDITION" = "personal" ]; then
+  info "  agent-bot, agent-langgraph: skipped for the personal edition (its Bot runs in the server)"
+elif [ "$BOT_PROVIDER" = "anthropic" ]; then
   info "  agent-bot: skipped for Anthropic (OpenAI-only sample)"
+  SERVICES+=(agent-langgraph)
 else
-  SERVICES+=(agent-bot)
+  SERVICES+=(agent-bot agent-langgraph)
 fi
-SERVICES+=(agent-langgraph)
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
 export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
@@ -265,10 +314,12 @@ if ! docker compose run --rm --build migrate >"$LOGS/migrate.log" 2>&1; then
   exit 1
 fi
 wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
-if [ "$BOT_PROVIDER" != "anthropic" ]; then
-  wait_for "http://localhost:$BOT_PORT/health" "agent-bot"
+if [ "$EDITION" != "personal" ]; then
+  if [ "$BOT_PROVIDER" != "anthropic" ]; then
+    wait_for "http://localhost:$BOT_PORT/health" "agent-bot"
+  fi
+  wait_for "http://localhost:$LANGGRAPH_PORT/health" "agent-langgraph"
 fi
-wait_for "http://localhost:$LANGGRAPH_PORT/health" "agent-langgraph"
 
 for table in agent_profiles agent_preferences; do
   if ! docker compose exec -T postgres \
@@ -289,7 +340,10 @@ green "  coworker tables migrated"
 # pipeline, and `set -e` then aborts the assignment before the check below could say why. The same
 # grep survives inside `setting()` only because `local v="$(...)"` takes `local`'s own exit status
 # and masks it. So: report what was resolved, and do not re-read the file.
-green "  managed coworker endpoint: $MANAGED_AGENT_AG_UI_URL"
+# The fallback stays outside the expansion: inside "${VAR:-...}" bash reads an apostrophe as an opening
+# quote, which swallowed the script up to the next one and ran the words in later comments.
+MANAGED_ENDPOINT_LINE="none (the personal edition's Bot runs in the server)"
+green "  managed coworker endpoint: ${MANAGED_AGENT_AG_UI_URL:-$MANAGED_ENDPOINT_LINE}"
 
 # Automatic Learning collects nothing until a container is assigned. The server assigns this
 # project's `openbot` container on its own once it exists (server/src/learning/auto-assign.ts), but
@@ -303,6 +357,43 @@ if [ -z "$LEARNING_CONTAINER" ] && [ "$LEARNING_AUTO_ASSIGN" != "false" ] \
    && [ "$LEARNING_AUTO_ASSIGN" != "0" ] && { [ -n "$(setting CPK_INTELLIGENCE_API_KEY "")" ] || [ -n "$(setting INTELLIGENCE_API_KEY "")" ]; }; then
   LEARNING_LINE="$(bun scripts/setup-learning.ts --non-interactive 2>>"$LOGS/learning-setup.log" | tail -1 || true)"
   info "  ${LEARNING_LINE:-Automatic Learning: the container check did not run. Log: $LOGS/learning-setup.log}"
+fi
+
+# The personal edition's own browser: the person's installed Chrome or Edge, as a window on their
+# desktop with the Recorder in it, as OpenBot Desktop gives the team edition (docs/configuration.md,
+# "OpenBot Desktop runs it for the person"). Its Bots share one computer, which is no place for a
+# browser of the person's own, so this one runs on the host and runs nobody else's
+# (`COMPUTER_PEOPLE_ONLY=on`). The server finds it through `OPENBOT_BROWSER_URL`, exported so the
+# server started below reads it over .env. Never fatal: without Chrome or Edge, or with a Recorder
+# that will not build, OpenBot starts without the person's browser and the line says why.
+if [ "$EDITION" = "personal" ]; then
+  BROWSER_PORT="$(setting BROWSER_PORT 4101)"
+  if [ ! -f extension/dist/manifest.json ]; then
+    info "  building the Recorder for your browser"
+    (cd extension && bun install --frozen-lockfile && bun scripts/build.ts) >"$LOGS/recorder-build.log" 2>&1 \
+      || red "  Recorder: the build failed. Log: $LOGS/recorder-build.log"
+  fi
+  if [ ! -f extension/dist/manifest.json ]; then
+    :
+  elif identifies_as_openbot "$BROWSER_PORT" browser; then
+    info "  your browser: already up on $BROWSER_PORT"
+  else
+    (cd "$ROOT" && COMPUTER_TOKEN="$COMPUTER_TOKEN" \
+      COMPUTER_PEOPLE_ONLY=on \
+      OPENBOT_RECORDER_DIR="$ROOT/extension/dist" \
+      PORT="$BROWSER_PORT" \
+      bun scripts/start-local-chrome-computer.ts >"$LOGS/browser.log" 2>&1 &)
+    for _ in $(seq 1 20); do
+      identifies_as_openbot "$BROWSER_PORT" browser && break
+      sleep 1
+    done
+  fi
+  if identifies_as_openbot "$BROWSER_PORT" browser; then
+    export OPENBOT_BROWSER_URL="http://127.0.0.1:$BROWSER_PORT"
+    green "  your browser: Chrome or Edge on this computer, with the Recorder"
+  else
+    red "  your browser: did not start, so Browser is hidden. Log: $LOGS/browser.log"
+  fi
 fi
 
 info "2/4  Server"
@@ -352,7 +443,20 @@ if identifies_as_openbot "$SERVER_PORT" server; then
       sleep 1
       ;;
   esac
+  # A personal edition server started before the browser of its person was: it has no address for
+  # it, and says so by offering no browser. The edition is single-user, so this answers without
+  # signing in. (No apostrophe in this comment: bash 3.2 misreads one in a comment after esac.)
+  if [ -n "${OPENBOT_BROWSER_URL:-}" ]; then
+    OFFERED="$(curl -fsS --max-time 3 "http://localhost:$SERVER_PORT/api/browser" 2>/dev/null || true)"
+    if ! printf '%s' "$OFFERED" | grep -q '"available":true'; then
+      info "  server: up, but without your browser, so it is restarted to pick it up"
+      stop_server_processes_for_restart
+      sleep 1
+    fi
+  fi
 fi
+# Redirect the whole background group. Redirecting only Bun inside `(command &)` leaves its
+# waiting Bash wrapper holding the updater's captured stdout/stderr open after this script exits.
 if ! identifies_as_openbot "$SERVER_PORT" server; then
   if [ "$ONE_COMPUTER_EACH" = "true" ]; then
     (cd server && PORT="$SERVER_PORT" \
@@ -360,11 +464,11 @@ if ! identifies_as_openbot "$SERVER_PORT" server; then
       SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" \
       COMPUTER_TOKEN="$COMPUTER_TOKEN" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/production-entry.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/production-entry.ts) >"$LOGS/server.log" 2>&1 &
   else
     (cd server && PORT="$SERVER_PORT" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/production-entry.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/production-entry.ts) >"$LOGS/server.log" 2>&1 &
   fi
 fi
 wait_for_openbot "$SERVER_PORT" server
@@ -374,27 +478,34 @@ wait_for_openbot "$SERVER_PORT" server
 # only now, because dispatching a claimed routine is one HTTP call to this server's own
 # /internal/routines/run, and the wait_for above is what confirms that call has somewhere to land.
 #
-# Guarded by a pgrep check rather than an HTTP health check, the same way the restart guard above
-# matches the server's own command line with `pkill -f`: the worker loop has no HTTP endpoint of its
-# own to ask, so "is a matching process already running" is the only signal a rerun of this script
-# has for "leave it alone."
+# Scoped to this checkout's working directory: another local installation can run the same command.
+# The worker has no HTTP endpoint, so a process match plus its cwd is the ownership signal.
+# Unknown ownership refuses startup before another worker can be launched.
 #
 # Launched from `$ROOT` with `bun worker/src/index.ts`, not `cd worker && bun src/index.ts`: on a
-# Linux host, container processes are visible to `pgrep` too, and `server/Dockerfile`,
-# `agent-computer/Dockerfile`, and `supervisor/Dockerfile` all run `bun src/index.ts` as their argv.
-# The old pattern matched those containers, the guard false-positived, and the worker silently never
-# started. `bun worker/src/index.ts` matches nothing else in the repo. Running from `$ROOT` is safe:
-# relative imports resolve from the importing file, not from the process's cwd.
-if ! running "bun worker/src/index.ts"; then
+# Linux host, container processes are visible too and several services run `bun src/index.ts`.
+# Relative imports resolve from the importing file, so running the worker from `$ROOT` is safe.
+worker_running=false
+if running_here "bun worker/src/index.ts" "$ROOT"; then
+  worker_running=true
+else
+  ownership_status=$?
+  if [ "$ownership_status" -ne 1 ]; then exit "$ownership_status"; fi
+fi
+if [ "$worker_running" = false ]; then
   WORKER_DATABASE_URL="$(setting DATABASE_URL postgres://openbot:openbot@localhost:5432/openbot)"
   (cd "$ROOT" && \
     DATABASE_URL="$WORKER_DATABASE_URL" \
     SERVER_INTERNAL_URL="http://localhost:$SERVER_PORT" \
     WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-    bun worker/src/index.ts >"$LOGS/worker.log" 2>&1 &)
+    bun worker/src/index.ts) >"$LOGS/worker.log" 2>&1 &
   info "  worker: started (routine sweep loop)"
   sleep 1
-  if ! running "bun worker/src/index.ts"; then
+  if running_here "bun worker/src/index.ts" "$ROOT"; then
+    :
+  else
+    ownership_status=$?
+    if [ "$ownership_status" -ne 1 ]; then exit "$ownership_status"; fi
     red "  worker: did not stay up, check $LOGS/worker.log"
   fi
 else
@@ -427,7 +538,7 @@ JS
 info "4/4  App"
 require_free_or_ours "$APP_PORT" app
 if ! identifies_as_openbot "$APP_PORT" app; then
-  (cd app && bun run dev --port "$APP_PORT" --strictPort >"$LOGS/app.log" 2>&1 &)
+  (cd app && bun run dev --port "$APP_PORT" --strictPort) >"$LOGS/app.log" 2>&1 &
 fi
 wait_for_openbot "$APP_PORT" app
 

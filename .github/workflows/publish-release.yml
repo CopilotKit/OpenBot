@@ -10,6 +10,15 @@ on:
 permissions:
   contents: read
 
+# Identity belongs to this repository. Forks must explicitly declare their upstream baseline; never
+# inherit another publisher's registry. The compatibility and upgrade policy is not configuration:
+# it is release-policy.json in the release commit, reviewed with the release.
+env:
+  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
+  OPENBOT_UPSTREAM_REPOSITORY: ${{ vars.OPENBOT_UPSTREAM_REPOSITORY || 'CopilotKit/openbot' }}
+  OPENBOT_UPSTREAM_COMMIT: ${{ vars.OPENBOT_UPSTREAM_COMMIT }}
+  OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
+
 jobs:
   # Every push to main runs this, and almost none of them are releases. This job decides which, and
   # it decides from the merged pull request rather than from the commit message, because a commit
@@ -79,10 +88,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       components: ${{ steps.components.outputs.components }}
+      image_repository: ${{ steps.registry.outputs.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -96,6 +107,20 @@ jobs:
             echo "::error::CHANGELOG.md has no section for ${VERSION#v}."
             exit 1
           }
+      # release-policy.json must name this version. One left over from the previous release names
+      # that release, and is refused here, before anything is built or pushed.
+      - name: Validate release compatibility and source baseline
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: bun scripts/release-manifest.ts --validate-policy
+      - id: registry
+        name: Resolve this distribution's registry namespace
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          repository="ghcr.io/$(tr '[:upper:]' '[:lower:]' <<< "$REPOSITORY")"
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
       # The services published alongside the image above. Read from the tree rather than written
       # here, because CI checks the same file when it proves those Dockerfiles still build, so the
       # set that is tested and the set that is published cannot drift apart.
@@ -143,23 +168,29 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            OPENBOT_BUILD_VERSION=${{ needs.metadata.outputs.version }}
+            OPENBOT_BUILD_COMMIT=${{ github.sha }}
+            OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
+            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
+            OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
           # The version, the commit, and a moving latest. The version tag is the one to deploy; the
           # commit tag is how you find out what a running image actually contains.
           tags: |
-            ghcr.io/copilotkit/openbot:${{ needs.metadata.outputs.version }}
-            ghcr.io/copilotkit/openbot:${{ github.sha }}
-            ghcr.io/copilotkit/openbot:latest
+            ${{ needs.verify.outputs.image_repository }}:${{ needs.metadata.outputs.version }}
+            ${{ needs.verify.outputs.image_repository }}:${{ github.sha }}
+            ${{ needs.verify.outputs.image_repository }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true
           sbom: true
       # BuildKit's own attestations above travel inside the image. This one is the record GitHub
-      # holds, and it is what `gh attestation verify oci://ghcr.io/copilotkit/openbot:vX.Y.Z
+      # holds, and it is what `gh attestation verify oci://${{ needs.verify.outputs.image_repository }}:vX.Y.Z
       # -R CopilotKit/OpenBot` checks before anybody deploys it. Bound to the digest, never a tag,
       # because a tag can be moved to point at something else afterwards.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-name: ghcr.io/copilotkit/openbot
+          subject-name: ${{ needs.verify.outputs.image_repository }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
@@ -223,10 +254,16 @@ jobs:
           context: .
           file: ${{ matrix.image }}/Dockerfile
           platforms: linux/${{ matrix.platform.arch }}
+          build-args: |
+            OPENBOT_BUILD_VERSION=${{ needs.metadata.outputs.version }}
+            OPENBOT_BUILD_COMMIT=${{ github.sha }}
+            OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
+            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
+            OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
           # `oci-mediatypes=true` because zstd layers have no Docker-schema2 media type to be
           # described by. It is buildx's default for this exporter and is stated rather than
           # assumed, since the push fails without it and the reason would not be obvious.
-          outputs: type=image,name=ghcr.io/copilotkit/openbot-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,force-compression=true
+          outputs: type=image,name=${{ needs.verify.outputs.image_repository }}-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,force-compression=true
           # Scoped per image and per architecture. One shared scope would have ten builds
           # overwriting each other's cache and none of them reading their own.
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
@@ -292,7 +329,7 @@ jobs:
       - id: merge
         name: Write the tags over both architectures
         env:
-          REPOSITORY: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          REPOSITORY: ${{ needs.verify.outputs.image_repository }}-${{ matrix.image }}
           VERSION: ${{ needs.metadata.outputs.version }}
           COMMIT: ${{ github.sha }}
         run: |
@@ -319,7 +356,7 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-name: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          subject-name: ${{ needs.verify.outputs.image_repository }}-${{ matrix.image }}
           subject-digest: ${{ steps.merge.outputs.digest }}
           push-to-registry: true
       # For the same reason the digests above travel as files: a matrix cannot hand a value to a
@@ -327,7 +364,7 @@ jobs:
       - name: Record the manifest
         env:
           NAME: ${{ matrix.image }}
-          REPOSITORY: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          REPOSITORY: ${{ needs.verify.outputs.image_repository }}-${{ matrix.image }}
           DIGEST: ${{ steps.merge.outputs.digest }}
         run: |
           set -euo pipefail
@@ -350,13 +387,21 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      # Only to dispatch Desktop macOS signing for the tag below.
+      actions: write
     steps:
       # No credential is left in the runner: the tag is created through the API below rather than
       # with `git push`, so nothing here needs one, and no later step or action can read one.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: manifest-*
@@ -387,16 +432,12 @@ jobs:
               reference: (.repository + "@" + .digest),
             }
           }) | add' manifests/*.json)"
-          # `jq`, not `bun`: this job deliberately checks out without credentials and installs no
-          # toolchain, so reaching for the repository's runtime here is a step that was never taken.
-          # It was, and the tag was never cut: the manifest step died on `bun: command not found`
-          # after the image had already been pushed, which is the one point in the release where a
-          # failure leaves a published image with nothing pointing at it.
+          # Keep the legacy image manifest intact for existing installers.
           jq -n \
             --arg version "$VERSION" \
             --arg digest "$DIGEST" \
             --arg commit "$COMMIT" \
-            --arg repository "ghcr.io/copilotkit/openbot" \
+            --arg repository "${{ needs.verify.outputs.image_repository }}" \
             --argjson components "$components" \
             '{
               version: $version,
@@ -410,6 +451,58 @@ jobs:
               } + $components),
             }' > container-images.json
           cat container-images.json
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.19.0
+      - name: Package this release's chart
+        run: |
+          set -euo pipefail
+          helm dependency build charts/openbot
+          mkdir -p release-assets
+          helm package charts/openbot --destination release-assets
+          chart_version="$(helm show chart charts/openbot | sed -n 's/^version: //p')"
+          test -f "release-assets/openbot-$chart_version.tgz"
+          echo "OPENBOT_CHART_PATH=release-assets/openbot-$chart_version.tgz" >> "$GITHUB_ENV"
+          echo "OPENBOT_CHART_VERSION=$chart_version" >> "$GITHUB_ENV"
+      # A rerun of a half-published release. `helm package` stamps the time it ran and the provenance
+      # bundle is signed again on every run, so this run's bytes never equal the published ones even
+      # when nothing changed. What was published is fetched first; each asset this run produces is
+      # compared with it by content, and the published bytes are kept, so the manifest and the
+      # attestation below describe exactly what is downloadable.
+      - name: Fetch what an earlier attempt already published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          published="$RUNNER_TEMP/published"
+          mkdir -p "$published"
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json assets > "$RUNNER_TEMP/existing-assets.json" 2>/dev/null; then
+            if [ "$(jq '.assets | length' "$RUNNER_TEMP/existing-assets.json")" -gt 0 ]; then
+              gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --dir "$published"
+            fi
+            echo "OPENBOT_PUBLISHED_ASSETS=$published" >> "$GITHUB_ENV"
+          fi
+      - name: Archive exact source and write release manifest
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: bun scripts/release-manifest.ts
+      - id: source-provenance
+        name: Authenticate release metadata and source archive
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            release-assets/release-manifest.json
+            release-assets/openbot-source.tar.gz
+            release-assets/openbot-*.tgz
+            container-images.json
+      - name: Save portable provenance bundle
+        env:
+          BUNDLE_PATH: ${{ steps.source-provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp "$BUNDLE_PATH" release-assets/release-provenance.sigstore.json
+          bun scripts/release-manifest.ts --adopt-provenance release-assets/release-provenance.sigstore.json
       - name: Tag and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -420,17 +513,49 @@ jobs:
           awk -v v="## ${VERSION#v}" '$0==v{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md > notes.md
           test -s notes.md
 
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" >/dev/null 2>&1; then
-            echo "$VERSION is already tagged; only refreshing the release."
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" > tag.json 2>/dev/null; then
+            test "$(jq -r .object.sha tag.json)" = "$GITHUB_SHA" || {
+              echo "::error::$VERSION already identifies another source commit."
+              exit 1
+            }
           else
             gh api "repos/$GITHUB_REPOSITORY/git/refs" \
               -f "ref=refs/tags/$VERSION" -f "sha=$GITHUB_SHA" >/dev/null
           fi
 
-          if gh release view "$VERSION" >/dev/null 2>&1; then
+          if [ -n "${OPENBOT_PUBLISHED_ASSETS:-}" ]; then
+            # Release-specific source/chart URLs are immutable after first publication. A rerun
+            # fills in what is missing. Every asset that was published already was compared by
+            # content and kept above, so it is byte-identical here. The one exception is the
+            # provenance bundle, replaced only when the published one attests assets that were
+            # never published.
             gh release edit "$VERSION" --title "$VERSION" --notes-file notes.md
-            gh release upload "$VERSION" container-images.json --clobber
+            for artifact in container-images.json release-assets/*; do
+              name="$(basename "$artifact")"
+              published="$OPENBOT_PUBLISHED_ASSETS/$name"
+              if [ ! -e "$published" ]; then
+                gh release upload "$VERSION" "$artifact"
+              elif ! cmp -s "$artifact" "$published"; then
+                if [ "$name" != release-provenance.sigstore.json ]; then
+                  echo "::error::Published asset $name differs; publish a new release version."
+                  exit 1
+                fi
+                gh release upload "$VERSION" "$artifact" --clobber
+              fi
+            done
           else
-            gh release create "$VERSION" container-images.json \
+            gh release create "$VERSION" container-images.json release-assets/* \
               --title "$VERSION" --notes-file notes.md
           fi
+      # The tag above was created with GITHUB_TOKEN, and GitHub starts no workflow from that push, so
+      # Mac signing is dispatched explicitly; a dispatch is the one event GITHUB_TOKEN may start. On
+      # the tag, so the signed build is this commit and carries the release version. The
+      # `macos-signing` environment's required reviewers still approve the signing itself.
+      - name: Start signing the Mac build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh workflow run desktop-macos-signing.yml -R "$GITHUB_REPOSITORY" --ref "$VERSION" \
+            -f signing-mode=developer-id -f release-tag="$VERSION"

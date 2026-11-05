@@ -6,6 +6,7 @@ import {
   IconAlertTriangle,
   IconCircleCheck,
   IconPlayerRecordFilled,
+  IconTrash,
 } from "@tabler/icons-react";
 import { type UseMutationOptions, useMutation } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
@@ -20,6 +21,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import {
+  openAndStartBrowserRecordingMutationOptions,
   startBrowserRecordingMutationOptions,
   stopBrowserRecordingMutationOptions,
 } from "@/lib/browser/mutations";
@@ -75,11 +77,15 @@ export type RecordingHooks = {
 /**
  * Record and Stop for the person's browser, from the Recorder's own report in `state`. Record asks about narration
  * first when the person has never said (`useRecordingWith`).
+ *
+ * With `opens` (OpenBot Desktop, where the browser is a window on the person's desktop), Record opens the browser, or
+ * brings it forward, and starts recording in it, so a closed browser holds nothing back.
  */
 export function useRecording(
   state: BrowserApiState,
   choice: NarrationChoice,
   hooks: RecordingHooks = {},
+  { opens = false }: { opens?: boolean } = {},
 ) {
   return useRecordingWith({
     recorder: state.recorder,
@@ -87,8 +93,13 @@ export function useRecording(
      * A Recorder that reports itself disconnected does not hold Record back: the server connects the person's own
      * browser again before it starts (a Disconnect in Settings, Browsers leaves it signed out until then).
      */
-    waiting: !state.open ? "Your browser is closed. Open it to record." : null,
-    start: startBrowserRecordingMutationOptions(queryClient),
+    waiting:
+      !opens && !state.open
+        ? "Your browser is closed. Open it to record."
+        : null,
+    start: opens
+      ? openAndStartBrowserRecordingMutationOptions(queryClient)
+      : startBrowserRecordingMutationOptions(queryClient),
     stop: stopBrowserRecordingMutationOptions(queryClient),
     choice,
     ...hooks,
@@ -237,10 +248,6 @@ export type Stopped = NonNullable<ReturnType<typeof stoppedRecording>>;
 const WHAT_IT_RECORDS =
   "The Recorder records the pages you open on websites and what you do there, with what each step saves, AI assistant conversations and your narration, in every tab you use while it records, except sites you leave out.";
 
-/** What Record does, said before it is pressed: everything a recording holds, as the disclosure says it. */
-export const RECORDING_DESCRIPTION =
-  "Do the task in your browser as you always would. The Recorder records every tab you use until you stop, and each tab shows that it is: the pages and what is on them, your clicks and typing, what each step saves, AI assistant conversations, and your narration when it's on. Passwords, card numbers, email addresses and tokens are masked first.";
-
 /** What a saved recording held: its actions, and its narrated phrases when there were any. */
 function heldIn(stopped: Stopped): string {
   return stopped.phrases > 0
@@ -250,6 +257,7 @@ function heldIn(stopped: Stopped): string {
 
 /** What the page says once Stop ended a recording, naming it. The sidebar's Browser button says the same. */
 export function stoppedSentence(stopped: Stopped): string {
+  if (stopped.discarded) return `Discarded “${stopped.title}”.`;
   return stopped.empty
     ? `Nothing was recorded in “${stopped.title}”. ${WHAT_IT_RECORDS}`
     : `Saved “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
@@ -262,6 +270,13 @@ export function StoppedIcon({
   stopped: Stopped;
   className?: string;
 }) {
+  if (stopped.discarded)
+    return (
+      <IconTrash
+        aria-hidden="true"
+        className={cn("text-muted-foreground", className)}
+      />
+    );
   return stopped.empty ? (
     <IconAlertTriangle
       aria-hidden="true"
@@ -287,9 +302,11 @@ export function StoppedRow({
   stopped: Stopped;
   ended?: string;
 }) {
-  const held = stopped.empty
-    ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
-    : `Saved to your Learning space: ${heldIn(stopped)}.`;
+  const held = stopped.discarded
+    ? "Discarded. You chose not to save it."
+    : stopped.empty
+      ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
+      : `Saved to your Learning space: ${heldIn(stopped)}.`;
   return (
     <Item size="sm" role="status">
       <ItemMedia variant="icon">
@@ -353,9 +370,15 @@ function progressLine(recording: Recording): string {
 export function RecordingRow({
   recording,
   placeholder = "Name the task, like Submit an expense report",
+  recordLabel = "Record",
+  whileRecording,
 }: {
   recording: Recording;
   placeholder?: string;
+  /** What the button that starts a recording says. */
+  recordLabel?: string;
+  /** More actions beside Stop while a recording runs. */
+  whileRecording?: ReactNode;
 }) {
   if (recording.phase !== "idle") {
     return (
@@ -370,6 +393,7 @@ export function RecordingRow({
           </ItemDescription>
         </ItemContent>
         <ItemActions>
+          {whileRecording}
           <Button
             size="sm"
             disabled={recording.stopping || recording.phase !== "recording"}
@@ -412,7 +436,7 @@ export function RecordingRow({
       <ItemActions>
         {/* Base UI's Button defaults to type="button", which never submits the form. */}
         <Button disabled={!recording.canRecord} size="sm" type="submit">
-          {recording.starting ? "Starting…" : "Record"}
+          {recording.starting ? "Starting…" : recordLabel}
         </Button>
       </ItemActions>
     </Item>

@@ -27,6 +27,11 @@ export type AgentProfile = {
    * deployment's own credential and needs no setup at all.
    */
   builtIn: boolean;
+  /**
+   * Whether it runs inside OpenBot on OpenBot's own model. Only such a Bot gets the composer's model
+   * picker; a Bot on its own framework picks its own model. Absent reads as no.
+   */
+  runsOnOpenBotModel?: boolean;
   /** Whether a key is set for it. Never the key itself. */
   hasAuth: boolean;
   /**
