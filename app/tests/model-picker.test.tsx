@@ -24,6 +24,7 @@ import { settleReactWork } from "./settle-react-work";
  */
 
 const originalFetch = globalThis.fetch;
+let pendingWrite: Promise<void> | undefined;
 let saved: Record<string, string | null> = {};
 let writes: { channelId: string; model: unknown }[] = [];
 
@@ -39,6 +40,7 @@ beforeAll(() => {
       if (init?.method === "PUT") {
         const { model } = JSON.parse(String(init.body)) as { model: unknown };
         writes.push({ channelId, model });
+        await pendingWrite;
         saved[channelId] = model as string | null;
       }
       return Response.json({ model: saved[channelId] ?? null });
@@ -51,6 +53,7 @@ afterEach(() => {
   queryClient.clear();
   saved = {};
   writes = [];
+  pendingWrite = undefined;
 });
 afterAll(async () => {
   await settleReactWork();
@@ -168,4 +171,38 @@ test("a new conversation's pick is held until it is created, and the default ask
 
   act(() => result.current.choose("gpt-5.5"));
   expect(result.current.requested).toBeNull();
+});
+
+test("sending waits for the model save and refuses a failed save", async () => {
+  const { result } = renderHook(
+    () => useConversationModel("conversation-a", catalogue),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.value).toBe("gpt-5.5"));
+
+  const write = Promise.withResolvers<void>();
+  pendingWrite = write.promise;
+  act(() => result.current.choose("gpt-4o"));
+  let sent = false;
+  const send = result.current.beforeSend().then(() => {
+    sent = true;
+  });
+  await settleReactWork();
+  expect(sent).toBe(false);
+  await act(async () => {
+    write.resolve();
+    await send;
+  });
+  expect(saved["conversation-a"]).toBe("gpt-4o");
+  expect(sent).toBe(true);
+
+  const failed = Promise.withResolvers<void>();
+  pendingWrite = failed.promise;
+  act(() => result.current.choose("gpt-6-sol"));
+  const refused = result.current.beforeSend();
+  await act(async () => {
+    failed.reject(new Error("save failed"));
+    await expect(refused).rejects.toThrow("save failed");
+  });
+  expect(saved["conversation-a"]).toBe("gpt-4o");
 });

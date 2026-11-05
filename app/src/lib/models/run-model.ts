@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { queryClient } from "@/query-client";
 import { setConversationModelMutationOptions } from "./mutations";
@@ -35,6 +35,7 @@ export function useConversationModel(
     enabled: choosable,
   });
   const save = useMutation(setConversationModelMutationOptions(queryClient));
+  const pendingSave = useRef<Promise<string | null> | null>(null);
   const picked = save.isPending ? save.variables.model : saved.data;
 
   return {
@@ -44,8 +45,12 @@ export function useConversationModel(
         ? undefined
         : shown(picked, catalogue),
     saving: save.isPending,
-    choose: (model: string) =>
-      save.mutate(
+    // Read the ref at submission time, including a choice made before React renders again.
+    beforeSend: async () => {
+      await pendingSave.current;
+    },
+    choose: (model: string) => {
+      const pending = save.mutateAsync(
         { channelId, model: model === catalogue?.default ? null : model },
         {
           onError: (error) =>
@@ -55,7 +60,19 @@ export function useConversationModel(
               type: "error",
             }),
         },
-      ),
+      );
+      pendingSave.current = pending;
+      // The mutation reports save errors through the toast above. A send waiting on the original
+      // promise still rejects, so its composer keeps the draft instead of running the old model.
+      void pending.then(
+        () => {
+          if (pendingSave.current === pending) pendingSave.current = null;
+        },
+        () => {
+          if (pendingSave.current === pending) pendingSave.current = null;
+        },
+      );
+    },
   };
 }
 

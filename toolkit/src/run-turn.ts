@@ -644,7 +644,7 @@ export function createTurnRunner(options: {
     } = hostTurn;
     if (signal?.aborted) throw new Error("The headless turn was cancelled.");
     // A paused Bot or a refused capability throws here; a pause mid-turn aborts the returned signal.
-    signal = await admission({ ownerUserId, agentId, signal });
+    signal = await admission({ ownerUserId, agentId, threadId, signal });
     if (continuation && continuation.snapshot.threadId !== threadId)
       throw new Error(
         "The interrupted conversation does not match this thread.",

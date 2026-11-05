@@ -81,6 +81,7 @@ const provider: ComputerProvider = {
 };
 
 let controls: EnterpriseControls;
+const pickedModels = new Map<string, string>();
 
 async function clean() {
   await database.delete(capabilitySettings);
@@ -128,6 +129,8 @@ beforeAll(async () => {
     auditStore,
     provider,
     builtInModel: "openai/gpt-test",
+    pickedModel: async (actorId, threadId) =>
+      actorId === member.id ? pickedModels.get(threadId) : undefined,
     duringRecording: async (botId, policy) =>
       botId === recordingBot
         ? { ...policy, rules: [...policy.rules, RECORDER_RULE] }
@@ -513,6 +516,27 @@ describe("headless turns obey the same switches", () => {
     }
     const allowed = headlessTurn(bot);
     await expect(allowed.run()).resolves.toMatchObject({ replyText: "Done." });
+  });
+
+  test("headless admission judges the conversation's pick instead of the default", async () => {
+    await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+      value: { enabled: true, models: ["openai/gpt-picked"] },
+    });
+    pickedModels.set(`thread-${suite}`, "gpt-picked");
+    try {
+      const turn = headlessTurn(bot);
+      await expect(turn.run()).resolves.toMatchObject({ replyText: "Done." });
+      expect(turn.ran).toEqual([bot]);
+      pickedModels.delete(`thread-${suite}`);
+      await expect(headlessTurn(bot).run()).rejects.toThrow(
+        /isn't an allowed model/,
+      );
+    } finally {
+      pickedModels.clear();
+      await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+        value: { enabled: false, models: [] },
+      });
+    }
   });
 
   test("a Bot-to-Bot hand-off meets the same switches", async () => {

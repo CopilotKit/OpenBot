@@ -956,10 +956,11 @@ describe("recovering what was said", () => {
  */
 describe("a turn's admission", () => {
   test("is asked with the owner and the Bot, before the thread is touched", async () => {
-    const asked: { ownerUserId: string; agentId: string }[] = [];
+    const asked: { ownerUserId: string; agentId: string; threadId?: string }[] =
+      [];
     const { run, order } = harness({
-      admission: async ({ ownerUserId, agentId, signal }) => {
-        asked.push({ ownerUserId, agentId });
+      admission: async ({ ownerUserId, agentId, threadId, signal }) => {
+        asked.push({ ownerUserId, agentId, threadId });
         order.push("admission");
         return signal ?? new AbortController().signal;
       },
@@ -967,7 +968,9 @@ describe("a turn's admission", () => {
 
     await run();
 
-    expect(asked).toEqual([{ ownerUserId: OWNER, agentId: AGENT_ID }]);
+    expect(asked).toEqual([
+      { ownerUserId: OWNER, agentId: AGENT_ID, threadId: THREAD_ID },
+    ]);
     expect(order[0]).toBe("admission");
   });
 

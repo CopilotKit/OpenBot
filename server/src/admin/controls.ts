@@ -1049,12 +1049,13 @@ export async function recordHeadlessUsage(input: {
  * Run now, responsibilities, follow-ups, group turns, delivery conversations and Slack, Teams and
  * SMS messages never cross it: they run through the shared headless turn runner, which asks here.
  * The allowlist is decided the way the gate decides it before a run: a built-in Bot runs on the
- * deployment's configured model, so that model is known; a remote Bot chooses its own and is
+ * conversation's picked model or the deployment's default; a remote Bot chooses its own and is
  * checked only by what it streams. Fails closed when the controls cannot be read.
  */
 export async function headlessTurnRefusal(input: {
   ownerUserId: string;
   agentId: string;
+  threadId?: string;
 }): Promise<string | null> {
   const controls = installed;
   if (!controls) return null;
@@ -1069,13 +1070,19 @@ export async function headlessTurnRefusal(input: {
       .where(eq(agents.id, input.agentId))
       .limit(1);
     const model =
-      row?.type === "built_in" ? controls.deps.builtInModel : undefined;
+      row?.type === "built_in"
+        ? await builtInModelFor(
+            controls.deps,
+            input.ownerUserId,
+            input.threadId ?? null,
+          )
+        : undefined;
     if (!model || allowlist.models.includes(model)) return null;
     await controls.store
       .recordModelUsage({
         userId: input.ownerUserId,
         agentId: input.agentId,
-        threadId: null,
+        threadId: input.threadId ?? null,
         runId: null,
         model,
         source: "configured",

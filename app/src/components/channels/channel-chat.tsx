@@ -1268,6 +1268,7 @@ export function ChannelChat({
               </>
             }
             onSubmit={async (draft) => {
+              await runModel.beforeSend();
               // `draft.agentId` carries the @mentioned coworker, but nothing routes on it yet: this
               // channel is pinned to one `runtimeAgentId` for the life of its thread, so honouring a
               // per-message mention is a change to that binding, not to the composer.
