@@ -6,6 +6,7 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useId, useState } from "react";
+import { SkillSharingSection } from "@/components/admin/controls/skill-sharing-section";
 import { PageSection, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -485,6 +486,7 @@ export function LearningPage() {
           </p>
         </div>
       </PageSection>
+      <SkillSharingSection />
     </PageShell>
   );
 }

@@ -21,7 +21,7 @@ export type PersonalLearningRouteDeps = {
   /** Tells this replica's open-Skill index to read again; other replicas see the change within its TTL. */
   invalidate: () => void;
   /**
-   * Whether an administrator lets people open their Skills to every Bot (Admin, Enterprise controls, Skill sharing),
+   * Whether an administrator lets people open their Skills to every Bot (Admin, Automatic learning, Skill sharing),
    * read fresh for every change. Off, opening is refused and closing is not: a person can always take their Skills
    * back to their own Bots.
    */

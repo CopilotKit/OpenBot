@@ -195,7 +195,7 @@ export type PersonalSkillSources = {
   /** Everyone's opened Skills, from the in-memory index (learning/sharing.ts), never read per person per run. */
   openSkills(): Promise<readonly OpenSkillSource[]>;
   /**
-   * Whether an administrator lets people open their Skills to every Bot (Admin, Enterprise controls, Skill sharing).
+   * Whether an administrator lets people open their Skills to every Bot (Admin, Automatic learning, Skill sharing).
    * Asked on every run, before the index: while it is off, a Skill somebody opened reaches no other person's Bot, and
    * their choice is kept for when it is on again. A gate that cannot be read counts as off.
    */

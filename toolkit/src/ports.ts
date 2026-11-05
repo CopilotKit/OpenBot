@@ -17,6 +17,8 @@ import type { AuditInitiator } from "./initiator";
 export type TurnAdmission = (input: {
   ownerUserId: string;
   agentId: string;
+  /** The conversation whose saved model the host should judge. Absent uses the default. */
+  threadId?: string;
   signal?: AbortSignal;
 }) => Promise<AbortSignal>;
 

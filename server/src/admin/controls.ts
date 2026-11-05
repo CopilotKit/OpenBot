@@ -102,6 +102,15 @@ export type EnterpriseDeps = {
   webBotAuth?: WebBotAuth;
   /** `provider/model` the built-in Bot runs on, for the model allowlist and usage view. */
   builtInModel?: string;
+  /**
+   * The model a person picked for the conversation behind a thread, when there is one they may use
+   * (`channels/model-choice.ts`). A built-in run in that thread answers on it, so it is the model
+   * the allowlist judges and the usage row names.
+   */
+  pickedModel?: (
+    actorId: string,
+    threadId: string,
+  ) => Promise<string | undefined>;
   /** Offboarding: ends sessions and deny-lists, and retires what a person granted. */
   people?: {
     revoke: (userId: string, by: string) => Promise<void>;
@@ -151,7 +160,7 @@ export function enterpriseControls(): EnterpriseControls | undefined {
 }
 
 /**
- * Skill sharing (Admin, Enterprise controls): whether people may open their Skills to every Bot. Off until the
+ * Skill sharing (Admin, Automatic learning): whether people may open their Skills to every Bot. Off until the
  * controls have read it, like every switch here. For a person's change, read fresh from the database.
  */
 export async function skillSharingAllowed(): Promise<boolean> {
@@ -966,6 +975,21 @@ export function auditRoutineStore<T extends RoutineLike>(
 /* ------------------------------ headless turns ------------------------------ */
 
 /**
+ * `provider/model` a built-in run in this thread answers on: the person's pick for the
+ * conversation, or the deployment's own. Same spelling as `builtInModel`.
+ */
+export async function builtInModelFor(
+  deps: Pick<EnterpriseDeps, "builtInModel" | "pickedModel">,
+  actorId: string,
+  threadId: string | null,
+): Promise<string | undefined> {
+  const deployment = deps.builtInModel;
+  if (!deployment || !threadId) return deployment;
+  const picked = await deps.pickedModel?.(actorId, threadId);
+  return picked ? `${deployment.split("/")[0]}/${picked}` : deployment;
+}
+
+/**
  * One usage row for a headless turn that reached the model, as the gate writes one for each browser
  * run (`gate.ts`): the configured model for a built-in Bot, `unknown` for a remote one, which chooses
  * its own and was not watched here.
@@ -990,7 +1014,13 @@ export async function recordHeadlessUsage(input: {
       .where(eq(agents.id, input.agentId))
       .limit(1);
     const model =
-      row?.type === "built_in" ? controls.deps.builtInModel : undefined;
+      row?.type === "built_in"
+        ? await builtInModelFor(
+            controls.deps,
+            input.ownerUserId,
+            input.threadId,
+          )
+        : undefined;
     // A model nobody named is allowed only while there is no list, as the gate records it.
     const listed = controls.snapshot()?.settings.modelAllowlist?.enabled;
     await controls.store.recordModelUsage({
@@ -1019,12 +1049,13 @@ export async function recordHeadlessUsage(input: {
  * Run now, responsibilities, follow-ups, group turns, delivery conversations and Slack, Teams and
  * SMS messages never cross it: they run through the shared headless turn runner, which asks here.
  * The allowlist is decided the way the gate decides it before a run: a built-in Bot runs on the
- * deployment's configured model, so that model is known; a remote Bot chooses its own and is
+ * conversation's picked model or the deployment's default; a remote Bot chooses its own and is
  * checked only by what it streams. Fails closed when the controls cannot be read.
  */
 export async function headlessTurnRefusal(input: {
   ownerUserId: string;
   agentId: string;
+  threadId?: string;
 }): Promise<string | null> {
   const controls = installed;
   if (!controls) return null;
@@ -1039,13 +1070,19 @@ export async function headlessTurnRefusal(input: {
       .where(eq(agents.id, input.agentId))
       .limit(1);
     const model =
-      row?.type === "built_in" ? controls.deps.builtInModel : undefined;
+      row?.type === "built_in"
+        ? await builtInModelFor(
+            controls.deps,
+            input.ownerUserId,
+            input.threadId ?? null,
+          )
+        : undefined;
     if (!model || allowlist.models.includes(model)) return null;
     await controls.store
       .recordModelUsage({
         userId: input.ownerUserId,
         agentId: input.agentId,
-        threadId: null,
+        threadId: input.threadId ?? null,
         runId: null,
         model,
         source: "configured",

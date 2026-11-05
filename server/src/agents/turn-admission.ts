@@ -12,13 +12,14 @@ import { guardBotTurn } from "./lifecycle";
 export const serverTurnAdmission: TurnAdmission = async ({
   ownerUserId,
   agentId,
+  threadId,
   signal,
 }) => {
   // Paused Bots do not start; a pause while running aborts this signal. See agents/lifecycle.ts.
   const admitted = await guardBotTurn({ ownerUserId, agentId, signal });
   // "Use Bots" and the model allowlist, which a browser run meets at the HTTP gate. No headless turn
   // crosses that gate, so every one of them meets the same check here instead.
-  const refused = await headlessTurnRefusal({ ownerUserId, agentId });
+  const refused = await headlessTurnRefusal({ ownerUserId, agentId, threadId });
   if (refused) {
     const error = new Error(refused);
     error.name = "CapabilityRefusedError";

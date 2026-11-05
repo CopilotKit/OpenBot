@@ -497,6 +497,16 @@ export const intelligenceChannelMappings = pgTable(
       .notNull()
       .references(() => channels.id, { onDelete: "cascade" }),
     threadId: text("thread_id").notNull(),
+    /**
+     * The model this person picked for this conversation's built-in Bot, or null for the
+     * configured one. Per person, like the thread: in a shared channel each member answers on
+     * their own pick. The provider is kept so a pick made under one provider is not sent to
+     * another after the deployment switches. See channels/model-choice.ts.
+     */
+    modelSelection: jsonb("model_selection").$type<{
+      provider: string;
+      model: string;
+    }>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
