@@ -83,6 +83,28 @@ jobs:
           desktop/scripts/import-developer-id-intermediate.sh "$keychain"
           desktop/scripts/import-developer-id-intermediate.sh "$keychain"
           security find-certificate -c "Developer ID Certification Authority" "$keychain" > /dev/null
+      - name: Stapling retries a dropped connection and still fails a missing ticket
+        # The first real signing run had Apple accept the Intel image, then lost the connection
+        # while stapling and failed the job. A stand-in for xcrun fails twice, then succeeds.
+        run: |
+          set -euo pipefail
+          fake="$RUNNER_TEMP/fake-xcrun"
+          export STAPLE_CALLS="$RUNNER_TEMP/staple-calls"
+          printf '0' > "$STAPLE_CALLS"
+          cat > "$fake" <<'FAKE'
+          #!/usr/bin/env bash
+          n=$(( $(cat "$STAPLE_CALLS") + 1 ))
+          printf '%s' "$n" > "$STAPLE_CALLS"
+          [ "$n" -ge 3 ]
+          FAKE
+          chmod +x "$fake"
+          XCRUN="$fake" STAPLE_RETRY_DELAY=0 desktop/scripts/staple-with-retry.sh image.dmg 5
+          test "$(cat "$STAPLE_CALLS")" = 3
+          printf '#!/usr/bin/env bash\nexit 1\n' > "$fake"
+          if XCRUN="$fake" STAPLE_RETRY_DELAY=0 desktop/scripts/staple-with-retry.sh image.dmg 3; then
+            echo "A ticket that never arrives must fail the job." >&2
+            exit 1
+          fi
       - name: Check the updater is wired together
         run: |
           set -euo pipefail
@@ -263,7 +285,9 @@ jobs:
           xcrun notarytool submit "${images[0]}" \
             --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
             --wait --timeout 30m
-          xcrun stapler staple "${images[0]}"
+          # Apple has accepted it by now; stapling only fetches the ticket, and retries a dropped
+          # connection rather than failing a notarized build (see the script).
+          desktop/scripts/staple-with-retry.sh "${images[0]}"
       - name: Verify the signature, Gatekeeper and the notarization ticket
         run: |
           set -euo pipefail
