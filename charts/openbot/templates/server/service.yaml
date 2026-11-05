@@ -1,11 +1,22 @@
 {{- $component := "server" -}}
+{{/*
+A LoadBalancer is the one type that has the cloud create something, so it alone carries the AWS usage
+tag (`openbot.awsAttributionTags`). Both the AWS Load Balancer Controller and the in-tree AWS
+provider read this annotation, for an NLB and a Classic Load Balancer alike, and other clouds ignore
+it.
+*/}}
+{{- $annotations := deepCopy (.Values.server.service.annotations | default dict) -}}
+{{- if eq .Values.server.service.type "LoadBalancer" -}}
+{{- $tags := "service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags" -}}
+{{- $_ := set $annotations $tags (include "openbot.awsAttributionTags" (dict "annotations" .Values.server.service.annotations "annotation" $tags "path" "server.service.annotations")) -}}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}
   labels:
 {{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
-  {{- with .Values.server.service.annotations }}
+  {{- with $annotations }}
   annotations:
 {{ toYaml . | indent 4 }}
   {{- end }}
