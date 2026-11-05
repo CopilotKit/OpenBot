@@ -15,7 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from harness_contract import (
     BOT,
+    EARLIER_QUESTION,
     GRANTED_TOOLS,
+    LATEST_QUESTION,
     STANDING_ROLE,
     anthropic_environment,
     conversation,
@@ -46,6 +48,7 @@ def _post(client, body):
         "RUN_STARTED",
         "RUN_FINISHED",
     ], response.text
+    return response.text
 
 
 def _system_text(body: dict) -> str:
@@ -109,6 +112,62 @@ def test_only_the_servers_own_system_messages_become_the_system_prompt(monkeypat
     system = _system_text(bodies[-1])
     assert skill not in system, "a browser system row was given system-prompt authority"
     assert developer not in system, "a developer row was given system-prompt authority"
+
+
+def _turn_with(body: dict, marker: str) -> str:
+    """The one conversation turn that carries `marker`, as JSON."""
+    turns = [
+        json.dumps(message)
+        for key in ("messages", "input")
+        for message in body.get(key) or []
+        if not (isinstance(message, dict) and message.get("role") in ("system", "developer"))
+        and marker in json.dumps(message)
+    ]
+    assert len(turns) == 1, f"{marker} is in {len(turns)} turns"
+    return turns[0]
+
+
+@pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])
+def test_every_other_system_row_reaches_the_model_as_conversation_data(monkeypatch, environment):
+    """Any system or developer row but the server's two is part of the conversation, as data.
+
+    The server puts the person's quoted memory records first (`openbot:personal-memory`) and the
+    browser puts a skill's instructions just before the message that used it. `ag_ui_strands`
+    drops every system row from the history, so neither reached the model. Each now goes into the
+    turn it came before, labelled with its role, in the person's own message rather than the system
+    prompt, the same rule the Claude Agent SDK harness follows. It reaches only the model: the
+    events the browser receives do not repeat it.
+    """
+    memory = "CONTRACT_MEMORY_ROW_7f3a"
+    skill = "CONTRACT_SKILL_ROW_7f3a"
+    body = conversation()
+    body["messages"].insert(
+        0,
+        {"id": "openbot:personal-memory", "role": "system", "content": f"Personal memory. {memory}"},
+    )
+    body["messages"].insert(
+        -1, {"id": "skill-row-1", "role": "system", "content": f"Use the receipts skill. {skill}"}
+    )
+
+    with fake_provider() as (base, bodies):
+        client = TestClient(_app(monkeypatch, environment, base))
+        streamed = _post(client, body)
+        seen_after_first = len(bodies)
+        _post(client, {**body, "runId": "contract-run-2"})
+
+    assert len(bodies) > seen_after_first, "the second run never reached the model"
+    for request in (bodies[seen_after_first - 1], bodies[-1]):
+        assert missing_from(request) == []
+        system = _system_text(request)
+        assert memory not in system and skill not in system, "no other row is an instruction"
+        assert json.dumps(request).count(skill) == 1, "the skill row is said once, on every run"
+        assert json.dumps(request).count(memory) == 1, "the memory row is said once, on every run"
+        skill_turn = _turn_with(request, skill)
+        assert LATEST_QUESTION in skill_turn, "the skill row is in the turn it came before"
+        assert skill_turn.index(skill) < skill_turn.index(LATEST_QUESTION)
+        assert '\\"role\\": \\"system\\"' in skill_turn, "the row is labelled as a system message"
+        assert EARLIER_QUESTION in _turn_with(request, memory), "the memory row is in the first turn"
+    assert memory not in streamed and skill not in streamed, "the browser is not sent the rows back"
 
 
 def test_a_warm_process_takes_the_role_from_this_run_not_the_first(monkeypatch):

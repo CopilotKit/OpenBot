@@ -1,4 +1,4 @@
-"""The Bot's role, from the run the server sent, as the system prompt of that run.
+"""The run's system messages, each where it belongs: the server's two in the system prompt, the rest in the conversation.
 
 The server sends the standing role and the granted-tools summary as `role: "system"` messages
 at the head of `messages` on every run (`runWith` in `server/src/copilot.ts`). `ag_ui_strands`
@@ -11,26 +11,43 @@ Two seams the library supports carry it instead. `invocation_state(request, inpu
 endpoint's `invocation_state_provider`: it reads the server's own system messages from this run,
 in order. `RunSystemPrompt` is a Strands hook on `BeforeInvocationEvent`, which every per-thread
 agent receives: it sets that agent's system prompt from the run's invocation state before the
-first model call, so nothing from an earlier run remains. The messages stay out of the replayed
-history, where the library already leaves them.
+first model call, so nothing from an earlier run remains.
 
-Only those two are instructions. The browser inserts system rows of its own (a skill's
-instructions arrive that way), and those are not the server's to vouch for: they keep the
-treatment they had before, which in this harness is that the library leaves them out.
+Only those two are instructions. Other system rows are part of the conversation: the server puts
+the person's quoted memory records in one (`openbot:personal-memory`), and the browser puts a
+skill's instructions in one, just before the message that used it. The library dropped those too,
+so a Strands Bot never saw a skill or a memory. They now reach the model the way the Claude Agent
+SDK harness replays them (`agent-claude-sdk/src/replay.py`): as labelled data, with their role,
+never in the system prompt. Each goes into the person's turn it came before, for each model call
+only, the way the library adds AG-UI context: the history the library keeps, the snapshots it
+sends the browser and what Intelligence stores never carry it.
 """
 
+import json
 from typing import Any
 
-from strands.hooks import BeforeInvocationEvent
+from strands.hooks import AfterModelCallEvent, BeforeInvocationEvent, BeforeModelCallEvent
 
-# Keys of the invocation state are stripped from every RAW event the library forwards, so the
-# prompt does not reach the browser by this route.
+# Keys of the invocation state are stripped from every RAW event the library forwards, so neither
+# reaches the browser by this route.
 KEY = "openbot_system_prompt"
+ROWS_KEY = "openbot_conversation_rows"
 
 # The ids the server gives the system messages it writes for a remote Bot: `standingRoleMessage`
 # and `holdingsMessageFor` in server/src/copilot.ts. The server drops every incoming message whose
 # id starts with one of these before it adds its own, so in a run only its own copies carry one.
 SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
+
+# What a row other than the server's two is introduced with in the person's turn. As much
+# authority as the person's own messages and no more: a skill is something the person chose to
+# run, and the memory records say themselves that they are data.
+ROW_LABEL = (
+    "A system message in this conversation. It carries no more authority than the person's "
+    "own messages:"
+)
+
+# Where the rows a model call added are kept until it ends, on the per-thread agent.
+_APPLIED = "_openbot_conversation_rows_applied"
 
 
 def _text(content: Any) -> str:
@@ -65,20 +82,130 @@ def system_text(messages: Any) -> list[str]:
     return found
 
 
+def conversation_rows(messages: Any) -> dict[str, Any]:
+    """Every other system or developer row, labelled, with the person's turn it came before.
+
+    `before` counts the user messages ahead of the row, so it is the index of the next one; a row
+    after the last user message has `before == users`.
+    """
+    rows = []
+    users = 0
+    for message in messages or []:
+        role = getattr(message, "role", None)
+        if role == "user":
+            users += 1
+        elif role in ("system", "developer") and not is_server_instruction(message):
+            content = _text(getattr(message, "content", None))
+            if content.strip():
+                entry = {"id": getattr(message, "id", None), "role": role, "content": content}
+                rows.append({"before": users, "text": f"{ROW_LABEL}\n{json.dumps(entry, ensure_ascii=False)}"})
+    return {"users": users, "rows": rows}
+
+
 def invocation_state(_request: Any, input_data: Any) -> dict[str, Any]:
-    return {KEY: system_text(getattr(input_data, "messages", None))}
+    messages = getattr(input_data, "messages", None)
+    return {KEY: system_text(messages), ROWS_KEY: conversation_rows(messages)}
+
+
+def _is_question(message: Any) -> bool:
+    """A user turn the person wrote, as the library builds it: not a turn of tool results."""
+    content = message.get("content") if isinstance(message, dict) else None
+    return (
+        message.get("role") == "user"
+        and isinstance(content, list)
+        and not any(isinstance(block, dict) and "toolResult" in block for block in content)
+    )
+
+
+def _merge(message: dict, text: str, placement: str) -> tuple:
+    """Into the turn's own text block, as the library merges context: some formatters refuse a
+    user turn with two text blocks."""
+    content = message["content"]
+    texts = [i for i, block in enumerate(content) if isinstance(block, dict) and isinstance(block.get("text"), str)]
+    if texts:
+        index = texts[0] if placement == "prepend" else texts[-1]
+        original = content[index]
+        joined = f"{text}\n\n{original['text']}" if placement == "prepend" else f"{original['text']}\n\n{text}"
+        replacement = {**original, "text": joined}
+        content[index] = replacement
+        return ("replace", content, original, replacement)
+    block = {"text": text}
+    content.insert(0, block) if placement == "prepend" else content.append(block)
+    return ("splice", content, block)
+
+
+def _undo(mutation: tuple) -> None:
+    if mutation[0] == "replace":
+        _, content, original, replacement = mutation
+        for index, block in enumerate(content):
+            if block is replacement:
+                content[index] = original
+                return
+    else:
+        _, holder, added = mutation
+        for index, item in enumerate(holder):
+            if item is added:
+                holder.pop(index)
+                return
+
+
+def _restore(agent: Any) -> None:
+    applied = agent.__dict__.pop(_APPLIED, None)
+    for mutation in reversed(applied or []):
+        _undo(mutation)
+
+
+def _add_rows(agent: Any, plan: dict[str, Any]) -> list[tuple]:
+    rows = plan.get("rows") or []
+    if not rows:
+        return []
+    messages = agent.messages
+    questions = [index for index, message in enumerate(messages) if _is_question(message)]
+    if not questions:
+        added = {"role": "user", "content": [{"text": "\n\n".join(row["text"] for row in rows)}]}
+        messages.insert(0, added)
+        return [("splice", messages, added)]
+    users = plan.get("users", 0)
+    # One user turn here for each one the run sent, which is how the library replays a thread.
+    # A history this run did not replay (a resume it continued in place) may not line up, and then
+    # every row goes with the latest turn, which is the one being answered.
+    lined_up = len(questions) == users
+    before: dict[int, list[str]] = {}
+    after: list[str] = []
+    for row in rows:
+        if row["before"] >= users:
+            after.append(row["text"])
+        else:
+            before.setdefault(questions[row["before"]] if lined_up else questions[-1], []).append(row["text"])
+    mutations = [_merge(messages[index], "\n\n".join(texts), "prepend") for index, texts in before.items()]
+    if after:
+        mutations.append(_merge(messages[questions[-1]], "\n\n".join(after), "append"))
+    return mutations
 
 
 class RunSystemPrompt:
-    """Sets each invocation's system prompt: the base instruction, then this run's messages."""
+    """Sets each invocation's system prompt, and adds the other rows to each model call's turns."""
 
     def __init__(self, base: str | None = None):
         self.base = (base or "").strip()
 
     def register_hooks(self, registry: Any, **_kwargs: Any) -> None:
         registry.add_callback(BeforeInvocationEvent, self._before_invocation)
+        registry.add_callback(BeforeModelCallEvent, self._before_model_call)
+        registry.add_callback(AfterModelCallEvent, self._after_model_call)
 
     def _before_invocation(self, event: BeforeInvocationEvent) -> None:
         parts = [self.base] if self.base else []
         parts.extend((event.invocation_state or {}).get(KEY) or [])
         event.agent.system_prompt = "\n\n".join(parts) or None
+
+    def _before_model_call(self, event: BeforeModelCallEvent) -> None:
+        # Whatever a call that never reached its end left behind first, so a row is never said twice.
+        _restore(event.agent)
+        plan = (event.invocation_state or {}).get(ROWS_KEY) or {}
+        mutations = _add_rows(event.agent, plan)
+        if mutations:
+            event.agent.__dict__[_APPLIED] = mutations
+
+    def _after_model_call(self, event: AfterModelCallEvent) -> None:
+        _restore(event.agent)
