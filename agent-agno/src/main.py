@@ -23,6 +23,11 @@ from agno.os.interfaces.agui import AGUI
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from .conversation import install as answer_from_the_whole_thread
+
+# Before the app is built: Agno's AG-UI router would otherwise send the model only the newest line.
+answer_from_the_whole_thread()
+
 TOKEN_HEADER = "x-openbot-agent-token"
 
 
@@ -45,7 +50,8 @@ def _model_id() -> str:
 
 agent = Agent(
     # In memory, because a Bot's history lives in OpenBot's database and not in the harness. Two
-    # places remembering the same conversation is how they come to disagree.
+    # places remembering the same conversation is how they come to disagree. The server sends all
+    # of it on every run, and `conversation.py` is what hands it to the model.
     db=InMemoryDb(),
     # `drop_params`, because Agno sends a temperature and a `top_p` on every request and LiteLLM
     # refuses both for a reasoning model, the default `gpt-5.5` among them: every run on an OpenAI
