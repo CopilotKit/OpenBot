@@ -351,3 +351,70 @@ describe.skipIf(!helm || !kubeconfig)(
     });
   },
 );
+
+/** The annotations on a workload's pod template: what Kubernetes compares to decide whether to roll it. */
+function podAnnotations(
+  docs: Doc[],
+  kind: string,
+  name: string,
+): Record<string, string> {
+  const workload = docs.find((d) => d.kind === kind && component(name)(d)) as
+    | { spec?: { template?: { metadata?: { annotations?: Record<string, string> } } } }
+    | undefined;
+  return workload?.spec?.template?.metadata?.annotations ?? {};
+}
+
+describe.skipIf(!helm)("an upgrade that changes a secret", () => {
+  // A changed Secret does not change a pod, so without these an upgrade with a new model key or
+  // licence left every pod on the old one: the release looked upgraded and every Bot turn kept
+  // failing on the key it was meant to replace.
+  const given = (...extra: string[]) =>
+    render(
+      "--set-string",
+      "secrets.licenseToken=licence-a",
+      "--set-string",
+      "secrets.computerToken=computer-token-a-0123456789abcdef",
+      ...extra,
+    );
+
+  test("a new model key rolls the server, and leaves the computer and its sessions alone", () => {
+    const before = given("--set-string", "secrets.modelApiKey=key-a");
+    const after = given("--set-string", "secrets.modelApiKey=key-b");
+
+    expect(podAnnotations(after, "Deployment", "server")).not.toEqual(
+      podAnnotations(before, "Deployment", "server"),
+    );
+    expect(podAnnotations(after, "StatefulSet", "computer")).toEqual(
+      podAnnotations(before, "StatefulSet", "computer"),
+    );
+  });
+
+  test("a new computer token rolls both the server and the computer, which must agree on it", () => {
+    const before = given("--set-string", "secrets.modelApiKey=key-a");
+    const after = given(
+      "--set-string",
+      "secrets.modelApiKey=key-a",
+      "--set-string",
+      "secrets.computerToken=computer-token-b-0123456789abcdef",
+    );
+
+    expect(podAnnotations(after, "Deployment", "server")).not.toEqual(
+      podAnnotations(before, "Deployment", "server"),
+    );
+    expect(podAnnotations(after, "StatefulSet", "computer")).not.toEqual(
+      podAnnotations(before, "StatefulSet", "computer"),
+    );
+  });
+
+  test("the same values roll nothing, though the generated secrets differ on every render", () => {
+    const once = render("--set-string", "secrets.modelApiKey=key-a");
+    const twice = render("--set-string", "secrets.modelApiKey=key-a");
+
+    expect(podAnnotations(twice, "Deployment", "server")).toEqual(
+      podAnnotations(once, "Deployment", "server"),
+    );
+    expect(podAnnotations(twice, "StatefulSet", "computer")).toEqual(
+      podAnnotations(once, "StatefulSet", "computer"),
+    );
+  });
+});

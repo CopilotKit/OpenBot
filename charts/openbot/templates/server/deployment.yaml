@@ -43,6 +43,7 @@ spec:
           the old values, and the deployment looks upgraded while behaving exactly as it did.
         */}}
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secrets: {{ include "openbot.secretsChecksum" . }}
         {{- if eq .Values.computers.mode "sandbox" }}
         {{- /*
           The shape of a computer, which the server reads once and keeps.

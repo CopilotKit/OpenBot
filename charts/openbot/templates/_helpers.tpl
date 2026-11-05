@@ -1108,6 +1108,29 @@ PostgreSQL a password it was never initialized with. `lookup` sees nothing under
 or a client-side dry run, so those render a fresh value, which is what they should show.
 Called with (dict "root" . "secret" <name> "key" <key> "generate" <a fresh value>).
 */}}
+{{- /*
+  A hash of every secret an operator gives this chart, for the pods that read them to roll on.
+
+  A changed Secret does not change a pod, so without this an upgrade with a new model key or licence
+  left every replica on the old one: the release looked upgraded and every Bot turn kept failing on
+  the key it was meant to replace. The values given are hashed rather than the rendered Secret,
+  because a generated value is drawn afresh on every render until `lookup` finds it kept, and hashing
+  that would roll the pods on the first upgrade for nothing. Generated values never change, by design,
+  so what the operator gives is the whole of what can. A Secret of the operator's own
+  (`existingSecret`, External Secrets) changes outside Helm and rolls nothing; that is theirs to roll.
+*/}}
+{{- define "openbot.secretsChecksum" -}}
+{{- .Values.secrets | toJson | sha256sum -}}
+{{- end -}}
+
+{{- /*
+  The same, for the computer: only what it reads, which is its token. A model key or licence change
+  must not restart it, because that drops every browser and shell session on it.
+*/}}
+{{- define "openbot.computerTokenChecksum" -}}
+{{- list .Values.secrets.computerToken .Values.secrets.existingSecret .Values.computers.existingTokenSecret | toJson | sha256sum -}}
+{{- end -}}
+
 {{- define "openbot.keptValue" -}}
 {{- $existing := lookup "v1" "Secret" .root.Release.Namespace .secret -}}
 {{- $data := ($existing | default dict).data | default dict -}}
