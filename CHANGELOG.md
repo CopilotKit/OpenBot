@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Sending a message from the home page opens its conversation at once. The message shows while a
+  Bot is picked and the conversation is made, and the real conversation replaces it when it exists.
+  A start that fails goes back to the home page with the message in the box and the reason under it.
+  Before, the composer sat still for a second or more after send.
+- The Bot for an untagged message is picked on a lighter model: `claude-haiku-5-5` on Anthropic,
+  `gpt-6-luna` on OpenAI. A model the provider refuses falls back to the Bots' own model. Behind
+  `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`, and when the admin's model allowlist leaves the lighter
+  model out, routing stays on the Bots' model. Set `ROUTER_MODEL` to choose it.
+- A message that names its Bot with `@` no longer waits for the audit record of that choice before
+  the conversation starts. The record is still written.
+
 - People can pick the model a built-in Bot answers on, per conversation, from a brain icon in the
   composer, including before the first message. The list is read from the model provider, or from
   the gateway in `OPENAI_BASE_URL`, filtered to chat models and to the model allowlist. The pick is

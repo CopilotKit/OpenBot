@@ -297,7 +297,7 @@ import { createServerResponsibilityEngine } from "./responsibilities/wiring";
 import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
-import { createModelCompleter } from "./routing/model";
+import { createModelCompleter, routingModelFor } from "./routing/model";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createSetupSources, modelKeyOf } from "./setup/checklist";
 import { createComputerCheck } from "./setup/computer-check";
@@ -1374,6 +1374,21 @@ const stallGuard = createStallGuard({
 const intentRouter = createIntentRouter({
   complete: createModelCompleter({
     model: runtimeModel,
+    /*
+     * Picking a Bot sits between send and the conversation opening; see `routingModelFor`. Never a
+     * model the admin's allowlist leaves out: the router then stays on the deployment's own model,
+     * which the allowlist already governs for every run.
+     */
+    fastModel: () => {
+      const fast = routingModelFor(runtimeModel, process.env);
+      const allowlist =
+        enterpriseControls()?.snapshot()?.settings.modelAllowlist;
+      return fast &&
+        (!allowlist?.enabled ||
+          allowlist.models.includes(`${runtimeModel.provider}/${fast}`))
+        ? fast
+        : undefined;
+    },
     resolveApiKey: () =>
       resolveModelApiKey({
         encryptionKey: config.keyEncryptionKey,

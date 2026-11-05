@@ -1,8 +1,17 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router";
 import { useState } from "react";
 import { AgentCard } from "@/components/agents/agent-card";
-import { Composer, toAgentOptions } from "@/components/channels/composer";
+import {
+  Composer,
+  type ComposerDraft,
+  toAgentOptions,
+} from "@/components/channels/composer";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,12 +19,20 @@ import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import { agentListQueryOptions, isSharedWithYou } from "@/lib/agents/queries";
 import { firstConversationGreeting } from "@/lib/auth/greeting";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import {
+  beginPendingStart,
+  endPendingStart,
+  pendingStartPath,
+  stashFailedStart,
+  takeFailedStart,
+} from "@/lib/channels/pending-start";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
   CoworkerRoutingRefusedError,
   routeMessage,
 } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
+import { newId } from "@/lib/new-id";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
 const EXPLORE_SHOWN = 4;
@@ -33,14 +50,63 @@ function RouteComponent() {
     isError: failed,
   } = useQuery(agentListQueryOptions());
   const explore = agents?.filter(isSharedWithYou);
-  const { start, startChosen, pending } = useStartChannel();
-  const [error, setError] = useState<string | null>(null);
+  const { start, startChosen } = useStartChannel();
+  const router = useRouter();
+  const navigate = useNavigate();
+  // A start that failed behind its placeholder comes back here: its words in the box, its reason
+  // under it, the way a failed send always left them. Taken once, on mount.
+  const [restored] = useState(takeFailedStart);
+  const [error, setError] = useState<string | null>(restored?.error ?? null);
 
   /** Default recipient when the composer draft has no mention. */
   const fallback = defaultAgentProfile(
     agents,
     agents?.find((agent) => agent.visibility === "public"),
   );
+
+  /**
+   * Pick the Bot and make the channel behind the placeholder `pendingId`.
+   *
+   * A channel is pinned to one coworker for the life of its thread, so the coworker is chosen now,
+   * before it is created. An `@` is an explicit choice and is honoured as-is. With no `@`, the
+   * message is routed to the coworker it is for; if that routing cannot run, it falls back to the
+   * same default the composer used to always use.
+   *
+   * Runs on after this page has unmounted, which is the point. A failure goes back to the home
+   * composer with the words and the reason, and the person is taken there only if they are still
+   * looking at the placeholder; otherwise the next home page they open shows it.
+   */
+  const startBehind = async (pendingId: string, draft: ComposerDraft) => {
+    try {
+      if (draft.agentId) {
+        // Recorded and started as one sequence, shared with `/channel/new`: the person already
+        // decided, and the trail has to say so wherever they decided it.
+        await startChosen(draft.agentId, draft.text, [], undefined, pendingId);
+        return;
+      }
+      let agentId: string | undefined;
+      try {
+        agentId = (await routeMessage(draft.text)).agentId;
+      } catch (caught) {
+        if (caught instanceof CoworkerRoutingRefusedError) throw caught;
+        agentId = fallback?.id;
+      }
+      if (!agentId) throw new Error("There's no Bot to send this to. Reload the page.");
+      await start(agentId, draft.text, [], undefined, pendingId);
+    } catch (caught) {
+      stashFailedStart({
+        text: draft.text,
+        error:
+          caught instanceof Error
+            ? caught.message
+            : "Couldn't start the conversation. Try again.",
+      });
+      if (router.state.location.pathname === pendingStartPath(pendingId))
+        await navigate({ replace: true, to: "/" });
+    } finally {
+      endPendingStart(pendingId);
+    }
+  };
 
   return (
     <>
@@ -61,39 +127,23 @@ function RouteComponent() {
             agents={toAgentOptions(agents)}
             className="w-full max-w-2xl"
             disabled={!fallback}
+            {...(restored ? { initialValue: restored.text } : {})}
             onSubmit={async (draft) => {
-              // A channel is pinned to one coworker for the life of its thread, so the coworker is
-              // chosen now, before it is created. An `@` is an explicit choice and is honoured as-is.
-              // With no `@`, the message is routed to the coworker it is for; if that routing cannot
-              // run, it falls back to the same default the composer used to always use.
+              // The conversation opens NOW, as a placeholder showing the message, and the Bot is
+              // picked and the channel made behind it; see `pending-start.ts`. Waiting here for
+              // both is what kept send looking dead for seconds.
               setError(null);
-              try {
-                if (draft.agentId) {
-                  // Recorded and started as one sequence, shared with `/channel/new`: the person
-                  // already decided, and the trail has to say so wherever they decided it.
-                  await startChosen(draft.agentId, draft.text);
-                  return;
-                }
-                let agentId: string | undefined;
-                try {
-                  agentId = (await routeMessage(draft.text)).agentId;
-                } catch (caught) {
-                  if (caught instanceof CoworkerRoutingRefusedError)
-                    throw caught;
-                  agentId = fallback?.id;
-                }
-                if (!agentId) return;
-                await start(agentId, draft.text);
-              } catch (caught) {
-                setError(
-                  caught instanceof Error
-                    ? caught.message
-                    : "Couldn't start the conversation. Try again.",
-                );
-                throw caught;
-              }
+              const pendingId = newId();
+              beginPendingStart(pendingId, {
+                text: draft.text,
+                agentId: draft.agentId,
+              });
+              await navigate({
+                params: { startId: pendingId },
+                to: "/start/$startId",
+              });
+              void startBehind(pendingId, draft);
             }}
-            pending={pending}
           />
           {fallback ? (
             // Said out loud: a message that silently reaches somebody you did not choose is the

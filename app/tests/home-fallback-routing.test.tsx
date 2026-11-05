@@ -6,7 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
+  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
@@ -64,9 +66,23 @@ function queryClientWithAgents(agents: AgentProfile[]) {
 }
 
 function renderHome(queryClient: QueryClient) {
-  const rootRoute = createRootRoute({ component: HomeRoute.options.component });
+  // Home and the placeholder it opens on send, so a start that fails behind the placeholder comes
+  // back to a freshly mounted home page, as it does in the app.
+  const rootRoute = createRootRoute({ component: Outlet });
+  const routeTree = rootRoute.addChildren([
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: HomeRoute.options.component,
+    }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/start/$startId",
+      component: () => <p>Starting</p>,
+    }),
+  ]);
   const router = createRouter({
-    routeTree: rootRoute,
+    routeTree,
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   return render(
@@ -203,3 +219,27 @@ for (const refusal of [
     );
   });
 }
+
+test("send opens the placeholder at once, before a Bot is picked or a channel made", async () => {
+  const asked: string[] = [];
+  global.fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      // Only the writes: the page's own reads (who is signed in, the roster) are not the start.
+      if (init?.method === "POST")
+        asked.push(typeof input === "string" ? input : input.toString());
+      // Routing never answers: whatever is on screen got there without it.
+      return new Promise<Response>(() => {});
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = renderHome(
+    queryClientWithAgents([
+      agent({ id: "default", name: "Default", visibility: "public" }),
+    ]),
+  );
+
+  await submitHomeMessage(view, "hello");
+
+  expect(await view.findByText("Starting")).toBeTruthy();
+  expect(asked).toEqual(["/api/route"]);
+});
