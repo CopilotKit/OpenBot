@@ -777,6 +777,31 @@ describe("reading a person's routines", () => {
     ]);
   });
 
+  test("names the conversation it posts into as the sidebar does, not by its Bot", async () => {
+    // Every conversation with a Bot is NAMED after the Bot, so the Routines page read "General
+    // Assistant" on every routine. The person knows the conversation by its sidebar title.
+    const { owner, agentId, channel } = await setUp();
+    const untitled = await createChannel(owner, [agentId]);
+    await titled(channel.id, "15-Minute EKS UTC Routine");
+    for (const channelId of [channel.id, untitled.id])
+      await store.create({
+        ownerUserId: owner.id,
+        agentId,
+        channelId,
+        instruction: "Reply with the current UTC time.",
+        cron: DAILY,
+      });
+
+    const titles = new Map(
+      (await store.listFor(owner.id)).map((summary) => [
+        summary.channelId,
+        summary.channelTitle,
+      ]),
+    );
+    expect(titles.get(channel.id)).toBe("15-Minute EKS UTC Routine");
+    expect(titles.get(untitled.id)).toBe("New conversation");
+  });
+
   test("keeps a routine whose channel was deleted and reports it as gone", async () => {
     // The whole reason `routines.channel_id` is not a foreign key: a cascade here would delete the
     // person's standing instruction silently, and they would find out by it never running again.
