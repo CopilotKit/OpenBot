@@ -254,8 +254,8 @@ jobs:
   # The macOS and Windows installers, built from the commit that passed the checks, with the CLI
   # bundled. A candidate or beta pins the images built above, so whoever tests it runs exactly what
   # the final will ship. A stable release is what customers install, and it is not pinned. These are
-  # ad-hoc signed and not notarized, the same as every CI build today: signing is still to come, and
-  # needs certificates this workflow does not hold.
+  # ad-hoc signed and not notarized, the same as every CI build: this workflow holds no signing
+  # certificate. The signing workflows dispatched at the end of `github-release` replace them.
   desktop:
     name: desktop
     needs: [metadata, verify, checks, images]
@@ -425,11 +425,11 @@ jobs:
               --title "$VERSION" --notes-file notes.md "${flags[@]}"
           fi
 
-          # The installers are ad-hoc builds, so a rerun produces new bytes. They are kept out of
-          # the check above, which holds the release's source, chart and manifest to what was
-          # first published, and are replaced instead.
+          # The installers are rebuilt on every run, so a rerun produces new bytes. They are kept
+          # out of the check above, which holds the release's source, chart and manifest to what
+          # was first published.
           # Every installer the desktop job built. A release without them is not the release that
-          # was asked for, so none at all is a failure. `--clobber` lets a re-run replace them.
+          # was asked for, so none at all is a failure.
           installers=()
           while IFS= read -r installer; do
             installers+=("$installer")
@@ -438,7 +438,45 @@ jobs:
             echo "::error::No .dmg or .exe was downloaded into installers/, so there is nothing to attach."
             exit 1
           fi
-          gh release upload "$VERSION" "${installers[@]}" --clobber
+
+          # Each installer is attached twice: under the name Tauri gave it, which carries the
+          # version, and under a fixed name from scripts/release-download-names.ts, so a web page
+          # can link to `releases/latest/download/<fixed name>` across releases.
+          #
+          # What is already published wins. The signing workflows replace an installer with a
+          # signed one under both names, and a re-run of this job must not put the unsigned build
+          # back. So an installer an earlier attempt or a signing run attached is kept, and the
+          # fixed-name copy is made from those published bytes, not from this run's build. A
+          # fixed-name copy that differs from its installer, such as one left behind by an
+          # interrupted upload, is replaced. `--clobber` replaces an asset a failed upload left
+          # half-written.
+          published="${OPENBOT_PUBLISHED_ASSETS:-$RUNNER_TEMP/nothing-published}"
+          fixed_dir="$RUNNER_TEMP/download-names"
+          mkdir -p "$fixed_dir"
+          attached=()
+          for installer in "${installers[@]}"; do
+            name="$(basename "$installer")"
+            fixed="$(bun scripts/release-download-names.ts "$name")"
+            if [ -e "$fixed_dir/$fixed.name" ]; then
+              echo "::error::$name and $(cat "$fixed_dir/$fixed.name") would both be published as $fixed."
+              exit 1
+            fi
+            echo "$name" > "$fixed_dir/$fixed.name"
+            attached+=("\`$name\`, also as \`$fixed\`")
+            if [ -f "$published/$name" ]; then
+              echo "$name is already published; keeping it."
+              copy_from="$published/$name"
+            else
+              gh release upload "$VERSION" "$installer" --clobber
+              copy_from="$installer"
+            fi
+            if [ -f "$published/$fixed" ] && cmp -s "$copy_from" "$published/$fixed"; then
+              echo "$fixed is already a copy of $name."
+            else
+              cp "$copy_from" "$fixed_dir/$fixed"
+              gh release upload "$VERSION" "$fixed_dir/$fixed" --clobber
+            fi
+          done
 
           # Say which CLI the installers carry. Every platform bundles the same one, so the first
           # build-version.json that names a CLI is the answer.
@@ -454,8 +492,8 @@ jobs:
           {
             echo "### Installers for $VERSION"
             echo ""
-            for installer in "${installers[@]}"; do
-              echo "- \`$(basename "$installer")\`"
+            for line in "${attached[@]}"; do
+              echo "- $line"
             done
             echo ""
             echo "- CLI: $cli"
@@ -469,9 +507,11 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
       # The tag above was created with GITHUB_TOKEN, and GitHub starts no workflow from that push, so
-      # Mac signing is dispatched explicitly; a dispatch is the one event GITHUB_TOKEN may start. On
+      # signing is dispatched explicitly; a dispatch is the one event GITHUB_TOKEN may start. On
       # the tag, so the signed build is this commit and carries the release version. The
-      # `macos-signing` environment's required reviewers still approve the signing itself.
+      # `macos-signing` and `windows-signing` environments' required reviewers still approve the
+      # signing itself. Each signing run attaches its signed installers to the release under both
+      # names, replacing the unsigned ones attached above.
       - name: Start signing the Mac build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -480,6 +520,14 @@ jobs:
           set -euo pipefail
           gh workflow run desktop-macos-signing.yml -R "$GITHUB_REPOSITORY" --ref "$VERSION" \
             -f signing-mode=developer-id -f release-tag="$VERSION"
+      - name: Start signing the Windows build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh workflow run desktop-signing.yml -R "$GITHUB_REPOSITORY" --ref "$VERSION" \
+            -f signing-mode=keyvault -f release-tag="$VERSION"
 
   # A final cut from a candidate is published from `release/X.Y`, so main has not seen it: the
   # version bump, the changelog section and any fix made while the candidates were tested are all

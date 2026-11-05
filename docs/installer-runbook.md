@@ -44,8 +44,24 @@ There are three kinds of build:
 | Kind | Made by | Pinned to its commit | Signed | Where it goes |
 |---|---|---|---|---|
 | Internal build | **Internal build** workflow | Yes | No | Workflow artifacts, kept 30 days |
-| Release candidate or beta | **Create release PR**, then merge | Yes | Mac: after approval | GitHub prerelease |
-| Stable release | **Create release PR**, then merge | No: it installs the latest release | Mac: after approval | GitHub release marked Latest |
+| Release candidate or beta | **Create release PR**, then merge | Yes | After approval | GitHub prerelease |
+| Stable release | **Create release PR**, then merge | No: it installs the latest release | After approval | GitHub release marked Latest |
+
+A release is made only by merging its release PR. Do not push a `v*` tag by hand: that builds and
+publishes nothing. It only starts Mac signing, which then has no release to attach to.
+
+Every release carries each installer under a fixed name as well as under its versioned name. These
+addresses always give the installers of the release marked Latest:
+
+| Platform | Address |
+|---|---|
+| Mac, Apple silicon | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-mac-arm64.dmg` |
+| Mac, Intel | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-mac-x64.dmg` |
+| Windows, x64 | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-windows-x64-setup.exe` |
+
+A candidate or beta is never Latest. Link to its installers by version:
+`https://github.com/CopilotKit/OpenBot/releases/download/<tag>/OpenBot-mac-arm64.dmg`. See
+[Download links](releasing.md#download-links).
 
 ## 1. Make an internal build
 
@@ -110,8 +126,11 @@ Use a candidate to test what will become a release. The details are in
 4. Review and merge the release PR. Merging publishes the candidate.
    **Expected:** a GitHub prerelease `vX.Y.Z-rc.1` with `container-images.json`, the source
    archive, the chart, the release manifest, and the Mac and Windows installers.
-5. Approve **Desktop macOS signing** when it asks. This needs a `macos-signing` approver.
-   **Expected:** the signed `.dmg` replaces the ad-hoc one on the release.
+5. Approve **Desktop macOS signing** and **Desktop Windows signing** when they ask. These need a
+   `macos-signing` and a `windows-signing` approver.
+   **Expected:** the signed `.dmg` files replace the ad-hoc one on the release, and the signed
+   `-setup.exe` replaces the unsigned one, each under its versioned name and its fixed name. The
+   release now also has `OpenBot-mac-x64.dmg`, for Intel Macs.
 6. Test the candidate with [Install and test](#3-install-and-test) and
    [Check a build](#4-check-a-build).
 7. For a fix, merge it into `release/X.Y`, then run **Create release PR** from that branch with
@@ -121,7 +140,8 @@ Use a candidate to test what will become a release. The details are in
    version. **Expected:** the release becomes Latest, and a merge-back PR into `main` opens.
 
 A stable release from `main` (`kind=stable`) follows steps 1 to 5 without a release branch. Its
-installers are not pinned: they install the latest release.
+installers are not pinned: they install the latest release. When it becomes Latest, the fixed
+addresses in [What an installer contains](#what-an-installer-contains) give its installers.
 
 ## 3. Install and test
 
@@ -270,6 +290,8 @@ results in the PR or the issue for the build.
 | An image job fails | Open the failed job's log and read the first error. A Dockerfile error is a code problem on the branch. Do not run it again until you know the cause. |
 | The build fails with `the pinned deployment manifest ... has commit ..., but this build compiles ...` | The installer is being built from a different commit than its images. Build both from the same commit. |
 | A signing run waits | It needs an approver from the table in [Before you start](#before-you-start). |
+| A fixed download address gives the unsigned build | That platform's signing run was not approved, or failed. Approve it, or re-run it; its attach step replaces both names. |
+| A fixed download address gives an older release | `latest/download` follows the release marked Latest. A candidate or beta is never Latest, and a patch released while a newer release is out does not become Latest. |
 | Windows setup stops with a virtualization message | The machine cannot run WSL 2. Use an x64 PC or an x64 VM with nested virtualization. |
 | Setup returns to Install after sign-in | The saved sign-in no longer works. Sign in again. |
 | A step shows **Retry** | Select it once. If it fails again, open **Technical details** and copy them into the issue. |

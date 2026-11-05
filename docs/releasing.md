@@ -20,6 +20,10 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 Merging is the trigger, so a release is always a reviewed commit: on `main` for a stable release,
 and on `release/X.Y` for a candidate, beta or final.
 
+Do not push a `v*` tag by hand to release. A tag pushed by a person builds nothing and publishes
+nothing. It only starts [Desktop macOS signing](#signed-mac-builds-and-the-updater) for that tag,
+which then fails to attach anything because the tag has no release.
+
 `kind` chooses what the run releases: `stable` (the default), `rc`, `beta` or `final`. A plain
 `patch`, `minor` or `major` from `main` is a `stable` release and works as described above. The
 other three are for a release candidate or beta, and are described under
@@ -34,7 +38,8 @@ root version change, run `bun desktop/scripts/desktop-version.ts sync`.
 
 Internal desktop artifacts use `X.Y.Z-internal.g<commit>` so testers can identify the source
 revision. Both desktop CI and protected Windows signing prepare this version before compilation
-and packaging. The artifact includes `build-version.json` with the full commit and release version.
+and packaging. A signing run on a release tag, and the release's own build, use the plain release
+version instead. The artifact includes `build-version.json` with the full commit and release version.
 
 To build locally, from the repository root:
 
@@ -83,8 +88,13 @@ When it runs:
   ref and keeps the results as Actions artifacts for 14 days. Set `release-tag` to an existing
   release, e.g. `v0.2.1`, to also attach the `.dmg` files, the updater archives and their `.sig`
   files, and `latest.json` to it. Run it on the release tag (**Use workflow from** → the tag) so
-  the build carries the release version. This is how to re-sign a release by hand.
-- a `v*` tag pushed by a person does the same thing automatically.
+  the build carries the release version. A run with `release-tag` that is not on that tag fails
+  before it attaches anything. This is how to re-sign a release by hand.
+- a `v*` tag pushed by a person starts it too. That tag is not a release: see
+  [Cutting one](#cutting-one).
+
+Each signed `.dmg` is attached twice: under the name Tauri gives it, which replaces the ad-hoc
+`.dmg` of the same name, and under its [fixed download name](#download-links).
 
 Signing imports the certificate into a temporary keychain made for the run, and always deletes
 that keychain afterwards, even when an earlier step failed.
@@ -290,8 +300,9 @@ check for the latest release do not see it. Its images are tagged with the versi
 `sha-<commit>`, and never `latest`. A Mac (Apple Silicon) and a Windows (x64) installer are attached
 to it, pinned to that version and to those images, the same as an internal build is. The Mac one is
 ad-hoc signed until [Mac signing](#signed-mac-builds-and-the-updater) is approved and replaces it,
-and the Windows one is unsigned, so the first open needs the exceptions described under
-[Internal builds](#internal-builds).
+and the Windows one is unsigned until [Windows signing](windows-signing.md) is approved and replaces
+it. Until then the first open needs the exceptions described under [Internal builds](#internal-builds).
+Link a candidate's installers by its version, as described under [Download links](#download-links).
 
 A candidate does not promote the changelog. Its notes are what is under `## Unreleased` at that
 moment, and the final promotes them. A candidate also fixes the CLI choice, as described under
@@ -348,6 +359,37 @@ and reopen the PR before merging. If the merge conflicts, a person resolves it.
 Merge the merge-back PR with a merge commit, not a squash, so main keeps the release branch's
 history and the next merge-back does not conflict.
 
+## Download links
+
+Every release carries each installer twice: under the name Tauri gives it, which contains the
+version, and under a fixed name that is the same in every release. A web page links to the fixed
+name:
+
+| Platform | Address |
+|---|---|
+| Mac, Apple silicon | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-mac-arm64.dmg` |
+| Mac, Intel | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-mac-x64.dmg` |
+| Windows, x64 | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-windows-x64-setup.exe` |
+
+These names are a public address. Do not change them: every page that links to one breaks.
+[`scripts/release-download-names.ts`](../scripts/release-download-names.ts) maps the Tauri names to
+them, and the publish and signing workflows fail on an installer it does not know.
+
+`releases/latest/download` goes to the release marked Latest. A candidate or beta is never Latest,
+so these addresses never give one. Link a prerelease by its version instead, for example
+`https://github.com/CopilotKit/OpenBot/releases/download/v0.3.0-rc.1/OpenBot-mac-arm64.dmg`.
+
+The Mac Intel installer exists only after [Mac signing](#signed-mac-builds-and-the-updater) is
+approved, because the release build makes only the Apple silicon one. Until a signing run is
+approved, the Mac Apple silicon address gives the ad-hoc build and the Windows address gives the
+unsigned build. Each signing run replaces its installers under both names.
+
+A re-run of the publish workflow keeps an installer that is already attached, signed or not, and
+makes the fixed-name copy from it. So a re-run never puts an unsigned build back over a signed one.
+To replace an attached installer with a new build, delete it from the release first, then re-run.
+
+Linux installers are not attached to a release yet.
+
 ## What merging does
 
 `publish-release.yml` runs on every push to `main` and to `release/**`, and starts by deciding
@@ -384,15 +426,19 @@ Then, in order:
   archive, the chart, the release manifest and the installers as assets. A candidate or beta is
   marked as a prerelease and never Latest. A stable release becomes Latest only when no newer
   release already is
+- each installer is also attached under its [fixed download name](#download-links)
 - [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag. It waits
   for a `macos-signing` reviewer, then attaches the signed `.dmg` files, the updater archives and
-  `latest.json` to the release. The signed `.dmg` has the same name as the ad-hoc one and replaces it
+  `latest.json` to the release. The signed `.dmg` has the same name as the ad-hoc one and replaces
+  it, under both names
+- [Desktop Windows signing](windows-signing.md) is dispatched on the tag. It waits for a
+  `windows-signing` reviewer, then attaches the signed `-setup.exe`, which replaces the unsigned one
+  under both names
 - for a final cut from `release/X.Y`, the merge-back PR opens as described under
   [Finishing a candidate](#finishing-a-candidate)
 
-Until signing is approved, the Mac installer attached to a release is ad-hoc signed, like every
-ordinary CI build. The Windows installer is unsigned: releases do not go through
-[Windows signing](windows-signing.md) yet.
+Until signing is approved, the Mac installer attached to a release is ad-hoc signed and the
+Windows installer is unsigned, like every ordinary CI build.
 
 ## Deploying a release
 
