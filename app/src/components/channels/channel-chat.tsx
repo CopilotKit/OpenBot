@@ -1003,7 +1003,16 @@ export function ChannelChat({
       // both is not told two different things about the same silence.
       onRunErrorEvent: ({ event }) => fail(stoppedReason(event?.message)),
       onRunFailed: ({ error }) => fail(stoppedReason(error)),
-      onRunFinishedEvent: () => {
+      onRunFinishedEvent: ({ event }) => {
+        /*
+         * A run the server stopped to ask the person (an app's call OpenBot asks about) draws its
+         * card now, not on the inbox's next poll, as a computer step's does.
+         */
+        if (
+          (event as { outcome?: { type?: unknown } } | undefined)?.outcome
+            ?.type === "interrupt"
+        )
+          void queryClient.invalidateQueries({ queryKey: ["approvals"] });
         const wasOurs = awaitingReply.current;
         awaitingReply.current = false;
         /*

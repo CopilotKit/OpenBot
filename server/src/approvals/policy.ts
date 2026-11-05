@@ -120,10 +120,18 @@ const SAFETY_REQUIREMENTS: readonly {
      * Moving money and buying, by what the action is called. A transfer, a payout or an order says
      * so in its tool's name or on the button pressed, and nowhere in its arguments, so these words
      * are matched on the name alone: a note that says "transfer" or "buy" is still an ordinary edit.
+     *
+     * A transfer of something that is not money ("transfer a repository", "transfer ownership") is
+     * left out, with or without an article in front of it. "Pay" counts only with what is paid
+     * after it ("pay invoice", "pay order"): payroll apps use it as a noun ("update pay schedule").
+     *
+     * A payroll run pays people ("submit on demand payroll", "run payroll"); a payroll's files and
+     * settings do not. A paid plan is bought or changed by upgrading, downgrading or changing it,
+     * or by an app subscription; a plain "subscription" is mostly a webhook, and is left alone.
      */
-    tool: /\b(payouts?|transfers?(?! (ownership|of ownership|files?|domains?|calls?|chats?|conversations?))|withdraw(als?)?|charges?|buy|purchases?|remit|(create|place|submit) (an? )?order|send money)\b/,
+    tool: /\b(payouts?|transfers?(?! (an? |the )?(ownership|of ownership|files?|domains?|calls?|chats?|conversations?|repositor(y|ies)|repos?)\b)|withdraw(als?)?|charges?|buy|purchases?|remit|pay (an? |the )?(invoices?|orders?|bills?|balances?)|(create|place|submit) (an? )?order|send money|(submit|run|process|approve|execute|confirm|pay) (an? |the )?(\w+ ){0,3}?(payrolls?|pay runs?|payruns?)(?! (migration|imports?|amendments?|entries|settings?|reports?)\b)|(upgrade|downgrade) (an? |the |your |my )?(\w+ ){0,2}?(plans?|subscriptions?|tiers?|seats?|licen[cs]es?)|(change|switch) (an? |the |your |my )?(\w+ ){0,2}?(plans?|subscriptions?|tiers?)|(create|start|purchase) (an? )?app subscriptions?)\b/,
     click: new RegExp(
-      `^${CONFIRMING}(transfer|withdraw|pay|buy|send money)\\b|^${CONFIRMING}(send|pay|transfer|donate|tip)\\b.*[$€£¥₹]\\s?\\d|\\b(place (your )?order|(complete|confirm|submit) (your )?(purchase|order)|order now|buy now|buy it now)\\b`,
+      `^${CONFIRMING}(transfer|withdraw|pay|buy|send money)\\b|^${CONFIRMING}(send|pay|transfer|donate|tip)\\b.*[$€£¥₹]\\s?\\d|\\b(place (your )?order|(complete|confirm|submit) (your )?(purchase|order)|order now|buy now|buy it now)\\b|^${CONFIRMING}(upgrade|downgrade|(change|switch) (your |my |the )?plan|start (my |your )?(subscription|membership))\\b`,
     ),
   },
 ];
@@ -138,11 +146,21 @@ const SAFETY_REQUIREMENTS: readonly {
  * A tool name holds the verb anywhere ("GOOGLEDRIVE_DELETE_FILE"). A button holds it first
  * ("Delete", "Send", "Post"), so a folder called "Sent", a tab called "Posts" or a list called
  * "Shared with me" is browsing, not acting.
+ *
+ * A tool name's action is its verb, and a word for sending or publishing that only names what the
+ * verb acts on is not the action (see {@link actsBy}): "mark comment as spam", "add post to
+ * bookmarks", "like tweet". "Post" publishes only with something to publish after it ("post
+ * comment", "post photo") or as the thing created ("create post"), so the web request's verb in
+ * `STRIPE_POST_V1_PLANS_OVERVIEW`, `SALESFORCE_POST_COMPOSITE_SOBJECTS` or `..._VIA_POST` is not posting.
+ *
+ * A tool whose action is remove deletes, unless it takes somebody's access away ("remove
+ * collaborator"), which sharing asks about. A button counts only as a confirmation: "Remove",
+ * "Yes, remove", "Remove permanently", and not "Remove filter".
  */
 const CONSEQUENTIAL: readonly {
   id: string;
   reason: string;
-  tool: RegExp;
+  tool: { test(name: string): boolean };
   click: RegExp;
 }[] = [
   {
@@ -150,14 +168,20 @@ const CONSEQUENTIAL: readonly {
     reason: "Deleting something always asks you first.",
     tool: /\b(delete|deletes|trash|destroy|erase|purge|wipe|discard)\b/,
     click: new RegExp(
-      `^${CONFIRMING}(delete|permanently delete|move to (the )?(trash|bin)|trash|empty (the )?(trash|bin)|discard|erase|destroy)\\b`,
+      `^${CONFIRMING}(delete|permanently delete|move to (the )?(trash|bin)|trash|empty (the )?(trash|bin)|discard|erase|destroy)\\b|^${CONFIRMING}remove( permanently)?$`,
     ),
   },
   {
     id: "sending",
     reason: "Sending something to other people always asks you first.",
-    tool: /\b(send|sends|reply|replies|forward|respond|notify|broadcast|invite|invites|comment|comments|(create|post|add) (an? )?(chat )?message)\b/,
-    click: new RegExp(`^${CONFIRMING}send\\b`),
+    // A scheduled send is a send: it goes to them later, with nobody asked then either.
+    tool: toOthers(
+      actsBy(
+        /\b(send|sends|reply|replies|forward|respond|notify|broadcast|invite|invites|comment|comments|(create|post|add) (an? )?(chat |channel )?messages?(?! templates?\b)|schedules? (an? |the |single )?((?!with |for |to |of )\w+ )?(messages?|emails?|mails?|campaigns?|dms?|sms|texts?|newsletters?|sends?)|create scheduled (\w+ )?(messages?|emails?|mails?|dms?|sms|texts?))\b/,
+      ),
+    ),
+    // A Comment or a Reply button is how a comment or a reply is sent. Only the whole label.
+    click: new RegExp(`^${CONFIRMING}(send\\b|(comment|reply)$)`),
   },
   {
     id: "sharing",
@@ -168,12 +192,100 @@ const CONSEQUENTIAL: readonly {
   {
     id: "publishing",
     reason: "Posting or publishing something always asks you first.",
-    tool: /\b(publish|publishes|post|posts|tweet|retweet|repost|go live|(create|publish) (an? )?release)\b/,
+    tool: actsBy(
+      /\b(publish|publishes|go live|(create|publish) (an? )?release|retweets?|reposts?|tweets?|post (an? |the |new )?(\w+ ){0,3}?(comments?|repl(y|ies)|messages?|mentions?|tweets?|threads?|status(es)?|stor(y|ies)|photos?|videos?|articles?|reels?)|(create|creation of|publish|submit|schedule|reschedule|share|write|send) (an? |the |new )?(\w+ ){0,3}?(?<!\bvia )posts?(?! (drafts?|templates?)\b))\b/,
+    ),
     click: new RegExp(
       `^${CONFIRMING}(post|publish|tweet|repost|retweet|go live)\\b`,
     ),
   },
 ];
+
+/**
+ * Verbs that act on a message, a comment or a post without sending or publishing one: "mark comment
+ * as spam", "add post to bookmarks", "like tweet", "update comment", "cancel scheduled send", "hide
+ * replies". When one of these is the name's first verb, a word for sending or publishing after it is
+ * its object, not the action.
+ */
+const NOT_SENDING_VERBS =
+  "update|updates|edit|patch|modify|set|mark|unmark|approve|restore|resolve|unresolve|hide|unhide|toggle|like|likes|unlike|react|bookmark|unbookmark|pin|unpin|star|unstar|flag|report|moderate|redact|translate|make|cancel|pause|unschedule|undo|unrepost|unretweet|get|list|fetch|retrieve|search|find|read|count|lookup|export|download|remove|removes|delete|archive|unarchive|watch|mute|unmute|subscribe|unsubscribe";
+
+/**
+ * The first verb of a tool name, which is its action. The verbs above, and the ones that make,
+ * send, publish or remove something. "Create list comment" is creating, though "list" is a verb too,
+ * because "create" comes first.
+ */
+const FIRST_VERB = new RegExp(
+  `\\b(${NOT_SENDING_VERBS}|create|creation|add|adds|post|posts|send|sends|write|submit|publish|schedule|reschedule|reply|forward|leave|share|invite|respond|notify|broadcast)\\b`,
+);
+const NOT_SENDING = new RegExp(`^(${NOT_SENDING_VERBS})$`);
+
+/** What follows a word to make it part of something else: a comment's reaction, Gmail's send-as. */
+const PART_OF_SOMETHING_ELSE =
+  /^ (as|reactions?|redactions?|attachments?|extensions?|restrictions?|restrict|rules?|settings?)\b/;
+
+/**
+ * A tool name matching `pattern` where what matched is the action: the name's first verb before it
+ * does not act on it instead, it is not what a reaction is made to, and nothing after it makes it
+ * part of something else.
+ */
+function actsBy(pattern: RegExp): { test(name: string): boolean } {
+  const every = new RegExp(pattern.source, "g");
+  return {
+    test: (name) =>
+      [...name.matchAll(every)].some((match) => {
+        const before = name.slice(0, match.index);
+        const first = before.match(FIRST_VERB)?.[1];
+        return (
+          !(first !== undefined && NOT_SENDING.test(first)) &&
+          !/\breactions?\b/.test(before) &&
+          !PART_OF_SOMETHING_ELSE.test(
+            name.slice(match.index + match[0].length),
+          )
+        );
+      }),
+  };
+}
+
+/** A send to the person themselves ("send message to self") is not to other people. */
+function toOthers(rule: { test(name: string): boolean }) {
+  return {
+    test: (name: string) =>
+      rule.test(name) && !/\bto (self|me|myself)\b/.test(name),
+  };
+}
+
+/**
+ * Whether a Subscribe button starts a paid plan: its label names a price or a plan, or its page is
+ * about plans, pricing or billing. Subscribing to a channel or a free newsletter buys nothing, and
+ * a hand-off would leave the Bot unable to press it at all.
+ */
+function paysToSubscribe(
+  candidate: ApprovalCandidate,
+  named: { kind: "tool" | "click"; name: string } | undefined,
+): boolean {
+  if (
+    named?.kind !== "click" ||
+    !new RegExp(`^${CONFIRMING}subscribe\\b`).test(named.name)
+  )
+    return false;
+  if (
+    /[$€£¥₹]\s?\d|\b(premium|pro|plus|membership|plans?|annual|annually|monthly|yearly|month|year|trial)\b/.test(
+      named.name,
+    )
+  )
+    return true;
+  const page = (candidate.target as { pageUrl?: unknown } | undefined)?.pageUrl;
+  if (typeof page !== "string") return false;
+  try {
+    const url = new URL(page);
+    return /\b(pricing|plans?|billing|checkout|subscriptions?|membership|premium|upgrade|payment)\b/i.test(
+      `${url.pathname} ${url.search}`,
+    );
+  } catch {
+    return false;
+  }
+}
 
 /** How deep a value is read. Anything nested further is not, so matching stays cheap. */
 const MAX_DEPTH = 6;
@@ -262,13 +374,20 @@ export function safetyRequirement(
     flatten(candidate.target),
   ].join(" ");
   const named = actionName(candidate);
-  const matches = (entry: { tool?: RegExp; click?: RegExp }) =>
+  const matches = (entry: {
+    tool?: { test(name: string): boolean };
+    click?: RegExp;
+  }) =>
     named !== undefined &&
     (named.kind === "tool" ? entry.tool : entry.click)?.test(named.name) ===
       true;
-  const handOff = SAFETY_REQUIREMENTS.find(
-    (entry) => entry.pattern.test(words) || matches(entry),
-  );
+  const handOff =
+    SAFETY_REQUIREMENTS.find(
+      (entry) => entry.pattern.test(words) || matches(entry),
+    ) ??
+    (paysToSubscribe(candidate, named)
+      ? SAFETY_REQUIREMENTS.find((entry) => entry.id === "payments")
+      : undefined);
   if (handOff)
     return { id: handOff.id, reason: handOff.reason, behaviour: "hand_off" };
   // The Bot's own memory and settings are its own, as auto-review treats them (see `reviewable`).
@@ -291,6 +410,11 @@ export function safetyRequirement(
       : undefined) ??
     (pressesSend(candidate)
       ? CONSEQUENTIAL.find((entry) => entry.id === "sending")
+      : undefined) ??
+    // Last, so taking somebody's access away ("remove collaborator") is asked about as sharing.
+    (named?.kind === "tool" &&
+    /^removes?$/.test(named.name.match(FIRST_VERB)?.[1] ?? "")
+      ? CONSEQUENTIAL.find((entry) => entry.id === "deleting")
       : undefined);
   return asks
     ? { id: asks.id, reason: asks.reason, behaviour: "ask" }
@@ -397,6 +521,14 @@ const RECIPIENT_KEYS = new Set([
 ]);
 
 /**
+ * Or an argument whose name says it holds the people an invitation goes to, however the broker
+ * spells it: Composio's `attendees`, Arcade's `attendee_emails`, Composio's Outlook `attendees_info`,
+ * Zoom's `settings__meeting__invitees`. A setting such as `guestsCanModify` or
+ * `send_notifications_to_attendees` holds no address, so the address test below leaves it out.
+ */
+const INVITED = /(^|_)(attendees?|invitees?|guests?)(_|$)/;
+
+/**
  * Whether a connector call names somebody to send it to by email address: a calendar event with
  * attendees sends them an invitation, whatever its tool is called. Only top-level arguments, and
  * only an address, so a `to` that names a folder is not a recipient.
@@ -406,7 +538,9 @@ function addressesPeople(args: unknown): boolean {
     return false;
   return Object.entries(args as Record<string, unknown>).some(
     ([key, value]) =>
-      RECIPIENT_KEYS.has(key.toLowerCase()) && /\S@\S/.test(flatten(value)),
+      (RECIPIENT_KEYS.has(key.toLowerCase()) ||
+        INVITED.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase())) &&
+      /\S@\S/.test(flatten(value)),
   );
 }
 
