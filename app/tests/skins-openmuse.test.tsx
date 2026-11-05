@@ -292,7 +292,12 @@ const routines: RoutineRecord[] = [
     schedule: "Every weekday at 9:00",
     timezone: "Europe/London",
     instruction: "Send me the headlines",
-    channel: { id: "c-muse", name: "Muse", gone: false },
+    channel: {
+      id: "c-muse",
+      name: "Muse",
+      title: "Morning headlines",
+      gone: false,
+    },
     enabled: true,
     nextRunAt: now,
     lastRun: null,

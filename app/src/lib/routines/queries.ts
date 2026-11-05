@@ -17,7 +17,16 @@ export type RoutineRecord = {
   schedule: string;
   timezone: string;
   instruction: string;
-  channel: { id: string; name: string | null; gone: boolean };
+  /**
+   * Where it posts. Name it by `title`, the conversation as the sidebar titles it: `name` is only its
+   * Bots' names, so every conversation with General Assistant is called "General Assistant".
+   */
+  channel: {
+    id: string;
+    name: string | null;
+    title: string | null;
+    gone: boolean;
+  };
   enabled: boolean;
   nextRunAt: string;
   /**

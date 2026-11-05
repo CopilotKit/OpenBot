@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createChannelStore } from "../src/channels/routes";
@@ -497,111 +497,223 @@ describe("resolving the channel to post into", () => {
     ).rejects.toThrow(/Start one/);
   });
 
-  test("refuses ambiguity by naming the channels, so a model can ask", async () => {
+  test("with no conversation to go on, asks by each conversation's title and id", async () => {
     const { owner, agentId, channel } = await setUp();
     const secondAgentId = await createAgent(owner, "Second Bot");
     const other = await createChannel(owner, [agentId, secondAgentId]);
+    await titled(channel.id, "Weekly receipts review");
+    await titled(other.id, "Quarter close plan");
 
-    const failure = await store
-      .create({
-        ownerUserId: owner.id,
-        agentId,
-        instruction: "Which one?",
-        cron: DAILY,
-      })
-      .then(
-        () => null,
-        (error: unknown) => error,
-      );
+    const message = await refusalOf({
+      ownerUserId: owner.id,
+      agentId,
+      instruction: "Which one?",
+      cron: DAILY,
+    });
 
-    expect(failure).toBeInstanceOf(RoutineRefusedError);
-    const message = (failure as Error).message;
-    expect(message).toContain(channel.name);
-    expect(message).toContain(other.name);
-    expect(message).toContain("Say which one.");
+    expect(message).toContain(`"Weekly receipts review" (id: ${channel.id})`);
+    expect(message).toContain(`"Quarter close plan" (id: ${other.id})`);
+    expect(message).toContain(
+      "Ask which one it should post in, offering each by its title",
+    );
   });
 
-  test("names at most five channels before it gives up and says 'and others'", async () => {
+  test("names at most five conversations before it gives up and says 'and others'", async () => {
     const owner = await createUser();
     const agentId = await createAgent(owner);
-    const sharedChannels = [];
     for (let index = 0; index < 6; index += 1) {
-      sharedChannels.push(await createChannel(owner, [agentId]));
+      await createChannel(owner, [agentId]);
     }
 
-    const failure = await store
-      .create({
-        ownerUserId: owner.id,
-        agentId,
-        instruction: "Which one?",
-        cron: DAILY,
-      })
-      .then(
-        () => null,
-        (error: unknown) => error,
-      );
+    const message = await refusalOf({
+      ownerUserId: owner.id,
+      agentId,
+      instruction: "Which one?",
+      cron: DAILY,
+    });
 
-    expect(failure).toBeInstanceOf(RoutineRefusedError);
-    const message = (failure as Error).message;
-    expect(message).toContain(", and others");
-    // All six channels share one agent, so they share one name; the cap names five of them, not
-    // six, so that one name appears exactly five times rather than six.
-    const name = sharedChannels[0]?.name as string;
-    const occurrences = message.split(name).length - 1;
-    expect(occurrences).toBe(5);
+    expect(message).toContain(", and others.");
+    // Six conversations nobody has spoken in yet, all "New conversation" as the sidebar shows them;
+    // five are named, not six.
+    expect(message.split('"New conversation"').length - 1).toBe(5);
   });
 
-  test("names a colliding channel by id when its name cannot tell it apart from another", async () => {
-    // The finding this guards: a real account had six channels all named "General Assistant" with
-    // the same Bot, and the refusal read "General Assistant, General Assistant, … and others" —
-    // circular, because the person cannot answer it and the model cannot map an answer back to a
-    // channelId. Two same-named channels plus one distinctly-named one is the smallest case that
-    // proves the fix: the colliding pair gets ids, the distinct one stays bare.
+  test("names each conversation as the sidebar does, never by its Bots' names", async () => {
+    // The finding this guards: a person with seven conversations with General Assistant, each with
+    // a good title in the sidebar, was offered "General Assistant, channel 1" to "channel 5". Every
+    // one of those channels is NAMED "General Assistant", because a channel's name is its Bots'
+    // names; the title the person reads is the summary, then the last thing said.
     const owner = await createUser();
-    const agentId = await createAgent(owner);
-    const twinOne = await createChannel(owner, [agentId]);
-    const twinTwo = await createChannel(owner, [agentId]);
-    // channelStore.create names channels itself, so force the collision directly rather than
-    // trusting default naming to produce two identical names.
+    const agentId = await createAgent(owner, "General Assistant");
+    const untouched = await createChannel(owner, [agentId]);
+    const spokenIn = await createChannel(owner, [agentId]);
+    const named = await createChannel(owner, [agentId]);
     await database
       .update(channels)
       .set({ name: "General Assistant" })
-      .where(eq(channels.id, twinOne.id));
+      .where(inArray(channels.id, [untouched.id, spokenIn.id, named.id]));
+    const minutesAgo = (minutes: number) =>
+      new Date(Date.now() - minutes * 60_000);
     await database
       .update(channels)
-      .set({ name: "General Assistant" })
-      .where(eq(channels.id, twinTwo.id));
-    const distinct = await createChannel(owner, [agentId]);
+      .set({ createdAt: minutesAgo(60) })
+      .where(eq(channels.id, untouched.id));
     await database
       .update(channels)
-      .set({ name: "Marketing Bot" })
-      .where(eq(channels.id, distinct.id));
-
-    const failure = await store
-      .create({
-        ownerUserId: owner.id,
-        agentId,
-        instruction: "Which one?",
-        cron: DAILY,
+      .set({
+        lastMessage: "Reverse the string\n  'openbot' for me",
+        lastMessageAt: minutesAgo(5),
+        createdAt: minutesAgo(90),
       })
-      .then(
-        () => null,
-        (error: unknown) => error,
-      );
+      .where(eq(channels.id, spokenIn.id));
+    await database
+      .update(channels)
+      .set({ lastMessage: "Done.", lastMessageAt: minutesAgo(1) })
+      .where(eq(channels.id, named.id));
+    await titled(named.id, "15-Minute EKS UTC Routine");
 
-    expect(failure).toBeInstanceOf(RoutineRefusedError);
-    const message = (failure as Error).message;
-    // Both same-named channels are named by their full id, because that is the one thing the model
-    // can pass back as `channelId` when the names alone cannot disambiguate.
-    expect(message).toContain(twinOne.id);
-    expect(message).toContain(twinTwo.id);
-    // The distinctly-named channel is not: its name alone already disambiguates it, and appending
-    // an id it does not need would make the common, non-colliding case's sentence longer for
-    // nothing.
-    expect(message).toContain("Marketing Bot");
-    expect(message).not.toContain(`Marketing Bot (${distinct.id})`);
+    const message = await refusalOf({
+      ownerUserId: owner.id,
+      agentId,
+      instruction: "Which one?",
+      cron: DAILY,
+    });
+
+    expect(message).not.toContain("General Assistant");
+    // In the sidebar's order: the latest activity first.
+    expect(message).toContain(
+      `"15-Minute EKS UTC Routine" (id: ${named.id}), "Reverse the string 'openbot' for me" (id: ${spokenIn.id}), "New conversation" (id: ${untouched.id})`,
+    );
+  });
+
+  test("posts into the conversation it was asked in, out of several", async () => {
+    const { owner, agentId } = await setUp();
+    const asked = await createChannel(owner, [agentId]);
+    await createChannel(owner, [agentId]);
+
+    const routine = await store.create({
+      ownerUserId: owner.id,
+      agentId,
+      threadId: asked.threadId,
+      instruction: "Reply with the current UTC time.",
+      cron: "*/15 * * * *",
+    });
+
+    expect(routine.channelId).toBe(asked.id);
+  });
+
+  test("a named channel still wins over the conversation it was asked in", async () => {
+    const { owner, agentId, channel } = await setUp();
+    const asked = await createChannel(owner, [agentId]);
+
+    const routine = await store.create({
+      ownerUserId: owner.id,
+      agentId,
+      channelId: channel.id,
+      threadId: asked.threadId,
+      instruction: "Post it over there.",
+      cron: DAILY,
+    });
+
+    expect(routine.channelId).toBe(channel.id);
+  });
+
+  test("a thread that is not the owner's own conversation is ignored", async () => {
+    const { owner, agentId, channel } = await setUp();
+    await createChannel(owner, [agentId]);
+    const stranger = await createUser();
+    const theirAgentId = await createAgent(stranger, "Their Bot");
+    const theirs = await createChannel(stranger, [theirAgentId]);
+
+    // Their thread is not a way into their conversation: the store asks, as with no thread at all.
+    const message = await refusalOf({
+      ownerUserId: owner.id,
+      agentId,
+      threadId: theirs.threadId,
+      instruction: "Post into their conversation.",
+      cron: DAILY,
+    });
+    expect(message).toContain(`id: ${channel.id}`);
+    expect(message).not.toContain(theirs.id);
+    expect(message).not.toContain("this conversation");
+  });
+
+  test("a conversation this Bot is not in is not where its routine posts", async () => {
+    const { owner, agentId, channel } = await setUp();
+    const otherAgentId = await createAgent(owner, "Unrelated Bot");
+    const elsewhere = await createChannel(owner, [otherAgentId]);
+
+    // The one conversation this Bot does share, rather than one it would post into as a stranger.
+    const routine = await store.create({
+      ownerUserId: owner.id,
+      agentId,
+      threadId: elsewhere.threadId,
+      instruction: "Post where I live.",
+      cron: DAILY,
+    });
+    expect(routine.channelId).toBe(channel.id);
+  });
+
+  test("a deleted conversation is not where its routine posts", async () => {
+    const { owner, agentId, channel } = await setUp();
+    const asked = await createChannel(owner, [agentId]);
+    await database
+      .update(channels)
+      .set({ deletedAt: new Date() })
+      .where(eq(channels.id, asked.id));
+
+    const routine = await store.create({
+      ownerUserId: owner.id,
+      agentId,
+      threadId: asked.threadId,
+      instruction: "Post into a conversation that is gone.",
+      cron: DAILY,
+    });
+    expect(routine.channelId).toBe(channel.id);
+  });
+
+  test("a channel it does not share is refused with the ones it does, this conversation marked", async () => {
+    const { owner, agentId, channel } = await setUp();
+    const asked = await createChannel(owner, [agentId]);
+    await titled(asked.id, "Morning standup");
+    await titled(channel.id, "Receipts");
+
+    const message = await refusalOf({
+      ownerUserId: owner.id,
+      agentId,
+      channelId: "General Assistant, channel 1",
+      threadId: asked.threadId,
+      instruction: "Post it somewhere I made up.",
+      cron: DAILY,
+    });
+
+    expect(message).toStartWith(
+      "I can only post into a conversation you and I are both in.",
+    );
+    expect(message).toContain(
+      `"Morning standup" (this conversation, id: ${asked.id})`,
+    );
+    expect(message).toContain(`"Receipts" (id: ${channel.id})`);
   });
 });
+
+/** Give a conversation the title the sidebar shows, as the titler writes it. */
+async function titled(channelId: string, title: string) {
+  await database
+    .update(channels)
+    .set({ summary: title, summaryAt: new Date() })
+    .where(eq(channels.id, channelId));
+}
+
+/** The sentence a create was refused with. Fails the test when the create succeeds instead. */
+async function refusalOf(input: Parameters<typeof store.create>[0]) {
+  const failure = await store.create(input).then(
+    () => null,
+    (error: unknown) => error,
+  );
+  expect(failure).toBeInstanceOf(RoutineRefusedError);
+  return (failure as Error).message;
+}
 
 describe("reading a person's routines", () => {
   test("says the schedule in words and never in cron", async () => {
@@ -663,6 +775,31 @@ describe("reading a person's routines", () => {
       second.id,
       first.id,
     ]);
+  });
+
+  test("names the conversation it posts into as the sidebar does, not by its Bot", async () => {
+    // Every conversation with a Bot is NAMED after the Bot, so the Routines page read "General
+    // Assistant" on every routine. The person knows the conversation by its sidebar title.
+    const { owner, agentId, channel } = await setUp();
+    const untitled = await createChannel(owner, [agentId]);
+    await titled(channel.id, "15-Minute EKS UTC Routine");
+    for (const channelId of [channel.id, untitled.id])
+      await store.create({
+        ownerUserId: owner.id,
+        agentId,
+        channelId,
+        instruction: "Reply with the current UTC time.",
+        cron: DAILY,
+      });
+
+    const titles = new Map(
+      (await store.listFor(owner.id)).map((summary) => [
+        summary.channelId,
+        summary.channelTitle,
+      ]),
+    );
+    expect(titles.get(channel.id)).toBe("15-Minute EKS UTC Routine");
+    expect(titles.get(untitled.id)).toBe("New conversation");
   });
 
   test("keeps a routine whose channel was deleted and reports it as gone", async () => {

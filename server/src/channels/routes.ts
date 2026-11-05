@@ -165,11 +165,13 @@ export function decodeChannelCursor(
  *
  * The browser repeats the recency half when the socket patches a row, and lifts pinned rows at
  * render; both must agree with this, or the list reorders itself on the next event. See `byRecency`
- * in use-channel-events.ts and `pinnedFirst` in app-sidebar.tsx.
+ * in use-channel-events.ts and `pinnedFirst` in app-sidebar.tsx. A routine's question about which
+ * conversation to post in lists them in this order too (routines/store.ts), so the person reads its
+ * options in the order the sidebar shows them. Any query using it must join `channelMemberships`.
  */
 const PINNED_RANK = sql`case when ${channelMemberships.pinnedAt} is not null then 1 else 0 end`;
 const RECENCY = sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt})`;
-const ROSTER_ORDER = [
+export const ROSTER_ORDER = [
   sql`${PINNED_RANK} desc`,
   sql`${RECENCY} desc`,
   desc(channels.id),
