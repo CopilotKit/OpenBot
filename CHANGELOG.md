@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Thirty-three things change for an existing deployment:
+**Before upgrading.** Thirty-four things change for an existing deployment:
 - Migrations `0066_recorder_extension`, `0067_recorder_activity` and
   `0068_recorder_organization_session_expiry` add six tables for the OpenBot Recorder and each
   person's own Learning space (`recorder_connect_codes`, `recorder_connections`,
@@ -134,6 +134,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - With `OPENBOT_SINGLE_USER=true`, an address with no scheme (such as `example.com:3010`) in
   `OPENBOT_PUBLIC_URL`, `OPENBOT_APP_URL` or `TRUSTED_ORIGINS` now stops the server starting instead
   of only warning. Write it with its scheme so it is judged by its host.
+- A Bot on the Claude Agent SDK harness starts a new Claude process for every turn instead of
+  keeping one per conversation, so each turn starts a little later (about a second or two), and a
+  conversation past about 100,000 tokens now leaves out its oldest messages.
 
 ### Teach a Bot: do a task once in your own browser, and your Bots learn it
 
@@ -793,11 +796,10 @@ imports; without them it exited at start when run as the API, in 0.2.0 too.
 Built-in Bots, and remote Bots through the standing role OpenBot sends them, are now told to use a
 component when an answer has structure: a chart for figures, a checklist or table for steps, a
 record card for one thing's details, a card to choose from for a decision. Short replies stay plain
-text. A Claude Agent SDK coding Bot does not get this, because its harness drops the standing role.
-Code in replies, tool results and group chat is highlighted in light and dark. A coding Bot's Claude
-Code steps get cards of their own (a command with its output, an edit as a diff, its to-do list),
-and a step that failed or was refused no longer shows as done. The answer column is 768px wide, up
-from 672px; skins keep their own widths.
+text. Code in replies, tool results and group chat is highlighted in light and dark. A coding Bot's
+Claude Code steps get cards of their own (a command with its output, an edit as a diff, its to-do
+list), and a step that failed or was refused no longer shows as done. The answer column is 768px
+wide, up from 672px; skins keep their own widths.
 
 ### A new Bot starts from its name, and OpenBot knows yours
 
@@ -818,6 +820,37 @@ on, because its images and database are there, and Start brings that engine up, 
 reopened after a restart no longer stops with "podman is installed but not answering". Linux is
 unchanged.
 
+### Bots on other frameworks answer from the whole conversation, in their role
+
+OpenBot sends a Bot the whole conversation on every run, behind its role and a summary of the tools
+it holds. Several harnesses dropped part of that. Each now gives the model the conversation as
+OpenBot sent it, with the current role and tools summary, so a restart or another replica no
+longer changes what the Bot knows, and a changed grant reaches it on the next run. Only that role
+and summary are its instructions: any other system message, such as a skill you pick, reaches it
+labelled as part of the conversation.
+
+- **Claude Agent SDK.** After its container restarted, or the conversation sat idle for 30
+  minutes, it answered only the newest message, and it never received its role or tools summary.
+  A long conversation now sends its newest messages, up to about 100,000 tokens, and tells the Bot
+  that older ones are left out. Built-in Bots on a Claude subscription run through this harness and
+  get the same limit.
+- **Agno.** It was sent only the newest message, so it never remembered an earlier turn, and it
+  never received its role or tools summary. A long conversation is cut the same way, at 100,000
+  tokens or half the model's window. A tool result that reaches a restarted harness or another
+  replica is answered from the conversation instead of failing the run.
+- **Google ADK.** After about 20 idle minutes it saw only the newest message. It kept only the
+  first system message OpenBot sends, so it never had its tools summary, nor its role when personal
+  memory came first.
+- **LangGraph.** It dropped the first system message, usually its role, so it often answered as a
+  plain assistant, and a running harness kept an old tools summary. After you approve something it
+  stopped to ask about, it now carries on from the conversation; it used to stop without answering,
+  or answer with none of the conversation.
+- **Mastra.** It now receives the context the app sends with a run, such as a component catalogue,
+  after its role, and a skill's instructions and your personal memory, which it never saw.
+
+The Agno, ADK and LangGraph harnesses also no longer keep a copy of every finished conversation in
+memory for the life of the process.
+
 ### Google Antigravity can be a Bot
 
 OpenBot Desktop's setup and the New Bot sheet offer Google Antigravity, from the new
@@ -826,7 +859,9 @@ OpenBot Desktop's setup and the New Bot sheet offer Google Antigravity, from the
 and takes `BOT_MODEL` for the Gemini model (default `gemini-3.6-flash`). Checking the address of the
 deployment's own Bot, or of the framework picked in Desktop setup, now sends the deployment's token
 as a run does and stops at the first event, so a working Bot is no longer reported as refused or
-broken.
+broken. It answers from the whole conversation OpenBot sends, in its role and with the summary of
+its tools, after a restart too; a change to either starts its session again, and a long conversation
+is sent from its newest messages with a note that earlier ones are left out.
 
 ### A Bot's turn rides through a network blip without losing its conversation
 
