@@ -1,13 +1,13 @@
 # Somebody's own cluster, which is the shape every default is written for.
 #
 # Nothing here turns a cloud feature on, because there are none to turn on: the cluster's default
-# StorageClass, a plain Secret, the bundled database, an Ingress. If this file needs to grow, a
-# default is wrong.
+# StorageClass, a plain Secret, the bundled database, the bundled Intelligence, an Ingress. If this
+# file needs to grow, a default is wrong.
+#
+# Both bundled databases at once on purpose: OpenBot's and Intelligence's are both Bitnami PostgreSQL,
+# and nothing else renders the two side by side.
 config:
   initialAdminEmails: admin@example.com
-  intelligence:
-    apiUrl: https://api.intelligence.copilotkit.ai
-    gatewayWsUrl: wss://realtime.intelligence.copilotkit.ai
   auth:
     google:
       clientId: example.apps.googleusercontent.com
@@ -24,9 +24,9 @@ secrets:
   # `.env.example`, which the server refuses to start with in production: the target rendered, and
   # the deployment it described could never run. Supply a real one:
   #   --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)"
-  intelligenceApiKey: "example-for-rendering-only"
   googleClientSecret: "example-for-rendering-only"
   computerToken: "example-for-rendering-only"
+  # Given once, and written to both OpenBot's Secret and the bundled Intelligence's.
   licenseToken: "example-for-rendering-only"
   # So the routines CronJob renders in CI at all. Rendering example only.
   workerSharedSecret: "example-for-rendering-only"

@@ -166,13 +166,18 @@ config:
       issuer: ""
   tenantPackageDir: /app/examples/fintech
 
-  # CopilotKit Intelligence, which OpenBot requires. All four values are needed together: the server
-  # refuses to start on a partial set, deliberately, because a half-configured Intelligence is a
-  # mistake somebody made rather than a deployment that meant to run without one.
+  # CopilotKit Intelligence, which OpenBot requires, when it is NOT the one this chart installs
+  # (`intelligence.enabled: false` below): managed Intelligence, or a self-hosted one run elsewhere.
+  # Both addresses and `secrets.intelligenceApiKey` are needed together, deliberately, because a
+  # half-configured Intelligence is a mistake somebody made rather than a deployment that meant to run
+  # without one.
+  #
+  # Leave both empty with the bundled Intelligence: the chart points the server at it in the cluster,
+  # and refuses an address here rather than install a second Intelligence beside the one you named.
   intelligence:
     apiUrl: ""
     gatewayWsUrl: ""
-    # The two secret halves live under `secrets` below, never here.
+    # The secret halves live under `secrets` below, never here.
   # Learning defaults on; collection and delivery require an existing, assigned container.
   # With nothing saved in Admin and no containerId below, the server assigns the project's openbot
   # container on its own once it exists. The runtime key cannot create it, so `setup` below gives the
@@ -640,14 +645,17 @@ secrets:
   modelApiKey: ""
   computerToken: ""
   supervisorToken: ""
-  # From the CopilotKit CLI: `npx --yes copilotkit@latest project select` prints the runtime key.
-  # The chart refuses to install without it, because there is no mode where this runs with
-  # Intelligence missing.
+  # Only with `intelligence.enabled: false`. From the CopilotKit CLI: `npx --yes copilotkit@latest
+  # project select` prints the runtime key. The chart refuses to install without it, because there is
+  # no mode where this runs with Intelligence missing. The bundled Intelligence needs none: the chart
+  # creates a project and its key there itself (see `intelligence` below).
   intelligenceApiKey: ""
-  # Optional. Managed Intelligence issues no licence token; set this only for a self-hosted
-  # Intelligence that has one, and it is passed to the server as COPILOTKIT_LICENSE_TOKEN. From a
-  # store, name `license-token` in `externalSecrets.data` instead; it is passed the same way. That
-  # Intelligence needs the licence on its own deployment too, or it refuses memory.
+  # The CopilotKit licence. REQUIRED with the bundled Intelligence, which is self-hosted and needs it
+  # on its own deployment: given here once, it reaches both, OpenBot's server as
+  # COPILOTKIT_LICENSE_TOKEN and Intelligence through `intelligence.appApi.licenseSecret`. From a
+  # Secret of your own or a store, see `intelligence.appApi.licenseSecret` below.
+  #
+  # Optional with managed Intelligence, which issues no licence token.
   licenseToken: ""
   # Optional. One key for the whole deployment, for Composio, the broker holding people's accounts for
   # a few hundred apps (docs/plugins/composio.md). Passed to the server alone as COMPOSIO_API_KEY.
@@ -755,3 +763,141 @@ securityContext: {}
 # Applied to every pod this chart creates.
 commonLabels: {}
 commonAnnotations: {}
+
+# COPILOTKIT INTELLIGENCE, INSTALLED WITH OPENBOT.
+#
+# OpenBot keeps its conversations, memory and history in Intelligence and does not run without one,
+# so by default this chart installs it: the published Intelligence chart, self-hosted, on its own
+# bundled PostgreSQL and Redis, with nothing outside the cluster. The chart then does the rest of
+# what a person would otherwise do by hand:
+#
+#   - points the OpenBot server at Intelligence's services inside the cluster;
+#   - carries the browser's gateway socket through OpenBot's own address, so one port-forward or one
+#     Ingress host reaches everything;
+#   - creates an organization (`bootstrap` below), a service token for it, and with that token a
+#     project and its runtime key, which a Job stores in the Secret `<fullname>-intelligence-key`
+#     (`openbot-intelligence-key` for a release called `openbot`). The server starts once it exists;
+#   - generates every credential Intelligence needs (database and Redis passwords, session and
+#     gateway secrets) as Secrets kept across upgrades and uninstalls, never as values;
+#   - hands it the licence given once in `secrets.licenseToken`.
+#
+# Everything under this key except `enabled` is the Intelligence chart's own values, passed to it
+# unchanged: its README (`helm show readme oci://ghcr.io/copilotkit/charts/intelligence --version
+# 0.15.1`) documents every one, and anything it documents can be set here.
+#
+# THE SECRET NAMES BELOW ARE FIXED, NOT DERIVED FROM THE RELEASE, because the Intelligence chart takes
+# them as plain names. This chart creates each one under exactly the name written here, so changing a
+# name here changes both sides. Two OpenBot releases in one namespace would share them: give each
+# release its own namespace. `openbot-intel-` rather than `<release>-intelligence-`, because the
+# Intelligence chart names objects of its own that way and reserves `<that>-license`.
+#
+# FIRST INSTALL WITHOUT `--wait` (Helm 4 does not wait by default; Helm 3 waits only when asked).
+# Intelligence 0.15.1 will not start its API until the organization its service token names exists,
+# and it creates that organization in a post-install hook, which `--wait` holds until the API is
+# ready. Without `--wait` the API restarts until the organization is there, the key Job finishes,
+# and the server starts: a few minutes on a fresh cluster.
+#
+# `intelligence.enabled: false` is the other deployment: an Intelligence that already runs, named
+# in `config.intelligence` with `secrets.intelligenceApiKey`.
+intelligence:
+  enabled: true
+
+  auth:
+    deploymentMode: self_hosted
+    # NOBODY SIGNS IN TO THE BUNDLED INTELLIGENCE. OpenBot reaches it with a project key, and its own
+    # UI is not installed (`appFrontend` below). Intelligence 0.15.1 still requires an OIDC issuer
+    # URL to start, so this names one that by definition never resolves (`.invalid`, RFC 2606) and is
+    # never contacted. Point it at a real issuer, with `appFrontend` and an Ingress, if people are to
+    # sign in to Intelligence itself.
+    issuer: https://sign-in.invalid
+    # Generated by this chart: `auth-secret`, `auth-client-id`, `auth-client-secret`.
+    existingSecret: openbot-intel-auth
+
+  # Intelligence's own dashboard, which nobody can sign in to here (see `auth` above).
+  appFrontend:
+    enabled: false
+  ingress:
+    enabled: false
+  externalSecrets:
+    enabled: false
+
+  # Intelligence's own PostgreSQL, separate from OpenBot's.
+  postgresql:
+    enabled: true
+    # RENAMED, AND NOT FOR STYLE. Bitnami names a PostgreSQL subchart `<release>-postgresql`, which is
+    # exactly the name of OpenBot's own bundled database: with both on, the two would render one
+    # StatefulSet, one Service and one Secret with two different passwords between them.
+    nameOverride: intelligence-postgresql
+    auth:
+      # THE SUPERUSER, as OpenBot's own bundled database does, and for a reason of the same kind: an
+      # ordinary user makes the Bitnami chart demand that user's current password as a literal on
+      # every `helm template --is-upgrade`, which is the render an OpenBot upgrade checks before it
+      # touches anything. This database belongs to this Intelligence alone.
+      username: postgres
+      database: intelligence
+      # Generated by this chart: `postgres-password`, with `database-url` beside it for the services
+      # (see `database` below).
+      existingSecret: openbot-intel-postgresql
+    primary:
+      persistence:
+        enabled: true
+        # Empty means the cluster's default class, as everywhere in this chart.
+        storageClass: ""
+        size: 20Gi
+  # How Intelligence's services reach that database. The same Secret, because the Intelligence chart
+  # would otherwise build the URL itself from a host it assumes is `<release>-postgresql`, which is
+  # OpenBot's (see `nameOverride` above).
+  database:
+    existingSecret: openbot-intel-postgresql
+
+  # Intelligence's Redis.
+  redis-subchart:
+    enabled: true
+    architecture: standalone
+    auth:
+      enabled: true
+      # Generated by this chart: `redis-password`, with `redis-url` beside it (see `redis` below).
+      existingSecret: openbot-intel-redis
+      existingSecretPasswordKey: redis-password
+  redis:
+    existingSecret: openbot-intel-redis
+
+  # Generated by this chart: `runner-auth-secret`, `secret-key-base` and `release-cookie`.
+  realtimeGateway:
+    existingSecret: openbot-intel-gateway
+    beam:
+      cookieSecret:
+        name: openbot-intel-gateway
+        key: release-cookie
+
+  migrations:
+    enabled: true
+
+  # The organization OpenBot's project lives in. Its id is fixed because the service token below acts
+  # for it, and a service token's requests name the organization by id.
+  bootstrap:
+    enabled: true
+    organizations:
+      - id: org_openbot
+        slug: openbot
+        name: OpenBot
+
+  appApi:
+    # The licence. This chart writes `secrets.licenseToken` into the Secret named here. With the
+    # licence in a Secret of your own instead (`secrets.existingSecret`), name that Secret here and
+    # the key that holds it, and both sides read the one Secret.
+    licenseSecret:
+      existingSecret: openbot-intel-license
+      key: license-token
+    # How the chart creates OpenBot's project and key without anybody signing in. The token is
+    # generated by this chart into the Secret named here, mounted into Intelligence's API as a file,
+    # and used by OpenBot's key Job. It can create projects and keys in the organization above, and
+    # nothing else.
+    serviceTokens:
+      enabled: true
+      tokens:
+        - name: openbot
+          organizationSlug: openbot
+          secret:
+            name: openbot-intel-service-token
+            key: token

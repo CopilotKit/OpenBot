@@ -410,14 +410,19 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   value: "false"
 {{- end }}
 - name: INTELLIGENCE_API_URL
-  value: {{ .Values.config.intelligence.apiUrl | quote }}
+  value: {{ include "openbot.intelligenceApiUrl" . | quote }}
 - name: INTELLIGENCE_GATEWAY_WS_URL
-  value: {{ .Values.config.intelligence.gatewayWsUrl | quote }}
-- name: INTELLIGENCE_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "openbot.secretName" . }}
-      key: intelligence-api-key
+  value: {{ include "openbot.intelligenceGatewayWsUrl" . | quote }}
+{{ include "openbot.intelligenceApiKeyEnv" . }}
+{{- if include "openbot.intelligenceBundled" . }}
+{{- /*
+  The bundled Intelligence has no address a browser can reach, only Services in this cluster, and
+  the browser opens the gateway's socket itself. So the server carries it, on its own address, and
+  tells the browser that address (server/src/intelligence-gateway-proxy.ts).
+*/}}
+- name: INTELLIGENCE_GATEWAY_PROXY
+  value: "on"
+{{- end }}
 {{- /* From a store or an existingSecret too: emitted for the literal alone, a synced token reached
      the Secret and never the pod, and a self-hosted Intelligence ran unlicensed. */}}
 {{- $license := include "openbot.secretKeySource" (dict "root" . "key" "license-token" "literal" .Values.secrets.licenseToken) }}
@@ -861,4 +866,125 @@ than anything that names the cause.
 {{- if kindIs "float64" . -}}
 {{- if eq . (floor .) -}}{{ int64 . }}{{- else -}}{{ . }}{{- end -}}
 {{- else -}}{{ . }}{{- end -}}
+{{- end -}}
+
+{{/*
+Whether this release installs Intelligence itself (`intelligence.enabled`), answered the way Helm
+answers it for the dependency: only a boolean false turns it off.
+
+With no `intelligence.enabled` at all, which is what `helm upgrade --reuse-values` from a chart
+before it leaves, Helm turns the dependency ON (and `.Values.intelligence` still holds that chart's
+own defaults, so the map is never simply missing). That release is refused by name in
+validation.yaml, and this answers false for it so nothing else fails first with a message about a
+value nobody set.
+*/}}
+{{- define "openbot.intelligenceBundled" -}}
+{{- $values := .Values.intelligence | default dict -}}
+{{- if hasKey $values "enabled" -}}
+{{- if not (and (kindIs "bool" $values.enabled) (not $values.enabled)) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+A name the bundled Intelligence chart gives one of its objects, worked out the way that chart and its
+Bitnami subcharts work it out, so the addresses here are the Services there. Called with
+(dict "root" . "values" <that chart's values> "chart" <its chart name>).
+*/}}
+{{- define "openbot.subchartFullname" -}}
+{{- $values := .values | default dict -}}
+{{- if $values.fullnameOverride -}}
+{{- $values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default .chart $values.nameOverride -}}
+{{- if contains $name .root.Release.Name -}}
+{{- .root.Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .root.Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "openbot.intelligenceFullname" -}}
+{{- include "openbot.subchartFullname" (dict "root" . "values" .Values.intelligence "chart" "intelligence") -}}
+{{- end -}}
+
+{{/* Intelligence's API and gateway, as the OpenBot server reaches them inside the cluster. */}}
+{{- define "openbot.intelligenceApiUrl" -}}
+{{- if include "openbot.intelligenceBundled" . -}}
+{{- $appApi := (.Values.intelligence | default dict).appApi | default dict -}}
+{{- $port := (($appApi.service | default dict).port | default 4201) -}}
+{{- printf "http://%s-app-api:%v" (include "openbot.intelligenceFullname" .) $port -}}
+{{- else -}}
+{{- .Values.config.intelligence.apiUrl -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "openbot.intelligenceGatewayWsUrl" -}}
+{{- if include "openbot.intelligenceBundled" . -}}
+{{- $gateway := (.Values.intelligence | default dict).realtimeGateway | default dict -}}
+{{- $port := (($gateway.service | default dict).port | default 4401) -}}
+{{- printf "ws://%s-realtime-gateway:%v" (include "openbot.intelligenceFullname" .) $port -}}
+{{- else -}}
+{{- .Values.config.intelligence.gatewayWsUrl -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The Secret the key Job writes the bundled Intelligence's runtime key into. */}}
+{{- define "openbot.intelligenceKeySecretName" -}}
+{{- include "openbot.componentName" (dict "root" . "component" "intelligence-key") -}}
+{{- end -}}
+
+{{/*
+INTELLIGENCE_API_KEY, from wherever it is: the Secret the key Job writes for the bundled Intelligence,
+or `secrets.intelligenceApiKey` in this chart's Secret for one that already runs.
+*/}}
+{{- define "openbot.intelligenceApiKeyEnv" -}}
+- name: INTELLIGENCE_API_KEY
+  valueFrom:
+    secretKeyRef:
+      {{- if include "openbot.intelligenceBundled" . }}
+      name: {{ include "openbot.intelligenceKeySecretName" . }}
+      {{- else }}
+      name: {{ include "openbot.secretName" . }}
+      {{- end }}
+      key: intelligence-api-key
+{{- end -}}
+
+{{/*
+The organization the bundled Intelligence's service token acts for, by id: the `bootstrap`
+organization whose slug the token names, with the id the bootstrap Job gives it (`id`, or
+`org_<slug>` with anything outside a-z and 0-9 made `_`, as bootstrap-self-hosted.sh does).
+*/}}
+{{- define "openbot.intelligenceOrganizationId" -}}
+{{- $values := .Values.intelligence | default dict -}}
+{{- $tokens := (($values.appApi | default dict).serviceTokens | default dict).tokens | default list -}}
+{{- $token := dict -}}
+{{- range $tokens }}{{- if eq .name "openbot" }}{{- $token = . }}{{- end }}{{- end -}}
+{{- if not $token.organizationSlug -}}
+{{- fail "intelligence.appApi.serviceTokens.tokens needs the entry named `openbot`, with an organizationSlug: it is how this chart creates OpenBot's project and key in the bundled Intelligence." -}}
+{{- end -}}
+{{- $organization := dict -}}
+{{- range (($values.bootstrap | default dict).organizations | default list) }}{{- if eq .slug $token.organizationSlug }}{{- $organization = . }}{{- end }}{{- end -}}
+{{- if not $organization.slug -}}
+{{- fail (printf "intelligence.bootstrap.organizations has no organization with slug %q, which the `openbot` service token acts for. The bundled Intelligence would not start: its API refuses a service token for an organization that does not exist." $token.organizationSlug) -}}
+{{- end -}}
+{{- default (printf "org_%s" (regexReplaceAll "[^a-z0-9]" $organization.slug "_")) $organization.id -}}
+{{- end -}}
+
+{{/*
+A generated credential that stays what it was.
+
+Read back from the Secret already in the cluster when there is one, so an upgrade does not hand
+PostgreSQL a password it was never initialized with. `lookup` sees nothing under `helm template`
+or a client-side dry run, so those render a fresh value, which is what they should show.
+Called with (dict "root" . "secret" <name> "key" <key> "generate" <a fresh value>).
+*/}}
+{{- define "openbot.keptValue" -}}
+{{- $existing := lookup "v1" "Secret" .root.Release.Namespace .secret -}}
+{{- $data := ($existing | default dict).data | default dict -}}
+{{- if hasKey $data .key -}}
+{{- index $data .key | b64dec -}}
+{{- else -}}
+{{- .generate -}}
+{{- end -}}
 {{- end -}}

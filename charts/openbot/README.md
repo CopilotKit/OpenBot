@@ -3,6 +3,82 @@
 Runs OpenBot on any Kubernetes cluster: EKS, GKE, AKS, or your own. One chart, five targets, and the
 only difference between them is values.
 
+OpenBot needs CopilotKit Intelligence, and by default this chart installs it too: self-hosted, on its
+own bundled PostgreSQL and Redis, wired to OpenBot, with OpenBot's project key created inside it
+without anybody signing in. [The vanilla install](#vanilla-install) below is that whole product in
+three steps. Pointing OpenBot at managed Intelligence, or at one you already run, is
+[the alternative](#with-managed-intelligence-or-one-you-already-run).
+
+## Vanilla install
+
+One person, from their own computer, on any cluster with a default StorageClass and amd64 nodes (the
+OpenBot image is amd64 only, and so is the embeddings image Intelligence runs). From a checkout of
+this repository:
+
+**1. Write your secrets into a file you keep and never commit.** The licence and the model key are
+yours; the other three are generated once here and must stay the same on every upgrade, which is why
+they live in a file rather than on the command line.
+
+```sh
+cat > openbot-secrets.yaml <<EOF
+secrets:
+  licenseToken: "<your CopilotKit licence>"
+  modelApiKey: "<your OpenAI API key>"
+  keyEncryptionKey: "$(openssl rand -base64 32)"
+  computerToken: "$(openssl rand -hex 32)"
+postgresql:
+  auth:
+    password: "$(openssl rand -hex 24)"
+EOF
+```
+
+**2. Install.**
+
+```sh
+helm dependency build charts/openbot
+helm install openbot charts/openbot \
+  --namespace openbot --create-namespace \
+  --values charts/openbot/ci/vanilla-values.yaml \
+  --values openbot-secrets.yaml \
+  --timeout 15m
+```
+
+**3. Open it.**
+
+```sh
+kubectl -n openbot port-forward svc/openbot-server 3001:3001
+```
+
+Then open <http://127.0.0.1:3001>. You are its one administrator: `config.singleUser` admits whoever
+reaches the server with no sign-in, which is why it is only ever reached through a port-forward on
+your own computer, and why the chart refuses it with a public URL or an open LoadBalancer.
+
+`ci/vanilla-values.yaml` is single-user mode, OpenBot's bundled database, and a placeholder for each
+secret that your file replaces. CI renders exactly this install on every change.
+
+**What happens, so a first install that takes a few minutes is not a surprise.** The chart installs
+Intelligence 0.15.1, generates every credential it needs as Secrets that are kept across upgrades and
+uninstalls, gives it the licence from your file (OpenBot gets the same one), and creates an
+organization with a service token. A Job then waits for Intelligence's API, creates OpenBot's project
+and key with that token, and stores the key in the Secret `openbot-intelligence-key`. The OpenBot
+server starts once that Secret exists. Intelligence's API restarts a few times on the way: it will not
+start until its organization exists, and Intelligence creates that in a post-install hook.
+
+**Do not pass `--wait` (or `--atomic`, or `--rollback-on-failure`) on the first install.** `--wait`
+holds those post-install hooks until every pod is ready, and Intelligence's API cannot be ready before
+them, so the install times out instead. Helm 4 does not wait unless asked. Upgrades are not affected.
+`--timeout 15m` gives the hooks room while a fresh cluster pulls every image.
+
+`kubectl -n openbot get pods,jobs` shows it coming up, and `kubectl -n openbot logs` on the
+`openbot-intelligence-key` Job says what it is waiting for. The browser reaches Intelligence's gateway
+through OpenBot's own address, so the one port-forward is all it needs.
+
+The secrets can also live in a Secret of your own instead of a file: set `secrets.existingSecret` to
+it, with the keys `license-token`, `model-api-key`, `key-encryption-key` and `computer-token`; put the
+database password under `postgres-password` and set `postgresql.auth.existingSecret` to the same
+Secret; and set `intelligence.appApi.licenseSecret.existingSecret` to it too, so Intelligence reads the
+same licence. `values.yaml` under `intelligence` explains every value the bundle sets.
+
 ## What a cluster needs first
 
 Four things this chart assumes and does not create.
@@ -18,8 +94,11 @@ architecture you have and push it somewhere the cluster can reach. Check before 
 docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.9 | grep architecture
 ```
 
-**Intelligence credentials.** OpenBot requires CopilotKit Intelligence and the chart refuses to
-install without `secrets.intelligenceApiKey`. It comes from the CLI, on any machine with a browser:
+**Intelligence credentials, unless the chart installs Intelligence.** With the bundled Intelligence
+(the default) there are none to fetch: the chart makes OpenBot's key itself and needs only the
+licence. With `intelligence.enabled: false`, OpenBot requires an Intelligence you name and the chart
+refuses to install without `secrets.intelligenceApiKey`. It comes from the CLI, on any machine with a
+browser:
 
 ```sh
 npx --yes copilotkit@latest login           # browser sign-in
@@ -148,16 +227,40 @@ from the cluster's own security group. `aws eks describe-cluster` names both. Ke
 
 ## Install
 
-The bundled database and one administrator, which is the shortest thing that works:
+[The vanilla install](#vanilla-install) above is the shortest thing that works. Everything below adds
+to it: sign-in for a team, your own database, a cloud's features.
+
+### With managed Intelligence, or one you already run
+
+`intelligence.enabled: false` installs OpenBot alone and points it at an Intelligence that already
+runs: managed Intelligence, or a self-hosted one installed from its own chart. Name it in
+`config.intelligence` and give its key as `secrets.intelligenceApiKey` (see
+[What a cluster needs first](#what-a-cluster-needs-first)):
 
 ```sh
 helm dependency build charts/openbot
 helm upgrade --install openbot charts/openbot \
   --namespace openbot --create-namespace \
+  --set intelligence.enabled=false \
+  --set-string config.intelligence.apiUrl=https://api.intelligence.copilotkit.ai \
+  --set-string config.intelligence.gatewayWsUrl=wss://realtime.intelligence.copilotkit.ai \
+  --set-string secrets.intelligenceApiKey="<cpk-... runtime key>" \
+  --set config.singleUser=true \
   --set postgresql.enabled=true \
-  --set config.initialAdminEmails=you@example.com \
-  --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)"
+  --set-string postgresql.auth.password="<a password you keep>" \
+  --set-string secrets.keyEncryptionKey="<a key you keep: openssl rand -base64 32>" \
+  --set-string secrets.computerToken="$(openssl rand -hex 32)"
 ```
+
+For a team rather than one person, configure an identity provider instead of `config.singleUser`:
+`config.auth` in `values.yaml`, with its client secret under `secrets`, `secrets.betterAuthSecret`,
+`config.publicUrl` and `config.initialAdminEmails`.
+
+**Upgrading a release from before the bundled Intelligence.** Its values have no `intelligence` key,
+and Helm installs a dependency whose switch is missing, so the chart refuses the upgrade by name rather
+than install a second, empty Intelligence beside yours. Add `--set intelligence.enabled=false` to keep
+the Intelligence you have. The same applies with `--reuse-values`, which keeps the old values and
+drops the new chart's defaults.
 
 `secrets.keyEncryptionKey` encrypts the credential vault. Generate it once, keep it, and do not put
 it in a file anybody commits. The chart marks the Secret it creates `helm.sh/resource-policy: keep`,
@@ -349,7 +452,10 @@ installing on somebody's bare-metal cluster.
 The chart fails the install, naming the value to change, when: there is no database or two of them;
 nobody could sign in or nobody would be an administrator; an identity provider is configured without
 `secrets.betterAuthSecret` or `config.publicUrl`; `singleUser` is combined with a public URL or a
-public LoadBalancer; the Intelligence URLs or `secrets.intelligenceApiKey` are missing;
+public LoadBalancer; with `intelligence.enabled: false`, the Intelligence URLs or
+`secrets.intelligenceApiKey` are missing; with the bundled Intelligence, an Intelligence address or key
+of your own is named beside it, the licence is missing, or the release predates it (no
+`intelligence.enabled` at all);
 `secrets.keyEncryptionKey` is not a base64 32-byte value, or is the public example key; there is no
 `secrets.computerToken`; `computers.mode` is `external` with no `computers.url`, or `sandbox` on a
 cluster with no Sandbox CRD; both an Ingress and an HTTPRoute are enabled; both `externalSecrets` and

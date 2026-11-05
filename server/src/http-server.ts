@@ -10,6 +10,14 @@ import type { ComputerGateway } from "./computer/gateway";
 import { streamPathBotId } from "./computer/stream-path";
 import type { DeploymentConfig } from "./config";
 import {
+  closeGatewaySocket,
+  type GatewaySocketData,
+  gatewayClientSocketUrl,
+  gatewaySocketMessage,
+  isIntelligenceClientSocketPath,
+  openGatewaySocket,
+} from "./intelligence-gateway-proxy";
+import {
   CROSS_SITE_REFUSAL,
   crossSiteRequest,
   type FrontDoorBindings,
@@ -33,13 +41,14 @@ type StreamData = {
 };
 
 /**
- * Bun takes exactly one WebSocket handler for the server, and two features need one: the app proxies
- * the computer stream, and it pushes channel activity through Hono's adapter. So this one
- * dispatches on what the upgrade attached, a proxy socket carries `upstream`, a Hono socket does
- * not, rather than either feature quietly taking the slot and breaking the other on connect.
+ * Bun takes exactly one WebSocket handler for the server, and three features need one: the app
+ * proxies the computer stream and the Intelligence gateway's client socket, and it pushes channel
+ * activity through Hono's adapter. So this one dispatches on what the upgrade attached, a stream
+ * carries `upstream`, a gateway socket `gatewayUpstream`, and a Hono socket neither, rather than any
+ * feature quietly taking the slot and breaking the others on connect.
  */
 type ChannelSocket = Parameters<typeof channelSocket.open>[0];
-type SocketData = StreamData | ChannelSocket["data"];
+type SocketData = StreamData | GatewaySocketData | ChannelSocket["data"];
 
 export function startHttpServer(deps: {
   port: number;
@@ -94,6 +103,11 @@ export function startHttpServer(deps: {
   const isProxiedStream = (data: SocketData): data is StreamData =>
     typeof (data as StreamData).upstream === "string";
 
+  const isGatewaySocket = (data: SocketData): data is GatewaySocketData =>
+    typeof (data as GatewaySocketData).gatewayUpstream === "string";
+
+  const intelligence = config.runtime?.intelligence;
+
   // Hono owns the socket's data once it has upgraded it; this hands its own back to it.
   const asChannelSocket = (ws: { data: SocketData }) =>
     ws as unknown as ChannelSocket;
@@ -134,6 +148,35 @@ export function startHttpServer(deps: {
         browserRequestSeconds(url.pathname) ??
         botBrowserRequestSeconds(url.pathname);
       if (browserSeconds !== undefined) server.timeout(request, browserSeconds);
+      /*
+       * The Intelligence gateway's client socket, when this server carries it
+       * (intelligence-gateway-proxy.ts). Behind the same doors as the live screen: a single-user
+       * deployment admits only who it admits, and a socket needs a session, applied here by hand
+       * because middleware does not run on an upgrade. The gateway then checks the join token itself.
+       */
+      if (
+        intelligence?.gatewayProxy &&
+        isIntelligenceClientSocketPath(url.pathname) &&
+        isWebSocketUpgrade(request.headers)
+      ) {
+        const notHere = config.singleUser
+          ? singleUserRefusal(request, caller, config.singleUserAccess)
+          : null;
+        if (notHere) return new Response(notHere, { status: 403 });
+        const actor = await resolveRequestActor(request).catch(() => null);
+        if (!actor) return new Response("Sign in first.", { status: 401 });
+        const data: GatewaySocketData = {
+          gatewayUpstream: gatewayClientSocketUrl(
+            intelligence.gatewayWsUrl,
+            url,
+          ),
+          pending: [],
+        };
+        if (server.upgrade(request, { data })) {
+          return undefined as unknown as Response;
+        }
+        return new Response("Expected a WebSocket upgrade.", { status: 400 });
+      }
       const streamBotId = streamPathBotId(url.pathname);
       if (
         streamBotId !== null &&
@@ -212,6 +255,10 @@ export function startHttpServer(deps: {
     },
     websocket: {
       open(ws) {
+        if (isGatewaySocket(ws.data)) {
+          openGatewaySocket(ws as typeof ws & { data: GatewaySocketData });
+          return;
+        }
         if (!isProxiedStream(ws.data)) {
           channelSocket.open(asChannelSocket(ws));
           return;
@@ -232,6 +279,13 @@ export function startHttpServer(deps: {
         inward.onerror = () => ws.close();
       },
       message(ws, raw) {
+        if (isGatewaySocket(ws.data)) {
+          gatewaySocketMessage(
+            ws as typeof ws & { data: GatewaySocketData },
+            raw,
+          );
+          return;
+        }
         if (!isProxiedStream(ws.data)) {
           channelSocket.message(asChannelSocket(ws), raw);
           return;
@@ -239,6 +293,14 @@ export function startHttpServer(deps: {
         if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
       },
       close(ws, code, reason) {
+        if (isGatewaySocket(ws.data)) {
+          closeGatewaySocket(
+            ws as typeof ws & { data: GatewaySocketData },
+            code,
+            reason,
+          );
+          return;
+        }
         if (!isProxiedStream(ws.data)) {
           channelSocket.close(asChannelSocket(ws), code, reason);
           return;

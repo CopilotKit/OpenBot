@@ -166,7 +166,7 @@ jobs:
       # One red target must not hide whether another is red too.
       fail-fast: false
       matrix:
-        target: [self-hosted, eks, eks-sandbox, gke, aks]
+        target: [vanilla, self-hosted, eks, eks-sandbox, gke, aks]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -292,6 +292,22 @@ jobs:
             --set-string config.push.projectId=not-a-uuid
           refuses "a delivery public URL that is not http(s)" \
             --set-string config.deliveryPublicUrl=hooks.example.com
+          # The bundled Intelligence beside one somebody named, and without the licence a self-hosted
+          # Intelligence needs. Armed only on targets that bundle it.
+          if ! grep -qE '^ *enabled: false' <(sed -n '/^intelligence:/,/^[a-z]/p' charts/openbot/ci/${{ matrix.target }}-values.yaml); then
+            refuses "the bundled Intelligence beside an Intelligence address of your own" \
+              --set-string config.intelligence.apiUrl=https://api.intelligence.copilotkit.ai
+            refuses "the bundled Intelligence with no licence for it" \
+              --set-string secrets.licenseToken= \
+              --set-string intelligence.appApi.licenseSecret.existingSecret=openbot-intel-license
+          else
+            echo "skipped: the bundled-Intelligence refusals are armed only where the target bundles it"
+            refuses "no Intelligence at all" \
+              --set-string config.intelligence.apiUrl= --set-string config.intelligence.gatewayWsUrl=
+          fi
+          # A release from before the bundled Intelligence, upgraded with --reuse-values: refused by
+          # name rather than installing a second Intelligence on that chart's bare defaults.
+          refuses "a release with no intelligence.enabled" --set intelligence=null
           # A warm pool nothing claims from. Only meaningful where the target asks for per-Bot
           # computers; on the others the mode is not sandbox and the refusal is not armed.
           if grep -qE '^ *mode: sandbox' charts/openbot/ci/${{ matrix.target }}-values.yaml; then

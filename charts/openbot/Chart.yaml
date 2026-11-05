@@ -3,7 +3,7 @@ name: openbot
 description: Run OpenBot on any Kubernetes cluster, managed or your own
 type: application
 # The chart's own version, bumped when templates or defaults change.
-version: 0.1.4
+version: 0.2.0
 # The OpenBot release this chart's default image tag points at. Kept equal to package.json's version
 # (the last version published) by the release workflow, and CI refuses a tree where they have drifted.
 appVersion: "0.2.0"
@@ -30,3 +30,15 @@ dependencies:
     version: "16.7.27"
     repository: "oci://registry-1.docker.io/bitnamicharts"
     condition: postgresql.enabled
+  # COPILOTKIT INTELLIGENCE, BECAUSE OPENBOT DOES NOT RUN WITHOUT IT. On by default, so one install is
+  # the whole product: Intelligence in self-hosted mode on its own bundled PostgreSQL and Redis, wired
+  # to OpenBot and holding a project key OpenBot was given without anybody signing in to anything.
+  # `intelligence.enabled: false` is the other deployment, OpenBot pointed at an Intelligence that is
+  # already running (managed, or self-hosted elsewhere) through `config.intelligence`.
+  - name: intelligence
+    # EXACT, NOT A RANGE, for the reason the pin above gives: a new release of this chart carries new
+    # images and new required values, and arriving on its own it would be an install nobody tested.
+    # Bump it deliberately, with the values under `intelligence` in values.yaml.
+    version: "0.15.1"
+    repository: "oci://ghcr.io/copilotkit/charts"
+    condition: intelligence.enabled

@@ -68,17 +68,45 @@ This template renders nothing.
 {{- end }}
 
 {{- /*
-  Intelligence, which is not optional.
+  Intelligence, which is not optional: the one this chart installs, or one that already runs.
 
-  The three addressing values are required together and the server refuses to start on a partial
-  set, so the same rule is applied here: caught at install with the values named, rather than in a
-  crash loop whose message is in a log nobody has opened.
+  A RELEASE FROM BEFORE THE BUNDLED INTELLIGENCE, upgraded with `--reuse-values`, has no
+  `intelligence` key at all, and Helm turns a dependency ON when its condition is missing. That
+  would install an Intelligence on the subchart's bare defaults beside the one the release already
+  uses, and render cleanly doing it. So it is refused by name.
 
-  `secrets.licenseToken` is NOT among them. Managed Intelligence issues no licence token, so
-  requiring one here would block an install the server would have accepted.
+  WITH THE BUNDLED ONE, an address in `config.intelligence` or a key in `secrets.intelligenceApiKey`
+  is somebody who meant a different Intelligence, which is the release that existed before this
+  chart bundled one. Refused rather than ignored, because ignoring it moves their conversations to an
+  empty Intelligence without a word.
+
+  The bundled Intelligence is self-hosted, and a self-hosted Intelligence needs the licence on its own
+  deployment, so with it the licence is required. Given as `secrets.licenseToken`, this chart writes
+  it to both sides. In a Secret of the operator's (or a store's), the chart cannot read it, so
+  `intelligence.appApi.licenseSecret` has to name that Secret instead of the one the chart would write.
+
+  WITHOUT IT, the three addressing values are required together and the server refuses to start on a
+  partial set, so the same rule is applied here: caught at install with the values named, rather than
+  in a crash loop whose message is in a log nobody has opened. `secrets.licenseToken` is NOT among
+  them: managed Intelligence issues no licence token.
 */}}
-{{- if or (not .Values.config.intelligence.apiUrl) (not .Values.config.intelligence.gatewayWsUrl) }}
-{{- fail "OpenBot requires CopilotKit Intelligence. Set config.intelligence.apiUrl and config.intelligence.gatewayWsUrl, and the matching secrets.intelligenceApiKey." }}
+{{- if not (hasKey (.Values.intelligence | default dict) "enabled") }}
+{{- fail "This chart now installs CopilotKit Intelligence with OpenBot, and this release's values have no `intelligence` key, which is what `helm upgrade --reuse-values` from an earlier chart leaves. To keep the Intelligence in config.intelligence, add --set intelligence.enabled=false. To move to the bundled one, upgrade with --reset-then-reuse-values (Helm 3.14 or later) and read the chart README first: it is a new, empty Intelligence." }}
+{{- end }}
+{{- if include "openbot.intelligenceBundled" . }}
+{{- if or .Values.config.intelligence.apiUrl .Values.config.intelligence.gatewayWsUrl .Values.secrets.intelligenceApiKey }}
+{{- fail "config.intelligence.apiUrl, config.intelligence.gatewayWsUrl or secrets.intelligenceApiKey name an Intelligence of your own, and this chart installs one too (intelligence.enabled is true). To keep yours, set intelligence.enabled=false. To use the bundled one, clear those three: the chart wires it itself, and it is a new, empty Intelligence." }}
+{{- end }}
+{{- $licenseSecret := ((.Values.intelligence.appApi | default dict).licenseSecret | default dict) }}
+{{- if not $licenseSecret.existingSecret }}
+{{- fail "intelligence.appApi.licenseSecret.existingSecret is empty. The bundled Intelligence reads the CopilotKit licence from that Secret; leave it at the chart's default and set secrets.licenseToken, or name the Secret of your own that holds it." }}
+{{- end }}
+{{- if and (not .Values.secrets.licenseToken) (eq $licenseSecret.existingSecret "openbot-intel-license") }}
+{{- fail "The bundled Intelligence is self-hosted and needs the CopilotKit licence. Set secrets.licenseToken and the chart gives it to both OpenBot and Intelligence. If the licence is in a Secret of your own (secrets.existingSecret, or a store), also set intelligence.appApi.licenseSecret.existingSecret to that Secret's name and intelligence.appApi.licenseSecret.key to its key, so Intelligence reads the same one." }}
+{{- end }}
+{{- $_ := include "openbot.intelligenceOrganizationId" . }}
+{{- else if or (not .Values.config.intelligence.apiUrl) (not .Values.config.intelligence.gatewayWsUrl) }}
+{{- fail "OpenBot requires CopilotKit Intelligence. With intelligence.enabled=false, set config.intelligence.apiUrl and config.intelligence.gatewayWsUrl, and the matching secrets.intelligenceApiKey." }}
 {{- end }}
 
 {{- /*

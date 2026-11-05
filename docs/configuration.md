@@ -29,6 +29,15 @@ All five above stop server startup if missing. The three `INTELLIGENCE_` values 
 checked as a set, so a partial set is refused as a misconfiguration rather than treated as
 unconfigured.
 
+The browser opens the Intelligence gateway's socket itself, at the address the server gives it. Where
+the server reaches the gateway somewhere a browser cannot, two variables cover it.
+`INTELLIGENCE_BROWSER_GATEWAY_WS_URL` names a second address for the same gateway (OpenBot Desktop's
+container uses it). `INTELLIGENCE_GATEWAY_PROXY=on` has the server carry the socket itself, at
+`/api/intelligence/client` on its own address, for an Intelligence nobody outside the cluster can
+reach: the Helm chart sets it for the Intelligence it installs, so one port-forward or one Ingress
+host is enough. The socket needs a signed-in session, and the gateway still checks the join token on
+it. Set one of the two, not both; `off` or unset is neither.
+
 `COPILOTKIT_LICENSE_TOKEN` is optional: managed Intelligence issues no licence token, and a
 self-hosted Intelligence that has one sets this and has it forwarded to the runtime. That
 Intelligence needs the same licence on its own deployment as well, or it refuses memory and the
