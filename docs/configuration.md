@@ -1002,8 +1002,13 @@ administrator sets under **Admin > Enterprise controls**, and it sets `HTTP_PROX
 `NO_PROXY` for itself and its shell to point at that filter. Do not set those three to reach an
 upstream proxy; use `EGRESS_PROXY_<BOT_ID>` or `EGRESS_PROXY_DEFAULT`, which the filter chains to.
 
-The server pushes each Bot's policy to its computer when the computer wakes and every 30 seconds
-after. Until a policy has arrived, the filter refuses every connection. Metadata and link-local
+The server pushes each Bot's policy to its computer when the computer wakes, ahead of the Bot's next
+action after any change to the enterprise controls, and to every running computer every 30 seconds.
+A push that does not land, such as one to a computer that is still starting, is tried again after
+1, 2, 4, 8 and 16 seconds. The server logs one `egress-policy-push-waiting` line when that starts,
+`egress-policy-delivered` when it lands, and an `egress-policy-push-failed` error only if computers
+have still not taken their policies after five minutes. Until a policy has arrived, the filter
+refuses every connection. Metadata and link-local
 addresses (`169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254` and the like) are refused in every mode,
 including `allow_all`. `EGRESS_POLICY_REQUIRED=0` (or `false`) lets the filter allow everything
 until a policy arrives instead, which only a computer run with no API server should need. It is read
