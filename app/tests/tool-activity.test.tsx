@@ -68,6 +68,32 @@ test("adjacent connector calls fold into one row named after the first", () => {
   });
 });
 
+test("a subtask folds into the same line as the searches beside it, even though the app draws it", () => {
+  const subtask = call(
+    "subtask",
+    "run_subagent",
+    { task: "Find five logistics companies." },
+    JSON.stringify(
+      JSON.stringify({ answer: "Five companies.", threadId: "t", steps: 9 }),
+    ),
+  );
+  const items = [subtask, search(), fetch(["https://a.example/1"]), text("answer")];
+  const grouped = groupToolSteps(items, () => true);
+  expect(grouped.map((item) => item.kind)).toEqual(["tools", "text"]);
+  const steps = items.slice(0, 3).map((item) => stepDetails(item as ToolItem));
+  expect(steps[0]).toMatchObject({
+    kind: "subtask",
+    label: "Subtask",
+    detail: "Find five logistics companies.",
+    output: "Five companies.",
+    failed: false,
+  });
+  expect(summarise(steps)).toBe("Searched the web, read 1 page and ran a subtask");
+  expect(summarise([steps[0], steps[0]].filter((step) => step !== undefined))).toBe(
+    "Ran 2 subtasks",
+  );
+});
+
 test("one connector call keeps its own line, and anything the app draws stays where it is", () => {
   // Drawn as its own line, inside the one row type a run uses, so a second call does not rebuild it.
   expect(groupToolSteps([search()], drawn)).toEqual([
