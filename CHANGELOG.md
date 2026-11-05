@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot on the Claude Agent SDK harness now remembers the whole conversation after its container restarts, or after the conversation sits idle for 30 minutes. It used to answer only the newest message and say it had no record of anything before it. It now also receives its standing role and the summary of its granted tools, which it never did, and a grant an administrator adds or removes applies on the next run instead of waiting for a new worker. Each turn now starts a fresh Claude process, which adds a second or two.
 - With OpenBot's product telemetry off, CopilotKit's own runtime events no longer carry the deployment's ID. They still carry `app_id=openbot`. With it on, nothing changes.
 - A run OpenBot stops now ends as `cancelled` in its product telemetry, matching Intelligence: a person's Stop, a stop that reaches a subagent, a cancelled or paused headless turn, and a paused Bot-to-Bot hop. A headless turn stopped at its deadline ends as `timeout`. These used to read `unknown` with `missing_terminal`, which still describes a run that ends with neither a terminal event nor a stop. A lost lock is not counted as a stop.
 - OpenBot's product run counts no longer include the run the CopilotKit runtime makes to name each new conversation, or its suggestion runs: only work a person, routine, subagent or hop started is counted. A subagent's runs now report the surface of the run that started it instead of `unknown`.
