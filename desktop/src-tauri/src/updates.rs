@@ -1230,7 +1230,7 @@ fn promote(root: &Path, journal: &mut Journal) -> Result<Value, String> {
             return Err("candidate source identity changed during startup".into());
         }
         checkpoint(root, journal, "verified")?;
-        deployment::record(root, &journal.to_version).map_err(io)?;
+        deployment::record(root, &journal.to_version, false).map_err(io)?;
         crate::preparation::rebind_after_runtime_update(root).map_err(|p| p.said)?;
         write_json(&root.join(BASELINE), &journal.next)?;
         write_json(&root.join(RELEASE), &journal.candidate)?;
@@ -1507,7 +1507,7 @@ mod tests {
             },
         )
         .unwrap();
-        deployment::record(&root, "v0.2.0").unwrap();
+        deployment::record(&root, "v0.2.0", false).unwrap();
         write(&root, "container-images.json", b"previous images");
         write(
             &root,

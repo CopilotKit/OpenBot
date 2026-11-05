@@ -505,12 +505,16 @@ pub fn require(
     selection: Option<&Option<HarnessChoice>>,
     address: &Address,
 ) -> Result<(), Problem> {
-    require_with(root, selection, |images| require_images(address, images))
+    require_with(root, selection, deployment::pinned().as_ref(), |images| {
+        require_images(address, images)
+    })
 }
 
+/// `pin` is the release this build was pinned to, passed in so a test can be either kind of build.
 fn require_with(
     root: &Path,
     selection: Option<&Option<HarnessChoice>>,
+    pin: Option<&deployment::Pin>,
     verify: impl FnOnce(&[String]) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     let record: Prepared = serde_json::from_slice(
@@ -542,7 +546,35 @@ fn require_with(
             "The deployment was laid out by an earlier OpenBot and is missing files this version runs.",
         ));
     }
+    // Install is the only place a pin is applied, and a saved setup goes straight to Start. So
+    // Start refuses a deployment this build would not have laid out, and Install replaces it.
+    if let Some(problem) = other_release(deployment::installed(root).as_ref(), pin) {
+        return Err(required(problem));
+    }
     verify(&record.images)
+}
+
+/// Why the installed deployment is not one this build lays out, or `None` when it is.
+///
+/// A pinned build runs only the release it was pinned to, laid out as pinned. An ordinary build
+/// does not run a pinned release, which was installed by an internal or candidate build.
+pub fn other_release(
+    found: Option<&deployment::Installed>,
+    pin: Option<&deployment::Pin>,
+) -> Option<String> {
+    match pin {
+        Some(pin) if !found.is_some_and(|found| found.pinned && found.version == pin.version) => {
+            Some(format!(
+                "This OpenBot runs release {}, and the installed deployment is a different release.",
+                pin.version
+            ))
+        }
+        None if found.is_some_and(|found| found.pinned) => Some(
+            "The installed deployment is a test release, and this OpenBot runs the latest public release."
+                .into(),
+        ),
+        _ => None,
+    }
 }
 
 /// Public Compose overrides suffice to identify and download software before authentication.
@@ -650,7 +682,7 @@ mod tests {
             std::fs::write(root.join("bun.lock"), "synthetic-lock").unwrap();
             std::fs::write(root.join("docker-compose.yml"), COMPOSE).unwrap();
             std::fs::write(root.join("container-images.json"), "{}").unwrap();
-            deployment::record(&root, "v-test").unwrap();
+            deployment::record(&root, "v-test", false).unwrap();
             let source = root.join("runtime.rs");
             std::fs::write(&source, r#"
 use std::io::Write;
@@ -714,7 +746,7 @@ fn main() {
             .unwrap();
         f.prepared(None);
         for _ in 0..2 {
-            require_with(&f.root, None, |images| {
+            require_with(&f.root, None, None, |images| {
                 assert_eq!(images, ["synthetic-image"]);
                 Ok(())
             })
@@ -739,9 +771,77 @@ fn main() {
         // Exactly what an earlier app wrote, in place before it prepared the installation.
         std::fs::write(deployment::stamp_path(&f.root), r#"{"version":"v-test"}"#).unwrap();
         f.prepared(None);
-        let problem = require_with(&f.root, None, |_| Ok(()))
+        let problem = require_with(&f.root, None, None, |_| Ok(()))
             .expect_err("a deployment missing folders this app copies cannot start");
         assert!(problem.said.contains("Finish installing"));
+    }
+
+    fn pin(version: &str) -> deployment::Pin {
+        deployment::Pin {
+            version: version.into(),
+            commit: "0".repeat(40),
+            images: "{}",
+        }
+    }
+
+    /// A Fixture prepared over a deployment whose stamp says `version`, pinned or followed.
+    fn prepared_over(version: &str, pinned: bool) -> Fixture {
+        let f = Fixture::new();
+        deployment::record(&f.root, version, pinned).unwrap();
+        f.prepared(None);
+        f
+    }
+
+    /// An internal build opened over a customer's v0.2.0 must not start v0.2.0: Install lays out
+    /// the release it was pinned to.
+    #[test]
+    fn a_pinned_build_does_not_start_a_followed_deployment() {
+        let f = prepared_over("v0.2.0", false);
+        let problem = require_with(&f.root, None, Some(&pin("v0.3.0-rc.1")), |_| {
+            panic!("a deployment this build was not pinned to must stop before its images")
+        })
+        .expect_err("a pinned build starts only its own release");
+        assert!(problem.said.contains("Finish installing"), "{problem:?}");
+    }
+
+    /// A pinned build refuses another pinned release too, not just a followed one.
+    #[test]
+    fn a_pinned_build_does_not_start_a_deployment_pinned_to_another_release() {
+        let f = prepared_over("v0.3.0-rc.1", true);
+        let problem = require_with(&f.root, None, Some(&pin("v0.3.0-rc.2")), |_| Ok(()))
+            .expect_err("a pinned build starts only its own release");
+        assert!(problem.said.contains("Finish installing"), "{problem:?}");
+    }
+
+    /// Even at the same version, a followed deployment is not the one a pinned build laid out.
+    #[test]
+    fn a_pinned_build_does_not_start_a_followed_deployment_of_the_same_version() {
+        let f = prepared_over("v0.3.0", false);
+        let problem = require_with(&f.root, None, Some(&pin("v0.3.0")), |_| Ok(()))
+            .expect_err("the stamp must say this build laid it out");
+        assert!(problem.said.contains("Finish installing"), "{problem:?}");
+    }
+
+    #[test]
+    fn a_pinned_build_starts_its_own_deployment() {
+        let f = prepared_over("v0.3.0-rc.1", true);
+        require_with(&f.root, None, Some(&pin("v0.3.0-rc.1")), |_| Ok(())).unwrap();
+    }
+
+    /// A customer build opened after an internal one must not keep running the internal release:
+    /// Install moves it to the latest public one.
+    #[test]
+    fn an_ordinary_build_does_not_start_a_pinned_deployment() {
+        let f = prepared_over("v0.3.0-rc.1", true);
+        let problem = require_with(&f.root, None, None, |_| Ok(()))
+            .expect_err("an ordinary build does not run a pinned release");
+        assert!(problem.said.contains("Finish installing"), "{problem:?}");
+    }
+
+    #[test]
+    fn an_ordinary_build_starts_a_followed_deployment() {
+        let f = prepared_over("v0.2.0", false);
+        require_with(&f.root, None, None, |_| Ok(())).unwrap();
     }
 
     #[test]
@@ -765,9 +865,9 @@ fn main() {
         let f = Fixture::new();
         assert!(!f.root.join(DEPENDENCIES).exists());
         complete_with(&f.root, None, vec!["synthetic-image".into()], |_| Ok(())).unwrap();
-        require_with(&f.root, Some(&None), |_| Ok(())).unwrap();
+        require_with(&f.root, Some(&None), None, |_| Ok(())).unwrap();
         f.dependencies();
-        require_with(&f.root, Some(&None), |_| Ok(())).unwrap();
+        require_with(&f.root, Some(&None), None, |_| Ok(())).unwrap();
     }
 
     #[test]
@@ -798,7 +898,7 @@ fn main() {
         )
         .unwrap();
         f.prepared(None);
-        let problem = require_with(&f.root, Some(&None), |_| Ok(())).unwrap_err();
+        let problem = require_with(&f.root, Some(&None), None, |_| Ok(())).unwrap_err();
         assert!(
             format!("{problem:?}").contains("before OpenBot ran its server in a container"),
             "{problem:?}"
@@ -813,24 +913,27 @@ fn main() {
             agent_url: None,
         });
         f.prepared(chosen.as_ref());
-        require_with(&f.root, Some(&chosen), |_| Ok(())).unwrap();
-        assert!(require_with(&f.root, Some(&None), |_| panic!(
+        require_with(&f.root, Some(&chosen), None, |_| Ok(())).unwrap();
+        assert!(require_with(&f.root, Some(&None), None, |_| panic!(
             "wrong selection must stop first"
         ))
         .is_err());
         // Start runs containers, so the host's packages and runtime are not its business.
         std::fs::remove_file(f.root.join("node_modules/synthetic-package/package.json")).unwrap();
         std::fs::write(f.root.join("runtime-version"), "1.2.15").unwrap();
-        require_with(&f.root, Some(&chosen), |_| Ok(())).unwrap();
+        require_with(&f.root, Some(&chosen), None, |_| Ok(())).unwrap();
         // The images still are.
-        assert!(require_with(&f.root, Some(&chosen), |_| Err(required("missing image"))).is_err());
+        assert!(require_with(&f.root, Some(&chosen), None, |_| Err(required(
+            "missing image"
+        )))
+        .is_err());
         // And the deployment Compose runs.
         std::fs::write(
             f.root.join("docker-compose.yml"),
             format!("{COMPOSE}  x: {{}}\n"),
         )
         .unwrap();
-        assert!(require_with(&f.root, Some(&chosen), |_| Ok(())).is_err());
+        assert!(require_with(&f.root, Some(&chosen), None, |_| Ok(())).is_err());
     }
 
     #[test]
@@ -893,10 +996,10 @@ fn main() {
         let image = ComputerImage::with_recorder();
         place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
         complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
-        require_with(&f.root, None, |_| Ok(())).unwrap();
+        require_with(&f.root, None, None, |_| Ok(())).unwrap();
 
         std::fs::remove_dir_all(f.root.join(local_browser::RECORDER_DIST)).unwrap();
-        let gone = require_with(&f.root, None, |_| Ok(()))
+        let gone = require_with(&f.root, None, None, |_| Ok(()))
             .expect_err("Start must not run a browser with no Recorder to load");
         assert!(gone.said.contains("Finish installing"), "{gone:?}");
 

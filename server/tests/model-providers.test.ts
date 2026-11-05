@@ -10,6 +10,7 @@ import { encryptSecret, resolveModelApiKey } from "../src/credentials";
 import {
   anthropicMessagesUrl,
   createModelCompleter,
+  routingModelFor,
 } from "../src/routing/model";
 import { validateTenantPackage } from "../src/tenant-package";
 
@@ -520,3 +521,123 @@ test("cancelling an Anthropic selector closes its in-flight HTTP request", async
     await server.stop(true);
   }
 }, 5000);
+
+describe("the router's fast model", () => {
+  test("defaults to a small model per provider, and to nothing behind a gateway", () => {
+    expect(routingModelFor(anthropicModel, {})).toBe("claude-haiku-5-5");
+    expect(routingModelFor(packageModel, {})).toBe("gpt-6-luna");
+    expect(
+      routingModelFor(packageModel, { OPENAI_BASE_URL: "https://gw/v1" }),
+    ).toBeUndefined();
+    expect(
+      routingModelFor(anthropicModel, { ANTHROPIC_BASE_URL: "https://gw" }),
+    ).toBeUndefined();
+    // A gateway for the other provider says nothing about this one.
+    expect(
+      routingModelFor(anthropicModel, { OPENAI_BASE_URL: "https://gw/v1" }),
+    ).toBe("claude-haiku-5-5");
+  });
+
+  test("ROUTER_MODEL wins everywhere, a gateway included; blank is unset", () => {
+    expect(
+      routingModelFor(packageModel, {
+        ROUTER_MODEL: " gw/small ",
+        OPENAI_BASE_URL: "https://gw/v1",
+      }),
+    ).toBe("gw/small");
+    expect(routingModelFor(packageModel, { ROUTER_MODEL: "  " })).toBe(
+      "gpt-6-luna",
+    );
+  });
+
+  test("asks the fast model first and the deployment's model only when it is refused", async () => {
+    const asked: string[] = [];
+    let refuse = false;
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        const body = (await request.json()) as { model: string };
+        asked.push(body.model);
+        if (refuse && body.model === "gpt-6-luna")
+          return Response.json({ error: "no access" }, { status: 404 });
+        return Response.json({
+          choices: [{ message: { content: `{"from":"${body.model}"}` } }],
+        });
+      },
+    });
+    try {
+      process.env.OPENAI_BASE_URL = `${server.url.origin}/v1`;
+      const complete = createModelCompleter({
+        model: packageModel,
+        resolveApiKey: async () => "synthetic-key",
+        fastModel: "gpt-6-luna",
+      });
+      expect(await complete("Pick one.")).toBe('{"from":"gpt-6-luna"}');
+      expect(asked).toEqual(["gpt-6-luna"]);
+
+      asked.length = 0;
+      refuse = true;
+      expect(await complete("Pick one.")).toBe('{"from":"gpt-5.6-terra"}');
+      expect(asked).toEqual(["gpt-6-luna", "gpt-5.6-terra"]);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("a fast model given as a function is asked for on every call, so the allowlist applies at once", async () => {
+    const asked: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        const { model } = (await request.json()) as { model: string };
+        asked.push(model);
+        return Response.json({
+          choices: [{ message: { content: `{"from":"${model}"}` } }],
+        });
+      },
+    });
+    try {
+      process.env.OPENAI_BASE_URL = `${server.url.origin}/v1`;
+      let allowed = true;
+      const complete = createModelCompleter({
+        model: packageModel,
+        resolveApiKey: async () => "synthetic-key",
+        fastModel: () => (allowed ? "gpt-6-luna" : undefined),
+      });
+      await complete("Pick one.");
+      allowed = false;
+      await complete("Pick one.");
+      expect(asked).toEqual(["gpt-6-luna", packageModel.defaultModel]);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("a fast model that is the deployment's own is asked once", async () => {
+    const asked: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        asked.push(((await request.json()) as { model: string }).model);
+        return Response.json({ error: "down" }, { status: 500 });
+      },
+    });
+    try {
+      process.env.OPENAI_BASE_URL = `${server.url.origin}/v1`;
+      const complete = createModelCompleter({
+        model: packageModel,
+        resolveApiKey: async () => "synthetic-key",
+        fastModel: packageModel.defaultModel,
+      });
+      await expect(complete("Pick one.")).rejects.toThrow(
+        "router model answered 500",
+      );
+      expect(asked).toEqual([packageModel.defaultModel]);
+    } finally {
+      await server.stop(true);
+    }
+  });
+});

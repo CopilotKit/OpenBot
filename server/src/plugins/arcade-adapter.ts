@@ -1646,6 +1646,171 @@ async function authorizeWholeApp(
 }
 
 /**
+ * Arcade's project-wide user verifier setting: `GET` and `PUT` on this path, answered as
+ * `schemas.SessionVerificationSettingsResponse` in Arcade's OpenAPI (`https://api.arcade.dev/v1/swagger`).
+ * The pinned SDK has no method for it, so it is reached through the SDK's own `get` and `put`, which
+ * carry the key and the base URL every other call here does.
+ */
+const VERIFIER_SETTINGS_PATH = "/v1/admin/settings/session_verification";
+
+/** The fields of `schemas.SessionVerificationSettingsResponse` this file reads. */
+type VerifierSettings = {
+  verifier_url?: unknown;
+  unsafe_skip_verification?: unknown;
+};
+
+/** Whether the project sends a finished consent to `address` and runs that verifier on it. */
+const verifierNames = (settings: VerifierSettings, address: string) =>
+  settings.verifier_url === address &&
+  settings.unsafe_skip_verification !== true;
+
+/**
+ * What the person who pressed is told when the verifier could not be read. Nothing was started, and
+ * whether the project names this deployment is not known, so there is no address to hand anybody.
+ */
+const verifierUnreadable = (subject: string, cause: unknown) =>
+  new BrokerRefusalError(
+    `Couldn't start connecting ${subject}. OpenBot couldn't check where Arcade sends you back after you sign in. Try again, or ask an admin if it keeps happening.`,
+    { cause },
+  );
+
+/**
+ * What the person who pressed is told when the project's verifier names somewhere else and this
+ * deployment may not change it. Nothing was started. Names the exact address an admin sets.
+ */
+const verifierElsewhere = (subject: string, address: string) =>
+  new BrokerRefusalError(
+    `Couldn't start connecting ${subject}. Arcade would send you back somewhere else after you sign in. Ask an admin to set the custom verifier in Arcade's dashboard to ${address}`,
+  );
+
+/**
+ * What the person who pressed is told when this deployment owns its project and Arcade would not
+ * take the new verifier. Nothing was started. On a single-user install that person is its admin.
+ */
+const verifierNotTaken = (subject: string, address: string, cause: unknown) =>
+  new BrokerRefusalError(
+    `Couldn't start connecting ${subject}. OpenBot couldn't set Arcade to send you back here after you sign in. Set the custom verifier in Arcade's dashboard to ${address}`,
+    { cause },
+  );
+
+/**
+ * MAKE SURE THE PROJECT'S USER VERIFIER NAMES THIS DEPLOYMENT, BEFORE A CONSENT IS MINTED.
+ *
+ * After somebody finishes an app's consent, Arcade sends their browser to the project's custom user
+ * verifier, and that route is what binds the consent to the attempt that started it and records the
+ * connection. There is one verifier per Arcade project, not one per request: Arcade refuses every
+ * `next_uri` on a mint (see `authorize` below). So the setting is this deployment's return address,
+ * as Composio's per-request `callback_url` is, and it is checked here, on every mint.
+ *
+ * IT USED TO BE SET BY HAND AND NEVER CHECKED, and the code said Arcade had no API that reads it.
+ * Arcade's OpenAPI serves {@link VERIFIER_SETTINGS_PATH}, and Arcade's own templates set the verifier
+ * through it with a project key. A project left naming one developer's `http://localhost:3001/...`
+ * sent every other deployment's people to a 404 with their consent spent.
+ *
+ * ONLY AN INSTALL THAT OWNS ITS PROJECT CHANGES IT (`repoint`). That is a single-user install, which
+ * has its own name at Arcade (`ensureSingleUserIdentity`) and whose one person is its admin. A
+ * deployment that signs people in treats its key's project as shared: rewriting the verifier there
+ * would send another deployment's people to this one. So it only reads, goes ahead when the project
+ * already names it, and otherwise refuses with the exact address an admin sets in the dashboard.
+ *
+ * ON EVERY MINT AND NOT ONCE AT BOOT. Several single-user OpenBots can run on one key at different
+ * addresses, and the verifier has to name whichever of them is about to send somebody to a consent
+ * screen. Read first, and written only when it names somewhere else, so a deployment that already
+ * holds it costs one read.
+ *
+ * READ BACK AFTER THE WRITE, as Arcade's own setup scripts do: a `PUT` that answers 200 and does not
+ * take is the one way this could still send somebody to the wrong place.
+ *
+ * A REFUSAL IS AUTHORED AND DEFINITE. Nothing has been minted when any of this fails, so the mint
+ * route discards the attempt and the person can press again at once. A consent minted anyway would
+ * be spent on a page that does not exist, which is the defect this exists for. The operator's half
+ * (the address and the vendor's status, never its body) goes to the log.
+ */
+async function ensureVerifierNamesHere(
+  client: Arcade,
+  { address, repoint }: { address: string; repoint: boolean },
+  subject: string,
+): Promise<void> {
+  let before: VerifierSettings;
+  try {
+    before = requireBody(
+      "the user verifier setting",
+      await vendorCall("reading the user verifier setting", () =>
+        client.get<VerifierSettings>(VERIFIER_SETTINGS_PATH),
+      ),
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "arcade-verifier-unread",
+        verifierUrl: address,
+        note: "Arcade's user verifier setting could not be read, so no consent was started. Check that ARCADE_API_KEY is a project key that can use Arcade's admin API.",
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    throw verifierUnreadable(subject, error);
+  }
+  if (verifierNames(before, address)) return;
+  const was =
+    typeof before.verifier_url === "string" ? before.verifier_url : null;
+  if (!repoint) {
+    console.error(
+      JSON.stringify({
+        type: "arcade-verifier-elsewhere",
+        verifierUrl: address,
+        was,
+        note: "This deployment signs people in, so it treats its Arcade project as shared and does not change the project's user verifier. It names somewhere else, so no consent was started. Set the custom verifier to verifierUrl in Arcade's dashboard (Auth, Settings) if this deployment is the one that project serves.",
+      }),
+    );
+    throw verifierElsewhere(subject, address);
+  }
+  let after: VerifierSettings;
+  try {
+    await vendorCall("setting the user verifier", () =>
+      client.put<VerifierSettings>(VERIFIER_SETTINGS_PATH, {
+        body: { verifier_url: address, unsafe_skip_verification: false },
+      }),
+    );
+    after = requireBody(
+      "the user verifier setting",
+      await vendorCall("reading the user verifier setting back", () =>
+        client.get<VerifierSettings>(VERIFIER_SETTINGS_PATH),
+      ),
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "arcade-verifier-not-pointed",
+        verifierUrl: address,
+        was,
+        note: "Arcade's user verifier could not be set, so no consent was started. Check that ARCADE_API_KEY is a project key that can use Arcade's admin API, or set the custom verifier to verifierUrl in Arcade's dashboard (Auth, Settings).",
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    throw verifierNotTaken(subject, address, error);
+  }
+  if (!verifierNames(after, address)) {
+    console.error(
+      JSON.stringify({
+        type: "arcade-verifier-not-pointed",
+        verifierUrl: address,
+        was,
+        note: "Arcade accepted the user verifier setting but reads back a different one, so no consent was started. Set the custom verifier to verifierUrl in Arcade's dashboard (Auth, Settings), and check the project is not set to skip verification.",
+      }),
+    );
+    throw verifierNotTaken(subject, address, null);
+  }
+  console.info(
+    JSON.stringify({
+      type: "arcade-verifier-pointed",
+      verifierUrl: address,
+      was,
+      note: "Arcade's user verifier now names this deployment, so a consent started here comes back here. Another single-user install on the same key that named it before points it back at itself on its next connect.",
+    }),
+  );
+}
+
+/**
  * The Arcade client, in the shape `createComposioClient` returns. `new Arcade({ apiKey })` opens no
  * socket and sends no request, so tests replace the SDK's PROTOTYPE methods before calling this.
  *
@@ -1655,7 +1820,25 @@ async function authorizeWholeApp(
  * body's, so without the normalization the authorize prompt would be unreachable — but it reaches
  * it through {@link ArcadeFailureError}, not through a bare object thrown as if it were an error.
  */
-export function createArcadeClient(apiKey: string): {
+export function createArcadeClient(
+  apiKey: string,
+  {
+    verifierUrl,
+    repointVerifier = false,
+  }: {
+    /**
+     * This deployment's verify address, checked before every mint; see
+     * {@link ensureVerifierNamesHere}. Absent where the deployment does not know its own origin, and
+     * the project's setting is then left unchecked, which `arcadeVerifierNotice` warns about.
+     */
+    verifierUrl?: string;
+    /**
+     * Whether this install owns its Arcade project and so may point the verifier at itself. True
+     * for a single-user install; false, the default, leaves the setting to an admin.
+     */
+    repointVerifier?: boolean;
+  } = {},
+): {
   actions: ArcadeActions;
   broker: ConnectedAppBroker;
 } {
@@ -1782,6 +1965,15 @@ export function createArcadeClient(apiKey: string): {
       // THROUGH {@link requireBody}: a mint that answered an empty body, or a body of literal
       // `null`, has `answer === null` wearing `AuthorizationResponse`, and the `status` read below
       // would raise a bare `TypeError` rather than the sentence this route shows somebody.
+      // THE RETURN ADDRESS FIRST: the consent minted below comes back through whatever the
+      // project's verifier names when it finishes. See {@link ensureVerifierNamesHere}.
+      if (verifierUrl) {
+        await ensureVerifierNamesHere(
+          client,
+          { address: verifierUrl, repoint: repointVerifier },
+          toolkit,
+        );
+      }
       const answer = requireBody(
         `the authorization for ${subject}`,
         action

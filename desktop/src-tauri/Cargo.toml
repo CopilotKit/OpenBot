@@ -17,6 +17,8 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 # Pins a bundled Intelligence CLI to the bytes the app was built with. See build.rs.
 sha2 = "0.10"
+# Reads the pinned deployment manifest an internal or candidate build carries. See `build.rs`.
+serde_json = "1"
 
 [features]
 default = []

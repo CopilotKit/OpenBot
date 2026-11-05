@@ -9609,7 +9609,7 @@ fn main() {
             down(&Address::new(crate::engine::Engine::Docker, None), root).unwrap();
             assert!(!record.exists());
         }
-        crate::deployment::record(&empty, "fixture").unwrap();
+        crate::deployment::record(&empty, "fixture", false).unwrap();
         assert!(down(&Address::new(crate::engine::Engine::Docker, None), &empty).is_err());
         assert!(!record.exists());
     }
@@ -9957,7 +9957,7 @@ fn main() {
         let docker = Address::new(crate::engine::Engine::Docker, None);
         let (root, record) = project_choice_root(&path, "legacy-own");
         // Made by an earlier app: a stamp, and no project record.
-        crate::deployment::record(&root, "v0.2.0").unwrap();
+        crate::deployment::record(&root, "v0.2.0", false).unwrap();
         // Compose labels the folder as given, which need not be its canonical spelling.
         let spelled = root.join("..").join("OpenBot");
         std::fs::write(
@@ -9984,7 +9984,7 @@ fn main() {
     /// An earlier app's installation in `root`: finished installing, its database volume left on
     /// the engine by a Stop or Quit that took every container down.
     fn earlier_installation(root: &Path) {
-        crate::deployment::record(root, "v0.2.0").unwrap();
+        crate::deployment::record(root, "v0.2.0", false).unwrap();
         std::fs::write(root.join(crate::preparation::FILE), "{}").unwrap();
         std::fs::write(root.join(".fixture-volumes"), "openbot_postgres-data\n").unwrap();
         std::fs::write(
@@ -10095,7 +10095,7 @@ fn main() {
         let path = PathFixture::with_fake_engine("postgres-volume");
         let docker = Address::new(crate::engine::Engine::Docker, None);
         let (root, record) = project_choice_root(&path, "legacy-collision");
-        crate::deployment::record(&root, "v0.2.0").unwrap();
+        crate::deployment::record(&root, "v0.2.0", false).unwrap();
         // A developer's source checkout called `openbot`, running as Compose project `openbot`.
         let checkout = path.bin.join("src").join("openbot");
         std::fs::create_dir_all(&checkout).unwrap();

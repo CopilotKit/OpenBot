@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { CLI_OVERLAY, planSignedBuild, type Runner } from "./signed-build";
 
 const repository = resolve(import.meta.dir, "..", "..");
 const scripts = import.meta.dir;
@@ -51,47 +52,100 @@ test("the bundle overlay puts the CLI in the app's resources", () => {
   expect(overlay.bundle.resources).toEqual({ "cli-bundle/": "cli-bundle/" });
 });
 
-test("the signed Mac build bundles, signs and checks the CLI", () => {
+test("the signed Mac build goes through signed-build.ts and checks the CLI it carries", () => {
   const text = workflow("desktop-macos-signing.yml");
-  const bundle = step(text, "Bundle the Intelligence CLI");
-  expect(bundle).toContain("bun desktop/scripts/cli-bundle.ts darwin");
-  expect(bundle).toContain("darwin-aarch64) arch=arm64");
-  expect(bundle).toContain("darwin-x86_64) arch=x64");
-  const sign = step(text, "Sign the bundled CLI's binaries");
-  expect(sign).toContain("desktop/scripts/sign-cli-bundle.sh");
-  const build = step(text, "Build, sign and notarize");
-  expect(build).toContain('OPENBOT_BUNDLED_CLI: "1"');
-  expect(build).toContain("--config src-tauri/tauri.bundled-cli.conf.json");
-  // Bundled and signed before the build pins the runtime's digest.
-  expect(text.indexOf("- name: Bundle the Intelligence CLI")).toBeLessThan(
-    text.indexOf("- name: Sign the bundled CLI's binaries"),
+  expect(step(text, "Build, sign and notarize")).toContain(
+    'bun desktop/scripts/signed-build.ts darwin "$ARCH"',
   );
-  expect(text.indexOf("- name: Sign the bundled CLI's binaries")).toBeLessThan(
-    text.indexOf("- name: Build, sign and notarize"),
-  );
-  const verify = step(
-    text,
-    "Verify the signature, Gatekeeper and the notarization ticket",
-  );
-  expect(verify).toContain(
-    'desktop/scripts/verify-cli-bundle.sh "$app" developer-id',
-  );
+  expect(
+    step(text, "Verify the signature, Gatekeeper and the notarization ticket"),
+  ).toContain('desktop/scripts/verify-cli-bundle.sh "$app" developer-id');
 });
 
-test("the signed Windows build bundles the CLI and checks the installer has it", () => {
+test("the signed Windows build goes through signed-build.ts and checks the installer has the CLI", () => {
   const text = workflow("desktop-signing.yml");
-  expect(step(text, "Bundle the Intelligence CLI")).toContain(
-    "bun desktop/scripts/cli-bundle.ts win32 x64",
+  expect(step(text, "Build and sign")).toContain(
+    "bun desktop/scripts/signed-build.ts win32 x64",
   );
-  const build = step(text, "Build and sign");
-  expect(build).toContain('OPENBOT_BUNDLED_CLI: "1"');
-  expect(build).toContain("--config src-tauri/tauri.bundled-cli.conf.json");
   const verify = step(
     text,
     "Verify the installer carries the Intelligence CLI",
   );
   expect(verify).toContain("cli-bundle\\runtime\\node.exe");
   expect(verify).toContain("cli-bundle\\cli\\index.js");
+});
+
+/** A desktop/ folder signed-build.ts can plan for, with the bundled CLI's overlay. */
+function signedDesktop(): string {
+  const dir = mkdtempSync(join(tmpdir(), "openbot-signed-cli-"));
+  directories.push(dir);
+  mkdirSync(join(dir, "src-tauri"));
+  for (const file of [
+    "src-tauri/tauri.macos-signing.conf.json",
+    "src-tauri/tauri.windows-signing.conf.json",
+    "src-tauri/tauri.bundled-cli.conf.json",
+  ]) {
+    copyFileSync(join(repository, "desktop", file), join(dir, file));
+  }
+  writeFileSync(
+    join(dir, "build-version.json"),
+    JSON.stringify({
+      version: "0.3.0",
+      sourceSha: "a".repeat(40),
+      channel: "release",
+    }),
+  );
+  return dir;
+}
+
+function plannedCommands(
+  platform: "darwin" | "win32",
+  signingIdentity?: string,
+) {
+  const dir = signedDesktop();
+  const calls: string[][] = [];
+  const run: Runner = (cmd) => {
+    calls.push(cmd);
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const plan = planSignedBuild({
+    desktop: dir,
+    platform,
+    arch: platform === "darwin" ? "arm64" : "x64",
+    overlay:
+      platform === "darwin"
+        ? "src-tauri/tauri.macos-signing.conf.json"
+        : "src-tauri/tauri.windows-signing.conf.json",
+    repository: "CopilotKit/OpenBot",
+    workDir: join(dir, "work"),
+    bun: "bun",
+    run,
+    signingIdentity,
+  });
+  return { plan, calls: calls.map((call) => call.join(" ")) };
+}
+
+test("a signed Mac build bundles the CLI, then signs its binaries before the build pins them", () => {
+  const { plan, calls } = plannedCommands(
+    "darwin",
+    "Developer ID Application: Example (TEAM123456)",
+  );
+  expect(calls).toHaveLength(2);
+  expect(calls[0]).toContain("scripts/cli-bundle.ts darwin arm64");
+  expect(calls[1]).toContain("scripts/sign-cli-bundle.sh");
+  expect(calls[1]).toContain("Developer ID Application: Example (TEAM123456)");
+  expect(calls[1]).toContain("cli-bundle.entitlements.plist");
+  expect(plan.configs).toContain(CLI_OVERLAY);
+  expect(plan.env.OPENBOT_BUNDLED_CLI).toBe("1");
+});
+
+test("a signed Windows build bundles the CLI and signs nothing in it itself", () => {
+  const { plan, calls } = plannedCommands("win32");
+  expect(calls).toEqual([
+    expect.stringContaining("scripts/cli-bundle.ts win32 x64"),
+  ]);
+  expect(plan.configs).toContain(CLI_OVERLAY);
+  expect(plan.env.OPENBOT_BUNDLED_CLI).toBe("1");
 });
 
 /** A stand-in OpenBot.app: a signed main program and, unless `withCli` is false, a CLI bundle. */

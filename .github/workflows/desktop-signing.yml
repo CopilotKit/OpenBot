@@ -121,19 +121,15 @@ jobs:
       - name: Prepare internal build version
         run: bun scripts/desktop-version.ts internal
         working-directory: desktop
-      # The Intelligence CLI and its Node runtime ship inside the app; without them it cannot set
-      # up Intelligence at all.
-      - name: Bundle the Intelligence CLI
-        run: bun desktop/scripts/cli-bundle.ts win32 x64
+      # signed-build.ts builds as the Mac signing job does, with the Intelligence CLI and its Node
+      # runtime inside the app: without them it cannot set up Intelligence at all.
       - name: Build and sign
         env:
           WINDOWS_SIGNING: keyvault
-          OPENBOT_BUNDLED_CLI: "1"
           OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
           OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
           OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
-        run: bun run tauri build --config src-tauri/tauri.windows-signing.conf.json --config src-tauri/tauri.build-version.conf.json --config src-tauri/tauri.bundled-cli.conf.json --bundles nsis
-        working-directory: desktop
+        run: bun desktop/scripts/signed-build.ts win32 x64 src-tauri/tauri.windows-signing.conf.json --bundles nsis
       # Tauri restores the unsigned build output after bundling. Verify the app
       # employees receive by extracting its signed payload from the installer.
       - name: Extract signed app from NSIS installer

@@ -1,0 +1,463 @@
+name: Images
+
+# The container images, built and pushed from one commit, and the manifest that pins them by digest.
+# Callable rather than triggered, so every channel that publishes images builds them the same way
+# and only the tags differ. The caller decides what the images are called; this decides how they
+# are made.
+on:
+  workflow_call:
+    inputs:
+      # A full commit SHA, not a branch or a tag. A name can move between the moment it is chosen
+      # and the moment it is checked out, and then the images would not be the commit the caller
+      # meant.
+      ref:
+        type: string
+        required: true
+      # Extra tags, one per line, written next to `sha-<ref>` on every image. A release passes its
+      # version here.
+      tags:
+        type: string
+        default: ""
+      # Whether `latest` moves to these images. Only a release should say yes.
+      latest:
+        type: boolean
+        default: false
+      # The version recorded in the manifest. It names the build; it is not used as a tag.
+      manifest_version:
+        type: string
+        required: true
+    outputs:
+      manifest-artifact:
+        description: The name of the artifact that holds container-images.json.
+        value: ${{ jobs.manifest.outputs.artifact }}
+
+# Least privilege by default. Jobs that need more must declare it locally. No concurrency group
+# here: it would be shared with whichever workflow calls this, and cancel the caller's own runs.
+permissions:
+  contents: read
+
+# The identity stamped into every image, the same expressions publish-release.yml and desktop.yml
+# use. A called workflow does not inherit its caller's `env`, so it is stated here as well.
+env:
+  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
+  OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
+
+jobs:
+  # The inputs are checked once, before anything is built, so a bad tag fails in seconds rather than
+  # after twenty images have been pushed without it.
+  components:
+    name: components
+    runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.components.outputs.components }}
+      tags: ${{ steps.tags.outputs.tags }}
+      repository: ${{ steps.registry.outputs.repository }}
+    steps:
+      - name: Check the commit
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ref must be a full 40-character commit SHA, got '$REF'."
+            exit 1
+          fi
+      # The tag names every image and manifest list below is given, without the repository. The
+      # commit tag is prefixed with `sha-` because a bare 40-character hex string is easy to mistake
+      # for a digest, and a tag that only some tools can tell apart from a digest is one somebody
+      # will eventually paste into the wrong place.
+      - id: tags
+        name: Write the tag list
+        env:
+          REF: ${{ inputs.ref }}
+          TAGS: ${{ inputs.tags }}
+          LATEST: ${{ inputs.latest }}
+        run: |
+          set -euo pipefail
+          names=("sha-$REF")
+          while IFS= read -r line || [ -n "$line" ]; do
+            # Only the ends are trimmed. A space inside a tag fails the check below rather than being
+            # quietly joined into a different tag.
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [ -z "$line" ] && continue
+            if [[ ! "$line" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]; then
+              echo "::error::'$line' is not a valid image tag."
+              exit 1
+            fi
+            names+=("$line")
+          done <<< "$TAGS"
+          if [ "$LATEST" = true ]; then
+            names+=("latest")
+          fi
+          # A caller that passes `latest` and also sets the flag gets the tag once.
+          unique="$(printf '%s\n' "${names[@]}" | awk '!seen[$0]++')"
+          echo "$unique"
+          # A random delimiter, so no tag can end the value early.
+          delimiter="EOF_$(openssl rand -hex 16)"
+          {
+            echo "tags<<$delimiter"
+            echo "$unique"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      # The services published alongside the image below. Read from the tree rather than written
+      # here, because CI checks the same file when it proves those Dockerfiles still build, so the
+      # set that is tested and the set that is published cannot drift apart.
+      - id: components
+        run: echo "components=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
+      # This repository's own namespace. A fork publishes under its own name and never into
+      # another publisher's registry.
+      - id: registry
+        name: Resolve this distribution's registry namespace
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          repository="ghcr.io/$(tr '[:upper:]' '[:lower:]' <<< "$REPOSITORY")"
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+
+  # One image, built once. Everything downstream refers to it by digest, so what was tested is what
+  # is deployed and there is no second build to disagree with the first.
+  image:
+    name: image
+    needs: components
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # The attestation is signed with the workflow's own OIDC identity, so there is no key to hold
+      # and the signature says which workflow, repository and commit produced the image.
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # The commit, whatever the caller added, and a moving latest when the caller asked for it. A
+      # release adds its version, which is the tag to deploy; the commit tag is how you find out
+      # what a running image actually contains.
+      - id: tags
+        name: Write the image references
+        env:
+          REPOSITORY: ${{ needs.components.outputs.repository }}
+          TAGS: ${{ needs.components.outputs.tags }}
+        run: |
+          set -euo pipefail
+          delimiter="EOF_$(openssl rand -hex 16)"
+          {
+            echo "tags<<$delimiter"
+            while IFS= read -r tag; do
+              [ -z "$tag" ] && continue
+              echo "$REPOSITORY:$tag"
+            done <<< "$TAGS"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+      - id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            OPENBOT_BUILD_VERSION=${{ inputs.manifest_version }}
+            OPENBOT_BUILD_COMMIT=${{ inputs.ref }}
+            OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
+            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
+            OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+      # BuildKit's own attestations above travel inside the image. This one is the record GitHub
+      # holds, and it is what `gh attestation verify oci://ghcr.io/copilotkit/openbot:vX.Y.Z
+      # -R CopilotKit/OpenBot` checks before anybody deploys it. Bound to the digest, never a tag,
+      # because a tag can be moved to point at something else afterwards.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ needs.components.outputs.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  # The images the installer pulls instead of building. `docker-compose.yml` builds these from
+  # source on every machine, which needs a toolchain and several minutes a desktop install does not
+  # have. Published here, from the same commit as the image above, so a deployment and a laptop run
+  # the same code.
+  #
+  # Two architectures, because the machines are laptops: arm64 Macs and amd64 everything else. Built
+  # on native runners rather than under QEMU. Emulated `bun install` and `vite build` are a known
+  # source of release-day flakiness, and arm64 runners are free to a public repository, so emulation
+  # would be the slower and less reliable option at no saving.
+  component-images:
+    name: ${{ matrix.image }} ${{ matrix.platform.arch }}
+    needs: components
+    runs-on: ${{ matrix.platform.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # One image failing should not hide whether the others build, and a half-finished run leaves
+      # nothing deployable: these builds are pushed untagged, and the tags are written by the job
+      # below only once both architectures of an image exist.
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.components.outputs.components) }}
+        platform:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Pushed by digest and deliberately untagged. A tag written here would name one architecture,
+      # and the two jobs for one image would race to own it, so the last to finish would decide what
+      # the tag meant.
+      #
+      # zstd, not gzip. A pull is already a compressed transfer, so this is not about compressing
+      # something that was not; it is a better algorithm for the same job. `force-compression`
+      # reaches layers that came from somebody else's registry; without it only our own thin layers
+      # change and the saving rounds to nothing. The cost is that these images no longer share layers
+      # with a gzip pull of the same base, and that a client which cannot read zstd cannot read them,
+      # which is why this is here and not on the `openbot` image above: that one is pulled by servers
+      # with whatever they have, and these are pulled by an installer that ships Podman. After the
+      # Chromium-only `agent-computer` Dockerfile change, while keeping Node/npm/npx from the
+      # official Node 24.18.1 image, local zstd OCI layer descriptors measured 535.0 MiB on arm64
+      # and 518.1 MiB on amd64.
+      - id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.image }}/Dockerfile
+          platforms: linux/${{ matrix.platform.arch }}
+          build-args: |
+            OPENBOT_BUILD_VERSION=${{ inputs.manifest_version }}
+            OPENBOT_BUILD_COMMIT=${{ inputs.ref }}
+            OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
+            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
+            OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
+          # `oci-mediatypes=true` because zstd layers have no Docker-schema2 media type to be
+          # described by. It is buildx's default for this exporter and is stated rather than
+          # assumed, since the push fails without it and the reason would not be obvious.
+          outputs: type=image,name=${{ needs.components.outputs.repository }}-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,force-compression=true
+          # Scoped per image and per architecture. One shared scope would have ten builds
+          # overwriting each other's cache and none of them reading their own.
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
+          provenance: true
+          sbom: true
+      # A matrix job's outputs are not addressable by the jobs that consume them, so the digest
+      # travels as a file. One artifact per image and architecture, because same-named artifacts
+      # from different matrix legs collide.
+      - name: Record the digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          ARCH: ${{ matrix.platform.arch }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir -p digests
+          echo "$DIGEST" > "digests/$ARCH"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-${{ matrix.image }}-${{ matrix.platform.arch }}
+          path: digests/
+          retention-days: 1
+
+  # Two per-architecture images become one reference. Whatever pulls it, a laptop or a cluster, names
+  # the manifest list and gets its own architecture without being told which one it is.
+  component-manifests:
+    name: ${{ matrix.image }} manifest
+    needs: [components, component-images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Same identity and the same reason as the image above: the attestation says which workflow,
+      # repository and commit produced this, and there is no key to hold.
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.components.outputs.components) }}
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Exact artifact names, one per architecture, not a `digest-<image>-*` glob. An image whose
+      # name is a prefix of another — `agent-langgraph` of `agent-langgraph-agui` — would otherwise
+      # match the other's digest artifacts too, and `merge-multiple` would overwrite this image's own
+      # `amd64`/`arm64` file with the other's. That shipped once: this image's manifest list was built
+      # from a digest that lived in the other's repository, so the join failed with "not found".
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: digest-${{ matrix.image }}-amd64
+          path: digests
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: digest-${{ matrix.image }}-arm64
+          path: digests
+      # The same tags as the image above, over the same repository-less list, so every image a
+      # build publishes answers to the same names.
+      - id: tags
+        name: Write the image references
+        env:
+          REPOSITORY: ${{ needs.components.outputs.repository }}-${{ matrix.image }}
+          TAGS: ${{ needs.components.outputs.tags }}
+        run: |
+          set -euo pipefail
+          delimiter="EOF_$(openssl rand -hex 16)"
+          {
+            echo "tags<<$delimiter"
+            while IFS= read -r tag; do
+              [ -z "$tag" ] && continue
+              echo "$REPOSITORY:$tag"
+            done <<< "$TAGS"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+      - id: merge
+        name: Write the tags over both architectures
+        env:
+          REPOSITORY: ${{ needs.components.outputs.repository }}-${{ matrix.image }}
+          COMMIT: ${{ inputs.ref }}
+          TAGS: ${{ steps.tags.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # Both architectures or neither. A manifest list holding one of them installs on half the
+          # machines and looks exactly like one holding both until somebody's laptop says
+          # "no matching manifest".
+          refs=()
+          for arch in amd64 arm64; do
+            digest="$(cat "digests/$arch")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            refs+=("$REPOSITORY@$digest")
+          done
+          tag_args=()
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            tag_args+=(--tag "$tag")
+          done <<< "$TAGS"
+          docker buildx imagetools create "${tag_args[@]}" "${refs[@]}"
+          # The list's own digest, which is what anything downstream pins. Read back from the
+          # registry rather than derived here, and checked, so a template that stops returning a
+          # digest fails now instead of writing something unusable into the release. Read through
+          # the commit tag, the one every build writes whatever else the caller asked for.
+          digest="$(docker buildx imagetools inspect "$REPOSITORY:sha-$COMMIT" --format '{{.Manifest.Digest}}')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ needs.components.outputs.repository }}-${{ matrix.image }}
+          subject-digest: ${{ steps.merge.outputs.digest }}
+          push-to-registry: true
+      # For the same reason the digests above travel as files: a matrix cannot hand a value to a
+      # later job.
+      - name: Record the manifest
+        env:
+          NAME: ${{ matrix.image }}
+          REPOSITORY: ${{ needs.components.outputs.repository }}-${{ matrix.image }}
+          DIGEST: ${{ steps.merge.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p manifests
+          jq -n --arg name "$NAME" --arg repository "$REPOSITORY" --arg digest "$DIGEST" \
+            '{name: $name, repository: $repository, digest: $digest}' > "manifests/$NAME.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: manifest-${{ matrix.image }}
+          path: manifests/
+          retention-days: 1
+
+  # The manifest, last, so nothing is recorded that was not built. It pins every digest, so a deploy
+  # or a rollback names an exact image rather than a tag somebody could move. Handed back as an
+  # artifact; what to do with it, attach it to a release or publish it somewhere else, is the
+  # caller's decision.
+  manifest:
+    name: manifest
+    needs: [components, image, component-manifests]
+    runs-on: ubuntu-latest
+    outputs:
+      artifact: container-images
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: manifest-*
+          path: manifests
+          merge-multiple: true
+      - name: Write the image manifest
+        env:
+          VERSION: ${{ inputs.manifest_version }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+          COMMIT: ${{ inputs.ref }}
+          COMPONENTS: ${{ needs.components.outputs.components }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          # Every image this build published, or the file is not written. A missing entry is a
+          # service whatever reads this would quietly build from source instead, which is the thing
+          # publishing them was for, and it would only be noticed on somebody's laptop.
+          expected="$(jq -r 'length' <<< "$COMPONENTS")"
+          found="$(find manifests -name '*.json' -type f | wc -l | tr -d ' ')"
+          if [ "$found" != "$expected" ]; then
+            echo "::error::Expected $expected component manifests, found $found."
+            exit 1
+          fi
+          components="$(jq -s 'map({
+            (.name): {
+              repository: .repository,
+              digest: .digest,
+              reference: (.repository + "@" + .digest),
+            }
+          }) | add' manifests/*.json)"
+          # `jq`, not `bun`: this job installs no toolchain, so reaching for the repository's runtime
+          # here is a step that was never taken. It was once, and the tag was never cut: the
+          # manifest step died on `bun: command not found` after the image had already been pushed,
+          # which is the one point in a release where a failure leaves a published image with
+          # nothing pointing at it.
+          jq -n \
+            --arg version "$VERSION" \
+            --arg digest "$DIGEST" \
+            --arg commit "$COMMIT" \
+            --arg repository "${{ needs.components.outputs.repository }}" \
+            --argjson components "$components" \
+            '{
+              version: $version,
+              commit: $commit,
+              images: ({
+                openbot: {
+                  repository: $repository,
+                  digest: $digest,
+                  reference: ($repository + "@" + $digest),
+                },
+              } + $components),
+            }' > container-images.json
+          cat container-images.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: container-images
+          path: container-images.json
+          retention-days: 30

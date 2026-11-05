@@ -657,8 +657,20 @@ fn require_update_root(shell: &Shell, root: &Path) -> Result<(), Problem> {
     }
     Ok(())
 }
+/// An internal or candidate build installs the release it was compiled with on every Start (see
+/// `deployment::pinned`), so a runtime update would be undone the next time OpenBot starts.
+fn refuse_runtime_update_in_pinned_build() -> Result<(), Problem> {
+    if deployment::pinned().is_some() {
+        return Err(Problem::plain(
+            "This build of OpenBot always runs the release it was made with, so it does not take \
+             runtime updates.",
+        ));
+    }
+    Ok(())
+}
 #[tauri::command]
 async fn check_runtime_update(root: String, version: String) -> Result<serde_json::Value, Problem> {
+    refuse_runtime_update_in_pinned_build()?;
     tauri::async_runtime::spawn_blocking(move || {
         updates::check(&stack::root_from(&root), &version).map_err(Problem::from)
     })
@@ -685,6 +697,7 @@ async fn stage_runtime_update(
     root: String,
     version: String,
 ) -> Result<serde_json::Value, Problem> {
+    refuse_runtime_update_in_pinned_build()?;
     let _update = RuntimeUpdateGuard::begin(&app)?;
     let root = stack::root_from(&root);
     require_update_root(&app.state::<Shell>(), &root)?;
@@ -717,6 +730,7 @@ async fn apply_runtime_update(
     harness: Option<harness::HarnessChoice>,
     backup_acknowledged: bool,
 ) -> Result<serde_json::Value, Problem> {
+    refuse_runtime_update_in_pinned_build()?;
     if !backup_acknowledged {
         return Err(Problem::plain(
             "Acknowledge downtime and database backup recovery before applying this update.",
@@ -1591,7 +1605,18 @@ fn linux_server_user(engine: engine::Engine, uid: u32, gid: u32) -> String {
 /// Install the latest published deployment on first use, then keep its recorded version.
 ///
 /// Local preparation fetches the manifest needed by both launch and plan sign-in images.
-/// An installed deployment keeps its exact tag without consulting GitHub again.
+/// A customer build keeps an installed deployment's exact tag without consulting GitHub again.
+/// An internal or candidate build instead installs the deployment it was compiled with over any
+/// deployment already there, and keeps the data.
+/// Whether Install lays the deployment out again before preparing it.
+///
+/// A deployment of the other kind at the same version would otherwise stay, and Start refuses it,
+/// so the person would be sent back to Install with nothing Install changes.
+fn deployment_needs_laying_out(root: &Path, version: &str, pin: Option<&deployment::Pin>) -> bool {
+    deployment::needs_fetch(root, version)
+        || preparation::other_release(deployment::installed(root).as_ref(), pin).is_some()
+}
+
 async fn deployment_ready<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     root: &Path,
@@ -1613,15 +1638,19 @@ async fn deployment_ready<R: tauri::Runtime>(
     let target = root.to_path_buf();
     let handle = app.clone();
     let version = tauri::async_runtime::spawn_blocking(move || {
+        let pin = deployment::pinned();
         let version = deployment_release::resolve_version(&target)?;
-        if deployment::needs_fetch(&target, &version) {
+        if deployment_needs_laying_out(&target, &version, pin.as_ref()) {
             report_running(
                 &handle,
                 "deployment",
                 format!("Downloading OpenBot {version}."),
                 None,
             );
-            deployment::fetch(&target, &version)?;
+            match &pin {
+                Some(pin) => deployment::fetch_pinned(&target, pin)?,
+                None => deployment::fetch(&target, &version)?,
+            }
         }
         Ok::<_, String>(version)
     })
@@ -7902,6 +7931,28 @@ mod tests {
         assert!(migrate.is_ok(), "{migrate:?}");
     }
 
+    // A pinned build installs its own pin, so the unpinned keep-the-installed-release behaviour does not apply.
+    #[cfg(not(openbot_pinned))]
+    /// Start refuses a deployment of the other kind, so Install must replace it even when the
+    /// version matches; otherwise the person is sent back to Install with nothing it will change.
+    #[test]
+    fn install_lays_out_again_a_deployment_of_the_other_kind_at_the_same_version() {
+        let root = temp_root("deployment-kind");
+        write_installed_deployment(&root);
+        let pin = deployment::Pin {
+            version: "v0.3.0".into(),
+            commit: "0".repeat(40),
+            images: "{}",
+        };
+        deployment::record(&root, "v0.3.0", false).unwrap();
+        assert!(!deployment_needs_laying_out(&root, "v0.3.0", None));
+        assert!(deployment_needs_laying_out(&root, "v0.3.0", Some(&pin)));
+        deployment::record(&root, "v0.3.0", true).unwrap();
+        assert!(!deployment_needs_laying_out(&root, "v0.3.0", Some(&pin)));
+        assert!(deployment_needs_laying_out(&root, "v0.3.0", None));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn the_linux_server_runs_as_the_owner_under_docker_and_as_namespace_root_under_podman() {
         assert_eq!(
@@ -7915,7 +7966,7 @@ mod tests {
     fn deployment_ready_preserves_the_installed_release() {
         let root = temp_root("deployment-ready-pinned");
         write_installed_deployment(&root);
-        deployment::record(&root, "v0.0.7").unwrap();
+        deployment::record(&root, "v0.0.7", false).unwrap();
         let app = tauri::test::mock_builder()
             .manage(Shell::default())
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -13242,7 +13293,7 @@ fn main() {
             serde_json::to_string(&images).unwrap(),
         )
         .unwrap();
-        deployment::record(root, DEPLOYMENT_VERSION).unwrap();
+        deployment::record(root, DEPLOYMENT_VERSION, false).unwrap();
         // Installed by this app, so its Compose project is decided and recorded already. Choosing
         // one is `stack::project`'s, tested in `stack`.
         std::fs::write(
