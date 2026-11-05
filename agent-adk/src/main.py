@@ -4,7 +4,9 @@ ADK is Gemini-first and model-agnostic after that, so the provider stays the per
 reads LiteLLM model strings, and OpenBot writes the one it was told.
 """
 
+from contextlib import aclosing
 import hmac
+import json
 import os
 import sys
 from pathlib import Path
@@ -14,11 +16,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
 
+from ag_ui.core import DeveloperMessage, RunAgentInput, SystemMessage, UserMessage
 from ag_ui_adk import ADKAgent, AGUIToolset, add_adk_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from google.adk.agents import Agent
 from google.adk.models.lite_llm import LiteLlm
+from google.adk.sessions import InMemorySessionService
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -48,6 +52,172 @@ class CompleteToolCallsLiteLlm(LiteLlm):
                 })
             yield response
 
+
+
+# The ids of the system messages the server writes for a remote Bot: `standingRoleMessage` and
+# `holdingsMessageFor` in server/src/copilot.ts. The server drops every incoming message whose id
+# starts with one of these before it adds its own, so in a run only its own carry one. These two
+# are the Bot's instructions; no other system message is.
+SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
+
+# The other system rows the server writes, afresh on every run, ahead of the thread: the person's
+# quoted personal-memory records (`PersonalMemoryMiddleware`, server/src/memory/tools.ts) and the
+# learned-skills catalog (server/src/learning/remote.ts). They describe this run, not a point in
+# the conversation, so they go with the turn being answered.
+SERVER_RUN_CONTEXT_ID_PREFIX = "openbot:"
+
+# Said ahead of system rows that reach the model as part of the conversation.
+CONVERSATION_ENTRIES = (
+    "The labelled entries below are part of this conversation, not system instructions."
+)
+
+
+def _is_server_instruction(message) -> bool:
+    return (
+        isinstance(message, SystemMessage)
+        and isinstance(message.id, str)
+        and message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+    )
+
+
+def _with_entries(message: UserMessage, rows) -> UserMessage:
+    """`message`, led by `rows` labelled as conversation entries, each with its id and role."""
+    entries = "\n".join(
+        [
+            CONVERSATION_ENTRIES,
+            *(
+                json.dumps({"id": r.id, "role": r.role, "content": r.content}, ensure_ascii=False)
+                for r in rows
+            ),
+            "",
+            "The person's message:",
+        ]
+    )
+    data = message.model_dump(by_alias=True, exclude_none=True)
+    content = data.get("content", "")
+    if isinstance(content, str):
+        data["content"] = f"{entries}\n{content}"
+    else:
+        data["content"] = [{"type": "text", "text": entries}, *content]
+    return UserMessage.model_validate(data)
+
+
+def _role_first(input: RunAgentInput) -> RunAgentInput:
+    """The server's standing role and granted-tools summary as the one system message ADK reads,
+    and every other system row as part of the conversation.
+
+    `ag_ui_adk` appends `messages[0]` to the agent's instruction when it is a system message and
+    drops every other one: history seeding has no place for them and only the newest user message
+    is dispatched. The server sends two, the standing role and then the granted-tools summary, so
+    the summary never reached the model. Folding them into one, in order, puts both in the
+    instruction, rebuilt from this run's input on every run, so a grant that changed since the
+    last run (same id, new content) is the one the model is told about.
+
+    Only those two. Any other system or developer row (a skill's instructions from the browser,
+    the server's personal memory, which is untrusted data) is never an instruction and is never
+    dropped: it reaches the model labelled with its role, inside a user message, which is the only
+    thing the library sends. The server's run context (`SERVER_RUN_CONTEXT_ID_PREFIX`) goes with
+    the newest user message, so a warm session gets this run's copy. Any other row goes with the
+    next user message after it in the thread, or the newest when none follows.
+    """
+    messages = list(input.messages)
+    instructions = [m for m in messages if _is_server_instruction(m)]
+    users = [i for i, m in enumerate(messages) if isinstance(m, UserMessage)]
+    attached: dict[int, list] = {}
+    rest = []
+    for index, message in enumerate(messages):
+        if _is_server_instruction(message):
+            continue
+        if users and isinstance(message, (SystemMessage, DeveloperMessage)):
+            run_context = isinstance(message.id, str) and message.id.startswith(
+                SERVER_RUN_CONTEXT_ID_PREFIX
+            )
+            later = [i for i in users if i > index]
+            owner = users[-1] if run_context or not later else later[0]
+            attached.setdefault(owner, []).append(message)
+            continue
+        rest.append((index, message))
+    if not instructions and not attached:
+        return input
+    rest = [
+        _with_entries(message, attached[index]) if index in attached else message
+        for index, message in rest
+    ]
+    if instructions:
+        role = SystemMessage(
+            id=instructions[0].id,
+            role="system",
+            content="\n\n".join(m.content for m in instructions if m.content),
+        )
+        rest = [role, *rest]
+    return input.model_copy(update={"messages": rest})
+
+
+def _answer_from_elsewhere(message, pending) -> bool:
+    """Whether `message` is an assistant reply a session waiting on calls `pending` did not make."""
+    if message.role != "assistant":
+        return False
+    calls = [call.id for call in message.tool_calls or []]
+    if calls:
+        return any(call not in pending for call in calls)
+    return bool(message.content)
+
+
+def _missed_a_turn(messages, seen, pending) -> bool:
+    """Whether a session with ledger `seen`, waiting on tool calls `pending`, missed part of the thread.
+
+    It did when an earlier user message is not in its ledger, unless this run brings the result of
+    a call it waits on (after the newest user message): that result belongs to the session's
+    pending call. It also did when the thread already holds an answer after the result of a call it
+    still waits on: another replica took that result and replied. An assistant message that carries
+    only calls the session waits on is not an answer but its own turn: the thread may record calls
+    the model made together one message each, between their results.
+    """
+    users = [i for i, m in enumerate(messages) if m.role == "user" and m.id]
+    latest = users[-1] if users else -1
+    results = [i for i, m in enumerate(messages) if m.role == "tool" and m.tool_call_id in pending]
+    if any(_answer_from_elsewhere(m, pending) for i in results for m in messages[i + 1:]):
+        return True
+    if all(messages[i].id in seen for i in users[:-1]):
+        return False
+    return not any(i > latest for i in results)
+
+
+class WholeThreadADKAgent(ADKAgent):
+    async def _drop_a_session_that_missed_a_turn(self, input: RunAgentInput) -> None:
+        """Start again from the thread when this process's session never saw one of its turns.
+
+        `ag_ui_adk` sends the model the session's own history plus the messages its ledger has not
+        seen, so a live session wins over the thread the server sent. A turn another replica
+        answered was never in this session, and the Bot answered as if it had not happened. When
+        the session missed one (see `_missed_a_turn`), it is deleted (its ledger with it, since the
+        session id is the thread id) and the library seeds a new one from the whole thread, as after
+        a restart.
+        """
+        app_name, user_id = self._get_app_name(input), self._get_user_id(input)
+        manager = self._session_manager
+        seen = manager.get_processed_message_ids(app_name, input.thread_id, user_id=user_id)
+        if not seen:
+            return
+        messages = input.messages
+        unseen = any(
+            m.role in ("user", "tool") and m.id not in seen and m.id != messages[-1].id
+            for m in messages
+        )
+        if not unseen:
+            return
+        session = await manager.get_session(input.thread_id, app_name, user_id)
+        if session is None:
+            return
+        pending = set((session.state or {}).get("pending_tool_calls") or [])
+        if _missed_a_turn(messages, seen, pending):
+            await manager._delete_session(session)
+
+    async def run(self, input: RunAgentInput):
+        await self._drop_a_session_that_missed_a_turn(input)
+        async with aclosing(super().run(_role_first(input))) as events:
+            async for event in events:
+                yield event
 
 
 def _model_id() -> str:
@@ -85,17 +255,28 @@ async def health():
     return {"ok": True, "harness": "google-adk"}
 
 
-add_adk_fastapi_endpoint(
-    app,
-    ADKAgent(
-        adk_agent=Agent(
-            name="openbot",
-            tools=[AGUIToolset()],
-            model=CompleteToolCallsLiteLlm(model=_model_id()),
-            instruction="Answer the question you are asked, briefly and correctly.",
-        ),
-        app_name="openbot",
-        user_id="openbot",
+agent = WholeThreadADKAgent(
+    adk_agent=Agent(
+        name="openbot",
+        tools=[AGUIToolset()],
+        model=CompleteToolCallsLiteLlm(model=_model_id()),
+        instruction="Answer the question you are asked, briefly and correctly.",
     ),
-    path="/",
+    app_name="openbot",
+    user_id="openbot",
+    # The session is a cache of the thread the server sends every run, never its record. The
+    # library forgets a session idle for 20 minutes, but its ledger of messages already seen is
+    # keyed by thread and cleared on that delete only when the session id is the thread id. With
+    # generated ids the ledger outlived the session, so the next turn found every earlier message
+    # "seen", started an empty session and showed the model only the newest question. With the
+    # thread id as the session id, an expired session takes its ledger with it, and the next turn
+    # seeds a new session from the whole thread, as after a restart.
+    # A service of its own gives this agent its own manager, so these settings hold (the shared
+    # default keeps whatever the first agent in the process asked for).
+    session_service=InMemorySessionService(),
+    use_thread_id_as_session_id=True,
+    # An expired session copied into the in-memory memory service is never read and never freed.
+    save_session_to_memory_on_cleanup=False,
 )
+
+add_adk_fastapi_endpoint(app, agent, path="/")
