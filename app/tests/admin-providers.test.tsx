@@ -243,3 +243,25 @@ test("an old link to Enterprise controls opens the Admin overview", () => {
     (thrown as { options?: { to?: string } } | undefined)?.options?.to,
   ).toBe("/admin");
 });
+
+test("cancelling allowlist edits restores the saved choices when reopened", async () => {
+  const view = await draw(ProvidersPage);
+  fireEvent.click(await view.findByRole("button", { name: /Allowed models/ }));
+  fireEvent.click(
+    await view.findByRole("checkbox", { name: "Allow GPT-6 Sol" }),
+  );
+  fireEvent.click(view.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  fireEvent.click(view.getByRole("button", { name: /Allowed models/ }));
+  const reopened = await view.findByRole("checkbox", {
+    name: "Allow GPT-6 Sol",
+  });
+  expect(reopened.getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(view.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(writes).toContainEqual({
+      path: "/api/admin/enterprise/settings/modelAllowlist",
+      body: { value: { enabled: true, models: ["openai/gpt-5.6-terra"] } },
+    }),
+  );
+});

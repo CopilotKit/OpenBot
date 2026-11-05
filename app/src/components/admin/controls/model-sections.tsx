@@ -192,15 +192,18 @@ export function ModelAllowlistSection() {
                 </ItemActions>
               </Item>
             </PageRows>
-            <AllowedModelsDialog
-              builtInModel={data.builtInModel}
-              initial={modelAllowlist.models}
-              onClose={() => setOpen(false)}
-              onSave={(models) =>
-                setSetting("modelAllowlist", { ...modelAllowlist, models })
-              }
-              open={open}
-            />
+            {/* A fresh draft on each open, from the latest saved allowlist. */}
+            {open ? (
+              <AllowedModelsDialog
+                builtInModel={data.builtInModel}
+                initial={modelAllowlist.models}
+                onClose={() => setOpen(false)}
+                onSave={(models) =>
+                  setSetting("modelAllowlist", { ...modelAllowlist, models })
+                }
+                open
+              />
+            ) : null}
           </>
         );
       }}
@@ -267,11 +270,7 @@ export function AllowedModelsDialog({
   return (
     <Dialog
       onOpenChange={(next) => {
-        if (next) {
-          setSelected([...initial]);
-          setSearch("");
-          setOther("");
-        } else onClose();
+        if (!next) onClose();
       }}
       open={open}
     >
