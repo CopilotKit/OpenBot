@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Thirty-four things change for an existing deployment:
+**Before upgrading.** Forty things change for an existing deployment:
 - Migrations `0066_recorder_extension`, `0067_recorder_activity` and
   `0068_recorder_organization_session_expiry` add six tables for the OpenBot Recorder and each
   person's own Learning space (`recorder_connect_codes`, `recorder_connections`,
@@ -29,7 +29,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   writes `claude-sonnet-5-5`. A `BOT_MODEL` you set is left alone.
 - A Bot that deletes, sends, shares or posts, on a schedule too, now waits for approval every time,
   in both editions. An Always allow saved for one of these, including one given on a private-share
-  card for a send, no longer applies.
+  card for a send, no longer applies. Through an app, removing something and a scheduled send now
+  ask every time, and paying an invoice or order, running payroll, and upgrading, downgrading or
+  changing a paid plan are handed to the person.
 - A hosted computer's browser now runs headed by default (full Chromium on the computer's own
   virtual display), which uses a little more memory. `COMPUTER_BROWSER_MODE=headless` (Helm:
   `computers.browserMode: headless`) keeps headless.
@@ -137,6 +139,23 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - A Bot on the Claude Agent SDK harness starts a new Claude process for every turn instead of
   keeping one per conversation, so each turn starts a little later (about a second or two), and a
   conversation past about 100,000 tokens now leaves out its oldest messages.
+- Picking the Bot for an untagged message from home now calls `claude-haiku-5-5` (Anthropic) or
+  `gpt-6-luna` (OpenAI) on the deployment's key, and falls back to the Bots' model when the provider
+  refuses it. `ROUTER_MODEL` names another. Behind `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`, or
+  with a model allowlist that leaves it out, routing stays on the Bots' model.
+- Admin → Enterprise controls is gone: `/admin/enterprise` opens the Admin overview, and its
+  switches are on Permissions, Providers, Identity providers, Computers, Plugins, Automatic learning
+  and Audit (below).
+- OpenBot Desktop no longer connects to a hosted or self-hosted Intelligence. An installation set
+  up that way opens at the first screen and sets up Intelligence on this computer, keeping its
+  install, database and Bots; its conversations stay in the old Intelligence.
+- On a Podman machine an earlier OpenBot Desktop made, local Intelligence will not start until you
+  stop the machine, run `podman machine set --rootful` and start it again. OpenBot's data stays.
+- The Helm chart now installs its own Intelligence. A release on managed Intelligence or one of its
+  own needs `--set intelligence.enabled=false`; until then the chart refuses the upgrade,
+  `--reuse-values` included. `routines.enabled` now defaults to `true`, and a changed value under
+  `secrets` restarts the server.
+- Migration `0077_channel_opening` adds a nullable `channels.opening`.
 
 ### Teach a Bot: do a task once in your own browser, and your Bots learn it
 
@@ -223,21 +242,49 @@ variable to change, unless `OPENBOT_SINGLE_USER=true`, no sign-in provider or
 
 See `docs/personal-edition.md`.
 
+### OpenBot Desktop runs CopilotKit Intelligence on your own computer, set up from the app alone
+
+OpenBot Desktop now sets up OpenBot for one person with CopilotKit Intelligence on the same
+computer: Account (sign in to CopilotKit and accept the Intelligence evaluation licence), Install,
+AI and Start. Install starts on the first click and shows each image's size and speed. The
+installer carries the CopilotKit CLI current when it was built, and its Node, checked against
+digests taken then. The CLI chooses and runs the Intelligence; sign-in shows OpenBot's own page
+when the CLI offers it. OpenBot opens once Intelligence is ready with a valid licence, and the app
+warns five days before the licence expires.
+
+- **Only this Intelligence.** No hosted or self-hosted option, organization sign-in or Bot picker.
+- **OpenBot runs in containers**, from the published `openbot-server` image, not as Bun processes
+  the app installed. New installations are Compose project `openbot-desktop`, apart from a source
+  checkout's; an earlier one keeps its project and data.
+- **A new Podman machine is rootful**, as Intelligence needs. On Windows, setup turns on WSL 2 with
+  one prompt and a restart, and says when the machine cannot run it.
+- **Settings → This computer**, in the Desktop app only, shows each part's memory, with Restart,
+  Stop and Copy diagnostics. Stop and Quit stop Intelligence too, if the app created it.
+- **Apps need your own `COMPOSIO_API_KEY`** in `~/OpenBot/.env`.
+
 ### Deleting, sending, sharing and posting always ask first
 
-In both editions a Bot now asks before it deletes something, sends to other people, shares or
-posts, whatever Ask before making changes, a rule or Auto-review says. The card offers Allow once or
-Deny: Always allow is not offered, and the server refuses one. Paying and buying are still handed to
-you to do yourself, and now also cover an app tool named for a transfer, payout, withdrawal, charge
-or order, and buttons such as Transfer, Place your order and Send $20.
+In both editions a Bot now asks before it deletes or removes something, sends to other people (a
+scheduled send too), shares or posts, whatever Ask before making changes, a rule or Auto-review
+says. The card offers Allow once or Deny: Always allow is not offered, and the server refuses one.
+Paying and buying are still handed to you to do yourself, and now also cover an app tool named for a
+transfer of money, a payout, withdrawal, charge or order, paying an invoice or order, a payroll run,
+an app subscription, or upgrading, downgrading or changing a plan, and buttons such as Transfer,
+Place your order, Send $20, Upgrade, Change plan, and Subscribe for a paid plan. Moving a
+repository or ownership is not a payment.
 
-The four are recognised only by what the action is called: an app tool's name (`GMAIL_SEND_EMAIL`,
-`GOOGLEDRIVE_DELETE_FILE`), or a browser button whose label starts with the action (Delete, Send,
-Share, Post). An app call with an email address in `to`, `cc`, `attendees` or a similar field is a
-send, and so are Cmd+Enter or Ctrl+Enter, and Enter in a box for a message, reply or comment.
-Drafts, edits, labels, events with no guests, a Bot's memory, and files and commands on its own
-computer stay ordinary. An action whose tool or button doesn't name it (an unlabelled icon, trashing
-mail by relabelling it) isn't caught: Auto-review, Ask before making changes or a rule covers those.
+The four are recognised only by what the action is called: an app tool's first verb
+(`GMAIL_SEND_EMAIL`, `GOOGLEDRIVE_DELETE_FILE`), so marking a comment as spam, liking a post,
+cancelling a scheduled send or a request named for the web's POST method
+(`STRIPE_POST_V1_PLANS_OVERVIEW`) is neither a send nor a post; or a browser button whose label
+starts with the action (Delete, Send, Share, Post) or is exactly Remove, Comment or Reply. Removing
+somebody's access asks as sharing. An app call with an email address in `to`, `cc` or any argument
+named for attendees, invitees or guests is a send, so a meeting invitation asks through every
+calendar app, and so are Cmd+Enter or Ctrl+Enter, and Enter in a box for a message, reply or
+comment. Drafts, edits, labels, events with no guests, a Bot's memory, and files and commands on its
+own computer stay ordinary. An action whose tool or button doesn't name it (an unlabelled icon,
+trashing mail by relabelling it) isn't caught: Auto-review, Ask before making changes or a rule
+covers those.
 
 You are asked once: a connector send asks on the send itself, not on a private-share card first,
 and a Bot OpenBot runs is told not to put its own approval card in front. See `docs/approvals.md`.
@@ -249,7 +296,7 @@ the time, and for a public Bot one set of logins shared by everyone who used it.
 person uses run on that person's one computer, each with its own browser profile and folder, so a
 login belongs to the person and the Bot. Tick **Isolated** when making a Bot, or in its Setup, to
 give it a computer of its own; everyone who uses that Bot shares it and whatever is signed in there,
-which its Setup says. Admin → Enterprise controls → Isolated Bots decides who may: on for everyone
+which its Setup says. Admin → Permissions → Isolated Bots decides who may: on for everyone
 by default, or limited to roles and groups. A Bot whose owner loses the switch runs on the owner's
 computer from its next run, and its Setup says why. A deployment with one shared computer (Helm
 `shared`, or no supervisor) cannot isolate a Bot, and the checkbox says so.
@@ -339,21 +386,42 @@ connection whose refresh token is refused is withdrawn, with Reconnect on the ca
 A Bot, built in or an AG-UI agent somebody brings, can hand a piece of its work to a subagent: a
 fresh run of the same Bot, as the same person, with the same tools, approval rules and standing
 instructions, that sees none of the conversation and hands back only its answer. Bots are told to
-work this way by default, giving anything that needs many tool calls or a lot of reading to
-subagents (up to five for one answer) and keeping decisions and the answer themselves, so a
-question that needs several lookups makes more model calls than before. A subagent never waits on
-the person: an action that needs approval is handed back, and the Bot asks in the conversation.
-Each subagent shows as a subtask with its steps and its answer. OpenBot runs the tool itself, so a
-remote agent needs no change.
+use subagents only when a request falls into several independent parts that each need a lot of
+reading (up to five for one answer), to do a single question or search themselves, and to keep
+decisions and the answer. A subagent never waits on the person: an action that needs approval is
+handed back, and the Bot asks in the conversation. A subtask is a step in the Bot's work line beside
+its searches ("Searched the web, read 5 pages and ran 2 subtasks") and opens to its task, its
+answer and its steps; one that stopped before an approval says Handed back. OpenBot runs the tool
+itself, so a remote agent needs no change.
 
-### OpenBot Desktop for Mac is signed and notarized, and updates itself when you say so
+### People can pick the model a built-in Bot answers on, per conversation
 
-The Mac `.dmg` files attached to a release are built for Apple silicon and Intel, signed with a
-Developer ID and notarized by Apple, so macOS opens the app without Open Anyway. An app installed
-from one checks GitHub for a newer release once when it opens and, if there is one, offers **Update
-and restart**. Nothing downloads until you press it, and the app refuses an update not signed with
-OpenBot's update key. A failed check says nothing; a failed install says why. Windows, Linux and any
-unsigned Mac build have no updater.
+A brain icon in the composer opens a searchable list of models, read from the provider, or from the
+gateway in `OPENAI_BASE_URL`, filtered to chat models and to the model allowlist. It is offered in a
+conversation with one built-in Bot, and on a new conversation before its first message. The pick is
+kept on the server per person and conversation (migration `0076_model_selection` adds a nullable
+column), every run there uses it, routines too, and the allowlist and usage records judge the
+picked model. Off by default in the team edition: an admin turns on "Let people choose a model"
+under Admin → Providers. Off, every run uses the configured model and saved picks are kept. Always
+on in the personal edition. Bots on their own framework, and built-in Bots on a ChatGPT or Claude
+subscription, keep their own model.
+
+The composer is now two rows: the message box, then attach and the model on the left, dictation and
+send on the right. It draws no focus ring, and opening a conversation puts the caret in it.
+
+### OpenBot Desktop installers are signed and at fixed links, and the Mac app updates itself
+
+Each release carries OpenBot Desktop for Mac (Apple silicon and Intel), signed with a Developer ID
+and notarized so macOS opens it without Open Anyway, and for Windows x64, code-signed. The newest
+stable release's are at `https://downloads.copilotkit.ai/latest/` and
+`https://github.com/CopilotKit/OpenBot/releases/latest/download/`, as `OpenBot-mac-arm64.dmg`,
+`OpenBot-mac-x64.dmg` and `OpenBot-windows-x64-setup.exe`. A release becomes Latest only once its
+signed installers are on it, so these never give an unsigned build or a candidate.
+
+The Mac app checks GitHub's Latest release when it opens and offers **Update and restart**. Nothing
+downloads until you press it, and an update not signed with OpenBot's update key is refused.
+Windows has no updater. A release candidate is a GitHub prerelease, linked by its version; its app
+has no updater and always runs its own release, laid over the folder's installation, data kept.
 
 ### An installation moves to a newer release only when you ask, with a backup first
 
@@ -379,13 +447,19 @@ actions to Bots, and let each person connect their own account, as with Composio
 one provider at a time: with both keys set, `OPENBOT_BROKER_PROVIDER` (`composio` or `arcade`) says
 which, and switching is refused while the other still holds connections. An app's page says how many
 permissions its actions ask for, and warns when Arcade has not said which only read, so every call
-will ask for approval. Each Arcade provider needs an OAuth app of your own and its verifier set in
-Arcade's dashboard to this deployment's `/api/plugins/arcade/verify`; the server reminds you at
-start. On every deployment, an action whose name no model accepts is listed on its app's page
-instead of failing the app, and a call to Composio or Arcade from a screen gives up after 10
-seconds. Migrations `0057_arcade_provider`, `0058_arcade_provider_backfill` and `0059_skipped_tools`
-add `pending_authorizations`, `mcp_tools.vendor_name` and `mcp_servers.skipped_tools`. See
+will ask for approval. Each Arcade provider needs an OAuth app of your own. On every deployment, an
+action whose name no model accepts is listed on its app's page instead of failing the app, and a
+call to Composio or Arcade from a screen gives up after 10 seconds. Migrations
+`0057_arcade_provider`, `0058_arcade_provider_backfill` and `0059_skipped_tools` add
+`pending_authorizations`, `mcp_tools.vendor_name` and `mcp_servers.skipped_tools`. See
 [Arcade](docs/plugins/arcade.md).
+
+After a consent, Arcade sends the person to its project's user verifier, which must be this
+deployment's `/api/plugins/arcade/verify`. A single-user install points it there through Arcade's
+API before each Connect and reads it back, so several on one key take turns. A deployment that signs
+people in treats the project as shared and never changes it: until it names this deployment, Connect
+is refused before any consent screen, with the exact address to set in Arcade's dashboard, which the
+server also names at start. See [Arcade](docs/plugins/arcade.md#the-verifier-url).
 
 An Arcade app has Connect, under Connections and on a Bot's app card, which asks Arcade for
 everything the app's actions need in one consent; the action list still approves one action at a
@@ -433,7 +507,7 @@ never fails a run, and Automatic Learning off, or the Bot excluded, still means 
 
 **Settings → Learning** chooses who else's Bots use a person's Skills: only their own (the
 default), every Bot in the deployment, or Skills they open one by one. Opening any needs **Admin →
-Enterprise controls → Skill sharing**, off by default; while it is off nothing is shared, and each
+Automatic learning → Skill sharing**, off by default; while it is off nothing is shared, and each
 person's choice is kept for when it is turned on.
 
 For recordings to reach Intelligence it needs Product Trajectories (in its licence, and
@@ -468,6 +542,59 @@ person can use the bar or record.
   control can clear its browser. Audited as `computer.browser_cleared`.
 - Leaving a conversation while you hold a Bot's control no longer leaves it blank: the Bot's reply
   after you hand back is there when you return.
+
+### Enterprise controls moved onto the Admin pages each part governs
+
+What people may do is on a new Permissions page; the model switch, the model allowlist and model
+usage are on a new Providers page; Require SSO and SCIM are on Identity providers; the network
+policy and stopping idle computers are on Computers; the MCP server allowlist is on Plugins; Skill
+sharing is on Automatic learning; Action Recording and the OpenTelemetry export are on Audit. An old
+link to Enterprise controls opens the Admin overview. The model allowlist is now picked from the
+provider's own list, searchable, with the configured model marked; a model the list lacks, such as a
+remote Bot's, is added by its `provider/model` name.
+
+### A message sent from home opens its conversation at once
+
+Pressing send on the home page opens the conversation straight away, showing the message, while a
+Bot is picked and the conversation is made behind it. The real conversation replaces it if you are
+still there, and Back opens it if you left. A start that fails returns you to home with the message
+in the box and the reason under it. Picking the Bot for an untagged message now runs on a lighter
+model (see Before upgrading), and a message that names its Bot with `@` no longer waits for the
+audit record of that choice.
+
+### Built-in Bots know today's date, and a run always ends with an answer
+
+Built-in Bots are told today's date (UTC), so "this quarter" or "last week" no longer starts a guess
+or a `date` command that waits for approval. The last step a built-in Bot's run is allowed is sent
+with no tools, so a Bot that spent its steps searching answers from what it found instead of
+stopping with nothing said. Every Bot is told to draw a table or chart once, with its result.
+
+### The Helm chart installs CopilotKit Intelligence with OpenBot
+
+By default (`intelligence.enabled: true`), one `helm install` with `secrets.licenseToken` and
+`secrets.modelApiKey` is the whole product: Intelligence 0.16.0-rc.3, a release candidate,
+self-hosted on its own PostgreSQL, Redis and object store. Its bootstrap creates OpenBot's project
+and `openbot` Learning container, with a runtime key the chart generates, and nobody signs in.
+Automatic Learning, on `secrets.modelApiKey` with `openai/gpt-5.5`, and trajectories are on. The
+server carries the browser's socket to Intelligence's gateway (`INTELLIGENCE_GATEWAY_PROXY=on`), so
+one `kubectl port-forward` reaches everything.
+
+- With the bundled database the chart generates the database password, `secrets.keyEncryptionKey`
+  and `secrets.computerToken`, reads them back on upgrade and keeps them on uninstall. `helm
+  template` (Argo CD) cannot read them back, so set them there.
+- Every workload that reads the database waits for it and its migrations, so `--wait` works on a
+  first install.
+- The Ingress, and a `LoadBalancer` server Service, carry the tag
+  `aws-apn-id-058264219587=pc:avjdxr516uh0mgsqob730tzgy`, which credits CopilotKit through AWS
+  Partner Revenue Measurement. No setting turns it off.
+
+### A Bot asked by another Bot answers in its own name
+
+The asked Bot is told who it is and which Bot asked, and gets your conversation as quoted context.
+Its answer appears in your conversation word for word under its own name, not retold by the Bot
+that asked. Bots are matched the way people say them ("the Knowledge Bot"). An answer for a busy
+conversation waits without using up its retries, and one never delivered is audited as
+`agent.handoff_failed`.
 
 ### Fewer "Verify you are human" pages
 
@@ -532,7 +659,7 @@ longer the Bot's user's. A Bot's tool description says which to use, by whether 
   network rule closes the screen it opened, unless an earlier action in the run opened it; one that
   was allowed and failed keeps it.
 - In a conversation, a Bot is no longer offered computer tools that the Cloud browser use, Cloud
-  computer use or Cloud network access switches (Admin → Enterprise controls) would refuse, so it
+  computer use or Cloud network access switches (Admin → Permissions) would refuse, so it
   stops reaching for one and spending the turn saying it was refused.
 - Opening the Computer panel shows the screen at once. It could stay on "Waiting for the Bot's
   screen" while the Bot browsed.
@@ -594,7 +721,8 @@ container as soon as it exists (it checks at start and every ten minutes until t
 in the audit log, and Admin says so. A saved setting, including off, is never changed.
 `OPENBOT_LEARNING_AUTO_ASSIGN=false` (Helm: `config.learning.autoAssign: false`) turns this off.
 
-The runtime key cannot create the container, so OpenBot creates it with a credential that can:
+The server first creates it with the runtime key, which Intelligence after 0.15.1 allows. On
+0.15.1 and earlier, OpenBot creates it with a credential that can:
 - `bun scripts/setup-learning.ts`, which `scripts/start.sh` now runs on every start without a
   prompt, uses a CopilotKit CLI login, even with no project selected, once the login's organization
   and project match the runtime key's. On Windows it starts the CLI through `cmd.exe`.
@@ -769,16 +897,13 @@ failed. Opened, it lists each step, and each step opens to what it was given and
 A lone call keeps its own line, and approvals, connection requests and anything drawn as an
 interface stay outside the fold.
 
-### Signing in to CopilotKit sets up Composio, with no key to paste
+### A source checkout sets up Composio from your CopilotKit login
 
-With no Composio key, OpenBot Desktop uses your CopilotKit sign-in to create or reuse one Composio
-project for the installation, keeps its key in the app's protected storage and hands it to the
-server at every Start. In a source checkout, `scripts/start.sh` does the same with your CopilotKit
-CLI login and writes `COMPOSIO_API_KEY` to `.env`; `bun run setup:composio` runs that step alone.
-Neither waits on it: if it fails, OpenBot starts with apps unavailable, and the Desktop sign-in
-screen offers Connect apps to try again. A `COMPOSIO_API_KEY` you set always wins, and a deployment
-on Arcade is left alone. A server, container or Helm release started directly still needs the key
-set as before.
+With no Composio key, `scripts/start.sh` uses your CopilotKit CLI login to create or reuse one
+Composio project for the installation and writes `COMPOSIO_API_KEY` to `.env`; `bun run
+setup:composio` runs that step alone. If it fails, OpenBot starts with apps unavailable. A key you
+set always wins, and a deployment on Arcade is left alone. OpenBot Desktop, a server, a container
+or a Helm release still needs the key set.
 
 ### The server image runs the routines worker too, and Compose can run OpenBot from it
 
@@ -840,13 +965,18 @@ labelled as part of the conversation.
   replica is answered from the conversation instead of failing the run.
 - **Google ADK.** After about 20 idle minutes it saw only the newest message. It kept only the
   first system message OpenBot sends, so it never had its tools summary, nor its role when personal
-  memory came first.
+  memory came first. A tool result that reaches another replica or a restarted harness now carries
+  on from the call, so the tool runs once; that replica used to call it again (a message sent
+  twice) or end the run with nothing said.
 - **LangGraph.** It dropped the first system message, usually its role, so it often answered as a
   plain assistant, and a running harness kept an old tools summary. After you approve something it
   stopped to ask about, it now carries on from the conversation; it used to stop without answering,
   or answer with none of the conversation.
 - **Mastra.** It now receives the context the app sends with a run, such as a component catalogue,
   after its role, and a skill's instructions and your personal memory, which it never saw.
+- **Strands.** It never received its role, its tools summary or a skill's instructions, so it
+  answered as a plain assistant. Its role and summary are now its instructions on every run, so a
+  new role or grant applies on the next message without a restart.
 
 The Agno, ADK and LangGraph harnesses also no longer keep a copy of every finished conversation in
 memory for the life of the process.
@@ -987,14 +1117,14 @@ Bot as a result, so it can take a fresh snapshot, try another way, or tell you w
 - `page.host` drops the root dot a host can end with, so `https://intranet.example.com./` no
   longer slips past `page.host == "intranet.example.com"`. The port stays.
 
-### A Bot's question waits above the composer, and can hold several decisions
+### A Bot's question waits above the composer, with the answers it expects
 
 When a Bot stops to ask you something, the conversation it asked in now shows the question and why
 in a drawer above the composer, however far you scroll, and what you send there is your answer. A
-Bot can ask several separate decisions in one question, each with the answers it expects; the
-drawer takes them one at a time, an option or your own words, and a reply from the composer answers
-the whole. Dismiss puts a question down unanswered, with nothing sent to the Bot (also
-`POST /api/approvals/questions/:id/dismiss`).
+Bot can put one decision or up to six in a question, each with the answers it expects (which time
+zone to use, say); the drawer takes them one at a time, an option or your own words, and a reply
+from the composer answers the whole. Dismiss puts a question down unanswered, with nothing sent to
+the Bot (also `POST /api/approvals/questions/:id/dismiss`).
 
 ### Each browser on a computer is held to its own network policy, and Google loads behind it
 
@@ -1022,8 +1152,35 @@ restart switched off.
   offers **Start fresh**, which deletes exactly those and then starts; to keep them, restore the old
   folder. A container from it that is still running blocks the deletion. An installation with its
   saved key keeps its data as before.
-- The CopilotKit sign-in Desktop opens now carries `mode=openbot`, so the hosted page can show
-  OpenBot's own wording. Sign-in itself is unchanged.
+
+### The approval card for an app's call appears in the conversation
+
+When OpenBot stops a Bot to ask about an app's call (sending an invitation, deleting a file), the
+approval card now appears in the conversation where the call is, as soon as the run stops. It used
+to appear only on the Bots page, while the conversation showed the call still running.
+
+### A skill in a new conversation's first message reaches the Bot
+
+A `/` skill picked in the first message of a new conversation showed its chip, but its instructions
+were left out, for every kind of Bot. The first message now carries them, as later ones did.
+
+### Conversations go by your first message until named, and are named on Anthropic too
+
+Until a conversation is named, the sidebar and every skin show your first message as plain text,
+not the Bot's reply with its Markdown, and search matches it. Names are stored as plain text. With
+Bots on Anthropic, naming sent the Anthropic key to OpenAI and no conversation was ever named; it
+now asks Anthropic.
+
+### A routine asked for in a conversation posts in that conversation
+
+It used to post into the one conversation you share with the Bot, or have the Bot ask which. The
+Routines page names conversations by their title.
+
+### Admin → Automatic learning reviews and publishes proposed skills
+
+The page lists Learning's proposed skills, each with its SKILL.md, files and what it was learned
+from, to approve and publish or reject, both audited. **Learn now** starts a run. It works on an
+Intelligence with no dashboard, and says when Learning is off in Intelligence.
 
 ### An allowed site on a non-default port opens
 
@@ -1172,9 +1329,9 @@ back to `INTELLIGENCE_API_KEY`; `scripts/start.sh` accepts either, and OpenBot D
 ### A local Intelligence install signs in through its own dashboard
 
 Connecting an Intelligence install made with `copilotkit local` failed with `invalid_redirect_uri`.
-`bun scripts/setup-learning.ts` and OpenBot Desktop's self-hosted Intelligence setup now ask the
-newest CopilotKit CLI on the machine (installed or in npm's npx cache) for its dashboard and sign in
-there. Any other Intelligence signs in at its API address as before.
+`bun scripts/setup-learning.ts` now asks the newest CopilotKit CLI on the machine (installed or in
+npm's npx cache) for its dashboard and signs in there. Any other Intelligence signs in at its API
+address as before.
 
 ### A new conversation starts with no Bot chosen
 
