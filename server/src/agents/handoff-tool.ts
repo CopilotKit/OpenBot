@@ -123,9 +123,9 @@ export function handoffTool(options: {
     ref: `bot/${HANDOFF_TOOL}`,
     description:
       "Hand a piece of work to another Bot in this workspace and let it answer for itself. " +
-      "Use this when the work needs a role you do not have. The other Bot answers in its own " +
-      "conversation with this person, so do not wait for it or repeat what it will say: tell them " +
-      "who you have asked and what for. If the work is yours to do, do it, and if it needs a " +
+      "Use this when the work needs a role you do not have. The other Bot's answer appears later " +
+      "in this conversation, under its own name, so do not wait for it or repeat what it will say: " +
+      "tell them who you have asked and what for. If the work is yours to do, do it, and if it needs a " +
       "person's judgement rather than another Bot's, ask the person instead.",
     parameters,
     execute: async (args: unknown) => {
