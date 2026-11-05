@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop can finish installation when the Docker CLI and Docker Desktop credential helpers
+  are installed in different places, including Homebrew on macOS. Existing Docker sign-ins and
+  custom helper choices are preserved.
+
 - People can pick the model a built-in Bot answers on, per conversation, from a brain icon in the
   composer, including before the first message. The list is read from the model provider, or from
   the gateway in `OPENAI_BASE_URL`, filtered to chat models and to the model allowlist. The pick is
