@@ -45,7 +45,7 @@ There are three kinds of build:
 |---|---|---|---|---|
 | Internal build | **Internal build** workflow | Yes | No | Workflow artifacts, kept 30 days |
 | Release candidate or beta | **Create release PR**, then merge | Yes | Mac: after approval | GitHub prerelease |
-| Stable release | **Create release PR**, then merge | No: it installs the latest release | Mac: after approval | GitHub release marked Latest |
+| Stable release | **Create release PR**, then merge | No: it installs the latest release | Mac: after approval | GitHub release, marked Latest once Mac signing attaches its signed installers |
 
 ## 1. Make an internal build
 
@@ -111,14 +111,17 @@ Use a candidate to test what will become a release. The details are in
    **Expected:** a GitHub prerelease `vX.Y.Z-rc.1` with `container-images.json`, the source
    archive, the chart, the release manifest, and the Mac and Windows installers.
 5. Approve **Desktop macOS signing** when it asks. This needs a `macos-signing` approver.
-   **Expected:** the signed `.dmg` replaces the ad-hoc one on the release.
+   **Expected:** the signed Apple silicon `.dmg` replaces the ad-hoc one on the release, and a signed
+   Intel `.dmg` is added. For a candidate both are pinned to the candidate's images, like the ad-hoc
+   one. A stable release also gets `latest.json` and becomes Latest at this point.
 6. Test the candidate with [Install and test](#3-install-and-test) and
    [Check a build](#4-check-a-build).
 7. For a fix, merge it into `release/X.Y`, then run **Create release PR** from that branch with
    `kind=rc` for the next candidate.
 8. To finish, run **Create release PR** from `release/X.Y` with `kind=final`, then merge. A final may
    not differ from its last candidate except in the version, the changelog and the policy's
-   version. **Expected:** the release becomes Latest, and a merge-back PR into `main` opens.
+   version. **Expected:** a merge-back PR into `main` opens. The release becomes Latest once you
+   approve Mac signing for it (step 5).
 
 A stable release from `main` (`kind=stable`) follows steps 1 to 5 without a release branch. Its
 installers are not pinned: they install the latest release.
@@ -270,6 +273,8 @@ results in the PR or the issue for the build.
 | An image job fails | Open the failed job's log and read the first error. A Dockerfile error is a code problem on the branch. Do not run it again until you know the cause. |
 | The build fails with `the pinned deployment manifest ... has commit ..., but this build compiles ...` | The installer is being built from a different commit than its images. Build both from the same commit. |
 | A signing run waits | It needs an approver from the table in [Before you start](#before-you-start). |
+| A stable release is published but is not Latest | It becomes Latest once Mac signing attaches its signed installers. Approve the signing run. If that run failed, run **Desktop macOS signing** again from the release tag with `signing-mode: developer-id`, `release-tag` set and `make-latest` on. |
+| Mac signing of a candidate fails with `container-images.json ... was built from ...` | The signing run is not on the candidate's tag. Run it from the tag the release was published from. |
 | Windows setup stops with a virtualization message | The machine cannot run WSL 2. Use an x64 PC or an x64 VM with nested virtualization. |
 | Setup returns to Install after sign-in | The saved sign-in no longer works. Sign in again. |
 | A step shows **Retry** | Select it once. If it fails again, open **Technical details** and copy them into the issue. |

@@ -83,11 +83,21 @@ When it runs:
   ref and keeps the results as Actions artifacts for 14 days. Set `release-tag` to an existing
   release, e.g. `v0.2.1`, to also attach the `.dmg` files, the updater archives and their `.sig`
   files, and `latest.json` to it. Run it on the release tag (**Use workflow from** → the tag) so
-  the build carries the release version. This is how to re-sign a release by hand.
+  the build carries the release version. This is how to re-sign a release by hand. It leaves
+  Latest where it is unless `make-latest` is set; see [Which release is Latest](#which-release-is-latest).
 - a `v*` tag pushed by a person does the same thing automatically.
 
 Signing imports the certificate into a temporary keychain made for the run, and always deletes
 that keychain afterwards, even when an earlier step failed.
+
+A release is signed as the same product its ad-hoc installer was.
+[`desktop/scripts/signed-build.ts`](../desktop/scripts/signed-build.ts) builds the signed app:
+
+- a candidate or beta is pinned to its release's own `container-images.json`, as its ad-hoc
+  installer is, and refuses one built from another commit. It has no updater, so it makes no
+  updater archive and no `latest.json`, and the updater key never reaches its build;
+- a stable release is not pinned, and carries the updater;
+- either bundles the Intelligence CLI whenever the tree has `tauri.bundled-cli.conf.json`.
 
 Only the signing job produces updater artifacts. `bundle.createUpdaterArtifacts` lives in
 `desktop/src-tauri/tauri.macos-signing.conf.json`, which that job alone passes to Tauri, because
@@ -108,10 +118,29 @@ once at launch. If a newer version is listed, the window offers **Update and res
 installs without that click. GitHub redirects that address to the `latest.json` attached to the
 release marked Latest, so the newest non-draft, non-prerelease release is always the one offered.
 
-After it attaches `latest.json`, the signing workflow fetches that address the way the app does,
-following redirects, and fails unless the answer is JSON whose `version` is the release version and
-which has a `darwin-*` platform with a URL and signature. A release that is not marked Latest fails
-this check, because the apps would not see it.
+After it attaches `latest.json`, and marks the release Latest when it should (see below), the
+signing workflow fetches that address the way the app does, following redirects, and fails unless
+the answer is JSON whose `version` is the release version and which has a `darwin-*` platform with
+a URL and signature. A release that is not Latest is not checked, because the apps never read its
+feed: a candidate, a patch to an older line, or a release signed again by hand.
+
+### Which release is Latest
+
+`releases/latest`, the download links under it and the update feed all follow the release marked
+Latest. A stable release is published **not** Latest, and becomes Latest only after Desktop macOS
+signing has attached its signed `.dmg` files and `latest.json`. Until then the previous release
+stays Latest, with its signed installers, so `releases/latest` never serves an ad-hoc installer that
+macOS refuses, or a release with no Intel installer.
+
+Whether a release becomes Latest is decided once, in `verify`, by
+[`scripts/release-becomes-latest.sh`](../scripts/release-becomes-latest.sh): never for a candidate or
+beta, and for a stable release only when no newer release is Latest. The publish workflow hands
+that decision to the signing run as `make-latest`, and the signing run asks the script again just
+before it marks the release, so a newer release published meanwhile keeps Latest. A re-run of the
+publish workflow does not touch Latest.
+
+If Mac signing is never approved, or fails, the release stays not Latest. Sign it again from its tag
+with `make-latest` set, or mark it Latest by hand on its release page.
 
 `latest.json` names a version and, for `darwin-aarch64` and `darwin-x86_64`, an archive URL and
 that archive's minisign signature. The app verifies the signature against the public key in
@@ -289,8 +318,9 @@ Each candidate or beta is published as a GitHub prerelease. It is never Latest, 
 check for the latest release do not see it. Its images are tagged with the version and
 `sha-<commit>`, and never `latest`. A Mac (Apple Silicon) and a Windows (x64) installer are attached
 to it, pinned to that version and to those images, the same as an internal build is. The Mac one is
-ad-hoc signed until [Mac signing](#signed-mac-builds-and-the-updater) is approved and replaces it,
-and the Windows one is unsigned, so the first open needs the exceptions described under
+ad-hoc signed until [Mac signing](#signed-mac-builds-and-the-updater) is approved and replaces it
+with a signed one, pinned the same way. Mac signing also adds the Intel installer. The Windows one
+is unsigned, so the first open needs the exception described under
 [Internal builds](#internal-builds).
 
 A candidate does not promote the changelog. Its notes are what is under `## Unreleased` at that
@@ -327,8 +357,9 @@ A final also cannot change `desktop/intelligence-cli.json`, so it bundles the CL
 pinned.
 
 The final is a normal release: its installers are attached, and it becomes Latest, with its images
-tagged `latest`, only when no newer release already is. A patch from `main` can be released while a
-newer final is out, and that does not move Latest back.
+tagged `latest`, only when no newer release already is, and only once its signed Mac installers are
+attached (see [Which release is Latest](#which-release-is-latest)). A patch from `main` can be
+released while a newer final is out, and that does not move Latest back.
 
 The smoke journey is still required before a final. See
 [The one thing CI cannot do](#the-one-thing-ci-cannot-do). The PR body asks for the result, as it
@@ -382,17 +413,20 @@ Then, in order:
 - the commit is tagged and a GitHub Release is created, carrying the changelog section as its notes
   (for a candidate or beta, what is under `## Unreleased`), `container-images.json`, the source
   archive, the chart, the release manifest and the installers as assets. A candidate or beta is
-  marked as a prerelease and never Latest. A stable release becomes Latest only when no newer
-  release already is
+  marked as a prerelease and never Latest. A stable release is published not Latest. A re-run keeps
+  any installer already on the release, so it never puts the ad-hoc `.dmg` back over a signed one
 - [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag. It waits
-  for a `macos-signing` reviewer, then attaches the signed `.dmg` files, the updater archives and
-  `latest.json` to the release. The signed `.dmg` has the same name as the ad-hoc one and replaces it
+  for a `macos-signing` reviewer, then attaches the signed `.dmg` files to the release. The signed
+  `.dmg` has the same name as the ad-hoc one and replaces it. For a stable release it also attaches
+  the updater archives and `latest.json`, and then marks the release Latest when `verify` decided it
+  becomes Latest (see [Which release is Latest](#which-release-is-latest)). A candidate or beta's
+  signed `.dmg` is pinned to its images, and has no updater archive and no `latest.json`
 - for a final cut from `release/X.Y`, the merge-back PR opens as described under
   [Finishing a candidate](#finishing-a-candidate)
 
 Until signing is approved, the Mac installer attached to a release is ad-hoc signed, like every
-ordinary CI build. The Windows installer is unsigned: releases do not go through
-[Windows signing](windows-signing.md) yet.
+ordinary CI build, and a stable release is not yet Latest. The Windows installer is unsigned:
+releases do not go through [Windows signing](windows-signing.md) yet.
 
 ## Deploying a release
 
