@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`. Eight
+**Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`. Ten
 things change for an existing deployment:
 - On OpenBot Desktop, the first Start after the app updates to this release moves the installed
   OpenBot to it too. Until now an installation kept the release it was installed at until you moved
@@ -23,23 +23,42 @@ things change for an existing deployment:
   and the key goes to the app's protected store, never to `.env`. Apps, unavailable on Desktop since
   0.3.0, become available. A `COMPOSIO_API_KEY` in `~/OpenBot/.env` or the environment, or an Arcade
   choice, still wins, and then nothing is asked (below).
-- Built-in Bots, and the Bot framework picked at setup when it is OpenBot's own LangGraph or Claude
-  Agent SDK harness, now answer on the middle of the provider's current line when nobody has picked
-  a model, instead of `BOT_MODEL`: the newest model of each line, ordered by price, and the one in
-  the middle (on 2026-11-05, `gpt-6.1-terra`, `claude-sonnet-5-5`, `gemini-3.8-flash` and
-  `grok-4.7`). This holds whether or not people may pick, within the model allowlist when it is on.
-  `BOT_MODEL` stays the default only behind a gateway in `OPENAI_BASE_URL` that lists it, or while
-  the provider's model list cannot be read. A ChatGPT plan answers only on a model its own list
-  offers (below).
+- When nobody has picked a model, built-in Bots now answer on `BOT_MODEL` while the provider lists
+  it, and otherwise on the middle of the provider's current line: the newest model of each line,
+  ordered by price, and the one in the middle (on 2026-11-05, `gpt-6.1-terra`, `claude-sonnet-5-5`,
+  `gemini-3.8-flash` and `grok-4.7`). With no `BOT_MODEL`, that replaces the tenant package's
+  `default_model` (`gpt-5.6-terra` in the bundled packages) or, on Anthropic, `claude-sonnet-5-5`.
+  On OpenAI's own API, `BOT_MODEL` now applies to built-in Bots, where it used to be ignored. A
+  `BOT_MODEL` the provider doesn't list gives way to the middle: a ChatGPT plan given `gpt-5.5` runs
+  the plan's middle model. Behind a gateway in `OPENAI_BASE_URL`, the configured model stays the
+  default while the gateway lists it, and until the provider's list has been read the configured
+  model is used. The Bot framework picked at setup, when it is OpenBot's own LangGraph or Claude
+  Agent SDK harness, is sent the same model on every run (below).
+- Nothing writes a `BOT_MODEL` on your behalf any more, so an unset one means the middle of the
+  line. `docker-compose.yml` gives the picked harness an empty `BOT_MODEL` when it is unset, rather
+  than `gpt-5.5`. OpenBot Desktop no longer writes `BOT_MODEL=claude-sonnet-5-5` for an Anthropic
+  key, and takes out the one it wrote at the next Start; a model chosen on a Desktop setup screen
+  (an OpenAI-compatible endpoint's, or a Google or xAI sign-in's) is still written and stays the
+  default. The harness answers on the model the server sends each run, and only when the server
+  sends none, because it has not read the provider's list, on the provider spec file's model for it
+  (`gpt-4o-mini` on OpenAI).
 - The server now reads the provider's model list (a plan's own, through its harness) and
-  `https://models.dev/api.json` when it starts and every six hours after, whether or not people may
-  pick, and again at once, at most once a minute, when a provider refuses a model as unknown or
+  `https://models.dev/api.json` when it starts and every six hours after, whether or not anybody
+  picks, and again at once, at most once a minute, when a provider refuses a model as unknown or
   unsupported. A refresh that fails keeps the last good list. `OPENBOT_MODEL_CAPABILITIES_URL`
   points at a mirror of models.dev, or `off` reads none, and then the default is the configured
   model while the provider lists it.
-- With `OPENBOT_SINGLE_USER=true` (OpenBot Desktop among them), "Let people choose a model" under
-  Admin → Providers is now on until somebody turns it off. A deployment that saved it off keeps it
-  off.
+- With `OPENBOT_SINGLE_USER=true` (OpenBot Desktop and the personal edition among them), the one
+  person is offered every model the provider lists, with no switch and no allowlist. Admin →
+  Providers shows neither, and a model allowlist saved earlier no longer applies.
+- In a team, people pick among the models an admin allows under Admin → Providers → Allowed models,
+  plus the default, and "Let people choose a model" is gone. Until an admin allows one, people get
+  the default and see no picker: a team that let people pick before upgrading has no picker until
+  models are allowed there, and one whose list already holds models now shows them, whatever the old
+  switch said. A pick on a model no longer allowed, or no longer listed by the provider, runs on the
+  default and is kept for when it is offered again. "Only allowed models" still refuses a run on any
+  model not allowed, the default included, so with it on, allow the new default (above) or runs
+  nobody picked a model for are refused.
 - A Bot's commands now run in one interactive bash on its computer, one for each Bot a person uses,
   instead of a fresh `bash -c` each (below). `cd` and exported variables carry over to the next
   command. A command's stdout and stderr come back together as its output, with `stderr` empty, as a
@@ -145,8 +164,13 @@ The composer's model picker is now a text button naming the model and its thinki
 Sonnet 5.5 · High"), and its list adds a Thinking group with the levels the model in use accepts,
 its default marked. A model is only ever shown, saved and sent the levels it takes, and switching to
 a model that doesn't take the chosen effort clears it. The pick is still kept per person and
-conversation, and a new conversation saves both before its first message.
+conversation, a change applies from the next message, and a new conversation saves both before its
+first message.
 
+- **Who picks from what.** One person on their own machine picks from every model the provider
+  lists. In a team, people pick among the models an admin allows under Admin → Providers → Allowed
+  models, which lists each with its maker's mark and thinking levels, and see no picker until one is
+  allowed (above).
 - **More Bots and every sign-in.** It is offered for the Bot framework picked at setup when it is
   OpenBot's own LangGraph or Claude Agent SDK harness, and on OpenAI, Anthropic, Google and xAI keys
   and sign-ins, any OpenAI-compatible endpoint, and ChatGPT and Claude plans, each listed from its
