@@ -259,7 +259,9 @@ export function AfterStop({
             </ItemMedia>
             <ItemContent>
               <ItemTitle>
-                {sent ? "Sent to Intelligence" : "Sending to Intelligence"}
+                {sent
+                  ? "Sent to OpenBot's back end"
+                  : "Sending to OpenBot's back end"}
               </ItemTitle>
               {sent ? null : (
                 <ItemDescription className="line-clamp-none">
@@ -312,7 +314,7 @@ export function AfterStop({
             <DialogTitle>Discard kept events?</DialogTitle>
           </DialogHeader>
           <DialogBody className="mt-4 text-sm">
-            Intelligence will never receive them.
+            OpenBot's back end will never receive them.
           </DialogBody>
           <DialogFooter className="mt-4">
             <Button size="sm" variant="ghost" onClick={() => setAsking(false)}>

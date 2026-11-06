@@ -286,13 +286,13 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
             {recording ? (
               <p className="mt-2">
                 The recording in progress stops, and what it has not sent to
-                Intelligence yet is discarded.
+                OpenBot's back end yet is discarded.
               </p>
             ) : null}
             {sending > 0 ? (
               <p className="mt-2">
                 {plural(sending, "recording", "recordings")} still sending to
-                Intelligence {sending === 1 ? "stops" : "stop"}, and what{" "}
+                OpenBot's back end {sending === 1 ? "stops" : "stop"}, and what{" "}
                 {sending === 1 ? "it has" : "they have"} not sent yet is
                 discarded.
               </p>

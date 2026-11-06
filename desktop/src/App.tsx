@@ -5,7 +5,6 @@ import { CopilotKitAccount } from "./CopilotKitAccount";
 import { useWindowFitsContent } from "./fitWindow";
 import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
-import { IntelligenceOpening } from "./IntelligenceOpening";
 import {
   LocalIntelligence,
   type LocalStartable,
@@ -80,12 +79,7 @@ function installationKeyFor(root: string, harness: HarnessChoice | null) {
 
 export function App() {
   useWindowFitsContent();
-  return (
-    <>
-      <Setup />
-      <IntelligenceOpening />
-    </>
-  );
+  return <Setup />;
 }
 
 function Setup() {
@@ -221,9 +215,9 @@ function Setup() {
       if (connected) setLocalConnected(true);
     },
   });
-  // A recorded stack: the dashboard can be opened, from here and from the menus.
+  // A recorded stack: the OpenBot app's page may offer its dashboard (intelligence_bridge.rs).
   const intelligenceOffered = localStack !== null;
-  // What the menus were last told. Starts hidden, so nothing is said before a stack is recorded.
+  // What the shell was last told. Starts hidden, so nothing is said before a stack is recorded.
   const offeredToMenus = useRef({ root: "", offered: false });
   useEffect(() => {
     const last = offeredToMenus.current;

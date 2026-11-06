@@ -567,7 +567,7 @@ test("disconnect forgets the connection OpenBot revoked at once and reports sign
   expect(openbotAsked.slice(asked)).toEqual([]);
 });
 
-test("a recording disconnect finds running stops as a sign-out stops one, kept for its person, and goes to Intelligence once the browser is connected again", async () => {
+test("a recording disconnect finds running stops as a sign-out stops one, kept for its person, and goes to OpenBot's back end once the browser is connected again", async () => {
   await launcher().connect({ connection: connection(), narration: "external" });
   const click = rows.archiveClick;
   const trajectoryId = await record(

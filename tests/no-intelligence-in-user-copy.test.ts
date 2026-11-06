@@ -8,8 +8,9 @@ import ts from "typescript";
  * OpenBot they mean is the back end (see .claude/skills/openbot-copy).
  *
  * Read are the string literals, template text and JSX text of the desktop window, the app, the
- * server and the shared Recorder disclosure the app shows, and the string literals of the desktop's
- * native side, whose problems, notices, progress lines and menu items reach the window and the tray.
+ * server, the Recorder extension and the shared Recorder disclosure, and the string literals of the
+ * desktop's native side, whose problems, notices, progress lines and menu items reach the window and
+ * the tray.
  * Not read: code identifiers and env names (`intelligenceStack`, `INTELLIGENCE_API_URL`; the check
  * is for the capitalised word), comments, tests, log calls, and docs/ and charts/, which operators
  * read to configure Intelligence by name.
@@ -168,9 +169,9 @@ function nativeText(path: string): string[] {
 
 function shown(): string[] {
   const found = [
-    ...["desktop/src", "app/src", "server/src"].flatMap((root) => [
-      ...files(join(REPO, root), /\.tsx?$/),
-    ]),
+    ...["desktop/src", "app/src", "server/src", "extension/src"].flatMap(
+      (root) => [...files(join(REPO, root), /\.tsx?$/)],
+    ),
     join(REPO, "shared/recorder-disclosure.ts"),
   ].flatMap(scriptText);
   found.push(
@@ -186,7 +187,7 @@ const isNotShown = (hit: string) =>
     (entry) => hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
   );
 
-test("no text a person reads in the desktop app, the app or the server says Intelligence", () => {
+test("no text a person reads in the desktop app, the app, the server or the Recorder says Intelligence", () => {
   expect(shown().filter((hit) => !isNotShown(hit))).toEqual([]);
 });
 

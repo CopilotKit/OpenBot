@@ -282,7 +282,7 @@ export function connectLocalEval(root: string): {
   return { attempt, connection };
 }
 
-/** Whether the menus offer "Open back end dashboard" for `root`. */
+/** Whether the OpenBot app's page may offer the back end dashboard for `root`. */
 export function offerLocalIntelligence(
   root: string,
   offered: boolean,

@@ -42,6 +42,7 @@ import {
   intelligenceReadinessQueryOptions,
   totalMemory,
 } from "@/lib/desktop/queries";
+import { type PartGroup, partLabel } from "@/lib/desktop/part-names";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/settings/this-computer")({
@@ -126,7 +127,7 @@ function OpenBotSection({
   const memory = totalMemory([...status.processes, ...status.containers]);
   const busy = restart.isPending || stop.isPending;
   return (
-    <PageSection title="OpenBot">
+    <PageSection title="App">
       <PageRows>
         <Item size="sm">
           <RowMark>
@@ -182,11 +183,17 @@ function OpenBotSection({
           )}
         </Item>
         <PartRows
+          group="bots"
           icon={IconTerminal2}
           parts={status.processes}
           separatorFirst
         />
-        <PartRows icon={IconBox} parts={status.containers} separatorFirst />
+        <PartRows
+          group="bots"
+          icon={IconBox}
+          parts={status.containers}
+          separatorFirst
+        />
       </PageRows>
     </PageSection>
   );
@@ -272,6 +279,7 @@ function IntelligenceSection({
           </ItemActions>
         </Item>
         <PartRows
+          group="back-end"
           icon={IconBox}
           parts={status.intelligenceContainers}
           separatorFirst
@@ -351,14 +359,16 @@ function MachineSection({
   );
 }
 
-/** Each container or process as a read-only row: its name, and its memory as the value. */
+/** Each container or process as a read-only row: what it is for, and its memory as the value. */
 function PartRows({
   icon: Icon,
   parts,
+  group,
   separatorFirst = false,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   parts: DesktopPart[];
+  group: PartGroup;
   separatorFirst?: boolean;
 }) {
   return parts.map((part, index) => (
@@ -369,7 +379,9 @@ function PartRows({
           <Icon className="size-4" />
         </RowMark>
         <ItemContent>
-          <ItemTitle className="font-normal">{part.name}</ItemTitle>
+          <ItemTitle className="font-normal">
+            {partLabel(part.name, group)}
+          </ItemTitle>
         </ItemContent>
         <ItemActions>
           <span className="text-muted-foreground text-sm tabular-nums">

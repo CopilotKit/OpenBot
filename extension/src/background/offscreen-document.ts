@@ -24,7 +24,7 @@ export function ensureOffscreenDocument(): Promise<void> {
       // transcribes the person's narration from.
       reasons: ["LOCAL_STORAGE", "USER_MEDIA"],
       justification:
-        "Keeps the recording in this browser, turns the person's narration into text, and sends it to Intelligence.",
+        "Keeps the recording in this browser, turns the person's narration into text, and sends it to OpenBot's back end.",
     });
   })().finally(() => {
     creating = null;
