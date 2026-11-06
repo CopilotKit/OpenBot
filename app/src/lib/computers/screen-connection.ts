@@ -1,4 +1,11 @@
 /** Small transport lifecycle shared by the live viewer and deterministic reconnect tests. */
+
+/** How every frame the computer sends starts: `JSON.stringify({ type: "frame", ... })`. */
+export const FRAME_PREFIX = '{"type":"frame"';
+
+/** What the screen sends back as each frame reaches it, when the computer has asked for it. */
+export const FRAME_RECEIVED = '{"type":"frame-received"}';
+
 export type ScreenSocket = {
   onopen: (() => void | Promise<void>) | null;
   onclose: (() => void) | null;
@@ -73,6 +80,17 @@ export function connectScreen(options: Options) {
     };
     current.onmessage = (event) => {
       if (!owns()) return;
+      // A frame is most of what arrives, and the screen parses it itself. Told apart by how it starts,
+      // so a frame of a hundred kilobytes is not parsed twice.
+      if (
+        typeof event.data === "string" &&
+        event.data.startsWith(FRAME_PREFIX)
+      ) {
+        // A frame means this socket recovered, so the next drop starts the backoff over.
+        attempts = 0;
+        options.onMessage(event);
+        return;
+      }
       let message: { type?: string; error?: string } | undefined;
       try {
         message = JSON.parse(String(event.data));

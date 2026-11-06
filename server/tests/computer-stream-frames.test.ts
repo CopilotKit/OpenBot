@@ -21,12 +21,15 @@ type Upstream = {
   port: number;
   /** The computer's end of the one stream the proxy opens, once it has. */
   opened: Promise<{ send(message: string): void }>;
+  /** What the proxy sent the computer, oldest first. */
+  heard: string[];
   stop(): void;
 };
 
 /** The computer: a socket that sends whatever the test hands it. */
 function computer(): Upstream {
   let resolve: (ws: { send(message: string): void }) => void = () => {};
+  const heard: string[] = [];
   const opened = new Promise<{ send(message: string): void }>((done) => {
     resolve = done;
   });
@@ -41,12 +44,15 @@ function computer(): Upstream {
       open(ws) {
         resolve(ws);
       },
-      message() {},
+      message(_ws, message) {
+        heard.push(String(message));
+      },
     },
   });
   return {
     port: server.port ?? 0,
     opened,
+    heard,
     stop: () => server.stop(true),
   };
 }
@@ -111,7 +117,25 @@ async function browser(port: number, path: string) {
     ].join("\r\n"),
   );
   await open;
-  return { socket, messages };
+  /** A text message to the server, masked as every message from a client must be. */
+  const send = (text: string) => {
+    const payload = Buffer.from(text);
+    const mask = randomBytes(4);
+    const head =
+      payload.length < 126
+        ? Buffer.from([0x81, 0x80 | payload.length])
+        : Buffer.from([
+            0x81,
+            0x80 | 126,
+            payload.length >> 8,
+            payload.length & 0xff,
+          ]);
+    const masked = Buffer.from(
+      payload.map((byte, i) => byte ^ (mask[i % 4] ?? 0)),
+    );
+    socket.write(Buffer.concat([head, mask, masked]));
+  };
+  return { socket, messages, send };
 }
 
 /** A frame as the computer sends one, about a megabyte, named so the test can tell which arrived. */
@@ -203,6 +227,56 @@ describe("frames to a browser that cannot keep up", () => {
     expect(frames.length).toBeLessThan(SENT);
     expect(messages).toContain(
       JSON.stringify({ type: "error", error: "Said at once." }),
+    );
+  }, 30_000);
+
+  test("a screen that has never confirmed a frame is not confirmed for, and one that does is confirmed for exactly", async () => {
+    // A screen loaded before confirmations existed never sends one. Told of a let-go frame on its behalf, a computer
+    // that counts started counting frames that screen would never confirm, and paced it to one every two seconds.
+    const upstream = computer();
+    cleanup.push(() => upstream.stop());
+    const port = await proxy(upstream);
+    const { socket, messages, send } = await browser(
+      port,
+      "/api/computers/general-assistant/stream",
+    );
+    cleanup.push(() => socket.destroy());
+    socket.pause();
+    const computerEnd = await upstream.opened;
+    computerEnd.send(JSON.stringify({ type: "hello", confirmFrames: true }));
+
+    // A few at a time: twenty megabytes sent in one go would pass the fake computer's own 16 MB limit, and Bun drops
+    // whatever a socket is sent past that.
+    const SENT = 20;
+    for (let i = 0; i < SENT; i += 1) {
+      computerEnd.send(frame(String(i)));
+      await Bun.sleep(10);
+    }
+    await Bun.sleep(300);
+    const RECEIVED = '{"type":"frame-received"}';
+    expect(upstream.heard.filter((said) => said === RECEIVED)).toEqual([]);
+
+    // Now a screen that confirms each frame as it arrives: every frame the computer sent is accounted for once, the
+    // ones it received by the screen and the ones let go by the proxy, so the computer's count comes out exact.
+    socket.resume();
+    let confirmed = 0;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const frames = messages.filter((message) =>
+        message.startsWith('{"type":"frame"'),
+      );
+      for (; confirmed < frames.length; confirmed += 1) send(RECEIVED);
+      if (
+        confirmed > 0 &&
+        upstream.heard.filter((said) => said === RECEIVED).length === SENT
+      )
+        break;
+      await Bun.sleep(50);
+    }
+    await Bun.sleep(300);
+    expect(confirmed).toBeLessThan(SENT);
+    expect(upstream.heard.filter((said) => said === RECEIVED)).toHaveLength(
+      SENT,
     );
   }, 30_000);
 });

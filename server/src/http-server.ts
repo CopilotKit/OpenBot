@@ -38,6 +38,14 @@ import {
 type StreamData = {
   upstream: string;
   inward?: WebSocket;
+  /** Input that arrived before the socket to the computer had opened, sent once it does. */
+  early?: string[];
+  /** The computer counts the frames the screen confirms (it said so in its hello). */
+  confirms?: boolean;
+  /** The person's screen has confirmed a frame, so it confirms every frame it receives. */
+  viewerConfirms?: boolean;
+  /** Frames let go before the screen had confirmed one, not yet said to the computer. See `frameLetGo`. */
+  unsaidConfirms?: number;
   /** The newest frame not sent yet, because the browser was still receiving the ones before it. */
   heldFrame?: string;
   /** Looks again for room for `heldFrame`; see `sendHeldFrame`. */
@@ -104,6 +112,12 @@ type SocketData = StreamData | GatewaySocketData | ChannelSocket["data"];
 /** How every screencast frame from the computer starts: `JSON.stringify({ type: "frame", ... })`. */
 const FRAME_PREFIX = '{"type":"frame"';
 
+/** What a person's screen sends as a frame reaches it; the proxy says it for a frame it let go. */
+const FRAME_RECEIVED = '{"type":"frame-received"}';
+
+/** How many inputs are held while the socket to the computer opens. A person, not a script, fills it. */
+const EARLY_INPUT_LIMIT = 256;
+
 /** How much may sit unsent to a person's browser before a new frame is held back: about one frame. */
 const STREAM_BUFFER_LIMIT = 128 * 1024;
 
@@ -145,6 +159,26 @@ function sendHeldFrame(ws: HeldFrameSocket) {
   } catch {
     ws.data.inward?.close();
   }
+}
+
+/**
+ * A frame let go because a newer one replaced it while it was held, said as received to a computer
+ * that counts the frames on their way, so it does not wait on one that is never coming.
+ *
+ * Only once the person's screen has itself confirmed a frame. The computer starts counting at the
+ * first confirmation it hears, and a screen loaded before confirmations existed never sends one: told
+ * of a let-go frame on its behalf, the computer counted frames that screen would never confirm and
+ * fell to one frame every two seconds. Those let go before then are kept count of and said right
+ * after the screen's first confirmation, so the computer's count still comes out exact.
+ */
+function frameLetGo(stream: StreamData) {
+  if (!stream.confirms) return;
+  if (!stream.viewerConfirms) {
+    stream.unsaidConfirms = (stream.unsaidConfirms ?? 0) + 1;
+    return;
+  }
+  if (stream.inward?.readyState === WebSocket.OPEN)
+    stream.inward.send(FRAME_RECEIVED);
 }
 
 export function startHttpServer(deps: {
@@ -379,7 +413,11 @@ export function startHttpServer(deps: {
         // frame, such as an error the person has to read, always goes at once.
         inward.onmessage = (event) => {
           const message = String(event.data);
+          // Only a computer that said it counts confirmations is sent one for a frame let go.
+          if (message.startsWith('{"type":"hello"'))
+            stream.confirms = message.includes('"confirmFrames":true');
           if (message.startsWith(FRAME_PREFIX)) {
+            if (stream.heldFrame !== undefined) frameLetGo(stream);
             stream.heldFrame = message;
             sendHeldFrame(ws as typeof ws & { data: StreamData });
             return;
@@ -389,6 +427,10 @@ export function startHttpServer(deps: {
           } catch {
             inward.close();
           }
+        };
+        inward.onopen = () => {
+          for (const message of stream.early ?? []) inward.send(message);
+          stream.early = undefined;
         };
         inward.onclose = () => ws.close();
         inward.onerror = () => ws.close();
@@ -407,7 +449,26 @@ export function startHttpServer(deps: {
           channelSocket.message(asChannelSocket(ws), raw);
           return;
         }
-        if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
+        const stream = ws.data;
+        const inward = stream.inward;
+        const message = String(raw);
+        // A click made the moment the screen appeared used to be lost here, before the socket to the
+        // computer had finished opening. Held until it has, in order, and only that long.
+        if (inward?.readyState === WebSocket.CONNECTING) {
+          stream.early ??= [];
+          if (stream.early.length < EARLY_INPUT_LIMIT)
+            stream.early.push(message);
+          return;
+        }
+        if (inward?.readyState !== WebSocket.OPEN) return;
+        inward.send(message);
+        // The screen's first confirmation: the frames let go before it can be said now. See `frameLetGo`.
+        if (message === FRAME_RECEIVED && !stream.viewerConfirms) {
+          stream.viewerConfirms = true;
+          for (let i = 0; i < (stream.unsaidConfirms ?? 0); i += 1)
+            inward.send(FRAME_RECEIVED);
+          stream.unsaidConfirms = undefined;
+        }
       },
       /** Room to the browser again: the frame held while it was busy goes now. */
       drain(ws) {
