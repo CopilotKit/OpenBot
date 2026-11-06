@@ -69,7 +69,7 @@ export function ProfileNameForm({
       )}
       <Button
         type="submit"
-        className="self-start"
+        className="self-end"
         disabled={!name.trim() || save.isPending}
       >
         {save.isPending ? "Saving…" : "Save name"}

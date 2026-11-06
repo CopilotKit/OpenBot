@@ -162,7 +162,15 @@ export function ProposedSkillCard({
         </p>
       ) : null}
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex justify-end gap-2">
+        <Button
+          disabled={Boolean(sending)}
+          onClick={() => void decline()}
+          size="sm"
+          variant="outline"
+        >
+          {sending === "decline" ? "…" : "Don't save"}
+        </Button>
         <Button
           disabled={Boolean(sending)}
           onClick={() => void create()}
@@ -173,14 +181,6 @@ export function ProposedSkillCard({
             : replaces
               ? "Replace it"
               : "Create it"}
-        </Button>
-        <Button
-          disabled={Boolean(sending)}
-          onClick={() => void decline()}
-          size="sm"
-          variant="outline"
-        >
-          {sending === "decline" ? "…" : "Don't save"}
         </Button>
       </div>
     </GalleryFrame>

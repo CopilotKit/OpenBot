@@ -291,13 +291,13 @@ export function SkillFields({
            */}
           {footer ? <div className="mt-6">{footer}</div> : null}
           {failure}
-          <div className="mt-4 flex gap-2">
-            {submit}
+          <div className="mt-4 flex justify-end gap-2">
             {onCancel ? (
               <Button onClick={onCancel} type="button" variant="outline">
                 Cancel
               </Button>
             ) : null}
+            {submit}
           </div>
         </>
       )}

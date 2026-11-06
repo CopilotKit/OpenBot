@@ -349,15 +349,15 @@ export function LearningPage() {
                 );
               })}
             </fieldset>
-            <div className="flex items-center gap-3">
-              <Button type="submit" disabled={save.isPending}>
-                {save.isPending ? "Saving…" : "Save Learning settings"}
-              </Button>
+            <div className="flex items-center justify-end gap-3">
               {saved && (
                 <p role="status" className="text-sm">
                   Settings saved.
                 </p>
               )}
+              <Button type="submit" disabled={save.isPending}>
+                {save.isPending ? "Saving…" : "Save Learning settings"}
+              </Button>
             </div>
             {save.error && (
               <p role="alert" className="text-destructive">
