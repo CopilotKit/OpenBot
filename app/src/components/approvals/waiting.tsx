@@ -9,7 +9,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useState } from "react";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotKite } from "@/components/agents/kite/kite";
 import { PageRows } from "@/components/layout/page-shell";
 import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
@@ -360,7 +360,12 @@ function AnswerDialog({
       <DialogContent className="gap-5 sm:max-w-xl">
         <DialogHeader className="gap-3">
           <div className="flex items-center gap-2 text-muted-foreground text-xs">
-            <BotOrb name={name} seed={bot?.avatarSeed || asker} size={20} />
+            <BotKite
+              name={name}
+              seed={bot?.avatarSeed || asker}
+              size={20}
+              state="waiting"
+            />
             <span className="font-medium text-foreground">{name}</span>
             <span aria-hidden>·</span>
             <span>asked {relativeTime(question.createdAt)}</span>

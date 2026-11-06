@@ -1,19 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotKite } from "@/components/agents/kite/kite";
 import { Skeleton } from "@/components/ui/skeleton";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
- * The top of a conversation with one Bot: its orb, its name, what it does, and who can see it.
+ * The top of a conversation with one Bot: its kite, its name, what it does, and who can see it. The
+ * kite works while the Bot has the turn (`busy`) and rests otherwise.
  *
  * Drawn from the Bot's profile, with visibility shown only in the team edition.
  * It is the first thing in the transcript's scroll content and scrolls away with it.
  *
- * The empty-state pattern sits behind the orb as a halo (`.orb-pattern` in styles.css), so it follows
+ * The empty-state pattern sits behind the kite as a halo (`.kite-halo` in styles.css), so it follows
  * the `--empty-pattern*` tokens and a skin that turns the pattern off turns this off too.
  */
 export function ConversationIntro({
   agent,
+  busy = false,
 }: {
   agent: {
     id: string;
@@ -23,6 +25,7 @@ export function ConversationIntro({
     avatarSeed?: string | null;
     visibility: "public" | "private";
   };
+  busy?: boolean;
 }) {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
@@ -32,11 +35,12 @@ export function ConversationIntro({
   return (
     <div className="flex items-center gap-5 pt-4 pb-2">
       <div className="relative isolate grid shrink-0 place-items-center">
-        <div aria-hidden className="orb-pattern" />
-        <BotOrb
+        <div aria-hidden className="kite-halo" />
+        <BotKite
           name={agent.name}
           seed={agent.avatarSeed || agent.id}
           size={96}
+          state={busy ? "thinking" : "idle"}
         />
       </div>
       <div className="min-w-0">
@@ -71,7 +75,7 @@ export function ConversationIntro({
  * message sits where the end of the scroll puts it. Without something in the intro's place above
  * it, the placeholder had nothing to scroll and drew the message at the top, and the message
  * dropped 48px when the conversation arrived. The same footprint as `ConversationIntro`, line for
- * line, so the conversation that replaces it moves nothing but the orb and the words coming in.
+ * line, so the conversation that replaces it moves nothing but the kite and the words coming in.
  */
 export function ConversationIntroPlaceholder() {
   const personal =
@@ -79,7 +83,7 @@ export function ConversationIntroPlaceholder() {
   return (
     <div aria-hidden className="flex items-center gap-5 pt-4 pb-2">
       <div className="relative isolate grid shrink-0 place-items-center">
-        <div className="orb-pattern" />
+        <div className="kite-halo" />
         <Skeleton className="size-24 rounded-full" />
       </div>
       <div className="min-w-0 flex-1">

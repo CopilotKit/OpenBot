@@ -10,7 +10,7 @@ import { OnboardingFrame, StepTitle } from "./onboarding-frame";
  * TWO HALVES, BECAUSE A DESKTOP SHOWS THEM SIDE BY SIDE. `intro` is the step's heading (an `h1`),
  * its sentence and any control that belongs with them; `demo` is what it shows. From `lg` up the
  * intro sits on the left and the demo fills the right; below, the demo follows
- * the intro, or comes first where `demoFirst` says so (the name step, under its orb).
+ * the intro, or comes first where `demoFirst` says so (the name step, under its kite).
  *
  * The buttons are the frame's, so a step describes them rather than drawing them: the primary's
  * words where the step has its own action ("Turn on notifications"), what that action does given

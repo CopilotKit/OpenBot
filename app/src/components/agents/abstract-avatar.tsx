@@ -1,19 +1,25 @@
 import Avatar from "boring-avatars";
 import { useBotLook } from "@/components/agents/bot-look";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotKite } from "@/components/agents/kite/kite";
+import type { KiteState } from "@/components/agents/kite/kite-draw";
 
-/** A Bot's avatar: its orb, or its face in a skin that has not opted in to orbs. */
+/**
+ * A Bot's avatar: its kite, or its face in a skin that has not opted in to kites. `state` is what
+ * the kite shows; a face has no states.
+ */
 export function AbstractAvatar({
   name,
   seed,
   size = 40,
+  state = "idle",
 }: {
   name: string;
   seed: string;
   size?: number;
+  state?: KiteState;
 }) {
-  if (useBotLook() === "orb") {
-    return <BotOrb name={name} seed={seed} size={size} />;
+  if (useBotLook() === "kite") {
+    return <BotKite name={name} seed={seed} size={size} state={state} />;
   }
 
   return (

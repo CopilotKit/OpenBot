@@ -18,8 +18,8 @@ import { SKINS } from "@/skins/registry";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * Bots appear as their orb where the active skin asks for it (`botLook: "orb"`). OpenBot's own look
- * does; a skin that has not opted in keeps the faces it was designed with.
+ * Bots appear as their kite where the active skin asks for it (`botLook: "kite"`). OpenBot's own
+ * look does; a skin that has not opted in keeps the faces it was designed with.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -55,60 +55,94 @@ const avatars = {
 };
 
 describe.each(Object.entries(avatars))("%s", (_, Avatar) => {
-  test("is an orb where Bots are orbs", () => {
-    const view = renderAs("orb", <Avatar />);
-    expect(view.container.querySelector("[data-variant]")).not.toBeNull();
+  test("is a kite where Bots are kites", () => {
+    const view = renderAs("kite", <Avatar />);
+    expect(view.container.querySelector("[data-kite]")).not.toBeNull();
     expect(view.container.querySelector("svg")).toBeNull();
   });
 
   test("is a face where they are not", () => {
     const view = renderAs("face", <Avatar />);
     expect(view.container.querySelector("svg")).not.toBeNull();
-    expect(view.container.querySelector("[data-variant]")).toBeNull();
+    expect(view.container.querySelector("[data-kite]")).toBeNull();
   });
 });
 
-test("OpenBot's own look opts in to orbs and the skins do not", () => {
-  expect(SKINS.openbot.botLook).toBe("orb");
+test("OpenBot's own look opts in to kites and the skins do not", () => {
+  expect(SKINS.openbot.botLook).toBe("kite");
   for (const id of ["openduet", "opendots", "openmuse"] as const) {
     expect(SKINS[id].botLook ?? "face").toBe("face");
   }
 });
 
-test("a group shows two orbs", () => {
+test("a group shows two kites", () => {
   const view = renderAs(
-    "orb",
+    "kite",
     <ChannelAvatar
       participantIds={["knowledge", "risk-analyst", "release-notes"]}
       size={32}
     />,
   );
-  expect(view.container.querySelectorAll("[data-variant]")).toHaveLength(2);
+  expect(view.container.querySelectorAll("[data-kite]")).toHaveLength(2);
 });
 
-test("a conversation's orb is drawn from the Bot's seed, as its own avatar is", () => {
-  const color = (view: ReturnType<typeof render>) =>
-    view.container
-      .querySelector<HTMLElement>("[data-variant]")
-      ?.style.getPropertyValue("--c1");
-  const own = color(
-    renderAs("orb", <AbstractAvatar name="Copy" seed="knowledge" size={32} />),
+test("a conversation's kite is drawn from the Bot's seed, as its own avatar is", () => {
+  const livery = (view: ReturnType<typeof render>) => {
+    const kite = view.container.querySelector<HTMLElement>("[data-kite]");
+    return `${kite?.dataset.slot} ${kite?.dataset.pattern}`;
+  };
+  const own = livery(
+    renderAs("kite", <AbstractAvatar name="Copy" seed="knowledge" size={32} />),
   );
   cleanup();
-  const inSidebar = color(
+  const inSidebar = livery(
     renderAs(
-      "orb",
+      "kite",
       <ChannelAvatar participantIds={["knowledge-copy"]} size={32} />,
     ),
   );
-  expect(own).toBeTruthy();
+  expect(own).not.toBe("undefined undefined");
   expect(inSidebar).toBe(own);
 });
 
-test("a busy conversation keeps its working badge as an orb", () => {
+test("a busy conversation's kite works, and says so", () => {
   const view = renderAs(
-    "orb",
+    "kite",
     <ChannelAvatar participantIds={["knowledge"]} size={32} typing />,
   );
+  expect(
+    view.container.querySelector<HTMLElement>("[data-kite]")?.dataset.state,
+  ).toBe("thinking");
   expect(view.getByText("Working…")).toBeTruthy();
+});
+
+test("a busy group keeps its working badge, since no one kite is the one working", () => {
+  const view = renderAs(
+    "kite",
+    <ChannelAvatar
+      participantIds={["knowledge", "risk-analyst"]}
+      size={32}
+      typing
+    />,
+  );
+  for (const kite of view.container.querySelectorAll<HTMLElement>(
+    "[data-kite]",
+  ))
+    expect(kite.dataset.state).toBe("idle");
+  expect(view.getByText("Working…")).toBeTruthy();
+});
+
+test("a Bot's avatar shows the state it is given", () => {
+  const view = renderAs(
+    "kite",
+    <AbstractAvatar
+      name="Knowledge"
+      seed="knowledge"
+      size={28}
+      state="sleeping"
+    />,
+  );
+  expect(view.getByRole("img", { name: "Knowledge" }).dataset.state).toBe(
+    "sleeping",
+  );
 });

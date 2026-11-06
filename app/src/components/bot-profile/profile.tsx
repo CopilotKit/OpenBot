@@ -37,6 +37,7 @@ import {
 } from "@/lib/bot-lifecycle/mutations";
 import {
   type BotNotify,
+  botAttentionQueryOptions,
   botLifecycleQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import {
@@ -45,6 +46,7 @@ import {
 } from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
 import { BotActivityGlance, BotActivityRow } from "./activity";
+import { kiteStateOf } from "./attention";
 import { BotPausedBanner } from "./pause-banner";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
@@ -69,6 +71,10 @@ export function BotProfile({
   manage?: React.ReactNode;
 }) {
   const lifecycle = useQuery(botLifecycleQueryOptions(agent.id));
+  const attention = useQuery({
+    ...botAttentionQueryOptions(),
+    select: (body) => body.bots.find((bot) => bot.agentId === agent.id),
+  });
   const { done } = useNeedsYou(agent.id);
   const pause = useMutation(setBotPausedMutationOptions(queryClient));
   const notify = useMutation(setBotNotifyMutationOptions(queryClient));
@@ -78,7 +84,22 @@ export function BotProfile({
   return (
     <>
       <div className="mt-6 flex items-center gap-3">
-        <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
+        {/* The pause switch below answers before the sidebar's counts refetch, so it wins. */}
+        <AbstractAvatar
+          name={agent.name}
+          seed={agent.avatarSeed}
+          size={40}
+          state={
+            attention.data
+              ? kiteStateOf({
+                  ...attention.data,
+                  paused: lifecycle.data?.paused ?? attention.data.paused,
+                })
+              : lifecycle.data?.paused
+                ? "sleeping"
+                : "idle"
+          }
+        />
         <div className="min-w-0">
           {agent.title && <p className="truncate font-medium">{agent.title}</p>}
           <p className="line-clamp-2 text-muted-foreground text-sm">

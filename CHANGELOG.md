@@ -8,6 +8,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Every Bot is now a kite, OpenBot's mascot, instead of an orb. A kite rests with no face and shows
+  pixel eyes while it is in touch with you. A small square beside it says what it is doing: blue
+  while it listens, works or answers, amber while it waits on you, green when it is done, red when
+  a task failed. The Bots list and a Bot's page draw each Bot that way: waiting while it has a
+  question, an approval or a stalled hand-off for you, red with a failed task, dimmed with no face
+  while it is paused, and green with a reply to read. A conversation's kite works while the Bot has
+  the turn, and a busy conversation in the sidebar shows it in the kite rather than three dots.
+  Each Bot keeps its orb's place in the palette, now the brand's eight colours, so most stay in
+  their colour family (the teal slot becomes graphite, the sky slot teal), and gets a sail pattern
+  from the same seed. OpenBot's own mark (sign-in, onboarding, the New Bot sheet, the skins'
+  frames, OpenBot for Business) is the violet kite. A kite holds still under reduced motion and at 32 px and under, where only its
+  square moves, shows no face under 22 px, and uses each colour's lighter twin in dark mode. A skin
+  that set `botLook: "orb"` sets `botLook: "kite"`.
 - OpenBot Desktop's menu bar and tray no longer have an item that opens the back end's own
   dashboard, which is branded as another product. The Status window and Settings, This computer
   list each part by what it does: "Front end and Bots", "Background jobs", "Database" and "Bot

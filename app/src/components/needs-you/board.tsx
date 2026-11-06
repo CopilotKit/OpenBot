@@ -1,7 +1,8 @@
 import { IconChevronDown } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotKite } from "@/components/agents/kite/kite";
+import type { KiteState } from "@/components/agents/kite/kite-draw";
 import { useWaitingByBot } from "@/components/approvals/waiting";
 import { PageSection } from "@/components/layout/page-shell";
 import { SuggestionRow } from "@/components/suggestions/suggestion-row";
@@ -27,7 +28,7 @@ const FINDS_SHOWN = 3;
  * (`waitingOnYou`).
  *
  * BOT FIRST. A row used to name its Bot in the faintest line at its foot, and with two Bots nobody
- * could tell who was asking. Each group now opens with the Bot's orb and name, and for finds, what
+ * could tell who was asking. Each group now opens with the Bot's kite and name, and for finds, what
  * its check-ins watch. Given a Bot (its own page), there is one group of each.
  */
 export function NeedsYouBoard({ agentId }: { agentId?: string }) {
@@ -91,6 +92,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
                 bot={bot(botId)}
                 botId={botId}
                 key={botId}
+                state="waiting"
                 note={`waiting since ${relativeTime(
                   group.times.reduce((first, at) =>
                     Date.parse(at) < Date.parse(first) ? at : first,
@@ -145,16 +147,21 @@ function Half({ title, children }: { title: string; children: ReactNode }) {
 
 type GroupBot = { name: string; avatarSeed: string } | undefined;
 
-/** One Bot's rows in a bordered card, opened by its orb, its name and a note on what they are. */
+/**
+ * One Bot's rows in a bordered card, opened by its kite, its name and a note on what they are. The
+ * kite waits with the person where the rows wait on them.
+ */
 function BotGroup({
   bot,
   botId,
   note,
+  state = "idle",
   children,
 }: {
   bot: GroupBot;
   botId: string;
   note: string;
+  state?: KiteState;
   children: ReactNode[];
 }) {
   const name = bot?.name ?? "Your Bot";
@@ -165,7 +172,12 @@ function BotGroup({
       data-needs-you-bot={botId}
     >
       <div className="flex items-center gap-2.5 border-border border-b bg-muted px-3.5 py-2.5">
-        <BotOrb name={name} seed={bot?.avatarSeed || botId} size={22} />
+        <BotKite
+          name={name}
+          seed={bot?.avatarSeed || botId}
+          size={22}
+          state={state}
+        />
         <span className="font-semibold text-[13px]">{name}</span>
         <span className="truncate text-muted-foreground text-xs">· {note}</span>
       </div>

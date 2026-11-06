@@ -4,7 +4,7 @@ import {
   IconChevronLeft,
 } from "@tabler/icons-react";
 import { createContext, type ReactNode, useContext, useState } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import { OpenBotKite } from "@/components/agents/kite/kite";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Popover,
@@ -122,7 +122,7 @@ export function OnboardingFrame({
         </div>
         <div className="hidden lg:flex lg:items-center lg:justify-between lg:gap-4">
           <div className="text-sm flex items-center gap-2 font-semibold">
-            <AgentOrb size="24px" />
+            <OpenBotKite size={24} />
             {appConfig.brand.productName}
           </div>
           {titles.length > 1 ? (

@@ -3,7 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { NameOrb, useNameStep } from "@/components/onboarding/name-step";
+import { NameKite, useNameStep } from "@/components/onboarding/name-step";
 import { StepIntro } from "@/components/onboarding/onboarding-frame";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { authKeys } from "@/lib/auth/queries";
@@ -185,15 +185,17 @@ test("a completion that fails is said under the field too", async () => {
   expect(primary(view).textContent).toBe("Get started");
 });
 
-test("the orb is OpenBot's own, listening, and settles into done when onboarding ends", () => {
-  const view = render(<NameOrb />);
-  const orb = () =>
-    view.container.querySelector<HTMLElement>("[data-orb]") as HTMLElement;
-  expect(orb().getAttribute("data-orb")).toBe("openbot");
-  expect(orb().getAttribute("data-state")).toBe("listening");
+test("the kite is OpenBot's own, listening, and settles into done when onboarding ends", () => {
+  const view = render(<NameKite />);
+  const kite = () =>
+    view.container.querySelector<HTMLElement>(
+      "[data-kite-demo]",
+    ) as HTMLElement;
+  expect(kite().getAttribute("data-kite-demo")).toBe("openbot");
+  expect(kite().getAttribute("data-state")).toBe("listening");
   expect(view.container.querySelector("[data-onboarding-finish]")).toBeNull();
 
-  view.rerender(<NameOrb finished />);
-  expect(orb().getAttribute("data-state")).toBe("done");
-  expect(orb().closest("[data-onboarding-finish]")).not.toBeNull();
+  view.rerender(<NameKite finished />);
+  expect(kite().getAttribute("data-state")).toBe("done");
+  expect(kite().closest("[data-onboarding-finish]")).not.toBeNull();
 });

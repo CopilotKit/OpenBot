@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from "node:fs";
  * Found in review: the skin's controls moved for people who asked their system for less motion.
  * Every class list in the skin that animates (a transition, a press that scales, a spin or pulse)
  * has to say what happens under `motion-reduce:` in the same list, so a new one cannot slip in
- * without it. The orb is OpenBot's `AgentOrb`, which reads the same preference itself.
+ * without it. The kite is OpenBot's `OpenBotKite`, which reads the same preference itself.
  */
 
 const folder = new URL("../src/skins/openduet/", import.meta.url);

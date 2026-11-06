@@ -24,6 +24,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { OPENBOT_SLOT } from "@/components/agents/kite/kite-draw";
 import { PageShell } from "@/components/layout/page-shell";
 import { appConfig } from "@/lib/generated/application-config";
 import { navigationFor } from "@/lib/navigation";
@@ -550,7 +551,7 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
 
 /*
  * A skin takes OpenDuet's look and the deployment's identity: the name a person reads is the one in
- * brand.yaml, and the orb is OpenBot's own, never OpenDuet's name or its robot face.
+ * brand.yaml, and the kite is OpenBot's own, never OpenDuet's name or its robot face.
  */
 describe("the frame carries the deployment's brand, not OpenDuet's", () => {
   /** Every word a person can read or hear: the text, and the names and titles on controls. */
@@ -565,7 +566,7 @@ describe("the frame carries the deployment's brand, not OpenDuet's", () => {
     return `${document.body.textContent ?? ""}\n${named.join("\n")}`;
   }
 
-  test("the menu and the orb name the deployment's product, and nothing says OpenDuet", async () => {
+  test("the menu and the kite name the deployment's product, and nothing says OpenDuet", async () => {
     api("admin");
     const view = renderApp("/");
     const orb = await view.findByRole("button", {
@@ -575,9 +576,13 @@ describe("the frame carries the deployment's brand, not OpenDuet's", () => {
     const menu = view.getByRole("dialog");
     expect(within(menu).getByText(appConfig.brand.productName)).toBeTruthy();
     expect(readable()).not.toContain("OpenDuet");
-    // OpenBot's own orb, as sign-in and onboarding draw it, and no drawing of OpenDuet's.
-    expect(orb.querySelector(".agent-orb")).not.toBeNull();
-    expect(orb.querySelector("canvas")).toBeNull();
+    // OpenBot's own kite, as sign-in and onboarding draw it, and no drawing of OpenDuet's: the
+    // only canvas is the kite's.
+    const kite = orb.querySelector<HTMLElement>("[data-kite]");
+    expect(kite?.dataset.slot).toBe(String(OPENBOT_SLOT));
+    expect([...orb.querySelectorAll("canvas")]).toEqual([
+      ...(kite?.querySelectorAll("canvas") ?? []),
+    ]);
   });
 
   test("Tasks names nothing as OpenDuet either", async () => {

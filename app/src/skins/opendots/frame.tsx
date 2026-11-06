@@ -16,7 +16,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import { OpenBotKite } from "@/components/agents/kite/kite";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
@@ -169,7 +169,7 @@ function Rail({
         className="mb-3 grid size-9 shrink-0 place-items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
         to="/"
       >
-        <AgentOrb size="26px" />
+        <OpenBotKite size={26} />
       </Link>
       <RailTip label={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
         <button

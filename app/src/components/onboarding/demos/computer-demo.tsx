@@ -1,11 +1,11 @@
-import { DemoOrb } from "@/components/onboarding/demo-orb";
 import { DesktopIllustration } from "@/components/computer/desktop-illustration";
 import { ComputerPlaceholder } from "@/components/computer/placeholder";
+import { DemoKite } from "@/components/onboarding/demo-kite";
 import { DemoStage } from "../demo-stage";
 
 /**
  * A browser and files of its own: the desktop a Bot works on, its browser and its folder of files,
- * with its pointer on an errand, and the orb working in the corner.
+ * with its pointer on an errand, and the kite working in the corner.
  *
  * The computer panel's own drawing of a Bot's desktop, so the picture matches what it shows
  * when a Bot is using it. Two beats only to swap the caption; the pointer keeps its own loop, held
@@ -25,7 +25,7 @@ export function ComputerDemo() {
           <ComputerPlaceholder className="absolute inset-0 h-full w-full" />
           <DesktopIllustration still={!playing} />
           <div className="bg-background/80 backdrop-blur absolute bottom-3 left-3 flex items-center gap-2 rounded-full py-1 pr-3 pl-1 ring-1 ring-border shadow-lg">
-            <DemoOrb size={28} state="thinking" still={!playing} />
+            <DemoKite size={28} state="thinking" still={!playing} />
             <span className="text-xs font-medium text-foreground">
               {beat === 0 ? "Reading the page" : "Saving it to a file"}
             </span>

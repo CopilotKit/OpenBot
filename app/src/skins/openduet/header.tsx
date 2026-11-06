@@ -8,8 +8,8 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
-import type { AIState } from "@/components/agents/orb/ai-core";
+import { OpenBotKite } from "@/components/agents/kite/kite";
+import type { KiteState } from "@/components/agents/kite/kite-draw";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type ChannelWork,
@@ -30,7 +30,7 @@ import {
 
 /** The header's side discs: 46px, past the 44px a finger needs. */
 const SIDE = 46;
-/** The orb's footprint on a tab. */
+/** The kite's footprint on a tab: the talk button around it. */
 const ORB = 62;
 
 /** The person's initial, from their name, or their email when they have none. */
@@ -59,7 +59,7 @@ function useOpenConversation() {
   return { busy: (channel?.busy ?? false) || work.length > 0, work };
 }
 
-/** What the Bot is doing, in a few words, for the pill under the orb. */
+/** What the Bot is doing, in a few words, for the pill under the kite. */
 export function doingLine(busy: boolean, work: ChannelWork[]): string | null {
   const first = work[0];
   if (first?.kind === "handoff")
@@ -69,13 +69,12 @@ export function doingLine(busy: boolean, work: ChannelWork[]): string | null {
 }
 
 /**
- * OpenDuet's header on a tab: the menu in a disc on the left, an orb in the centre, the person's
- * initial in a disc on the right (their settings). The orb is OpenBot's own (`AgentOrb`, as sign-in
- * and onboarding draw it), so the frame carries the deployment's identity, not OpenDuet's. It is the
- * way to talk: pressed, it
- * starts the composer's own dictation, or, on a screen with no composer, opens Chat and starts it
- * there. It looks down while the person types or talks, and thinks while the Bot works, with a pill
- * under it saying what the Bot is doing.
+ * OpenDuet's header on a tab: the menu in a disc on the left, OpenBot's kite in the centre, the
+ * person's initial in a disc on the right (their settings). The kite is OpenBot's own
+ * (`OpenBotKite`, as sign-in and onboarding draw it), so the frame carries the deployment's
+ * identity, not OpenDuet's. It is the way to talk: pressed, it starts the composer's own dictation,
+ * or, on a screen with no composer, opens Chat and starts it there. It listens while the person
+ * types or talks, and works while the Bot works, with a pill under it saying what the Bot is doing.
  *
  * `floating` lays it over a screen that scrolls under it, behind a fade. Otherwise it is a bar in
  * the column's flow, over an OpenBot page that owns its own scroller.
@@ -89,7 +88,7 @@ export function TabHeader({
   floating: boolean;
   menuOpen: boolean;
   onMenu: () => void;
-  /** The frame's content, where the composer the orb talks through is drawn. */
+  /** The frame's content, where the composer the kite talks through is drawn. */
   main: HTMLElement | null;
 }) {
   const { data: user } = useQuery(currentUserQueryOptions());
@@ -107,7 +106,7 @@ export function TabHeader({
 
   // Working is the composer's own Stop control or the roster's word for a run nobody here started.
   const working = presence.working || conversation.busy;
-  const state: AIState = presence.recording
+  const state: KiteState = presence.recording
     ? "listening"
     : working
       ? "thinking"
@@ -154,7 +153,7 @@ export function TabHeader({
       >
         <IconMenuShort size={21} stroke={1.8} />
       </button>
-      {/* The span between the discs, so the pill under the orb never reaches under either. */}
+      {/* The span between the discs, so the pill under the kite never reaches under either. */}
       <div className="flex min-w-0 flex-1 flex-col items-center gap-1 px-2">
         <button
           aria-label={label}
@@ -168,7 +167,7 @@ export function TabHeader({
           title={label}
           type="button"
         >
-          <AgentOrb size={`${ORB - 6}px`} state={state} />
+          <OpenBotKite size={ORB - 6} state={state} />
         </button>
         <DoingPill line={doingLine(working, conversation.work)} />
       </div>
@@ -187,7 +186,7 @@ export function TabHeader({
 }
 
 /**
- * What the Bot is doing, in a glass pill under the orb. Always mounted, so the live region is there
+ * What the Bot is doing, in a glass pill under the kite. Always mounted, so the live region is there
  * before the first words arrive and it can fade out as well as in.
  */
 function DoingPill({ line }: { line: string | null }) {
