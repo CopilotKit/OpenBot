@@ -203,7 +203,7 @@ export function ModelAllowlistSection() {
                   <ItemDescription>
                     {modelAllowlist.enabled
                       ? "Bots can only run on the models listed below."
-                      : "Off. Any model can be used."}
+                      : "Off. Runs on other models, a remote Bot's own included, aren't refused."}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
