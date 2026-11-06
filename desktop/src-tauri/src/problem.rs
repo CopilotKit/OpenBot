@@ -147,6 +147,20 @@ pub fn said_about(output: &str) -> String {
                 space and try again."
             .into();
     }
+    // A registry that did not answer, while the engine did: the engine is what reports it, so the
+    // "connection refused" in it is the registry's, not the engine's.
+    if lower.contains("failed to resolve reference")
+        || lower.contains("failed to do request")
+        || lower.contains("error pulling")
+        || (lower.contains("error response from daemon")
+            && (lower.contains("dial tcp")
+                || lower.contains("no such host")
+                || lower.contains("i/o timeout")))
+    {
+        return "OpenBot couldn't download what it needs. Check the internet connection, and try \
+                again."
+            .into();
+    }
     if lower.contains("cannot connect")
         || lower.contains("is the docker daemon running")
         || lower.contains("connection refused")
@@ -186,6 +200,23 @@ mod tests {
         // The person is never told to run `docker login`, which is not a thing they have.
         assert!(!said.to_lowercase().contains("docker login"), "{said}");
         assert!(!said.contains("openbot-agent"), "{said}");
+    }
+
+    /// Found upgrading a real Desktop with its registry stopped: the engine answered and the
+    /// registry did not, and the window said to start Docker, which was running.
+    #[test]
+    fn a_registry_that_does_not_answer_is_a_download_that_failed_not_a_stopped_engine() {
+        for raw in [
+            r#"{"id":"Image 127.0.0.1:5050/openbot-server@sha256:d6dcee1f","status":"Error","text":"Error","details":"failed to resolve reference \"127.0.0.1:5050/openbot-server@sha256:d6dcee1f\": failed to do request: Head \"http://127.0.0.1:5050/v2/openbot-server/manifests/sha256:d6dcee1f\": dial tcp 127.0.0.1:5050: connect: connection refused"}"#,
+            "Error response from daemon: Get \"https://ghcr.io/v2/\": dial tcp: lookup ghcr.io: no such host",
+        ] {
+            let said = said_about(raw);
+            assert!(said.contains("couldn't download"), "{said}");
+            assert!(!said.contains("container engine"), "{said}");
+        }
+        // The engine itself not answering still says so.
+        let said = said_about("dial unix /var/run/docker.sock: connect: connection refused");
+        assert!(said.contains("Start Docker or Podman"), "{said}");
     }
 
     #[test]

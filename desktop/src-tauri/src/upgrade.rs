@@ -359,7 +359,7 @@ pub fn back_said(planned: &Move, start: &Problem) -> String {
 /// The upgrade failed, and the previous version could not be put back.
 pub fn stuck_said(planned: &Move) -> String {
     format!(
-        "OpenBot couldn't update to {} or put {} back. Choose Start to try putting it back again.",
+        "OpenBot couldn't update to {} or put {} back. Choose Retry to try putting it back again.",
         planned.to, planned.from
     )
 }
@@ -551,6 +551,19 @@ mod tests {
             kept_said(&planned),
             "OpenBot couldn't update to v0.3.1, so it's still on v0.3.0, with your data as it was."
         );
+    }
+
+    /// The screen a failed Start leaves has Retry, Change AI connection and Repair installation,
+    /// and no Start. Retry runs Start again, which puts the previous version back first.
+    #[test]
+    fn a_previous_version_that_could_not_go_back_names_the_retry_that_is_on_screen() {
+        let planned = Move {
+            from: "v0.3.0".into(),
+            to: "v0.3.1".into(),
+        };
+        let said = stuck_said(&planned);
+        assert!(said.contains("Choose Retry"), "{said}");
+        assert!(!said.contains("Choose Start"), "{said}");
     }
 
     // ---- The steps, against files on disk and a recording of what ran ----
@@ -882,6 +895,9 @@ services:
       POSTGRES_DB: openbot
       POSTGRES_USER: openbot
       POSTGRES_PASSWORD: openbot
+    # Published on loopback, as OpenBot's own Compose file does, so a client on the host can reach it.
+    ports:
+      - "127.0.0.1:${{POSTGRES_PORT:-5432}}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -899,14 +915,15 @@ services:
   server:
     profiles: ["openbot"]
     image: ${{SERVER_IMAGE:-openbot-upgrade-fixture-unset}}
-    command: ["sleep", "infinity"]
+    # Connected to the database for as long as it runs, as the real server's pool is.
+    command: ["psql", "postgres://openbot:openbot@postgres:5432/openbot", "-c", "select pg_sleep(100000)"]
     depends_on:
       migrate:
         condition: service_completed_successfully
   worker:
     profiles: ["openbot"]
     image: ${{SERVER_IMAGE:-openbot-upgrade-fixture-unset}}
-    command: ["sleep", "infinity"]
+    command: ["psql", "postgres://openbot:openbot@postgres:5432/openbot", "-c", "select pg_sleep(100000)"]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -971,6 +988,8 @@ volumes:
     struct Fixture {
         root: PathBuf,
         project: String,
+        /// The host port the fixture's Postgres is published on.
+        port: u16,
         address: engine::Address,
         /// What `get` answers for each release: its tarball and its image list.
         releases: Vec<(String, Vec<u8>, Vec<u8>)>,
@@ -1004,9 +1023,15 @@ volumes:
                 engine::Address::new(selected, std::env::var("OPENBOT_TEST_CONNECTION").ok())
                     .pin()
                     .expect("the explicitly selected test engine answers");
+            let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
             Self {
                 root,
                 project,
+                port,
                 address,
                 releases: Vec::new(),
                 tags: Vec::new(),
@@ -1109,8 +1134,60 @@ volumes:
         }
     }
 
+    impl Fixture {
+        /// Something outside the installation's Compose project that keeps connecting to its
+        /// database through the published port, and reconnects whenever it is cut off: what a
+        /// developer's OpenBot server left running on the host does to the Desktop's Postgres on
+        /// 5432 (found holding 12 sessions in the real failure). Six sessions, each opened again as
+        /// soon as it ends. Not part of the project, so no Stop or `down` of it touches them.
+        fn connect_from_outside(&mut self) {
+            let url = format!(
+                "postgres://openbot:openbot@host.docker.internal:{}/openbot",
+                self.port
+            );
+            let session = format!(
+                "(while true; do psql '{url}' -c 'select pg_sleep(100000)' >/dev/null 2>&1; sleep 0.2; done) &"
+            );
+            let script = format!("{} wait", session.repeat(6));
+            let name = format!("{}-outside-client", self.project);
+            self.ok(&[
+                "run",
+                "--detach",
+                "--name",
+                &name,
+                "--add-host",
+                "host.docker.internal:host-gateway",
+                "--entrypoint",
+                "sh",
+                POSTGRES,
+                "-c",
+                &script,
+            ]);
+            // Connected before anything below runs.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while self.outside_sessions() < 6 {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the outside client never connected"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        }
+
+        /// Sessions open to the database from anything but the project's own containers.
+        fn outside_sessions(&self) -> usize {
+            self.sql(
+                "select count(*) from pg_stat_activity where datname = 'openbot' and query like '%pg_sleep(100000)%' and pid <> pg_backend_pid()",
+            )
+            .parse::<usize>()
+            .unwrap_or(0)
+                .saturating_sub(2)
+        }
+    }
+
     impl Drop for Fixture {
         fn drop(&mut self) {
+            let _ = self.engine(&["rm", "--force", &format!("{}-outside-client", self.project)]);
             let _ = self.engine(&[
                 "compose",
                 "-p",
@@ -1160,8 +1237,11 @@ volumes:
                 .iter()
                 .map(|(key, value)| format!("{key}={value}\n"))
                 .collect();
+            let env = format!("{env}POSTGRES_PORT={}\n", self.fixture.port);
             std::fs::write(self.fixture.root.join(".env"), env).unwrap();
-            variables.into_iter().collect()
+            let mut secrets: stack::Secrets = variables.into_iter().collect();
+            secrets.insert("POSTGRES_PORT".into(), self.fixture.port.to_string());
+            secrets
         }
 
         fn down(&self) -> Result<(), Problem> {
@@ -1315,13 +1395,19 @@ volumes:
         let previous = installed_and_used(&mut fixture);
         let compose_before = std::fs::read(fixture.root.join("docker-compose.yml")).unwrap();
         let images_before = std::fs::read(deployment::images_path(&fixture.root)).unwrap();
-        // Published in the image list, and never pushed.
-        let registry =
-            std::env::var("OPENBOT_TEST_REGISTRY").unwrap_or_else(|_| "127.0.0.1:5050".into());
+        // Published in the image list, on a registry that is not answering: a stopped registry,
+        // or this computer offline. Nothing listens on that port once the listener is dropped.
+        let closed = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
         fixture.release(
             NEXT,
-            &format!("{registry}/openbot-upgrade-fixture/never-pushed:{NEXT}"),
+            &format!("127.0.0.1:{closed}/openbot-upgrade-fixture/never-pushed:{NEXT}"),
         );
+        // And the database is in use from outside OpenBot the whole time.
+        fixture.connect_from_outside();
 
         let mut steps = Real {
             fixture: &fixture,
@@ -1336,6 +1422,9 @@ volumes:
             detail(&failed).contains("never-pushed"),
             "the pull is what failed: {failed:?}"
         );
+        // Said as a download that failed, never as the engine being down: it answered throughout.
+        assert!(failed.said.contains("couldn't download"), "{}", failed.said);
+        assert!(!failed.said.contains("container engine"), "{}", failed.said);
         assert_eq!(
             steps.ran,
             ["stop", "back_up", "lay_out", "install", "stop", "restore", "start"]
@@ -1370,5 +1459,69 @@ volumes:
             // Compose's dependency on every `up`, and never the next release's.
             format!("{N}=2")
         );
+    }
+
+    /// The state a real Desktop was left in: an upgrade that set the previous version aside, laid
+    /// the next one out and then could not put the database back, because a client outside
+    /// OpenBot kept sessions open to it. Retry runs Start, which puts the previous version back
+    /// (`recover`) and starts it, with that client still connected.
+    #[test]
+    #[ignore = "pushes to a local registry and runs an isolated Compose project on the selected engine"]
+    fn a_previous_version_left_aside_is_put_back_and_started_while_the_database_is_in_use() {
+        let mut fixture = Fixture::new("stuck");
+        let previous = installed_and_used(&mut fixture);
+        let next = fixture.publish(NEXT);
+        fixture.release(NEXT, &next);
+        fixture.connect_from_outside();
+        let mut steps = Real {
+            fixture: &fixture,
+            to: NEXT.into(),
+            ran: Vec::new(),
+        };
+        // Stopped, backed up, set aside, and the next release laid out, pulled and started: its
+        // migration ran. Then the app stopped before it finished.
+        steps.stop().unwrap();
+        let aside = fixture.root.join(PREVIOUS);
+        std::fs::create_dir_all(&aside).unwrap();
+        steps.back_up(&aside.join(DUMP)).unwrap();
+        keep(&fixture.root).unwrap();
+        steps.lay_out().unwrap();
+        steps.install().unwrap();
+        steps.start().unwrap();
+        fixture.sql("insert into conversations values (2, 'written by the next release')");
+        assert!(interrupted(&fixture.root));
+
+        steps.ran.clear();
+        assert!(recover(&fixture.root, &mut steps).unwrap());
+        steps.start().unwrap();
+        assert_eq!(steps.ran, ["stop", "restore", "start"]);
+
+        assert!(!interrupted(&fixture.root));
+        assert_eq!(deployment::installed(&fixture.root).unwrap().version, N);
+        let running = fixture.running();
+        for service in ["agent-computer", "server", "supervisor", "worker"] {
+            assert!(
+                running.contains(&format!("{service} {previous}")),
+                "{service} is not running {previous}: {running:?}"
+            );
+        }
+        // The database as it was when the upgrade began: nothing the next release wrote.
+        assert_eq!(
+            fixture.sql("select string_agg(said, ',' order by id) from conversations"),
+            "hello from N"
+        );
+        assert_eq!(
+            fixture.sql("select count(*) from fixture_migrations where version = 'v0.0.2'"),
+            "0"
+        );
+        // And the client outside OpenBot is back on it.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while fixture.outside_sessions() < 6 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the outside client did not reconnect"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
     }
 }

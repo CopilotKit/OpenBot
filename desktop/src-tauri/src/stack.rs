@@ -4142,10 +4142,20 @@ pub fn start_runtime_database(
     Ok(())
 }
 
-/// Return the database to the dump taken before an update. `--clean --create` drops and recreates
-/// the database named in the archive, connecting to the `postgres` maintenance database to do it,
-/// so tables a candidate migration added do not survive. A connection still open to the database
-/// makes the `DROP DATABASE` fail before anything is removed, and that failure is reported.
+/// Return the database to the dump taken before an update, whoever else is connected to it.
+///
+/// The database is published on the host's loopback, so anything on this computer can hold
+/// sessions open to it and reconnect the moment they are cut: a developer's OpenBot server left
+/// running on the host was found holding twelve. `pg_restore --clean --create` issues a plain
+/// `DROP DATABASE`, which any one of those sessions refuses. So, the standard way, and with no
+/// moment where a client could connect to half a database:
+///
+/// 1. Stop every container of this installation's Compose project but Postgres, whether or not
+///    this session started it (`stop_all_but_the_database`).
+/// 2. Restore the dump into a scratch database nobody connects to, in one transaction. A dump that
+///    does not restore leaves the database as it was.
+/// 3. Refuse new connections to the database, end the ones it has, drop it (`WITH (FORCE)`), and
+///    rename the scratch database into its place.
 pub fn restore_runtime_database(
     engine: &Address,
     root: &Path,
@@ -4154,15 +4164,9 @@ pub fn restore_runtime_database(
 ) -> Result<(), String> {
     let file = std::fs::File::open(dump)
         .map_err(|e| format!("the database backup {} cannot be read: {e}", dump.display()))?;
+    stop_all_but_the_database(engine, root)?;
     let restored = compose_command(engine, root, secrets)
-        .args([
-            "exec",
-            "-T",
-            "postgres",
-            "sh",
-            "-c",
-            "exec pg_restore --clean --if-exists --create --exit-on-error --username=\"$POSTGRES_USER\" --dbname=postgres",
-        ])
+        .args(["exec", "-T", "postgres", "sh", "-c", RESTORE_SCRIPT])
         .stdin(Stdio::from(file))
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -4172,6 +4176,73 @@ pub fn restore_runtime_database(
         return Err(format!(
             "the database backup could not be restored: {}",
             command_said(&restored.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Run inside the Postgres container, with the dump on its standard input. See
+/// `restore_runtime_database`. `ALLOW_CONNECTIONS false` keeps a client that reconnects at once
+/// from getting back in between the sessions ending and the drop.
+const RESTORE_SCRIPT: &str = r#"set -e
+db="$POSTGRES_DB"
+scratch="${POSTGRES_DB}_restore"
+sql() { psql --no-psqlrc --quiet -v ON_ERROR_STOP=1 --username="$POSTGRES_USER" --dbname=postgres -c "$1"; }
+sql "DROP DATABASE IF EXISTS \"$scratch\" WITH (FORCE)"
+sql "CREATE DATABASE \"$scratch\" TEMPLATE template0 OWNER \"$POSTGRES_USER\""
+pg_restore --exit-on-error --single-transaction --username="$POSTGRES_USER" --dbname="$scratch"
+if [ "$(psql --no-psqlrc -tA --username="$POSTGRES_USER" --dbname=postgres -c "SELECT 1 FROM pg_database WHERE datname = '$db'")" = 1 ]; then
+  sql "ALTER DATABASE \"$db\" ALLOW_CONNECTIONS false"
+  sql "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db' AND pid <> pg_backend_pid()"
+  sql "DROP DATABASE \"$db\" WITH (FORCE)"
+fi
+sql "ALTER DATABASE \"$scratch\" RENAME TO \"$db\""
+"#;
+
+/// Stop every running container of this installation's Compose project except Postgres: by the
+/// project's label, so a container this session did not start, or one a service of another version
+/// of the Compose file made, is stopped too. Stopped, not removed.
+pub fn stop_all_but_the_database(engine: &Address, root: &Path) -> Result<(), String> {
+    let project = project(engine, root).map_err(|problem| problem.said)?;
+    let listed = |filters: &[String]| -> Result<Vec<String>, String> {
+        let mut command = engine.command();
+        command.args(["ps", "--quiet"]);
+        for filter in filters {
+            command.args(["--filter", filter]);
+        }
+        let output = command
+            .output()
+            .map_err(|error| format!("could not list this installation's containers: {error}"))?;
+        if !output.status.success() {
+            return Err(command_said(&output.stderr));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .map(str::to_string)
+            .collect())
+    };
+    let in_project = format!("label=com.docker.compose.project={project}");
+    let database = listed(&[
+        in_project.clone(),
+        "label=com.docker.compose.service=postgres".into(),
+    ])?;
+    let others: Vec<String> = listed(&[in_project])?
+        .into_iter()
+        .filter(|id| !database.contains(id))
+        .collect();
+    if others.is_empty() {
+        return Ok(());
+    }
+    let stopped = engine
+        .command()
+        .arg("stop")
+        .args(&others)
+        .output()
+        .map_err(|error| format!("could not stop this installation's containers: {error}"))?;
+    if !stopped.status.success() {
+        return Err(format!(
+            "could not stop this installation's containers: {}",
+            command_said(&stopped.stderr)
         ));
     }
     Ok(())

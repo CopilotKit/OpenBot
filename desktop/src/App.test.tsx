@@ -1425,6 +1425,48 @@ test("relaunch upgrades an older installation to this app's release as part of S
   });
 });
 
+test("an upgrade that could not put the previous version back is retried from the Retry its sentence names", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-upgrade-stuck",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "OpenBot couldn't update to v0.3.1 or put v0.3.0 back. Choose Retry to try putting it back again.";
+  let attempts = 0;
+  withOlderDeployment(() => {
+    attempts += 1;
+    if (attempts === 1)
+      throw {
+        said,
+        detail: "the database backup could not be restored",
+      };
+    // The second Start puts the previous version back, tries the update again, and keeps v0.3.0.
+    return {
+      from: "v0.3.0",
+      to: "v0.3.1",
+      moved: false,
+      notice: {
+        said: "OpenBot couldn't update to v0.3.1, so it's still on v0.3.0, with your data as it was.",
+      },
+    };
+  });
+  const view = await renderApp();
+  await view.findByText(said);
+  // The button the sentence names is the one on this screen, and there is no Start to choose.
+  expect(view.queryByRole("button", { name: /^Start/ })).toBeNull();
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await view.findByText(
+    "OpenBot couldn't update to v0.3.1, so it's still on v0.3.0, with your data as it was.",
+  );
+  expect(
+    invokeCalls.filter((call) => call.command === "upgrade_and_start"),
+  ).toHaveLength(2);
+  // Each Retry asks first, and an interrupted upgrade is always due: Start never runs around it.
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+});
+
 test("an upgrade that did not finish says so on the running screen before handing over", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-move-undone",

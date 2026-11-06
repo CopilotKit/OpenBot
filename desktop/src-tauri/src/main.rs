@@ -659,9 +659,20 @@ fn require_update_root(shell: &Shell, root: &Path) -> Result<(), Problem> {
     }
     Ok(())
 }
-/// Said while an upgrade the app stopped part way waits for its previous version to go back.
+/// Said while an upgrade the app stopped part way waits for its previous version to go back, on
+/// the screen a failed Start leaves, whose Retry runs Start again: `upgrade_due` sends it to
+/// `upgrade_and_start`, which puts the previous version back first.
 const UPGRADE_INTERRUPTED: &str =
-    "OpenBot's last update did not finish. Choose Start to put the previous version back.";
+    "OpenBot's last update did not finish. Choose Retry to put the previous version back.";
+
+/// The same, on the installation screen a failed Install or Repair leaves, whose button installs
+/// again, which puts the previous version back first (`put_back_interrupted_upgrade`).
+const UPGRADE_INTERRUPTED_INSTALL: &str =
+    "OpenBot's last update did not finish. Choose Retry installation to put the previous version back.";
+
+/// The same, on the running screen, where Show OpenBot is refused and Stop OpenBot leads to Start.
+const UPGRADE_INTERRUPTED_SHOWING: &str =
+    "OpenBot's last update did not finish. Choose Stop OpenBot, then Start OpenBot, to put the previous version back.";
 
 /// What Start is given, for an upgrade to start the version it leaves in place.
 struct StartWith {
@@ -969,7 +980,9 @@ async fn put_back_interrupted_upgrade(app: &tauri::AppHandle, root: &Path) -> Re
         };
         upgrade::recover(&target, &mut steps)
             .map(|_| ())
-            .map_err(|problem| Problem::with(UPGRADE_INTERRUPTED, upgrade::detail(&problem)))
+            .map_err(|problem| {
+                Problem::with(UPGRADE_INTERRUPTED_INSTALL, upgrade::detail(&problem))
+            })
     })
     .await
     .map_err(|e| Problem::from(e.to_string()))?
@@ -3686,7 +3699,7 @@ fn show_openbot_on<R: tauri::Runtime>(
     let _startup = shell.startup.lock().unwrap();
     let root = cleanup_root(&shell, &stack::default_root());
     if upgrade::interrupted(&root) {
-        return Err(Problem::plain(UPGRADE_INTERRUPTED));
+        return Err(Problem::plain(UPGRADE_INTERRUPTED_SHOWING));
     }
     if recovery_required_or_pending_quit_notice(&shell, &root) {
         return Err("Part of OpenBot needs recovery. Try starting OpenBot once more.".into());
@@ -14224,7 +14237,7 @@ fn main() {
         ));
         assert!(owned_app_url(&app.state::<Shell>(), &f.owned, &f.ports).is_none());
         let error = show_openbot_on(app.handle().clone(), &f.ports).unwrap_err();
-        assert_eq!(error.said, UPGRADE_INTERRUPTED);
+        assert_eq!(error.said, UPGRADE_INTERRUPTED_SHOWING);
         restore_window_on(app.handle(), &f.ports);
         assert_eq!(
             app.get_webview_window("main")
