@@ -15,6 +15,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
 import {
   PeopleProposalsSection,
+  SharingRequestsSection,
   WhoApprovesSection,
 } from "@/components/admin/controls/people-learning";
 import { SkillSharingSection } from "@/components/admin/controls/skill-sharing-section";
@@ -524,6 +525,7 @@ export function LearningPage() {
       <PublishedSkills agentId={selected || undefined} />
       <WhoApprovesSection />
       <PeopleProposalsSection />
+      <SharingRequestsSection />
       <SkillSharingSection />
     </PageShell>
   );

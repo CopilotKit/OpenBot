@@ -345,6 +345,7 @@ describe("reviewing proposed skills", () => {
   function intelligence(overview: LearningOverview = noDashboard) {
     let status: LearningProposal["status"] = "pending_review";
     let personStatus: LearningProposal["status"] = "pending_review";
+    let sharingDecided = false;
     const posts: string[] = [];
     global.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -389,6 +390,41 @@ describe("reviewing proposed skills", () => {
               ...detail,
               ...personPending,
               status: personStatus,
+            },
+          });
+        if (path === "/api/admin/learning/sharing-requests")
+          return Response.json({
+            requests: sharingDecided
+              ? []
+              : [
+                  {
+                    userId: PERSON,
+                    name: "Dana Reyes",
+                    skillName: "quote-follow-up",
+                    requestedAt: "2026-11-05T09:00:00.000Z",
+                  },
+                ],
+          });
+        if (
+          path ===
+          `/api/admin/learning/sharing-requests/${PERSON}/quote-follow-up/approve`
+        ) {
+          sharingDecided = true;
+          return Response.json({ sharing: "approved" });
+        }
+        if (
+          path === `/api/admin/learning/people/${PERSON}/skills/quote-follow-up`
+        )
+          return Response.json({
+            skill: {
+              name: "quote-follow-up",
+              description: "Follow up on a quiet quote.",
+              files: [
+                {
+                  path: "SKILL.md",
+                  text: "---\nname: quote-follow-up\n---\n\nAsk whether the quote still fits.\n",
+                },
+              ],
             },
           });
         if (path.startsWith("/api/admin/learning/overview"))
@@ -483,6 +519,26 @@ describe("reviewing proposed skills", () => {
     expect(posts).toEqual([
       `/api/admin/learning/people/${PERSON}/proposals/${PERSON_PROPOSAL}/approve`,
     ]);
+  });
+
+  test("an admin approves a sharing request", async () => {
+    const posts = intelligence();
+    const view = shared();
+    const row = await view.findByRole("button", { name: /quote-follow-up/ });
+    expect(row.textContent).toContain("Dana Reyes");
+    fireEvent.click(row);
+    await view.findByText("Ask whether the quote still fits.");
+    fireEvent.click(view.getByRole("button", { name: "Approve sharing" }));
+    await waitFor(() =>
+      expect(posts).toEqual([
+        `/api/admin/learning/sharing-requests/${PERSON}/quote-follow-up/approve`,
+      ]),
+    );
+    await waitFor(() =>
+      expect(
+        view.queryByRole("button", { name: /quote-follow-up/ }),
+      ).toBeNull(),
+    );
   });
 
   test("people's proposals are not listed once each person approves their own", async () => {

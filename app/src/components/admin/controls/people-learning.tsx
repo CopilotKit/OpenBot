@@ -2,6 +2,7 @@ import type { LearningPersonalReview } from "@openbot/shared/learning";
 import {
   IconCheck,
   IconChevronRight,
+  IconShare,
   IconSparkles,
   IconUserCheck,
 } from "@tabler/icons-react";
@@ -12,6 +13,7 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
+import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { ProposalDialog } from "@/components/learning/proposal-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +34,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import {
+  decideSharingMutationOptions,
   reviewPersonProposalMutationOptions,
   savePersonalReviewMutationOptions,
 } from "@/lib/learning/mutations";
@@ -39,6 +42,7 @@ import {
   learningSettingsQueryOptions,
   peopleProposalsQueryOptions,
   personProposalQueryOptions,
+  sharingRequestsQueryOptions,
 } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
 
@@ -269,6 +273,117 @@ export function PeopleProposalsSection() {
           publishedNote="Published. Their Bots use it from their next conversation."
         />
       ) : null}
+    </PageSection>
+  );
+}
+
+/**
+ * Admin, Automatic learning: people's requests to open a skill they learned to every Bot. Shown
+ * while each person approves their own skills, and whenever a request is waiting.
+ */
+export function SharingRequestsSection() {
+  const settings = useQuery(learningSettingsQueryOptions());
+  const requests = useQuery(sharingRequestsQueryOptions());
+  const decide = useMutation(decideSharingMutationOptions(queryClient));
+  const [open, setOpen] = useState<{
+    userId: string;
+    skillName: string;
+  } | null>(null);
+  const rows = requests.data ?? [];
+  const people = settings.data?.personalReview === "people";
+  if (!people && rows.length === 0) return null;
+  const close = () => {
+    setOpen(null);
+    decide.reset();
+  };
+  return (
+    <PageSection
+      title="Sharing requests"
+      description="Approve a request to open a skill to every Bot."
+    >
+      {requests.isPending ? null : requests.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {requests.error.message}
+        </p>
+      ) : rows.length === 0 ? (
+        <PageEmpty icon={IconShare} title="No requests to share">
+          Requests to share a skill appear here when people send them.
+        </PageEmpty>
+      ) : (
+        <PageRows>
+          {rows.map((request, index) => (
+            <Fragment key={`${request.userId}:${request.skillName}`}>
+              {index > 0 ? <Separator /> : null}
+              <Item
+                render={
+                  <button
+                    onClick={() =>
+                      setOpen({
+                        userId: request.userId,
+                        skillName: request.skillName,
+                      })
+                    }
+                    type="button"
+                  />
+                }
+                size="sm"
+              >
+                <ItemMedia variant="icon">
+                  <IconShare />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{request.skillName}</ItemTitle>
+                  <ItemDescription>{request.name}</ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <IconChevronRight className="size-4 text-muted-foreground" />
+                </ItemActions>
+              </Item>
+            </Fragment>
+          ))}
+        </PageRows>
+      )}
+      <LearnedSkillDialog
+        footer={
+          open ? (
+            <>
+              {decide.error ? (
+                <p className="mr-auto text-destructive text-sm" role="alert">
+                  {decide.error.message}
+                </p>
+              ) : null}
+              <Button
+                disabled={decide.isPending}
+                onClick={() =>
+                  decide.mutate(
+                    { ...open, decision: "decline" },
+                    { onSuccess: close },
+                  )
+                }
+                size="sm"
+                variant="outline"
+              >
+                Decline
+              </Button>
+              <Button
+                disabled={decide.isPending}
+                onClick={() =>
+                  decide.mutate(
+                    { ...open, decision: "approve" },
+                    { onSuccess: close },
+                  )
+                }
+                size="sm"
+              >
+                {decide.isPending ? "Saving…" : "Approve sharing"}
+              </Button>
+            </>
+          ) : undefined
+        }
+        name={open?.skillName ?? null}
+        onClose={close}
+        source={{ kind: "person", userId: open?.userId ?? "" }}
+      />
     </PageSection>
   );
 }
