@@ -134,6 +134,7 @@ export function evidence(entry: Evidence): LearningEvidence {
     return {
       kind: "recording",
       id: entry.trajectoryId,
+      title: null,
       available: entry.trajectoryPresent && entry.unavailable === null,
       eventCount: entry.eventCount,
       events: entry.events.map((event) => event.name),
@@ -162,4 +163,62 @@ export function proposalDetail(
     )
     .map((file) => ({ path: file.path, content: file.content }));
   return { ...proposal(candidate), files, insights };
+}
+
+/** Every proposal of a container, newest first as Intelligence lists them. */
+export async function readProposals(
+  manage: LearningManagement,
+  containerId: string,
+): Promise<LearningProposal[]> {
+  const candidates = await manage.listLearningCandidates({ containerId });
+  return candidates.map(proposal);
+}
+
+/**
+ * One proposal with its files and the evidence behind it. `titles` names recordings by id; when it
+ * fails, the recordings are shown without a title rather than the proposal not loading.
+ */
+export async function readProposal(
+  manage: LearningManagement,
+  containerId: string,
+  candidateId: string,
+  titles?: (ids: string[]) => Promise<Map<string, string | null>>,
+): Promise<LearningProposalDetail> {
+  const candidate = await manage.getLearningCandidate({
+    containerId,
+    candidateId,
+  });
+  const insights = await Promise.all(
+    candidate.supportingInsights
+      .slice(0, MAX_INSIGHTS)
+      .map(async (insight) => ({
+        id: insight.id,
+        statement: insight.statement,
+        impact: insight.impact,
+        evidence: await manage
+          .getLearningInsightEvidence({ containerId, insightId: insight.id })
+          .then((entries) => entries.map(evidence))
+          .catch(() => null),
+      })),
+  );
+  if (titles) {
+    const ids = [
+      ...new Set(
+        insights.flatMap((insight) =>
+          (insight.evidence ?? []).flatMap((item) =>
+            item.kind === "recording" ? [item.id] : [],
+          ),
+        ),
+      ),
+    ];
+    if (ids.length > 0) {
+      const found = await titles(ids).catch(() => null);
+      if (found)
+        for (const insight of insights)
+          for (const item of insight.evidence ?? [])
+            if (item.kind === "recording")
+              item.title = found.get(item.id) ?? null;
+    }
+  }
+  return proposalDetail(candidate, insights);
 }

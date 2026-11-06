@@ -450,6 +450,7 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
       {
         kind: "recording",
         id: "0198a012-a20f-77c0-9e33-8992f18e74b0",
+        title: null,
         available: true,
         eventCount: 1,
         events: ["click"],

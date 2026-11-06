@@ -81,6 +81,8 @@ export type LearningEvidence =
       kind: "recording";
       /** Intelligence's id for the recording. */
       id: string;
+      /** The recording's title, or null when it has none or could not be read. */
+      title: string | null;
       available: boolean;
       eventCount: number;
       /** The names of the cited events, in order. */
