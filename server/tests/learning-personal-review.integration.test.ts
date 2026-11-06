@@ -353,6 +353,11 @@ describe("approving and rejecting the skills learned from your own recordings", 
     });
     const response = await approve(app);
     expect(response.status).toBe(422);
+    expect(audits[0]?.payload).toMatchObject({
+      change: "skill_review_failed",
+      decision: "approve",
+      code: "UNNAMED_SKILL",
+    });
     expect(
       lastServed().requests.filter((entry) => entry.path.endsWith("/approve")),
     ).toEqual([]);

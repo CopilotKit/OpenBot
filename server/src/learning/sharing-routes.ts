@@ -238,7 +238,7 @@ export function createPersonalLearningRoutes(
       }
       if (!(await canReview())) {
         return context.json(
-          { error: "An admin reviews these skills. You can't approve them." },
+          { error: "An admin reviews these skills. You can't review them." },
           403,
         );
       }
@@ -283,10 +283,6 @@ export function createPersonalLearningRoutes(
           proposal: { id: candidateId, status: review.status },
         });
       } catch (error) {
-        if (error instanceof UnnamedSkillError) {
-          return context.json({ error: error.message }, 422);
-        }
-        const failure = learningFailure(error);
         await audit({
           eventType: "configuration.changed",
           targetType: "learning_skill",
@@ -296,10 +292,17 @@ export function createPersonalLearningRoutes(
             change: "skill_review_failed",
             decision: action,
             containerId,
-            code: requestFailure(error).code ?? null,
+            code:
+              error instanceof UnnamedSkillError
+                ? "UNNAMED_SKILL"
+                : (requestFailure(error).code ?? null),
             by: actor.email,
           },
         });
+        if (error instanceof UnnamedSkillError) {
+          return context.json({ error: error.message }, 422);
+        }
+        const failure = learningFailure(error);
         return context.json({ error: failure.error }, failure.status);
       }
     });
