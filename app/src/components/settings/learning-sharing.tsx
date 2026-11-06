@@ -76,13 +76,25 @@ function choiceSentence(data: PersonalLearningSharing): string {
 }
 
 /** What the Skills list says when it has none to show. */
-function emptySentence(data: PersonalLearningSharing): string {
+function emptySentence(
+  data: PersonalLearningSharing,
+  mode: LearningSharingMode,
+): string {
   if (data.unavailable === "off")
     return "An admin has turned off Automatic Learning, so no Skills are learned from your recordings.";
   if (data.skills === null)
     return "Couldn't read your Skills from Intelligence just now. Your choice above still applies to them.";
-  return "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot.";
+  return mode === "choose"
+    ? "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot."
+    : "No Skills learned from your recordings yet. Once there are, they show up here.";
 }
+
+/** What the Your Skills section says about who draws on them, in the mode chosen. */
+const SKILLS_DESCRIPTION: Record<LearningSharingMode, string> = {
+  closed: "Only the Bots you use draw on these Skills.",
+  open: "Every Bot on OpenBot draws on these Skills.",
+  choose: "Open a Skill to let every Bot on OpenBot use it.",
+};
 
 /**
  * Settings, Learning: every recording a person makes goes into their own Learning space, and the Skills learned there
@@ -158,36 +170,33 @@ export function LearningSharing() {
           ))}
         </PageRows>
       </PageSection>
-      {mode === "choose" ? (
-        <PageSection
-          title="Your Skills"
-          description="Open a Skill to let every Bot on OpenBot use it."
-        >
-          {data.skills === null || data.skills.length === 0 ? (
-            <PageEmpty>{emptySentence(data)}</PageEmpty>
-          ) : (
-            <PageRows>
-              {data.skills.map((skill, index) => {
-                const open =
-                  (setOpen.isPending && setOpen.variables?.name === skill.name
-                    ? setOpen.variables.open
-                    : undefined) ?? skill.open;
-                return (
-                  <React.Fragment key={skill.name}>
-                    {index > 0 ? <Separator /> : null}
-                    <Item size="sm">
-                      <ItemMedia variant="icon">
-                        <IconSparkles />
-                      </ItemMedia>
-                      <ItemContent>
-                        <ItemTitle>{skill.name}</ItemTitle>
-                        <ItemDescription>
-                          {open
-                            ? "Every Bot may use it."
-                            : "Only your Bots use it."}
-                          {skill.description ? ` ${skill.description}` : ""}
-                        </ItemDescription>
-                      </ItemContent>
+      <PageSection title="Your Skills" description={SKILLS_DESCRIPTION[mode]}>
+        {data.skills === null || data.skills.length === 0 ? (
+          <PageEmpty>{emptySentence(data, mode)}</PageEmpty>
+        ) : (
+          <PageRows>
+            {data.skills.map((skill, index) => {
+              const open =
+                (setOpen.isPending && setOpen.variables?.name === skill.name
+                  ? setOpen.variables.open
+                  : undefined) ?? skill.open;
+              return (
+                <React.Fragment key={skill.name}>
+                  {index > 0 ? <Separator /> : null}
+                  <Item size="sm">
+                    <ItemMedia variant="icon">
+                      <IconSparkles />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>{skill.name}</ItemTitle>
+                      <ItemDescription>
+                        {open || mode === "open"
+                          ? "Every Bot may use it."
+                          : "Only your Bots use it."}
+                        {skill.description ? ` ${skill.description}` : ""}
+                      </ItemDescription>
+                    </ItemContent>
+                    {mode === "choose" ? (
                       <ItemActions>
                         <Switch
                           aria-label={`Open ${skill.name} to everyone`}
@@ -197,18 +206,21 @@ export function LearningSharing() {
                             setOpen.isPending || (!data.sharingAllowed && !open)
                           }
                           onCheckedChange={(checked) =>
-                            setOpen.mutate({ name: skill.name, open: checked })
+                            setOpen.mutate({
+                              name: skill.name,
+                              open: checked,
+                            })
                           }
                         />
                       </ItemActions>
-                    </Item>
-                  </React.Fragment>
-                );
-              })}
-            </PageRows>
-          )}
-        </PageSection>
-      ) : null}
+                    ) : null}
+                  </Item>
+                </React.Fragment>
+              );
+            })}
+          </PageRows>
+        )}
+      </PageSection>
       {failure ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {failure.message}

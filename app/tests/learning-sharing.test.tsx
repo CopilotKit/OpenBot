@@ -120,7 +120,7 @@ test("three choices, each with one plain line saying who sees what", async () =>
   ).toBeTruthy();
 });
 
-test("closed is the default: Only my Bots is checked and no Skill list shows", async () => {
+test("closed is the default: Only my Bots is checked and your Skills are listed without switches", async () => {
   const view = draw();
   await view.findByText("Only my Bots");
   expect(choice(view, "Only my Bots").getAttribute("aria-pressed")).toBe(
@@ -129,8 +129,24 @@ test("closed is the default: Only my Bots is checked and no Skill list shows", a
   expect(choice(view, "Everyone's Bots").getAttribute("aria-pressed")).toBe(
     "false",
   );
-  expect(view.queryByText("Your Skills")).toBeNull();
+  expect(view.getByText("Your Skills")).toBeTruthy();
+  expect(view.getByText("refund-order")).toBeTruthy();
   expect(view.queryByRole("switch")).toBeNull();
+});
+
+test("Your Skills shows in every sharing mode", async () => {
+  for (const mode of ["closed", "open", "choose"] as const) {
+    queryClient.clear();
+    answer = { ...answer, mode };
+    const view = draw();
+    await view.findByText("Your Skills");
+    expect(view.getByText("refund-order")).toBeTruthy();
+    expect(view.getByText("close-ticket")).toBeTruthy();
+    expect(view.queryAllByRole("switch")).toHaveLength(
+      mode === "choose" ? 2 : 0,
+    );
+    cleanup();
+  }
 });
 
 test("choosing Everyone's Bots saves open at once", async () => {
