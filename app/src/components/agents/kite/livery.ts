@@ -1,4 +1,9 @@
-import { KITE_PATTERNS, type KitePattern } from "./kite-draw";
+import {
+  KITE_PATTERNS,
+  type KitePattern,
+  OPENBOT_PATTERN,
+  OPENBOT_SLOT,
+} from "./kite-draw";
 
 /** How one Bot is told apart from the others: its colour, its sail pattern and its blink. */
 export type BotLivery = {
@@ -32,9 +37,15 @@ export function botLivery(seed: string): BotLivery {
     hash = Math.imul(hash, FNV_PRIME);
   }
   const h = hash >>> 0;
+  const slot = h % 8;
+  let pick = (h >>> 16) % KITE_PATTERNS.length;
+  // Violet quarters is OpenBot's own kite. One Bot in 64 would land on it and read as the product,
+  // so that Bot takes the next sail instead, keeping its colour.
+  if (slot === OPENBOT_SLOT && KITE_PATTERNS[pick] === OPENBOT_PATTERN)
+    pick = (pick + 1) % KITE_PATTERNS.length;
   return {
-    slot: h % 8,
-    pattern: KITE_PATTERNS[(h >>> 16) % KITE_PATTERNS.length],
+    slot,
+    pattern: KITE_PATTERNS[pick],
     seed: (h % 9973) + 1,
   };
 }

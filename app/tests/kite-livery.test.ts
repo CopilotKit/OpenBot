@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { KITE_PATTERNS } from "@/components/agents/kite/kite-draw";
+import {
+  KITE_PATTERNS,
+  OPENBOT_PATTERN,
+  OPENBOT_SLOT,
+} from "@/components/agents/kite/kite-draw";
 import { botLivery } from "@/components/agents/kite/livery";
 import { kiteStateOf } from "@/components/bot-profile/attention";
 import type { BotAttention } from "@/lib/bot-lifecycle/queries";
@@ -80,6 +84,15 @@ describe("botLivery", () => {
       return `${slot} ${pattern}`;
     });
     expect(new Set(liveries).size).toBe(shipped.length);
+  });
+
+  test("no Bot wears OpenBot's own kite, violet quarters", () => {
+    for (let i = 0; i < 20000; i++) {
+      const { slot, pattern } = botLivery(
+        `agent_${i.toString(36)}-${i * 7919}`,
+      );
+      expect(slot === OPENBOT_SLOT && pattern === OPENBOT_PATTERN).toBe(false);
+    }
   });
 
   test("no seed has no identity: the first colour and a plain sail", () => {

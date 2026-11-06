@@ -190,3 +190,37 @@ test("a kite that mounts done after working plays its landing", () => {
   render(<OpenBotKite enterFrom="thinking" size={88} state="done" />);
   expect(frames).toHaveLength(1);
 });
+
+test("a zoom or a move to another screen redraws a resting kite at the new resolution", async () => {
+  let changed: (() => void) | null = null;
+  spyOn(window, "matchMedia").mockImplementation(
+    () =>
+      ({
+        addEventListener: (_: string, listener: () => void) => {
+          changed = listener;
+        },
+        removeEventListener: () => {},
+      }) as unknown as MediaQueryList,
+  );
+  let ratio = 1;
+  const original = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+  Object.defineProperty(window, "devicePixelRatio", {
+    configurable: true,
+    get: () => ratio,
+  });
+  try {
+    const view = render(<OpenBotKite size={24} />);
+    const canvas = view.container.querySelector("canvas") as HTMLCanvasElement;
+    const before = canvas.width;
+    ratio = 2;
+    await act(async () => {
+      changed?.();
+      await Promise.resolve();
+    });
+    expect(canvas.width).toBe(before * 2);
+    expect(frames).toHaveLength(0);
+  } finally {
+    if (original) Object.defineProperty(window, "devicePixelRatio", original);
+    else Reflect.deleteProperty(window, "devicePixelRatio");
+  }
+});

@@ -15,9 +15,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   question, an approval or a stalled hand-off for you, red with a failed task, dimmed with no face
   while it is paused, and green with a reply to read. A conversation's kite works while the Bot has
   the turn, and a busy conversation in the sidebar shows it in the kite rather than three dots.
-  Each Bot keeps the colour its orb had, and gets a sail pattern from the same seed. OpenBot's own
-  mark (sign-in, onboarding, the New Bot sheet, the skins' frames, OpenBot for Business) is the
-  violet kite. A kite holds still under reduced motion and at 32 px and under, where only its
+  Each Bot keeps its orb's place in the palette, now the brand's eight colours, so most stay in
+  their colour family (the teal slot becomes graphite, the sky slot teal), and gets a sail pattern
+  from the same seed. OpenBot's own mark (sign-in, onboarding, the New Bot sheet, the skins'
+  frames, OpenBot for Business) is the violet kite. A kite holds still under reduced motion and at 32 px and under, where only its
   square moves, shows no face under 22 px, and uses each colour's lighter twin in dark mode. A skin
   that set `botLook: "orb"` sets `botLook: "kite"`.
 - OpenBot Desktop's menu bar and tray no longer have an item that opens the back end's own

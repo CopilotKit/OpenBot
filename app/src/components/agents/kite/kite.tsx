@@ -1,5 +1,5 @@
 import { useReducedMotion } from "motion/react";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { cn } from "@/lib/utils";
 import { subscribeFrame } from "./frame-clock";
 import {
@@ -12,6 +12,7 @@ import {
   OPENBOT_PATTERN,
   OPENBOT_SLOT,
   poseAt,
+  STILL_MAX,
 } from "./kite-draw";
 import { botLivery } from "./livery";
 
@@ -19,6 +20,11 @@ import { botLivery } from "./livery";
 const MAX_DPR = 3;
 /** Where a kite's clock starts its first state: long enough ago that it is already settled. */
 const SETTLED = -9;
+/**
+ * The least time between two frames of a kite at 32 px and under, in ms. Only its square moves, a
+ * few px, so about thirty a second is plenty where a fast screen would draw every one 120 times.
+ */
+const SMALL_FRAME_MS = 30;
 
 // ---------- dark mode ----------
 
@@ -53,6 +59,38 @@ const isDark = () => document.documentElement.classList.contains("dark");
 
 function useDarkMode(): boolean {
   return useSyncExternalStore(subscribeDark, isDark, () => false);
+}
+
+// ---------- screen resolution ----------
+
+/*
+ * Page zoom and moving a window to another screen change `devicePixelRatio`. A resting kite asks
+ * for no frames, so without this it would keep the old resolution and go soft. The media query
+ * matches only the current ratio, so its change event is the moment the ratio changes; it is then
+ * replaced by one for the new ratio.
+ */
+function subscribeResolution(onChange: () => void) {
+  let query: MediaQueryList | null = null;
+  function listen() {
+    query?.removeEventListener("change", changed);
+    query =
+      window.matchMedia?.(
+        `(resolution: ${window.devicePixelRatio || 1}dppx)`,
+      ) ?? null;
+    query?.addEventListener("change", changed);
+  }
+  function changed() {
+    listen();
+    onChange();
+  }
+  listen();
+  return () => query?.removeEventListener("change", changed);
+}
+
+const resolution = () => Math.min(MAX_DPR, window.devicePixelRatio || 1);
+
+function useResolution(): number {
+  return useSyncExternalStore(subscribeResolution, resolution, () => 1);
 }
 
 // ---------- the kite ----------
@@ -103,6 +141,7 @@ export function Kite({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const reduced = useReducedMotion() === true;
   const dark = useDarkMode();
+  const dpr = useResolution();
   // The kite's own clock and the states it has been through. Refs, never state: a frame of the
   // animation never re-renders React.
   const clock = useRef<{ start: number; timeline: KiteTimeline } | null>(null);
@@ -114,7 +153,8 @@ export function Kite({
   }
   const bleed = kiteBleed(size);
 
-  useEffect(() => {
+  // Before the browser paints, so a kite that mounts is never shown as an empty frame.
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     const kite = clock.current;
     if (!canvas || !kite) return;
@@ -128,7 +168,6 @@ export function Kite({
     const draw = (t: number): boolean => {
       const ctx = canvas.getContext("2d");
       if (!ctx) return false;
-      const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
       const box = size + 2 * bleed;
       const backing = Math.round(box * dpr);
       if (canvas.width !== backing || canvas.height !== backing) {
@@ -157,7 +196,10 @@ export function Kite({
     const t0 = now();
     if (!draw(t0) || !busy(t0)) return;
     let stop: (() => void) | null = null;
-    stop = subscribeFrame(() => {
+    let drewAt = Number.NEGATIVE_INFINITY;
+    stop = subscribeFrame((frame) => {
+      if (size <= STILL_MAX && frame - drewAt < SMALL_FRAME_MS) return;
+      drewAt = frame;
       const t = now();
       draw(t);
       if (!busy(t)) {
@@ -166,7 +208,7 @@ export function Kite({
       }
     });
     return () => stop?.();
-  }, [state, size, slot, pattern, seed, dark, reduced, still, bleed]);
+  }, [state, size, slot, pattern, seed, dark, dpr, reduced, still, bleed]);
 
   // The canvas is laid out in shares of the slot, so a parent that resizes the slot scales the
   // drawing with it rather than cropping it.
