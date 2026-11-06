@@ -11,8 +11,9 @@
 //!   fetches (`install.rs`). There is no fallback to `PATH`, `npx` or a global install.
 //! - **Arguments are fixed.** Only `status`, `start`, `stop` and `login`, a validated stack id and
 //!   `--json`, plus the constant `list`, `setup`, `connect` and `login --help` lists and the sign-in's
-//!   `--mode openbot`, as separate arguments with no shell. The CLI's `resumeCommand` strings are text for a
-//!   terminal user; they are dropped here and never executed.
+//!   `--mode openbot`, and `integrations composio provision` with a validated installation id and
+//!   a file OpenBot made, as separate arguments with no shell. The CLI's `resumeCommand` strings
+//!   are text for a terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
 //!   cross IPC or reach a log. Failures are static categories with no payload.
 //!
@@ -362,6 +363,116 @@ pub fn help_lists_openbot_mode(exit_code: i32, stdout: &[u8]) -> bool {
 
 /// The evaluation agreement, read only: `onboard local-terms --json`.
 pub const TERMS_ARGUMENTS: [&str; 3] = ["onboard", "local-terms", "--json"];
+
+/**
+This installation's Composio project, from CopilotKit, for the account `login` signed in:
+`integrations composio provision --installation-id <UUID> --env-path <file> --json`.
+
+The CLI posts the installation id to Ops with its own session, which never leaves the CLI, writes
+the project key it gets back into `env_file` as `COMPOSIO_API_KEY`, and prints only metadata. Ops
+makes one project per installation and replays the same key for it after a lost answer
+(`reused`). The contract is Intelligence's `docs/contracts/openbot-composio-provisioning.md`; the
+command is `apps/cli/src/commands/integrations.ts`, in the CLI pinned since
+`desktop/intelligence-cli.json` named 256cc68.
+*/
+pub fn apps_arguments<'a>(installation: &'a Installation, env_file: &'a str) -> [&'a str; 8] {
+    [
+        "integrations",
+        "composio",
+        "provision",
+        "--installation-id",
+        installation.as_str(),
+        "--env-path",
+        env_file,
+        "--json",
+    ]
+}
+
+/// An installation id, as OpenBot keeps it: a lowercase UUID, and nothing that could be another
+/// argument.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Installation(String);
+
+impl Installation {
+    pub fn parse(value: &str) -> Result<Self, Failure> {
+        let bytes = value.as_bytes();
+        let canonical = bytes.len() == 36
+            && bytes.iter().enumerate().all(|(index, byte)| {
+                if [8, 13, 18, 23].contains(&index) {
+                    *byte == b'-'
+                } else {
+                    byte.is_ascii_digit() || (b'a'..=b'f').contains(byte)
+                }
+            });
+        if canonical {
+            Ok(Self(value.to_owned()))
+        } else {
+            // Refused before anything runs.
+            Err(Failure::Spawn)
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// What `integrations composio provision` reported. Metadata only: the key is in the file it
+/// was given, and the CLI never prints it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppsProvisioned {
+    pub installation_id: String,
+    pub project_id: String,
+    /// Ops replayed the key it made for this installation before.
+    pub reused: bool,
+}
+
+/**
+`integrations composio provision`'s one line of JSON on success, exit 0.
+
+Any failure exits 1 with a sentence on stderr, which is never read: a missing or expired session,
+another account's installation, provisioning not set up on Ops, or a repair. Only `completed`, for
+the installation asked about, with the file written, is believed. `already_configured` means the
+file already held a key, and the file OpenBot hands over never does.
+*/
+pub fn normalize_apps(
+    installation: &Installation,
+    exit_code: i32,
+    stdout: &[u8],
+) -> Result<AppsProvisioned, Failure> {
+    if exit_code != 0 {
+        return Err(Failure::UnexpectedExit);
+    }
+    if stdout.len() > MAX_OUTPUT {
+        return Err(Failure::OutputLimit);
+    }
+    let text_out = std::str::from_utf8(stdout).map_err(|_| Failure::InvalidJson)?;
+    let wire: Value = serde_json::from_str(text_out.trim()).map_err(|_| Failure::InvalidJson)?;
+    let wire = object(&wire)?;
+    if wire.get("type").and_then(Value::as_str) != Some("completed")
+        || wire.get("installation_id").and_then(Value::as_str) != Some(installation.as_str())
+        || wire
+            .get("environment_file_written")
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return Err(Failure::ContractMismatch);
+    }
+    let project_id = wire
+        .get("project_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty() && id.len() <= 256)
+        .ok_or(Failure::ContractMismatch)?;
+    let reused = wire
+        .get("reused")
+        .and_then(Value::as_bool)
+        .ok_or(Failure::ContractMismatch)?;
+    Ok(AppsProvisioned {
+        installation_id: installation.as_str().to_owned(),
+        project_id: project_id.to_owned(),
+        reused,
+    })
+}
 
 /**
 `local connect` connects the folder it runs in, the installation `local setup` was run in, to that
@@ -1050,6 +1161,15 @@ impl Limits {
         }
     }
 
+    /// Composio provisioning: one request to Ops, which gives Composio ten seconds. Start waits on
+    /// it when an installation has no key yet, so it is bounded well under `status`.
+    pub fn for_apps() -> Self {
+        Self {
+            timeout: Duration::from_secs(60),
+            ..Self::for_action(Action::Status)
+        }
+    }
+
     /// `stop` while OpenBot quits. Somebody is waiting for the app to close, so the stop gets two
     /// minutes rather than ten; a stack that has not stopped by then is reported, not waited on.
     pub fn for_quit() -> Self {
@@ -1497,10 +1617,34 @@ pub fn list(cli: &PinnedCli, limits: Limits, cancel: &Cancel) -> Result<Listing,
     normalize_list(code, &bytes)
 }
 
+/// `integrations composio provision` for `installation`, writing the key into `env_file`.
+pub fn provision_apps(
+    cli: &PinnedCli,
+    installation: &Installation,
+    env_file: &std::path::Path,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<AppsProvisioned, Failure> {
+    // The CLI takes an absolute path in a folder that exists; OpenBot makes both.
+    let env_file = env_file
+        .is_absolute()
+        .then(|| env_file.to_str())
+        .flatten()
+        .ok_or(Failure::Spawn)?;
+    let (code, bytes) = execute(
+        cli,
+        &apps_arguments(installation, env_file),
+        None,
+        limits,
+        cancel,
+    )?;
+    normalize_apps(installation, code, &bytes)
+}
+
 /// The exit code and stdout of one bounded CLI process. Arguments come only from `arguments`,
 /// `login_arguments`, `LIST_ARGUMENTS`, `setup_arguments`, `CONNECT_ARGUMENTS`,
-/// `ACCOUNT_SIGN_IN_ARGUMENTS` and `TERMS_ARGUMENTS`; only setup and connect run somewhere other
-/// than inherited.
+/// `ACCOUNT_SIGN_IN_ARGUMENTS`, `TERMS_ARGUMENTS` and `apps_arguments`; only setup and connect
+/// run somewhere other than inherited.
 fn execute(
     cli: &PinnedCli,
     arguments: &[&str],
@@ -1926,6 +2070,20 @@ pub fn connect_installed(
     one_at_a_time(&attempt.0, Limits::for_action(Action::Status), |limits| {
         let cli = installed()?;
         connect(&cli, installation, limits, &attempt.0)
+    })
+}
+
+/// This installation's Composio project against the installed CLI. See `apps_arguments`.
+pub fn provision_apps_installed(
+    attempt: &str,
+    installation: &str,
+    env_file: &std::path::Path,
+) -> Result<AppsProvisioned, Failure> {
+    let installation = Installation::parse(installation)?;
+    let attempt = Attempt::register(attempt);
+    one_at_a_time(&attempt.0, Limits::for_apps(), |limits| {
+        let cli = installed()?;
+        provision_apps(&cli, &installation, env_file, limits, &attempt.0)
     })
 }
 
@@ -3456,6 +3614,7 @@ mod tests {
             login_arguments(&stack).to_vec(),
             ACCOUNT_SIGN_IN_ARGUMENTS.to_vec(),
             TERMS_ARGUMENTS.to_vec(),
+            apps_arguments(&Installation::parse(APPS_ID).unwrap(), "/tmp/composio.env").to_vec(),
         ] {
             assert_eq!(refuse_rootless(&arguments, Some(&rootless)), Ok(()));
         }
@@ -4119,6 +4278,126 @@ fn main() {
                 "{refused:?}"
             );
         }
+    }
+
+    const APPS_ID: &str = "e1503aba-d1ba-4d21-ab5e-7b6cb109bfb6";
+
+    /// `integrations composio provision`'s line, as `commands/integrations.ts` prints it.
+    fn apps_report(fields: Value) -> String {
+        let mut report = json!({
+            "type": "completed",
+            "installation_id": APPS_ID,
+            "project_id": "pr_fixture",
+            "environment_file_written": true,
+            "reused": false,
+        });
+        for (name, value) in fields.as_object().unwrap() {
+            report[name] = value.clone();
+        }
+        format!("{report}\n")
+    }
+
+    /// Only an id OpenBot could have made reaches the command line, and the arguments are fixed.
+    #[test]
+    fn apps_arguments_are_fixed_and_take_only_a_lowercase_installation_id() {
+        let id = Installation::parse(APPS_ID).unwrap();
+        assert_eq!(
+            apps_arguments(&id, "/home/person/OpenBot/.openbot-apps/composio.env"),
+            [
+                "integrations",
+                "composio",
+                "provision",
+                "--installation-id",
+                APPS_ID,
+                "--env-path",
+                "/home/person/OpenBot/.openbot-apps/composio.env",
+                "--json"
+            ]
+        );
+        for refused in [
+            "",
+            "--json",
+            "E1503ABA-D1BA-4D21-AB5E-7B6CB109BFB6",
+            "e1503aba-d1ba-4d21-ab5e-7b6cb109bfb",
+            "e1503aba-d1ba-4d21-ab5e-7b6cb109bfb6 --x",
+            "e1503abad1ba-4d21-ab5e-7b6cb109bfb6-",
+        ] {
+            assert_eq!(
+                Installation::parse(refused),
+                Err(Failure::Spawn),
+                "{refused}"
+            );
+        }
+    }
+
+    /// Only a completed report for the installation asked about, with the file written, counts.
+    #[test]
+    fn an_apps_report_is_believed_only_for_this_installation() {
+        let id = Installation::parse(APPS_ID).unwrap();
+        assert_eq!(
+            normalize_apps(&id, 0, apps_report(json!({ "reused": true })).as_bytes()),
+            Ok(AppsProvisioned {
+                installation_id: APPS_ID.into(),
+                project_id: "pr_fixture".into(),
+                reused: true,
+            })
+        );
+        // Every failure exits 1 with its sentence on stderr only.
+        assert_eq!(normalize_apps(&id, 1, b""), Err(Failure::UnexpectedExit));
+        for wrong in [
+            json!({ "type": "already_configured", "environment_file_written": false }),
+            json!({ "installation_id": "a1503aba-d1ba-4d21-ab5e-7b6cb109bfb6" }),
+            json!({ "environment_file_written": false }),
+            json!({ "project_id": "" }),
+            json!({ "reused": "yes" }),
+        ] {
+            assert_eq!(
+                normalize_apps(&id, 0, apps_report(wrong.clone()).as_bytes()),
+                Err(Failure::ContractMismatch),
+                "{wrong}"
+            );
+        }
+        assert_eq!(
+            normalize_apps(&id, 0, b"Composio provisioning could not finish."),
+            Err(Failure::InvalidJson)
+        );
+    }
+
+    /// The real bounded process: fixed arguments in, the one line read back.
+    #[test]
+    fn provisioning_apps_runs_the_fixed_arguments_and_reads_only_the_report() {
+        let fixture = Fixture::new("local-eval-apps", &format!("0\n{}", apps_report(json!({}))));
+        let env_file = fixture.root.join("composio.env");
+        let id = Installation::parse(APPS_ID).unwrap();
+        assert_eq!(
+            provision_apps(
+                &fixture.cli(),
+                &id,
+                &env_file,
+                Limits::for_apps(),
+                &Cancel::default()
+            )
+            .map(|provisioned| provisioned.reused),
+            Ok(false)
+        );
+        assert_eq!(
+            fixture.argv().unwrap(),
+            format!(
+                "integrations\ncomposio\nprovision\n--installation-id\n{APPS_ID}\n--env-path\n{}\n--json",
+                env_file.display()
+            )
+        );
+        // A relative file is refused before anything runs.
+        assert_eq!(
+            provision_apps(
+                &fixture.cli(),
+                &id,
+                std::path::Path::new("composio.env"),
+                Limits::for_apps(),
+                &Cancel::default()
+            ),
+            Err(Failure::Spawn)
+        );
     }
 
     /// #991: the sign-in page a person sees explains OpenBot's setup. The CLI carries that as

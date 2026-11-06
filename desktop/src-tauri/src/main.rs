@@ -3354,6 +3354,21 @@ fn persist_start_environment(
         root, &settings, &secrets, &purge, credential,
     )?;
     /*
+     * This installation's Composio project, for an installation signed in to CopilotKit with no
+     * key yet: one signed in under 0.3.0, which never asked, or one whose sign-in-time attempt
+     * failed. Asks nobody when a key is supplied or already kept. Never fatal.
+     */
+    if local_eval_state::read(root, None).is_some() {
+        static STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let attempt = format!(
+            "apps-start-{}",
+            STARTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        if let Err(problem) = connect_apps(root, &attempt) {
+            eprintln!("[apps] {}", problem.said);
+        }
+    }
+    /*
      * The app broker's settings, read where the person keeps them and handed over at runtime only.
      *
      * None of them is written, moved or purged. A Composio key in `.env` stays in `.env` and wins;
@@ -5294,6 +5309,37 @@ async fn local_eval_terms(attempt: String) -> Result<local_eval::Terms, local_ev
 }
 
 /**
+Connect this installation's apps with the CopilotKit sign-in that just finished, and again on
+Connect apps.
+
+Only adds a key, and never fails the sign-in: the window offers Continue without apps, and every
+Start tries again. `attempt` lets `cancel_local_eval` stop the CLI call.
+*/
+#[tauri::command]
+async fn connect_copilotkit_apps(attempt: String, root: String) -> Result<(), Problem> {
+    let root = stack::root_from(&root);
+    if !root.is_absolute() {
+        return Err(apps_unavailable());
+    }
+    tauri::async_runtime::spawn_blocking(move || connect_apps(&root, &attempt))
+        .await
+        .map_err(|_| apps_unavailable())?
+}
+
+/// Ask CopilotKit for this installation's Composio project through the CLI, and keep its key.
+/// See `composio::connect`.
+fn connect_apps(root: &Path, attempt: &str) -> Result<(), Problem> {
+    openbot_desktop_lib::composio::connect(root, |installation, env_file| {
+        local_eval::provision_apps_installed(attempt, installation, env_file)
+            .map_err(|_| apps_unavailable())
+    })
+}
+
+fn apps_unavailable() -> Problem {
+    openbot_desktop_lib::composio::setup_problem()
+}
+
+/**
 Run `setup` in `root` and record what it made.
 
 A stack set up here was made for OpenBot, so it starts and stops with it. The one exception is a
@@ -7165,6 +7211,7 @@ fn main() {
             set_up_local_eval,
             sign_in_to_copilotkit,
             local_eval_terms,
+            connect_copilotkit_apps,
             connect_local_eval,
             last_local_eval_stop_failure,
             quit_status,
@@ -7409,6 +7456,7 @@ mod tests {
     use std::io::{Read, Write};
 
     include!("stop_ipc_tests.rs");
+    include!("composio_ipc_tests.rs");
 
     // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
     #[cfg(debug_assertions)]

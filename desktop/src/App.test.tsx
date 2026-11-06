@@ -333,6 +333,12 @@ function withLocalCli(local: Record<string, unknown>) {
     // Signed in and agreed already, unless a test says otherwise: the account step passes.
     if (command === "local_eval_terms" && !("local_eval_terms" in local))
       return ACCEPTED_TERMS;
+    // Apps connect once signed in, unless a test says otherwise.
+    if (
+      command === "connect_copilotkit_apps" &&
+      !("connect_copilotkit_apps" in local)
+    )
+      return null;
     if (command in local) {
       const answer = local[command];
       return typeof answer === "function" ? answer(args) : answer;
@@ -609,6 +615,12 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await view.findByRole("heading", { name: "Connect your AI" });
   expect(stepLabel(view)).toBe("AI");
   expect(view.queryByText(/needs your CopilotKit account/)).toBeNull();
+  // Signed in, this installation's apps were connected before moving on.
+  expect(
+    invokeCalls
+      .filter((call) => call.command === "connect_copilotkit_apps")
+      .map((call) => call.args),
+  ).toEqual([{ attempt: expect.any(String), root: "/tmp/local-eval-account" }]);
   // Leaving the account step does not install a second time.
   expect(
     installationCalls().filter(
@@ -623,6 +635,67 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
     acceptedEulaVersion: "developer-edition-2026-10-01-web",
   });
   expectPlain(view);
+});
+
+const APPS_UNAVAILABLE = {
+  said: "OpenBot couldn't connect your apps. Check your connection, then choose Connect apps. If it keeps happening, ask an admin.",
+};
+
+test("apps that could not be connected at sign-in say so, and Connect apps tries again", async () => {
+  setupRootConfiguration("/tmp/local-eval-apps-retry", async () =>
+    emptyConfiguration(),
+  );
+  let attempts = 0;
+  withLocalCli({
+    connect_copilotkit_apps: () => {
+      attempts += 1;
+      if (attempts === 1) throw APPS_UNAVAILABLE;
+      return null;
+    },
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByText(APPS_UNAVAILABLE.said);
+  expect(stepLabel(view)).toBe("Account");
+  expect(view.getByRole("heading", { name: "Connect your apps" })).toBeTruthy();
+  expect(
+    view.getByText(
+      "You can continue without them. OpenBot tries again each time it starts.",
+    ),
+  ).toBeTruthy();
+  // Intelligence waits for the account step, and nothing of the key reaches the window.
+  expect(localSequence()).toEqual([]);
+  await userEvent.click(view.getByRole("button", { name: "Connect apps" }));
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(attempts).toBe(2);
+  await waitFor(() => expect(localSequence()).toContain("set_up_local_eval"));
+  expectPlain(view);
+});
+
+test("Continue goes on without apps when they could not be connected", async () => {
+  setupRootConfiguration("/tmp/local-eval-apps-skip", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    connect_copilotkit_apps: () => {
+      throw APPS_UNAVAILABLE;
+    },
+    set_up_local_eval: localStatus("starting", "valid"),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByText(APPS_UNAVAILABLE.said);
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("heading", { name: "Connect your AI" });
+  await waitFor(() => expect(localSequence()).toContain("set_up_local_eval"));
+  expect(
+    invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
+  ).toMatchObject({ acceptedEulaVersion: null });
 });
 
 test("a first run already signed in with the agreement accepted passes the account step by itself", async () => {
