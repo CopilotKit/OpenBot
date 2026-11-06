@@ -114,6 +114,35 @@ test("validates and persists a same-origin admin save", async () => {
   ).toBe(400);
 });
 
+test("a settings save keeps who approves and automatic approval when it leaves them out", async () => {
+  const { app, store } = routes();
+  await store.write({
+    enabled: true,
+    defaultTarget: null,
+    agents: {},
+    personalReview: "people",
+    autoApprove: false,
+  });
+  const response = await app.request("https://openbot.example.com/settings", {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      origin: "https://openbot.example.com",
+    },
+    body: JSON.stringify({
+      enabled: true,
+      defaultTarget: { containerId: "support" },
+      agents: {},
+    }),
+  });
+  expect(response.status).toBe(200);
+  expect(await store.read()).toMatchObject({
+    defaultTarget: { containerId: "support" },
+    personalReview: "people",
+    autoApprove: false,
+  });
+});
+
 test("upstream errors never expose credentials", async () => {
   const { app } = routes();
   const response = await app.request("/overview");

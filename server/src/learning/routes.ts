@@ -251,7 +251,14 @@ export function createLearningRoutes(
         await context.req.json().catch(() => null),
       );
       if (!parsed.ok) return context.json({ error: parsed.error }, 400);
-      const settings = await dependencies.store.write(parsed.settings);
+      const stored = await dependencies.store.read();
+      const next = { ...parsed.settings };
+      const personalReview =
+        parsed.settings.personalReview ?? stored.personalReview;
+      const autoApprove = parsed.settings.autoApprove ?? stored.autoApprove;
+      if (personalReview !== undefined) next.personalReview = personalReview;
+      if (autoApprove !== undefined) next.autoApprove = autoApprove;
+      const settings = await dependencies.store.write(next);
       if (audit)
         await recordAuditEvent(audit, {
           eventType: "configuration.changed",
