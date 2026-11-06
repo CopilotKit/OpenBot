@@ -10,6 +10,7 @@ import {
 } from "@copilotkit/runtime/internal/learned-skills";
 import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type {
+  LearnedSkillContent,
   LearningDeliveryStatus,
   LearningSettings,
   LearningTarget,
@@ -382,29 +383,31 @@ export function createLearningRuntime(options: {
   return {
     acquire,
     /**
-     * The Skills published in this person's own Learning space, read the way a run reads them (the same registry and
-     * Intelligence call), for Settings, Learning. `off` when Automatic Learning is off here; `unavailable` when
+     * The Skills published in any one Learning space, with their files (SKILL.md first), read the way a run reads them
+     * (the same registry and Intelligence call). `off` when Automatic Learning is off here; `unavailable` when
      * Intelligence did not deliver them (its Learning delivery off, the space not made yet, or not reachable).
      */
-    async personalSkills(
-      userId: string,
+    async containerSkills(
+      containerId: string,
     ): Promise<
-      | { skills: { name: string; description: string }[] }
-      | { unavailable: "off" | "unavailable" }
+      { skills: LearnedSkillContent[] } | { unavailable: "off" | "unavailable" }
     > {
-      if (!people) return { unavailable: "unavailable" };
       if (!(await store.read()).enabled) return { unavailable: "off" };
       try {
         const snapshot = await waitForSnapshot(
-          registryFor({
-            containerId: people.containerFor(userId),
-          }).acquireSnapshot(),
+          registryFor({ containerId }).acquireSnapshot(),
           AbortSignal.timeout(PERSONAL_READ_MS),
         );
         return {
-          skills: snapshot.skills.map(({ name, description }) => ({
+          skills: snapshot.skills.map(({ name, description, files }) => ({
             name,
             description,
+            files: [...files]
+              .sort(
+                (a, b) =>
+                  Number(b.path === "SKILL.md") - Number(a.path === "SKILL.md"),
+              )
+              .map((file) => ({ path: file.path, text: file.text ?? null })),
           })),
         };
       } catch (error) {
@@ -418,6 +421,23 @@ export function createLearningRuntime(options: {
           return { skills: [] };
         return { unavailable: "unavailable" };
       }
+    },
+    /** The Skills published in this person's own Learning space, for Settings, Learning. */
+    async personalSkills(
+      userId: string,
+    ): Promise<
+      | { skills: { name: string; description: string }[] }
+      | { unavailable: "off" | "unavailable" }
+    > {
+      if (!people) return { unavailable: "unavailable" };
+      const result = await this.containerSkills(people.containerFor(userId));
+      if ("unavailable" in result) return result;
+      return {
+        skills: result.skills.map(({ name, description }) => ({
+          name,
+          description,
+        })),
+      };
     },
     /**
      * Bind once, before thread creation. The SDK calls this selector before its ownership check,

@@ -315,3 +315,15 @@ test("cancelling one acquisition leaves another run's shared refresh alive", asy
   expect((await second)?.catalog).toContain("public-answer");
   expect(reads).toBe(1);
 });
+
+test("containerSkills reads a container's published files, SKILL.md first", async () => {
+  const f = fixture();
+  f.client.getLearnedSkillsSnapshot = async () => skillSnapshot("r1");
+  const runtime = createLearningRuntime({ client: f.client, store: f.store });
+  const result = await runtime.containerSkills("someone-elses-space");
+  if (!("skills" in result)) throw new Error("Expected skills");
+  const skill = result.skills.find((s) => s.name === "public-answer");
+  expect(skill?.files[0]?.path).toBe("SKILL.md");
+  expect(skill?.files[0]?.text).toEqual(expect.any(String));
+  expect(skill?.files.map((file) => file.path)).toContain("reference.txt");
+});
