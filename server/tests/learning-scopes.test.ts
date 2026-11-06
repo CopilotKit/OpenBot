@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { LearningSettings } from "@openbot/shared/learning";
+import type {
+  LearningSettings,
+  LearningSource,
+} from "@openbot/shared/learning";
 import { personalLearningContainerId } from "../src/learning/personal-space";
 import { learningScopes } from "../src/learning/scopes";
 
@@ -10,12 +13,12 @@ const settings = (patch: Partial<LearningSettings>): LearningSettings => ({
   ...patch,
 });
 
-const own = {
+const own: LearningSource = {
   containerId: personalLearningContainerId("ada"),
   kind: "recordings",
   label: "From your recordings",
 };
-const conversations = (containerId: string) => ({
+const conversations = (containerId: string): LearningSource => ({
   containerId,
   kind: "conversations",
   label: "From your conversations",
