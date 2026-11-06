@@ -4349,10 +4349,8 @@ pub fn verify_runtime_update_images(
     }
     // Not the supervisor: the personal edition runs none. One still running from before is checked
     // above like any other container.
-    for service in ["agent-computer"] {
-        if !verified.contains(service) {
-            return Err(format!("candidate {service} was not verified"));
-        }
+    if !verified.contains("agent-computer") {
+        return Err("candidate agent-computer was not verified".into());
     }
     Ok(())
 }
