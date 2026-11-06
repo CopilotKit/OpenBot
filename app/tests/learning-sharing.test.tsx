@@ -140,21 +140,21 @@ const choices = (view: ReturnType<typeof draw>) =>
 
 test("three choices, each with one plain line saying who sees what", async () => {
   const view = draw();
-  await view.findByText("Who else's Bots use your Skills");
+  await view.findByText("Who else's Bots use your skills");
   expect(choices(view)).toHaveLength(3);
   for (const choice of SHARING_CHOICES) {
     expect(view.getByText(choice.title)).toBeTruthy();
     expect(view.getByText(choice.description)).toBeTruthy();
   }
   expect(
-    view.getByText("Only the Bots you use draw on your Skills."),
+    view.getByText("Only the Bots you use draw on your skills."),
   ).toBeTruthy();
   expect(
-    view.getByText("Every Bot on OpenBot draws on all of your Skills."),
+    view.getByText("Every Bot on OpenBot draws on all of your skills."),
   ).toBeTruthy();
 });
 
-test("closed is the default: Only my Bots is checked and your Skills are listed without switches", async () => {
+test("closed is the default: Only my Bots is checked and your skills are listed without switches", async () => {
   const view = draw();
   await view.findByText("Only my Bots");
   expect(choice(view, "Only my Bots").getAttribute("aria-pressed")).toBe(
@@ -163,17 +163,17 @@ test("closed is the default: Only my Bots is checked and your Skills are listed 
   expect(choice(view, "Everyone's Bots").getAttribute("aria-pressed")).toBe(
     "false",
   );
-  expect(view.getByText("Your Skills")).toBeTruthy();
+  expect(view.getByText("Your skills")).toBeTruthy();
   expect(view.getByText("refund-order")).toBeTruthy();
   expect(view.queryByRole("switch")).toBeNull();
 });
 
-test("Your Skills shows in every sharing mode", async () => {
+test("Your skills shows in every sharing mode", async () => {
   for (const mode of ["closed", "open", "choose"] as const) {
     queryClient.clear();
     answer = { ...answer, mode };
     const view = draw();
-    await view.findByText("Your Skills");
+    await view.findByText("Your skills");
     expect(view.getByText("refund-order")).toBeTruthy();
     expect(view.getByText("close-ticket")).toBeTruthy();
     expect(view.queryAllByRole("switch")).toHaveLength(
@@ -214,10 +214,10 @@ test("pressing the choice already made saves nothing", async () => {
   expect(sent).toEqual([]);
 });
 
-test("under The Skills I choose, each Skill in your space has a switch that opens it to everyone", async () => {
+test("under The skills I choose, each skill in your space has a switch that opens it to everyone", async () => {
   answer = { ...answer, mode: "choose" };
   const view = draw();
-  await view.findByText("Your Skills");
+  await view.findByText("Your skills");
   const refund = view.getByRole("switch", {
     name: "Open refund-order to everyone",
   });
@@ -249,11 +249,11 @@ test("under The Skills I choose, each Skill in your space has a switch that open
   );
 });
 
-test("a space with no Skills yet says so plainly", async () => {
+test("a space with no skills yet says so plainly", async () => {
   answer = { mode: "choose", sharingAllowed: true, skills: [] };
   const view = draw();
   await view.findByText(
-    "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot.",
+    "No skills learned from your recordings yet. Once there are, each one you open here reaches every Bot.",
   );
   expect(view.queryByRole("switch")).toBeNull();
 });
@@ -267,7 +267,7 @@ test("Skills Intelligence did not deliver show a plain unavailable line, and the
   };
   const view = draw();
   await view.findByText(
-    "Couldn't read your Skills from Intelligence just now. Your choice above still applies to them.",
+    "Couldn't read your skills from Intelligence just now. Your choice above still applies to them.",
   );
   fireEvent.click(choice(view, "Only my Bots"));
   await waitFor(() =>
@@ -279,7 +279,7 @@ test("Skills Intelligence did not deliver show a plain unavailable line, and the
   );
 });
 
-test("Automatic Learning off says no Skills are learned", async () => {
+test("Automatic Learning off says no skills are learned", async () => {
   answer = {
     mode: "choose",
     sharingAllowed: true,
@@ -288,18 +288,18 @@ test("Automatic Learning off says no Skills are learned", async () => {
   };
   const view = draw();
   await view.findByText(
-    "An admin has turned off Automatic Learning, so no Skills are learned from your recordings.",
+    "An admin has turned off Automatic Learning, so no skills are learned from your recordings.",
   );
 });
 
-test("until an admin turns on Skill sharing, it says so plainly and only Only my Bots can be chosen", async () => {
+test("until an admin turns on skill sharing, it says so plainly and only Only my Bots can be chosen", async () => {
   answer = { ...answer, sharingAllowed: false };
   const view = draw();
   await view.findByText(
-    "An admin hasn't turned on sharing Skills with every Bot, so only the Bots you use draw on yours.",
+    "An admin hasn't turned on sharing skills with every Bot, so only the Bots you use draw on yours.",
   );
   expect(choice(view, "Only my Bots").hasAttribute("disabled")).toBe(false);
-  for (const title of ["Everyone's Bots", "The Skills I choose"]) {
+  for (const title of ["Everyone's Bots", "The skills I choose"]) {
     expect(choice(view, title).hasAttribute("disabled")).toBe(true);
     fireEvent.click(choice(view, title));
   }
@@ -307,11 +307,11 @@ test("until an admin turns on Skill sharing, it says so plainly and only Only my
   expect(sent).toEqual([]);
 });
 
-test("a choice made before sharing was turned off says it applies again, and an open Skill can be closed but none opened", async () => {
+test("a choice made before sharing was turned off says it applies again, and an open skill can be closed but none opened", async () => {
   answer = { ...answer, mode: "choose", sharingAllowed: false };
   const view = draw();
   await view.findByText(
-    "An admin hasn't turned on sharing Skills with every Bot, so only the Bots you use draw on yours. Your choice below applies again if an admin turns it on.",
+    "An admin hasn't turned on sharing skills with every Bot, so only the Bots you use draw on yours. Your choice below applies again if an admin turns it on.",
   );
   const refund = view.getByRole("switch", {
     name: "Open refund-order to everyone",
@@ -350,10 +350,10 @@ test("a read that fails says so, and a save that fails says why", async () => {
   await view.findByText("Your Learning settings could not be saved.");
 });
 
-test("each of Your Skills opens its SKILL.md", async () => {
+test("each of Your skills opens its SKILL.md", async () => {
   answer = { ...answer, mode: "choose" };
   const view = draw();
-  await view.findByText("Your Skills");
+  await view.findByText("Your skills");
   // Toggling the switch does not open the Skill.
   fireEvent.click(
     view.getByRole("switch", { name: "Open refund-order to everyone" }),
@@ -367,10 +367,10 @@ test("each of Your Skills opens its SKILL.md", async () => {
   expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
 });
 
-test("pressing a Your Skills row opens its SKILL.md where there is no switch", async () => {
+test("pressing a Your skills row opens its SKILL.md where there is no switch", async () => {
   answer = { ...answer, mode: "closed" };
   const view = draw();
-  await view.findByText("Your Skills");
+  await view.findByText("Your skills");
   expect(view.queryByRole("switch")).toBeNull();
   fireEvent.click(view.getByRole("button", { name: /refund-order/ }));
   await view.findByText(/Step one: look up the order/);
@@ -447,7 +447,7 @@ test("a skill the person approved shows Ask to share instead of the Open switch"
   expect(reopenRow?.textContent ?? "").not.toContain("Only your Bots use it.");
 });
 
-test("the personal edition lists Your Skills with no sharing choice and no switches", async () => {
+test("the personal edition lists Your skills with no sharing choice and no switches", async () => {
   edition = "personal";
   answer = {
     ...answer,
@@ -470,15 +470,15 @@ test("the personal edition lists Your Skills with no sharing choice and no switc
     ],
   };
   const view = draw();
-  await view.findByText("Your Skills");
+  await view.findByText("Your skills");
   await view.findByText("refund-order");
-  expect(view.queryByText("Who else's Bots use your Skills")).toBeNull();
+  expect(view.queryByText("Who else's Bots use your skills")).toBeNull();
   expect(choices(view)).toHaveLength(0);
   expect(view.queryAllByRole("switch")).toHaveLength(0);
   expect(view.queryByRole("button", { name: "Ask to share" })).toBeNull();
   expect(view.queryByText(/Bots use it|Every Bot|Asked to share/)).toBeNull();
   expect(
-    view.queryByText(/Only the Bots you use|Open a Skill to let/),
+    view.queryByText(/Only the Bots you use|Open a skill to let/),
   ).toBeNull();
   fireEvent.click(view.getByRole("button", { name: /refund-order/ }));
   await view.findByText(/Step one: look up the order/);
