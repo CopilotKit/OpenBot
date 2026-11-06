@@ -146,8 +146,9 @@ services:
       # browser is on the host. So it gets the deployment's own address, the one a host server would
       # have used, whatever this container uses itself.
       INTELLIGENCE_BROWSER_GATEWAY_WS_URL: ${INTELLIGENCE_GATEWAY_WS_URL:-}
-      # The person's own browser, which OpenBot Desktop runs on the host where this machine can run
-      # one, listening on the host's loopback. Its container address, when Desktop gives one.
+      # The person's own browser, where a host-side computer runs it (scripts/start.sh's personal
+      # edition), listening on the host's loopback, and its container address when one is given.
+      # Unset, the person's browser runs on the computers the Bots run on and shows in the page.
       OPENBOT_BROWSER_URL: ${OPENBOT_BROWSER_CONTAINER_URL:-${OPENBOT_BROWSER_URL:-}}
       # The deployment's secrets, from the environment Compose runs in and then from `.env`, which
       # Compose reads for these `${...}` and the host server reads for itself. OpenBot Desktop keeps

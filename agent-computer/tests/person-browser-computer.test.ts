@@ -553,6 +553,7 @@ describe("a person's browser on a computer that is not its own", () => {
       OPENBOT_RECORDER_DIR: FIXTURE,
       COMPUTER_PERSON_ID: "personal",
       OPENBOT_EDITION: "personal",
+      COMPUTER_SEPARATE_WORKSPACES: "on",
     });
     // The person's own routes go on to the browser host, which says the browser is not open yet.
     const state = await call("/browser/state", { on: personal });
@@ -602,6 +603,8 @@ describe.skipIf(!asked)(
         OPENBOT_RECORDER_DIR: FIXTURE,
         COMPUTER_PERSON_ID: "personal",
         OPENBOT_EDITION: "personal",
+        // As docker-compose.yml starts the one computer.
+        COMPUTER_SEPARATE_WORKSPACES: "on",
       });
       try {
         const opening = await call("/browser/open", {

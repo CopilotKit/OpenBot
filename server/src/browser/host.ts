@@ -139,7 +139,7 @@ export function withPersonBrowsers(
       isPersonBrowserId(seat.botId)
         ? Promise.resolve(browserUrl)
         : provider.locate(seat),
-    // A host process OpenBot Desktop keeps running with the stack: there is nothing to wake, and what the browser itself
+    // A host process kept running with the stack: there is nothing to wake, and what the browser itself
     // is doing, the computer's own state route says.
     status: (seat: ComputerSeat) =>
       isPersonBrowserId(seat.botId)
@@ -149,7 +149,7 @@ export function withPersonBrowsers(
     sessionOf: async (seat: ComputerSeat) =>
       isPersonBrowserId(seat.botId) ? undefined : provider.sessionOf?.(seat),
     /*
-     * OpenBot Desktop starts its host-side computer with the deployment's token: it runs the person's own browsers and
+     * A host-side computer is started with the deployment's token: it runs the person's own browsers and
      * no Bot, on their own machine. Bots' computers take whatever their provider gave them.
      */
     tokenFor: (key: ComputerKey, deploymentToken: string) =>
@@ -193,7 +193,7 @@ export function gatewayBrowserComputers(
 const REPUSH_MS = 30_000;
 
 /**
- * People's browsers on OpenBot Desktop's host-side computer when this OpenBot has no computer for Bots at all, so there
+ * People's browsers on a host-side computer when this OpenBot has no computer for Bots at all, so there
  * is no gateway to go through. The person's network policy goes ahead of the browser, as the provider's push on wake
  * sends a Bot's: the computer holds it in memory and refuses the browser's connections until one arrives. A failed push
  * is logged, never thrown, for the same reason.
@@ -229,7 +229,7 @@ export function directBrowserComputers(input: {
       }
       return input.browserUrl;
     },
-    // OpenBot Desktop's host-side computer, started with the deployment's token: see `withPersonBrowsers`.
+    // A host-side computer, started with the deployment's token: see `withPersonBrowsers`.
     tokenFor: () => input.token,
     running: async () => true,
   };

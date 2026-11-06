@@ -2794,10 +2794,10 @@ describe("a single-user OpenBot, where the person is its admin", () => {
     expect(await personal.gateway.locate(botSeat(computerId))).toMatch(
       `http://127.0.0.1:${COMPUTER_PORT}`,
     );
-    expect(
-      (browsers.get(computerId)?.connection as { openbotUrl: string })
-        .openbotUrl,
-    ).toBe(WINDOW.origin);
+    const handed = browsers.get(computerId)?.connection as
+      | { openbotUrl: string }
+      | undefined;
+    expect(handed?.openbotUrl).toBe(WINDOW.origin);
     await call(personal, "/api/browser/close", {
       method: "POST",
       headers: WINDOW,

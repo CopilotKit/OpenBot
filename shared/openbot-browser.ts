@@ -22,8 +22,9 @@ export function isPersonBrowserId(id: string): boolean {
 }
 
 /**
- * Where the browser shows. `native`: a window on the person's own desktop (OpenBot Desktop, the person's installed
- * Chrome or Edge). `screen`: a cloud browser the app shows through the live screen (hosted OpenBot, bundled Chromium).
+ * Where the browser shows. `native`: a window on the person's own desktop (a host-side computer, the person's installed
+ * Chrome or Edge). `screen`: a browser on a computer the app shows through the live screen (hosted OpenBot and OpenBot
+ * Desktop, bundled Chromium).
  */
 export type BrowserWindow = "native" | "screen";
 /** The person's own everyday browsers OpenBot Desktop can put the Recorder in and bring forward. */

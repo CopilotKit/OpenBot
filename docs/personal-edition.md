@@ -30,7 +30,7 @@ in the sidebar takes you to a page whose Open opens or brings forward that windo
 goes to your own Learning space. OpenBot Desktop does not do this: it shows your browser inside its
 window (see [OpenBot Desktop](#openbot-desktop)). Its profile is kept under
 `~/Library/Application Support/OpenBot/local-computer` on macOS (see
-[configuration](configuration.md#openbot-desktop-runs-it-for-the-person) for the other systems).
+[configuration](configuration.md#installed-chrome-for-a-local-api-deployment) for the other systems).
 Without Chrome or Edge, OpenBot starts without it and `start.sh` says why. `scripts/stop.sh` stops it
 with the rest.
 
