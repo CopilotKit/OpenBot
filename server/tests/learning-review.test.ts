@@ -138,9 +138,16 @@ describe("reviewProposal", () => {
   function reviewing(
     review: () => Promise<unknown>,
     calls: string[],
+    reread?: () => Promise<unknown>,
   ): LearningManagement {
+    let reads = 0;
     return {
       getLearningCandidate: async () => {
+        reads += 1;
+        if (reads > 1 && reread) {
+          calls.push("reread");
+          return reread();
+        }
         calls.push("read");
         return detail;
       },
@@ -205,6 +212,102 @@ describe("reviewProposal", () => {
     });
     await expect(review).rejects.toBe(conflict);
     expect(calls).toEqual(["read", "before", "review", "undo"]);
+  });
+
+  function approving(
+    review: () => Promise<unknown>,
+    calls: string[],
+    reread?: () => Promise<unknown>,
+  ) {
+    return reviewProposal({
+      manage: reviewing(review, calls, reread),
+      containerId: "openbot",
+      candidateId: candidate.id,
+      action: "approve",
+      before: async () => {
+        calls.push("before");
+        return async () => {
+          calls.push("undo");
+        };
+      },
+    });
+  }
+  const timedOut = new Error("The operation timed out.");
+
+  test("a 409 undoes without reading the proposal again", async () => {
+    const calls: string[] = [];
+    const reread = async () => ({ ...detail, status: "pending_review" });
+    await expect(
+      approving(
+        async () => {
+          throw conflict;
+        },
+        calls,
+        reread,
+      ),
+    ).rejects.toBe(conflict);
+    expect(calls).toEqual(["read", "before", "review", "undo"]);
+  });
+
+  test("an error without a status keeps the record when Intelligence approved anyway", async () => {
+    const calls: string[] = [];
+    await expect(
+      approving(
+        async () => {
+          throw timedOut;
+        },
+        calls,
+        async () => ({ ...detail, status: "approved" }),
+      ),
+    ).rejects.toBe(timedOut);
+    expect(calls).toEqual(["read", "before", "review", "reread"]);
+  });
+
+  test("an error without a status undoes when the proposal is still pending", async () => {
+    const calls: string[] = [];
+    await expect(
+      approving(
+        async () => {
+          throw timedOut;
+        },
+        calls,
+        async () => ({ ...detail, status: "pending_review" }),
+      ),
+    ).rejects.toBe(timedOut);
+    expect(calls).toEqual(["read", "before", "review", "reread", "undo"]);
+  });
+
+  test("a 503 keeps the record when Intelligence approved anyway", async () => {
+    const calls: string[] = [];
+    const unavailable = Object.assign(new Error("unavailable"), {
+      status: 503,
+    });
+    await expect(
+      approving(
+        async () => {
+          throw unavailable;
+        },
+        calls,
+        async () => ({ ...detail, status: "approved" }),
+      ),
+    ).rejects.toBe(unavailable);
+    expect(calls).toEqual(["read", "before", "review", "reread"]);
+  });
+
+  test("a failing re-read keeps the record and rethrows the review's error", async () => {
+    const calls: string[] = [];
+    await expect(
+      approving(
+        async () => {
+          throw timedOut;
+        },
+        calls,
+        async () => {
+          throw new Error("still down");
+        },
+      ),
+    ).rejects.toBe(timedOut);
+    expect(calls).toEqual(["read", "before", "review", "reread"]);
   });
 
   test("a throwing undo still rethrows the review's error", async () => {

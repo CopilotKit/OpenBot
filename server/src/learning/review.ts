@@ -223,11 +223,49 @@ export async function readProposal(
   return proposalDetail(candidate, insights);
 }
 
+/** Logs a failure while deciding whether, or while, taking OpenBot's own record back. */
+function logUndoFailure(type: string, candidateId: string, error: unknown) {
+  console.error(
+    JSON.stringify({
+      type,
+      candidateId,
+      errorType: error instanceof Error ? error.name : "unknown",
+      message: error instanceof Error ? error.message : String(error),
+    }),
+  );
+}
+
+/**
+ * Whether Intelligence surely did not take the review that failed with `error`: it answered with a
+ * 4xx, or the proposal still reads as pending. A timeout, network error or 5xx may land after the
+ * skill was published, so the proposal is read again; when that read fails too, the answer is no.
+ */
+async function surelyRefused(
+  manage: LearningManagement,
+  containerId: string,
+  candidateId: string,
+  error: unknown,
+): Promise<boolean> {
+  const { status } = requestFailure(error);
+  if (status !== undefined && status >= 400 && status < 500) return true;
+  try {
+    const candidate = await manage.getLearningCandidate({
+      containerId,
+      candidateId,
+    });
+    return candidate.status === "pending_review";
+  } catch (readError) {
+    logUndoFailure("learning-review-reread-failed", candidateId, readError);
+    return false;
+  }
+}
+
 /**
  * Approves or rejects a proposal. `before` runs once the proposal is read and before Intelligence is asked, so OpenBot
- * can write its own record first (callers pass it only on approve); when Intelligence then refuses, the undo it returned
- * takes that record back. If `before` throws, Intelligence is never asked. A failing undo is logged and never hides
- * Intelligence's error, which is what the caller gets.
+ * can write its own record first (callers pass it only on approve). The undo it returned takes that record back only
+ * when Intelligence surely refused: a 4xx, or the proposal still pending when read again. Otherwise the record stays,
+ * since the skill may already be published. If `before` throws, Intelligence is never asked. A failing re-read or undo
+ * is logged and never hides Intelligence's error, which is what the caller gets.
  */
 export async function reviewProposal({
   manage,
@@ -262,18 +300,15 @@ export async function reviewProposal({
       action,
     });
   } catch (error) {
-    try {
-      await undo?.();
-    } catch (undoError) {
-      console.error(
-        JSON.stringify({
-          type: "learning-review-undo-failed",
-          candidateId,
-          errorType: undoError instanceof Error ? undoError.name : "unknown",
-          message:
-            undoError instanceof Error ? undoError.message : String(undoError),
-        }),
-      );
+    if (
+      undo &&
+      (await surelyRefused(manage, containerId, candidateId, error))
+    ) {
+      try {
+        await undo();
+      } catch (undoError) {
+        logUndoFailure("learning-review-undo-failed", candidateId, undoError);
+      }
     }
     throw error;
   }
