@@ -216,13 +216,14 @@ describe("reviewing the skills learned from your own recordings", () => {
 
   test("evidence names the person's own recordings and no one else's", async () => {
     const asked: { userId: string; ids: string[] }[] = [];
-    const read = async (titled: boolean) => {
+    const read = async () => {
       const app = review({
         recordingTitles: async (userId, ids) => {
           asked.push({ userId, ids });
-          return new Map(
-            titled ? [] : [["someone-elses-recording", "Not yours"]],
-          );
+          return new Map([
+            ["0198a012-a20f-77c0-9e33-8992f18e74b0", "Refund an order"],
+            ["someone-elses-recording", "Not yours"],
+          ]);
         },
       });
       const response = await app.request(
@@ -231,16 +232,23 @@ describe("reviewing the skills learned from your own recordings", () => {
       expect(response.status).toBe(200);
       const { proposal } = (await response.json()) as {
         proposal: {
-          insights: { evidence: { kind: string; title: string | null }[] }[];
+          insights: {
+            evidence: { kind: string; id: string; title: string | null }[];
+          }[];
         };
       };
       return proposal.insights
         .flatMap((insight) => insight.evidence ?? [])
         .filter((item) => item.kind === "recording");
     };
-    const recordings = await read(false);
+    const recordings = await read();
     expect(recordings.length).toBeGreaterThan(0);
-    expect(recordings.every((item) => item.title === null)).toBe(true);
+    expect(
+      recordings.find(
+        (item) => item.id === "0198a012-a20f-77c0-9e33-8992f18e74b0",
+      )?.title,
+    ).toBe("Refund an order");
+    expect(recordings.some((item) => item.title === "Not yours")).toBe(false);
     expect(asked.length).toBe(1);
     expect(asked[0]?.userId).toBe(ada);
     expect(asked[0]?.ids.length).toBeGreaterThan(0);
