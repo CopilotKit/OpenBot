@@ -10,7 +10,7 @@ import {
 
 function logFailure(
   error: unknown,
-  where: { containerId: string; candidateId?: string },
+  where: { containerId?: string; candidateId?: string },
 ) {
   const { status, code } = requestFailure(error);
   console.error(
@@ -29,7 +29,8 @@ function logFailure(
  * The personal edition's sweep: approves every pending proposal of the person's Learning sources while automatic
  * approval is on, recording a person's approval for skills learned from recordings first. One sweep runs at a time; a
  * call while one runs gets that sweep. A proposal another review already settled (409) counts as done; any other
- * failure, of one proposal or one source, is logged and the sweep goes on.
+ * failure, of one proposal or one source, is logged and the sweep goes on. A sweep never rejects: settings that can't
+ * be read are logged and approve nothing.
  */
 export function createAutoApprover(deps: {
   manage: LearningManagement;
@@ -85,9 +86,16 @@ export function createAutoApprover(deps: {
   }
 
   async function run(): Promise<{ approved: number }> {
-    if (!(await deps.enabled())) return { approved: 0 };
+    let sources: LearningSource[];
+    try {
+      if (!(await deps.enabled())) return { approved: 0 };
+      sources = await deps.sources();
+    } catch (error) {
+      logFailure(error, {});
+      return { approved: 0 };
+    }
     let approved = 0;
-    for (const source of await deps.sources()) {
+    for (const source of sources) {
       let pending: string[];
       try {
         pending = (await readProposals(deps.manage, source.containerId))

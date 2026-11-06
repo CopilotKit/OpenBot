@@ -270,4 +270,44 @@ describe("createAutoApprover", () => {
       containerId: RECORDINGS,
     });
   });
+
+  test("a sweep whose settings can't be read logs and approves nothing", async () => {
+    const { manage, approved } = stubManage({
+      [RECORDINGS]: [candidate("r1")],
+    });
+    const { approvals } = stubApprovals();
+    const originalError = console.error;
+    try {
+      for (const failing of ["enabled", "sources"] as const) {
+        const errors: string[] = [];
+        console.error = (line: string) => errors.push(line);
+        const approver = createAutoApprover({
+          manage,
+          enabled:
+            failing === "enabled"
+              ? async () => {
+                  throw new Error("settings down");
+                }
+              : async () => true,
+          sources:
+            failing === "sources"
+              ? async () => {
+                  throw new Error("sources down");
+                }
+              : sources,
+          approvals,
+          userId: "user-1",
+        });
+        expect(await approver.sweep()).toEqual({ approved: 0 });
+        expect(errors).toHaveLength(1);
+        expect(JSON.parse(errors[0] ?? "")).toMatchObject({
+          type: "learning-auto-approve-failed",
+          message: failing === "enabled" ? "settings down" : "sources down",
+        });
+      }
+    } finally {
+      console.error = originalError;
+    }
+    expect(approved).toHaveLength(0);
+  });
 });
