@@ -13,6 +13,7 @@ import { queryClient } from "@/query-client";
 import { TEACH_A_BOT } from "./browser-nav-item";
 import { ScreenBrowser } from "./browser-screen";
 import { TeachSteps } from "./teach-steps";
+import { YourRecordings } from "./your-recordings";
 
 const TITLE = TEACH_A_BOT;
 const DESCRIPTION =
@@ -35,6 +36,7 @@ export function BrowserPage() {
         <p className="mt-6 text-destructive text-sm" role="alert">
           Couldn't load your browser. Reload the page.
         </p>
+        <YourRecordings />
       </PageShell>
     );
   }
@@ -46,6 +48,7 @@ export function BrowserPage() {
           {state.data.note ??
             "OpenBot isn't set up to run a browser for you. Ask an admin."}
         </PageEmpty>
+        <YourRecordings />
       </PageShell>
     );
   }
@@ -93,18 +96,23 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
             ) : null}
           </div>
         ) : null}
+        <YourRecordings />
       </PageShell>
     );
   }
   // The person's own everyday browser (OpenBot Desktop) has no screen here: it is a window on their desktop.
   if ("window" in opened && opened.window === "screen") {
+    // ScreenBrowser is deliberately not a PageShell (it fills the pane), so the list sits beneath it unframed.
     return (
-      <ScreenBrowser
-        computerId={opened.computerId}
-        state={state}
-        reopen={() => reopen.mutate()}
-        reopening={reopen.isPending}
-      />
+      <>
+        <ScreenBrowser
+          computerId={opened.computerId}
+          state={state}
+          reopen={() => reopen.mutate()}
+          reopening={reopen.isPending}
+        />
+        <YourRecordings />
+      </>
     );
   }
   // Only an older server says nothing of where its browser shows, and it may answer with a window after all.
@@ -121,6 +129,7 @@ function NativeBrowser({ state }: { state: BrowserApiState }) {
   return (
     <PageShell title={TITLE}>
       <TeachSteps state={state} />
+      <YourRecordings />
     </PageShell>
   );
 }

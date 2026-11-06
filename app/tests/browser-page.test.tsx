@@ -171,6 +171,8 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
       },
     });
   }
+  if (path === "/api/recorder/recordings")
+    return Response.json({ recordings: [], nextCursor: null });
   if (path === browserApiPaths.state && method === "GET") {
     if (stateFails)
       return Response.json({ error: "Unavailable" }, { status: 500 });
@@ -415,6 +417,13 @@ async function pressRecord(
   await user.click(view.getByRole("button", { name: "Continue" }));
   await user.click(await view.findByRole("button", { name: OPEN_AND_RECORD }));
 }
+
+test("your recordings show even when OpenBot can't run a browser", async () => {
+  state = { available: false, note: "No browser here." } as BrowserApiState;
+  const view = draw(<BrowserPage />);
+  expect(await view.findByText("No browser here.")).toBeTruthy();
+  expect(await view.findByText("Your recordings")).toBeTruthy();
+});
 
 test("on OpenBot Desktop arriving opens nothing: the page offers the task's name and narration", async () => {
   state = { ...nativeState(), open: false, recorder: undefined };
