@@ -2931,6 +2931,7 @@ const app = createApp(
       : undefined,
     manage: learningProbeIntelligence.experimental.learning,
     skills: copilotRuntime.learning?.containerSkills,
+    recordingTitles: recorderExtension.recordingTitles,
   },
   {
     productTelemetry,
@@ -3018,6 +3019,7 @@ const app = createApp(
       invalidate: () => openSkillIndex.invalidate(),
       sharingAllowed: skillSharingAllowed,
       manage: learningProbeIntelligence.experimental.learning,
+      recordingTitles: recorderExtension.recordingTitles,
       settings: learningSettings,
       scopesFor: async (actor) =>
         learningScopes({

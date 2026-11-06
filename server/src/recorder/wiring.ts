@@ -113,6 +113,11 @@ export function createRecorderExtension(deps: {
     gate: NonNullable<CopilotRuntimeHooks["onBeforeHandler"]>;
     selectLearningContainers: GetTrajectoryLearningContainerIds;
   };
+  /** The titles of a person's recordings by id, for the evidence shown with skills learned from them. */
+  recordingTitles: (
+    userId: string,
+    ids: string[],
+  ) => Promise<Map<string, string | null>>;
 } {
   const { config, database, organizationAuth } = deps;
   const trajectoryBindings = createTrajectoryBindingStore(database);
@@ -210,6 +215,7 @@ export function createRecorderExtension(deps: {
   return {
     connections,
     recordings,
+    recordingTitles: (userId, ids) => recordings.recordingTitles(userId, ids),
     allowedExtensionIds: () => allowedExtensionIds(config),
     // Bounded like a capture pass, so the popup is not held by a slow Intelligence; a creation it started goes on.
     learningSpace: (actor) =>
