@@ -12,7 +12,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   them under Admin → Automatic learning: admins, or each person for their own Bots, and a skill a
   person approves reaches only their own Bots until an admin approves sharing it. Settings → Learning
   shows what is waiting for review, and Teach a Bot lists your recordings, which needs Intelligence
-  0.16 with recordings switched on. See [Automatic Learning](docs/automatic-learning.md#reviewing-learned-skills).
+  0.16 with recordings switched on. In the personal edition, Settings → Learning is now there, and
+  it approves new skills automatically until you turn that off. See [Automatic Learning](docs/automatic-learning.md#reviewing-learned-skills).
 - OpenBot Desktop installs the personal edition: nobody signs in, one computer is shared by your
   Bots, and you start with the Personal Assistant. Before, it installed the team edition, with its
   admin screens, the fintech example's Bots and a computer for each Bot. An existing installation
