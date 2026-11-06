@@ -5,7 +5,7 @@ import { type Observable, tap } from "rxjs";
 import {
   isModelUnavailableMessage,
   reportModelRejected,
-} from "./model-catalogue";
+} from "./model-rejection";
 
 export type DesktopConnectionFailure =
   | { connection: "model"; code: "provider_authentication_failed" }
