@@ -26,6 +26,7 @@ import { createDatabase } from "../src/db/client";
 import { enterpriseSettings } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
 import { learningSkillApprovals } from "../src/db/schema/learning";
+import { currentEdition, setEdition } from "../src/edition";
 import { createSkillApprovalStore } from "../src/learning/approvals";
 import { personalLearningContainerId } from "../src/learning/personal-space";
 import { createLearningRuntime } from "../src/learning/runtime";
@@ -257,13 +258,13 @@ function catalogIn(value: unknown): string[] | undefined {
   return undefined;
 }
 
-/** Runs a built Bot once and says which learned Skills the model was offered. */
 /**
  * The run is marked as the runtime's run route marks a person's (`markAskedRun`): a run on the
  * runtime's own map without it is one the runtime made for itself, which holds no Skills.
  */
 const personsRun = { forwardedProps: { [ASKED_RUN]: true } };
 
+/** Runs a built Bot once and says which learned Skills the model was offered. */
 async function skillsOfferedBy(built: AbstractAgent): Promise<string[]> {
   const agent = built.clone();
   agent.setMessages([{ id: randomUUID(), role: "user", content: "Help me." }]);
@@ -317,11 +318,37 @@ const offered = async (
 };
 const sharingAudits = () =>
   audits.filter((event) => event.eventType.startsWith("learning."));
+/** The sharing requests waiting for an admin from the people in this file, whatever else the database holds. */
+const ourRequests = async () =>
+  (await approvals.requests()).filter((request) =>
+    [ada, grace].includes(request.userId),
+  );
+/** Decides a person's sharing request on the version it was asked for, as the admin's screen does. */
+const decide = async (
+  userId: string,
+  skillName: string,
+  decision: "approved" | "declined",
+) => {
+  const request = (await ourRequests()).find(
+    (entry) => entry.userId === userId && entry.skillName === skillName,
+  );
+  if (!request) throw new Error(`No sharing request for ${skillName}.`);
+  return approvals.decideSharing(
+    userId,
+    skillName,
+    decision,
+    request.updatedAt,
+  );
+};
+const everything = ["ada-only", "grace-picked", "grace-private"];
 
 const sharingRow = eq(enterpriseSettings.key, "skill_sharing");
 let modelUrl: string | undefined;
+const EDITION = currentEdition();
 
 beforeAll(async () => {
+  // Skill sharing and its requests belong to the team edition, whatever an earlier file left set.
+  setEdition("team");
   await database.insert(users).values([
     { id: ada, email: `${ada}@example.test` },
     { id: grace, email: `${grace}@example.test` },
@@ -333,6 +360,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  setEdition(EDITION);
   if (modelUrl === undefined) delete process.env.OPENAI_BASE_URL;
   else process.env.OPENAI_BASE_URL = modelUrl;
   await model.stop();
@@ -365,6 +393,11 @@ describe("Settings, Learning", () => {
         method: "PUT",
         json: { open: true },
       }),
+      await call(
+        "/api/settings/learning/skills/grace-picked/share-request",
+        "grace",
+        { method: "POST" },
+      ),
     ];
     for (const refused of refusals) {
       expect(refused.status).toBe(403);
@@ -374,6 +407,7 @@ describe("Settings, Learning", () => {
       });
     }
     expect(await store.read(grace)).toEqual({ mode: "closed", openSkills: [] });
+    expect(await ourRequests()).toEqual([]);
     expect(sharingAudits()).toEqual([]);
     // Keeping them to their own Bots is always allowed.
     expect(
@@ -432,6 +466,7 @@ describe("Settings, Learning", () => {
   });
 
   test("asking to share a skill puts it in the admin's requests", async () => {
+    await setSharing(true);
     await approvals.recordApproval(ada, "ada-only", "person");
     await approvals.recordApproval(ada, "ada-admin", "admin");
     const before = audits.length;
@@ -446,7 +481,7 @@ describe("Settings, Learning", () => {
         name: "ada-only",
         sharing: "requested",
       });
-      expect(await approvals.requests()).toMatchObject([
+      expect(await ourRequests()).toMatchObject([
         { userId: ada, skillName: "ada-only" },
       ]);
       expect(
@@ -479,7 +514,7 @@ describe("Settings, Learning", () => {
         sharing: "requested",
       });
       expect(requestedAudits()).toBe(count);
-      await approvals.decideSharing(ada, "ada-only", "approved");
+      expect(await decide(ada, "ada-only", "approved")).toBe(true);
       const repeat = await call(
         "/api/settings/learning/skills/ada-only/share-request",
         "ada",
@@ -508,7 +543,13 @@ describe("Settings, Learning", () => {
     expect(await offered(learning, "ada")).toEqual(["ada-only"]);
   });
 
-  test("open: every Bot uses them, at once on this replica, and on another within the index's TTL", async () => {
+  test("open: every Bot uses them, at once on this replica; another replica keeps the index it read until its TTL passes", async () => {
+    await setSharing(true);
+    await store.setMode(grace, "closed");
+    thisReplica.invalidate();
+    otherReplica.invalidate();
+    // The other replica reads its index while Grace's Skills are still her own.
+    expect(await offered(learningElsewhere, "ada")).toEqual(["ada-only"]);
     const before = invalidations;
     const saved = await call("/api/settings/learning/mode", "grace", {
       method: "PUT",
@@ -516,21 +557,27 @@ describe("Settings, Learning", () => {
     });
     expect(saved.status).toBe(200);
     expect(invalidations).toBe(before + 1);
-    expect(await offered(learning, "ada")).toEqual([
-      "ada-only",
-      "grace-picked",
-      "grace-private",
-    ]);
-    // The other replica read its index before the change and keeps it for its TTL.
-    expect(await offered(learningElsewhere, "ada")).toEqual([
-      "ada-only",
-      "grace-picked",
-      "grace-private",
-    ]);
+    expect(await offered(learning, "ada")).toEqual(everything);
+    // Nobody told the other replica, and its index hasn't aged out, so it still answers from before the change.
+    expect(await offered(learningElsewhere, "ada")).toEqual(["ada-only"]);
   });
 
   test("changing the choice writes one audit row naming the old and new choice; saving the same choice writes none", async () => {
-    expect(sharingAudits()).toEqual([
+    await setSharing(true);
+    await store.setMode(grace, "closed");
+    const start = audits.length;
+    for (let saved = 0; saved < 2; saved++) {
+      const response = await call("/api/settings/learning/mode", "grace", {
+        method: "PUT",
+        json: { mode: "open" },
+      });
+      expect(response.status).toBe(200);
+    }
+    expect(
+      audits
+        .slice(start)
+        .filter((event) => event.eventType.startsWith("learning.")),
+    ).toEqual([
       expect.objectContaining({
         eventType: "learning.sharing_changed",
         targetType: "learning_sharing",
@@ -539,16 +586,13 @@ describe("Settings, Learning", () => {
         payload: { from: "closed", to: "open" },
       }),
     ]);
-    await call("/api/settings/learning/mode", "grace", {
-      method: "PUT",
-      json: { mode: "open" },
-    });
-    expect(sharingAudits()).toHaveLength(1);
   });
 
   test("choose: only the Skills the person opens are used by every Bot", async () => {
-    // The other replica has an index from the open step; let it age out first.
-    await offered(learningElsewhere, "ada");
+    await setSharing(true);
+    await store.setMode(grace, "open");
+    await store.setSkillOpen(grace, "grace-picked", false);
+    thisReplica.invalidate();
     await call("/api/settings/learning/mode", "grace", {
       method: "PUT",
       json: { mode: "choose" },
@@ -586,12 +630,19 @@ describe("Settings, Learning", () => {
   });
 
   test("another replica sees a change once its index's TTL has passed", async () => {
-    // Still the index it read while Grace's choice was open.
-    expect(await offered(learningElsewhere, "ada")).toEqual([
-      "ada-only",
-      "grace-picked",
-      "grace-private",
-    ]);
+    await setSharing(true);
+    await store.setMode(grace, "open");
+    await store.setSkillOpen(grace, "grace-picked", true);
+    otherReplica.invalidate();
+    // The other replica reads its index while Grace's choice is open.
+    expect(await offered(learningElsewhere, "ada")).toEqual(everything);
+    const saved = await call("/api/settings/learning/mode", "grace", {
+      method: "PUT",
+      json: { mode: "choose" },
+    });
+    expect(saved.status).toBe(200);
+    // Within its TTL it still answers from the index it read before the change.
+    expect(await offered(learningElsewhere, "ada")).toEqual(everything);
     clock += 30_001;
     expect(await offered(learningElsewhere, "ada")).toEqual([
       "ada-only",
@@ -600,17 +651,22 @@ describe("Settings, Learning", () => {
   });
 
   test("opening and closing a Skill each write an audit row; repeating one writes none", async () => {
-    await call("/api/settings/learning/skills/grace-picked", "grace", {
-      method: "PUT",
-      json: { open: true },
-    });
-    await call("/api/settings/learning/skills/grace-picked", "grace", {
-      method: "PUT",
-      json: { open: false },
-    });
-    const skillRows = sharingAudits().filter(
-      (event) => event.eventType !== "learning.sharing_changed",
-    );
+    await setSharing(true);
+    await store.setMode(grace, "choose");
+    await store.setSkillOpen(grace, "grace-picked", false);
+    thisReplica.invalidate();
+    const start = audits.length;
+    for (const open of [true, true, false, false]) {
+      const response = await call(
+        "/api/settings/learning/skills/grace-picked",
+        "grace",
+        { method: "PUT", json: { open } },
+      );
+      expect(response.status).toBe(200);
+    }
+    const skillRows = audits
+      .slice(start)
+      .filter((event) => event.eventType.startsWith("learning."));
     expect(skillRows).toEqual([
       expect.objectContaining({
         eventType: "learning.skill_opened",
@@ -649,11 +705,16 @@ describe("Settings, Learning", () => {
   });
 
   test("a person's choice is theirs: another person's screen neither shows nor changes it", async () => {
+    await setSharing(true);
+    await store.setMode(ada, "closed");
+    await store.setMode(grace, "choose");
     expect((await read("ada")).mode).toBe("closed");
-    await call("/api/settings/learning/mode", "ada", {
+    const saved = await call("/api/settings/learning/mode", "ada", {
       method: "PUT",
       json: { mode: "open" },
     });
+    expect(saved.status).toBe(200);
+    expect((await read("ada")).mode).toBe("open");
     expect((await read("grace")).mode).toBe("choose");
   });
 
@@ -943,11 +1004,11 @@ describe("the open-Skill index", () => {
 
   test("a read that began before a change never replaces what came after it", async () => {
     let release: () => void = () => {};
-    let call = 0;
+    let reads = 0;
     const index = createOpenSkillIndex({
       read: async () => {
-        call++;
-        if (call === 1) {
+        reads++;
+        if (reads === 1) {
           await new Promise<void>((resolve) => {
             release = resolve;
           });
@@ -1008,7 +1069,6 @@ describe("the open-Skill index", () => {
     await store.setMode(ada, "closed");
     thisReplica.invalidate();
     otherReplica.invalidate();
-    const everything = ["ada-only", "grace-picked", "grace-private"];
     try {
       // Both replicas read their index while Grace holds nothing back.
       expect(await offered(learning, "ada")).toEqual(everything);
@@ -1032,7 +1092,7 @@ describe("the open-Skill index", () => {
 
       // An administrator approves sharing it: it reaches other people's runs again, still without a fresh index.
       await approvals.requestSharing(grace, "grace-private");
-      await approvals.decideSharing(grace, "grace-private", "approved");
+      expect(await decide(grace, "grace-private", "approved")).toBe(true);
       expect(await offered(learningElsewhere, "ada")).toEqual(everything);
     } finally {
       await database
