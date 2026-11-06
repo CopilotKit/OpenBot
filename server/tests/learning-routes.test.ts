@@ -163,17 +163,31 @@ test("an admin switches who approves, and a later settings save keeps it", async
     ["https://openbot.example.com"],
     { insert: async (event) => void events.push(event) },
   );
-  const put = (path: string, body: unknown, origin = true) =>
+  const put = (
+    path: string,
+    body: unknown,
+    origin = "https://openbot.example.com",
+  ) =>
     app.request(`https://openbot.example.com${path}`, {
       method: "PUT",
       headers: {
         "content-type": "application/json",
-        ...(origin ? { origin: "https://openbot.example.com" } : {}),
+        origin,
       },
       body: JSON.stringify(body),
     });
-  expect((await put("/personal-review", { personalReview: "people" }, false)).status).toBe(403);
-  expect((await put("/personal-review", { personalReview: "nobody" })).status).toBe(400);
+  expect(
+    (
+      await put(
+        "/personal-review",
+        { personalReview: "people" },
+        "https://evil.example",
+      )
+    ).status,
+  ).toBe(403);
+  expect(
+    (await put("/personal-review", { personalReview: "nobody" })).status,
+  ).toBe(400);
   const response = await put("/personal-review", { personalReview: "people" });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
