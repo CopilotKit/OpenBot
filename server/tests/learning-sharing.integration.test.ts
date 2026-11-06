@@ -426,6 +426,47 @@ describe("Settings, Learning", () => {
     }
   });
 
+  test("asking to share a skill puts it in the admin's requests", async () => {
+    await approvals.recordApproval(ada, "ada-only", "person");
+    await approvals.recordApproval(ada, "ada-admin", "admin");
+    try {
+      const asked = await call(
+        "/api/settings/learning/skills/ada-only/share-request",
+        "ada",
+        { method: "POST" },
+      );
+      expect(asked.status).toBe(200);
+      expect(await asked.json()).toEqual({
+        name: "ada-only",
+        sharing: "requested",
+      });
+      expect(await approvals.requests()).toMatchObject([
+        { userId: ada, skillName: "ada-only" },
+      ]);
+      expect(
+        audits.find(
+          (event) => event.eventType === "learning.sharing_requested",
+        ),
+      ).toMatchObject({
+        targetType: "learned_skill",
+        targetId: "ada-only",
+        actorUserId: ada,
+        payload: { skill: "ada-only" },
+      });
+      const refused = await call(
+        "/api/settings/learning/skills/ada-admin/share-request",
+        "ada",
+        { method: "POST" },
+      );
+      expect(refused.status).toBe(409);
+    } finally {
+      audits.length = 0;
+      await database
+        .delete(learningSkillApprovals)
+        .where(eq(learningSkillApprovals.userId, ada));
+    }
+  });
+
   test("closed: only the person's own runs use their Skills", async () => {
     expect(await offered(learning, "grace")).toEqual([
       "grace-picked",

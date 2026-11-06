@@ -213,5 +213,30 @@ export function createPersonalLearningRoutes(
     return context.json({ name, open: body.open });
   });
 
+  routes.post("/skills/:name/share-request", smallBody, async (context) => {
+    const name = context.req.param("name");
+    if (!isLearnedSkillName(name)) {
+      return context.json({ error: "Name a Skill to ask to share." }, 400);
+    }
+    const userId = context.var.actor.id;
+    if (!(await deps.approvals.requestSharing(userId, name))) {
+      return context.json(
+        {
+          error:
+            "Only a Skill you approved yourself is shared this way. An admin already approved this one.",
+        },
+        409,
+      );
+    }
+    await audit({
+      eventType: "learning.sharing_requested",
+      targetType: "learned_skill",
+      targetId: name,
+      actorUserId: userId,
+      payload: { skill: name },
+    });
+    return context.json({ name, sharing: "requested" });
+  });
+
   return routes;
 }
