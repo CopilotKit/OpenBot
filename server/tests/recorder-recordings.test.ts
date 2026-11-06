@@ -52,6 +52,45 @@ describe("fetchTrajectorySummaries", () => {
     ).toEqual({ unavailable: "unreachable" });
   });
 
+  test("a 401, a 400 or another 4xx says unavailable, since trying again will not help", async () => {
+    for (const status of [400, 401, 422]) {
+      const { fetcher } = answering(status);
+      expect(
+        await fetchTrajectorySummaries({ ...base, fetch: fetcher, ids: ["a"] }),
+      ).toEqual({ unavailable: "unavailable" });
+    }
+  });
+
+  test("a 408 or 429 may pass, so it says unreachable", async () => {
+    for (const status of [408, 429]) {
+      const { fetcher } = answering(status);
+      expect(
+        await fetchTrajectorySummaries({ ...base, fetch: fetcher, ids: ["a"] }),
+      ).toEqual({ unavailable: "unreachable" });
+    }
+  });
+
+  test("a malformed item is dropped and the rest are kept", async () => {
+    const good = {
+      trajectoryId: "t-1",
+      createdAt: "2026-11-06T09:00:00.000Z",
+      firstEventAt: null,
+      lastEventAt: null,
+      eventCount: 1,
+      workflow: null,
+      outcome: null,
+    };
+    const { fetcher } = answering(200, {
+      items: [null, 7, { trajectoryId: 5 }, { ...good, eventCount: "x" }, good],
+    });
+    const result = await fetchTrajectorySummaries({
+      ...base,
+      fetch: fetcher,
+      ids: ["t-1"],
+    });
+    expect(result).toEqual({ items: [good] });
+  });
+
   test("empty ids make no request", async () => {
     const { fetcher, calls } = answering(200);
     expect(
@@ -162,6 +201,16 @@ describe("toRow", () => {
     ).toEqual(row("unknown"));
   });
 
+  test("bound seconds ago with no summary yet is sending", () => {
+    expect(
+      toRow(
+        { trajectoryId: "t-1", createdAt: new Date(now.getTime() - 30_000) },
+        undefined,
+        now,
+      )?.ended,
+    ).toBe("sending");
+  });
+
   test("absent from Intelligence is missing, dated by the binding", () => {
     expect(toRow(binding, undefined, now)).toEqual({
       id: "t-1",
@@ -266,6 +315,8 @@ describe("createRecordings", () => {
       const recordings = createRecordings({
         pageForUser: async () => ({ ids: [], nextCursor: null }),
         isBoundTo: async (id) => id === own,
+        boundTo: async (_userId, ids) =>
+          new Set(ids.filter((id) => id === own)),
         summaries: async (requested) => {
           asked.push(requested);
           return result;
@@ -287,6 +338,35 @@ describe("createRecordings", () => {
       ]);
       expect(asked).toEqual([[own]]);
       expect(found).toEqual(new Map([[own, "Refund an order"]]));
+    });
+
+    test("ownership is one query, and Intelligence is asked 100 ids at a time", async () => {
+      const many = Array.from(
+        { length: 250 },
+        (_, index) =>
+          `${String(index).padStart(8, "0")}-1111-4111-8111-111111111111`,
+      );
+      const asked: string[][] = [];
+      let boundCalls = 0;
+      const recordings = createRecordings({
+        pageForUser: async () => ({ ids: [], nextCursor: null }),
+        isBoundTo: async () => {
+          throw new Error("one id at a time");
+        },
+        boundTo: async (_userId, ids) => {
+          boundCalls += 1;
+          return new Set(ids);
+        },
+        summaries: async (requested) => {
+          asked.push(requested);
+          return { items: [] };
+        },
+        now: () => now,
+      });
+      const found = await recordings.recordingTitles("u-1", many);
+      expect(boundCalls).toBe(1);
+      expect(asked.map((batch) => batch.length)).toEqual([100, 100, 50]);
+      expect(found.size).toBe(250);
     });
 
     test("none owned means an empty map and no call", async () => {

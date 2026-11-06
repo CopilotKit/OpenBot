@@ -23,6 +23,7 @@ import type {
   RecorderConnectionStore,
   SealedOrganizationSession,
 } from "./connections";
+import { InvalidCursorError } from "./trajectory-bindings";
 import type { RecorderVariables } from "./variables";
 
 export type RecorderRouteDeps = {
@@ -43,7 +44,7 @@ export type RecorderRouteDeps = {
   sealOrganizationSession: (
     cookieHeader: string | undefined,
   ) => Promise<SealedOrganizationSession | null>;
-  /** A person's recordings, a page at a time. Throws a RangeError for a cursor that does not decode. Absent where
+  /** A person's recordings, a page at a time. Throws an InvalidCursorError for a cursor that does not decode. Absent where
    * recordings are not kept. */
   recordings?: {
     list(userId: string, cursor: string | null): Promise<RecordingsPage>;
@@ -252,7 +253,7 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
         ),
       );
     } catch (error) {
-      if (error instanceof RangeError) {
+      if (error instanceof InvalidCursorError) {
         return context.json(
           {
             error:

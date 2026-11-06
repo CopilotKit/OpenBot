@@ -1,6 +1,14 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { recorderTrajectoryBindings } from "../db/schema/recorder";
+
+/** A cursor that does not decode, or names a time the database cannot hold. */
+export class InvalidCursorError extends RangeError {
+  constructor() {
+    super("Invalid cursor");
+    this.name = "InvalidCursorError";
+  }
+}
 
 /**
  * Which person each Recorder trajectory belongs to. The first capture pass for a trajectory binds it to the person whose
@@ -27,10 +35,27 @@ export function createTrajectoryBindingStore(database: Database) {
   };
 
   return {
+    /** Which of these trajectories are bound to this person, in one query. Ids must be UUIDs (the column is one). */
+    async boundTo(
+      userId: string,
+      trajectoryIds: string[],
+    ): Promise<Set<string>> {
+      if (trajectoryIds.length === 0) return new Set();
+      const rows = await database
+        .select({ trajectoryId: recorderTrajectoryBindings.trajectoryId })
+        .from(recorderTrajectoryBindings)
+        .where(
+          and(
+            eq(recorderTrajectoryBindings.userId, userId),
+            inArray(recorderTrajectoryBindings.trajectoryId, trajectoryIds),
+          ),
+        );
+      return new Set(rows.map((row) => row.trajectoryId));
+    },
     /**
      * One page of this person's trajectories, newest first. Postgres keeps microseconds and a JS Date milliseconds, so
      * the order and the cursor both use the time cut to milliseconds: a cursor never skips or repeats a row.
-     * Throws a RangeError for a cursor that does not decode.
+     * Throws an InvalidCursorError (a RangeError) for a cursor that does not decode.
      */
     async pageForUser(
       userId: string,
@@ -107,10 +132,13 @@ function decodeCursor(cursor: string): {
   if (
     rest.length > 0 ||
     Number.isNaN(createdAt.getTime()) ||
+    // Postgres holds years 0001-9999 in this format; a wider year is a valid Date but fails the cast.
+    createdAt.getUTCFullYear() < 1 ||
+    createdAt.getUTCFullYear() > 9999 ||
     trajectoryId === undefined ||
     !UUID.test(trajectoryId)
   ) {
-    throw new RangeError("Invalid cursor");
+    throw new InvalidCursorError();
   }
   return { createdAt, trajectoryId };
 }

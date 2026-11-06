@@ -4,7 +4,10 @@ import { inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { recorderTrajectoryBindings } from "../src/db/schema/recorder";
-import { createTrajectoryBindingStore } from "../src/recorder/trajectory-bindings";
+import {
+  createTrajectoryBindingStore,
+  InvalidCursorError,
+} from "../src/recorder/trajectory-bindings";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -82,6 +85,21 @@ describe("pageForUser", () => {
     );
   });
 
+  test("a cursor with a year Postgres cannot take is a RangeError, not a failed query", async () => {
+    const far = Buffer.from(
+      `+010000-01-01T00:00:00.000Z|${randomUUID()}`,
+    ).toString("base64url");
+    await expect(store.pageForUser(person, far)).rejects.toBeInstanceOf(
+      InvalidCursorError,
+    );
+    const early = Buffer.from(
+      `-000001-01-01T00:00:00.000Z|${randomUUID()}`,
+    ).toString("base64url");
+    await expect(store.pageForUser(person, early)).rejects.toThrow(
+      "Invalid cursor",
+    );
+  });
+
   test("rows written within one millisecond are neither skipped nor repeated", async () => {
     const ids = [randomUUID(), randomUUID(), randomUUID()];
     await database.insert(recorderTrajectoryBindings).values(
@@ -103,5 +121,31 @@ describe("pageForUser", () => {
     expect(pages).toBe(3);
     expect(new Set(seen).size).toBe(3);
     expect(seen).toEqual([...ids].sort().reverse());
+  });
+});
+
+describe("bind, isBoundTo and boundTo", () => {
+  test("the first person to bind a trajectory owns it; anyone else is refused", async () => {
+    const trajectoryId = randomUUID();
+    expect(await store.bind({ trajectoryId, userId: person })).toBe(true);
+    expect(await store.bind({ trajectoryId, userId: person })).toBe(true);
+    expect(await store.bind({ trajectoryId, userId: other })).toBe(false);
+    expect(await store.isBoundTo(trajectoryId, person)).toBe(true);
+    expect(await store.isBoundTo(trajectoryId, other)).toBe(false);
+    expect(await store.isBoundTo(randomUUID(), person)).toBe(false);
+  });
+
+  test("boundTo answers which of many ids are this person's, in one query", async () => {
+    const unbound = randomUUID();
+    const found = await store.boundTo(person, [
+      mine[0]?.trajectoryId as string,
+      theirs.trajectoryId,
+      unbound,
+      mine[1]?.trajectoryId as string,
+    ]);
+    expect([...found].sort()).toEqual(
+      [mine[0]?.trajectoryId, mine[1]?.trajectoryId].sort(),
+    );
+    expect((await store.boundTo(person, [])).size).toBe(0);
   });
 });

@@ -19,9 +19,11 @@ export type TrajectorySummary = {
 /**
  * Read the summaries of recordings (trajectories) from Intelligence with the runtime key.
  *
- * 404 and 403 mean this Intelligence has no such route or does not let the key read it, so
- * recordings are `unavailable`. Nothing answering, a 5xx, or any other answer that is not a list is
- * `unreachable`, which may pass in a moment.
+ * 404, 403 and any other 4xx but 408 and 429 mean this Intelligence has no such route or will not let
+ * the key read it, and asking again will not change that, so recordings are `unavailable`. Nothing
+ * answering, a 5xx, a 408 or 429, or any answer that is not a list is `unreachable`, which may pass
+ * in a moment. Every failure is logged (status only, never the key). An item that is not a summary
+ * is dropped.
  */
 export async function fetchTrajectorySummaries(input: {
   apiUrl: string;
@@ -47,20 +49,88 @@ export async function fetchTrajectorySummaries(input: {
         signal: AbortSignal.timeout(10_000),
       },
     );
-  } catch {
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "recorder-summaries-failed",
+        reason: "request",
+        error: error instanceof Error ? error.name : "unknown",
+      }),
+    );
     return { unavailable: "unreachable" };
   }
-  if (response.status === 404 || response.status === 403)
-    return { unavailable: "unavailable" };
-  if (!response.ok) return { unavailable: "unreachable" };
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    console.error(
+      JSON.stringify({
+        type: "recorder-summaries-failed",
+        reason: "status",
+        status: response.status,
+      }),
+    );
+    const final =
+      response.status >= 400 &&
+      response.status < 500 &&
+      response.status !== 408 &&
+      response.status !== 429;
+    return { unavailable: final ? "unavailable" : "unreachable" };
+  }
   const body: unknown = await response.json().catch(() => null);
   const items =
     typeof body === "object" && body !== null && "items" in body
       ? body.items
       : null;
-  if (!Array.isArray(items)) return { unavailable: "unreachable" };
-  return { items: items as TrajectorySummary[] };
+  if (!Array.isArray(items)) {
+    console.error(
+      JSON.stringify({
+        type: "recorder-summaries-failed",
+        reason: "not-a-list",
+        status: response.status,
+      }),
+    );
+    return { unavailable: "unreachable" };
+  }
+  const valid = items.filter(isTrajectorySummary);
+  if (valid.length < items.length) {
+    console.error(
+      JSON.stringify({
+        type: "recorder-summaries-dropped",
+        dropped: items.length - valid.length,
+      }),
+    );
+  }
+  return { items: valid };
 }
+
+const isString = (value: unknown): value is string => typeof value === "string";
+const isStringOrNull = (value: unknown): value is string | null =>
+  value === null || isString(value);
+
+function isTrajectorySummary(item: unknown): item is TrajectorySummary {
+  if (typeof item !== "object" || item === null) return false;
+  const row = item as Record<string, unknown>;
+  const outcome = row.outcome;
+  const outcomeOk =
+    outcome === null ||
+    (typeof outcome === "object" &&
+      (outcome as Record<string, unknown>).phase !== undefined &&
+      ["started", "succeeded", "failed"].includes(
+        (outcome as Record<string, unknown>).phase as string,
+      ) &&
+      isStringOrNull((outcome as Record<string, unknown>).reason ?? null));
+  return (
+    isString(row.trajectoryId) &&
+    isString(row.createdAt) &&
+    isStringOrNull(row.firstEventAt) &&
+    isStringOrNull(row.lastEventAt) &&
+    typeof row.eventCount === "number" &&
+    isStringOrNull(row.workflow) &&
+    outcomeOk
+  );
+}
+
+/** Intelligence takes 1 to 100 ids in one request. */
+const SUMMARY_BATCH = 100;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -79,11 +149,14 @@ export function toRow(
 ): RecordingRow | null {
   const id = binding.trajectoryId;
   if (!summary) {
+    // Bound a moment ago, Intelligence may not have its first event yet.
+    const fresh =
+      now.getTime() - binding.createdAt.getTime() <= SENDING_WINDOW_MS;
     return {
       id,
       title: null,
       recordedAt: binding.createdAt.toISOString(),
-      ended: "missing",
+      ended: fresh ? "sending" : "missing",
       reason: null,
     };
   }
@@ -118,6 +191,8 @@ export function createRecordings(deps: {
     nextCursor: string | null;
   }>;
   isBoundTo: (trajectoryId: string, userId: string) => Promise<boolean>;
+  /** Which of these ids are this person's, in one query. Without it each id is checked on its own. */
+  boundTo?: (userId: string, ids: string[]) => Promise<Set<string>>;
   summaries: (ids: string[]) => ReturnType<typeof fetchTrajectorySummaries>;
   now?: () => Date;
 }) {
@@ -154,17 +229,28 @@ export function createRecordings(deps: {
       userId: string,
       ids: string[],
     ): Promise<Map<string, string | null>> {
-      const owned: string[] = [];
-      for (const id of new Set(ids)) {
-        if (UUID.test(id) && (await deps.isBoundTo(id, userId))) owned.push(id);
-      }
+      const candidates = [...new Set(ids)].filter((id) => UUID.test(id));
+      const boundIds = deps.boundTo
+        ? await deps.boundTo(userId, candidates)
+        : new Set(
+            (
+              await Promise.all(
+                candidates.map(async (id) =>
+                  (await deps.isBoundTo(id, userId)) ? id : null,
+                ),
+              )
+            ).filter((id) => id !== null),
+          );
+      const owned = candidates.filter((id) => boundIds.has(id));
       const titles = new Map<string, string | null>();
-      if (owned.length === 0) return titles;
-      const result = await deps.summaries(owned);
-      const byId =
-        "items" in result
-          ? new Map(result.items.map((item) => [item.trajectoryId, item]))
-          : new Map<string, TrajectorySummary>();
+      const byId = new Map<string, TrajectorySummary>();
+      for (let at = 0; at < owned.length; at += SUMMARY_BATCH) {
+        const result = await deps.summaries(
+          owned.slice(at, at + SUMMARY_BATCH),
+        );
+        if ("items" in result)
+          for (const item of result.items) byId.set(item.trajectoryId, item);
+      }
       for (const id of owned) titles.set(id, byId.get(id)?.workflow ?? null);
       return titles;
     },

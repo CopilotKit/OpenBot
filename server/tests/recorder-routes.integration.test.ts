@@ -700,5 +700,13 @@ describe("recordings", () => {
       headers: COOKIE,
     });
     expect(bad.status).toBe(400);
+
+    const farYear = Buffer.from(
+      `+010000-01-01T00:00:00.000Z|${randomUUID()}`,
+    ).toString("base64url");
+    const far = await call(h, `/api/recorder/recordings?cursor=${farYear}`, {
+      headers: COOKIE,
+    });
+    expect(far.status).toBe(400);
   });
 });
