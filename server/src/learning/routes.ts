@@ -14,12 +14,10 @@ import type { LearningAutoAssign } from "./auto-assign";
 import type { InspectorLearning, InspectorLearningRequest } from "./inspector";
 import {
   CANDIDATE_ID,
-  evidence,
   type LearningManagement,
   learningFailure,
-  MAX_INSIGHTS,
-  proposal,
-  proposalDetail,
+  readProposal,
+  readProposals,
   requestFailure,
   runSummary,
 } from "./review";
@@ -345,8 +343,10 @@ export function createLearningRoutes(
       return context.json({ containerId: null, proposals: [] });
     const containerId = scope.target.containerId;
     try {
-      const candidates = await manage.listLearningCandidates({ containerId });
-      return context.json({ containerId, proposals: candidates.map(proposal) });
+      return context.json({
+        containerId,
+        proposals: await readProposals(manage, containerId),
+      });
     } catch (error) {
       const failure = learningFailure(error);
       return context.json({ error: failure.error }, failure.status);
@@ -369,27 +369,9 @@ export function createLearningRoutes(
       return context.json({ error: "No Learning container is assigned." }, 404);
     const containerId = scope.target.containerId;
     try {
-      const candidate = await manage.getLearningCandidate({
-        containerId,
-        candidateId,
+      return context.json({
+        proposal: await readProposal(manage, containerId, candidateId),
       });
-      const insights = await Promise.all(
-        candidate.supportingInsights
-          .slice(0, MAX_INSIGHTS)
-          .map(async (insight) => ({
-            id: insight.id,
-            statement: insight.statement,
-            impact: insight.impact,
-            evidence: await manage
-              .getLearningInsightEvidence({
-                containerId,
-                insightId: insight.id,
-              })
-              .then((entries) => entries.map(evidence))
-              .catch(() => null),
-          })),
-      );
-      return context.json({ proposal: proposalDetail(candidate, insights) });
     } catch (error) {
       const failure = learningFailure(error);
       return context.json({ error: failure.error }, failure.status);
