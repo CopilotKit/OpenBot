@@ -127,7 +127,10 @@ services:
       # Per-Bot computers too, which is not automatic: the supervisor publishes each on a loopback
       # port unless `COMPUTER_NETWORK` names this project's `default` network, and a loopback port on
       # the host is not one this container can open. Whoever starts this service sets that as well.
-      COMPUTER_SUPERVISOR_URL: http://supervisor:4300
+      #
+      # `-` and not `:-`: unset is the supervisor, as it always was, and set empty is no supervisor,
+      # which is how OpenBot Desktop runs the personal edition on its one computer.
+      COMPUTER_SUPERVISOR_URL: ${COMPUTER_SUPERVISOR_CONTAINER_URL-http://supervisor:4300}
       # The managed Bot by name, when the deployment has one. `:+` keeps an empty setting empty, which
       # is how a deployment without that Bot says so: the package drops its row while this is blank.
       MANAGED_AGENT_AG_UI_URL: ${MANAGED_AGENT_AG_UI_URL:+http://agent-langgraph:4201/ag-ui}
