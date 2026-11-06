@@ -426,6 +426,45 @@ describe("reviewing proposed skills", () => {
     );
   });
 
+  test("Who approves opens a dialog and saves people", async () => {
+    intelligence();
+    const base = global.fetch;
+    const puts: { path: string; body: unknown }[] = [];
+    global.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path === "/api/admin/learning/personal-review") {
+          puts.push({ path, body: JSON.parse(String(init?.body)) });
+          return Response.json({
+            settings: { enabled: true, agents: {}, personalReview: "people" },
+          });
+        }
+        return base(input, init);
+      },
+      { preconnect: originalFetch.preconnect },
+    );
+    const view = shared();
+    const row = await view.findByRole("button", {
+      name: /Who approves skills learned from people's recordings/,
+    });
+    expect(row.textContent).toContain("Admins");
+    fireEvent.click(row);
+    fireEvent.click(
+      await view.findByRole("button", {
+        name: /Each person, for their own Bots/,
+      }),
+    );
+    fireEvent.click(view.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(puts).toEqual([
+        {
+          path: "/api/admin/learning/personal-review",
+          body: { personalReview: "people" },
+        },
+      ]),
+    );
+  });
+
   test("Published skills lists the container's skills and opens one", async () => {
     intelligence();
     const view = shared();

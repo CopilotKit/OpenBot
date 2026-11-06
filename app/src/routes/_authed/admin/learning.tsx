@@ -13,6 +13,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
+import { WhoApprovesSection } from "@/components/admin/controls/people-learning";
 import { SkillSharingSection } from "@/components/admin/controls/skill-sharing-section";
 import {
   PageEmpty,
@@ -508,6 +509,7 @@ export function LearningPage() {
       <ProposedSkills agentId={selected || undefined} />
       <AnalysisRuns agentId={selected || undefined} />
       <PublishedSkills agentId={selected || undefined} />
+      <WhoApprovesSection />
       <SkillSharingSection />
     </PageShell>
   );
