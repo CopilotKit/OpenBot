@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { fetchTrajectorySummaries } from "../src/recorder/recordings";
+import type {
+  RecordingEnded,
+  RecordingRow,
+} from "@openbot/shared/recorder-api";
+import {
+  fetchTrajectorySummaries,
+  type TrajectorySummary,
+  toRow,
+} from "../src/recorder/recordings";
 
 const base = { apiUrl: "http://intelligence.test/", apiKey: "key-1" };
 
@@ -75,5 +83,91 @@ describe("fetchTrajectorySummaries", () => {
     expect(headers.authorization).toBe("Bearer key-1");
     expect(headers.accept).toBe("application/json");
     expect(calls[0]?.init.redirect).toBe("error");
+  });
+});
+
+describe("toRow", () => {
+  const now = new Date("2026-11-06T12:00:00.000Z");
+  const binding = {
+    trajectoryId: "t-1",
+    createdAt: new Date("2026-11-06T09:00:00.000Z"),
+  };
+  const minutesAgo = (minutes: number) =>
+    new Date(now.getTime() - minutes * 60_000).toISOString();
+  const summary = (
+    outcome: TrajectorySummary["outcome"],
+    lastEventAt: string | null = null,
+  ): TrajectorySummary => ({
+    trajectoryId: "t-1",
+    createdAt: "2026-11-06T09:00:00.000Z",
+    firstEventAt: "2026-11-06T09:01:00.000Z",
+    lastEventAt,
+    eventCount: 3,
+    workflow: "Refund an order",
+    outcome,
+  });
+  const row = (
+    ended: RecordingEnded,
+    reason: string | null = null,
+  ): RecordingRow => ({
+    id: "t-1",
+    title: "Refund an order",
+    recordedAt: "2026-11-06T09:01:00.000Z",
+    ended,
+    reason,
+  });
+
+  test("succeeded", () => {
+    expect(
+      toRow(binding, summary({ phase: "succeeded", reason: null }), now),
+    ).toEqual(row("succeeded"));
+  });
+
+  test("a discarded recording is hidden", () => {
+    expect(
+      toRow(binding, summary({ phase: "failed", reason: "discarded" }), now),
+    ).toBeNull();
+  });
+
+  test("a restarted recording is hidden", () => {
+    expect(
+      toRow(binding, summary({ phase: "failed", reason: "restarted" }), now),
+    ).toBeNull();
+  });
+
+  test("disconnected is stopped, with its reason", () => {
+    expect(
+      toRow(binding, summary({ phase: "failed", reason: "disconnected" }), now),
+    ).toEqual(row("stopped", "disconnected"));
+  });
+
+  test("started 5 minutes ago is sending", () => {
+    expect(
+      toRow(
+        binding,
+        summary({ phase: "started", reason: null }, minutesAgo(5)),
+        now,
+      ),
+    ).toEqual(row("sending"));
+  });
+
+  test("started 30 minutes ago is unknown", () => {
+    expect(
+      toRow(
+        binding,
+        summary({ phase: "started", reason: null }, minutesAgo(30)),
+        now,
+      ),
+    ).toEqual(row("unknown"));
+  });
+
+  test("absent from Intelligence is missing, dated by the binding", () => {
+    expect(toRow(binding, undefined, now)).toEqual({
+      id: "t-1",
+      title: null,
+      recordedAt: "2026-11-06T09:00:00.000Z",
+      ended: "missing",
+      reason: null,
+    });
   });
 });

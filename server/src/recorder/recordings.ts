@@ -1,3 +1,5 @@
+import type { RecordingRow } from "@openbot/shared/recorder-api";
+
 export type TrajectorySummary = {
   trajectoryId: string;
   createdAt: string;
@@ -55,4 +57,44 @@ export async function fetchTrajectorySummaries(input: {
       : null;
   if (!Array.isArray(items)) return { unavailable: "unreachable" };
   return { items: items as TrajectorySummary[] };
+}
+
+/** How long after its last event a recording that has not ended still counts as being sent. */
+const SENDING_WINDOW_MS = 10 * 60_000;
+
+/**
+ * How one recording ended, from its binding and what Intelligence says of it.
+ *
+ * A recording the person discarded or restarted is not one they made, so it has no row.
+ */
+export function toRow(
+  binding: { trajectoryId: string; createdAt: Date },
+  summary: TrajectorySummary | undefined,
+  now: Date,
+): RecordingRow | null {
+  const id = binding.trajectoryId;
+  if (!summary) {
+    return {
+      id,
+      title: null,
+      recordedAt: binding.createdAt.toISOString(),
+      ended: "missing",
+      reason: null,
+    };
+  }
+  const { outcome } = summary;
+  if (
+    outcome?.phase === "failed" &&
+    (outcome.reason === "discarded" || outcome.reason === "restarted")
+  )
+    return null;
+  const recordedAt = summary.firstEventAt ?? binding.createdAt.toISOString();
+  const row = { id, title: summary.workflow, recordedAt };
+  if (outcome?.phase === "failed")
+    return { ...row, ended: "stopped", reason: outcome.reason };
+  if (outcome?.phase === "succeeded")
+    return { ...row, ended: "succeeded", reason: null };
+  const lastSeen = new Date(summary.lastEventAt ?? binding.createdAt);
+  const recent = now.getTime() - lastSeen.getTime() <= SENDING_WINDOW_MS;
+  return { ...row, ended: recent ? "sending" : "unknown", reason: null };
 }
