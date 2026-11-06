@@ -5035,7 +5035,10 @@ async fn run_local_eval(
 /**
 The engine for the Intelligence CLI when nothing this run has named one yet.
 
-A relaunched OpenBot can ask Intelligence for its status before Start has pinned an engine. The
+A relaunched OpenBot can ask Intelligence for its status before Start has pinned an engine, and the
+account screen asks the CLI before Install has found one (Install does not run again over an
+installation already prepared). On Windows Podman also answers on Docker's pipe, and a CLI not told
+which engine it is on declines with `engine_mismatch`. The
 answer is the one Start would reach with no containers of its own: the engine `root` was set up on
 if it saved one (see `preparation::saved_engine`), otherwise whatever `engine::detect` finds
 answering. Blocking, so only from a blocking thread.
@@ -5117,19 +5120,39 @@ approved it there, or it failed. `attempt` lets `cancel_local_eval` stop the wai
 */
 #[tauri::command]
 async fn sign_in_to_copilotkit(
+    app: tauri::AppHandle,
     attempt: String,
 ) -> Result<local_eval::AccountSignIn, local_eval::Failure> {
-    tauri::async_runtime::spawn_blocking(move || local_eval::account_sign_in_installed(&attempt))
-        .await
-        .map_err(|_| local_eval::Failure::Spawn)?
+    let root = selected_root_or_default(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        know_cli_engine(&root);
+        local_eval::account_sign_in_installed(&attempt)
+    })
+    .await
+    .map_err(|_| local_eval::Failure::Spawn)?
 }
 
 /// The evaluation agreement local setup needs accepted, for the window to show before Accept.
 #[tauri::command]
-async fn local_eval_terms(attempt: String) -> Result<local_eval::Terms, local_eval::Failure> {
-    tauri::async_runtime::spawn_blocking(move || local_eval::terms_installed(&attempt))
-        .await
-        .map_err(|_| local_eval::Failure::Spawn)?
+async fn local_eval_terms(
+    app: tauri::AppHandle,
+    attempt: String,
+) -> Result<local_eval::Terms, local_eval::Failure> {
+    let root = selected_root_or_default(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        // The CLI checks its engine before it answers. See `know_cli_engine`.
+        know_cli_engine(&root);
+        local_eval::terms_installed(&attempt)
+    })
+    .await
+    .map_err(|_| local_eval::Failure::Spawn)?
+}
+
+/// The folder this window is installing into, or the default one.
+fn selected_root_or_default(app: &tauri::AppHandle) -> PathBuf {
+    let shell = app.state::<Shell>();
+    let selected = shell.selected_root.lock().unwrap().clone();
+    selected.unwrap_or_else(stack::default_root)
 }
 
 /**
@@ -10129,6 +10152,30 @@ mod tests {
         );
         assert_eq!(about.version.as_deref(), Some(env!("OPENBOT_BUILD_COMMIT")));
         assert!(about.credits.unwrap().starts_with("Built "));
+    }
+
+    /// Windows: Podman also answers on Docker's pipe, so a CLI not told the engine finds "the Docker
+    /// address answers with Podman" and declines (`engine_mismatch`), which the account screen shows
+    /// as "Couldn't check your CopilotKit account". Over an installation already prepared, Install
+    /// does not run again and nothing else names the engine before Start, so Try again never
+    /// helped. Every command the account screen runs names the engine first, as Start and setup do.
+    #[test]
+    fn the_account_screen_tells_the_cli_its_engine_first() {
+        let source = include_str!("main.rs");
+        for command in [
+            "async fn local_eval_terms(",
+            "async fn sign_in_to_copilotkit(",
+        ] {
+            let start = source.find(command).expect(command);
+            let body = &source[start..];
+            let body = &body[..body.find("\n}\n").expect("the end of the command")];
+            let named = body.find("know_cli_engine(").unwrap_or(usize::MAX);
+            let runs = body.find("_installed(").expect("the CLI call");
+            assert!(
+                named < runs,
+                "{command} runs the CLI before naming its engine"
+            );
+        }
     }
 
     #[test]
