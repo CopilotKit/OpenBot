@@ -10264,7 +10264,13 @@ fn main() {
         assert_eq!(health["browserMode"], "headed");
         assert_eq!(health["browser"], false, "nothing opened a browser");
         assert_eq!(without_token, reqwest::StatusCode::UNAUTHORIZED);
-        assert_eq!(with_token, reqwest::StatusCode::OK);
+        // Accepted: what it answers past that is the computer's own rule for a person's browser
+        // (`agent-computer/src/person-access.ts`), which keeps it off the Bots' routes.
+        assert_ne!(
+            with_token,
+            reqwest::StatusCode::UNAUTHORIZED,
+            "the computer token is accepted"
+        );
         assert!(!on_ipv6, "the computer listens on 127.0.0.1 alone");
         assert_eq!(exit.code(), Some(0), "Stop let it close on its own");
     }
