@@ -22,7 +22,7 @@ bash scripts/start.sh
 because the Personal Assistant runs inside the server on the model in
 [`examples/personal/model.yaml`](../examples/personal/model.yaml).
 
-It also starts your own browser, as OpenBot Desktop does for the team edition: your installed Google
+It also starts your own browser, as OpenBot Desktop does: your installed Google
 Chrome, or Microsoft Edge, as a window on your desktop with the OpenBot Recorder in it. It builds the
 Recorder (`extension/dist`) if it isn't built, runs `scripts/start-local-chrome-computer.ts` on port
 `BROWSER_PORT` (4101) with `COMPUTER_PEOPLE_ONLY=on`, and points the server at it with
@@ -32,6 +32,24 @@ there goes to your own Learning space. Its profile is kept under
 [configuration](configuration.md#openbot-desktop-runs-it-for-the-person) for the other systems).
 Without Chrome or Edge, OpenBot starts without it and `start.sh` says why. `scripts/stop.sh` stops it
 with the rest.
+
+## OpenBot Desktop
+
+OpenBot Desktop installs the personal edition: it writes `OPENBOT_EDITION=personal` and the settings
+below into its deployment's `.env` on every Start (`desktop/src-tauri/src/env.rs`). It runs
+PostgreSQL, the one computer, the server and the worker, and no supervisor and no bundled Bot
+containers. The Bot picked during setup, if any, joins the Personal Assistant: the `picked-harness`
+row in [`examples/personal/agents.yaml`](../examples/personal/agents.yaml) is dropped while
+`PICKED_HARNESS_URL` is empty, which is how `start.sh` leaves it.
+
+The server's container is given the supervisor by name in `docker-compose.yml` unless
+`COMPUTER_SUPERVISOR_CONTAINER_URL` is set, so the desktop sets it empty as well as
+`COMPUTER_SUPERVISOR_URL`.
+
+An installation from an earlier OpenBot Desktop, which ran the team edition, becomes the personal
+edition on its next Start. Its Bots and conversations stay in the database. The team edition's
+settings stored there are not read (see [What is fixed](#what-is-fixed)). Stop still stops each
+computer the supervisor made for a Bot.
 
 ## What the server requires
 

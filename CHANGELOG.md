@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop installs the personal edition: nobody signs in, one computer is shared by your
+  Bots, and you start with the Personal Assistant. Before, it installed the team edition, with its
+  admin screens, the fintech example's Bots and a computer for each Bot. An existing installation
+  becomes the personal edition on its next Start. It runs no supervisor and no bundled Bot
+  containers, so an installation downloads three fewer images. The Bot picked during setup joins
+  the Personal Assistant. See [Personal edition](docs/personal-edition.md#openbot-desktop).
+- `docker-compose.yml` gives the `server` container no supervisor when
+  `COMPUTER_SUPERVISOR_CONTAINER_URL` is set empty. Unset, it is the supervisor, as before.
+
 - Skills (Admin → Skills, and Settings → Skills in the personal edition) lists each skill as one
   row with its name, what it does and how many Bots offer it, and the row opens the skill's own
   page. There, each Bot has a switch, the skill's words can be edited, and deleting asks first.
