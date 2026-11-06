@@ -6,6 +6,7 @@ import {
   type LearningManagement,
   readProposal,
   readProposals,
+  reviewProposal,
 } from "../src/learning/review";
 
 const candidate = {
@@ -130,5 +131,149 @@ describe("readProposal", () => {
         item.kind === "recording" ? [item.title] : [],
       ),
     ).toEqual([null, null, null]);
+  });
+});
+
+describe("reviewProposal", () => {
+  function reviewing(
+    review: () => Promise<unknown>,
+    calls: string[],
+  ): LearningManagement {
+    return {
+      getLearningCandidate: async () => {
+        calls.push("read");
+        return detail;
+      },
+      reviewLearningCandidate: async () => {
+        calls.push("review");
+        return review();
+      },
+    } as unknown as LearningManagement;
+  }
+  const approved = async () => ({
+    candidateId: candidate.id,
+    operation: "add",
+    status: "approved",
+    publishedRegistryRevision: 1,
+    publishedSkillId: "skill-1",
+  });
+  const conflict = Object.assign(new Error("conflict"), {
+    status: 409,
+    code: "LEARNING_CANDIDATE_CONFLICT",
+  });
+
+  test("before runs after the read and before the review", async () => {
+    const calls: string[] = [];
+    const result = await reviewProposal({
+      manage: reviewing(approved, calls),
+      containerId: "openbot",
+      candidateId: candidate.id,
+      action: "approve",
+      before: async (seen) => {
+        calls.push("before");
+        expect(seen.files).toEqual([{ path: "SKILL.md", content: "# Skill" }]);
+        expect(seen.insights).toEqual([]);
+        return async () => {
+          calls.push("undo");
+        };
+      },
+    });
+    expect(calls).toEqual(["read", "before", "review"]);
+    expect(result).toEqual({
+      id: candidate.id,
+      status: "approved",
+      operation: "add",
+      title: "Refund check",
+    });
+  });
+
+  test("a 409 from the review calls the undo and rethrows", async () => {
+    const calls: string[] = [];
+    const review = reviewProposal({
+      manage: reviewing(async () => {
+        throw conflict;
+      }, calls),
+      containerId: "openbot",
+      candidateId: candidate.id,
+      action: "approve",
+      before: async () => {
+        calls.push("before");
+        return async () => {
+          calls.push("undo");
+        };
+      },
+    });
+    await expect(review).rejects.toBe(conflict);
+    expect(calls).toEqual(["read", "before", "review", "undo"]);
+  });
+
+  test("a throwing undo still rethrows the review's error", async () => {
+    const calls: string[] = [];
+    const review = reviewProposal({
+      manage: reviewing(async () => {
+        throw conflict;
+      }, calls),
+      containerId: "openbot",
+      candidateId: candidate.id,
+      action: "approve",
+      before: async () => async () => {
+        calls.push("undo");
+        throw new Error("database gone");
+      },
+    });
+    await expect(review).rejects.toBe(conflict);
+    expect(calls).toEqual(["read", "review", "undo"]);
+  });
+
+  test("on success the undo is not called", async () => {
+    const calls: string[] = [];
+    await reviewProposal({
+      manage: reviewing(approved, calls),
+      containerId: "openbot",
+      candidateId: candidate.id,
+      action: "approve",
+      before: async () => async () => {
+        calls.push("undo");
+      },
+    });
+    expect(calls).toEqual(["read", "review"]);
+  });
+
+  test("a throwing before means no review call", async () => {
+    const calls: string[] = [];
+    const refused = new Error("unnamed");
+    const review = reviewProposal({
+      manage: reviewing(approved, calls),
+      containerId: "openbot",
+      candidateId: candidate.id,
+      action: "approve",
+      before: async () => {
+        calls.push("before");
+        throw refused;
+      },
+    });
+    await expect(review).rejects.toBe(refused);
+    expect(calls).toEqual(["read", "before"]);
+  });
+
+  test("without before it reads and reviews", async () => {
+    const calls: string[] = [];
+    const result = await reviewProposal({
+      manage: reviewing(
+        async () => ({
+          candidateId: candidate.id,
+          operation: "add",
+          status: "rejected",
+          publishedRegistryRevision: null,
+          publishedSkillId: null,
+        }),
+        calls,
+      ),
+      containerId: "openbot",
+      candidateId: candidate.id,
+      action: "reject",
+    });
+    expect(calls).toEqual(["read", "review"]);
+    expect(result.status).toBe("rejected");
   });
 });

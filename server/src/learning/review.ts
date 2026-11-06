@@ -222,3 +222,65 @@ export async function readProposal(
   }
   return proposalDetail(candidate, insights);
 }
+
+/**
+ * Approves or rejects a proposal. `before` runs once the proposal is read and before Intelligence is asked, so OpenBot
+ * can write its own record first (callers pass it only on approve); when Intelligence then refuses, the undo it returned
+ * takes that record back. If `before` throws, Intelligence is never asked. A failing undo is logged and never hides
+ * Intelligence's error, which is what the caller gets.
+ */
+export async function reviewProposal({
+  manage,
+  containerId,
+  candidateId,
+  action,
+  before,
+}: {
+  manage: LearningManagement;
+  containerId: string;
+  candidateId: string;
+  action: "approve" | "reject";
+  before?: (detail: LearningProposalDetail) => Promise<() => Promise<void>>;
+}): Promise<{
+  id: string;
+  status: "approved" | "rejected";
+  operation: "add" | "update" | "remove";
+  title: string;
+}> {
+  const candidate = await manage.getLearningCandidate({
+    containerId,
+    candidateId,
+  });
+  const undo = before ? await before(proposalDetail(candidate, [])) : undefined;
+  let review: Awaited<
+    ReturnType<LearningManagement["reviewLearningCandidate"]>
+  >;
+  try {
+    review = await manage.reviewLearningCandidate({
+      containerId,
+      candidateId,
+      action,
+    });
+  } catch (error) {
+    try {
+      await undo?.();
+    } catch (undoError) {
+      console.error(
+        JSON.stringify({
+          type: "learning-review-undo-failed",
+          candidateId,
+          errorType: undoError instanceof Error ? undoError.name : "unknown",
+          message:
+            undoError instanceof Error ? undoError.message : String(undoError),
+        }),
+      );
+    }
+    throw error;
+  }
+  return {
+    id: candidateId,
+    status: review.status,
+    operation: review.operation,
+    title: candidate.title,
+  };
+}
