@@ -132,4 +132,14 @@ test("an admin reads a person's published skill", async () => {
   expect(
     (await admin().request("/people/ana/skills/send-invoice")).status,
   ).toBe(503);
+  const failing = admin({
+    personSkill: async () => {
+      throw new Error("Intelligence is down");
+    },
+  });
+  const failed = await failing.request("/people/ana/skills/send-invoice");
+  expect(failed.status).toBe(503);
+  expect(((await failed.json()) as { error: string }).error).toContain(
+    "Intelligence",
+  );
 });

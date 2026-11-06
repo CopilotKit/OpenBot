@@ -502,7 +502,15 @@ export function createLearningRoutes(
     const userId = context.req.param("userId");
     if (!(await people()).some((entry) => entry.userId === userId))
       return context.json({ error: "This person doesn't exist." }, 404);
-    const skill = await personSkill(userId, name);
+    const skill = await personSkill(userId, name).catch(() => undefined);
+    if (skill === undefined)
+      return context.json(
+        {
+          error:
+            "Couldn't read this person's skills from Intelligence just now. Try again.",
+        },
+        503,
+      );
     if (!skill)
       return context.json({ error: "This skill doesn't exist." }, 404);
     return context.json({ skill });
