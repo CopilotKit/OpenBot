@@ -373,3 +373,68 @@ test("pressing a Your Skills row opens its SKILL.md where there is no switch", a
   await view.findByText(/Step one: look up the order/);
   expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
 });
+
+test("a skill the person approved shows Ask to share instead of the Open switch", async () => {
+  answer = {
+    ...answer,
+    mode: "choose",
+    skills: [
+      {
+        name: "refund-order",
+        description: "Refunds an order.",
+        open: false,
+        approvedBy: "person",
+        sharing: "none",
+      },
+      {
+        name: "close-ticket",
+        description: "Closes a ticket.",
+        open: true,
+        approvedBy: "person",
+        sharing: "requested",
+      },
+      {
+        name: "reopen-ticket",
+        description: "Reopens a ticket.",
+        open: false,
+        approvedBy: "admin",
+        sharing: "none",
+      },
+    ],
+  };
+  const posts: string[] = [];
+  const inner = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      if (init?.method === "POST") {
+        posts.push(String(path));
+        return Response.json({ ok: true });
+      }
+      return inner(path, init);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = draw();
+  await view.findByText("refund-order");
+  // Only the admin-approved skill keeps its switch.
+  expect(view.getAllByRole("switch")).toHaveLength(1);
+  expect(view.getByLabelText("Open reopen-ticket to everyone")).toBeTruthy();
+  expect(view.getByText("Asked to share")).toBeTruthy();
+  // Never "Every Bot may use it." for a skill an admin hasn't approved.
+  expect(view.queryByText(/Every Bot may use it/)).toBeNull();
+  expect(view.getAllByText(/Only your Bots use it/)).toHaveLength(3);
+  fireEvent.click(view.getByRole("button", { name: "Ask to share" }));
+  await waitFor(() =>
+    expect(posts).toEqual([
+      "/api/settings/learning/skills/refund-order/share-request",
+    ]),
+  );
+  // In open mode the button replaces the row's chevron-only layout too.
+  cleanup();
+  queryClient.clear();
+  answer = { ...answer, mode: "open" };
+  const open = draw();
+  await open.findByText("refund-order");
+  expect(open.queryAllByRole("switch")).toHaveLength(0);
+  expect(open.getByRole("button", { name: "Ask to share" })).toBeTruthy();
+});

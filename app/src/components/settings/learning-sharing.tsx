@@ -18,6 +18,7 @@ import {
   PageSection,
 } from "@/components/layout/page-shell";
 import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
+import { Button } from "@/components/ui/button";
 import {
   Item,
   ItemActions,
@@ -29,6 +30,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import {
+  requestSkillSharingMutationOptions,
   setLearnedSkillOpenMutationOptions,
   setLearningSharingModeMutationOptions,
 } from "@/lib/learning/mutations";
@@ -110,6 +112,9 @@ export function LearningSharing() {
     setLearningSharingModeMutationOptions(queryClient),
   );
   const setOpen = useMutation(setLearnedSkillOpenMutationOptions(queryClient));
+  const requestShare = useMutation(
+    requestSkillSharingMutationOptions(queryClient),
+  );
   const [reading, setReading] = React.useState<string | null>(null);
   if (sharing.isPending) return null;
   if (sharing.error) {
@@ -122,7 +127,7 @@ export function LearningSharing() {
   const data = sharing.data;
   // Shown at once while the save is on its way, as a switch is.
   const mode = (setMode.isPending ? setMode.variables : undefined) ?? data.mode;
-  const failure = setMode.error ?? setOpen.error;
+  const failure = setMode.error ?? setOpen.error ?? requestShare.error;
 
   return (
     <>
@@ -183,10 +188,15 @@ export function LearningSharing() {
                 (setOpen.isPending && setOpen.variables?.name === skill.name
                   ? setOpen.variables.open
                   : undefined) ?? skill.open;
+              // A skill the person approved reaches other Bots only once an admin approves sharing it.
+              const needsAdmin =
+                mode !== "closed" &&
+                skill.approvedBy === "person" &&
+                skill.sharing !== "approved";
               return (
                 <React.Fragment key={skill.name}>
                   {index > 0 ? <Separator /> : null}
-                  {mode === "choose" ? (
+                  {mode === "choose" || needsAdmin ? (
                     // The row opens the Skill; the Switch sits beside that button, not inside it.
                     <Item size="sm">
                       <button
@@ -201,29 +211,52 @@ export function LearningSharing() {
                           <ItemTitle>{skill.name}</ItemTitle>
                           <ItemDescription>
                             {[
-                              open
-                                ? "Every Bot may use it."
-                                : "Only your Bots use it.",
+                              mode === "choose"
+                                ? open && !needsAdmin
+                                  ? "Every Bot may use it."
+                                  : "Only your Bots use it."
+                                : null,
                               skill.description,
-                            ].join(" ")}
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
                           </ItemDescription>
                         </ItemContent>
                       </button>
                       <ItemActions>
-                        <Switch
-                          aria-label={`Open ${skill.name} to everyone`}
-                          checked={open}
-                          // An open Skill can always be closed; opening one waits for an admin.
-                          disabled={
-                            setOpen.isPending || (!data.sharingAllowed && !open)
-                          }
-                          onCheckedChange={(checked) =>
-                            setOpen.mutate({
-                              name: skill.name,
-                              open: checked,
-                            })
-                          }
-                        />
+                        {needsAdmin ? (
+                          skill.sharing === "requested" ? (
+                            <span className="text-muted-foreground text-sm">
+                              Asked to share
+                            </span>
+                          ) : (
+                            <Button
+                              disabled={requestShare.isPending}
+                              onClick={() => requestShare.mutate(skill.name)}
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              Ask to share
+                            </Button>
+                          )
+                        ) : mode === "choose" ? (
+                          <Switch
+                            aria-label={`Open ${skill.name} to everyone`}
+                            checked={open}
+                            // An open Skill can always be closed; opening one waits for an admin.
+                            disabled={
+                              setOpen.isPending ||
+                              (!data.sharingAllowed && !open)
+                            }
+                            onCheckedChange={(checked) =>
+                              setOpen.mutate({
+                                name: skill.name,
+                                open: checked,
+                              })
+                            }
+                          />
+                        ) : null}
                       </ItemActions>
                     </Item>
                   ) : (
