@@ -2488,6 +2488,45 @@ async fn start_stack_inner<R: tauri::Runtime>(
             report(&app, "services", false, detail);
         })?;
 
+        /*
+         * The personal edition shares one computer, so a Bot's files and logins from the computer
+         * the supervisor made for its person are brought into it, once (`stack::
+         * carry_over_person_computers`). On every Start, the first one after an upgrade included,
+         * and cheap once done. Not fatal: OpenBot runs, the old volumes keep everything, and the next
+         * Start tries again.
+         */
+        let carried = deployment::reference(&root, "agent-computer")
+            .and_then(|image| stack::carry_over_person_computers(&found, &root, &image));
+        match carried {
+            Ok(carried) => {
+                for person in carried {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "type": "computer-carried-over",
+                            "person": person.person,
+                            "workspace": person.workspace,
+                            "profiles": person.profile,
+                            "note": "The old volumes are left in place.",
+                        })
+                    );
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({ "type": "computer-carry-over-failed", "error": error })
+                );
+                report(
+                    &app,
+                    "carry-over",
+                    false,
+                    "Your Bots' files and sign-ins from before are not in place yet. OpenBot tries \
+                     again the next time it starts.",
+                );
+            }
+        }
+
         (found, secrets, ports, local_browser)
     };
 

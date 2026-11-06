@@ -52,6 +52,15 @@ settings stored there are not read (see [What is fixed](#what-is-fixed)). The pa
 `openbot` tenant id so the picked Bot retains its package ownership across that switch. Stop still stops each
 computer the supervisor made for a Bot.
 
+Its Bots' files and browser logins come along. The supervisor gave the person a computer of their
+own, whose volumes keep each Bot's files in `computers/<bot>` and its browser profile in `<bot>`; the
+one computer keeps them in `computers/<person>~<bot>` and `<person>~<bot>`. Start copies each Bot's
+files and profile from the old volumes into the new places, with their owners and modes, once
+(recorded in `.openbot-carried-over/` in each new volume), in a short-lived container from the
+computer's own image (`stack::carry_over_person_computers`). Nothing already there is replaced: a
+Bot's files are merged into its folder, and a profile the one computer already has for that Bot is
+kept whole, as the supervisor's own carry-over does. The old volumes are left as they were.
+
 ## What the server requires
 
 The server refuses to start in the personal edition unless all of these hold, and says which

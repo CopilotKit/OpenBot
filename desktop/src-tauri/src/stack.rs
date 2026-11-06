@@ -4181,6 +4181,288 @@ pub fn stop_all_but_the_database(engine: &Address, root: &Path) -> Result<(), St
     Ok(())
 }
 
+/// One person's computer from before the personal edition, carried into the shared computer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CarriedOver {
+    pub person: String,
+    pub workspace: Option<String>,
+    pub profile: Option<String>,
+}
+
+/**
+Bring each person's Bots' files and browser logins from the computer the supervisor made for them
+into the one computer the personal edition shares, once.
+
+WHY. Before the personal edition, OpenBot Desktop ran a supervisor that gave each person a computer of
+their own, with two volumes: `<namespace>-workspace-person-<person>`, where each Bot's files are in
+`computers/<bot>`, and `<namespace>-profile-person-<person>`, where each Bot's browser profile, its
+logins, is `<bot>`. The personal edition runs no supervisor: every Bot is on the Compose
+`agent-computer` service, whose volumes keep a Bot's files in `computers/<person>~<bot>` and its
+profile in `<person>~<bot>` (agent-computer's `seatIdFor`). An installation that moved to it found
+its Bots with no files and signed out of everything. Nothing was lost; it was in the old volumes.
+
+WHAT. The supervisor's own carry-over (`supervisor/src/docker.ts`, `carryOverProfile`) is the rule:
+copied, never moved, and the old volumes are left exactly as they are; a profile the shared computer
+already has for that Bot wins, whole, because two Chromium profiles cannot be merged; and the copy is
+done by a short-lived container that mounts the volumes, Docker's own way to copy between volumes,
+from an image already on the machine (`image`, the computer's), with no network and only the
+capabilities that keep owners and modes. Files are merged into a Bot's folder rather than refused
+when it exists, because a Bot that already ran on the shared computer has a folder there, and its
+old files are no less its own: nothing that is there is replaced.
+
+ONCE. Recorded in each destination volume (`.openbot-carried-over/<old volume>`), which outlives
+this app and any reinstall, as the supervisor records its own. A run that fails records nothing, so
+the next Start tries again.
+
+Only volumes the supervisor made for a person, in this installation's namespace, by their labels:
+nothing is read out of a volume this installation does not own. Run after the Compose `up`, so the
+shared computer's volumes are the ones Compose made.
+*/
+pub fn carry_over_person_computers(
+    engine: &Address,
+    root: &Path,
+    image: &str,
+) -> Result<Vec<CarriedOver>, String> {
+    let Some(namespace) = computer_namespace(engine, root)? else {
+        return Ok(Vec::new());
+    };
+    let listed = engine
+        .command()
+        .args([
+            "volume",
+            "ls",
+            "--quiet",
+            "--filter",
+            SUPERVISOR_FILTER,
+            "--filter",
+            &format!("label=openbot.namespace={namespace}"),
+            "--filter",
+            "label=openbot.computer-kind=person",
+        ])
+        .output()
+        .map_err(|error| format!("could not list the computers from before: {error}"))?;
+    if !listed.status.success() {
+        return Err(command_said(&listed.stderr));
+    }
+    let volumes: Vec<String> = String::from_utf8_lossy(&listed.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    let mut people = std::collections::BTreeMap::<String, (Option<String>, Option<String>)>::new();
+    for volume in volumes {
+        for (prefix, profile) in [
+            (format!("{namespace}-workspace-person-"), false),
+            (format!("{namespace}-profile-person-"), true),
+        ] {
+            let Some(person) = volume.strip_prefix(&prefix) else {
+                continue;
+            };
+            // A plain id only, as the supervisor made it: it becomes a path.
+            if !plain_id(person) {
+                continue;
+            }
+            let entry = people.entry(person.to_string()).or_default();
+            if profile {
+                entry.1 = Some(volume.clone());
+            } else {
+                entry.0 = Some(volume.clone());
+            }
+        }
+    }
+    if people.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (workspace, profiles) = shared_computer_volumes(engine, root)?;
+    // A person's computer from before still running is stopped first, as the supervisor does, so
+    // Chromium has flushed its profile and nothing writes to the volumes while they are read. The
+    // personal edition never starts one again.
+    let running = engine
+        .command()
+        .args([
+            "ps",
+            "--quiet",
+            "--filter",
+            SUPERVISOR_FILTER,
+            "--filter",
+            &format!("label=openbot.namespace={namespace}"),
+            "--filter",
+            "label=openbot.computer-kind=person",
+        ])
+        .output()
+        .map_err(|error| format!("could not list the computers from before: {error}"))?;
+    let running: Vec<String> = String::from_utf8_lossy(&running.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    if !running.is_empty() {
+        let stopped = engine
+            .command()
+            .args(["stop", "--time", "30"])
+            .args(&running)
+            .output()
+            .map_err(|error| format!("could not stop the computers from before: {error}"))?;
+        if !stopped.status.success() {
+            return Err(format!(
+                "could not stop the computers from before: {}",
+                command_said(&stopped.stderr)
+            ));
+        }
+    }
+    let mut carried = Vec::new();
+    for (person, (old_workspace, old_profile)) in people {
+        let mut command = engine.command();
+        command.args([
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--cap-drop",
+            "ALL",
+            "--cap-add",
+            "CHOWN",
+            "--cap-add",
+            "DAC_OVERRIDE",
+            "--cap-add",
+            "FOWNER",
+            "--label",
+            "openbot.carry-over=person",
+            "--entrypoint",
+            "sh",
+            "--env",
+            &format!("PERSON={person}"),
+            "--volume",
+            &format!("{workspace}:/workspace"),
+            "--volume",
+            &format!("{profiles}:/profiles"),
+        ]);
+        if let Some(volume) = &old_workspace {
+            command
+                .args(["--volume", &format!("{volume}:/from-workspace:ro")])
+                .args(["--env", &format!("FROM_WORKSPACE={volume}")]);
+        }
+        if let Some(volume) = &old_profile {
+            command
+                .args(["--volume", &format!("{volume}:/from-profiles:ro")])
+                .args(["--env", &format!("FROM_PROFILES={volume}")]);
+        }
+        let output = command
+            .args([image, "-c", CARRY_OVER_SCRIPT])
+            .output()
+            .map_err(|error| format!("could not run the copy for {person}: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "copying {person}'s computer from before failed: {}",
+                command_said(&output.stderr)
+            ));
+        }
+        let said = String::from_utf8_lossy(&output.stdout);
+        let outcome = |what: &str| {
+            said.lines()
+                .find_map(|line| line.strip_prefix(&format!("{what}=")))
+                .map(str::to_string)
+        };
+        carried.push(CarriedOver {
+            person,
+            workspace: outcome("workspace"),
+            profile: outcome("profiles"),
+        });
+    }
+    Ok(carried)
+}
+
+/// The volumes the shared computer (the Compose `agent-computer` service) keeps `/workspace` and
+/// `/profiles` on, read from its container, so whatever named them (an override file, a project
+/// name) is answered for.
+fn shared_computer_volumes(engine: &Address, root: &Path) -> Result<(String, String), String> {
+    let listed = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "--all", "--quiet", "agent-computer"])
+        .output()
+        .map_err(|error| format!("could not find the shared computer: {error}"))?;
+    if !listed.status.success() {
+        return Err(command_said(&listed.stderr));
+    }
+    let id = String::from_utf8_lossy(&listed.stdout)
+        .split_whitespace()
+        .next()
+        .map(str::to_string)
+        .ok_or("the shared computer has not been created")?;
+    let inspected = engine
+        .command()
+        .args(["inspect", "--format", "{{json .Mounts}}", &id])
+        .output()
+        .map_err(|error| format!("could not read the shared computer's volumes: {error}"))?;
+    if !inspected.status.success() {
+        return Err(command_said(&inspected.stderr));
+    }
+    let mounts: Vec<serde_json::Value> =
+        serde_json::from_slice(&inspected.stdout).map_err(|error| error.to_string())?;
+    let volume = |destination: &str| {
+        mounts
+            .iter()
+            .find(|mount| mount["Destination"] == destination && mount["Type"] == "volume")
+            .and_then(|mount| mount["Name"].as_str())
+            .map(str::to_string)
+            .ok_or_else(|| format!("the shared computer keeps {destination} on no volume"))
+    };
+    Ok((volume("/workspace")?, volume("/profiles")?))
+}
+
+/// What the supervisor allowed a person or Bot id to be, which is what keeps it one path segment.
+fn plain_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Run by `carry_over_person_computers` in its helper container. `tar` carries owners, modes and
+/// times (`-p`, and as root, owners), and `--skip-old-files` never replaces a file that is there.
+/// A profile is staged under a dot-name, which is not a seat, and moved into place whole. Prints
+/// `workspace=` and `profiles=` with what it did: `copied`, `done` (an earlier run did it) or nothing
+/// for a volume the person did not have.
+const CARRY_OVER_SCRIPT: &str = r#"set -eu
+plain() { case "$1" in ""|.*|*[!A-Za-z0-9_-]*) return 1 ;; *) return 0 ;; esac; }
+copy() {
+  if [ -e "$2" ]; then tar -C "$1" -cf - . | tar -C "$2" -xpf - --skip-old-files
+  else mkdir -p "$2" && tar -C "$1" -cf - . | tar -C "$2" -xpf -; fi
+}
+if [ -n "${FROM_WORKSPACE:-}" ]; then
+  mark="/workspace/.openbot-carried-over/$FROM_WORKSPACE"
+  if [ -e "$mark" ]; then echo workspace=done; else
+    if [ -d /from-workspace/computers ]; then
+      for dir in /from-workspace/computers/*; do
+        bot=$(basename "$dir")
+        [ -d "$dir" ] && plain "$bot" || continue
+        copy "$dir" "/workspace/computers/$PERSON~$bot"
+      done
+    fi
+    mkdir -p /workspace/.openbot-carried-over && touch "$mark"
+    echo workspace=copied
+  fi
+fi
+if [ -n "${FROM_PROFILES:-}" ]; then
+  mark="/profiles/.openbot-carried-over/$FROM_PROFILES"
+  if [ -e "$mark" ]; then echo profiles=done; else
+    for dir in /from-profiles/*; do
+      bot=$(basename "$dir")
+      [ -d "$dir" ] && plain "$bot" || continue
+      dest="/profiles/$PERSON~$bot"
+      [ -e "$dest" ] && continue
+      staging="/profiles/.openbot-carrying-$PERSON~$bot"
+      rm -rf "$staging"
+      copy "$dir" "$staging"
+      mv "$staging" "$dest"
+    done
+    mkdir -p /profiles/.openbot-carried-over && touch "$mark"
+    echo profiles=copied
+  fi
+fi
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -10525,5 +10807,261 @@ fn main() {
         let log = fixture.log();
         assert!(!log.contains("taskkill"), "{log}");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An installation that ran the team edition, with a computer the supervisor made for its person,
+    /// moves to the personal edition's one shared computer. Its Bot's files and its browser profile
+    /// were in the person's old volumes and nowhere the shared computer looks; Start brings them in,
+    /// under the names the shared computer uses, once, without replacing anything already there.
+    /// Against a real engine, with its own Compose project, namespace and volumes.
+    ///
+    /// ```sh
+    /// OPENBOT_TEST_COMPUTER_IMAGE=<agent-computer image> \
+    /// cargo test --locked --lib carried_into_the_shared -- --ignored
+    /// ```
+    #[test]
+    #[ignore = "creates an isolated Compose project and volumes on the selected engine"]
+    fn the_computers_from_before_the_personal_edition_are_carried_into_the_shared_one_once() {
+        const IMAGE: &str = "pgvector/pgvector:pg17";
+        // The image the copy runs in: the computer's own where one is named, as Start uses it.
+        let computer =
+            std::env::var("OPENBOT_TEST_COMPUTER_IMAGE").unwrap_or_else(|_| IMAGE.into());
+        let unique = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let project = format!("openbot-carry-fixture-{unique}");
+        let namespace = format!("carry{unique}");
+        let person = "dev-local-user";
+        let root = temp_root("carry-over");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(PROJECT_FILE),
+            serde_json::json!({ "project": project }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            format!(
+                "services:\n  agent-computer:\n    image: {IMAGE}\n    command: [\"sleep\", \"infinity\"]\n    volumes:\n      - agent-workspace:/workspace\n      - agent-profiles:/profiles\n  supervisor:\n    image: {IMAGE}\n    command: [\"sleep\", \"infinity\"]\n    environment:\n      COMPUTER_NAMESPACE: ${{COMPUTER_NAMESPACE:-{namespace}}}\nvolumes:\n  agent-workspace: {{}}\n  agent-profiles: {{}}\n"
+            ),
+        )
+        .unwrap();
+        let address = Address::new(crate::engine::Engine::Docker, None)
+            .pin()
+            .expect("the test engine answers");
+        let old_workspace = format!("{namespace}-workspace-person-{person}");
+        let old_profiles = format!("{namespace}-profile-person-{person}");
+        // Another installation's person computer: never read.
+        let elsewhere = format!("other{unique}-workspace-person-{person}");
+        let new_workspace = format!("{project}_agent-workspace");
+        let new_profiles = format!("{project}_agent-profiles");
+
+        let engine = |args: &[&str]| -> String {
+            let output = address.command().args(args).output().unwrap();
+            assert!(
+                output.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        // A shell in a throwaway container with these volumes, as root.
+        let shell = |volumes: &[(&str, &str)], script: &str| -> String {
+            let mut args = vec!["run".to_string(), "--rm".to_string()];
+            for (volume, at) in volumes {
+                args.push("--volume".into());
+                args.push(format!("{volume}:{at}"));
+            }
+            args.extend([
+                "--entrypoint".into(),
+                "sh".into(),
+                IMAGE.into(),
+                "-c".into(),
+                script.into(),
+            ]);
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            engine(&args)
+        };
+
+        let workflow = std::panic::catch_unwind(|| {
+            let up = compose_command(&address, &root, &Secrets::new())
+                .args(["up", "-d", "agent-computer"])
+                .output()
+                .unwrap();
+            assert!(
+                up.status.success(),
+                "{}",
+                String::from_utf8_lossy(&up.stderr)
+            );
+            for (volume, space) in [
+                (&old_workspace, namespace.as_str()),
+                (&old_profiles, namespace.as_str()),
+                (&elsewhere, &format!("other{unique}")[..]),
+            ] {
+                engine(&[
+                    "volume",
+                    "create",
+                    "--label",
+                    "openbot.supervisor=true",
+                    "--label",
+                    &format!("openbot.namespace={space}"),
+                    "--label",
+                    "openbot.computer-kind=person",
+                    "--label",
+                    &format!("openbot.person-id={person}"),
+                    volume,
+                ]);
+            }
+            // The person's computer from before: a Bot's files under `computers/<bot>`, its profile
+            // under `<bot>`, owned by somebody other than root, and the computer's own `.control`.
+            shell(
+                &[(&old_workspace, "/w"), (&old_profiles, "/p"), (&elsewhere, "/e")],
+                "set -e
+                 mkdir -p /w/computers/picked-harness /w/computers/other-bot /p/picked-harness/Default /p/other-bot /p/.control
+                 echo old-marker > /w/computers/picked-harness/final-marker.txt
+                 chown 1234:1234 /w/computers/picked-harness/final-marker.txt
+                 chmod 640 /w/computers/picked-harness/final-marker.txt
+                 echo older-note > /w/computers/picked-harness/note.txt
+                 echo b > /w/computers/other-bot/b.txt
+                 echo cookies > /p/picked-harness/Default/Cookies
+                 chown -R 1234:1234 /p/picked-harness
+                 echo old-profile > /p/other-bot/Preferences
+                 echo control > /p/.control/state
+                 mkdir -p /e/computers/stranger && echo not-ours > /e/computers/stranger/x",
+            );
+            // The person's computer from before, still running on those volumes.
+            engine(&[
+                "run",
+                "--detach",
+                "--name",
+                &format!("{project}-old-person"),
+                "--label",
+                "openbot.supervisor=true",
+                "--label",
+                &format!("openbot.namespace={namespace}"),
+                "--label",
+                "openbot.computer-kind=person",
+                "--volume",
+                &format!("{old_workspace}:/workspace"),
+                "--volume",
+                &format!("{old_profiles}:/profiles"),
+                IMAGE,
+                "sleep",
+                "infinity",
+            ]);
+            // What the shared computer already has: a newer note for that Bot, and a profile of its
+            // own for the other one.
+            shell(
+                &[(&new_workspace, "/workspace"), (&new_profiles, "/profiles")],
+                &format!(
+                    "set -e
+                     mkdir -p '/workspace/computers/{person}~picked-harness' '/profiles/{person}~other-bot'
+                     echo newer-note > '/workspace/computers/{person}~picked-harness/note.txt'
+                     echo new-profile > '/profiles/{person}~other-bot/Preferences'"
+                ),
+            );
+
+            let carried = carry_over_person_computers(&address, &root, &computer).unwrap();
+            assert_eq!(
+                carried,
+                vec![CarriedOver {
+                    person: person.into(),
+                    workspace: Some("copied".into()),
+                    profile: Some("copied".into()),
+                }]
+            );
+            let seen = shell(
+                &[(&new_workspace, "/workspace"), (&new_profiles, "/profiles")],
+                &format!(
+                    "cd '/workspace/computers/{person}~picked-harness'
+                     echo marker=$(cat final-marker.txt) $(stat -c '%u:%g:%a' final-marker.txt)
+                     echo note=$(cat note.txt)
+                     echo other=$(cat '/workspace/computers/{person}~other-bot/b.txt')
+                     echo cookies=$(cat '/profiles/{person}~picked-harness/Default/Cookies') $(stat -c '%u:%g' '/profiles/{person}~picked-harness/Default/Cookies')
+                     echo kept=$(cat '/profiles/{person}~other-bot/Preferences')
+                     echo control=$(ls -A /profiles | grep -c '^\\.control$' || true)
+                     echo stranger=$(ls /workspace/computers | grep -c stranger || true)
+                     echo staging=$(ls -A /profiles | grep -c '^\\.openbot-carrying' || true)"
+                ),
+            );
+            assert_eq!(
+                seen.lines().collect::<Vec<_>>(),
+                [
+                    "marker=old-marker 1234:1234:640",
+                    "note=newer-note",
+                    "other=b",
+                    "cookies=cookies 1234:1234",
+                    "kept=new-profile",
+                    "control=0",
+                    "stranger=0",
+                    "staging=0",
+                ],
+                "the files come with their owners and modes, and nothing there is replaced"
+            );
+            // Stopped before its volumes were read, and kept.
+            assert_eq!(
+                engine(&[
+                    "inspect",
+                    "--format",
+                    "{{.State.Running}}",
+                    &format!("{project}-old-person"),
+                ]),
+                "false"
+            );
+            // The old volumes are as they were.
+            assert_eq!(
+                shell(
+                    &[(&old_workspace, "/w")],
+                    "cat /w/computers/picked-harness/final-marker.txt"
+                ),
+                "old-marker"
+            );
+
+            // Once: a file the old computer gains later is not brought in by the next Start.
+            shell(
+                &[(&old_workspace, "/w")],
+                "echo later > /w/computers/picked-harness/later.txt",
+            );
+            assert_eq!(
+                carry_over_person_computers(&address, &root, &computer).unwrap(),
+                vec![CarriedOver {
+                    person: person.into(),
+                    workspace: Some("done".into()),
+                    profile: Some("done".into()),
+                }]
+            );
+            assert_eq!(
+                shell(
+                    &[(&new_workspace, "/workspace")],
+                    &format!(
+                        "ls '/workspace/computers/{person}~picked-harness' | grep -c later || true"
+                    ),
+                ),
+                "0"
+            );
+        });
+
+        let _ = address
+            .command()
+            .args(["rm", "--force", &format!("{project}-old-person")])
+            .output();
+        let _ = compose_command(&address, &root, &Secrets::new())
+            .args(["down", "--volumes", "--remove-orphans"])
+            .output();
+        for volume in [&old_workspace, &old_profiles, &elsewhere] {
+            let _ = address
+                .command()
+                .args(["volume", "rm", "--force", volume])
+                .output();
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        if let Err(panic) = workflow {
+            std::panic::resume_unwind(panic);
+        }
     }
 }
