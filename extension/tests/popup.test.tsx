@@ -1351,7 +1351,9 @@ test("kept events are discarded only after the dialog confirms, and Cancel sends
   expect(queryByText(/Discard them\?/)).toBeNull();
   fireEvent.click(getByRole("button", { name: "Cancel" }));
   await waitFor(() =>
-    expect(queryByText(/OpenBot's back end will never receive them/)).toBeNull(),
+    expect(
+      queryByText(/OpenBot's back end will never receive them/),
+    ).toBeNull(),
   );
   expect(sent.some((m) => m.type === "page.kept.discard")).toBe(false);
   fireEvent.click(getByRole("button", { name: "Discard kept events" }));
@@ -1449,7 +1451,9 @@ test("signed out with recordings kept, the popup says how to send them and Disca
   expect(sent.some((m) => m.type === "page.kept.discard")).toBe(false);
   fireEvent.click(getByRole("button", { name: "Cancel" }));
   await waitFor(() =>
-    expect(queryByText(/OpenBot's back end will never receive them/)).toBeNull(),
+    expect(
+      queryByText(/OpenBot's back end will never receive them/),
+    ).toBeNull(),
   );
   expect(sent.some((m) => m.type === "page.kept.discard")).toBe(false);
   fireEvent.click(getByRole("button", { name: "Discard kept events" }));

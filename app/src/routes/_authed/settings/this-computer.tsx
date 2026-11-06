@@ -127,7 +127,7 @@ function OpenBotSection({
   const memory = totalMemory([...status.processes, ...status.containers]);
   const busy = restart.isPending || stop.isPending;
   return (
-    <PageSection title="Your Bots">
+    <PageSection title="App">
       <PageRows>
         <Item size="sm">
           <RowMark>

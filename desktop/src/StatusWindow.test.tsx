@@ -77,7 +77,7 @@ test("memory reads as people read it, and a total ignores what could not be meas
 test("each part shows its state and memory, and the back end its CLI readiness", async () => {
   invokeHandler = answers();
   const view = render(<StatusWindow readEveryMs={60_000} />);
-  const bots = await view.findByRole("region", { name: "Your Bots" });
+  const bots = await view.findByRole("region", { name: "App" });
   expect(bots.textContent).toContain("Running · 400 MB");
   const intelligence = view.getByRole("region", { name: "Back end" });
   await waitFor(() =>

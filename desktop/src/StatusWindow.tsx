@@ -199,9 +199,9 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
           <StatusLine>Reading OpenBot's status…</StatusLine>
         ) : (
           <>
-            <section className="status-part" aria-label="Your Bots">
+            <section className="status-part" aria-label="App">
               <div className="status-head">
-                <h2>Your Bots</h2>
+                <h2>App</h2>
                 <span className="status-state">
                   {status.openbotRunning ? "Running" : "Stopped"}
                   {openbotMemory !== null &&
