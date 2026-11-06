@@ -128,7 +128,7 @@ all about other people, other computers or Slack and Teams.
 
 **Settings → Learning** is where the skills OpenBot learns from your recordings and conversations
 wait for your review. You approve or reject them yourself, under **Waiting for your review**, and
-**Learn now** starts a run on demand. **Your Skills** lists the skills learned from your recordings and conversations,
+**Learn now** starts a run on demand. **Your skills** lists the skills learned from your recordings and conversations,
 and a row opens one to read. A skill from your recordings reaches every Bot. A skill from
 conversations reaches the Bots that share its Learning container, which is every Bot unless one
 has a container of its own. There is no one to share with, so **Ask to share** is not offered here.
