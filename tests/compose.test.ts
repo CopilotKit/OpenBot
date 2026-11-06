@@ -461,7 +461,8 @@ test("passes the selected Anthropic provider and model into the picked harness",
     OPENAI_API_KEY: "sk-openai-synthetic",
     OPENAI_BASE_URL: "https://openai-compatible.example/v1",
     BOT_PROVIDER: "openai",
-    BOT_MODEL: "gpt-5.5",
+    // Unset arrives as unset: the server, not a stand-in here, decides the model.
+    BOT_MODEL: "",
     ANTHROPIC_API_KEY: "",
     ANTHROPIC_BASE_URL: "",
   });

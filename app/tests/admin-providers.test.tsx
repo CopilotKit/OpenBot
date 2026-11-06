@@ -55,6 +55,8 @@ afterEach(() => {
 let settings: Record<string, unknown>;
 /** Who serves the models; the allowlist prefix stays `openai` whatever this is. */
 let source: ModelSource;
+/** One person (`all`) or a team whose admin allows models (`allowed`). */
+let exposure: "all" | "allowed";
 const writes: { path: string; body: unknown }[] = [];
 
 function serving() {
@@ -100,6 +102,7 @@ function serving() {
       return Response.json({
         provider: "openai",
         source,
+        exposure,
         default: "gpt-5.6-terra",
         listed: true,
         models: [
@@ -137,6 +140,7 @@ beforeEach(() => {
     modelSelection: false,
   };
   source = "openai";
+  exposure = "allowed";
   queryClient.clear();
   serving();
 });
@@ -154,22 +158,46 @@ async function draw(page: () => React.ReactNode) {
   );
 }
 
-test("Providers names the provider and its default, and turns model choice on", async () => {
+test("a team's admin allows the models people pick, with no separate switch", async () => {
   const view = await draw(ProvidersPage);
   expect(await view.findByText("OpenAI")).toBeTruthy();
   expect(
     await view.findByText("Default gpt-5.6-terra · 3 models listed"),
   ).toBeTruthy();
+  // What is allowed says it: one listed model allowed, and no on/off switch beside it.
+  expect(await view.findByText("1 model allowed")).toBeTruthy();
+  expect(
+    view.queryByRole("switch", { name: "Let people choose a model" }),
+  ).toBeNull();
+  expect(view.getByRole("button", { name: /Allowed models/ })).toBeTruthy();
+});
 
-  fireEvent.click(
-    await view.findByRole("switch", { name: "Let people choose a model" }),
-  );
-  await waitFor(() =>
-    expect(writes).toContainEqual({
-      path: "/api/admin/enterprise/settings/modelSelection",
-      body: { value: true },
-    }),
-  );
+test("a team with nothing allowed is told people see no picker until it allows one", async () => {
+  settings = { ...settings, modelAllowlist: { enabled: false, models: [] } };
+  const view = await draw(ProvidersPage);
+  expect(await view.findByText("No models allowed yet")).toBeTruthy();
+  expect(
+    view.getByText(
+      "People don't see a model picker. Allow models below to offer them.",
+    ),
+  ).toBeTruthy();
+});
+
+test("one person on their own machine is offered every model, and nothing can narrow it", async () => {
+  exposure = "all";
+  const view = await draw(ProvidersPage);
+  expect(await view.findByText("Every listed model")).toBeTruthy();
+  expect(
+    view.getByText("3 models, kept current from your provider."),
+  ).toBeTruthy();
+  // No allowlist and no switch to narrow it.
+  expect(view.queryByRole("button", { name: /Allowed models/ })).toBeNull();
+  expect(
+    view.queryByRole("switch", { name: "Only allowed models" }),
+  ).toBeNull();
+  expect(
+    view.queryByRole("switch", { name: "Let people choose a model" }),
+  ).toBeNull();
 });
 
 test("Providers names what actually serves the models, with a vendor's mark only where one is vendored", async () => {
@@ -211,9 +239,14 @@ test("the allowlist is picked from the provider's models, and takes one it doesn
   fireEvent.click(await view.findByRole("button", { name: /Allowed models/ }));
   const dialog = await view.findByRole("dialog");
 
-  // Every listed model is offered, with the deployment's own marked.
+  // Every listed model is offered, with the deployment's own marked and how each thinks.
   await waitFor(() => expect(dialog.textContent).toContain("GPT-6 Sol"));
   expect(dialog.textContent).toContain("openai/gpt-5.6-terra · default");
+  expect(dialog.textContent).toContain(
+    "openai/gpt-6-sol · Thinking: Low, Medium, High",
+  );
+  // The maker's mark, as the composer's picker draws it.
+  expect(dialog.querySelector('img[data-mark="GPT-6 Sol"]')).toBeTruthy();
 
   // Search narrows the list.
   const user = userEvent.setup({ document });
@@ -254,16 +287,16 @@ test("the allowlist is picked from the provider's models, and takes one it doesn
   );
 });
 
-test("unticking the configured model warns that built-in Bots would be refused", async () => {
+test("unticking the default says it stays offered, and what Only allowed models would do", async () => {
   const view = await draw(ProvidersPage);
   fireEvent.click(await view.findByRole("button", { name: /Allowed models/ }));
   const dialog = await view.findByRole("dialog");
   await waitFor(() => expect(dialog.textContent).toContain("GPT-5.6 Terra"));
-  expect(dialog.textContent).not.toContain("isn't allowed");
+  expect(dialog.textContent).not.toContain("stays offered");
   fireEvent.click(view.getByRole("checkbox", { name: "Allow GPT-5.6 Terra" }));
-  await waitFor(() => expect(dialog.textContent).toContain("isn't allowed"));
+  await waitFor(() => expect(dialog.textContent).toContain("stays offered"));
   expect(dialog.textContent).toContain(
-    "openai/gpt-5.6-terra isn't allowed. While the allowlist is on, a built-in Bot is refused when nobody picked another model.",
+    "openai/gpt-5.6-terra is the default and stays offered. With Only allowed models on, a built-in Bot on it is refused unless you allow it.",
   );
 });
 

@@ -71,6 +71,7 @@ const channel: AgentChannel = {
 const catalogue: ModelCatalogue = {
   provider: "openai",
   source: "openai",
+  exposure: "all",
   default: "gpt-5.5",
   choosable: true,
   models: [

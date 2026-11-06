@@ -77,7 +77,7 @@ at `agent-langgraph` on a laptop.
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
 | `GOOGLE_API_KEY`     | unset                              | Google key when `BOT_PROVIDER=google`.                              |
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
-| `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-2.5-flash`. Built-in Bots and the picked harness answer on the model picked in the composer, or the default the [model list](#the-model-list) chooses, and use this only when the provider's listing cannot be read. |
+| `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-2.5-flash`. Set, it is the default for built-in Bots and the picked harness while the credential lists it; a person can still pick another in the composer. Unset, the [model list](#the-model-list) chooses the default. |
 | `CHATGPT_CODEX_CLIENT_VERSION` | `0.167.0` | The Codex client version the LangGraph harness names when it reads a ChatGPT plan's model list. Change it only if the plan's list comes back empty after a Codex release. |
 | `OPENBOT_MODEL_CAPABILITIES_URL` | `https://models.dev/api.json` | Where the model list reads each model's thinking levels, line and price when the provider's own listing does not say. `off` reads none: providers that publish their own (Anthropic, xAI, a ChatGPT plan) still show thinking levels, and the default falls back to the configured model. See [The model list](#the-model-list). |
 | `AGENT_BOT_MODEL`    | `gpt-5.5`                          | Model for the proof-of-concept Bot (`agent-bot`), kept separate because it speaks `/v1/chat/completions` directly and refuses a model it cannot use. |
@@ -293,7 +293,9 @@ The built-in Bots call a gateway's Chat Completions API (`/chat/completions`), w
 
 ## The model list
 
-The model picker in a Bot's composer offers the models the deployment's credential can use, and how hard each one can think. It applies to built-in Bots and to the harness picked in setup when it is OpenBot's own LangGraph or Claude Agent SDK harness; a Bot on any other framework picks its own model.
+The model picker in a Bot's composer offers the models the deployment's credential can use, and how hard each one can think, per conversation and turn by turn: a change applies to the next message. It applies to built-in Bots and to the harness picked in setup when it is OpenBot's own LangGraph or Claude Agent SDK harness; a Bot on any other framework picks its own model.
+
+Who decides what is offered depends on who uses the deployment. With `OPENBOT_SINGLE_USER=true` (OpenBot Desktop among them), the one person is offered every model the credential lists, and no allowlist narrows it. In a team, people pick among the models an admin allows in Admin, Providers; until an admin allows one, people get the default and see no picker. An allowed model the provider stops listing drops out on its own, and a pick saved on it runs on the default. "Only allowed models" in the same place also refuses runs on any other model, a remote Bot's own included.
 
 | Signed in with | Models listed from | Thinking levels from |
 | -------------- | ------------------ | -------------------- |
@@ -305,7 +307,7 @@ The model picker in a Bot's composer offers the models the deployment's credenti
 | Claude plan | `GET https://api.anthropic.com/v1/models` with the plan's token | Anthropic's own `capabilities.effort` |
 | Any other `OPENAI_BASE_URL` | the endpoint's `/models`, as it is | models.dev, for names it knows |
 
-The default, when nobody has picked, is the middle of the provider's current line: the newest model of each line still current, ordered by price, and the one in the middle (GPT-6.1 Terra, Claude Sonnet, Gemini Flash). It replaces the configured model, which is used only when the listing or the capability data cannot say. A model nothing describes yet is still listed, and runs on its own default effort.
+The default, when nobody has picked, is the operator's model: `BOT_MODEL`, or the model chosen on the Desktop setup screen, while the credential lists it. When nobody named one, or the named one is not in the credential's list (a ChatGPT plan given `gpt-5.5`, say), the default is the middle of the provider's current line: the newest model of each line still current, ordered by price, and the one in the middle (GPT-6.1 Terra, Claude Sonnet, Gemini Flash). A gateway keeps the model its operator named while it lists it. Nothing in OpenBot names a model on the operator's behalf: `docker-compose.yml` leaves `BOT_MODEL` empty when unset, and the Desktop writes it only for a model the person chose. A model nothing describes yet is still listed, and runs on its own default effort.
 
 Nothing in this is a table OpenBot ships. The listing and the capability data are read at start-up and then every six hours in the background, never on a message. A refresh that fails keeps the last good list. When a provider refuses a model as unknown or unsupported, the list is read again at once, at most once a minute, so a retired model drops out without waiting. Set `OPENBOT_MODEL_CAPABILITIES_URL` to a mirror of models.dev, or `off`.
 

@@ -554,6 +554,73 @@ describe("the default and the thinking levels, from the providers' own data", ()
   });
 });
 
+describe("whose model is the default", () => {
+  async function openAIWith(model: { defaultModel: string; pinned?: boolean }) {
+    const { fetcher } = web({
+      "https://api.openai.com/v1/models": await fixture("openai-models.json"),
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    return createModelCatalogue({
+      model: { provider: "openai", ...model },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+    });
+  }
+
+  test("a model the operator named stays the default while the credential lists it", async () => {
+    const read = await (
+      await openAIWith({ defaultModel: "gpt-6-sol", pinned: true })
+    ).read();
+    expect(read.default).toBe("gpt-6-sol");
+  });
+
+  test("nobody named one: the middle of the current line", async () => {
+    // The package's own model is a fallback, not a choice anybody made.
+    const read = await (
+      await openAIWith({ defaultModel: "gpt-5.6-terra" })
+    ).read();
+    expect(read.default).toBe("gpt-6.1-terra");
+  });
+
+  test("a named model the credential does not list gives way to the middle", async () => {
+    const read = await (
+      await openAIWith({ defaultModel: "gpt-9-imaginary", pinned: true })
+    ).read();
+    expect(read.default).toBe("gpt-6.1-terra");
+  });
+
+  test("a ChatGPT plan named gpt-5.5, which it does not offer, lands on the plan's middle", async () => {
+    const { fetcher } = web({
+      "http://agent-harness:4206/models": {
+        object: "list",
+        data: [
+          { id: "gpt-6.1-terra", efforts: ["low", "medium", "high"] },
+          { id: "gpt-6.1-sol", efforts: ["low", "medium", "high"] },
+          { id: "gpt-6-luna", efforts: ["low", "medium"] },
+        ],
+      },
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    const catalogue = createModelCatalogue({
+      model: {
+        provider: "openai",
+        defaultModel: "gpt-5.5",
+        pinned: true,
+        plan: {
+          provider: "chatgpt",
+          endpoint: new URL("http://agent-harness:4206/"),
+          token: "managed-token",
+        },
+      },
+      apiKey: async () => null,
+      environment: {},
+      fetch: fetcher,
+    });
+    expect((await catalogue.read()).default).toBe("gpt-6.1-terra");
+  });
+});
+
 describe("a run's model and effort", () => {
   async function openAI() {
     const { fetcher } = web({
@@ -791,6 +858,7 @@ describe("the catalogue a deployment offers", () => {
     expect(await catalogue.read()).toEqual({
       provider: "openai",
       source: "openai",
+      exposure: "all",
       default: "gpt-5.5",
       choosable: true,
       models: [
@@ -1016,6 +1084,7 @@ describe("the catalogue a deployment offers", () => {
     expect(await catalogue.read()).toEqual({
       provider: "openai",
       source: "openai",
+      exposure: "all",
       default: "gpt-5.5",
       choosable: false,
       models: [{ id: "gpt-5.5", label: "GPT-5.5", vendor: "openai" }],
@@ -1045,28 +1114,86 @@ describe("the catalogue a deployment offers", () => {
       "gpt-5.5",
       "gpt-4o",
     ]);
+    // An admin taking every model away leaves the default, and nothing to pick.
     allowlist = { enabled: false, models: [] };
-    expect((await catalogue.read()).models.map((model) => model.id)).toEqual([
-      "gpt-6-sol",
-      "gpt-5.5",
-      "gpt-4o",
-    ]);
+    const read = await catalogue.read();
+    expect(read.models.map((model) => model.id)).toEqual(["gpt-5.5"]);
+    expect(read.choosable).toBe(false);
   });
 
-  test("while the admin has picking off there is nothing to choose", async () => {
-    const { fetcher } = provider(openAIListing(["gpt-4o", "gpt-5.5"]));
-    let on = false;
+  test("a team gets the default only until an admin allows a model, and then picks among those", async () => {
+    const { fetcher } = provider(
+      openAIListing(["gpt-4o", "gpt-5.5", "gpt-6-sol"]),
+    );
+    let allowed: string[] = [];
     const catalogue = createModelCatalogue({
       model: { provider: "openai", defaultModel: "gpt-5.5" },
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
       capabilitiesUrl: null,
-      enabled: () => on,
+      // Whether "Only allowed models" is on is the gate's business; the picker reads the list.
+      allowlist: () => ({ enabled: false, models: allowed }),
     });
-    expect((await catalogue.read()).choosable).toBe(false);
-    on = true;
-    expect((await catalogue.read()).choosable).toBe(true);
+    const before = await catalogue.read();
+    expect(before.exposure).toBe("allowed");
+    expect(before.models.map((model) => model.id)).toEqual(["gpt-5.5"]);
+    expect(before.choosable).toBe(false);
+
+    allowed = ["openai/gpt-6-sol"];
+    const after = await catalogue.read();
+    expect(after.models.map((model) => model.id)).toEqual([
+      "gpt-6-sol",
+      "gpt-5.5",
+    ]);
+    expect(after.choosable).toBe(true);
+  });
+
+  test("one person on their own machine is offered everything, and no allowlist narrows it", async () => {
+    const { fetcher } = provider(
+      openAIListing(["gpt-4o", "gpt-5.5", "gpt-6-sol"]),
+    );
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "gpt-5.5" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+      capabilitiesUrl: null,
+    });
+    const read = await catalogue.read();
+    expect(read.exposure).toBe("all");
+    expect(read.models.map((model) => model.id)).toEqual([
+      "gpt-6-sol",
+      "gpt-5.5",
+      "gpt-4o",
+    ]);
+    expect(read.choosable).toBe(true);
+  });
+
+  test("an allowed model the provider stops listing drops out, and a pick on it runs on the default", async () => {
+    const listing = openAIListing(["gpt-4o", "gpt-5.5", "gpt-6-sol"]);
+    const { fetcher } = provider(listing);
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "gpt-5.5" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+      capabilitiesUrl: null,
+      allowlist: () => ({ enabled: true, models: ["openai/gpt-6-sol"] }),
+    });
+    expect(await catalogue.choose({ model: "gpt-6-sol" })).toEqual({
+      model: "gpt-6-sol",
+      listed: true,
+    });
+    listing.data = listing.data.filter((model) => model.id !== "gpt-6-sol");
+    await catalogue.refresh();
+    expect((await catalogue.read()).models.map((model) => model.id)).toEqual([
+      "gpt-5.5",
+    ]);
+    expect(await catalogue.choose({ model: "gpt-6-sol" })).toEqual({
+      model: "gpt-5.5",
+      listed: true,
+    });
   });
 
   test("allows only what it offers", async () => {
@@ -1096,11 +1223,11 @@ describe("the catalogue a deployment offers", () => {
       fetch: fetcher,
       capabilitiesUrl: null,
       allowlist: () => ({ enabled: true, models: ["openai/gpt-5.5"] }),
-      enabled: () => false,
     });
     expect(await catalogue.available()).toEqual({
       provider: "openai",
       source: "openai",
+      exposure: "allowed",
       default: "gpt-5.5",
       listed: true,
       models: [
@@ -1124,6 +1251,7 @@ describe("the catalogue a deployment offers", () => {
     expect(await catalogue.available()).toEqual({
       provider: "openai",
       source: "openai",
+      exposure: "all",
       default: "gpt-5.5",
       listed: false,
       models: [{ id: "gpt-5.5", label: "GPT-5.5", vendor: "openai" }],

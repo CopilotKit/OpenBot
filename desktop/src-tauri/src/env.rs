@@ -562,7 +562,11 @@ pub fn compose(
         ModelCredential::Anthropic { api_key } => {
             insert_if_given(&mut env, "ANTHROPIC_API_KEY", api_key);
             env.insert("BOT_PROVIDER".into(), "anthropic".into());
-            env.insert("BOT_MODEL".into(), "claude-sonnet-5-5".into());
+            /*
+             * NO MODEL. The setup screen asks for a key, not a model, so a model written here would
+             * be a stand-in that reads as the person's choice and pins every Bot to it. Unset, the
+             * server takes the middle of Anthropic's current line from Anthropic's own listing.
+             */
         }
         ModelCredential::ClaudePlan { token } => {
             insert_if_given(&mut env, "CLAUDE_CODE_OAUTH_TOKEN", token);
@@ -3009,7 +3013,8 @@ mod model_tests {
             Some(&"sk-ant-real".to_string())
         );
         assert_eq!(env.get("BOT_PROVIDER"), Some(&"anthropic".to_string()));
-        assert_eq!(env.get("BOT_MODEL"), Some(&"claude-sonnet-5-5".to_string()));
+        // No model was chosen on that screen, so none is written for the server to treat as one.
+        assert!(!env.contains_key("BOT_MODEL"));
         assert_eq!(env.get("OPENAI_API_KEY"), Some(&String::new()));
     }
 

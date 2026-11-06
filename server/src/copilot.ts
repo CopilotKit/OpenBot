@@ -294,6 +294,11 @@ export type RuntimeModel = {
   effort?: string;
   /** Whether `defaultModel` came from the provider's listing rather than configuration. */
   listed?: boolean;
+  /**
+   * Whether an operator named `defaultModel` (`BOT_MODEL`, the Desktop setup screen). Named, it is
+   * the default while the credential lists it; otherwise the middle of the provider's line is.
+   */
+  pinned?: boolean;
 };
 
 /** Optional desktop environment values may be present but blank; SDKs treat them as URLs. */
@@ -346,16 +351,16 @@ export function runtimeModelForEnvironment(
       : provider === "anthropic"
         ? defaultModelFor("anthropic")
         : BUILT_IN_OPENAI_FALLBACK_MODEL;
-  const selectedModelApplies =
-    provider === "anthropic" ||
-    ((!selectedProvider || selectedProvider === "openai") &&
-      !!environment.OPENAI_BASE_URL?.trim());
-  return {
-    provider,
-    plan: planModelForEnvironment(environment),
-    defaultModel:
-      selectedModelApplies && selectedModel ? selectedModel : defaultModel,
-  };
+  /*
+   * A model an operator named is the deployment's, on every provider. Nothing injects one any more
+   * (compose leaves `BOT_MODEL` empty when unset, and the Desktop writes it only for a model the
+   * person chose), so set means chosen, and the model list keeps it as the default while the
+   * credential lists it (`model-catalogue.ts`).
+   */
+  const plan = planModelForEnvironment(environment);
+  if (selectedModel)
+    return { provider, plan, defaultModel: selectedModel, pinned: true };
+  return { provider, plan, defaultModel };
 }
 
 /**

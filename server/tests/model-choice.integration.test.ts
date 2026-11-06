@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import type { MiddlewareHandler } from "hono";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import {
@@ -12,7 +13,12 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { createModelCatalogue } from "../src/model-catalogue";
+import type { AppVariables } from "../src/auth/guards";
+import { createModelChoiceRoutes } from "../src/channels/model-choice";
+import {
+  createModelCatalogue,
+  createModelRoutes,
+} from "../src/model-catalogue";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /*
@@ -67,7 +73,7 @@ const modelsDev = await Bun.file(`${FIXTURES}models-dev-api.json`).json();
 
 function choices(
   options: {
-    /** An admin allowlist, as `openai/<id>`. Absent: everything listed. */
+    /** A team's allowed models, as `openai/<id>`. Absent: one person, offered everything. */
     allowed?: string[];
     provider?: "openai" | "anthropic";
     on?: () => boolean;
@@ -85,10 +91,15 @@ function choices(
       Response.json(
         String(url) === "https://models.dev/api.json" ? modelsDev : listing,
       )) as typeof fetch,
-    allowlist: () =>
-      options.allowed
-        ? { enabled: true, models: options.allowed }
-        : { enabled: false, models: [] },
+    // A team's catalogue reads what an admin allowed; one person's reads none and offers all.
+    ...(options.allowed
+      ? {
+          allowlist: () => ({
+            enabled: true,
+            models: options.allowed ?? [],
+          }),
+        }
+      : {}),
   });
   return createModelChoices({
     database,
@@ -256,5 +267,133 @@ describe("a person's model pick for a conversation", () => {
       model: "gpt-4o",
       effort: null,
     });
+  });
+});
+
+/*
+ * The two ways a deployment decides what people may pick, through the routes the browser calls:
+ * `GET /api/models` for the picker and `PUT /api/channels/:id/model` for a pick.
+ */
+describe("who decides which models people may pick", () => {
+  const signedIn =
+    (id: string): MiddlewareHandler<{ Variables: AppVariables }> =>
+    async (context, next) => {
+      context.set("actor", { id, role: "user" } as AppVariables["actor"]);
+      await next();
+    };
+
+  function routesFor(userId: string, allowed?: string[]) {
+    const model = { provider: "openai" as const, defaultModel: "gpt-5.5" };
+    const catalogue = createModelCatalogue({
+      model,
+      apiKey: async () => "synthetic-key",
+      environment: {},
+      fetch: (async (url: string | URL | Request) =>
+        Response.json(
+          String(url) === "https://models.dev/api.json" ? modelsDev : listing,
+        )) as typeof fetch,
+      ...(allowed
+        ? { allowlist: () => ({ enabled: false, models: allowed }) }
+        : {}),
+    });
+    const choices = createModelChoices({ database, model, catalogue });
+    return {
+      models: createModelRoutes(catalogue, signedIn(userId)),
+      picks: createModelChoiceRoutes(choices, signedIn(userId)),
+    };
+  }
+
+  const pick = (
+    picks: ReturnType<typeof routesFor>["picks"],
+    channelId: string,
+    body: unknown,
+  ) =>
+    picks.request(`/${channelId}/model`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  test("one person on their own machine is offered every model, and may pick any", async () => {
+    const userId = await person();
+    const { channelId } = await conversation(userId);
+    const routes = routesFor(userId);
+    const offered = (await (await routes.models.request("/")).json()) as {
+      exposure: string;
+      choosable: boolean;
+      models: { id: string }[];
+    };
+    expect(offered.exposure).toBe("all");
+    expect(offered.choosable).toBe(true);
+    expect(offered.models.map((model) => model.id)).toContain("gpt-6-astra");
+    const saved = await pick(routes.picks, channelId, {
+      model: "gpt-6-astra",
+      effort: "max",
+    });
+    expect(saved.status).toBe(200);
+  });
+
+  test("a team gets the default only until an admin allows a model, then picks among those", async () => {
+    const userId = await person();
+    const { channelId, threadId } = await conversation(userId);
+
+    const none = routesFor(userId, []);
+    const before = (await (await none.models.request("/")).json()) as {
+      exposure: string;
+      choosable: boolean;
+      models: { id: string }[];
+    };
+    expect(before.exposure).toBe("allowed");
+    expect(before.choosable).toBe(false);
+    expect(before.models.map((model) => model.id)).toEqual(["gpt-6.1-terra"]);
+    // Nothing allowed, so nothing but the default can be picked.
+    expect(
+      (await pick(none.picks, channelId, { model: "gpt-6-sol", effort: null }))
+        .status,
+    ).toBe(400);
+
+    const some = routesFor(userId, ["openai/gpt-6-sol", "openai/gpt-6-astra"]);
+    const after = (await (await some.models.request("/")).json()) as {
+      choosable: boolean;
+      models: { id: string }[];
+    };
+    expect(after.choosable).toBe(true);
+    expect(after.models.map((model) => model.id).sort()).toEqual([
+      "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6.1-terra",
+    ]);
+    expect(
+      (
+        await pick(some.picks, channelId, {
+          model: "gpt-6-sol",
+          effort: "high",
+        })
+      ).status,
+    ).toBe(200);
+    // A model an admin did not allow is refused, even though the provider lists it.
+    expect(
+      (await pick(some.picks, channelId, { model: "gpt-6-luna", effort: null }))
+        .status,
+    ).toBe(400);
+
+    // The admin withdraws it: the saved pick is kept, and the run takes the default.
+    const withdrawn = createModelChoices({
+      database,
+      model: { provider: "openai", defaultModel: "gpt-5.5" },
+      catalogue: createModelCatalogue({
+        model: { provider: "openai", defaultModel: "gpt-5.5" },
+        apiKey: async () => "synthetic-key",
+        environment: {},
+        fetch: (async (url: string | URL | Request) =>
+          Response.json(
+            String(url) === "https://models.dev/api.json" ? modelsDev : listing,
+          )) as typeof fetch,
+        allowlist: () => ({ enabled: false, models: [] }),
+      }),
+    });
+    expect((await withdrawn.forRun(userId, threadId)).model).toBe(
+      "gpt-6.1-terra",
+    );
   });
 });

@@ -11,30 +11,20 @@
  * Per person, on the row that already maps a person and a conversation to their thread
  * (`intelligence_channel_mappings`), so a run finds its pick by the thread it is answering in.
  *
- * Read only while an admin lets people pick (`modelSelection`, always on in the personal edition and
- * on by default for one person on their own machine). Off, every run uses the default model and the
- * saved picks are left alone, so turning it back on brings them back. A saved pick the catalogue no
- * longer offers (the allowlist narrowed, the provider retired it, the deployment moved to another
- * provider) is not used either: the run takes the default, which is also what the picker then shows.
- * An effort is only ever sent to a model that takes it.
+ * What may be picked is the catalogue's to say: every model the credential lists for one person on
+ * their own machine, the models an admin allowed in a team (`model-catalogue.ts`). A saved pick the
+ * catalogue no longer offers (an admin withdrew it, the provider retired it, the deployment moved to
+ * another provider) is not used: the run takes the default, which is also what the picker then
+ * shows, and the pick is kept for when it is offered again. An effort is only ever sent to a model
+ * that takes it.
  */
 import { and, eq } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
-import { enterpriseControls } from "../admin/controls";
 import type { AppVariables } from "../auth/guards";
 import type { RuntimeModel } from "../copilot";
 import type { Database } from "../db/client";
 import { intelligenceChannelMappings } from "../db/schema";
-import { currentEdition } from "../edition";
 import type { ModelCatalogueReader, RunChoice } from "../model-catalogue";
-
-/** Whether people may pick a model right now. From the controls' snapshot, so a run pays no query. */
-export function modelSelectionOn(): boolean {
-  const settings = enterpriseControls()?.snapshot()?.settings;
-  if (settings) return settings.modelSelection;
-  // No controls installed yet: only the personal edition, which fixes it on, may pick.
-  return currentEdition() === "personal";
-}
 
 export class ModelChoiceError extends Error {
   constructor(
@@ -63,7 +53,11 @@ export function createModelChoices(deps: {
   enabled?: () => boolean;
 }) {
   const { database, model, catalogue } = deps;
-  const enabled = deps.enabled ?? modelSelectionOn;
+  /*
+   * Always, now that what may be picked is the catalogue's to say: everything for one person on
+   * their own machine, what an admin allowed in a team. A pick of anything else is refused below.
+   */
+  const enabled = deps.enabled ?? (() => true);
 
   /** The saved pick, when it was made under this deployment's provider and picking is on. */
   const applicable = (saved: Saved | undefined) =>

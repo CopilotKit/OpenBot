@@ -3,6 +3,7 @@ import {
   IconChartBar,
   IconChevronRight,
   IconCloud,
+  IconCube,
   IconKey,
   IconSearch,
   IconShieldLock,
@@ -34,8 +35,10 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { modelUsageQueryOptions } from "@/lib/enterprise/queries";
 import { markFor } from "@/lib/marks";
+import { effortLabel } from "@/lib/models/effort";
 import {
   availableModelsQueryOptions,
+  type ModelOption,
   type ModelSource,
 } from "@/lib/models/queries";
 import { ControlsSection } from "./controls-section";
@@ -115,42 +118,58 @@ export function ProviderSection() {
   );
 }
 
-/** Admin, Providers: whether people may pick the model a built-in Bot answers on. */
+/**
+ * Admin, Providers: what people pick from in a conversation. Everything the credential lists for
+ * one person on their own machine; in a team, the models allowed below, and until there are any,
+ * the default only. No switch: what is allowed says it.
+ */
 export function ModelChoiceSection() {
+  const available = useQuery(availableModelsQueryOptions());
   return (
     <ControlsSection
-      description={(data) =>
-        `Built-in Bots run on ${data.builtInModel ?? "the configured model"} unless a person picks another in the conversation.`
-      }
+      description={() => {
+        const data = available.data;
+        if (!data) return "Which models people can pick in each conversation.";
+        return data.exposure === "all"
+          ? `People can pick any model your provider lists, and its thinking level, in each conversation. Bots run on ${data.default} until somebody picks another.`
+          : `People pick among the models you allow below, and their thinking level, in each conversation. Until you allow one, every conversation runs on ${data.default}.`;
+      }}
       title="In conversations"
     >
-      {({ data, setSetting, saving }) => (
-        <PageRows>
-          <Item size="sm">
-            <ItemMedia variant="icon">
-              <IconBrain />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>Let people choose a model</ItemTitle>
-              <ItemDescription>
-                {data.settings.modelSelection
-                  ? "People can pick a model and its thinking effort for built-in Bots in each conversation."
-                  : "Off. Built-in Bots use the configured model."}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                aria-label="Let people choose a model"
-                checked={data.settings.modelSelection}
-                disabled={saving}
-                onCheckedChange={(enabled) =>
-                  setSetting("modelSelection", enabled)
-                }
-              />
-            </ItemActions>
-          </Item>
-        </PageRows>
-      )}
+      {({ data }) => {
+        const listing = available.data;
+        if (!listing) return null;
+        const allowed = data.settings.modelAllowlist.models.filter((name) =>
+          listing.models.some(
+            (model) => `${listing.provider}/${model.id}` === name,
+          ),
+        ).length;
+        return (
+          <PageRows>
+            <Item size="sm">
+              <ItemMedia variant="icon">
+                <IconBrain />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>
+                  {listing.exposure === "all"
+                    ? "Every listed model"
+                    : allowed === 0
+                      ? "No models allowed yet"
+                      : `${allowed} ${allowed === 1 ? "model" : "models"} allowed`}
+                </ItemTitle>
+                <ItemDescription>
+                  {listing.exposure === "all"
+                    ? `${listing.models.length} models, kept current from your provider.`
+                    : allowed === 0
+                      ? "People don't see a model picker. Allow models below to offer them."
+                      : "People see them in the composer's model picker, with the default."}
+                </ItemDescription>
+              </ItemContent>
+            </Item>
+          </PageRows>
+        );
+      }}
     </ControlsSection>
   );
 }
@@ -167,8 +186,8 @@ export function ModelAllowlistSection() {
   const [open, setOpen] = useState(false);
   return (
     <ControlsSection
-      description="With the allowlist on, a built-in Bot on a model that isn't listed is refused before it runs, and people can only pick listed models. A remote Bot chooses its own model, and the one it reports is checked."
-      title="Allowlist"
+      description="The models people may pick in each conversation. With Only allowed models on, a Bot on any other model is refused before it runs, and a remote Bot's own model is checked too."
+      title="Allowed models"
     >
       {({ data, setSetting, saving }) => {
         const { modelAllowlist } = data.settings;
@@ -270,13 +289,20 @@ export function AllowedModelsDialog({
   const [search, setSearch] = useState("");
   const [other, setOther] = useState("");
 
-  const listed = (available.data?.models ?? []).map((model) => ({
+  const listed: { name: string; label: string; model?: ModelOption }[] = (
+    available.data?.models ?? []
+  ).map((model) => ({
     name: `${available.data?.provider}/${model.id}`,
     label: model.label,
+    model,
   }));
   const listedNames = new Set(listed.map((model) => model.name));
+  // The default as the list says it today: the operator's model, or the middle of the line.
+  const defaultName = available.data
+    ? `${available.data.provider}/${available.data.default}`
+    : builtInModel;
   // Saved models the listing no longer (or never) had, so they can still be seen and removed.
-  const extra = selected
+  const extra: { name: string; label: string; model?: ModelOption }[] = selected
     .filter((name) => !listedNames.has(name))
     .map((name) => ({ name, label: name }));
   const needle = search.trim().toLowerCase();
@@ -329,11 +355,29 @@ export function AllowedModelsDialog({
             <div className="flex flex-col gap-px">
               {rows.map((model) => (
                 <Item key={model.name} size="sm" variant="muted">
+                  {/* The same mark the composer's picker draws, or its plain model icon. */}
+                  <ItemMedia>
+                    {model.model?.vendor && markFor(model.model.vendor) ? (
+                      <HarnessMark
+                        className="size-4"
+                        id={model.model.vendor}
+                        name={model.label}
+                      />
+                    ) : (
+                      <IconCube
+                        aria-hidden
+                        className="size-4 text-muted-foreground"
+                      />
+                    )}
+                  </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{model.label}</ItemTitle>
-                    <ItemDescription className="font-mono text-xs">
-                      {model.name}
-                      {model.name === builtInModel ? " · default" : ""}
+                    <ItemDescription className="text-xs">
+                      <span className="font-mono">{model.name}</span>
+                      {model.name === defaultName ? " · default" : ""}
+                      {model.model?.efforts?.length
+                        ? ` · Thinking: ${model.model.efforts.map(effortLabel).join(", ")}`
+                        : ""}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
@@ -374,10 +418,10 @@ export function AllowedModelsDialog({
               Add
             </Button>
           </form>
-          {builtInModel && !selected.includes(builtInModel) ? (
+          {defaultName && !selected.includes(defaultName) ? (
             <p className="text-muted-foreground text-xs">
-              {builtInModel} isn't allowed. While the allowlist is on, a
-              built-in Bot is refused when nobody picked another model.
+              {defaultName} is the default and stays offered. With Only allowed
+              models on, a built-in Bot on it is refused unless you allow it.
             </p>
           ) : null}
         </DialogBody>

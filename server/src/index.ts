@@ -106,7 +106,7 @@ import {
   createGroupStore,
   groupSourceForRun,
 } from "./channels/group";
-import { createModelChoices, modelSelectionOn } from "./channels/model-choice";
+import { createModelChoices } from "./channels/model-choice";
 import { type ChannelStore, createChannelStore } from "./channels/routes";
 import { createStallGuard } from "./channels/stall-guard";
 import {
@@ -171,7 +171,7 @@ import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
 import { setEdition } from "./edition";
-import { setSettingDefaults } from "./admin/settings-store";
+import { fixSettings } from "./admin/settings-store";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -328,8 +328,9 @@ import { createWorkQueue, type WorkOfferedListener } from "./work/queue";
 const config = loadConfig();
 // Before anything resolves a capability or reads an enterprise setting. See edition.ts.
 setEdition(config.edition);
-// One person on their own machine picks their own model, as the personal edition always does.
-if (config.singleUser) setSettingDefaults({ modelSelection: true });
+// One person on their own machine is shown every model their credential lists; nothing narrows it.
+if (config.singleUser)
+  fixSettings({ modelAllowlist: { enabled: false, models: [] } });
 // The environment seeds local policy once. The SDK fallback must not reapply an old revision
 // after an administrator clears a pin to follow the latest published Skills.
 clearLearningRevisionFallback();
@@ -1443,14 +1444,19 @@ const resolveRuntimeModelApiKey = () =>
 /**
  * The models a person may pick for a Bot's run, and how hard each can think, asked of whatever
  * serves the model: the provider, the gateway in OPENAI_BASE_URL, or a signed-in plan's own listing.
- * Narrowed by the admin's allowlist when it is on. Read now and then every few hours in the
- * background, and early when a provider refuses a model; never per message.
+ * One person on their own machine picks from all of them; in a team, people pick among the models an
+ * admin allowed (Admin, Providers), and get the default until there are any. Read now and then every
+ * few hours in the background, and early when a provider refuses a model; never per message.
  */
 const modelCatalogue = createModelCatalogue({
   model: runtimeModel,
   apiKey: resolveRuntimeModelApiKey,
-  allowlist: () => enterpriseControls()?.snapshot()?.settings.modelAllowlist,
-  enabled: modelSelectionOn,
+  ...(config.singleUser
+    ? {}
+    : {
+        allowlist: () =>
+          enterpriseControls()?.snapshot()?.settings.modelAllowlist,
+      }),
 });
 modelCatalogue.start();
 

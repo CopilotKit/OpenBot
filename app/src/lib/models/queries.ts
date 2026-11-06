@@ -36,10 +36,17 @@ export type ModelSource =
   | "chatgpt"
   | "claude";
 
+/**
+ * Who decides which models people may pick. `all`: one person on their own machine, offered every
+ * model the credential lists. `allowed`: a team, where an admin allows models in Admin, Providers.
+ */
+export type ModelExposure = "all" | "allowed";
+
 export type ModelCatalogue = {
   /** The allowlist's `provider/model` prefix. Not who serves the models; that is `source`. */
   provider: "openai" | "anthropic";
   source: ModelSource;
+  exposure: ModelExposure;
   /** What a run uses when nobody picked anything. Always one of `models`. */
   default: string;
   /** Newest first. */
@@ -55,6 +62,7 @@ export type ModelCatalogue = {
 export type AvailableModels = {
   provider: "openai" | "anthropic";
   source: ModelSource;
+  exposure: ModelExposure;
   default: string;
   /** Newest first. Always holds the default. */
   models: ModelOption[];

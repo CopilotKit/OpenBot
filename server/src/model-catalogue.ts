@@ -70,16 +70,27 @@ export type ModelSource =
   | "chatgpt"
   | "claude";
 
+/**
+ * Who decides which models people may pick. `all`: one person on their own machine, who picks from
+ * everything the credential lists. `allowed`: a team, where an admin allows models in Admin,
+ * Providers, and people pick among those.
+ */
+export type ModelExposure = "all" | "allowed";
+
 export type ModelCatalogue = {
   provider: RuntimeModel["provider"];
   source: ModelSource;
-  /** What a run uses when nobody picked anything: the middle of the current line, or the configured model. */
+  exposure: ModelExposure;
+  /**
+   * What a run uses when nobody picked anything: the operator's model when they named one the
+   * credential lists, otherwise the middle of the provider's current line.
+   */
   default: string;
   /** Newest first. Always holds the default. */
   models: ModelOption[];
   /**
-   * Whether there is anything to pick: false while the admin has picking off, or when the listing
-   * could not be read.
+   * Whether there is anything to pick: false until an admin allows a model in a team, or when the
+   * listing could not be read.
    */
   choosable: boolean;
 };
@@ -88,6 +99,7 @@ export type ModelCatalogue = {
 export type AvailableModels = {
   provider: RuntimeModel["provider"];
   source: ModelSource;
+  exposure: ModelExposure;
   default: string;
   /** Newest first. Always holds the default. */
   models: ModelOption[];
@@ -592,10 +604,12 @@ export function createModelCatalogue(options: {
   model: RuntimeModel;
   /** The deployment's model key, resolved per read so a rotated credential is used next time. */
   apiKey: () => Promise<string | null>;
-  /** The admin's model allowlist, read on every call so a change applies at once. */
+  /**
+   * The models an admin allowed people to pick, read on every call so a change applies at once.
+   * Given for a team: people pick among these, and until there are any they get the default only.
+   * Absent for one person on their own machine, who picks from everything the credential lists.
+   */
   allowlist?: () => Allowlist | undefined;
-  /** Whether people may pick at all (the admin's switch). Absent is yes. Read on every call. */
-  enabled?: () => boolean;
   environment?: Record<string, string | undefined>;
   fetch?: typeof fetch;
   log?: (line: string) => void;
@@ -796,9 +810,12 @@ export function createModelCatalogue(options: {
     return option(enrich({ id: defaultModel, created: 0 }));
   }
 
+  const exposure: ModelExposure = options.allowlist ? "allowed" : "all";
+
   /**
-   * The listing, newest first, and its default. Narrowed to the admin's allowlist unless
-   * `everything`, which is what an admin picks the allowlist from. Null when nothing was ever read.
+   * The listing, newest first, and its default. In a team, narrowed to the models an admin allowed
+   * unless `everything`, which is what the admin allows them from. The default is the same either
+   * way and always offered. Null when nothing was ever read.
    */
   async function offered(
     everything: boolean,
@@ -806,37 +823,44 @@ export function createModelCatalogue(options: {
     const found = await current();
     if (!found) return null;
 
-    const allowlist = everything ? undefined : options.allowlist?.();
-    const allowed = (id: string) =>
-      !allowlist?.enabled || allowlist.models.includes(`${provider}/${id}`);
-
     const usable = found.entries
       .map(enrich)
       .filter((entry) => entry.usable)
       .sort((a, b) => b.created - a.created || a.id.localeCompare(b.id));
-    const narrowed = usable.filter(
-      (entry) => entry.id === defaultModel || allowed(entry.id),
-    );
-    const models = narrowed.map(option);
+    let models = usable.map(option);
     const listed = models.some((model) => model.id === defaultModel);
     /*
-     * A gateway's operator named its model on purpose, and its list mixes every vendor it routes,
-     * where one vendor's middle means nothing. So a gateway keeps the model it names while it lists
-     * it; every provider named directly takes the middle of its current line.
+     * THE OPERATOR'S MODEL WINS. A model somebody named (`BOT_MODEL`, the Desktop setup screen) is
+     * the default while the credential lists it; so is a gateway's, whose list mixes every vendor
+     * it routes, where one vendor's middle means nothing. Only a model nobody named, or one the
+     * credential does not list (a ChatGPT plan given gpt-5.5), gives way to the middle of the
+     * provider's current line.
      */
-    const middle =
-      source === "gateway" && listed
-        ? undefined
-        : middleModel(narrowed.filter((entry) => allowed(entry.id)));
-    const chosen = middle ?? (listed ? defaultModel : undefined);
+    const kept = listed && (options.model.pinned || source === "gateway");
+    const middle = kept ? undefined : middleModel(usable);
+    let chosen = middle ?? (listed ? defaultModel : undefined);
     if (!chosen) {
       // Nothing says where the middle is and the configured model is not listed. For a plan or a
       // provider named directly, the configured model is the stale one this exists to replace, so
       // the newest listed model stands in; a gateway's operator named theirs on purpose.
       const newest = models[0];
-      if (newest && source !== "gateway") return { models, default: newest.id };
-      models.unshift(configured());
-      return { models, default: defaultModel };
+      if (newest && source !== "gateway") chosen = newest.id;
+      else {
+        models = [configured(), ...models];
+        chosen = defaultModel;
+      }
+    }
+    /*
+     * A team picks among what an admin allowed, and the default. A model the provider no longer
+     * lists drops out of what is offered on its own, whatever the allowed list still says, and a
+     * pick saved on it runs on the default.
+     */
+    if (!everything && options.allowlist) {
+      const allowed = new Set(options.allowlist()?.models ?? []);
+      const kept = chosen;
+      models = models.filter(
+        (model) => model.id === kept || allowed.has(`${provider}/${model.id}`),
+      );
     }
     return { models, default: chosen };
   }
@@ -847,6 +871,7 @@ export function createModelCatalogue(options: {
       return {
         provider,
         source,
+        exposure,
         default: defaultModel,
         models: [configured()],
         choosable: false,
@@ -854,21 +879,22 @@ export function createModelCatalogue(options: {
     return {
       provider,
       source,
+      exposure,
       default: found.default,
       models: found.models,
-      choosable: (options.enabled?.() ?? true) && found.models.length > 1,
+      choosable: found.models.length > 1,
     };
   }
 
   /**
-   * Every model the listing offers, whatever the allowlist and the switch say, for an admin to pick
-   * the allowlist from. Only the deployment's own model when the listing cannot be read.
+   * Every model the listing offers, whatever an admin allowed, for an admin to allow them from. Only the deployment's own model when the listing cannot be read.
    */
   async function available(): Promise<AvailableModels> {
     const found = await offered(true);
     return {
       provider,
       source,
+      exposure,
       default: found?.default ?? defaultModel,
       models: found?.models ?? [configured()],
       listed: found !== null,
