@@ -3,6 +3,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_TEMP_ROOT: AtomicU64 = AtomicU64::new(0);
 
+/// Held by every test that binds or probes loopback ports, in every module. Tests run in
+/// parallel, so one test's port could be taken by another between choosing it and using it.
+/// A test that panics while holding it does not fail the others that wait for it.
+#[allow(dead_code)] // The library's port tests use it; the binary shares this file.
+static PORT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[allow(dead_code)]
+pub(crate) fn hold_ports() -> std::sync::MutexGuard<'static, ()> {
+    PORT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub(crate) fn temp_root(label: &str) -> PathBuf {
     let next = NEXT_TEMP_ROOT.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!("openbot-{label}-{}-{next}", std::process::id()));

@@ -8559,6 +8559,7 @@ fn main() {
 
     #[test]
     fn a_port_nobody_holds_is_not_reported_as_taken() {
+        let _ports = crate::test_support::hold_ports();
         // 0 is never listening; this asserts the check does not invent a problem.
         assert!(port_already_taken(&[("nothing", 1)]).is_none());
     }
@@ -8633,6 +8634,7 @@ fn main() {
 
     #[test]
     fn multiline_published_ports_exempt_owned_listeners_but_reject_foreign_listener() {
+        let _ports = crate::test_support::hold_ports();
         let listeners = [(); 4].map(|()| std::net::TcpListener::bind("127.0.0.1:0").unwrap());
         let [first, second, third, foreign] = listeners
             .each_ref()
@@ -8672,6 +8674,7 @@ fn main() {
     */
     #[test]
     fn our_own_published_port_is_not_a_conflict() {
+        let _ports = crate::test_support::hold_ports();
         let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = held.local_addr().unwrap().port();
         assert!(port_already_taken(&[("Bot you picked", port)]).is_some());
@@ -8685,6 +8688,7 @@ fn main() {
 
     #[test]
     fn a_held_port_is_named_along_with_what_uses_it() {
+        let _ports = crate::test_support::hold_ports();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
 
@@ -8699,6 +8703,7 @@ fn main() {
 
     #[test]
     fn an_ipv6_only_port_is_named_unless_this_deployment_already_publishes_it() {
+        let _ports = crate::test_support::hold_ports();
         let Some(listener) = ipv6_loopback_listener() else {
             return;
         };
@@ -8720,6 +8725,7 @@ fn main() {
 
     #[test]
     fn an_ipv6_only_port_is_not_clear_while_its_listener_is_held() {
+        let _ports = crate::test_support::hold_ports();
         let Some(listener) = ipv6_loopback_listener() else {
             return;
         };
