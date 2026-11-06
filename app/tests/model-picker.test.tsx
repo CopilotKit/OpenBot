@@ -272,7 +272,7 @@ test("there is no picker before the models have loaded", () => {
   expect(container.innerHTML).toBe("");
 });
 
-test("the Default tag is one badge, the same on a model row and an effort row", async () => {
+test("the Default tag is the same quiet text on a model row and an effort row", async () => {
   // The model row's tag used to share the highlight's fill and vanish on the row in use.
   saved["conversation-a"] = { model: "gpt-5.5", effort: null };
   const { popup } = await openPicker(/GPT-5\.5/);
@@ -283,8 +283,8 @@ test("the Default tag is one badge, the same on a model row and an effort row", 
   expect(tags).toHaveLength(2);
   const [model, effort] = tags.map((tag) => tag.className);
   expect(model).toBe(effort);
-  // The app's own neutral Badge, a tint over whatever row is under it.
-  expect(model).toContain("bg-foreground/5");
+  // Muted text, which reads on the highlighted row too.
+  expect(model).toContain("text-muted-foreground");
 });
 
 test("choosing an effort saves the model with it, and the trigger names it", async () => {
@@ -397,18 +397,26 @@ test("a model that takes no effort shows no thinking control", async () => {
   ).toEqual(["GPT-6.1 Terra", "GPT-6 Sol", "GPT-5.5Default", "GPT-4o"]);
 });
 
-test("a search looks only for models, and the efforts step aside while it does", async () => {
+test("a search looks only for models, and the efforts stay in their column", async () => {
   saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
   const { user, popup } = await openPicker(/GPT-6\.1 Terra/);
   await user.type(within(popup).getByPlaceholderText("Search models"), "sol");
-  await waitFor(() =>
-    expect(
-      within(popup)
-        .getAllByRole("option")
-        .map((option) => option.textContent),
-    ).toEqual(["GPT-6 Sol"]),
+  const models = () =>
+    within(within(popup).getByRole("group", { name: "Models" }))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+  await waitFor(() => expect(models()).toEqual(["GPT-6 Sol"]));
+  expect(thinking(popup)).not.toBeNull();
+});
+
+test("a search no model matches says so", async () => {
+  saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
+  const { user, popup } = await openPicker(/GPT-6\.1 Terra/);
+  await user.type(
+    within(popup).getByPlaceholderText("Search models"),
+    "nothing like it",
   );
-  expect(thinking(popup)).toBeNull();
+  expect(await within(popup).findByText("No models match.")).toBeTruthy();
 });
 
 test("a conversation shows the pick the server holds for it", async () => {
