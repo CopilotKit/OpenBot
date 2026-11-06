@@ -173,6 +173,7 @@ export function createSkillApprovalStore(database: Database) {
           skillName: previous.skillName,
           approvedBy: previous.approvedBy,
           sharing: previous.sharing,
+          updatedAt: sql`clock_timestamp()`,
         })
         .onConflictDoUpdate({
           target: [
@@ -182,7 +183,7 @@ export function createSkillApprovalStore(database: Database) {
           set: {
             approvedBy: previous.approvedBy,
             sharing: previous.sharing,
-            updatedAt: new Date(),
+            updatedAt: sql`clock_timestamp()`,
           },
         });
     },
@@ -209,8 +210,15 @@ export function createSkillApprovalStore(database: Database) {
       return restored.length > 0;
     },
 
-    /** Puts back an approval `forget` deleted, unless the skill has been approved again since. */
-    async restoreIfAbsent(previous: SkillApproval): Promise<boolean> {
+    /**
+     * Puts back an approval `forget` deleted, unless the skill has been approved again since. The row returns with the
+     * `stamp` it had when deleted, so it is exactly the row that was removed and an undo still waiting on that stamp
+     * (`forgetIfUnchanged`, `restoreIfUnchanged`) still matches it.
+     */
+    async restoreIfAbsent(
+      previous: SkillApproval,
+      stamp: string,
+    ): Promise<boolean> {
       const restored = await database
         .insert(learningSkillApprovals)
         .values({
@@ -218,6 +226,7 @@ export function createSkillApprovalStore(database: Database) {
           skillName: previous.skillName,
           approvedBy: previous.approvedBy,
           sharing: previous.sharing,
+          updatedAt: sql`${stamp}::timestamptz`,
         })
         .onConflictDoNothing({
           target: [
@@ -229,16 +238,18 @@ export function createSkillApprovalStore(database: Database) {
       return restored.length > 0;
     },
 
-    /** Deletes an approval and returns what it deleted, or null when there was none. */
+    /** Deletes an approval and returns what it deleted and its `updated_at` stamp, or null when there was none. */
     async forget(
       userId: string,
       skillName: string,
-    ): Promise<SkillApproval | null> {
+    ): Promise<{ row: SkillApproval; stamp: string } | null> {
       const [deleted] = await database
         .delete(learningSkillApprovals)
         .where(approvalKey(userId, skillName))
-        .returning(approvalColumns);
-      return deleted ?? null;
+        .returning({ ...approvalColumns, stamp: writtenStamp });
+      if (!deleted) return null;
+      const { stamp, ...row } = deleted;
+      return { row, stamp };
     },
 
     /** Deletes the approval `recordApprovalStamped` created, but only while the row is still that write (`written`). */
@@ -258,7 +269,7 @@ export function createSkillApprovalStore(database: Database) {
     async requestSharing(userId: string, skillName: string): Promise<boolean> {
       const updated = await database
         .update(learningSkillApprovals)
-        .set({ sharing: "requested", updatedAt: new Date() })
+        .set({ sharing: "requested", updatedAt: sql`clock_timestamp()` })
         .where(
           and(
             approvalKey(userId, skillName),
@@ -277,7 +288,7 @@ export function createSkillApprovalStore(database: Database) {
     ): Promise<boolean> {
       const updated = await database
         .update(learningSkillApprovals)
-        .set({ sharing: decision, updatedAt: new Date() })
+        .set({ sharing: decision, updatedAt: sql`clock_timestamp()` })
         .where(
           and(
             approvalKey(userId, skillName),
@@ -373,7 +384,9 @@ export function recordApprovalBefore(
     if (detail.operation === "remove") {
       const removed = await approvals.forget(userId, name);
       return async () => {
-        if (removed) await approvals.restoreIfAbsent(removed);
+        if (removed) {
+          await approvals.restoreIfAbsent(removed.row, removed.stamp);
+        }
       };
     }
     const { previous, written } = await approvals.recordApprovalStamped(

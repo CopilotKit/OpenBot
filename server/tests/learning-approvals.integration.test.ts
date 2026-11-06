@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { learningSkillApprovals } from "../src/db/schema/learning";
@@ -224,6 +224,39 @@ describe("recordApprovalBefore", () => {
     expect(await store.get(hopper, "removed")).toBeNull();
     await undo();
     expect((await store.get(hopper, "removed"))?.approvedBy).toBe("admin");
+  });
+
+  test("undoing a remove puts back the row with its original stamp, so an earlier approval's undo still applies", async () => {
+    const stampOf = async () => {
+      const [row] = await database
+        .select({
+          stamp: sql<string>`${learningSkillApprovals.updatedAt}::text`,
+        })
+        .from(learningSkillApprovals)
+        .where(
+          and(
+            eq(learningSkillApprovals.userId, hopper),
+            eq(learningSkillApprovals.skillName, "stamped"),
+          ),
+        );
+      return row?.stamp;
+    };
+    const approved = await recordApprovalBefore(
+      store,
+      hopper,
+      "person",
+    )({ files: skill("stamped"), operation: "add" });
+    const before = await stampOf();
+    const removed = await recordApprovalBefore(
+      store,
+      hopper,
+      "admin",
+    )({ files: skill("stamped"), operation: "remove" });
+    expect(await store.get(hopper, "stamped")).toBeNull();
+    await removed();
+    expect(await stampOf()).toBe(before);
+    await approved();
+    expect(await store.get(hopper, "stamped")).toBeNull();
   });
 
   test("an undo of a remove leaves alone a row approved since", async () => {
