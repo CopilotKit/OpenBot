@@ -78,10 +78,13 @@ if [ "$current" != "$RELEASE_TAG" ]; then
   exit 0
 fi
 
-# Read back what installed apps will read: the endpoint compiled into them, fetched the way they
-# fetch it, redirects and all. An endpoint that answers with a web page, or a Latest release that is
-# not this one, fails here instead of failing silently in every app.
-endpoint="$(jq -r '.plugins.updater.endpoints[0]' "$root/desktop/src-tauri/tauri.macos-signing.conf.json")"
+# Read back what installed apps will read: the release's own feed, compiled into them, fetched the
+# way they fetch it, redirects and all. An endpoint that answers with a web page, or a Latest release
+# that is not this one, fails here instead of failing silently in every app. The apps ask
+# downloads.copilotkit.ai first, which Downloads sync (started above) fills with a checked copy of
+# this same file a few minutes later, and fall back to this one when it does not answer.
+endpoint="$(jq -r '[.plugins.updater.endpoints[] | select(startswith("https://github.com/"))][0]' \
+  "$root/desktop/src-tauri/tauri.macos-signing.conf.json")"
 expected="${RELEASE_TAG#v}"
 for attempt in 1 2 3 4 5; do
   # The asset may have been uploaded seconds ago; give the download redirect a moment to catch up.

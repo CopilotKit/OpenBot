@@ -42,10 +42,29 @@ export type IntelligenceReadiness =
   | "degraded"
   | "unknown";
 
+/**
+ * A newer OpenBot Desktop, as the desktop app last read it from its update feed. The app reads the
+ * feed itself, at launch and every six hours; this page only asks the app, so a browser showing a
+ * self-hosted OpenBot (no desktop app around it) never asks anybody.
+ */
+export type DesktopAppUpdate = {
+  /** The version to offer; null when there is none, or this person closed the banner on it. */
+  version: string | null;
+  /** The desktop app's own version. */
+  current: string;
+  /** Set from the click on Update and restart until the app restarts. */
+  installing: {
+    downloaded: number;
+    total: number | null;
+    restarting: boolean;
+  } | null;
+};
+
 export const desktopKeys = {
   all: ["desktop"] as const,
   status: (memory: boolean) => ["desktop", "status", { memory }] as const,
   intelligence: ["desktop", "intelligence"] as const,
+  appUpdate: ["desktop", "app-update"] as const,
 };
 
 const PLUGIN = "plugin:openbot-desktop";
@@ -90,6 +109,22 @@ export function intelligenceReadinessQueryOptions() {
         )
       ).readiness,
     staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+/**
+ * The update banner's offer. Asked only inside the Desktop window; anywhere else it is never asked.
+ * A read of the app's memory, so asking every minute costs nothing, and twice a second while an
+ * update downloads, for its progress. An older desktop app has no such command and refuses it the
+ * same way every time, so a refusal is not retried: there is just no banner.
+ */
+export function desktopAppUpdateQueryOptions() {
+  return queryOptions({
+    queryKey: desktopKeys.appUpdate,
+    queryFn: (): Promise<DesktopAppUpdate> => invokeDesktop("update_offer"),
+    enabled: desktopShell() !== null,
+    retry: false,
+    refetchInterval: (query) => (query.state.data?.installing ? 500 : 60_000),
   });
 }
 

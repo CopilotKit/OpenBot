@@ -2,21 +2,24 @@
 //!
 //! The same facts and actions as the Status window, reached from the app instead: what is running,
 //! how much memory each part takes, Restart and Stop for OpenBot, and Start, Stop and status for
-//! the local Intelligence stack. An inline plugin, so each command carries a permission of its own,
+//! the local Intelligence stack. Also the update banner's offer, close and install. An inline plugin, so each command carries a permission of its own,
 //! granted at runtime to the exact origin of the OpenBot this app started and to nothing else.
 
-use openbot_desktop_lib::{local_eval, local_eval_state, stack};
+use openbot_desktop_lib::{app_update, local_eval, local_eval_state, stack};
 use tauri::Manager;
 
 pub const PLUGIN: &str = "openbot-desktop";
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 5] = [
+pub const PERMISSIONS: [&str; 8] = [
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
     "openbot-desktop:allow-stop",
     "openbot-desktop:allow-intelligence",
+    "openbot-desktop:allow-update-offer",
+    "openbot-desktop:allow-dismiss-update",
+    "openbot-desktop:allow-install-update",
 ];
 
 /**
@@ -82,6 +85,27 @@ async fn intelligence(
     crate::run_local_eval(app, attempt, action, stack.as_str().to_owned()).await
 }
 
+/// The update banner: a newer OpenBot Desktop, as the shell last read its update feed, unless
+/// this person closed it. Answered from memory; the page never reaches the feed itself.
+#[tauri::command]
+async fn update_offer(app: tauri::AppHandle) -> app_update::Status {
+    crate::app_update_status(&app)
+}
+
+/// The banner's close button: hidden until a newer version than `version` comes out.
+#[tauri::command]
+async fn dismiss_update(app: tauri::AppHandle, version: String) -> Result<(), String> {
+    crate::dismiss_app_update_for(&app, &version).map_err(|problem| problem.said)
+}
+
+/// The banner's Update and restart. Returns only when it failed: on success the app restarts.
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    crate::install_app_update_now(app)
+        .await
+        .map_err(|problem| problem.said)
+}
+
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new(PLUGIN)
         .invoke_handler(tauri::generate_handler![
@@ -89,7 +113,10 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             status,
             restart,
             stop,
-            intelligence
+            intelligence,
+            update_offer,
+            dismiss_update,
+            install_update
         ])
         .build()
 }

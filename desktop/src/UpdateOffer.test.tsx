@@ -1,44 +1,46 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import type { AppUpdate } from "./UpdateOffer";
 
-type Progress =
-  | { event: "Started"; data: { contentLength?: number } }
-  | { event: "Progress"; data: { chunkLength: number } }
-  | { event: "Finished" };
+/*
+ * The shell's three commands, answered the way main.rs answers them: `app_update_offer` from what
+ * the shell last read in its feed, `dismiss_app_update` remembering the version, and
+ * `install_app_update` resolving only when it failed (on success the app restarts).
+ */
+let offer: AppUpdate | null = null;
+let offerFailure: unknown = null;
+let installFailure: unknown = null;
+let dismissFailure: unknown = null;
+let installRelease: (() => void) | null = null;
+const calls: { command: string; args: unknown }[] = [];
 
-type Found = {
-  version: string;
-  currentVersion: string;
-  downloadAndInstall: (onEvent: (event: Progress) => void) => Promise<void>;
-};
+async function handle(command: string, args: unknown) {
+  if (command === "app_update_offer") {
+    if (offerFailure) throw offerFailure;
+    return offer;
+  }
+  calls.push({ command, args });
+  if (command === "dismiss_app_update") {
+    if (dismissFailure) throw dismissFailure;
+    if (offer) offer = { ...offer, version: null };
+    return null;
+  }
+  if (command === "install_app_update") {
+    if (installFailure) throw installFailure;
+    await new Promise<void>((resolve) => {
+      installRelease = resolve;
+    });
+    return null;
+  }
+  throw new Error(`unexpected command ${command}`);
+}
 
-let found: Found | null = null;
-let checkFailure: string | null = null;
-let checks = 0;
-let relaunches = 0;
-
-mock.module("@tauri-apps/plugin-updater", () => ({
-  check: async () => {
-    checks += 1;
-    if (checkFailure) throw new Error(checkFailure);
-    return found;
-  },
+// The seam App.test.tsx and the other desktop tests use; see RuntimeUpdates.test.tsx.
+mock.module("@tauri-apps/api/core", () => ({
+  invoke: (command: string, args?: unknown) => handle(command, args),
 }));
-
-mock.module("@tauri-apps/plugin-process", () => ({
-  relaunch: async () => {
-    relaunches += 1;
-  },
-}));
-
-const { UpdateOffer } = await import("./UpdateOffer");
+const { UpdateOffer, describe } = await import("./UpdateOffer");
 
 beforeAll(() =>
   GlobalRegistrator.register({
@@ -46,120 +48,121 @@ beforeAll(() =>
   }),
 );
 afterEach(() => {
-  found = null;
-  checkFailure = null;
-  checks = 0;
-  relaunches = 0;
+  offer = null;
+  offerFailure = null;
+  installFailure = null;
+  dismissFailure = null;
+  installRelease?.();
+  installRelease = null;
+  calls.length = 0;
   cleanup();
 });
 afterAll(() => GlobalRegistrator.unregister());
 
-function anUpdate(overrides: Partial<Found> = {}): Found {
-  return {
-    version: "0.3.0",
-    currentVersion: "0.2.0",
-    downloadAndInstall: async () => {},
-    ...overrides,
-  };
+function available(version = "0.3.2"): AppUpdate {
+  return { version, current: "0.3.1", installing: null };
 }
 
-test("an unreachable update endpoint says nothing", async () => {
-  checkFailure = "synthetic network refusal";
+test("a shell with nothing to say says nothing", async () => {
+  offerFailure = "plugin not found";
   const view = render(<UpdateOffer />);
-
-  await waitFor(() => expect(checks).toBeGreaterThan(0));
+  await new Promise((resolve) => setTimeout(resolve, 20));
   expect(view.container.textContent).toBe("");
   expect(view.queryByRole("alert")).toBeNull();
 });
 
-// Unsigned builds do not register the updater plugin at all, so `check()` is refused by Tauri
-// rather than by the network. That build has nothing it could verify, so it offers nothing.
-test("a build without the updater says nothing", async () => {
-  checkFailure = "plugin updater not found";
+test("no newer version, or one already closed, says nothing", async () => {
+  offer = { version: null, current: "0.3.1", installing: null };
   const view = render(<UpdateOffer />);
-
-  await waitFor(() => expect(checks).toBeGreaterThan(0));
-  expect(view.container.textContent).toBe("");
-  expect(view.queryByRole("alert")).toBeNull();
-});
-
-test("no newer version says nothing", async () => {
-  const view = render(<UpdateOffer />);
-
-  await waitFor(() => expect(checks).toBeGreaterThan(0));
+  await new Promise((resolve) => setTimeout(resolve, 20));
   expect(view.container.textContent).toBe("");
 });
 
 test("a newer version is offered with both versions named", async () => {
-  found = anUpdate();
+  offer = available();
   const view = render(<UpdateOffer />);
-
-  const heading = await view.findByRole("heading", {
-    name: "OpenBot 0.3.0 is available",
-  });
-  expect(heading).toBeTruthy();
-  expect(view.container.textContent).toContain("You are running 0.2.0");
+  expect(
+    await view.findByRole("heading", { name: "OpenBot 0.3.2 is available" }),
+  ).toBeTruthy();
+  expect(view.container.textContent).toContain("You are running 0.3.1");
 });
 
-test("installing downloads, reports progress, and restarts", async () => {
-  const download: {
-    report: ((event: Progress) => void) | null;
-    release: (() => void) | null;
-  } = { report: null, release: null };
-  found = anUpdate({
-    downloadAndInstall: async (onEvent) => {
-      download.report = onEvent;
-      await new Promise<void>((resolve) => {
-        download.release = resolve;
-      });
-    },
-  });
+test("installing asks the shell, and shows the shell's progress until it restarts", async () => {
+  offer = available();
   const view = render(<UpdateOffer />);
-
   fireEvent.click(
     await view.findByRole("button", { name: "Update and restart" }),
   );
-  await waitFor(() => expect(download.report).not.toBeNull());
-
-  act(() => {
-    download.report?.({ event: "Started", data: { contentLength: 200 } });
-    download.report?.({ event: "Progress", data: { chunkLength: 50 } });
-  });
+  await waitFor(() =>
+    expect(calls).toEqual([{ command: "install_app_update", args: undefined }]),
+  );
+  offer = {
+    ...available(),
+    installing: { downloaded: 50, total: 200, restarting: false },
+  };
   await waitFor(() =>
     expect(view.getByRole("button", { name: /Downloading/ }).textContent).toBe(
       "Downloading… 25%",
     ),
   );
-
-  await act(async () => {
-    download.release?.();
-  });
-  await waitFor(() => expect(relaunches).toBe(1));
+  offer = {
+    ...available(),
+    installing: { downloaded: 200, total: 200, restarting: true },
+  };
+  await waitFor(() =>
+    expect(view.getByRole("button", { name: "Restarting…" })).toBeTruthy(),
+  );
+  expect(
+    (view.getByRole("button", { name: "Not now" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
 });
 
-test("an install that fails says so and does not restart", async () => {
-  found = anUpdate({
-    downloadAndInstall: async () => {
-      throw new Error("synthetic signature refusal");
-    },
-  });
+test("an install that fails says so and offers it again", async () => {
+  offer = available();
+  installFailure = { said: "signature verification failed" };
   const view = render(<UpdateOffer />);
-
   fireEvent.click(
     await view.findByRole("button", { name: "Update and restart" }),
   );
-
   const alert = await view.findByRole("alert");
-  expect(alert.textContent).toContain("synthetic signature refusal");
-  expect(relaunches).toBe(0);
+  expect(alert.textContent).toBe(
+    "OpenBot could not install the update: signature verification failed",
+  );
+  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
 });
 
-test("declining removes the offer without installing", async () => {
-  found = anUpdate();
+test("Not now closes it and asks the shell to remember which version", async () => {
+  offer = available();
   const view = render(<UpdateOffer />);
-
   fireEvent.click(await view.findByRole("button", { name: "Not now" }));
-
   await waitFor(() => expect(view.container.textContent).toBe(""));
-  expect(relaunches).toBe(0);
+  expect(calls).toEqual([
+    { command: "dismiss_app_update", args: { version: "0.3.2" } },
+  ]);
+});
+
+test("Not now still closes it for this run when the shell could not remember it", async () => {
+  offer = available();
+  dismissFailure = { said: "read-only disk" };
+  const view = render(<UpdateOffer />);
+  fireEvent.click(await view.findByRole("button", { name: "Not now" }));
+  await waitFor(() => expect(view.container.textContent).toBe(""));
+  // The shell still offers it; this window does not, until a newer one.
+  expect(offer?.version).toBe("0.3.2");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(view.container.textContent).toBe("");
+});
+
+test("progress reads as a person would say it", () => {
+  expect(describe(null)).toBe("Downloading…");
+  expect(describe({ downloaded: 0, total: null, restarting: false })).toBe(
+    "Downloading…",
+  );
+  expect(describe({ downloaded: 199, total: 200, restarting: false })).toBe(
+    "Downloading… 100%",
+  );
+  expect(describe({ downloaded: 200, total: 200, restarting: true })).toBe(
+    "Restarting…",
+  );
 });
