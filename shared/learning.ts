@@ -5,6 +5,10 @@ export type LearningSettings = {
   defaultTarget: LearningTarget | null;
   /** Missing inherits the default; null explicitly excludes this Bot. */
   agents: Record<string, LearningTarget | null>;
+  /** Who reviews what a person's own Learning space proposes. Missing means "admins". */
+  personalReview?: LearningPersonalReview;
+  /** Whether proposals are approved without a review. Missing means true. */
+  autoApprove?: boolean;
 };
 
 export type LearningDeliveryStatus = {
@@ -163,6 +167,18 @@ export function isLearningSharingMode(
   );
 }
 
+/** Who reviews what a person's own Learning space proposes: the administrators, or the people themselves. */
+export const LEARNING_PERSONAL_REVIEW = ["admins", "people"] as const;
+export type LearningPersonalReview = (typeof LEARNING_PERSONAL_REVIEW)[number];
+export function isLearningPersonalReview(
+  value: unknown,
+): value is LearningPersonalReview {
+  return (
+    typeof value === "string" &&
+    (LEARNING_PERSONAL_REVIEW as readonly string[]).includes(value)
+  );
+}
+
 /** A learned Skill's name as Intelligence publishes it: 1 to 200 characters, no slash and no control characters. */
 export function isLearnedSkillName(value: unknown): value is string {
   return (
@@ -200,4 +216,65 @@ export type PersonalLearningSharing = {
   /** `off`: Automatic Learning is off in this OpenBot. `unavailable`: Intelligence did not deliver them (its Learning
    * delivery is off, the space does not exist yet, or it could not be reached). */
   unavailable?: "off" | "unavailable";
+};
+
+/** One run of Learning over a container, as the Learning screens list it. */
+export type LearningRunSummary = {
+  id: string;
+  status:
+    | "queued"
+    | "freezing"
+    | "batching"
+    | "reducing"
+    | "finalizing"
+    | "succeeded"
+    | "failed";
+  trigger: "automatic" | "manual";
+  proposals: number | null;
+  insights: number | null;
+  failureCode: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
+/** A learned Skill's files. SKILL.md first; `text` is null for a binary file. */
+export type LearnedSkillContent = {
+  name: string;
+  description: string;
+  files: { path: string; text: string | null }[];
+};
+
+/** Where a person's Learning comes from: a container of recordings or of conversations. */
+export type LearningSource = {
+  containerId: string;
+  kind: "recordings" | "conversations";
+  label: string;
+};
+
+/** The person's own review of what their sources proposed. `proposals` and `latestRun` are null when they could not be read. */
+export type PersonalReview = {
+  canReview: boolean;
+  autoApprove: boolean | null;
+  sources: (LearningSource & {
+    proposals: LearningProposal[] | null;
+    latestRun: LearningRunSummary | null;
+  })[];
+};
+
+/** What an administrator reviews for each person, where people's Learning is reviewed by admins. */
+export type PeopleProposals = {
+  people: {
+    userId: string;
+    name: string;
+    proposals: LearningProposal[] | null;
+  }[];
+};
+
+/** A person's request to open a learned Skill to every Bot. */
+export type SharingRequest = {
+  userId: string;
+  name: string;
+  skillName: string;
+  requestedAt: string;
 };
