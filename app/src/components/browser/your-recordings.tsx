@@ -38,9 +38,7 @@ function endedLabel(row: RecordingRow): string | null {
 export function YourRecordings() {
   const recordings = useInfiniteQuery(recordingsQueryOptions());
   if (recordings.isPending) return null;
-  const unavailable = recordings.data?.pages.find(
-    (page) => page.unavailable,
-  )?.unavailable;
+  const unavailable = recordings.data?.pages.at(-1)?.unavailable;
   const rows = recordings.data?.pages.flatMap((page) => page.recordings) ?? [];
 
   return (

@@ -173,6 +173,14 @@ test("a later page that cannot be reached says so below the rows, and Show more 
   await view.findByText(/Couldn't reach Intelligence/);
   expect(view.getByText("Refund an order")).toBeTruthy();
   expect(view.getByText("Show more")).toBeTruthy();
+  pages.c2 = {
+    recordings: [row({ id: "r2", title: "Close a ticket" })],
+    nextCursor: null,
+  };
+  fireEvent.click(view.getByText("Show more"));
+  await view.findByText("Close a ticket");
+  expect(view.queryByText(/Couldn't reach Intelligence/)).toBeNull();
+  expect(view.getByText("Refund an order")).toBeTruthy();
 });
 
 test("a first page with no rows still offers Show more when older ones exist", async () => {
