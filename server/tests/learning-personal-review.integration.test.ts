@@ -86,6 +86,8 @@ function review(options: {
   bundles?: Record<string, { path: string; content: string }[]>;
   containerSkills?: PersonalLearningRouteDeps["containerSkills"];
   defaultTarget?: string;
+  autoApprover?: PersonalLearningRouteDeps["autoApprover"];
+  written?: LearningSettings[];
 }) {
   const intelligence = fakeIntelligence("current", {
     containers: options.containers ?? [personalLearningContainerId(ada)],
@@ -135,8 +137,13 @@ function review(options: {
     ...(options.recordingTitles
       ? { recordingTitles: options.recordingTitles }
       : {}),
+    ...(options.autoApprover ? { autoApprover: options.autoApprover } : {}),
     settings: {
       read: async () => settings,
+      write: async (next: LearningSettings) => {
+        options.written?.push(next);
+        return next;
+      },
     } as unknown as LearningSettingsStore,
     scopesFor: async (actor) =>
       learningScopes({ edition: currentEdition(), userId: actor.id, settings }),
@@ -496,5 +503,60 @@ describe("Your Skills in the personal edition", () => {
       )
     ).json()) as { skills: unknown[] };
     expect(body.skills).toEqual([]);
+  });
+});
+
+describe("switching automatic approval on and off", () => {
+  const put = (app: ReturnType<typeof review>, body: unknown) =>
+    app.request("/auto-approve", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  test("auto-approve is not a route outside the personal edition", async () => {
+    setEdition("team");
+    const written: LearningSettings[] = [];
+    const response = await put(review({ written }), { autoApprove: true });
+    expect(response.status).toBe(404);
+    expect(written).toEqual([]);
+  });
+
+  test("turning automatic approval on approves what is pending", async () => {
+    setEdition("personal");
+    try {
+      const written: LearningSettings[] = [];
+      let sweeps = 0;
+      const autoApprover = {
+        sweep: async () => {
+          sweeps += 1;
+          return { approved: 1 };
+        },
+      };
+      const app = review({ written, autoApprover });
+      expect((await put(app, { autoApprove: "yes" })).status).toBe(400);
+      expect(written).toEqual([]);
+
+      const on = await put(app, { autoApprove: true });
+      expect(on.status).toBe(200);
+      expect(await on.json()).toEqual({ autoApprove: true });
+      expect(written).toMatchObject([{ autoApprove: true }]);
+      expect(sweeps).toBe(1);
+      expect(audits).toMatchObject([
+        {
+          eventType: "configuration.changed",
+          targetType: "learning",
+          actorUserId: ada,
+          payload: { change: "auto_approve", to: true },
+        },
+      ]);
+
+      const off = await put(app, { autoApprove: false });
+      expect(await off.json()).toEqual({ autoApprove: false });
+      expect(written[1]).toMatchObject({ autoApprove: false });
+      expect(sweeps).toBe(1);
+    } finally {
+      setEdition(EDITION);
+    }
   });
 });

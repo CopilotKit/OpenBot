@@ -67,6 +67,8 @@ export type PersonalLearningRouteDeps = {
   manage?: LearningManagement;
   /** Learning settings, read fresh to see who reviews what people's recordings propose. */
   settings: LearningSettingsStore;
+  /** Approves what is pending in the person's Learning spaces; run when automatic approval is switched on. */
+  autoApprover?: { sweep(): Promise<{ approved: number }> };
   /** The Learning spaces this person reviews (learning/scopes.ts). */
   scopesFor: (actor: AuthenticatedActor) => Promise<LearningSource[]>;
   /** The titles of this person's own recordings by id; an id they don't own is left out. */
@@ -488,6 +490,46 @@ export function createPersonalLearningRoutes(
       });
     }
     return context.json({ mode: to });
+  });
+
+  routes.put("/auto-approve", smallBody, async (context) => {
+    if (currentEdition() !== "personal") {
+      return context.notFound();
+    }
+    const body = (await context.req.json().catch(() => null)) as {
+      autoApprove?: unknown;
+    } | null;
+    if (typeof body?.autoApprove !== "boolean") {
+      return context.json(
+        { error: "Say whether to approve learned skills automatically." },
+        400,
+      );
+    }
+    const autoApprove = body.autoApprove;
+    const userId = context.var.actor.id;
+    await deps.settings.write({
+      ...(await deps.settings.read()),
+      autoApprove,
+    });
+    await audit({
+      eventType: "configuration.changed",
+      targetType: "learning",
+      actorUserId: userId,
+      payload: { change: "auto_approve", to: autoApprove },
+    });
+    if (autoApprove) {
+      try {
+        await deps.autoApprover?.sweep();
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "learning-auto-approve-failed",
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+    return context.json({ autoApprove });
   });
 
   routes.put("/skills/:name", smallBody, async (context) => {
