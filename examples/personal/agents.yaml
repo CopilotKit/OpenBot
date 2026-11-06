@@ -20,3 +20,19 @@ agents:
     skills:
       - bot-creator
       - skill-creator
+
+  # The Bot somebody picked in OpenBot Desktop's setup, as in the fintech package.
+  #
+  # ONE ROW, AND IT EXISTS ONLY ONCE SOMETHING IS PICKED. A Bot whose endpoint interpolates to
+  # nothing is dropped by the loader, so this row removes itself until the desktop writes an address;
+  # `scripts/start.sh` writes none. The kind is interpolated rather than written, so a server that
+  # predates `remote-mastra` still loads this file unless somebody picks Mastra.
+  - id: picked-harness
+    name: ${PICKED_HARNESS_NAME:-Your Bot}
+    title: ${PICKED_HARNESS_NAME:-Your Bot}
+    role_description: Answer questions and do work, using the tools it has been granted.
+    avatar_seed: picked-harness
+    type: ${PICKED_HARNESS_KIND:-remote-ag-ui}
+    endpoint: ${PICKED_HARNESS_URL:-}
+    # Which agent on that server, for a Mastra roster. Blank means the only one there.
+    remote_agent_id: ${PICKED_HARNESS_AGENT_ID:-}
