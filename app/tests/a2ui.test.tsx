@@ -35,7 +35,7 @@ function Committed() {
       rejected: [],
       operations: [
         {
-          version: "v1.0",
+          version: "1.0",
           createSurface: {
             surfaceId: "trip",
             catalogId: OPENBOT_UI.id,
@@ -43,7 +43,7 @@ function Committed() {
           },
         },
         {
-          version: "v1.0",
+          version: "1.0",
           updateComponents: {
             surfaceId: "trip",
             components: [
