@@ -200,11 +200,11 @@ import {
   type LearningContainerCredentials,
   learningSetupInstructions,
 } from "./learning/ensure-container";
+import { createInspectorLearningReader } from "./learning/inspector";
 import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
 } from "./learning/personal-space";
-import { createInspectorLearningReader } from "./learning/inspector";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
 import {
@@ -237,6 +237,7 @@ import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import {
   ensureAlwaysOnApp,
+  ensurePersonalSkills,
   personalDefaultAppsMemory,
   personalDefaultsDeps,
   startPersonalDefaultApps,
@@ -1151,6 +1152,18 @@ const routineStore = createRoutineStore(database);
 useRoutineTools(routineStore);
 // Routines is on from the start in every edition, for every Bot. See personal-defaults.ts.
 await ensureAlwaysOnApp(pluginStore, personalDefaultsDeps(database));
+/*
+ * The personal edition gives each Bot every skill once, so the skills there are reach every Bot and
+ * one switched off for a Bot stays off. A failure is a warning: a Bot is given them again the first
+ * time it is listed or runs. Does nothing in the team edition.
+ */
+await ensurePersonalSkills(pluginStore, personalDefaultsDeps(database)).catch(
+  (error: unknown) => {
+    console.warn(
+      `Couldn't give every Bot its skills at startup; each Bot gets them the first time it runs. ${error instanceof Error ? error.message : String(error)}`,
+    );
+  },
+);
 /*
  * The personal edition turns Parallel's keyless web search on once, on its first start. Not awaited:
  * adding it asks search.parallel.ai for its tools, and an offline start must still start. It keeps

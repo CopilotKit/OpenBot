@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { setEdition } from "../src/edition";
 import {
   ensureAlwaysOnApp,
+  ensurePersonalSkills,
   isAlwaysOn,
   withPersonalDefaults,
 } from "../src/plugins/personal-defaults";
@@ -21,14 +22,20 @@ const NOTION: Tool[] = [
  * A store whose apps list whatever the test says each vendor answers. `vendors` is what an app
  * lists the next time it is refreshed; `added` is what the deployment has added so far.
  */
-function fakeStore(vendors: Record<string, Tool[]>) {
+function fakeStore(
+  vendors: Record<string, Tool[]>,
+  existingSkills: string[] = [],
+  bots: string[] = ["assistant", "researcher"],
+) {
   const listed = new Map<string, Tool[]>();
   const grants: string[] = [];
   /** Who the trail names for each grant, by `agent:ref`. */
   const grantedBy = new Map<string, string>();
   const added: string[] = [];
   /** The skills written so far, by slug. */
-  const skills = new Set<string>();
+  const skills = new Set<string>(existingSkills);
+  /** The Bots given every skill once. */
+  const given = new Set<string>();
   const store = {
     async refreshTools(serverId: string, _actorId = "") {
       listed.set(serverId, vendors[serverId] ?? []);
@@ -61,7 +68,7 @@ function fakeStore(vendors: Record<string, Tool[]>) {
   };
   const deps = {
     tools: async (serverId: string) => listed.get(serverId) ?? [],
-    bots: async () => ["assistant", "researcher"],
+    bots: async () => bots,
     granted: async (agentId: string, serverId: string) =>
       new Set(
         grants
@@ -70,6 +77,18 @@ function fakeStore(vendors: Record<string, Tool[]>) {
       ),
     servers: async () => added,
     skillExists: async (slug: string) => skills.has(slug),
+    skills: async () => [...skills],
+    heldSkills: async (agentId: string) =>
+      new Set(
+        grants
+          .filter((grant) => grant.startsWith(`${agentId}:`))
+          .map((grant) => grant.slice(agentId.length + 1))
+          .filter((ref) => skills.has(ref)),
+      ),
+    skillsGiven: async (agentId: string) => given.has(agentId),
+    rememberSkillsGiven: async (agentId: string) => {
+      given.add(agentId);
+    },
   };
   const wrapped = withPersonalDefaults(store, deps);
   return { store: wrapped, grants, grantedBy, added, deps };
@@ -202,5 +221,48 @@ describe("a new skill in the personal edition", () => {
     const { store, grants } = fakeStore({});
     await store.installSkill({ slug: "standup", by: "me" });
     expect(grants).toEqual([]);
+  });
+});
+
+describe("the skills there are, in the personal edition", () => {
+  test("every Bot is given every skill at startup", async () => {
+    setEdition("personal");
+    const { store, grants, deps } = fakeStore({}, ["standup", "triage"]);
+    await ensurePersonalSkills(store, deps);
+    expect(grants.sort()).toEqual([
+      "assistant:standup",
+      "assistant:triage",
+      "researcher:standup",
+      "researcher:triage",
+    ]);
+  });
+
+  test("a skill switched off for a Bot stays off after the next start and run", async () => {
+    setEdition("personal");
+    const { store, grants, deps } = fakeStore({}, ["standup"]);
+    await ensurePersonalSkills(store, deps);
+    grants.splice(grants.indexOf("researcher:standup"), 1);
+    await ensurePersonalSkills(store, deps);
+    await store.listForAgent("researcher");
+    expect(grants).toEqual(["assistant:standup"]);
+  });
+
+  test("a Bot made later gets every skill the first time it runs", async () => {
+    setEdition("personal");
+    const bots = ["assistant"];
+    const { store, grants, deps } = fakeStore({}, ["standup", "triage"], bots);
+    await ensurePersonalSkills(store, deps);
+    bots.push("writer");
+    await store.listForAgent("writer");
+    expect(
+      grants.filter((grant) => grant.startsWith("writer:")).sort(),
+    ).toEqual(["writer:standup", "writer:triage"]);
+  });
+
+  test("the team edition gives none, where an admin chooses", async () => {
+    const { store, grants, deps } = fakeStore({}, ["standup"]);
+    await ensurePersonalSkills(store, deps);
+    await store.listForAgent("assistant");
+    expect(grants.filter((grant) => grant.endsWith(":standup"))).toEqual([]);
   });
 });

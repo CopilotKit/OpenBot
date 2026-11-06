@@ -37,6 +37,14 @@ export type PersonalDefaultsDeps = {
   servers(): Promise<string[]>;
   /** Whether a skill with this slug has been written already. */
   skillExists(slug: string): Promise<boolean>;
+  /** Every skill there is, by slug. */
+  skills(): Promise<string[]>;
+  /** The skills one Bot offers, by slug. */
+  heldSkills(agentId: string): Promise<Set<string>>;
+  /** Whether this Bot has been given every skill once already. */
+  skillsGiven(agentId: string): Promise<boolean>;
+  /** Writes down that it has, so a skill switched off for it stays off. */
+  rememberSkillsGiven(agentId: string): Promise<void>;
 };
 
 /** Who the trail names for a grant nobody pressed a button for. */
@@ -87,6 +95,41 @@ async function grantEveryTool(
           await store.grant("mcp", tool.ref, bot, grantedBy);
     }
   }
+}
+
+/**
+ * In the personal edition, gives each of these Bots every skill it doesn't offer yet, ONCE per Bot.
+ *
+ * Unlike an app's tools, which every Bot always holds, a skill can be switched off for one Bot on
+ * the skill's page, and that has to stick. So a Bot is given the skills there are the first time it
+ * passes through here (at startup for the Bots that exist, at its first listing or run for one made
+ * later), that is written down, and it is never given them again. A skill written afterwards reaches
+ * it through the `installSkill` wrapper below, which gives each new skill to every Bot.
+ */
+async function giveEverySkillOnce(
+  store: Pick<Store, "grant">,
+  deps: PersonalDefaultsDeps,
+  bots: string[],
+): Promise<void> {
+  if (currentEdition() !== "personal") return;
+  for (const bot of bots) {
+    if (await deps.skillsGiven(bot)) continue;
+    const held = await deps.heldSkills(bot);
+    for (const slug of await deps.skills())
+      if (!held.has(slug)) await store.grant("skill", slug, bot, GRANTED_BY);
+    await deps.rememberSkillsGiven(bot);
+  }
+}
+
+/**
+ * At startup, in the personal edition: give each Bot that exists every skill, once. See
+ * {@link giveEverySkillOnce}.
+ */
+export async function ensurePersonalSkills(
+  store: Pick<Store, "grant">,
+  deps: PersonalDefaultsDeps,
+): Promise<void> {
+  await giveEverySkillOnce(store, deps, await deps.bots());
 }
 
 /** The apps every Bot holds every tool of: all of them in the personal edition, else Routines. */
@@ -264,8 +307,8 @@ export function withPersonalDefaults<S extends Store>(
 
   /*
    * A Bot made after startup gets what every Bot has the first time it runs: Routines in every
-   * edition, and every connected app in the personal one. What a run is offered is what this
-   * answers, so it is the one moment every Bot, new or old, passes through.
+   * edition, and every connected app and every skill in the personal one. What a run is offered is
+   * what this answers, so it is the one moment every Bot, new or old, passes through.
    */
   const list = store.listForAgent;
   store.listForAgent = async function (this: S, agentId: string) {
@@ -276,6 +319,7 @@ export function withPersonalDefaults<S extends Store>(
       [agentId],
       GRANTED_BY,
     );
+    await giveEverySkillOnce(this, deps, [agentId]);
     return list.call(this, agentId);
   } as S["listForAgent"];
 
@@ -336,6 +380,45 @@ export function personalDefaultsDeps(database: Database): PersonalDefaultsDeps {
         .from(mcpServers);
       return rows.map((row) => row.id);
     },
+    async skills() {
+      const rows = await database.select({ slug: skills.slug }).from(skills);
+      return rows.map((row) => row.slug);
+    },
+    async heldSkills(agentId) {
+      const rows = await database
+        .select({ ref: pluginGrants.ref })
+        .from(pluginGrants)
+        .where(
+          and(
+            eq(pluginGrants.kind, "skill"),
+            eq(pluginGrants.agentId, agentId),
+          ),
+        );
+      return new Set(rows.map((row) => row.ref));
+    },
+    /*
+     * One settings row per Bot rather than one list of them: two Bots listed at once would each read
+     * the list, add themselves and write it back, and one of them would be lost and given every skill
+     * again, switched-off ones included.
+     */
+    async skillsGiven(agentId) {
+      const [row] = await database
+        .select({ key: enterpriseSettings.key })
+        .from(enterpriseSettings)
+        .where(eq(enterpriseSettings.key, skillsGivenSetting(agentId)))
+        .limit(1);
+      return row !== undefined;
+    },
+    async rememberSkillsGiven(agentId) {
+      await database
+        .insert(enterpriseSettings)
+        .values({
+          key: skillsGivenSetting(agentId),
+          value: { value: true },
+          updatedBy: GRANTED_BY,
+        })
+        .onConflictDoNothing();
+    },
     async skillExists(slug) {
       const [row] = await database
         .select({ slug: skills.slug })
@@ -354,6 +437,11 @@ export function personalDefaultsDeps(database: Database): PersonalDefaultsDeps {
  * settings ignore this one.
  */
 export const DEFAULT_APPS_SETTING = "personal_default_apps";
+
+/** The settings row that says a Bot has been given every skill once. */
+export function skillsGivenSetting(agentId: string): string {
+  return `personal_skills_given:${agentId}`;
+}
 
 /** The memory above, from the database. */
 export function personalDefaultAppsMemory(
