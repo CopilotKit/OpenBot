@@ -25,6 +25,7 @@ import {
 import { createDatabase } from "../src/db/client";
 import { enterpriseSettings } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
+import { createSkillApprovalStore } from "../src/learning/approvals";
 import { personalLearningContainerId } from "../src/learning/personal-space";
 import { createLearningRuntime } from "../src/learning/runtime";
 import type { LearningSettingsStore } from "../src/learning/settings";
@@ -56,7 +57,8 @@ const auditStore = {
     audits.push(event);
   },
 };
-const store = createLearningSharingStore(database);
+const approvals = createSkillApprovalStore(database);
+const store = createLearningSharingStore(database, approvals);
 let invalidations = 0;
 let clock = 1_000_000;
 /** Two replicas' indexes over one database; only the first is told about changes made through its routes. */
@@ -873,5 +875,17 @@ describe("the open-Skill index", () => {
     expect(
       (await store.openSources()).some((source) => source.userId === grace),
     ).toBe(false);
+  });
+
+  test("a person-approved skill reaches others only after an admin approves sharing", async () => {
+    await store.setMode(grace, "open");
+    await approvals.recordApproval(grace, "grace-private", "person");
+    const withheldFor = async () =>
+      (await store.openSources()).find((source) => source.userId === grace)
+        ?.withheld;
+    expect(await withheldFor()).toContain("grace-private");
+    await approvals.requestSharing(grace, "grace-private");
+    await approvals.decideSharing(grace, "grace-private", "approved");
+    expect(await withheldFor()).not.toContain("grace-private");
   });
 });

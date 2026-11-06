@@ -20,6 +20,7 @@ import {
   skillSharingAllowed,
   skillSharingInSnapshot,
 } from "./admin/controls";
+import { fixSettings } from "./admin/settings-store";
 import {
   CoworkerUnavailableError,
   createActorAgentResolver,
@@ -171,7 +172,6 @@ import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
 import { setEdition } from "./edition";
-import { fixSettings } from "./admin/settings-store";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -187,6 +187,7 @@ import {
   observeIntelligenceAuthentication,
 } from "./intelligence-client";
 import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
+import { createSkillApprovalStore } from "./learning/approvals";
 import {
   createLearningAutoAssign,
   probeLearningContainer,
@@ -421,7 +422,11 @@ const personalLearningSpaces = createPersonalLearningSpaces({
         .limit(1)
     ).map((row) => row.name?.trim() || null)[0] ?? null,
 });
-const learningSharingStore = createLearningSharingStore(database);
+const skillApprovalStore = createSkillApprovalStore(database);
+const learningSharingStore = createLearningSharingStore(
+  database,
+  skillApprovalStore,
+);
 /** What everyone opened to every Bot, in memory: runs read this, never each person's space or the table. */
 const openSkillIndex = createOpenSkillIndex({
   read: () => learningSharingStore.openSources(),

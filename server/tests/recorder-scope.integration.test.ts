@@ -21,6 +21,7 @@ import {
   learningSkillSharing,
 } from "../src/db/schema/learning";
 import { skills } from "../src/db/schema/plugins";
+import { createSkillApprovalStore } from "../src/learning/approvals";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { createLearningSharingStore } from "../src/learning/sharing";
 import { createRecorderExtension } from "../src/recorder/wiring";
@@ -126,7 +127,10 @@ args[12] = auditStore;
 args[34] = {
   recorder,
   personalLearning: {
-    store: createLearningSharingStore(database),
+    store: createLearningSharingStore(
+      database,
+      createSkillApprovalStore(database),
+    ),
     skillsOf: async () => ({ skills: [] }),
     invalidate: () => {},
     sharingAllowed: async () => true,

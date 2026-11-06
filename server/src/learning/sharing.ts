@@ -5,6 +5,7 @@ import {
   learningOpenSkills,
   learningSkillSharing,
 } from "../db/schema/learning";
+import type { SkillApprovalStore } from "./approvals";
 import { personalLearningContainerId } from "./personal-space";
 
 /**
@@ -20,7 +21,10 @@ export type OpenSkillSource = {
 };
 
 /** The sharing choice a person made for the Skills in their own Learning space. */
-export function createLearningSharingStore(database: Database) {
+export function createLearningSharingStore(
+  database: Database,
+  approvals: Pick<SkillApprovalStore, "withheld">,
+) {
   return {
     /** Their choice (`closed` when they never made one) and every Skill they opened under `choose`. */
     async read(
@@ -123,6 +127,9 @@ export function createLearningSharingStore(database: Database) {
         }
         names.add(row.name);
       }
+      const withheld = await approvals.withheld(
+        sharing.map((row) => row.userId),
+      );
       return sharing.flatMap((row): OpenSkillSource[] => {
         const containerId = personalLearningContainerId(row.userId);
         if (row.mode === "open") {
@@ -131,7 +138,7 @@ export function createLearningSharingStore(database: Database) {
               userId: row.userId,
               containerId,
               skills: "all",
-              withheld: new Set<string>(),
+              withheld: withheld.get(row.userId) ?? new Set<string>(),
             },
           ];
         }
@@ -142,7 +149,7 @@ export function createLearningSharingStore(database: Database) {
                 userId: row.userId,
                 containerId,
                 skills: names,
-                withheld: new Set<string>(),
+                withheld: withheld.get(row.userId) ?? new Set<string>(),
               },
             ]
           : [];
