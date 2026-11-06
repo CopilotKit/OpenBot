@@ -87,11 +87,9 @@ function emptySentence(
   personal: boolean,
 ): string {
   if (personal) {
-    if (data.unavailable === "off")
-      return "Automatic Learning is turned off, so no Skills are learned yet. Turn it on in Admin.";
     return data.skills === null
-      ? "Couldn't read your Skills from Intelligence just now. Reload the page to try again."
-      : "No Skills learned from your recordings yet. Once there are, they show up here.";
+      ? "Couldn't read your skills from Intelligence just now. Reload the page to try again."
+      : "No skills learned from your recordings and conversations yet. Once there are, they show up here.";
   }
   if (data.unavailable === "off")
     return "An admin has turned off Automatic Learning, so no Skills are learned from your recordings.";
@@ -99,12 +97,12 @@ function emptySentence(
     return "Couldn't read your Skills from Intelligence just now. Your choice above still applies to them.";
   return mode === "choose"
     ? "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot."
-    : "No Skills learned from your recordings yet. Once there are, they show up here.";
+    : "No skills learned from your recordings yet. Once there are, they show up here.";
 }
 
 /** What the Your Skills section says about who draws on them, in the mode chosen. */
 const SKILLS_DESCRIPTION: Record<LearningSharingMode, string> = {
-  closed: "Only the Bots you use draw on these Skills.",
+  closed: "Only the Bots you use draw on these skills.",
   open: "Every Bot on OpenBot draws on these Skills.",
   choose: "Open a Skill to let every Bot on OpenBot use it.",
 };
@@ -146,7 +144,7 @@ export function LearningSharing() {
     return (
       <PageSection
         title="Your Skills"
-        description="Open a Skill to read what it does."
+        description="Open a skill to read what it does."
       >
         {data.skills === null || data.skills.length === 0 ? (
           <PageEmpty>{emptySentence(data, mode, true)}</PageEmpty>
