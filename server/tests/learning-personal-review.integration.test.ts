@@ -84,6 +84,8 @@ function review(options: {
   manage?: LearningManagement;
   recordingTitles?: PersonalLearningRouteDeps["recordingTitles"];
   bundles?: Record<string, { path: string; content: string }[]>;
+  containerSkills?: PersonalLearningRouteDeps["containerSkills"];
+  defaultTarget?: string;
 }) {
   const intelligence = fakeIntelligence("current", {
     containers: options.containers ?? [personalLearningContainerId(ada)],
@@ -98,7 +100,9 @@ function review(options: {
   );
   const settings: LearningSettings = {
     enabled: true,
-    defaultTarget: null,
+    defaultTarget: options.defaultTarget
+      ? { containerId: options.defaultTarget }
+      : null,
     agents: {},
     ...(options.personalReview
       ? { personalReview: options.personalReview }
@@ -119,6 +123,9 @@ function review(options: {
     store,
     approvals,
     skillsOf: async () => ({ skills: [] }),
+    ...(options.containerSkills
+      ? { containerSkills: options.containerSkills }
+      : {}),
     invalidate: () => {},
     sharingAllowed: async () => true,
     auditStore,
@@ -422,5 +429,72 @@ describe("Learn now on your own space", () => {
       (await learn(review({ personalReview: "people", withManage: false })))
         .status,
     ).toBe(503);
+  });
+});
+
+describe("Your Skills in the personal edition", () => {
+  const CONVERSATIONS = "conversations-space";
+  const skill = (name: string, description: string) => ({
+    name,
+    description,
+    files: [{ path: "SKILL.md", text: `# ${name}` }],
+  });
+  const spaces = new Map<string, ReturnType<typeof skill>[]>([
+    [personalLearningContainerId(ada), [skill("mine", "From a recording")]],
+    [
+      CONVERSATIONS,
+      [skill("mine", "Shadowed"), skill("chatty", "From a conversation")],
+    ],
+  ]);
+  const containerSkills: PersonalLearningRouteDeps["containerSkills"] = async (
+    id,
+  ) => {
+    const skills = spaces.get(id);
+    return skills ? { skills } : { unavailable: "unavailable" };
+  };
+
+  test("the personal edition's Your Skills include skills learned from conversations", async () => {
+    setEdition("personal");
+    const app = review({ containerSkills, defaultTarget: CONVERSATIONS });
+    const body = (await (await app.request("/")).json()) as {
+      skills: { name: string; description: string; sharing: string }[];
+    };
+    expect(body.skills.map((entry) => entry.name)).toEqual(["mine", "chatty"]);
+    expect(body.skills[0]?.description).toBe("From a recording");
+    expect(body.skills[1]).toMatchObject({
+      approvedBy: null,
+      sharing: "none",
+    });
+    const found = await app.request("/skills/chatty");
+    expect(found.status).toBe(200);
+    expect(
+      ((await found.json()) as { skill: { name: string } }).skill.name,
+    ).toBe("chatty");
+    expect((await app.request("/skills/nope")).status).toBe(404);
+  });
+
+  test("it says unavailable only when every space failed to read", async () => {
+    setEdition("personal");
+    const failing: PersonalLearningRouteDeps["containerSkills"] = async () => ({
+      unavailable: "unavailable",
+    });
+    const body = (await (
+      await review({
+        containerSkills: failing,
+        defaultTarget: CONVERSATIONS,
+      }).request("/")
+    ).json()) as { skills: unknown; unavailable?: string };
+    expect(body.skills).toBeNull();
+    expect(body.unavailable).toBe("unavailable");
+  });
+
+  test("the team edition keeps reading only the person's own space", async () => {
+    setEdition("team");
+    const body = (await (
+      await review({ containerSkills, defaultTarget: CONVERSATIONS }).request(
+        "/",
+      )
+    ).json()) as { skills: unknown[] };
+    expect(body.skills).toEqual([]);
   });
 });

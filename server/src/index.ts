@@ -3016,6 +3016,9 @@ const app = createApp(
         }
         return read.skills.find((skill) => skill.name === name) ?? null;
       },
+      containerSkills: (id) =>
+        copilotRuntime.learning?.containerSkills(id) ??
+        Promise.resolve({ unavailable: "unavailable" as const }),
       invalidate: () => openSkillIndex.invalidate(),
       sharingAllowed: skillSharingAllowed,
       manage: learningProbeIntelligence.experimental.learning,

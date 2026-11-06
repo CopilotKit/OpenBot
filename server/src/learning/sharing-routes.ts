@@ -45,6 +45,15 @@ export type PersonalLearningRouteDeps = {
     userId: string,
     name: string,
   ) => Promise<LearnedSkillContent | null>;
+  /**
+   * The Skills published in any one Learning space, read the way a run reads them. In the personal edition Your Skills
+   * also list what the person's Bots learned from conversations, so every space `scopesFor` names is read.
+   */
+  containerSkills?: (
+    containerId: string,
+  ) => Promise<
+    { skills: LearnedSkillContent[] } | { unavailable: "off" | "unavailable" }
+  >;
   /** Tells this replica's open-Skill index to read again; other replicas see the change within its TTL. */
   invalidate: () => void;
   /**
@@ -94,11 +103,69 @@ export function createPersonalLearningRoutes(
     await recordAuditEvent(deps.auditStore, event);
   };
 
+  /**
+   * The spaces Your Skills read from, in order, the person's own first; null outside the personal edition or without a
+   * way to read them, where Your Skills are the person's own space alone.
+   */
+  const skillSpaces = async (actor: AuthenticatedActor) => {
+    const containerSkills = deps.containerSkills;
+    if (currentEdition() !== "personal" || !containerSkills) return null;
+    const scopes = await deps.scopesFor(actor);
+    return { containerSkills, scopes };
+  };
+
   routes.get("/", async (context) => {
     const userId = context.var.actor.id;
+    const spaces = await skillSpaces(context.var.actor);
     const [sharing, read, sharingAllowed] = await Promise.all([
       deps.store.read(userId),
-      deps.skillsOf(userId),
+      spaces
+        ? Promise.all(
+            spaces.scopes.map(async (scope) => ({
+              scope,
+              read: await spaces
+                .containerSkills(scope.containerId)
+                .catch(() => ({ unavailable: "unavailable" as const })),
+            })),
+          ).then((reads) => {
+            const seen = new Set<string>();
+            const skills: {
+              name: string;
+              description: string;
+              own: boolean;
+            }[] = [];
+            for (const { scope, read: space } of reads) {
+              if (!("skills" in space)) continue;
+              for (const skill of space.skills) {
+                if (seen.has(skill.name)) continue;
+                seen.add(skill.name);
+                skills.push({
+                  name: skill.name,
+                  description: skill.description,
+                  own: scope.kind === "recordings",
+                });
+              }
+            }
+            if (skills.length > 0 || reads.some((r) => "skills" in r.read))
+              return { skills };
+            const first = reads[0]?.read;
+            return {
+              unavailable:
+                first && "unavailable" in first
+                  ? first.unavailable
+                  : ("unavailable" as const),
+            };
+          })
+        : deps.skillsOf(userId).then((own) =>
+            "skills" in own
+              ? {
+                  skills: own.skills.map((skill) => ({
+                    ...skill,
+                    own: true,
+                  })),
+                }
+              : own,
+          ),
       deps.sharingAllowed(),
     ]);
     const opened = new Set(sharing.openSkills);
@@ -109,9 +176,12 @@ export function createPersonalLearningRoutes(
             sharingAllowed,
             skills: await Promise.all(
               read.skills.map(async (skill) => {
-                const approval = await deps.approvals.get(userId, skill.name);
+                const approval = skill.own
+                  ? await deps.approvals.get(userId, skill.name)
+                  : null;
                 return {
-                  ...skill,
+                  name: skill.name,
+                  description: skill.description,
                   open: opened.has(skill.name),
                   approvedBy: approval?.approvedBy ?? null,
                   sharing: approval?.sharing ?? "none",
@@ -349,14 +419,33 @@ export function createPersonalLearningRoutes(
     }
   });
 
+  /** The first space with a Skill by that name; undefined when no space could be read and none had it. */
+  const findInSpaces = async (
+    spaces: NonNullable<Awaited<ReturnType<typeof skillSpaces>>>,
+    name: string,
+  ): Promise<LearnedSkillContent | null | undefined> => {
+    let anyRead = false;
+    for (const scope of spaces.scopes) {
+      const read = await spaces
+        .containerSkills(scope.containerId)
+        .catch(() => null);
+      if (!read || !("skills" in read)) continue;
+      anyRead = true;
+      const found = read.skills.find((skill) => skill.name === name);
+      if (found) return found;
+    }
+    return anyRead ? null : undefined;
+  };
+
   routes.get("/skills/:name", async (context) => {
     const name = context.req.param("name");
     if (!isLearnedSkillName(name)) {
       return context.json({ error: "Name a Skill to read." }, 400);
     }
-    const skill = await deps
-      .skillOf?.(context.var.actor.id, name)
-      .catch(() => undefined);
+    const spaces = await skillSpaces(context.var.actor);
+    const skill = spaces
+      ? await findInSpaces(spaces, name)
+      : await deps.skillOf?.(context.var.actor.id, name).catch(() => undefined);
     if (skill === undefined) {
       return context.json(
         {
