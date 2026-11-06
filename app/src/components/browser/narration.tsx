@@ -14,75 +14,29 @@ import type { NarrationProblem } from "@/lib/browser/narration";
 import type { NarrationChoice } from "./narration-choice";
 import type { NarrationControls } from "./use-narration";
 
-const GOES_ON = "Recording still works.";
+/** All narration ever says (David): it is on and capturing the voice, or it is off. */
+export const NARRATION_ON = "Narration is on. We're capturing your voice.";
+export const NARRATION_OFF = "Narration is off.";
 
-function languageName(language: string): string {
-  try {
-    return (
-      new Intl.DisplayNames(["en"], { type: "language" }).of(language) ??
-      language
-    );
-  } catch {
-    return language;
-  }
-}
-
-/** What the person is told when narration did not reach the Recorder: the server's own sentence for why, when it said
- * one, since that is what they can act on. */
-function lostNarrationSentence(error: string | null): string {
-  return error
-    ? `Some of what you said didn't reach the Recorder. ${error}`
-    : `Some of what you said didn't reach the Recorder. ${GOES_ON}`;
-}
-
-/** Why narration is off, and what the person can do about it, in one or two short sentences. */
+/** Narration that cannot hear the person is simply off. */
 export function narrationProblemSentence(
-  problem: NarrationProblem,
-  language: string,
+  _problem: NarrationProblem,
+  _language: string,
 ): string {
-  switch (problem) {
-    case "unsupported":
-      return `Narration isn't available in this browser, so what you say isn't recorded. ${GOES_ON}`;
-    case "on-device":
-      return `This browser can't turn speech into text on your computer, and OpenBot sends your voice nowhere else, so narration is off. ${GOES_ON}`;
-    case "speech-pack":
-      return `Your browser has to download its ${languageName(language)} speech recognition to your computer first. Turn narration on to download it. ${GOES_ON}`;
-    case "not-allowed":
-      return `OpenBot can't use your microphone, so narration is off. Allow the microphone for this site, then turn narration on again. ${GOES_ON}`;
-    case "no-microphone":
-      return `No microphone was found, or another app is using it. ${GOES_ON}`;
-    case "service":
-      return `This browser's speech recognition is off or unavailable, so narration is off. ${GOES_ON}`;
-    case "language":
-      return `This browser can't turn ${languageName(language)} speech into text on your computer, so narration is off. ${GOES_ON}`;
-    case "network":
-      return "Can't reach this browser's speech service. Narration tries again in a moment.";
-  }
+  return NARRATION_OFF;
 }
 
 /** What the person is told while their browser downloads the narration's language: narration starts by itself. */
-export function downloadingSentence(language: string): string {
-  return `Your browser is downloading its ${languageName(language)} speech recognition to your computer. Narration starts when it's ready.`;
+export function downloadingSentence(_language: string): string {
+  return NARRATION_OFF;
 }
 
 /** What the Desktop narration row says, from the Recorder's own report of whether it hears the person. */
 function nativeNarrationSentence(voice: LauncherState["voice"]): string {
-  switch (voice) {
-    case "listening":
-      return "Listening. Say what you're doing as you go.";
-    case "muted":
-      return "Muted in the Recorder, so what you say isn't recorded. Turn it on again from the Recorder's button in your browser's toolbar.";
-    case "unavailable":
-      return `The Recorder can't hear your microphone, so what you say isn't recorded. The Recorder's button in your browser's toolbar says why. ${GOES_ON}`;
-    // Nothing is being recorded yet, or the Recorder has not said.
-    default:
-      return "On. The Recorder hears your microphone while you record, so say what you're doing as you go.";
-  }
+  return voice === "muted" || voice === "unavailable"
+    ? NARRATION_OFF
+    : NARRATION_ON;
 }
-
-/** The narration row for a window on the person's desktop while nothing records. The switch says on or off, so the sentence stays the same. */
-export const NARRATION_DESCRIPTION =
-  "Talk through the task as you do it, and what you say is added to the recording.";
 
 /**
  * The narration row for a window on the person's desktop. While nothing records it is the person's choice, a switch that takes effect at
@@ -112,7 +66,7 @@ export function NativeNarrationRow({
         <ItemContent>
           <ItemTitle>Narration</ItemTitle>
           <ItemDescription className="line-clamp-none">
-            {NARRATION_DESCRIPTION}
+            {on ? NARRATION_ON : NARRATION_OFF}
           </ItemDescription>
         </ItemContent>
         <ItemActions>
@@ -231,23 +185,18 @@ export function NarrationNotice({
 }
 
 /**
- * What the person needs to know about narration, or null when it is simply on or off as they set it. `lost` is whether
- * to say that some of it did not reach the Recorder.
+ * Narration is off when the browser cannot hear the person; null when it is simply on or off as they set it.
  */
 function narrationNoticeSentence(
   narration: NarrationControls,
-  language: string,
-  lost = true,
+  _language: string,
 ): string | null {
-  return !narration.supported
-    ? narrationProblemSentence("unsupported", language)
-    : narration.status?.state === "failed"
-      ? narrationProblemSentence(narration.status.problem, language)
-      : narration.status?.state === "downloading"
-        ? downloadingSentence(language)
-        : lost && narration.lost
-          ? lostNarrationSentence(narration.lost.error)
-          : null;
+  return narration.supported &&
+    narration.on &&
+    narration.status?.state !== "failed" &&
+    narration.status?.state !== "downloading"
+    ? NARRATION_ON
+    : NARRATION_OFF;
 }
 
 /**
@@ -274,14 +223,12 @@ export function NarrationRow({
   onChange: (on: boolean) => void;
 }) {
   const labelId = useId();
-  const notice = narrationNoticeSentence(narration, language, recording);
+  const notice = narrationNoticeSentence(narration, language);
   const listening =
     !notice && recording && narration.status?.state === "listening";
   const sentence =
     notice ??
-    (listening
-      ? "Listening. Say what you're doing as you go."
-      : NARRATION_DESCRIPTION);
+    (narration.supported && narration.on ? NARRATION_ON : NARRATION_OFF);
   return (
     <Item size="sm">
       <ItemMedia variant="icon">

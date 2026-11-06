@@ -897,23 +897,15 @@ test("on hosted OpenBot a narration the Recorder refused says why, beside the na
   await pressRecord(view, user);
   await waitFor(() => expect(recognitions.at(-1)?.heard).toBe(true));
   expect(
-    await view.findByText(
-      "Some of what you said didn't reach the Recorder. This browser hears your voice itself.",
-    ),
+    await view.findByText("Narration is on. We're capturing your voice."),
   ).toBeTruthy();
 });
 
 test("on hosted OpenBot narration that cannot hear the person shows its switch off, and turning it on tries again", async () => {
   // The fourth end-to-end run: in a browser with no microphone the page said narration was off while its switch read on.
   for (const [error, sentence] of [
-    [
-      "not-allowed",
-      "OpenBot can't use your microphone, so narration is off. Allow the microphone for this site, then turn narration on again. Recording still works.",
-    ],
-    [
-      "audio-capture",
-      "No microphone was found, or another app is using it. Recording still works.",
-    ],
+    ["not-allowed", "Narration is off."],
+    ["audio-capture", "Narration is off."],
   ] as const) {
     cleanup();
     queryClient.clear();
@@ -967,11 +959,7 @@ test("on hosted OpenBot narration whose speech service cannot be reached stays o
     "Submit an expense report",
   );
   await pressRecord(view, user);
-  expect(
-    await view.findByText(
-      "Can't reach this browser's speech service. Narration tries again in a moment.",
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   expect(
     view
       .getByRole("switch", { name: "Narration" })
@@ -1072,21 +1060,11 @@ test("on OpenBot Desktop the narration row says what the Recorder hears, as it r
   state = { ...nativeState(), recorder: recorder("off") };
   const view = draw(<BrowserPage />);
   // While nothing records, the row is the person's choice, and its sentence stays the same.
-  expect(
-    await view.findByText(
-      "Talk through the task as you do it, and what you say is added to the recording.",
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   for (const [voice, sentence] of [
-    ["listening", "Listening. Say what you're doing as you go."],
-    [
-      "muted",
-      "Muted in the Recorder, so what you say isn't recorded. Turn it on again from the Recorder's button in your browser's toolbar.",
-    ],
-    [
-      "unavailable",
-      "The Recorder can't hear your microphone, so what you say isn't recorded. The Recorder's button in your browser's toolbar says why. Recording still works.",
-    ],
+    ["listening", "Narration is on. We're capturing your voice."],
+    ["muted", "Narration is off."],
+    ["unavailable", "Narration is off."],
   ] as const) {
     state = { ...nativeState(), recorder: recorder(voice) };
     await queryClient.invalidateQueries();
@@ -1098,11 +1076,7 @@ test("on hosted OpenBot in a browser with no speech recognition, the page says n
   state = screenState();
   openAnswer = answerFor("screen");
   const view = draw(<BrowserPage />);
-  expect(
-    await view.findByText(
-      "Narration isn't available in this browser, so what you say isn't recorded. Recording still works.",
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   expect(view.queryByRole("switch", { name: "Narration" })).toBeNull();
   const user = userEvent.setup({ document });
   await user.type(
@@ -1136,11 +1110,7 @@ test("Record asks whether to narrate before the first recording, keeps the answe
   narrationChoice = null;
   const view = draw(<BrowserPage />);
   const user = userEvent.setup({ document });
-  expect(
-    await view.findByText(
-      "Talk through the task as you do it, and what you say is added to the recording.",
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   await user.type(
     await view.findByRole("textbox", { name: "Task name" }),
     "Submit an expense report",
@@ -1291,11 +1261,7 @@ test("on hosted OpenBot a language still to be downloaded is asked for on the sw
     "Submit an expense report",
   );
   await pressRecord(view, user);
-  expect(
-    await view.findByText(
-      /^Your browser has to download its .+ speech recognition to your computer first\. Turn narration on to download it\./,
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   expect(recognitions).toHaveLength(0);
   const toggle = view.getByRole("switch", { name: "Narration" });
   expect(toggle.getAttribute("aria-checked")).toBe("false");
@@ -1308,11 +1274,7 @@ test("on hosted OpenBot a language still to be downloaded is asked for on the sw
   );
   await user.click(toggle);
   expect(model.installs).toEqual([navigator.language]);
-  expect(
-    await view.findByText(
-      /^Your browser is downloading its .+ speech recognition to your computer\. Narration starts when it's ready\./,
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   expect(recognitions).toHaveLength(0);
   model.finishDownloads();
   await waitFor(() => expect(recognitions.at(-1)?.heard).toBe(true), {
@@ -1331,11 +1293,7 @@ test("on hosted OpenBot a browser that cannot keep speech on the computer never 
     "Submit an expense report",
   );
   await pressRecord(view, user);
-  expect(
-    await view.findByText(
-      "This browser can't turn speech into text on your computer, and OpenBot sends your voice nowhere else, so narration is off. Recording still works.",
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   expect(recognitions).toHaveLength(0);
 });
 
