@@ -254,7 +254,10 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
     } catch (error) {
       if (error instanceof RangeError) {
         return context.json(
-          { error: "That page of recordings is not one." },
+          {
+            error:
+              "That page of recordings doesn't exist. Go back to the first page.",
+          },
           400,
         );
       }
