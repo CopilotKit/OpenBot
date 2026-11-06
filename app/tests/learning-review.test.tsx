@@ -201,3 +201,40 @@ test("says what to expect when nothing is waiting", async () => {
     ),
   ).toBeTruthy();
 });
+
+test("with people approving, the latest run shows and Learn now starts one", async () => {
+  review = body(true);
+  const first = review.sources[0];
+  if (first)
+    first.latestRun = {
+      id: "run-1",
+      status: "succeeded",
+      trigger: "manual",
+      proposals: 2,
+      insights: null,
+      failureCode: null,
+      createdAt: "2026-11-01T00:00:00Z",
+      startedAt: null,
+      completedAt: null,
+    };
+  const view = draw();
+  expect(
+    await view.findByText("Your recordings: latest run finished."),
+  ).toBeTruthy();
+  fireEvent.click(await view.findByRole("button", { name: "Learn now" }));
+  await waitFor(() =>
+    expect(posts).toEqual(["/api/settings/learning/runs?container=user-1"]),
+  );
+  expect(
+    await view.findByText(
+      "Learning started. New skills show up here when it finishes.",
+    ),
+  ).toBeTruthy();
+});
+
+test("with admins approving, there is no Learn now", async () => {
+  const view = draw();
+  await view.findByText("Waiting for an admin");
+  expect(view.queryByRole("button", { name: "Learn now" })).toBeNull();
+  expect(view.queryByText(/latest run/)).toBeNull();
+});

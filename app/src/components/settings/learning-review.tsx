@@ -1,4 +1,7 @@
-import type { LearningProposal } from "@openbot/shared/learning";
+import type {
+  LearningProposal,
+  LearningRunSummary,
+} from "@openbot/shared/learning";
 import { IconChevronRight, IconSparkles } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
@@ -8,6 +11,7 @@ import {
   PageSection,
 } from "@/components/layout/page-shell";
 import { ProposalDialog } from "@/components/learning/proposal-dialog";
+import { Button } from "@/components/ui/button";
 import {
   Item,
   ItemActions,
@@ -17,7 +21,10 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { reviewPersonalProposalMutationOptions } from "@/lib/learning/mutations";
+import {
+  reviewPersonalProposalMutationOptions,
+  startPersonalLearningRunMutationOptions,
+} from "@/lib/learning/mutations";
 import {
   personalProposalQueryOptions,
   personalReviewQueryOptions,
@@ -36,6 +43,16 @@ function operationLabel(proposal: LearningProposal): string {
   }
 }
 
+const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
+  queued: "queued",
+  freezing: "starting",
+  batching: "analyzing",
+  reducing: "analyzing",
+  finalizing: "finishing",
+  succeeded: "finished",
+  failed: "failed",
+};
+
 /**
  * Settings, Learning: the skills Learning proposed from the person's own recordings. Where people approve their own,
  * a row opens a dialog with Approve and Reject; where admins do, the same dialog is read-only.
@@ -44,6 +61,9 @@ export function LearningReview() {
   const review = useQuery(personalReviewQueryOptions());
   const decide = useMutation(
     reviewPersonalProposalMutationOptions(queryClient),
+  );
+  const learnNow = useMutation(
+    startPersonalLearningRunMutationOptions(queryClient),
   );
   const [open, setOpen] = useState<{ container: string; id: string } | null>(
     null,
@@ -108,6 +128,38 @@ export function LearningReview() {
         <PageEmpty icon={IconSparkles} title="Nothing to review">
           New proposals show up here after Learning analyses your recordings.
         </PageEmpty>
+      )}
+      {canReview &&
+        sources.map((source) => (
+          <div
+            className="mt-4 flex items-center justify-between gap-3"
+            key={source.containerId}
+          >
+            <p className="text-muted-foreground text-sm">
+              {source.latestRun
+                ? `${source.label}: latest run ${RUN_STATUS[source.latestRun.status]}.`
+                : `${source.label}: no run yet.`}
+            </p>
+            <Button
+              disabled={learnNow.isPending}
+              onClick={() => learnNow.mutate(source.containerId)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {learnNow.isPending ? "Starting…" : "Learn now"}
+            </Button>
+          </div>
+        ))}
+      {canReview && learnNow.isSuccess && (
+        <p className="mt-4 text-sm" role="status">
+          Learning started. New skills show up here when it finishes.
+        </p>
+      )}
+      {canReview && learnNow.error && (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {learnNow.error.message}
+        </p>
       )}
       {unreadable && (
         <p className="mt-4 text-destructive text-sm" role="alert">
