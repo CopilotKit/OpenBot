@@ -87,6 +87,11 @@ import {
   WorkspaceFileTooLargeError,
   WorkspacePathError,
 } from "./workspace";
+import {
+  createTerminalSockets,
+  TERMINAL_UNAVAILABLE,
+  type TerminalSocketData,
+} from "./terminal-socket";
 import { createWorkspaces } from "./workspaces";
 
 /**
@@ -304,6 +309,14 @@ const workspaces = createWorkspaces(
   process.env.WORKSPACE_DIR?.trim() || "/workspace",
   process.env.COMPUTER_SEPARATE_WORKSPACES?.trim().toLowerCase() === "on",
 );
+
+/** Each seat's live shell, as a terminal a person watches and, holding the wheel, types into. */
+const terminalSockets = createTerminalSockets<StreamData & TerminalSocketData>({
+  shellFor: async (seat) => (await workspaces.for(seat)).shell.terminal,
+  mayType: (seat) => sessions.for(seat).control.humanMayDrive(),
+  takeControlFirst: TAKE_CONTROL_FIRST,
+  describe,
+});
 
 /**
  * Who has the wheel, as a state machine in its own module.
@@ -941,7 +954,7 @@ async function applyInput(
   }
 }
 
-serve<StreamData>({
+serve<StreamData & TerminalSocketData>({
   port: PORT,
   ...(RUNTIME.hostname ? { hostname: RUNTIME.hostname } : {}),
   idleTimeout: 120,
@@ -952,7 +965,7 @@ serve<StreamData>({
    * page changes and input goes back over the same connection. See screencast.ts for why polling was
    * not good enough once a person had to type into this.
    */
-  websocket: {
+  websocket: terminalSockets.around({
     async open(ws) {
       const session = sessions.for(ws.data.botId);
       /*
@@ -1066,7 +1079,7 @@ serve<StreamData>({
       // map is meant to shrink in.
       await sessions.get(ws.data.botId)?.viewer.release(ws);
     },
-  },
+  }),
   async fetch(request, server) {
     const url = new URL(request.url);
 
@@ -1114,7 +1127,7 @@ serve<StreamData>({
       ? null
       : refusedHere(
           OWNER,
-          url.pathname === "/stream"
+          url.pathname === "/stream" || url.pathname === "/terminal"
             ? seatOf(request, url.searchParams).bot
             : requestBot,
         );
@@ -1172,6 +1185,30 @@ serve<StreamData>({
           return json({ error: "That is not a usable bot id." }, 400);
         }
         if (server.upgrade(request, { data: { botId: streamBotId } }))
+          return undefined as unknown as Response;
+        return json({ error: "Expected a WebSocket upgrade." }, 400);
+      }
+
+      /*
+       * The seat's live shell, as a terminal (live-shell.ts). Named in the query for the reason the
+       * stream is. A person's own browser has no shell, so its id is refused here. Where commands are
+       * turned off the socket still opens, to say so, which a refused upgrade could not.
+       */
+      if (url.pathname === "/terminal") {
+        const named = seatOf(request, url.searchParams);
+        if (named.seat === undefined)
+          return json({ error: "That is not a usable bot id." }, 400);
+        if (isPersonBrowserId(named.bot))
+          return json({ error: PERSONS_OWN_BROWSER }, 403);
+        if (
+          server.upgrade(request, {
+            data: {
+              botId: named.seat,
+              kind: "terminal" as const,
+              ...(RUNTIME.allowExec ? {} : { refused: TERMINAL_UNAVAILABLE }),
+            },
+          })
+        )
           return undefined as unknown as Response;
         return json({ error: "Expected a WebSocket upgrade." }, 400);
       }
@@ -1478,6 +1515,12 @@ serve<StreamData>({
         session.control.interrupt(
           "The computer stopped; the previous task was interrupted.",
         );
+        // Its shell too: stopping a computer stops what it was running.
+        workspaces
+          .existingShell(botId)
+          ?.terminal.restart(
+            "The computer stopped, so the shell ended. A new one starts when it's next used.",
+          );
         await botBrowser.settled(botId);
         return json({ stopped: true, wasRunning });
       }
@@ -1517,6 +1560,11 @@ serve<StreamData>({
         session.control.interrupt(
           "The computer was reset; the previous task was interrupted.",
         );
+        workspaces
+          .existingShell(botId)
+          ?.terminal.restart(
+            "The computer was reset, so the shell ended. A new one starts when it's next used.",
+          );
         await botBrowser.settled(botId);
         /*
          * And a new run, because the browser this session described is gone.

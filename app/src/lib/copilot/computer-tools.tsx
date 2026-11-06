@@ -1,7 +1,10 @@
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
-import { CommandOutput } from "@/components/computer/command-output";
+import {
+  commandStatus,
+  TerminalBlock,
+} from "@/components/computer/terminal-block";
 import { ComputerView } from "@/components/computer/computer-view";
 import { HelpRequestCard } from "@/components/computer/help-request-card";
 import { tryClient } from "@/lib/client";
@@ -70,6 +73,8 @@ type ComputerOutcome = {
   refused?: boolean;
   /** Handed to the person, who did it themselves. Done, and not by the Bot. */
   doneByPerson?: boolean;
+  /** The person said no to it. */
+  declined?: boolean;
   reason?: string;
   staleRefs?: boolean;
   /** The computer was still starting and the call was not performed. */
@@ -722,42 +727,38 @@ export function ComputerTools() {
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       /*
-       * The command on the line, its output behind the chevron.
-       *
-       * The line stays one line, because a transcript of a Bot working through twenty commands is
-       * unreadable if each one dumps a screenful. But the output has to be reachable: this ran on a
-       * machine holding somebody's logins, and "take the model's word for what it printed" is not an
-       * answer. The pane beside the screen shows the same thing without expanding anything.
+       * A terminal block: the prompt and the command, the end of what it printed (the rest folds
+       * away), and how it exited, clicking through to the live terminal in the Computer panel. This
+       * ran on a machine holding somebody's logins, so what it printed is always reachable here
+       * rather than taken on the model's word.
        */
-      const printed = outputOf(outcome as ToolOutcome);
-      const exit = typeof outcome.exitCode === "number" ? outcome.exitCode : 0;
-      // Nothing ran on the computer for a step the person did themselves, so there is no output to show.
       const byYou = byPerson(outcome);
+      const refused = outcome.refused === true;
       return (
-        <ToolLine
-          running={status !== "complete"}
-          label="Ran a command"
-          byYou={byYou}
-          detail={
-            outcome.refused === true
+        <TerminalBlock
+          command={typeof args?.command === "string" ? args.command : ""}
+          computerId={bot.current}
+          output={
+            refused
               ? outcomeForPerson(String(outcome.reason ?? ""))
-              : typeof args?.command === "string"
-                ? args.command
-                : undefined
+              : stillStarting(outcome)
+                ? STILL_STARTING_DETAIL
+                : outputOf(outcome as ToolOutcome)
           }
-          refused={outcome.refused === true}
-          failed={didNotWork(outcome) || exit !== 0}
-          notYet={stillStarting(outcome)}
-        >
-          {status === "complete" && !byYou ? (
-            <CommandOutput
-              output={printed}
-              exitCode={exit}
-              truncated={outcome.truncated === true}
-              timedOut={outcome.timedOut === true}
-            />
-          ) : null}
-        </ToolLine>
+          status={commandStatus({
+            running: status !== "complete",
+            starting: stillStarting(outcome),
+            refused,
+            declined: outcome.declined === true,
+            byYou,
+            ...(typeof outcome.exitCode === "number"
+              ? { exitCode: outcome.exitCode }
+              : {}),
+            timedOut: outcome.timedOut === true,
+            failed: didNotWork(outcome),
+          })}
+          truncated={outcome.truncated === true}
+        />
       );
     },
   });

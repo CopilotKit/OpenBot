@@ -86,8 +86,10 @@ describe.skipIf(!asked)(
   "request handoff through the actual computer HTTP dispatcher",
   () => {
     test("take cannot overtake admitted work; later mutations are refused, then freshness is mandatory", async () => {
+      // Long enough to still be running when the help request below has launched the browser, which
+      // takes about 300 ms cold: at 0.3 s the two raced and the request often found the work done.
       const running = post("/exec", {
-        command: "printf admitted > admitted; sleep 0.3",
+        command: "printf admitted > admitted; sleep 1.5",
         timeoutMs: 3000,
       });
       await until(() => Bun.file(join(root, "workspace", "admitted")).exists());

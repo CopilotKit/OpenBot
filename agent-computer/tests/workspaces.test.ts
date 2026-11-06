@@ -27,7 +27,9 @@ test("a computer serving many Bots gives each its own files", async () => {
 test("a command starts in its Bot's folder, with HOME there too", async () => {
   const workspaces = createWorkspaces(root, true, { PATH: process.env.PATH });
   const { shell } = await workspaces.for("sales");
-  const result = await shell.run({ command: 'pwd; echo "$HOME"' });
+  const result = await shell
+    .run({ command: 'pwd; echo "$HOME"' })
+    .finally(() => shell.dispose());
   // pwd reports the real path, which differs where the temporary directory is a symlink (macOS).
   const folder = await realpath(join(root, "computers", "sales"));
   const [cwd, home] = result.stdout.trim().split("\n");
@@ -40,6 +42,24 @@ test("a computer serving one Bot keeps its files where they were", async () => {
   const workspaces = createWorkspaces(root, false);
   const { files } = await workspaces.for("sales");
   expect((await files.read("notes.md")).text).toBe("from before");
+});
+
+test("two Bots sharing one folder each get a shell of their own", async () => {
+  // A computer that keeps one folder for every Bot still gives each its own live shell: a shell now
+  // keeps its state, and whoever holds a Bot's wheel types into that Bot's shell and no other.
+  const workspaces = createWorkspaces(root, false, { PATH: process.env.PATH });
+  const sales = (await workspaces.for("sales")).shell;
+  const support = (await workspaces.for("support")).shell;
+  try {
+    await sales.run({ command: "export WHO=sales" });
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: bash expands this, not JavaScript.
+    const other = await support.run({ command: 'echo "[${WHO:-}]"' });
+    expect(other.stdout.trim()).toBe("[]");
+    expect((await workspaces.for("sales")).shell).toBe(sales);
+  } finally {
+    sales.dispose();
+    support.dispose();
+  }
 });
 
 test("an id that is not a plain name never becomes a folder", () => {
