@@ -266,11 +266,11 @@ test("with people approving, the latest run shows and Learn now starts one", asy
   await waitFor(() =>
     expect(posts).toEqual(["/api/settings/learning/runs?container=user-1"]),
   );
-  expect(
-    await view.findByText(
-      "Learning started. New proposals show up here when it finishes.",
-    ),
-  ).toBeTruthy();
+  const busy = await view.findByRole("button", {
+    name: "Learning in progress…",
+  });
+  expect((busy as HTMLButtonElement).disabled).toBe(true);
+  expect(view.queryByText(/Learning started/)).toBeNull();
 });
 
 const run = (id: string, createdAt: string) => ({
@@ -540,19 +540,19 @@ test("a Learn now failure in one group does not show in another", async () => {
   fireEvent.click(buttons[0] as HTMLElement);
   expect((await view.findByRole("alert")).textContent).toBe("Nope");
   fireEvent.click(view.getAllByRole("button", { name: "Learn now" })[1]!);
-  await waitFor(() => expect(view.getByText(/Learning started/)).toBeTruthy());
-  // Group b's start does not wipe or borrow group a's failure.
+  await view.findByRole("button", { name: "Learning in progress…" });
+  // Group b's start does not wipe or borrow group a's failure, and a's button comes back.
   expect(view.getByRole("alert").textContent).toBe("Nope");
-  expect(view.getAllByText(/Learning started/)).toHaveLength(1);
+  expect(view.getAllByRole("button", { name: "Learn now" })).toHaveLength(1);
 });
 
-test("Learning started goes away once the run it started has finished", async () => {
+test("Learn now stays disabled until the run it started has finished", async () => {
   review = body(true);
   const first = review.sources[0];
   if (first) first.latestRun = run("run-1", "2026-11-01T00:00:00Z");
   const view = draw();
   fireEvent.click(await view.findByRole("button", { name: "Learn now" }));
-  await view.findByText(/Learning started/);
+  await view.findByRole("button", { name: "Learning in progress…" });
   const next = review.sources[0];
   if (next)
     next.latestRun = {
@@ -561,11 +561,35 @@ test("Learning started goes away once the run it started has finished", async ()
     };
   await queryClient.invalidateQueries({ queryKey: ["learning", "review"] });
   await view.findByText("Latest run analyzing.");
-  expect(view.getByText(/Learning started/)).toBeTruthy();
+  expect(
+    (
+      view.getByRole("button", {
+        name: "Learning in progress…",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
   if (next) next.latestRun = run("run-2", "2026-11-02T00:00:00Z");
   await queryClient.invalidateQueries({ queryKey: ["learning", "review"] });
   await view.findByText("Latest run finished.");
-  expect(view.queryByText(/Learning started/)).toBeNull();
+  expect(
+    (view.getByRole("button", { name: "Learn now" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(false);
+});
+
+test("a run already going shows Learning in progress, disabled", async () => {
+  review = body(true);
+  const first = review.sources[0];
+  if (first)
+    first.latestRun = {
+      ...run("run-1", "2026-11-01T00:00:00Z"),
+      status: "queued",
+    };
+  const view = draw();
+  const busy = await view.findByRole("button", {
+    name: "Learning in progress…",
+  });
+  expect((busy as HTMLButtonElement).disabled).toBe(true);
 });
 
 test("a source that failed to read still alerts next to one that is unavailable", async () => {

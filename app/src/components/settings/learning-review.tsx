@@ -62,34 +62,28 @@ type StartState = {
   error: string | null;
 };
 
-/** What Learn now says for one group: that it started until its run finishes, or why it couldn't. */
-function GroupNotices({
-  group,
-  state,
-}: {
-  group: { latestRun: LearningRunSummary | null };
-  state: StartState | undefined;
-}) {
-  if (!state || state.pending) return null;
+/** Whether a run is going for one group: one it started and has not seen finish, or one the review shows running. */
+function learningInProgress(
+  group: { latestRun: LearningRunSummary | null },
+  state: StartState | undefined,
+): boolean {
+  if (state?.pending) return true;
   const run = group.latestRun;
-  // A newer run than the one there was at the click, and it is over: the notice has done its job.
-  const finished =
-    run !== null &&
-    run.id !== state.started?.from &&
-    (run.status === "succeeded" || run.status === "failed");
+  const running =
+    run !== null && run.status !== "succeeded" && run.status !== "failed";
+  if (running) return true;
+  // A newer run than the one there was at the click, and it is over: the run it started has finished.
+  const finished = run !== null && run.id !== state?.started?.from;
+  return state?.started != null && !finished;
+}
+
+/** Why Learn now couldn't start Learning for one group. */
+function GroupError({ state }: { state: StartState | undefined }) {
+  if (!state || state.pending || !state.error) return null;
   return (
-    <>
-      {state.started && !finished && (
-        <p className="mt-4 text-sm" role="status">
-          Learning started. New proposals show up here when it finishes.
-        </p>
-      )}
-      {state.error && (
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          {state.error}
-        </p>
-      )}
-    </>
+    <p className="mt-4 text-destructive text-sm" role="alert">
+      {state.error}
+    </p>
   );
 }
 
@@ -148,6 +142,26 @@ export function LearningReview() {
       queryClient.invalidateQueries({ queryKey: learningKeys.personal });
     previousWaiting.current = waitingCount;
   }, [waitingCount]);
+  // A run Learn now started may not be listed at once; read the review again until it is, so the button comes back.
+  const awaitingRun = Object.entries(starting).some(([label, state]) => {
+    if (state.started === null) return false;
+    const runs = (review.data?.sources ?? [])
+      .filter((source) => source.label === label)
+      .map((source) => source.latestRun)
+      .filter((run) => run !== null);
+    const latest = runs.reduce<LearningRunSummary | null>(
+      (newest, run) =>
+        !newest || run.createdAt > newest.createdAt ? run : newest,
+      null,
+    );
+    return latest === null || latest.id === state.started.from;
+  });
+  const refetchReview = review.refetch;
+  useEffect(() => {
+    if (!awaitingRun) return;
+    const timer = setInterval(() => void refetchReview(), 10_000);
+    return () => clearInterval(timer);
+  }, [awaitingRun, refetchReview]);
   if (review.isPending) return null;
   if (review.error) {
     return (
@@ -276,14 +290,17 @@ export function LearningReview() {
                 {canReview && (
                   <ItemActions>
                     <Button
-                      disabled={starting[group.label]?.pending === true}
+                      disabled={learningInProgress(
+                        group,
+                        starting[group.label],
+                      )}
                       onClick={() => learnNowFor(group)}
                       size="sm"
                       type="button"
                       variant="outline"
                     >
-                      {starting[group.label]?.pending
-                        ? "Starting…"
+                      {learningInProgress(group, starting[group.label])
+                        ? "Learning in progress…"
                         : "Learn now"}
                     </Button>
                   </ItemActions>
@@ -318,9 +335,7 @@ export function LearningReview() {
                 </Fragment>
               ))}
             </PageRows>
-            {canReview && (
-              <GroupNotices group={group} state={starting[group.label]} />
-            )}
+            {canReview && <GroupError state={starting[group.label]} />}
           </Fragment>
         ))}
       {showList && !anyWaiting && !unreadable && !unavailable && (
