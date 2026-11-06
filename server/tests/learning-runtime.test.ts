@@ -244,31 +244,40 @@ describe("Automatic Learning runtime", () => {
 test("Admin can clear an environment-seeded pin and follow latest", async () => {
   const previous = process.env.CPK_INTELLIGENCE_SKILLS_REVISION;
   try {
+    // The admin cleared the pin the environment seeded, so the saved target names no revision.
     process.env.CPK_INTELLIGENCE_SKILLS_REVISION = "r1";
-    const captured = {
-      containerId: "openbot",
-      revision: process.env.CPK_INTELLIGENCE_SKILLS_REVISION,
-    };
-    clearLearningRevisionFallback();
     const f = fixture();
-    await f.store.write({ enabled: true, defaultTarget: captured, agents: {} });
     await f.store.write({
       enabled: true,
       defaultTarget: { containerId: "openbot" },
       agents: {},
     });
-    let requestedRevision: string | undefined;
+    const requested: (string | undefined)[] = [];
     f.client.getLearnedSkillsSnapshot = async (request) => {
-      requestedRevision = request.revision;
-      return skillSnapshot("r2");
+      requested.push(request.revision);
+      return skillSnapshot(request.revision === "r1" ? "r1" : "r2");
     };
-    const invocation = await createLearningRuntime({
+    // While the variable is set, the SDK's registry falls back to it and pins the old revision anyway.
+    const pinned = await createLearningRuntime({
       client: f.client,
       store: f.store,
     }).acquire("bot");
-    expect(requestedRevision).toBeUndefined();
+    expect(requested).toEqual(["r1"]);
     expect(
-      await invocation?.execute("copilotkit_load_skill", {
+      await pinned?.execute("copilotkit_load_skill", {
+        skill_name: "public-answer",
+      }),
+    ).toContain("guidance r1");
+
+    clearLearningRevisionFallback();
+    expect(process.env.CPK_INTELLIGENCE_SKILLS_REVISION).toBeUndefined();
+    const latest = await createLearningRuntime({
+      client: f.client,
+      store: f.store,
+    }).acquire("bot");
+    expect(requested).toEqual(["r1", undefined]);
+    expect(
+      await latest?.execute("copilotkit_load_skill", {
         skill_name: "public-answer",
       }),
     ).toContain("guidance r2");
