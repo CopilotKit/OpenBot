@@ -5,9 +5,13 @@ import {
   chatModelIds,
   createModelCatalogue,
   createModelRoutes,
+  isModelUnavailableMessage,
+  type ModelOption,
   modelLabel,
   modelsUrl,
   modelVendor,
+  REFRESH_MS,
+  reportModelRejected,
 } from "../src/model-catalogue";
 
 const KEY = "sk-proj-not-a-real-key-0123456789";
@@ -170,6 +174,598 @@ describe("where the listing is read from", () => {
       modelsUrl("anthropic", { ANTHROPIC_BASE_URL: "https://proxy.test/v1" }),
     ).toBe("https://proxy.test/v1/models?limit=1000");
   });
+
+  test("Google's compatibility API, which ends in its own version path", () => {
+    expect(
+      modelsUrl("openai", {
+        OPENAI_BASE_URL:
+          "https://generativelanguage.googleapis.com/v1beta/openai/",
+      }),
+    ).toBe("https://generativelanguage.googleapis.com/v1beta/openai/models");
+  });
+});
+
+/*
+ * The listings below are the providers' own answers, captured on 2026-11-05 from OpenAI's, Anthropic's,
+ * Google's and xAI's model endpoints, and models.dev's `api.json` cut down to those vendors' models.
+ * See tests/fixtures/model-listings/.
+ */
+const FIXTURES = `${import.meta.dir}/fixtures/model-listings/`;
+const fixture = (name: string) => Bun.file(FIXTURES + name).json();
+const MODELS_DEV = "https://models.dev/api.json";
+
+/**
+ * The web as the catalogue sees it: each URL answers what its owner answers, and every request is
+ * counted. A route can be swapped mid-test, which is how a provider ships or retires a model.
+ */
+function web(routes: Record<string, unknown>) {
+  const calls: { url: string; headers: Record<string, string> }[] = [];
+  const answers = new Map(Object.entries(routes));
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    const href = String(url);
+    calls.push({
+      url: href,
+      headers: (init?.headers ?? {}) as Record<string, string>,
+    });
+    const answer = answers.get(href);
+    if (answer === undefined) return new Response("not found", { status: 404 });
+    if (answer instanceof Response) return answer.clone();
+    return Response.json(answer);
+  }) as typeof fetch;
+  return {
+    fetcher,
+    calls,
+    set: (url: string, answer: unknown) => answers.set(url, answer),
+    asked: (url: string) => calls.filter((call) => call.url === url).length,
+  };
+}
+
+const efforts = (catalogue: { models: ModelOption[] }, id: string) =>
+  catalogue.models.find((model) => model.id === id);
+
+describe("the default and the thinking levels, from the providers' own data", () => {
+  test("OpenAI: the middle of the current line is GPT-6.1 Terra, and models.dev says how each thinks", async () => {
+    const { fetcher } = web({
+      "https://api.openai.com/v1/models": await fixture("openai-models.json"),
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    const catalogue = createModelCatalogue({
+      // The configured model is stale on purpose: the middle replaces it.
+      model: { provider: "openai", defaultModel: "gpt-5.5" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+    });
+    const read = await catalogue.read();
+    expect(read.source).toBe("openai");
+    expect(read.default).toBe("gpt-6.1-terra");
+    expect(read.models[0]?.id).toBe("gpt-6.1-terra");
+    expect(efforts(read, "gpt-6.1-terra")).toEqual({
+      id: "gpt-6.1-terra",
+      label: "GPT-6.1 Terra",
+      vendor: "openai",
+      efforts: ["none", "low", "medium", "high", "xhigh", "max"],
+    });
+    // GPT-6.1 Sol takes no `none`; GPT-4o is not a reasoning model and offers no effort at all.
+    expect(efforts(read, "gpt-6.1-sol")?.efforts).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(efforts(read, "gpt-4o")).toEqual({
+      id: "gpt-4o",
+      label: "GPT-4o",
+      vendor: "openai",
+    });
+    // Past its shutdown date in OpenAI's own listing would drop it; image, audio and codex never chat.
+    const ids = read.models.map((model) => model.id);
+    expect(ids).not.toContain("gpt-image-2");
+    expect(ids).not.toContain("gpt-realtime-2");
+    expect(ids).not.toContain("gpt-5.3-codex");
+  });
+
+  test("Anthropic: Sonnet is the middle line, and its efforts come from Anthropic's own listing", async () => {
+    const { fetcher, calls } = web({
+      "https://api.anthropic.com/v1/models?limit=1000": await fixture(
+        "anthropic-models.json",
+      ),
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    const catalogue = createModelCatalogue({
+      model: { provider: "anthropic", defaultModel: "claude-sonnet-4-6" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+    });
+    const read = await catalogue.read();
+    expect(read.source).toBe("anthropic");
+    expect(read.default).toBe("claude-sonnet-5-5");
+    expect(efforts(read, "claude-sonnet-5-5")).toEqual({
+      id: "claude-sonnet-5-5",
+      label: "Claude Sonnet 5.5",
+      vendor: "anthropic",
+      efforts: ["low", "medium", "high", "xhigh", "max"],
+    });
+    // Anthropic says Sonnet 4.6 takes no `xhigh`, and Haiku 4.5 no effort at all.
+    expect(efforts(read, "claude-sonnet-4-6")?.efforts).toEqual([
+      "low",
+      "medium",
+      "high",
+      "max",
+    ]);
+    expect(efforts(read, "claude-haiku-4-5-20251001")).toEqual({
+      id: "claude-haiku-4-5-20251001",
+      label: "Claude Haiku 4.5",
+      vendor: "anthropic",
+    });
+    const asked = calls.find((call) => call.url.includes("anthropic.com"));
+    expect(asked?.headers["x-api-key"]).toBe(KEY);
+    expect(asked?.headers["anthropic-version"]).toBe("2023-06-01");
+  });
+
+  test("Google, through its OpenAI-compatible API: Flash is the middle, and what cannot chat is left out", async () => {
+    const base = "https://generativelanguage.googleapis.com/v1beta/openai/";
+    const { fetcher } = web({
+      [`${base}models`]: await fixture("gemini-openai-models.json"),
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "gemini-2.5-flash" },
+      apiKey: async () => KEY,
+      environment: { OPENAI_BASE_URL: base, BOT_MODEL: "gemini-2.5-flash" },
+      fetch: fetcher,
+    });
+    const read = await catalogue.read();
+    expect(read.source).toBe("google");
+    expect(read.default).toBe("gemini-3.8-flash");
+    expect(efforts(read, "gemini-3.8-flash")).toEqual({
+      id: "gemini-3.8-flash",
+      label: "Gemini 3.8 Flash",
+      vendor: "google",
+      efforts: ["low", "medium", "high"],
+    });
+    const ids = read.models.map((model) => model.id);
+    // Google's own `models/` prefix is dropped: the bare name is what a run sends.
+    expect(ids.every((id) => !id.startsWith("models/"))).toBe(true);
+    for (const never of [
+      "gemini-2.5-flash-preview-tts",
+      "gemini-3.1-flash-image",
+      "lyria-3.5",
+      "gemini-embedding-2",
+      "gemini-3.8-live",
+      "gemini-robotics-er-2-preview",
+      "deep-research-preview-04-2026",
+      "antigravity-preview-latest",
+      "nano-banana-pro-preview",
+    ])
+      expect(ids).not.toContain(never);
+  });
+
+  test("xAI: its own listing says each model's efforts and default effort", async () => {
+    const { fetcher, calls } = web({
+      "https://api.x.ai/v1/language-models": await fixture(
+        "xai-language-models.json",
+      ),
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "grok-4.5" },
+      apiKey: async () => KEY,
+      environment: {
+        OPENAI_BASE_URL: "https://api.x.ai/v1",
+        BOT_MODEL: "grok-4.5",
+      },
+      fetch: fetcher,
+    });
+    const read = await catalogue.read();
+    expect(read.source).toBe("xai");
+    // One current line (Grok), so its newest.
+    expect(read.default).toBe("grok-4.7");
+    expect(efforts(read, "grok-4.7")).toEqual({
+      id: "grok-4.7",
+      label: "Grok 4.7",
+      vendor: "xai",
+      efforts: ["low", "medium", "high", "xhigh"],
+      defaultEffort: "high",
+    });
+    expect(efforts(read, "grok-4.3")).toMatchObject({
+      efforts: ["none", "low", "medium", "high", "xhigh"],
+      defaultEffort: "low",
+    });
+    const ids = read.models.map((model) => model.id);
+    expect(ids).not.toContain("grok-imagine-video-1.5");
+    expect(ids).not.toContain("grok-4.20-multi-agent-0309");
+    expect(
+      calls.find((call) => call.url.includes("x.ai"))?.headers.authorization,
+    ).toBe(`Bearer ${KEY}`);
+  });
+
+  test("a ChatGPT plan lists what its harness says the plan can use, with the plan's own efforts", async () => {
+    const harness = "http://agent-harness:4206/";
+    const { fetcher, calls } = web({
+      "http://agent-harness:4206/models": {
+        object: "list",
+        data: [
+          {
+            id: "gpt-6.1-terra",
+            label: "GPT-6.1 Terra",
+            efforts: ["low", "medium", "high", "xhigh"],
+            default_effort: "medium",
+            priority: 1,
+          },
+          {
+            id: "gpt-6.1-sol",
+            label: "GPT-6.1 Sol",
+            efforts: ["low", "medium", "high", "xhigh"],
+            default_effort: "medium",
+            priority: 2,
+          },
+          {
+            id: "gpt-6-luna",
+            label: "GPT-6 Luna",
+            efforts: ["low", "medium", "high"],
+            default_effort: "low",
+            priority: 3,
+          },
+        ],
+      },
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    const catalogue = createModelCatalogue({
+      model: {
+        provider: "openai",
+        defaultModel: "gpt-5.5",
+        plan: {
+          provider: "chatgpt",
+          endpoint: new URL(harness),
+          token: "managed-token",
+        },
+      },
+      apiKey: async () => null,
+      environment: {},
+      fetch: fetcher,
+    });
+    const read = await catalogue.read();
+    expect(read.source).toBe("chatgpt");
+    // Never gpt-5.5, which the plan does not offer: the middle of what it does.
+    expect(read.default).toBe("gpt-6.1-terra");
+    expect(read.models.map((model) => model.id)).not.toContain("gpt-5.5");
+    expect(efforts(read, "gpt-6-luna")).toMatchObject({
+      efforts: ["low", "medium", "high"],
+      defaultEffort: "low",
+    });
+    expect(
+      calls.find((call) => call.url.includes("agent-harness"))?.headers[
+        "x-openbot-agent-token"
+      ],
+    ).toBe("managed-token");
+    // A run on the default is sent the plan's model, never the stale configured one.
+    expect(await catalogue.choose(null)).toEqual({
+      model: "gpt-6.1-terra",
+      listed: true,
+    });
+  });
+
+  test("a Claude plan is listed with its own token, the way Claude Code sends it", async () => {
+    const { fetcher, calls } = web({
+      "https://api.anthropic.com/v1/models?limit=1000": await fixture(
+        "anthropic-models.json",
+      ),
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    const catalogue = createModelCatalogue({
+      model: {
+        provider: "anthropic",
+        defaultModel: "claude-sonnet-5-5",
+        plan: {
+          provider: "claude",
+          endpoint: new URL("http://agent-harness:4206/model"),
+          token: "plan-oauth-token",
+        },
+      },
+      apiKey: async () => null,
+      environment: {},
+      fetch: fetcher,
+    });
+    expect((await catalogue.read()).default).toBe("claude-sonnet-5-5");
+    const asked = calls.find((call) => call.url.includes("anthropic.com"));
+    expect(asked?.headers.authorization).toBe("Bearer plan-oauth-token");
+    expect(asked?.headers["anthropic-beta"]).toBe("oauth-2025-04-20");
+  });
+
+  test("a model nothing describes yet is still listed, on its own default effort", async () => {
+    const listing = await fixture("openai-models.json");
+    listing.data.push({
+      id: "gpt-7-nova",
+      object: "model",
+      created: 1_800_000_000,
+      owned_by: "system",
+    });
+    const { fetcher } = web({
+      "https://api.openai.com/v1/models": listing,
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "gpt-5.5" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+    });
+    const read = await catalogue.read();
+    expect(read.models[0]).toEqual({
+      id: "gpt-7-nova",
+      label: "GPT-7 Nova",
+      vendor: "openai",
+    });
+    // With no price it cannot be placed in the line, so the default stays where the data puts it.
+    expect(read.default).toBe("gpt-6.1-terra");
+    // Picked with an effort it does not declare, none is sent.
+    expect(
+      await catalogue.choose({ model: "gpt-7-nova", effort: "high" }),
+    ).toEqual({ model: "gpt-7-nova", listed: true });
+  });
+
+  test("without models.dev the provider's own data still applies, and the default is the configured model", async () => {
+    const { fetcher } = web({
+      "https://api.openai.com/v1/models": await fixture("openai-models.json"),
+      [MODELS_DEV]: new Response("unavailable", { status: 503 }),
+    });
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "gpt-6.1-terra" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+      log: () => undefined,
+    });
+    const read = await catalogue.read();
+    expect(read.default).toBe("gpt-6.1-terra");
+    expect(read.choosable).toBe(true);
+    expect(efforts(read, "gpt-6.1-terra")).toEqual({
+      id: "gpt-6.1-terra",
+      label: "GPT-6.1 Terra",
+      vendor: "openai",
+    });
+  });
+
+  test("models.dev can be turned off, and is then never asked", async () => {
+    const { fetcher, asked } = web({
+      "https://api.x.ai/v1/language-models": await fixture(
+        "xai-language-models.json",
+      ),
+    });
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "grok-4.7" },
+      apiKey: async () => KEY,
+      environment: {
+        OPENAI_BASE_URL: "https://api.x.ai/v1",
+        BOT_MODEL: "grok-4.7",
+        OPENBOT_MODEL_CAPABILITIES_URL: "off",
+      },
+      fetch: fetcher,
+    });
+    const read = await catalogue.read();
+    expect(asked(MODELS_DEV)).toBe(0);
+    // xAI's own listing still says how Grok thinks.
+    expect(efforts(read, "grok-4.7")?.defaultEffort).toBe("high");
+  });
+});
+
+describe("a run's model and effort", () => {
+  async function openAI() {
+    const { fetcher } = web({
+      "https://api.openai.com/v1/models": await fixture("openai-models.json"),
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    return createModelCatalogue({
+      model: { provider: "openai", defaultModel: "gpt-5.5" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: fetcher,
+    });
+  }
+
+  test("nothing picked: the default, and no effort, so the model thinks on its own default", async () => {
+    expect(await (await openAI()).choose(null)).toEqual({
+      model: "gpt-6.1-terra",
+      listed: true,
+    });
+  });
+
+  test("a pick and an effort the model takes are used", async () => {
+    expect(
+      await (await openAI()).choose({ model: "gpt-6.1-sol", effort: "xhigh" }),
+    ).toEqual({ model: "gpt-6.1-sol", effort: "xhigh", listed: true });
+  });
+
+  test("an effort the model does not take is never sent", async () => {
+    // GPT-6.1 Sol takes no `none`, and GPT-4o takes no effort at all.
+    expect(
+      await (await openAI()).choose({ model: "gpt-6.1-sol", effort: "none" }),
+    ).toEqual({ model: "gpt-6.1-sol", listed: true });
+    expect(
+      await (await openAI()).choose({ model: "gpt-4o", effort: "high" }),
+    ).toEqual({ model: "gpt-4o", listed: true });
+  });
+
+  test("a model no longer offered falls back to the default, with an effort only if the default takes it", async () => {
+    expect(
+      await (await openAI()).choose({ model: "gpt-4-0613", effort: "max" }),
+    ).toEqual({ model: "gpt-6.1-terra", effort: "max", listed: true });
+  });
+});
+
+describe("keeping the list current without a release", () => {
+  const LISTING = "https://api.openai.com/v1/models";
+
+  async function provider() {
+    const listing = await fixture("openai-models.json");
+    const site = web({
+      [LISTING]: listing,
+      [MODELS_DEV]: await fixture("models-dev-api.json"),
+    });
+    let clock = 1_000_000_000_000;
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "gpt-5.5" },
+      apiKey: async () => KEY,
+      environment: {},
+      fetch: site.fetcher,
+      now: () => clock,
+      log: () => undefined,
+    });
+    return {
+      site,
+      listing,
+      catalogue,
+      advance: (ms: number) => {
+        clock += ms;
+      },
+    };
+  }
+
+  test("a run or a picker never asks the provider: one read at the start, then only the schedule", async () => {
+    const { site, catalogue, advance } = await provider();
+    await Promise.all([catalogue.read(), catalogue.read()]);
+    for (let message = 0; message < 50; message += 1) {
+      advance(60_000);
+      await catalogue.choose({ model: "gpt-6.1-sol", effort: "high" });
+      await catalogue.read();
+    }
+    // Fifty minutes of messages: still the one read.
+    expect(site.asked(LISTING)).toBe(1);
+    expect(site.asked(MODELS_DEV)).toBe(1);
+  });
+
+  test("a new model appears and a retired one disappears at the next refresh, and the default follows", async () => {
+    const { site, listing, catalogue, advance } = await provider();
+    const before = await catalogue.read();
+    expect(before.models.map((model) => model.id)).toContain("gpt-6.1-terra");
+    expect(before.default).toBe("gpt-6.1-terra");
+
+    // OpenAI ships GPT-6.2 Terra and retires GPT-6.1 Terra.
+    site.set(LISTING, {
+      ...listing,
+      data: [
+        ...listing.data.filter(
+          (model: { id: string }) => model.id !== "gpt-6.1-terra",
+        ),
+        {
+          id: "gpt-6.2-terra",
+          object: "model",
+          created: 1_793_000_000,
+          owned_by: "system",
+        },
+      ],
+    });
+    const models = await fixture("models-dev-api.json");
+    models.openai.models["gpt-6.2-terra"] = {
+      ...models.openai.models["gpt-6.1-terra"],
+      id: "gpt-6.2-terra",
+      name: "GPT-6.2 Terra",
+      release_date: "2026-11-04",
+    };
+    site.set(MODELS_DEV, models);
+
+    // Not before the schedule.
+    advance(REFRESH_MS / 2);
+    expect((await catalogue.read()).default).toBe("gpt-6.1-terra");
+    // The schedule's refresh, through the same path the timer takes.
+    advance(REFRESH_MS);
+    await catalogue.refresh();
+
+    const after = await catalogue.read();
+    const ids = after.models.map((model) => model.id);
+    expect(ids).toContain("gpt-6.2-terra");
+    expect(ids).not.toContain("gpt-6.1-terra");
+    expect(after.default).toBe("gpt-6.2-terra");
+    expect(efforts(after, "gpt-6.2-terra")?.efforts).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    // A conversation still on the retired model now runs on the default.
+    expect(
+      await catalogue.choose({ model: "gpt-6.1-terra", effort: "max" }),
+    ).toEqual({ model: "gpt-6.2-terra", effort: "max", listed: true });
+  });
+
+  test("a model past the shutdown date OpenAI lists drops out on its own", async () => {
+    const { site, listing, catalogue } = await provider();
+    site.set(LISTING, {
+      ...listing,
+      data: listing.data.map((model: { id: string }) =>
+        model.id === "gpt-6-luna"
+          ? { ...model, shutdown_date: "2000-01-01" }
+          : model,
+      ),
+    });
+    expect(
+      (await catalogue.read()).models.map((model) => model.id),
+    ).not.toContain("gpt-6-luna");
+  });
+
+  test("a refresh that fails keeps the last good list", async () => {
+    const { site, catalogue, advance } = await provider();
+    await catalogue.read();
+    site.set(LISTING, new Response("down", { status: 503 }));
+    advance(REFRESH_MS + 1);
+    await catalogue.refresh();
+    const read = await catalogue.read();
+    expect(read.choosable).toBe(true);
+    expect(read.default).toBe("gpt-6.1-terra");
+  });
+
+  test("a provider refusing a model refreshes at once, at most once a minute", async () => {
+    const { site, listing, catalogue, advance } = await provider();
+    await catalogue.read();
+    expect(site.asked(LISTING)).toBe(1);
+    site.set(LISTING, {
+      ...listing,
+      data: listing.data.filter(
+        (model: { id: string }) => model.id !== "gpt-6.1-sol",
+      ),
+    });
+
+    expect(
+      isModelUnavailableMessage(
+        "Error code: 400 - {'detail': \"The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.\"}",
+      ),
+    ).toBe(true);
+    expect(
+      isModelUnavailableMessage(
+        "The model `gpt-6.1-sol` does not exist or you do not have access to it.",
+      ),
+    ).toBe(true);
+    expect(isModelUnavailableMessage("Rate limit reached")).toBe(false);
+
+    reportModelRejected();
+    reportModelRejected();
+    await catalogue.refresh();
+    expect(site.asked(LISTING)).toBe(2);
+    expect(
+      (await catalogue.read()).models.map((model) => model.id),
+    ).not.toContain("gpt-6.1-sol");
+
+    advance(61_000);
+    reportModelRejected();
+    await catalogue.refresh();
+    expect(site.asked(LISTING)).toBeGreaterThanOrEqual(3);
+  });
+
+  test("a stale list is refreshed in the background while it keeps answering", async () => {
+    const { site, catalogue, advance } = await provider();
+    await catalogue.read();
+    advance(REFRESH_MS + 1);
+    const read = await catalogue.read();
+    // Answered at once from what it had.
+    expect(read.default).toBe("gpt-6.1-terra");
+    await catalogue.refresh();
+    expect(site.asked(LISTING)).toBe(2);
+  });
 });
 
 describe("the catalogue a deployment offers", () => {
@@ -187,10 +783,12 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
     });
 
     expect(await catalogue.read()).toEqual({
       provider: "openai",
+      source: "openai",
       default: "gpt-5.5",
       choosable: true,
       models: [
@@ -210,13 +808,14 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
     });
     await Promise.all([catalogue.read(), catalogue.read()]);
     await catalogue.read();
     expect(calls).toHaveLength(1);
   });
 
-  test("asks again once what it read has gone stale", async () => {
+  test("asks again once what it read has gone stale, without making anybody wait", async () => {
     const { fetcher, calls } = provider(openAIListing(["gpt-5.5", "gpt-4o"]));
     let clock = 0;
     const catalogue = createModelCatalogue({
@@ -224,12 +823,14 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
       now: () => clock,
-      ttlMs: 1_000,
+      refreshMs: 1_000_000,
     });
     await catalogue.read();
-    clock = 1_001;
+    clock = 1_000_001;
     await catalogue.read();
+    await catalogue.refresh();
     expect(calls).toHaveLength(2);
   });
 
@@ -258,6 +859,7 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
     });
 
     expect((await catalogue.read()).models).toEqual([
@@ -284,6 +886,7 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => null,
       environment: { OPENAI_BASE_URL: "http://127.0.0.1:4011/v1" },
       fetch: fetcher,
+      capabilitiesUrl: null,
     });
     expect((await catalogue.read()).models.map((model) => model.id)).toEqual([
       "smart",
@@ -292,18 +895,37 @@ describe("the catalogue a deployment offers", () => {
     expect(calls[0]?.headers).toEqual({});
   });
 
-  test("the deployment's model is offered even when the provider does not list it", async () => {
-    const { fetcher } = provider(openAIListing(["gpt-4o"]));
+  test("a configured model the provider no longer lists is never the default", async () => {
+    // The ChatGPT plan's gpt-5.5 was this: configured, not offered, and every message failed.
+    const { fetcher } = provider(openAIListing(["gpt-4o", "gpt-6-sol"]));
     const catalogue = createModelCatalogue({
       model: { provider: "openai", defaultModel: "gpt-5.5" },
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
     });
-    expect((await catalogue.read()).models).toEqual([
-      { id: "gpt-5.5", label: "GPT-5.5", vendor: "openai" },
-      { id: "gpt-4o", label: "GPT-4o", vendor: "openai" },
+    const read = await catalogue.read();
+    expect(read.models.map((model) => model.id)).toEqual([
+      "gpt-6-sol",
+      "gpt-4o",
     ]);
+    expect(read.default).toBe("gpt-6-sol");
+  });
+
+  test("a gateway's configured model is offered even when its listing leaves it out", async () => {
+    // A gateway's operator named that model on purpose; its listing may be partial.
+    const { fetcher } = provider(openAIListing(["fast"]));
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "smart" },
+      apiKey: async () => null,
+      environment: { OPENAI_BASE_URL: "http://127.0.0.1:4011/v1" },
+      fetch: fetcher,
+      capabilitiesUrl: null,
+    });
+    const read = await catalogue.read();
+    expect(read.models.map((model) => model.id)).toEqual(["smart", "fast"]);
+    expect(read.default).toBe("smart");
   });
 
   test("a provider that cannot be read leaves only the deployment's model, and nothing to choose", async () => {
@@ -314,10 +936,12 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
       log: (line) => logged.push(line),
     });
     expect(await catalogue.read()).toEqual({
       provider: "openai",
+      source: "openai",
       default: "gpt-5.5",
       choosable: false,
       models: [{ id: "gpt-5.5", label: "GPT-5.5", vendor: "openai" }],
@@ -325,22 +949,6 @@ describe("the catalogue a deployment offers", () => {
     expect(logged.join("\n")).toContain("model-list-unreadable");
     // Never the key.
     expect(logged.join("\n")).not.toContain(KEY);
-  });
-
-  test("a plan picks its own model, so there is nothing to choose and nobody is asked", async () => {
-    const { fetcher, calls } = provider(openAIListing(["gpt-5.5", "gpt-4o"]));
-    const catalogue = createModelCatalogue({
-      model: {
-        provider: "openai",
-        defaultModel: "gpt-5.5",
-        plan: { kind: "claude" } as never,
-      },
-      apiKey: async () => KEY,
-      environment: {},
-      fetch: fetcher,
-    });
-    expect((await catalogue.read()).choosable).toBe(false);
-    expect(calls).toHaveLength(0);
   });
 
   test("an admin's allowlist narrows what is offered, and is read every time", async () => {
@@ -356,6 +964,7 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
       allowlist: () => allowlist,
     });
     expect((await catalogue.read()).models.map((model) => model.id)).toEqual([
@@ -378,6 +987,7 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
       enabled: () => on,
     });
     expect((await catalogue.read()).choosable).toBe(false);
@@ -392,6 +1002,7 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
       allowlist: () => ({ enabled: true, models: ["openai/gpt-5.5"] }),
     });
     expect(await catalogue.allows("gpt-5.5")).toBe(true);
@@ -409,11 +1020,13 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
       allowlist: () => ({ enabled: true, models: ["openai/gpt-5.5"] }),
       enabled: () => false,
     });
     expect(await catalogue.available()).toEqual({
       provider: "openai",
+      source: "openai",
       default: "gpt-5.5",
       listed: true,
       models: [
@@ -431,10 +1044,12 @@ describe("the catalogue a deployment offers", () => {
       apiKey: async () => KEY,
       environment: {},
       fetch: fetcher,
+      capabilitiesUrl: null,
       log: () => undefined,
     });
     expect(await catalogue.available()).toEqual({
       provider: "openai",
+      source: "openai",
       default: "gpt-5.5",
       listed: false,
       models: [{ id: "gpt-5.5", label: "GPT-5.5", vendor: "openai" }],
@@ -448,6 +1063,7 @@ describe("GET /api/models/available", () => {
     apiKey: async () => KEY,
     environment: {},
     fetch: provider(openAIListing(["gpt-4o", "gpt-5.5"])).fetcher,
+    capabilitiesUrl: null,
     allowlist: () => ({ enabled: true, models: ["openai/gpt-5.5"] }),
   });
   const as =

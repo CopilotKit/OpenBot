@@ -1,18 +1,29 @@
 /**
- * The models a person may pick for a built-in Bot's run, read from whatever serves this deployment's
- * model.
+ * The models a person may pick for a Bot's run, read from whatever serves this deployment's model,
+ * with how hard each one can think.
  *
  * ONE SOURCE, WHATEVER IS IN FRONT. The listing is asked of the endpoint the Bots already call: the
- * provider's own API, or the OpenAI-compatible endpoint in `OPENAI_BASE_URL`. A gateway or router
- * in front (switchback, OpenRouter, a company proxy) answers `GET /v1/models` with the models it
- * routes, under its own names, so putting one in front later changes what this lists without
- * changing how. The ids it returns are exactly what a run sends upstream.
+ * provider's own API (OpenAI, Anthropic, Google, xAI), the OpenAI-compatible endpoint in
+ * `OPENAI_BASE_URL`, or, for a signed-in plan, the plan's own listing. A gateway or router in front
+ * (switchback, OpenRouter, a company proxy) answers `GET /v1/models` with the models it routes, under
+ * its own names, so putting one in front later changes what this lists without changing how. The ids
+ * it returns are exactly what a run sends upstream.
  *
- * OpenAI's own listing is every model the key can reach, image and audio and embeddings included,
- * so that one is filtered down to chat models. A gateway's listing is somebody's deliberate choice
- * and is only stripped of what can never chat.
+ * NOTHING HERE IS A TABLE OF MODELS. Which models exist comes from the provider's listing. How hard
+ * each can think comes from the provider's own listing where it says (Anthropic, xAI and the ChatGPT
+ * plan do), and otherwise from models.dev, the open catalogue opencode and others maintain, read at
+ * runtime. Which one is the default comes from the same data: the middle of the provider's current
+ * line by price. A model released tomorrow shows up at the next refresh; one with no capability data
+ * yet is still listed, on its own default effort. Without models.dev (offline, or turned off) the
+ * provider's own data still applies, and the default falls back to the deployment's configured model.
  *
- * Read once and kept for a while, because it changes when a provider ships a model, not per message.
+ * REFRESHED IN THE BACKGROUND, NEVER PER MESSAGE. The listing and the capability data are read at
+ * boot and then every few hours (`REFRESH_MS`), because providers ship and retire models on a scale of
+ * weeks and announce retirements months ahead. A run reads the last good answer from memory. A
+ * refresh that fails keeps the last good answer. A provider refusing a model as unknown or
+ * unsupported triggers an early refresh (`reportModelRejected`), so a retired model drops out
+ * without waiting for the schedule.
+ *
  * Never throws: a listing that cannot be read leaves the deployment's own model and nothing to pick.
  */
 import { Hono, type MiddlewareHandler } from "hono";
@@ -27,17 +38,41 @@ export type ModelOption = {
    * its mark. Absent where the name does not say: a gateway's own alias, such as `fast`.
    */
   vendor?: string;
+  /**
+   * How hard this model can be asked to think, weakest first, in the wire spelling every provider
+   * shares (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Absent when the model takes
+   * no effort, or nothing says which it takes: then none is ever sent and it thinks on its own
+   * default.
+   */
+  efforts?: string[];
+  /** The effort the model uses when none is sent, when its provider says. Absent: unknown. */
+  defaultEffort?: string;
 };
+
+/**
+ * What serves the models, as far as listing and thinking go. `provider` on the catalogue stays the
+ * wire provider (`openai` or `anthropic`), because that is the prefix the allowlist and the usage
+ * view already share; this says who is actually behind it.
+ */
+export type ModelSource =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "xai"
+  | "gateway"
+  | "chatgpt"
+  | "claude";
 
 export type ModelCatalogue = {
   provider: RuntimeModel["provider"];
-  /** What a run uses when nobody picked anything: the deployment's configured model. */
+  source: ModelSource;
+  /** What a run uses when nobody picked anything: the middle of the current line, or the configured model. */
   default: string;
   /** Newest first. Always holds the default. */
   models: ModelOption[];
   /**
-   * Whether there is anything to pick: false while the admin has picking off, for a plan, or when
-   * the listing could not be read.
+   * Whether there is anything to pick: false while the admin has picking off, or when the listing
+   * could not be read.
    */
   choosable: boolean;
 };
@@ -45,6 +80,7 @@ export type ModelCatalogue = {
 /** What an admin picks the model allowlist from: the whole listing, before the allowlist. */
 export type AvailableModels = {
   provider: RuntimeModel["provider"];
+  source: ModelSource;
   default: string;
   /** Newest first. Always holds the default. */
   models: ModelOption[];
@@ -52,22 +88,75 @@ export type AvailableModels = {
   listed: boolean;
 };
 
-type Listed = { id: string; label?: string; created: number };
+/** What one run answers on: the model, and the effort to send, if any. */
+export type RunChoice = {
+  model: string;
+  /** Only ever one the model takes. Absent: send none, so the model thinks on its own default. */
+  effort?: string;
+  /** Whether the model came from a listing that was read, rather than the configured fallback. */
+  listed: boolean;
+};
+
+/** One model as the listing and the capability data together describe it. */
+type Entry = {
+  id: string;
+  label?: string;
+  /** Seconds since the epoch. 0 when nothing says. */
+  created: number;
+  /** The provider's line or family (`claude-sonnet`, `gpt-terra`), for finding the middle. */
+  family?: string;
+  /** Dollars per million input tokens, for ordering a line. */
+  price?: number;
+  efforts?: string[];
+  defaultEffort?: string;
+  /** False when the provider or the catalogue says this model cannot chat with tools. */
+  chat?: boolean;
+  /** True when the provider says it is past its shutdown date. */
+  retired?: boolean;
+};
 
 type Allowlist = { enabled: boolean; models: readonly string[] };
+
+/** Every effort spelling the providers use, weakest first. Unknown ones sort last, kept as given. */
+export const EFFORT_ORDER = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
 
 const OPENAI_API = "https://api.openai.com";
 const ANTHROPIC_API = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
+/** What a Claude plan's OAuth token is accepted under, as Claude Code itself sends it. */
+const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
+const MODELS_DEV = "https://models.dev/api.json";
 
-/** Ten minutes: long enough that a picker opening costs nothing, short enough to see a new model today. */
-const DEFAULT_TTL_MS = 10 * 60_000;
-/** A failed listing is asked again sooner, but not on every message while a provider is down. */
-const FAILED_TTL_MS = 60_000;
+/**
+ * Six hours. Providers ship models weeks apart and publish shutdown dates months ahead (OpenAI's
+ * listing carries `shutdown_date`, Anthropic's `retires_at`), and models.dev is edited a few times a
+ * day, so a new model shows up the same day without the listing being asked more than four times
+ * a day. A model a provider refuses is refreshed early instead (`reportModelRejected`).
+ */
+export const REFRESH_MS = 6 * 60 * 60_000;
+/** A refresh that failed is tried again sooner, while the last good answer keeps serving. */
+const RETRY_MS = 5 * 60_000;
+/** At most one early refresh a minute, however many runs a retired model fails at once. */
+const EARLY_REFRESH_MS = 60_000;
+
+/**
+ * How far behind the provider's newest model a line's newest may be and still count as current.
+ * A line nobody has updated in four months is an older generation the provider still serves for
+ * compatibility (GPT-5.5 next to GPT-6.1), and is never the middle of anything.
+ */
+const CURRENT_LINE_SECONDS = 120 * 24 * 60 * 60;
 
 /** Models no chat can run on, by any provider or gateway's naming. */
 const NEVER_CHAT =
-  /(embed|tts|whisper|transcribe|dall-e|image|moderation|realtime|audio|sora|translate)/i;
+  /(embed|tts|whisper|transcribe|dall-e|image|moderation|realtime|audio|sora|translate|video|lyria|imagen|veo-|(^|[-/])live([-.]|$))/i;
 
 /**
  * Chat models in OpenAI's own listing that a Bot should still not be put on: search and research
@@ -76,6 +165,10 @@ const NEVER_CHAT =
  */
 const OPENAI_NOT_FOR_BOTS =
   /(search|deep-research|computer-use|chat-latest|codex|instruct|^gpt-live|^gpt-(3\.5|4)(-|$)|^o1(-|$)|^(babbage|davinci))/i;
+
+/** The same, for the other providers a deployment names directly: agents, research and robots. */
+const VENDOR_NOT_FOR_BOTS =
+  /(deep-research|computer-use|robotics|antigravity|nano-banana|multi-agent|(^|-)aqa$)/i;
 
 /** OpenAI's dated snapshots, which repeat a model already listed under its own name. */
 const DATED_SNAPSHOT = /-(\d{4}-\d{2}-\d{2}|\d{4})$/;
@@ -129,15 +222,6 @@ export function modelVendor(id: string): string | undefined {
   return VENDOR_FAMILIES.find(([family]) => family.test(id))?.[1];
 }
 
-function option(id: string, label?: string): ModelOption {
-  const vendor = modelVendor(id);
-  return {
-    id,
-    label: label ?? modelLabel(id),
-    ...(vendor ? { vendor } : {}),
-  };
-}
-
 /**
  * What a model is called where a person picks it. OpenAI publishes no display names, so its ids are
  * spelled out (`gpt-5.4-mini` is GPT-5.4 Mini); anything else, including a gateway's own namespaced
@@ -157,6 +241,57 @@ function base(value: string | undefined, fallback: string): string {
   return (value?.trim() || fallback).replace(/\/+$/, "");
 }
 
+function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).host;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Who is behind the endpoint the Bots call. A plan is its own source; otherwise the base URL's host
+ * says, and OpenBot's own sign-in proxy (Google or xAI, signed in to on the desktop) is told apart by
+ * the model it was set up with, which is the only thing the environment says about it.
+ */
+export function modelSourceFor(
+  model: Pick<RuntimeModel, "provider" | "plan">,
+  environment: Record<string, string | undefined>,
+): ModelSource {
+  if (model.plan)
+    return model.plan.provider === "claude" ? "claude" : "chatgpt";
+  if (model.provider === "anthropic") return "anthropic";
+  const configured = environment.OPENAI_BASE_URL?.trim();
+  if (!configured) return "openai";
+  const host = hostOf(configured);
+  if (host === hostOf(OPENAI_API)) return "openai";
+  if (host === "generativelanguage.googleapis.com") return "google";
+  if (host === "api.x.ai") return "xai";
+  if (/\/api\/model-provider\/v1\/?$/.test(configured)) {
+    const vendor = modelVendor(environment.BOT_MODEL?.trim() ?? "");
+    if (vendor === "google" || vendor === "xai") return vendor;
+  }
+  return "gateway";
+}
+
+/** The vendor whose models a source lists, for reading their capabilities. */
+function sourceVendor(source: ModelSource): string | undefined {
+  switch (source) {
+    case "openai":
+    case "chatgpt":
+      return "openai";
+    case "anthropic":
+    case "claude":
+      return "anthropic";
+    case "google":
+      return "google";
+    case "xai":
+      return "xai";
+    default:
+      return undefined;
+  }
+}
+
 /** The listing endpoint under the base URL the Bots call, which may or may not end in its version. */
 export function modelsUrl(
   provider: RuntimeModel["provider"],
@@ -166,53 +301,313 @@ export function modelsUrl(
     provider === "anthropic"
       ? base(environment.ANTHROPIC_BASE_URL, ANTHROPIC_API)
       : base(environment.OPENAI_BASE_URL, OPENAI_API);
-  const versioned = /\/v\d+$/.test(root) ? root : `${root}/v1`;
+  const versioned = /\/v\d+(beta)?(\/openai)?$/.test(root)
+    ? root
+    : `${root}/v1`;
   return provider === "anthropic"
     ? `${versioned}/models?limit=1000`
     : `${versioned}/models`;
 }
 
-function isOfficialOpenAI(environment: Record<string, string | undefined>) {
-  try {
-    return (
-      new URL(base(environment.OPENAI_BASE_URL, OPENAI_API)).host ===
-      new URL(OPENAI_API).host
-    );
-  } catch {
-    return false;
+/**
+ * Where a source's listing is read, and how. xAI is asked for `/language-models`, its own richer
+ * listing, which carries each model's efforts, default effort, modalities and price; everything else
+ * answers on `/models`. A ChatGPT plan is asked of the harness that holds its credential.
+ */
+function listingRequest(
+  model: RuntimeModel,
+  source: ModelSource,
+  environment: Record<string, string | undefined>,
+  key: string | null,
+): { url: string; headers: Record<string, string> } | null {
+  if (source === "chatgpt") {
+    const plan = model.plan;
+    if (!plan) return null;
+    return {
+      url: `${plan.endpoint.href.replace(/\/+$/, "")}/models`,
+      headers: { "x-openbot-agent-token": plan.token },
+    };
   }
+  if (source === "claude") {
+    const plan = model.plan;
+    if (!plan) return null;
+    return {
+      url: modelsUrl("anthropic", environment),
+      headers: {
+        authorization: `Bearer ${plan.token}`,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "anthropic-beta": ANTHROPIC_OAUTH_BETA,
+      },
+    };
+  }
+  if (source === "anthropic")
+    return {
+      url: modelsUrl("anthropic", environment),
+      headers: {
+        ...(key ? { "x-api-key": key } : {}),
+        "anthropic-version": ANTHROPIC_VERSION,
+      },
+    };
+  const url = modelsUrl("openai", environment);
+  return {
+    url:
+      source === "xai" && hostOf(url) === "api.x.ai"
+        ? url.replace(/\/models$/, "/language-models")
+        : url,
+    headers: key ? { authorization: `Bearer ${key}` } : {},
+  };
 }
 
-/** Reads `data[]` from an OpenAI- or Anthropic-shaped listing, skipping anything without an id. */
-function parseListing(body: unknown): Listed[] {
-  const data =
-    body && typeof body === "object" && "data" in body
-      ? (body as { data: unknown }).data
-      : undefined;
-  if (!Array.isArray(data)) return [];
-  const listed: Listed[] = [];
-  for (const entry of data) {
-    if (!entry || typeof entry !== "object") continue;
-    const { id, created, created_at, display_name } = entry as Record<
-      string,
-      unknown
-    >;
-    if (typeof id !== "string" || id.length === 0) continue;
-    listed.push({
+/** Efforts in the order every provider documents them, duplicates and blanks dropped. */
+export function orderEfforts(values: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  for (const value of values)
+    if (typeof value === "string" && value.trim())
+      seen.add(value.trim().toLowerCase());
+  const rank = (effort: string) => {
+    const at = (EFFORT_ORDER as readonly string[]).indexOf(effort);
+    return at === -1 ? EFFORT_ORDER.length : at;
+  };
+  return [...seen].sort((a, b) => rank(a) - rank(b));
+}
+
+function seconds(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed / 1000 : 0;
+  }
+  return 0;
+}
+
+function pastDate(value: unknown, now: number): boolean {
+  if (typeof value !== "string" || !value) return false;
+  const at = Date.parse(value);
+  return Number.isFinite(at) && at <= now;
+}
+
+/** Anthropic's `capabilities.effort`: an object of levels, each `{ supported }`. */
+function anthropicEfforts(capabilities: unknown): string[] | undefined {
+  if (!capabilities || typeof capabilities !== "object") return undefined;
+  const effort = (capabilities as Record<string, unknown>).effort;
+  if (!effort || typeof effort !== "object") return undefined;
+  const levels = effort as Record<string, unknown>;
+  if (levels.supported === false) return [];
+  return orderEfforts(
+    Object.entries(levels)
+      .filter(
+        ([name, level]) =>
+          name !== "supported" &&
+          !!level &&
+          typeof level === "object" &&
+          (level as { supported?: unknown }).supported === true,
+      )
+      .map(([name]) => name),
+  );
+}
+
+/**
+ * Reads a listing in any of the shapes the sources answer with: `data[]` (OpenAI, Anthropic, any
+ * gateway, the ChatGPT plan's harness) or `models[]` (xAI's language models, Google's native list),
+ * keeping whatever each says about thinking, price and retirement. Skips anything without an id.
+ */
+export function parseListing(body: unknown, now: number): Entry[] {
+  const record =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const data = Array.isArray(record.data)
+    ? record.data
+    : Array.isArray(record.models)
+      ? record.models
+      : [];
+  const entries: Entry[] = [];
+  for (const raw of data) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const named =
+      typeof item.id === "string"
+        ? item.id
+        : typeof item.name === "string"
+          ? item.name
+          : "";
+    // Google names its models `models/gemini-…` in both its listings and takes the bare name.
+    const id = named.replace(/^models\//, "");
+    if (!id) continue;
+    const label = [item.display_name, item.displayName, item.label].find(
+      (value): value is string => typeof value === "string" && !!value,
+    );
+    const capabilities = item.capabilities as
+      | Record<string, unknown>
+      | undefined;
+    const efforts = Array.isArray(item.efforts)
+      ? orderEfforts(item.efforts)
+      : Array.isArray(capabilities?.reasoning_effort)
+        ? orderEfforts(capabilities.reasoning_effort as unknown[])
+        : anthropicEfforts(capabilities);
+    const defaultEffort = [
+      item.default_effort,
+      capabilities?.default_reasoning_effort,
+    ].find((value): value is string => typeof value === "string" && !!value);
+    const outputs = item.output_modalities;
+    const methods = item.supportedGenerationMethods;
+    const price =
+      typeof item.prompt_text_token_price === "number"
+        ? // xAI prices in ten-thousandths of a dollar per million tokens.
+          item.prompt_text_token_price / 10_000
+        : undefined;
+    entries.push({
       id,
-      ...(typeof display_name === "string" && display_name
-        ? { label: display_name }
+      ...(label ? { label } : {}),
+      created: seconds(item.created ?? item.created_at),
+      // Anthropic's own name for a line (`sonnet`), spelt as models.dev spells the family.
+      ...(typeof item.line === "string" && item.line
+        ? { family: `claude-${item.line}` }
         : {}),
-      created:
-        typeof created === "number"
-          ? created
-          : typeof created_at === "string"
-            ? Date.parse(created_at) / 1000 || 0
-            : 0,
+      ...(price !== undefined ? { price } : {}),
+      ...(efforts ? { efforts } : {}),
+      ...(defaultEffort && efforts?.includes(defaultEffort.toLowerCase())
+        ? { defaultEffort: defaultEffort.toLowerCase() }
+        : {}),
+      ...((Array.isArray(outputs) && !outputs.includes("text")) ||
+      (Array.isArray(methods) && !methods.includes("generateContent"))
+        ? { chat: false }
+        : {}),
+      ...(pastDate(item.shutdown_date, now) ||
+      pastDate(item.retires_at, now) ||
+      item.lifecycle === "retired"
+        ? { retired: true }
+        : {}),
     });
   }
-  return listed;
+  return entries;
 }
+
+/** What models.dev says about one model: only the fields this file reads. */
+export type Capability = {
+  name?: string;
+  family?: string;
+  price?: number;
+  efforts?: string[];
+  tools?: boolean;
+  text?: boolean;
+  released?: number;
+};
+
+/** models.dev's catalogue, by `vendor/id`, for the four vendors a deployment can name directly. */
+export type Capabilities = Map<string, Capability>;
+
+const CAPABILITY_VENDORS = ["openai", "anthropic", "google", "xai"];
+
+/** Reads models.dev's `api.json`. Anything malformed is skipped, never thrown. */
+export function parseCapabilities(body: unknown): Capabilities {
+  const found: Capabilities = new Map();
+  if (!body || typeof body !== "object") return found;
+  for (const vendor of CAPABILITY_VENDORS) {
+    const models = (body as Record<string, { models?: unknown }>)[vendor]
+      ?.models;
+    if (!models || typeof models !== "object") continue;
+    for (const [id, raw] of Object.entries(models as Record<string, unknown>)) {
+      if (!raw || typeof raw !== "object") continue;
+      const model = raw as Record<string, unknown>;
+      const options = Array.isArray(model.reasoning_options)
+        ? (model.reasoning_options as Record<string, unknown>[])
+        : [];
+      const effort = options.find((option) => option?.type === "effort");
+      const outputs = (model.modalities as { output?: unknown } | undefined)
+        ?.output;
+      const cost = model.cost as { input?: unknown } | undefined;
+      found.set(`${vendor}/${id}`, {
+        ...(typeof model.name === "string" ? { name: model.name } : {}),
+        ...(typeof model.family === "string" ? { family: model.family } : {}),
+        ...(typeof cost?.input === "number" ? { price: cost.input } : {}),
+        ...(effort && Array.isArray(effort.values)
+          ? { efforts: orderEfforts(effort.values) }
+          : model.reasoning === false
+            ? { efforts: [] }
+            : {}),
+        ...(typeof model.tool_call === "boolean"
+          ? { tools: model.tool_call }
+          : {}),
+        ...(Array.isArray(outputs) ? { text: outputs.includes("text") } : {}),
+        ...(typeof model.release_date === "string"
+          ? { released: seconds(model.release_date) }
+          : {}),
+      });
+    }
+  }
+  return found;
+}
+
+/**
+ * The middle of a provider's current line: the newest model of each line (family) that is still
+ * current, ordered by price, and the one in the middle, the lower of the two when there are even.
+ * GPT-6.1 Terra between Luna and Sol, Sonnet between Haiku and Opus, Flash between Flash-Lite and
+ * Pro. Undefined when nothing carries a family and a price, which is when the caller falls back to
+ * the configured model.
+ */
+export function middleModel(
+  entries: readonly Pick<Entry, "id" | "created" | "family" | "price">[],
+): string | undefined {
+  const heads = new Map<string, (typeof entries)[number]>();
+  const alias = (id: string) => /(-latest|preview)/i.test(id);
+  for (const entry of entries) {
+    if (!entry.family || entry.price === undefined) continue;
+    const head = heads.get(entry.family);
+    // A dated or numbered model over a moving alias or a preview of the same line.
+    const better =
+      !head ||
+      (alias(head.id) && !alias(entry.id)) ||
+      (alias(head.id) === alias(entry.id) &&
+        (entry.created > head.created ||
+          (entry.created === head.created && entry.id < head.id)));
+    if (better) heads.set(entry.family, entry);
+  }
+  if (heads.size === 0) return undefined;
+  const newest = Math.max(...[...heads.values()].map((head) => head.created));
+  const current = [...heads.values()]
+    .filter((head) => newest - head.created <= CURRENT_LINE_SECONDS)
+    .sort(
+      (a, b) =>
+        (a.price ?? 0) - (b.price ?? 0) ||
+        b.created - a.created ||
+        a.id.localeCompare(b.id),
+    );
+  return current[Math.floor((current.length - 1) / 2)]?.id;
+}
+
+/**
+ * Whether a provider's refusal says the model itself is the problem: unknown, retired, or not one
+ * this credential can use. The ChatGPT plan's "The 'gpt-5.5' model is not supported when using Codex
+ * with a ChatGPT account" is the case that taught it.
+ */
+export function isModelUnavailableMessage(text: string): boolean {
+  return (
+    /model_not_found|model[_ ]not[_ ]supported|unknown model|invalid model|unsupported model/i.test(
+      text,
+    ) ||
+    /\bmodel\b[^\n]{0,80}?\b(is not supported|not supported|does not exist|not found|is not available|no longer available|has been deprecated|has been retired|is retired)\b/i.test(
+      text,
+    )
+  );
+}
+
+const rejectionListeners = new Set<() => void>();
+
+/** Called when a provider refuses a model as unavailable. See {@link isModelUnavailableMessage}. */
+export function onModelRejected(listener: () => void): () => void {
+  rejectionListeners.add(listener);
+  return () => rejectionListeners.delete(listener);
+}
+
+/** Tells every catalogue a model was refused, so they refresh early. Cheap; debounced by each. */
+export function reportModelRejected(): void {
+  for (const listener of rejectionListeners) listener();
+}
+
+type Snapshot = {
+  entries: Entry[];
+  /** When the listing was read, in ms. */
+  at: number;
+};
 
 export function createModelCatalogue(options: {
   model: RuntimeModel;
@@ -226,60 +621,67 @@ export function createModelCatalogue(options: {
   fetch?: typeof fetch;
   log?: (line: string) => void;
   now?: () => number;
-  ttlMs?: number;
+  /** How often the listing and capability data are read again. See {@link REFRESH_MS}. */
+  refreshMs?: number;
   timeoutMs?: number;
+  /**
+   * Where capability data is read: models.dev unless `OPENBOT_MODEL_CAPABILITIES_URL` says
+   * otherwise. `off` (or null here) reads none, which leaves each provider's own data.
+   */
+  capabilitiesUrl?: string | null;
 }) {
   const environment = options.environment ?? process.env;
   const request = options.fetch ?? fetch;
   const log = options.log ?? ((line: string) => console.warn(line));
   const now = options.now ?? Date.now;
-  const ttl = options.ttlMs ?? DEFAULT_TTL_MS;
+  const refreshMs = options.refreshMs ?? REFRESH_MS;
   const { provider, defaultModel } = options.model;
+  const source = modelSourceFor(options.model, environment);
+  const vendor = sourceVendor(source);
+  const capabilitiesUrl = (() => {
+    const configured =
+      options.capabilitiesUrl === undefined
+        ? environment.OPENBOT_MODEL_CAPABILITIES_URL?.trim() || MODELS_DEV
+        : options.capabilitiesUrl;
+    return !configured || configured === "off" ? null : configured;
+  })();
 
-  let cached: { listed: Listed[] | null; until: number } | undefined;
-  let inFlight: Promise<Listed[] | null> | undefined;
+  let snapshot: Snapshot | undefined;
+  let attemptedAt: number | undefined;
+  let capabilities: { data: Capabilities; at: number } | undefined;
+  let inFlight: Promise<void> | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
 
-  async function list(): Promise<Listed[] | null> {
+  async function readListing(): Promise<Entry[] | null> {
     try {
-      const key = await options.apiKey();
-      const headers: Record<string, string> =
-        provider === "anthropic"
-          ? {
-              ...(key ? { "x-api-key": key } : {}),
-              "anthropic-version": ANTHROPIC_VERSION,
-            }
-          : key
-            ? { authorization: `Bearer ${key}` }
-            : {};
-      const response = await request(modelsUrl(provider, environment), {
-        headers,
-        signal: AbortSignal.timeout(options.timeoutMs ?? 5_000),
+      const key =
+        source === "chatgpt" || source === "claude"
+          ? null
+          : await options.apiKey();
+      const asked = listingRequest(options.model, source, environment, key);
+      if (!asked) return null;
+      const response = await request(asked.url, {
+        headers: asked.headers,
+        redirect: "error",
+        signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
       });
       if (!response.ok) {
+        await response.body?.cancel();
         log(
           JSON.stringify({
             type: "model-list-unreadable",
-            provider,
+            source,
             status: response.status,
           }),
         );
         return null;
       }
-      const listed = parseListing(await response.json());
-      const keep = new Set(
-        provider === "anthropic"
-          ? listed.map((entry) => entry.id)
-          : chatModelIds(
-              listed.map((entry) => entry.id),
-              { officialOpenAI: isOfficialOpenAI(environment) },
-            ),
-      );
-      return listed.filter((entry) => keep.has(entry.id));
+      return parseListing(await response.json(), now());
     } catch (error) {
       log(
         JSON.stringify({
           type: "model-list-unreadable",
-          provider,
+          source,
           // The name only: a fetch error can carry the URL, and an SDK error can carry headers.
           reason: error instanceof Error ? error.name : "unknown",
         }),
@@ -288,58 +690,182 @@ export function createModelCatalogue(options: {
     }
   }
 
-  async function listed(): Promise<Listed[] | null> {
-    if (cached && now() < cached.until) return cached.listed;
-    inFlight ??= list().then((result) => {
-      cached = {
-        listed: result,
-        until: now() + (result ? ttl : Math.min(ttl, FAILED_TTL_MS)),
-      };
+  async function readCapabilities(): Promise<void> {
+    if (!capabilitiesUrl) return;
+    if (capabilities && now() - capabilities.at < refreshMs) return;
+    try {
+      const response = await request(capabilitiesUrl, {
+        redirect: "error",
+        signal: AbortSignal.timeout(Math.max(options.timeoutMs ?? 0, 20_000)),
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const data = parseCapabilities(await response.json());
+      // An answer that names none of the four vendors is a broken mirror, not news.
+      if (data.size === 0) throw new Error("empty");
+      capabilities = { data, at: now() };
+    } catch (error) {
+      // The last good copy keeps serving; without one, each provider's own data still applies.
+      log(
+        JSON.stringify({
+          type: "model-capabilities-unreadable",
+          reason: error instanceof Error ? error.name : "unknown",
+        }),
+      );
+    }
+  }
+
+  /** Read both again. Single flight; a failure keeps the last good answer. */
+  function refresh(): Promise<void> {
+    inFlight ??= (async () => {
+      attemptedAt = now();
+      const [entries] = await Promise.all([readListing(), readCapabilities()]);
+      if (entries) snapshot = { entries, at: now() };
+    })().finally(() => {
       inFlight = undefined;
-      return result;
     });
     return inFlight;
   }
 
   /**
-   * The listing, newest first, with the default always in it. Narrowed to the admin's allowlist
-   * unless `everything`, which is what an admin picks the allowlist from.
+   * The last good listing, read once at the start and otherwise only behind the schedule. A run or a
+   * picker opening never waits on a provider, except the very first read after boot.
    */
-  async function offered(everything: boolean): Promise<ModelOption[] | null> {
-    // A plan's harness picks the model itself and is never sent one, so there is nothing to offer.
-    if (options.model.plan) return null;
-    const found = await listed();
+  async function current(): Promise<Snapshot | undefined> {
+    if (!snapshot) {
+      // Never read, or every read so far failed: ask again, but not on every message.
+      if (attemptedAt === undefined || now() - attemptedAt >= RETRY_MS)
+        await refresh();
+      return snapshot;
+    }
+    // Without the timer (a test, or a timer the process never started), stale still refreshes in
+    // the background while the stale answer is served.
+    if (
+      now() - snapshot.at >= refreshMs &&
+      !inFlight &&
+      (attemptedAt === undefined || now() - attemptedAt >= RETRY_MS)
+    )
+      void refresh();
+    return snapshot;
+  }
+
+  /** One entry with what the capability catalogue adds, and whether a Bot can chat on it. */
+  function enrich(entry: Entry): Entry & { usable: boolean } {
+    const bare = entry.id.split("/").at(-1) ?? entry.id;
+    const namedVendor = vendor ?? modelVendor(entry.id);
+    const known = namedVendor
+      ? capabilities?.data.get(`${namedVendor}/${bare}`)
+      : undefined;
+    const label =
+      entry.label ??
+      (/^gpt-/i.test(bare) ? modelLabel(entry.id) : (known?.name ?? undefined));
+    const efforts = entry.efforts ?? known?.efforts;
+    const created = entry.created || known?.released || 0;
+    const chat =
+      entry.chat !== false && known?.tools !== false && known?.text !== false;
+    const usable =
+      !entry.retired &&
+      chat &&
+      (source === "openai"
+        ? chatModelIds([entry.id], { officialOpenAI: true }).length === 1
+        : source === "gateway"
+          ? chatModelIds([entry.id], { officialOpenAI: false }).length === 1
+          : !NEVER_CHAT.test(entry.id) && !VENDOR_NOT_FOR_BOTS.test(entry.id));
+    return {
+      ...entry,
+      ...(label ? { label } : {}),
+      created,
+      ...((entry.family ?? known?.family)
+        ? { family: entry.family ?? known?.family }
+        : {}),
+      ...((entry.price ?? known?.price) !== undefined
+        ? { price: entry.price ?? known?.price }
+        : {}),
+      ...(efforts && efforts.length > 0 ? { efforts } : { efforts: undefined }),
+      usable,
+    };
+  }
+
+  function option(
+    entry: Pick<Entry, "id" | "label" | "efforts" | "defaultEffort">,
+  ): ModelOption {
+    const madeBy = modelVendor(entry.id) ?? vendor;
+    return {
+      id: entry.id,
+      label: entry.label ?? modelLabel(entry.id),
+      ...(madeBy ? { vendor: madeBy } : {}),
+      ...(entry.efforts && entry.efforts.length > 0
+        ? { efforts: entry.efforts }
+        : {}),
+      ...(entry.defaultEffort && entry.efforts?.includes(entry.defaultEffort)
+        ? { defaultEffort: entry.defaultEffort }
+        : {}),
+    };
+  }
+
+  /** The configured model, as an option, with whatever the capability data knows about it. */
+  function configured(): ModelOption {
+    return option(enrich({ id: defaultModel, created: 0 }));
+  }
+
+  /**
+   * The listing, newest first, and its default. Narrowed to the admin's allowlist unless
+   * `everything`, which is what an admin picks the allowlist from. Null when nothing was ever read.
+   */
+  async function offered(
+    everything: boolean,
+  ): Promise<{ models: ModelOption[]; default: string } | null> {
+    const found = await current();
     if (!found) return null;
 
     const allowlist = everything ? undefined : options.allowlist?.();
     const allowed = (id: string) =>
-      id === defaultModel ||
-      !allowlist?.enabled ||
-      allowlist.models.includes(`${provider}/${id}`);
+      !allowlist?.enabled || allowlist.models.includes(`${provider}/${id}`);
 
-    const models = [...found]
-      .sort((a, b) => b.created - a.created || a.id.localeCompare(b.id))
-      .filter((entry) => allowed(entry.id))
-      .map((entry) => option(entry.id, entry.label));
-    if (!models.some((model) => model.id === defaultModel))
-      models.unshift(option(defaultModel));
-    return models;
+    const usable = found.entries
+      .map(enrich)
+      .filter((entry) => entry.usable)
+      .sort((a, b) => b.created - a.created || a.id.localeCompare(b.id));
+    const narrowed = usable.filter(
+      (entry) => entry.id === defaultModel || allowed(entry.id),
+    );
+    const middle = middleModel(narrowed.filter((entry) => allowed(entry.id)));
+    const models = narrowed.map(option);
+    const chosen =
+      middle ??
+      (models.some((model) => model.id === defaultModel)
+        ? defaultModel
+        : undefined);
+    if (!chosen) {
+      // Nothing says where the middle is and the configured model is not listed. For a plan or a
+      // provider named directly, the configured model is the stale one this exists to replace, so
+      // the newest listed model stands in; a gateway's operator named theirs on purpose.
+      const newest = models[0];
+      if (newest && source !== "gateway") return { models, default: newest.id };
+      models.unshift(configured());
+      return { models, default: defaultModel };
+    }
+    return { models, default: chosen };
   }
 
   async function read(): Promise<ModelCatalogue> {
-    const models = await offered(false);
-    if (!models)
+    const found = await offered(false);
+    if (!found)
       return {
         provider,
+        source,
         default: defaultModel,
-        models: [option(defaultModel)],
+        models: [configured()],
         choosable: false,
       };
     return {
       provider,
-      default: defaultModel,
-      models,
-      choosable: (options.enabled?.() ?? true) && models.length > 1,
+      source,
+      default: found.default,
+      models: found.models,
+      choosable: (options.enabled?.() ?? true) && found.models.length > 1,
     };
   }
 
@@ -348,22 +874,77 @@ export function createModelCatalogue(options: {
    * the allowlist from. Only the deployment's own model when the listing cannot be read.
    */
   async function available(): Promise<AvailableModels> {
-    const models = await offered(true);
+    const found = await offered(true);
     return {
       provider,
-      default: defaultModel,
-      models: models ?? [option(defaultModel)],
-      listed: models !== null,
+      source,
+      default: found?.default ?? defaultModel,
+      models: found?.models ?? [configured()],
+      listed: found !== null,
     };
   }
 
+  /**
+   * What a run answers on, given what the person saved: their model when it is still offered,
+   * otherwise the default, and their effort only when that model takes it. Never a model the
+   * catalogue does not offer, never an effort the model does not take.
+   */
+  async function choose(
+    saved: { model?: string | null; effort?: string | null } | null | undefined,
+  ): Promise<RunChoice> {
+    const catalogue = await read();
+    const listed = snapshot !== undefined;
+    const pick = saved?.model
+      ? catalogue.models.find((model) => model.id === saved.model)
+      : undefined;
+    const model =
+      pick ?? catalogue.models.find((entry) => entry.id === catalogue.default);
+    const id = model?.id ?? catalogue.default;
+    const effort =
+      saved?.effort && model?.efforts?.includes(saved.effort)
+        ? saved.effort
+        : undefined;
+    return { model: id, ...(effort ? { effort } : {}), listed };
+  }
+
+  let lastEarly = Number.NEGATIVE_INFINITY;
+  const unsubscribe = onModelRejected(() => {
+    if (now() - lastEarly < EARLY_REFRESH_MS) return;
+    lastEarly = now();
+    log(JSON.stringify({ type: "model-list-refresh-early", source }));
+    void refresh();
+  });
+
   return {
+    source,
     read,
     available,
+    choose,
+    /** Read the listing and capability data again now. Resolves once both have been tried. */
+    refresh,
     /** Whether a run may use this model: only ever one this catalogue would offer. */
     async allows(id: string): Promise<boolean> {
       const catalogue = await read();
       return catalogue.models.some((model) => model.id === id);
+    },
+    /** The efforts one offered model takes, or none. */
+    async effortsFor(id: string): Promise<string[]> {
+      const catalogue = await read();
+      return catalogue.models.find((model) => model.id === id)?.efforts ?? [];
+    },
+    /**
+     * Read at once, then every `refreshMs`, in the background. The timer never holds the process
+     * open. Returns a stop for tests and shutdown.
+     */
+    start(): () => void {
+      void refresh();
+      timer ??= setInterval(() => void refresh(), refreshMs);
+      timer.unref?.();
+      return () => {
+        if (timer) clearInterval(timer);
+        timer = undefined;
+        unsubscribe();
+      };
     },
   };
 }

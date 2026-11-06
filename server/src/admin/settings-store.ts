@@ -95,12 +95,27 @@ export type ModelUsageSummary = {
   lastUsedAt: string;
 };
 
+/**
+ * What a setting nobody has saved means on this deployment, where that differs from the team
+ * default. Set once at startup (`setSettingDefaults`).
+ */
+let deploymentDefaults: Partial<EnterpriseSettings> = {};
+
+/**
+ * One person on their own machine (`OPENBOT_SINGLE_USER`) is their own admin, so the switches that
+ * exist to keep a choice with the admin start on for them. They can still turn them off.
+ */
+export function setSettingDefaults(defaults: Partial<EnterpriseSettings>) {
+  deploymentDefaults = defaults;
+}
+
 /** Stored as `{ value }` so every key is a JSON object, which the jsonb column type requires. */
 function unwrap<K extends keyof EnterpriseSettings>(
   key: K,
   stored: Record<string, unknown> | undefined,
 ): EnterpriseSettings[K] {
-  const fallback = DEFAULT_ENTERPRISE_SETTINGS[key];
+  const fallback = (deploymentDefaults[key] ??
+    DEFAULT_ENTERPRISE_SETTINGS[key]) as EnterpriseSettings[K];
   const value = stored?.value;
   if (value === undefined) return fallback;
   if (typeof fallback === "boolean")

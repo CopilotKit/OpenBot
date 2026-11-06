@@ -55,6 +55,7 @@ import {
   type PlanModelConfig,
   planModelForEnvironment,
 } from "./agents/plan-model";
+import { takesModelChoice } from "./agents/harness-model";
 import type { AgentActor } from "./agents/profile-types";
 import {
   OPENBOT_TOOL_LIMIT,
@@ -106,6 +107,7 @@ import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
 import type { ProductTelemetry } from "./telemetry/product";
 import { productRuntimeHook } from "./telemetry/product-boundaries";
+import type { RunChoice } from "./model-catalogue";
 import { inlineToolImages } from "./tool-images";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
@@ -287,6 +289,10 @@ export type RuntimeModel = {
   provider: "openai" | "anthropic";
   defaultModel: string;
   plan?: PlanModelConfig;
+  /** How hard this run thinks, only ever one the model takes. Absent: the model's own default. */
+  effort?: string;
+  /** Whether `defaultModel` came from the provider's listing rather than configuration. */
+  listed?: boolean;
 };
 
 /** Optional desktop environment values may be present but blank; SDKs treat them as URLs. */
@@ -626,6 +632,11 @@ export function builtInAgentConfiguration(
       todayGuidance(now),
     ].join("\n\n"),
     ...(planModel ? {} : { apiKey: apiKey ?? undefined }),
+    // The run's thinking effort, when the person picked one the model takes. A plan's harness is
+    // told through its own run instead (`planChoice`).
+    ...(!planModel && effortProviderOptions(model)
+      ? { providerOptions: effortProviderOptions(model) }
+      : {}),
     /*
      * A run stops after one step unless told otherwise, which for a Bot with tools means it calls
      * one and never speaks: the tool executes, the result arrives, and the run ends before the model
@@ -1187,6 +1198,25 @@ async function buildAgent(
       handoff,
       initiator,
       holdsTools,
+      /*
+       * The person's model and effort, for the harness this deployment installed when it takes them.
+       * Only a model that came from a listing: otherwise the harness keeps its own configuration.
+       */
+      pickedModel &&
+        takesModelChoice(agent.endpoint) &&
+        process.env.MANAGED_AGENT_TOKEN &&
+        agent.headers?.["x-openbot-agent-token"] ===
+          process.env.MANAGED_AGENT_TOKEN
+        ? async (input) => {
+            const choice = await pickedModel(input);
+            return choice?.listed
+              ? {
+                  model: choice.model,
+                  ...(choice.effort ? { reasoningEffort: choice.effort } : {}),
+                }
+              : undefined;
+          }
+        : undefined,
     );
   }
 
@@ -1283,6 +1313,7 @@ async function buildAgent(
             input,
             new Set(input.tools.map((tool) => tool.name)),
             signal,
+            planChoice(runModel),
           )
         : undefined,
       learnedSkills,
@@ -1657,6 +1688,14 @@ function remoteAgentWithStandingRole(
   initiator?: AuditInitiator,
   /** Which runs may hold the Bot's tools. See {@link buildAgents}. */
   holdsTools?: HoldsTools,
+  /**
+   * The model and effort this run answers on, for a harness this deployment runs that takes them
+   * (`takesModelChoice`). Sent as `forwardedProps.openbotModel`. Absent for every other remote Bot,
+   * which picks its own model.
+   */
+  chooseModel?: (
+    input: RunAgentInput,
+  ) => Promise<{ model: string; reasoningEffort?: string } | undefined>,
 ) {
   const holds = (input: RunAgentInput) => !holdsTools || holdsTools(input);
   /*
@@ -1750,6 +1789,8 @@ function remoteAgentWithStandingRole(
     };
     // Nor one it carried in: a statement copied from another run would still be accepted.
     if (!held) delete forwardedProps.openbotRun;
+    // The model is this deployment's decision, never the request's. Set below when it applies.
+    delete (forwardedProps as Record<string, unknown>).openbotModel;
     /*
      * The same guard a built-in Bot gets in `BuiltInAgentWithSaneHistory`, applied here because a
      * remote Bot never passes through it: this middleware is the last thing between the browser's
@@ -1785,18 +1826,21 @@ function remoteAgentWithStandingRole(
      * either; see `tool-images.ts`.
      */
     return from(
-      (loadAttachment
-        ? inlineAttachments(
-            history,
-            loadAttachment,
-            // The conversation this run is in, which is what decides whose files it may reach.
-            input.threadId,
-            markAttachmentsSent,
-          )
-        : Promise.resolve(history)
-      ).then((inlined) => inlineToolImages(inlined)),
+      Promise.all([
+        (loadAttachment
+          ? inlineAttachments(
+              history,
+              loadAttachment,
+              // The conversation this run is in, which is what decides whose files it may reach.
+              input.threadId,
+              markAttachmentsSent,
+            )
+          : Promise.resolve(history)
+        ).then((inlined) => inlineToolImages(inlined)),
+        chooseModel?.(input),
+      ]),
     ).pipe(
-      switchMap((messages) => {
+      switchMap(([messages, chosenModel]) => {
         const prepared: RunAgentInput = {
           ...input,
           messages: [
@@ -1836,7 +1880,9 @@ function remoteAgentWithStandingRole(
                 ]
               : input.context,
           // Who the Bot is calling back as, so the audit row names it rather than "an agent".
-          forwardedProps,
+          forwardedProps: chosenModel
+            ? { ...forwardedProps, openbotModel: chosenModel }
+            : forwardedProps,
         };
         if (clientTools.length === 0) return next.run(prepared);
         return new HeadlessToolsMiddleware(
@@ -2068,28 +2114,67 @@ export async function resolveRuntimeAgents(
  * what the deployment offers, or undefined for the configured one. Read by the server from its own
  * record of the pick (`channels/model-choice.ts`), never from anything the request carries.
  */
-export type PickedModel = (input: RunAgentInput) => Promise<string | undefined>;
+export type PickedModel = (
+  input: RunAgentInput,
+) => Promise<RunChoice | undefined>;
 
 /**
- * The model one run of a built-in Bot uses: the person's pick for this conversation, or the
- * deployment's own.
+ * The model and effort one run of a Bot uses: the person's pick for this conversation, or the
+ * default, which is the middle of the provider's current line (`model-catalogue.ts`).
  *
  * Decided here, on the server, and never by the runtime's own `forwardedProps.model` override. That
  * one takes any `provider/model` string from the browser and sends it with this deployment's key,
  * past the allowlist and past the tool-search wrapper this file puts around the model. Here the pick
  * comes from the server's own record and goes through the same configuration as the default.
  *
- * A plan's harness picks its own model and is sent none, so a plan ignores the pick.
+ * A plan's harness is sent the model only when it came from the plan's own listing, so a plan is
+ * never handed the deployment's configured model name on a guess. See {@link planChoice}.
  */
 export async function modelForRun(
   model: RuntimeModel,
   input: RunAgentInput,
   pickedModel: PickedModel | undefined,
 ): Promise<RuntimeModel> {
-  if (!pickedModel || model.plan) return model;
-  const picked = await pickedModel(input);
-  if (!picked || picked === model.defaultModel) return model;
-  return { ...model, defaultModel: picked };
+  if (!pickedModel) return model;
+  const choice = await pickedModel(input);
+  if (!choice) return model;
+  if (model.plan && !choice.listed) return model;
+  if (choice.model === model.defaultModel && !choice.effort && !model.plan)
+    return model;
+  return {
+    ...model,
+    defaultModel: choice.model,
+    listed: choice.listed,
+    ...(choice.effort ? { effort: choice.effort } : {}),
+  };
+}
+
+/**
+ * What a harness is told to run on: the model and effort, as `forwardedProps.openbotModel`. Only
+ * for a model that came from a listing, so the harness's own fallback applies otherwise.
+ */
+export function planChoice(
+  model: RuntimeModel,
+): { model: string; reasoningEffort?: string } | undefined {
+  if (!model.listed) return undefined;
+  return {
+    model: model.defaultModel,
+    ...(model.effort ? { reasoningEffort: model.effort } : {}),
+  };
+}
+
+/**
+ * How a built-in Bot's effort reaches the model: the AI SDK's own provider option, which the
+ * Responses API sends as `reasoning.effort`, Chat Completions (any OpenAI-compatible endpoint,
+ * Google's and xAI's included) as `reasoning_effort`, and Anthropic as `output_config.effort`.
+ */
+export function effortProviderOptions(
+  model: RuntimeModel,
+): Record<string, Record<string, string>> | undefined {
+  if (!model.effort) return undefined;
+  return model.provider === "anthropic"
+    ? { anthropic: { effort: model.effort } }
+    : { openai: { reasoningEffort: model.effort } };
 }
 
 /** What one Bot may call, for the person whose request this is. */

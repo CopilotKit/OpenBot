@@ -2,6 +2,10 @@ import { timingSafeEqual } from "node:crypto";
 import type { BaseEvent } from "@ag-ui/client";
 import type { Env, Hono } from "hono";
 import { type Observable, tap } from "rxjs";
+import {
+  isModelUnavailableMessage,
+  reportModelRejected,
+} from "./model-catalogue";
 
 export type DesktopConnectionFailure =
   | { connection: "model"; code: "provider_authentication_failed" }
@@ -77,6 +81,15 @@ export function observeModelConnection(
             code: "provider_authentication_failed",
           });
         } else if (
+          event.type === "RUN_ERROR" &&
+          isModelUnavailableMessage(
+            String((event as { message?: unknown }).message ?? ""),
+          )
+        ) {
+          // The provider no longer serves this model to this credential: read the listing again
+          // now rather than at the next scheduled refresh, so the picker and the default drop it.
+          reportModelRejected();
+        } else if (
           event.type === "TEXT_MESSAGE_CONTENT" ||
           event.type === "TOOL_CALL_START"
         ) {
@@ -89,6 +102,13 @@ export function observeModelConnection(
             connection: "model",
             code: "provider_authentication_failed",
           });
+        else if (
+          error instanceof Error &&
+          isModelUnavailableMessage(
+            `${error.message} ${error.cause instanceof Error ? error.cause.message : ""}`,
+          )
+        )
+          reportModelRejected();
       },
     }),
   );

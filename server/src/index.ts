@@ -171,6 +171,7 @@ import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
 import { setEdition } from "./edition";
+import { setSettingDefaults } from "./admin/settings-store";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -327,6 +328,8 @@ import { createWorkQueue, type WorkOfferedListener } from "./work/queue";
 const config = loadConfig();
 // Before anything resolves a capability or reads an enterprise setting. See edition.ts.
 setEdition(config.edition);
+// One person on their own machine picks their own model, as the personal edition always does.
+if (config.singleUser) setSettingDefaults({ modelSelection: true });
 // The environment seeds local policy once. The SDK fallback must not reapply an old revision
 // after an administrator clears a pin to follow the latest published Skills.
 clearLearningRevisionFallback();
@@ -1438,8 +1441,10 @@ const resolveRuntimeModelApiKey = () =>
   });
 
 /**
- * The models a person may pick for a built-in Bot's run, asked of whatever serves the model: the
- * provider, or the gateway in OPENAI_BASE_URL. Narrowed by the admin's allowlist when it is on.
+ * The models a person may pick for a Bot's run, and how hard each can think, asked of whatever
+ * serves the model: the provider, the gateway in OPENAI_BASE_URL, or a signed-in plan's own listing.
+ * Narrowed by the admin's allowlist when it is on. Read now and then every few hours in the
+ * background, and early when a provider refuses a model; never per message.
  */
 const modelCatalogue = createModelCatalogue({
   model: runtimeModel,
@@ -1447,6 +1452,7 @@ const modelCatalogue = createModelCatalogue({
   allowlist: () => enterpriseControls()?.snapshot()?.settings.modelAllowlist,
   enabled: modelSelectionOn,
 });
+modelCatalogue.start();
 
 /** Each person's pick per conversation, saved through `/api/channels/:id/model` and read per run. */
 const modelChoices = createModelChoices({
@@ -2717,8 +2723,10 @@ await installEnterpriseControls({
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
   ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
   builtInModel: `${runtimeModel.provider}/${runtimeModel.defaultModel}`,
-  // The run gate records and judges the model a built-in run will use: the person's pick, if any.
-  pickedModel: (actorId, threadId) => modelChoices.forRun(actorId, threadId),
+  // The run gate records and judges the model a built-in run will use: the person's pick, or the
+  // default the catalogue chose.
+  pickedModel: async (actorId, threadId) =>
+    (await modelChoices.forRun(actorId, threadId)).model,
   people: peopleStore,
   initialAdminEmails: config.auth?.initialAdminEmails ?? [],
   recorders: {

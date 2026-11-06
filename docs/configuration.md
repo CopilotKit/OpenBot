@@ -77,7 +77,8 @@ at `agent-langgraph` on a laptop.
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
 | `GOOGLE_API_KEY`     | unset                              | Google key when `BOT_PROVIDER=google`.                              |
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
-| `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-2.5-flash`. |
+| `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-2.5-flash`. Built-in Bots and the picked harness answer on the model picked in the composer, or the default the [model list](#the-model-list) chooses, and use this only when the provider's listing cannot be read. |
+| `OPENBOT_MODEL_CAPABILITIES_URL` | `https://models.dev/api.json` | Where the model list reads each model's thinking levels, line and price when the provider's own listing does not say. `off` reads none: providers that publish their own (Anthropic, xAI, a ChatGPT plan) still show thinking levels, and the default falls back to the configured model. See [The model list](#the-model-list). |
 | `AGENT_BOT_MODEL`    | `gpt-5.5`                          | Model for the proof-of-concept Bot (`agent-bot`), kept separate because it speaks `/v1/chat/completions` directly and refuses a model it cannot use. |
 | `BOT_RESPONSES_API`  | `false`                            | Makes `agent-langgraph` use the OpenAI Responses API.               |
 | `BOT_REASONING_EFFORT` | unset (provider default)         | OpenAI and the Responses API only: one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. `agent-langgraph` refuses to start on any other value, on a non-`openai` provider, or without the Responses API. |
@@ -288,6 +289,24 @@ Most gateways publish a model list, which is the way to check a name before conf
 Two things are worth knowing before pointing a deployment at any gateway. Not every catalogue entry accepts tools, and a Bot without tool calling cannot drive its computer; the model list says which do. And `BOT_RESPONSES_API=true` needs an endpoint that implements the Responses API, not only chat completions.
 
 The built-in Bots call a gateway's Chat Completions API (`/chat/completions`), which every OpenAI-compatible endpoint serves, unless their model takes tools only through the Responses API: `gpt-5.6` and later, the `-pro` models and `gpt-5.3-codex`, under a gateway's `openai/` name too. For those they call `/responses`, which a gateway or a proxy in front of OpenAI also serves. `COPILOTKIT_OPENAI_API=responses` or `chat` picks one API for every model instead. When OpenBot picks `/responses` itself, the server logs `openai-api` once at start-up, naming the model; a value you set is never changed, `chat` included, and any other value is an error when a built-in Bot runs.
+
+## The model list
+
+The model picker in a Bot's composer offers the models the deployment's credential can use, and how hard each one can think. It applies to built-in Bots and to the harness picked in setup when it is OpenBot's own LangGraph or Claude Agent SDK harness; a Bot on any other framework picks its own model.
+
+| Signed in with | Models listed from | Thinking levels from |
+| -------------- | ------------------ | -------------------- |
+| OpenAI key | `GET https://api.openai.com/v1/models`, chat models only, dropping any past its `shutdown_date` | models.dev |
+| Anthropic key | `GET https://api.anthropic.com/v1/models` | Anthropic's own `capabilities.effort` |
+| Google key or sign-in | Google's model list (the OpenAI-compatible `/models` for a key, the native list for a sign-in) | models.dev |
+| xAI key or sign-in | `GET https://api.x.ai/v1/language-models` | xAI's own `capabilities.reasoning_effort` and default |
+| ChatGPT plan | the plan's own Codex listing, read by the LangGraph harness that holds the sign-in | the plan's `supported_reasoning_levels` and default |
+| Claude plan | `GET https://api.anthropic.com/v1/models` with the plan's token | Anthropic's own `capabilities.effort` |
+| Any other `OPENAI_BASE_URL` | the endpoint's `/models`, as it is | models.dev, for names it knows |
+
+The default, when nobody has picked, is the middle of the provider's current line: the newest model of each line still current, ordered by price, and the one in the middle (GPT-6.1 Terra, Claude Sonnet, Gemini Flash). It replaces the configured model, which is used only when the listing or the capability data cannot say. A model nothing describes yet is still listed, and runs on its own default effort.
+
+Nothing in this is a table OpenBot ships. The listing and the capability data are read at start-up and then every six hours in the background, never on a message. A refresh that fails keeps the last good list. When a provider refuses a model as unknown or unsupported, the list is read again at once, at most once a minute, so a retired model drops out without waiting. Set `OPENBOT_MODEL_CAPABILITIES_URL` to a mirror of models.dev, or `off`.
 
 ## Voice dictation
 
