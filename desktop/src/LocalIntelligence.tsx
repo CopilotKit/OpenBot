@@ -25,6 +25,15 @@ type Call<T> = { attempt: string; answer: Promise<T> };
 export type LocalStartable = { apiUrl: string; gatewayWsUrl: string };
 
 /**
+ * What became of one Start OpenBot.
+ *
+ * `deferred` is a Start that did not run yet because something else has to happen first, such as
+ * the installation that Start found it needs. Whoever deferred it gives the go-ahead again once
+ * that is done, so it is not a failure and is never said as one.
+ */
+export type StartOutcome = "started" | "failed" | "deferred";
+
+/**
  * Between status checks while Intelligence reports that it is starting: about three minutes in
  * all, then the person is told and can check again.
  */
@@ -142,8 +151,8 @@ export function useLocalSequence({
   stack: string | null;
   /** OpenBot already holds the key `local connect` gave it for this stack. */
   connected?: boolean;
-  /** Starts OpenBot against the stack; true when it started. */
-  onStart: (startable: LocalStartable) => Promise<boolean>;
+  /** Starts OpenBot against the stack, or says it failed or was deferred. */
+  onStart: (startable: LocalStartable) => Promise<StartOutcome>;
   /** A stack was set up, or connected. */
   onRecorded?: (stack: string, connected: boolean) => void;
   pollDelays?: number[];
@@ -344,10 +353,13 @@ export function useLocalSequence({
       if (phase === "start") {
         const target = startable.current;
         if (!target) return run("wait");
-        if (!(await latest.current.onStart(target))) {
+        const outcome = await latest.current.onStart(target);
+        if (outcome === "failed") {
           return stop({ said: "OpenBot did not start." });
         }
         go.current = false;
+        // Waiting on something else, which gives the go-ahead again when it is done.
+        if (outcome === "deferred") return stop();
       }
     }
     stop();

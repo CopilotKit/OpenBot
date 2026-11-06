@@ -10,6 +10,7 @@ import {
   LocalIntelligence,
   type LocalStartable,
   LocalStatus,
+  type StartOutcome,
   useLocalSequence,
 } from "./LocalIntelligence";
 import {
@@ -470,28 +471,57 @@ function Setup() {
     void installLocally(true);
   }, [reinstall, busy]);
 
-  /** Shows the install until it completes, then the AI provider screen. */
+  /*
+   * Start carries on by itself after an install Start asked for, and has not started since. A Start
+   * refused again then is said, rather than installing and starting round in a loop. The ref is for
+   * the Start's own answer; the state is what starts it, through the same go-ahead as auto-start,
+   * so the two never both start it.
+   */
+  const startedAfterReinstall = useRef(false);
+  const [resumingStart, setResumingStart] = useState(false);
+
+  /**
+   * Shows the install until it completes, then the AI provider screen.
+   *
+   * `again` is the install a refused Start asked for. Nothing about the AI connection changed, so
+   * one already saved is not asked for again: Start carries on with it. A saved connection that no
+   * longer works is refused at Start, which sends the person to the AI screen for it.
+   */
   async function installLocally(again = false) {
     setStep("install");
-    if (await beginLocalInstall(again)) {
-      setSteps([]);
-      setStep("model");
+    if (!(await beginLocalInstall(again))) return;
+    setSteps([]);
+    if (
+      again &&
+      !startedAfterReinstall.current &&
+      modelCanStart(chosenModel.current)
+    ) {
+      startedAfterReinstall.current = true;
+      setResumingStart(true);
+      setStep("connect");
+      return;
     }
+    setStep("model");
   }
 
-  /** True when OpenBot started. */
+  /**
+   * Starts OpenBot against a ready Intelligence.
+   *
+   * `started` only when OpenBot started. `deferred` when it has to be installed first: the window
+   * goes to the install, and Start is asked for again after it. `failed` for anything else.
+   */
   async function start(
     nextModel = model,
     intelligence: LocalStartable | null = null,
-  ): Promise<boolean> {
+  ): Promise<StartOutcome> {
     if (!installationReady) {
       setStep("install");
-      return false;
+      return "deferred";
     }
     // OpenBot starts only from a stack its CLI reports ready and licensed.
     if (!intelligence) {
       setStep("connect");
-      return false;
+      return "deferred";
     }
     setBusy(true);
     setFailure(null);
@@ -525,6 +555,7 @@ function Setup() {
       setSteps((current) => settleProgress(current));
       setRunning(true);
       setRecoveryFailure(null);
+      startedAfterReinstall.current = false;
       // The handover, on a first run as on a return: the window becomes OpenBot the moment the
       // stack is up. Recorded first, so a later Start of this installation reads as a return.
       savedLaunch.current = installationKey;
@@ -535,15 +566,22 @@ function Setup() {
         // The notice says what the rows would: it is the one thing on the screen.
         setSteps([]);
         setReleaseNotice(outcome.notice);
-        return true;
+        return "started";
       }
       await invoke("show_openbot");
-      return true;
+      return "started";
     } catch (error) {
       recoverFromStart(error);
-      return false;
+      // Refused until OpenBot is installed again, which the window now does by itself and then
+      // starts. Only once: refused again straight after that install, it is a failure.
+      return asProblem(error).connection === "installation" &&
+        !startedAfterReinstall.current
+        ? "deferred"
+        : "failed";
     } finally {
       setBusy(false);
+      // A Start carried on after its install has run, whatever it answered.
+      setResumingStart(false);
     }
   }
 
@@ -628,23 +666,24 @@ function Setup() {
     local.retry();
   }
 
-  function modelCanStart() {
-    if (!model) return false;
-    if (!model.saved) return true;
-    if (model.provider === "google" || model.provider === "xai") {
-      return model.login === "oauth" && Boolean(model.model?.trim());
+  /** The model chosen can start OpenBot: a saved one must be complete enough to use. */
+  function modelCanStart(choice = model) {
+    if (!choice) return false;
+    if (!choice.saved) return true;
+    if (choice.provider === "google" || choice.provider === "xai") {
+      return choice.login === "oauth" && Boolean(choice.model?.trim());
     }
-    if (model.provider === "openai-compatible") {
+    if (choice.provider === "openai-compatible") {
       return (
-        model.login === "endpoint" &&
-        isHttpEndpointUrl(model.baseUrl ?? "") &&
-        Boolean(model.model?.trim())
+        choice.login === "endpoint" &&
+        isHttpEndpointUrl(choice.baseUrl ?? "") &&
+        Boolean(choice.model?.trim())
       );
     }
-    if (model.provider !== "openai" && model.provider !== "anthropic") {
+    if (choice.provider !== "openai" && choice.provider !== "anthropic") {
       return false;
     }
-    return model.login === "plan" || model.login === "api-key";
+    return choice.login === "plan" || choice.login === "api-key";
   }
 
   /** True when OpenBot stopped, even if the local Intelligence stack it started did not. */
@@ -697,21 +736,23 @@ function Setup() {
 
   /*
    * Starts local Intelligence without a click: a recorded stack on a first run that was not
-   * interrupted, or a connected one on relaunch with auto-start on. Never after Stop OpenBot.
+   * interrupted, or a connected one on relaunch with auto-start on. Never after Stop OpenBot. And a
+   * Start that waited for the install it asked for, which is carrying on, not starting anew.
    */
   const localAuto =
     !checkingResume &&
     !running &&
-    !stoppedByChoice.current &&
     step === "connect" &&
     modelCanStart() &&
-    (returningToInstallation
-      ? !refreshIntelligence && localAutoStart
-      : !interruptedAtLaunch.current);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: when it turns on.
+    (resumingStart ||
+      (!stoppedByChoice.current &&
+        (returningToInstallation
+          ? !refreshIntelligence && localAutoStart
+          : !interruptedAtLaunch.current)));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: when it turns on, or a Start resumes.
   useEffect(() => {
     if (localAuto) local.start();
-  }, [localAuto]);
+  }, [localAuto, resumingStart]);
 
   // Quit outranks every screen: the app is closing, whatever was on it.
   const quitting = useQuitStatus(false);

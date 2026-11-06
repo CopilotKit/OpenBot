@@ -1835,41 +1835,117 @@ test.each(["model", "intelligence"])(
   },
 );
 
+const INSTALL_AGAIN = {
+  said: "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.",
+  connection: "installation",
+};
+
 /**
- * The upgrade every earlier installation makes: its deployment is one this app cannot start (a
- * release from before the server ran in a container), so Start is refused until Install lays out
- * the new one. The window used to stop there with "Return to Install and try again" beside a button
- * that said Repair installation. It now goes back to Install by itself.
+ * An installation from an earlier app, saved Claude plan sign-in and all, opened by a newer one:
+ * its deployment is one this app cannot start, so Start is refused until Install lays out the new
+ * one, and the window installs again by itself.
+ *
+ * Seen on a Mac replacing OpenBot 0.3.1: Starting OpenBot, then Installing OpenBot under an alert
+ * "OpenBot did not start", then "Refresh your AI connection", though nothing about the sign-in had
+ * changed and Continue with it started OpenBot at once. The Start was only waiting on the install,
+ * and after the install it carries on with the saved sign-in.
  */
-test("a Start refused until Install runs again goes back to Install by itself", async () => {
-  const root = "/tmp/installed-upgrade";
-  // Installed with the default Bot, as the window itself installs: what it recorded as finished
-  // has to be installed again all the same.
+async function reopenAfterUpdate(
+  root: string,
+  startStack: (starts: number) => unknown,
+) {
   setupConnectedLocalStack(root, localStatus("ready", "valid"), {
+    saved: { ...savedOpenAiConfiguration().saved, model: "claude-plan" },
+    // Installed with the default Bot, as the window itself installs: what it recorded as finished
+    // has to be installed again all the same.
     launch: { harness: { id: "langgraph" } },
   });
+  const installed = deferred<null>();
   const previous = invokeHandler;
   let starts = 0;
   invokeHandler = async (command, args) => {
-    if (command === "start_stack" && starts++ === 0)
-      throw {
-        said: "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.",
-        connection: "installation",
-      };
-    if (command === "prepare_installation") return null;
+    if (command === "start_stack") return startStack(++starts);
+    if (command === "prepare_installation") return installed.promise;
     return previous(command, args);
   };
   const view = await renderApp();
-  await waitFor(() =>
-    expect(
-      invokeCalls.some((call) => call.command === "prepare_installation"),
-    ).toBe(true),
-  );
+  await view.findByRole("heading", { name: "Installing OpenBot" });
+  return { view, installed };
+}
+
+function startsMade() {
+  return invokeCalls.filter((call) => call.command === "start_stack");
+}
+
+test("a Start that waits for the install it asked for carries on with the saved sign-in", async () => {
+  const root = "/tmp/installed-upgrade";
+  const { view, installed } = await reopenAfterUpdate(root, (starts) => {
+    if (starts === 1) throw INSTALL_AGAIN;
+    return null;
+  });
+  // Waiting on the install is not a Start that failed.
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByText(/did not start/)).toBeNull();
   expect(
     invokeCalls.find((call) => call.command === "prepare_installation")?.args,
   ).toMatchObject({ root });
-  // Installed, it carries on to the AI screen, from which Start runs again.
+
+  await act(async () => installed.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  // Never asked to pick the AI it already had.
+  expect(
+    view.queryByRole("heading", { name: /AI connection|Connect your AI/ }),
+  ).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(startsMade()).toHaveLength(2);
+  expect(startsMade()[1].args).toMatchObject({
+    root,
+    ...LOCAL_ADDRESSES,
+    model: { provider: "anthropic", login: "plan", saved: true },
+  });
+  expect(
+    invokeCalls.filter((call) => call.command === "show_openbot"),
+  ).toHaveLength(1);
+  expect(
+    invokeCalls.filter((call) => call.command === "prepare_installation"),
+  ).toHaveLength(1);
+});
+
+test("a saved sign-in refused after the install sends the person to refresh it", async () => {
+  const root = "/tmp/installed-upgrade-refused-sign-in";
+  const { view, installed } = await reopenAfterUpdate(root, (starts) => {
+    if (starts === 1) throw INSTALL_AGAIN;
+    throw {
+      said: "Your Claude sign-in has expired. Sign in again.",
+      connection: "model",
+    };
+  });
+  await act(async () => installed.resolve(null));
+  await view.findByRole("heading", { name: "Refresh your AI connection" });
+  expect(
+    view
+      .getAllByRole("alert")
+      .some((alert) => alert.textContent?.includes("has expired")),
+  ).toBe(true);
+  expect(startsMade()).toHaveLength(2);
+});
+
+test("a Start refused again straight after its install says so, and does not install round in a loop", async () => {
+  const { view, installed } = await reopenAfterUpdate(
+    "/tmp/installed-upgrade-refused-again",
+    () => {
+      throw INSTALL_AGAIN;
+    },
+  );
+  await act(async () => installed.resolve(null));
+  await view.findByRole("alert", { name: "OpenBot" });
+  // The second install the refusal asks for goes to the AI screen, from which Start runs again.
   await view.findByRole("heading", { name: /AI connection|Connect your AI/ });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(startsMade()).toHaveLength(2);
+  expect(
+    invokeCalls.filter((call) => call.command === "prepare_installation"),
+  ).toHaveLength(2);
 });
 
 test("a refused provider's failure sits in the AI card and goes when another provider is chosen", async () => {
