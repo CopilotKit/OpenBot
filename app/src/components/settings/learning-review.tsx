@@ -2,7 +2,11 @@ import type { LearningProposal } from "@openbot/shared/learning";
 import { IconChevronRight, IconSparkles } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
-import { PageRows, PageSection } from "@/components/layout/page-shell";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
 import { ProposalDialog } from "@/components/learning/proposal-dialog";
 import {
   Item,
@@ -62,7 +66,7 @@ export function LearningReview() {
 
   return (
     <PageSection
-      title="Waiting for your review"
+      title={canReview ? "Waiting for your review" : "Waiting for an admin"}
       description={
         canReview
           ? "Approve a skill to publish it to your Bots."
@@ -101,14 +105,15 @@ export function LearningReview() {
           ))}
         </PageRows>
       ) : unreadable ? null : (
-        <p className="mt-4 text-muted-foreground text-sm">
+        <PageEmpty icon={IconSparkles} title="Nothing to review">
           New proposals show up here after Learning analyses your recordings.
-        </p>
+        </PageEmpty>
       )}
       {unreadable && (
-        <p className="mt-4 text-muted-foreground text-sm">
-          Couldn't read some of your proposed skills. Reload the page to try
-          again.
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {sources.every((source) => source.proposals === null)
+            ? "Couldn't read your proposed skills. Reload the page."
+            : "Couldn't read some of your proposed skills. Reload the page."}
         </p>
       )}
       {open && (

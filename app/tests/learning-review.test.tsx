@@ -111,7 +111,7 @@ function draw() {
 
 test("lists the pending proposals with what each does", async () => {
   const view = draw();
-  await view.findByText("Waiting for your review");
+  await view.findByText("Waiting for an admin");
   expect(await view.findByText("New skill")).toBeTruthy();
   expect(view.getByText("Update to close-ticket")).toBeTruthy();
   expect(view.getByText("Remove old-skill")).toBeTruthy();
@@ -159,12 +159,42 @@ test("says so when proposals couldn't be read", async () => {
     ],
   };
   const view = draw();
-  expect(await view.findByText(/Couldn't read/)).toBeTruthy();
+  const alert = await view.findByRole("alert");
+  expect(alert.textContent).toBe(
+    "Couldn't read your proposed skills. Reload the page.",
+  );
+});
+
+test("says some were unreadable when another source was read", async () => {
+  review = {
+    canReview: true,
+    autoApprove: false,
+    sources: [
+      {
+        containerId: "user-1",
+        kind: "recordings",
+        label: "Your recordings",
+        latestRun: null,
+        proposals: null,
+      },
+      {
+        containerId: "user-2",
+        kind: "recordings",
+        label: "More recordings",
+        latestRun: null,
+        proposals: [],
+      },
+    ],
+  };
+  const view = draw();
+  const alert = await view.findByRole("alert");
+  expect(alert.textContent).toContain("Couldn't read some of your");
 });
 
 test("says what to expect when nothing is waiting", async () => {
   review = { canReview: true, autoApprove: false, sources: [] };
   const view = draw();
+  expect(await view.findByText("Nothing to review")).toBeTruthy();
   expect(
     await view.findByText(
       "New proposals show up here after Learning analyses your recordings.",
