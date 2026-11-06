@@ -8,26 +8,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Built-in Bots and the picked harness now answer on the middle of the
-provider's current line when nobody has picked a model (GPT-6.1 Terra, Claude Sonnet 5.5, Gemini
-3.8 Flash, Grok 4.7 as of today), not on the configured model. The configured model is used only
-when the provider's listing or the capability data cannot be read. One person on their own machine
-(`OPENBOT_SINGLE_USER`) now has "Let people choose a model" on until they turn it off.
-
-- **Model and thinking effort in the composer.** The model picker in a Bot's composer reads
-  "GPT-6.1 Terra · High", lists the models the deployment's credential can use, and offers each
-  reasoning model's thinking levels, only the ones it takes. The pick is saved per person and
-  conversation. It now covers the harness picked in setup when it is OpenBot's LangGraph or Claude
-  Agent SDK harness, and every sign-in: OpenAI, Anthropic, Google and xAI keys or sign-ins, any
-  OpenAI-compatible endpoint, and ChatGPT and Claude plans.
-- **The model list keeps itself current.** It is read at start-up and every six hours from the
-  provider (or a plan's own listing), with thinking levels from the provider where it says and
-  from models.dev otherwise (`OPENBOT_MODEL_CAPABILITIES_URL`, `off` to read none). A refresh that
-  fails keeps the last good list, and a provider refusing a model refreshes it at once.
-- **Fixed: every message failed on a ChatGPT plan** with "The 'gpt-5.5' model is not supported when
-  using Codex with a ChatGPT account". The LangGraph harness now runs a model the plan's own
-  listing offers.
-
 ## 0.3.0
 
 **Before upgrading.** Forty things change for an existing deployment:

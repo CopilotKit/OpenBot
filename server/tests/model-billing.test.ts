@@ -46,7 +46,16 @@ function refusing(answer: { status: number; body: unknown }) {
     port: 0,
     fetch: () => {
       calls += 1;
-      return Response.json(answer.body, { status: answer.status });
+      /*
+       * A 429 is retried by the AI SDK, as in production, and the SDK waits as long as the
+       * provider's `retry-after-ms` says before each retry, 2 s then 4 s when it says nothing.
+       * OpenAI says nothing on its no-credits 429, so this header is the one difference from its
+       * real answer: it is the SDK's own seam for the wait, and keeps every attempt real.
+       */
+      return Response.json(answer.body, {
+        status: answer.status,
+        headers: answer.status === 429 ? { "retry-after-ms": "0" } : {},
+      });
     },
   });
   servers.push(server);
@@ -106,6 +115,8 @@ test("OpenAI's no-credits 429 is told as that, not as three failed attempts", as
     provider: "openai",
     defaultModel: "gpt-6.1-terra",
   });
+  // Retried as the SDK retries any 429, and told as a billing refusal at the end.
+  expect(provider.calls()).toBe(3);
   expect(message).not.toContain("Failed after");
   expect(message).toContain(
     'said: "You have no credits remaining. Add credits to continue using the API',
@@ -143,6 +154,7 @@ test("a rate limit is not a billing problem, and keeps its own message", async (
     provider: "openai",
     defaultModel: "gpt-6.1-terra",
   });
+  expect(provider.calls()).toBe(3);
   expect(message).toContain("Rate limit reached");
   expect(message).not.toContain("out of credit");
 });
