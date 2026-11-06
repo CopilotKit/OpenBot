@@ -369,7 +369,7 @@ describe("Settings, Learning", () => {
       expect(refused.status).toBe(403);
       expect(await refused.json()).toEqual({
         error:
-          "An admin hasn't turned on sharing Skills with every Bot, so your Skills stay with your own Bots.",
+          "An admin hasn't turned on sharing skills with every Bot, so your skills stay with your own Bots.",
       });
     }
     expect(await store.read(grace)).toEqual({ mode: "closed", openSkills: [] });
@@ -765,7 +765,7 @@ describe("Settings, Learning", () => {
       expect(off.status).toBe(409);
       expect(await off.json()).toEqual({
         error:
-          "An admin has turned off Automatic Learning, so you have no Skills to change.",
+          "An admin has turned off Automatic Learning, so you have no skills to change.",
       });
     } finally {
       settings.enabled = true;

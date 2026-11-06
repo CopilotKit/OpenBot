@@ -240,6 +240,39 @@ describe("reviewing the skills learned from your own recordings", () => {
     });
   });
 
+  test("run history that can't be read still shows the proposals waiting for review", async () => {
+    const app = review({
+      manage: {
+        listLearningCandidates: async () => [
+          {
+            id: "pending-one",
+            title: "pending-one",
+            description: "",
+            reason: "",
+            operation: "create",
+            status: "pending_review",
+            createdAt: "2026-11-01T00:00:00.000Z",
+            reviewedAt: null,
+          },
+        ],
+        listLearningRuns: async () => {
+          throw Object.assign(new Error("Too many requests"), {
+            status: 429,
+            code: "RATE_LIMITED",
+          });
+        },
+      } as unknown as LearningManagement,
+    });
+    const body = (await (
+      await app.request("/review")
+    ).json()) as PersonalReview;
+    expect(body.sources[0]?.proposals?.map((entry) => entry.id)).toEqual([
+      "pending-one",
+    ]);
+    expect(body.sources[0]?.latestRun).toBeNull();
+    expect(body.sources[0]).not.toHaveProperty("unavailable");
+  });
+
   test("a space not made yet reads as nothing to review, without an error", async () => {
     const app = review({ containers: [] });
     const body = (await (
@@ -618,6 +651,7 @@ describe("switching automatic approval on and off", () => {
       expect(response.status).toBe(200);
       const body = (await response.json()) as PersonalReview;
       expect(body.autoApprove).toBe(true);
+      expect(body.approved).toBe(1);
       expect(sweeps).toBe(1);
     } finally {
       setEdition(EDITION);
@@ -627,7 +661,64 @@ describe("switching automatic approval on and off", () => {
       const response = await review({ autoApprover }).request("/review");
       const body = (await response.json()) as PersonalReview;
       expect(body.autoApprove).toBeNull();
+      expect(body.approved).toBe(0);
       expect(sweeps).toBe(1);
+    } finally {
+      setEdition(EDITION);
+    }
+  });
+
+  test("a sweep that fails reads as none approved", async () => {
+    setEdition("personal");
+    try {
+      const response = await review({
+        autoApprover: {
+          sweep: async () => {
+            throw new Error("down");
+          },
+        },
+      }).request("/review");
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as PersonalReview).approved).toBe(0);
+    } finally {
+      setEdition(EDITION);
+    }
+  });
+
+  test("the personal edition reads runs before the sweep and proposals after it", async () => {
+    const order: string[] = [];
+    const manage = {
+      listLearningCandidates: async () => {
+        order.push("proposals");
+        return [];
+      },
+      listLearningRuns: async () => {
+        order.push("runs");
+        return [];
+      },
+    } as unknown as LearningManagement;
+    const autoApprover = {
+      sweep: async () => {
+        order.push("sweep");
+        return { approved: 0 };
+      },
+    };
+    setEdition("personal");
+    try {
+      const response = await review({ manage, autoApprover }).request(
+        "/review",
+      );
+      expect(response.status).toBe(200);
+      expect(order).toEqual(["runs", "sweep", "proposals"]);
+    } finally {
+      setEdition(EDITION);
+    }
+    order.length = 0;
+    setEdition("team");
+    try {
+      await review({ manage, autoApprover }).request("/review");
+      expect(order).not.toContain("sweep");
+      expect([...order].sort()).toEqual(["proposals", "runs"]);
     } finally {
       setEdition(EDITION);
     }

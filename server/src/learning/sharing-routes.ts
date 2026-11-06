@@ -80,7 +80,7 @@ export type PersonalLearningRouteDeps = {
 
 /** What a person reads when they try to open their Skills while an administrator has not allowed it. */
 const SHARING_OFF =
-  "An admin hasn't turned on sharing Skills with every Bot, so your Skills stay with your own Bots.";
+  "An admin hasn't turned on sharing skills with every Bot, so your skills stay with your own Bots.";
 
 const smallBody = bodyLimit({
   maxSize: 2 * 1024,
@@ -246,9 +246,29 @@ export function createPersonalLearningRoutes(
       );
     }
     const personal = currentEdition() === "personal";
+    const [scopes, allowed] = await Promise.all([
+      deps.scopesFor(context.var.actor),
+      canReview(),
+    ]);
+    const readRuns = (source: LearningSource) =>
+      settle(manage.listLearningRuns({ containerId: source.containerId }));
+    const readPending = (source: LearningSource) =>
+      settle(readProposals(manage, source.containerId));
+    let approved = 0;
+    let reads: {
+      source: LearningSource;
+      proposals: Settled<Awaited<ReturnType<typeof readProposals>>>;
+      runs: Settled<Awaited<ReturnType<typeof manage.listLearningRuns>>>;
+    }[];
     if (personal) {
+      /*
+       * Runs first, then the sweep, then proposals. A run that finishes after its runs were read still reads as
+       * running, so the page polls again and the next sweep approves what it proposed. Read the other way round, a run
+       * finishing between the sweep and the runs read would stop polling with its proposals left waiting.
+       */
+      const runs = await Promise.all(scopes.map(readRuns));
       try {
-        await deps.autoApprover?.sweep();
+        approved = (await deps.autoApprover?.sweep())?.approved ?? 0;
       } catch (error) {
         console.error(
           JSON.stringify({
@@ -257,56 +277,60 @@ export function createPersonalLearningRoutes(
           }),
         );
       }
+      const proposals = await Promise.all(scopes.map(readPending));
+      reads = scopes.map((source, index) => ({
+        source,
+        proposals: proposals[index] as (typeof proposals)[number],
+        runs: runs[index] as (typeof runs)[number],
+      }));
+    } else {
+      reads = await Promise.all(
+        scopes.map(async (source) => {
+          const [proposals, runs] = await Promise.all([
+            readPending(source),
+            readRuns(source),
+          ]);
+          return { source, proposals, runs };
+        }),
+      );
     }
-    const [scopes, allowed] = await Promise.all([
-      deps.scopesFor(context.var.actor),
-      canReview(),
-    ]);
-    const sources = await Promise.all(
-      scopes.map(async (source) => {
-        const [proposals, runs] = await Promise.all([
-          settle(readProposals(manage, source.containerId)),
-          settle(manage.listLearningRuns({ containerId: source.containerId })),
-        ]);
-        const failure = [proposals, runs].find(
-          (outcome) => outcome.failed && !outcome.missing,
-        );
-        const off = [proposals, runs].some(
-          (outcome) => outcome.failed && outcome.off,
-        );
-        const latest = runs.value
-          ? [...runs.value].sort((a, b) =>
-              b.createdAt.localeCompare(a.createdAt),
-            )[0]
-          : undefined;
-        if (off) {
-          return {
-            ...source,
-            proposals: null,
-            latestRun: null,
-            unavailable: "learning-off" as const,
-          };
-        }
-        // A person's space exists once a Recorder connects, so not being there yet means nothing to review.
-        if (proposals.failed && proposals.missing) {
-          return { ...source, proposals: [], latestRun: null };
-        }
+    const sources = reads.map(({ source, proposals, runs }) => {
+      const off = [proposals, runs].some(
+        (outcome) => outcome.failed && outcome.off,
+      );
+      if (off) {
         return {
           ...source,
-          proposals: failure
-            ? null
-            : (proposals.value?.filter(
-                (entry) => entry.status === "pending_review",
-              ) ?? null),
-          latestRun: latest ? runSummary(latest) : null,
+          proposals: null,
+          latestRun: null,
+          unavailable: "learning-off" as const,
         };
-      }),
-    );
+      }
+      // A person's space exists once a Recorder connects, so not being there yet means nothing to review.
+      if (proposals.failed && proposals.missing) {
+        return { ...source, proposals: [], latestRun: null };
+      }
+      // Each read stands alone: run history that can't be read hides only the latest run, never what waits for review.
+      const latest = runs.value
+        ? [...runs.value].sort((a, b) =>
+            b.createdAt.localeCompare(a.createdAt),
+          )[0]
+        : undefined;
+      return {
+        ...source,
+        proposals:
+          proposals.value?.filter(
+            (entry) => entry.status === "pending_review",
+          ) ?? null,
+        latestRun: latest ? runSummary(latest) : null,
+      };
+    });
     const answer: PersonalReview = {
       canReview: allowed,
       autoApprove: personal
         ? ((await deps.settings.read()).autoApprove ?? true)
         : null,
+      approved,
       sources,
     };
     return context.json(answer);
@@ -533,7 +557,7 @@ export function createPersonalLearningRoutes(
     } | null;
     if (!isLearningSharingMode(body?.mode)) {
       return context.json(
-        { error: "Choose closed, open or choose for your Skills." },
+        { error: "Choose closed, open or choose for your skills." },
         400,
       );
     }
@@ -627,14 +651,14 @@ export function createPersonalLearningRoutes(
         ? context.json(
             {
               error:
-                "An admin has turned off Automatic Learning, so you have no Skills to change.",
+                "An admin has turned off Automatic Learning, so you have no skills to change.",
             },
             409,
           )
         : context.json(
             {
               error:
-                "Couldn't check your Skills with Intelligence just now, so nothing changed. Try again.",
+                "Couldn't check your skills with Intelligence just now, so nothing changed. Try again.",
             },
             503,
           );

@@ -262,6 +262,11 @@ export type LearningSource = {
 export type PersonalReview = {
   canReview: boolean;
   autoApprove: boolean | null;
+  /**
+   * How many proposals opening the page approved automatically; 0 when no sweep ran, as in the team edition. The server
+   * always sends it; optional so a reader written before it still type-checks.
+   */
+  approved?: number;
   sources: (LearningSource & {
     proposals: LearningProposal[] | null;
     latestRun: LearningRunSummary | null;
