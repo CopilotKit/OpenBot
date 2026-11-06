@@ -10,6 +10,7 @@ mod desktop_page;
 mod desktop_status;
 mod desktop_telemetry;
 mod intelligence_bridge;
+mod outside_links;
 mod update_offer;
 
 #[cfg(test)]
@@ -3908,6 +3909,33 @@ enum WindowPage {
     Other,
 }
 
+/// The main window's guard: from OpenBot's own pages, a site outside OpenBot opens in the person's
+/// default browser and the window stays where it is. See `outside_links`.
+fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::<R>::new("outside-links")
+        .on_navigation(|webview, destination| {
+            if webview.label() != "main" || !outside_links::leaves(destination) {
+                return true;
+            }
+            let from_openbot = webview.url().is_ok_and(|current| {
+                matches!(
+                    window_page(webview.app_handle(), &current),
+                    WindowPage::OwnedApp | WindowPage::LocalApp
+                )
+            });
+            if !from_openbot {
+                return true;
+            }
+            use tauri_plugin_opener::OpenerExt;
+            let _ = webview
+                .app_handle()
+                .opener()
+                .open_url(destination.as_str(), None::<&str>);
+            false
+        })
+        .build()
+}
+
 fn window_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> WindowPage {
     if on_setup_page(app, url) {
         WindowPage::Setup
@@ -7071,6 +7099,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(intelligence_bridge::plugin())
         .plugin(desktop_page::plugin())
+        .plugin(outside_links_guard())
         // Only so the window can restart into what the updater wrote.
         .plugin(tauri_plugin_process::init())
         .manage(Shell::default())
@@ -7136,6 +7165,9 @@ fn main() {
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
             let page = window_page(window.app_handle(), payload.url());
             match_title_bar(&window.window(), page);
+            if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp) {
+                let _ = window.eval(outside_links::PAGE);
+            }
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp)
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
