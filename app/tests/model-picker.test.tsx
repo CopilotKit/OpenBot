@@ -150,7 +150,7 @@ function thinking(popup: HTMLElement) {
   return within(popup).queryByRole("group", { name: "Thinking" });
 }
 
-test("the trigger names a model that takes no effort on its own", () => {
+test("the trigger is a CPU icon, and names a model that takes no effort on its own", () => {
   const { getByRole } = render(
     <ModelPicker
       catalogue={catalogue}
@@ -159,15 +159,23 @@ test("the trigger names a model that takes no effort on its own", () => {
     />,
   );
   const trigger = getByRole("combobox", { name: "Model: GPT-4o" });
-  expect(trigger.textContent).toBe("GPT-4o");
-  // Its maker's mark, as the list rows draw it.
-  expect(trigger.querySelector("img")?.getAttribute("data-mark")).toBe(
-    "GPT-4o",
+  // No name and no maker's mark in the row: the CPU icon and a chevron, named for screen readers.
+  expect(trigger.textContent).toBe("");
+  expect(trigger.querySelector("img")).toBeNull();
+  expect(trigger.firstElementChild?.classList.contains("tabler-icon-cpu")).toBe(
+    true,
   );
 });
 
-test("a model whose maker has no mark vendored gets the app's plain model icon, never an empty gap", () => {
-  const { getByRole } = render(
+/** The open popup of a picker drawn on its own. */
+async function openStandalone(view: ReturnType<typeof render>, name: string) {
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("combobox", { name }));
+  return await view.findByRole("dialog");
+}
+
+test("a model whose maker has no mark vendored gets the app's plain model icon in the list, never an empty gap", async () => {
+  const view = render(
     <ModelPicker
       catalogue={{
         ...catalogue,
@@ -177,18 +185,15 @@ test("a model whose maker has no mark vendored gets the app's plain model icon, 
       value={{ model: "fast", effort: null }}
     />,
   );
-  const trigger = getByRole("combobox", { name: "Model: fast" });
-  // No brand mark is invented for it.
-  expect(trigger.querySelector("img")).toBeNull();
-  // The app's own icon holds the place, so the label never starts on an empty gap.
-  expect(trigger.firstElementChild?.tagName.toLowerCase()).toBe("svg");
-  expect(
-    trigger.firstElementChild?.classList.contains("tabler-icon-cube"),
-  ).toBe(true);
+  const popup = await openStandalone(view, "Model: fast");
+  const row = within(popup).getByRole("option", { name: "fast" });
+  // No brand mark is invented for it, and the app's own icon holds the place.
+  expect(row.querySelector("img")).toBeNull();
+  expect(row.querySelector("svg.tabler-icon-cube")).not.toBeNull();
 });
 
-test("Google and xAI models carry their makers' marks", () => {
-  const { getByRole } = render(
+test("Google and xAI models carry their makers' marks in the list", async () => {
+  const view = render(
     <ModelPicker
       catalogue={{
         ...catalogue,
@@ -206,10 +211,14 @@ test("Google and xAI models carry their makers' marks", () => {
       value={{ model: "grok-4.7", effort: null }}
     />,
   );
-  const trigger = getByRole("combobox", { name: "Model: Grok 4.7" });
-  expect(trigger.querySelector("img")?.getAttribute("data-mark")).toBe(
-    "Grok 4.7",
-  );
+  const popup = await openStandalone(view, "Model: Grok 4.7");
+  for (const label of ["Grok 4.7", "Gemini 3.8 Flash"])
+    expect(
+      within(popup)
+        .getByRole("option", { name: label })
+        .querySelector("img")
+        ?.getAttribute("data-mark"),
+    ).toBe(label);
 });
 
 test("the trigger names the chosen effort beside the model", () => {
@@ -220,11 +229,11 @@ test("the trigger names the chosen effort beside the model", () => {
       value={{ model: "gpt-6.1-terra", effort: "xhigh" }}
     />,
   );
-  const trigger = getByRole("combobox", {
-    name: "Model: GPT-6.1 Terra, thinking: Extra high",
-  });
-  // A non-breaking space before the dot, so it never starts a line of its own.
-  expect(trigger.textContent).toBe("GPT-6.1 Terra · Extra high");
+  expect(
+    getByRole("combobox", {
+      name: "Model: GPT-6.1 Terra, thinking: Extra high",
+    }),
+  ).toBeTruthy();
 });
 
 test("with no effort chosen, the trigger names the model's own default", () => {
@@ -236,9 +245,8 @@ test("with no effort chosen, the trigger names the model's own default", () => {
     />,
   );
   expect(
-    getByRole("combobox", { name: "Model: GPT-6.1 Terra, thinking: Medium" })
-      .textContent,
-  ).toBe("GPT-6.1 Terra · Medium");
+    getByRole("combobox", { name: "Model: GPT-6.1 Terra, thinking: Medium" }),
+  ).toBeTruthy();
 });
 
 test("with no effort chosen and no default known, the trigger names the model alone", () => {
@@ -249,9 +257,7 @@ test("with no effort chosen and no default known, the trigger names the model al
       value={{ model: "gpt-6-sol", effort: null }}
     />,
   );
-  expect(getByRole("combobox", { name: "Model: GPT-6 Sol" }).textContent).toBe(
-    "GPT-6 Sol",
-  );
+  expect(getByRole("combobox", { name: "Model: GPT-6 Sol" })).toBeTruthy();
 });
 
 test("there is no picker when there is nothing to pick", () => {

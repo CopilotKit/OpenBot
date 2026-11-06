@@ -1,5 +1,10 @@
 import { Combobox as ComboboxPrimitive } from "@base-ui/react";
-import { IconCheck, IconChevronDown, IconCube } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconChevronDown,
+  IconCpu,
+  IconCube,
+} from "@tabler/icons-react";
 import { useMemo, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import { Button } from "@/components/ui/button";
@@ -79,8 +84,10 @@ function ModelMark({ model }: { model: ModelOption }) {
 /**
  * The model a conversation's Bot answers on, and how hard it thinks, picked in the composer.
  *
- * A quiet text button in the controls row naming the model and its effort, "GPT-6.1 Terra · High",
- * as VS Code's chat does. The popup is searchable, because a provider's own list runs to dozens,
+ * A quiet icon button in the controls row, a CPU and a chevron, rather than the model's mark and
+ * name: the row has the send and dictation controls to fit, and a name of any length crowded them.
+ * The tooltip and the button's accessible name say the model and its effort ("GPT-6.1 Terra ·
+ * High"). The popup is searchable, because a provider's own list runs to dozens,
  * newest first as the server sends it, with OpenBot's own model marked.
  *
  * TWO COLUMNS, ONE LIST, as T3 Code lays it out: the search and the models on the left, and the
@@ -224,8 +231,7 @@ function Picker({
           render={
             /*
              * Base UI's trigger rather than `ComboboxTrigger`, which draws its own larger chevron:
-             * this one is a ghost button like its neighbours in the row. It shrinks before the
-             * send and dictation controls do, and the model's name gives way before its effort.
+             * this one is a ghost button like its neighbours in the row.
              */
             <ComboboxPrimitive.Trigger
               aria-label={
@@ -234,24 +240,14 @@ function Picker({
                   : `Model: ${selected.label}`
               }
               className={cn(
-                "h-8 min-w-0 shrink gap-1.5 px-2 font-normal text-muted-foreground",
+                "h-8 shrink-0 gap-1 px-2 font-normal text-muted-foreground",
                 className,
               )}
               data-slot="composer-model"
               render={<Button size="sm" type="button" variant="ghost" />}
               nativeButton
             >
-              <ModelMark model={selected} />
-              {/*
-               * In a narrow column the name gives way first, down to a few letters, and only then
-               * the effort: the name says which model this is, and the tooltip has the rest.
-               */}
-              <span className="flex min-w-0 overflow-hidden">
-                <span className="min-w-12 truncate">{selected.label}</span>
-                {effortText ? (
-                  <span className="shrink-0">{` · ${effortText}`}</span>
-                ) : null}
-              </span>
+              <IconCpu aria-hidden className="size-4 shrink-0" />
               <IconChevronDown aria-hidden className="size-3.5 shrink-0" />
             </ComboboxPrimitive.Trigger>
           }
