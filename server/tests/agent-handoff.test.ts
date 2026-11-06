@@ -5,6 +5,7 @@ import {
   type HandoffCaps,
   resolveAddressedBot,
 } from "../src/agents/handoff";
+import { handoffTool } from "../src/agents/handoff-tool";
 import type { AgentProfileStore } from "../src/agents/profile-store";
 import type { AgentProfile } from "../src/agents/profile-types";
 import type { AuditStore } from "../src/audit";
@@ -314,6 +315,53 @@ describe("handing work to another Bot", () => {
 
     expect(outcome.ok).toBe(false);
     expect(rows).toEqual([]);
+  });
+
+  /*
+   * Found in an end-to-end run: "ask the Knowledge Bot for one sentence on what Helm is" was routed to
+   * Knowledge, which went looking for a way to reach the Knowledge Bot. A Bot that names itself is
+   * the one being asked, and the tool says so before anything else, a person's approval included.
+   */
+  test("a Bot naming itself is told it is the one asked, before anybody is asked to approve a hop", async () => {
+    const {
+      desk: handoff,
+      rows,
+      events,
+    } = desk({
+      roster: [
+        profile({ id: "knowledge", name: "Knowledge" }),
+        profile({ id: "researcher", name: "Researcher" }),
+      ],
+    });
+    const approvals: string[] = [];
+    const tool = handoffTool({
+      desk: handoff,
+      from: { ...FROM, botId: "knowledge" },
+      hasSomebodyToAsk: true,
+      maxDepth: 2,
+      maxPerRun: 3,
+      approvalGate: async (candidate) => {
+        approvals.push(String(candidate.scope));
+        return undefined;
+      },
+    });
+
+    const answer = await tool?.execute({
+      bot: "the Knowledge Bot",
+      task: "Say in one sentence what Helm is.",
+    });
+
+    expect(answer).toBe(
+      "Nothing was sent: you are Knowledge, so a request for Knowledge is a request to you. Do the work yourself and answer the person.",
+    );
+    expect(approvals).toEqual([]);
+    expect(rows).toEqual([]);
+    expect(events).toEqual([
+      expect.objectContaining({
+        eventType: "agent.handoff_refused",
+        payload: expect.objectContaining({ reason: "self" }),
+      }),
+    ]);
   });
 
   test("a Bot cannot hand work to itself", async () => {

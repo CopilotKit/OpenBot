@@ -27,7 +27,11 @@ import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { createApprovalService } from "../src/approvals/service";
 import { createApprovalStore } from "../src/approvals/store";
 import { createAuditStore, PERSON_INITIATOR } from "../src/audit";
-import { type RegisteredAgent, registeredAgentFromRow } from "../src/copilot";
+import {
+  type RegisteredAgent,
+  registeredAgentFromRow,
+  selfAddressGuidance,
+} from "../src/copilot";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
@@ -624,10 +628,12 @@ describe("a Bot gives part of its work to a subagent", () => {
 
     const [sub] = subagentRequests();
     if (!sub) throw new Error("No subagent ran.");
-    // The same Bot: its role and its granted tools, and none it was not granted.
+    // The same Bot: its name, its role and its granted tools, and none it was not granted.
     expect(
       text(sub.messages[0] ?? { role: "system", content: "" }),
-    ).toStartWith(ROLE);
+    ).toStartWith(
+      `You are Notes, a Bot in OpenBot. ${selfAddressGuidance("Notes")}\n\n${ROLE}`,
+    );
     expect(offered(sub)).toContain(modelName(SEARCH));
     expect(offered(sub)).toContain(modelName(POST));
     expect(offered(sub)).not.toContain(modelName(UNGRANTED));
