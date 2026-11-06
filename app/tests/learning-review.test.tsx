@@ -473,7 +473,7 @@ test("a source Learning is off for says so plainly, without the read failure ale
   const view = draw();
   expect(
     await view.findByText(
-      "Learning isn't available in Intelligence, so nothing is proposed here.",
+      "Learning isn't available in the back end, so nothing is proposed here.",
     ),
   ).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();

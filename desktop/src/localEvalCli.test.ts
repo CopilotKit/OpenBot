@@ -152,13 +152,15 @@ test("connects this installation as its own cancellable attempt", async () => {
 
 test("a connection OpenBot would not take up arrives as a Problem; CLI failures as categories", async () => {
   invokeHandler = async () => {
-    throw { said: "The Intelligence CLI connected a different stack." };
+    throw {
+      said: "A different back end was connected. OpenBot did not use it.",
+    };
   };
   const problem = await connectLocalEval("/tmp/openbot").connection.catch(
     (e) => e,
   );
   expect(problem).toEqual({
-    said: "The Intelligence CLI connected a different stack.",
+    said: "A different back end was connected. OpenBot did not use it.",
   });
   invokeHandler = async () => {
     throw "timeout";
@@ -283,6 +285,20 @@ test("the Stop failure prefix is the one the native side writes", async () => {
   expect(native).toContain(
     `const INTELLIGENCE_STOP_FAILED: &str = "${intelligenceStopFailed}";`,
   );
+  // The line a person can open under Technical details names the part, not the product.
+  expect(intelligenceStopFailed).toBe("Back end stop failed: ");
+  // A real native line, as Stop returns it after OpenBot's own, is still the back end's part.
+  const said = native.match(
+    /Err\(local_eval::Failure::Unavailable\) => \{?\s*Err\(\s*"([^"]+)"/,
+  )?.[1];
+  expect(said).toBe(
+    "this build has no command-line tool to stop the back end OpenBot created",
+  );
+  const line = `${intelligenceStopFailed}${said}`;
+  expect(splitStopFailure(`Compose down failed: busy\n${line}`)).toEqual({
+    openBot: "Compose down failed: busy",
+    intelligence: line,
+  });
 });
 
 test("a Stop failure is split into OpenBot's part and Intelligence's part", () => {
@@ -301,7 +317,7 @@ test("a Stop failure is split into OpenBot's part and Intelligence's part", () =
   // Anything that is not the native line format is OpenBot's own failure.
   expect(splitStopFailure({ said: "x" }).openBot).not.toBeNull();
   expect(intelligenceStopProblem(intelligence)).toEqual({
-    said: "OpenBot stopped, but could not stop the local Intelligence stack it started.",
+    said: "OpenBot stopped, but could not stop its back end.",
     detail: intelligence,
   });
 });

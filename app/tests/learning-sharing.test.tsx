@@ -255,7 +255,7 @@ test("a space with no skills yet says so plainly", async () => {
   answer = { mode: "choose", sharingAllowed: true, skills: [] };
   const view = draw();
   await view.findByText(
-    "No skills learned from your recordings yet. Once there are, each one you open here reaches every Bot.",
+    "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot.",
   );
   expect(view.queryByRole("switch")).toBeNull();
 });
@@ -269,7 +269,7 @@ test("Skills Intelligence did not deliver show a plain unavailable line, and the
   };
   const view = draw();
   await view.findByText(
-    "Couldn't read your skills from Intelligence just now. Your choice above still applies to them.",
+    "Couldn't read your Skills from the back end just now. Your choice above still applies to them.",
   );
   fireEvent.click(choice(view, "Only my Bots"));
   await waitFor(() =>

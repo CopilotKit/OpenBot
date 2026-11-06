@@ -73,15 +73,15 @@ function automaticMessage(
     automatic.state === "assigned" &&
     settings.defaultTarget?.containerId === automatic.containerId
   )
-    return `OpenBot assigned this Intelligence project's "${automatic.containerId}" container automatically. You can change it here.`;
+    return `OpenBot assigned this project's "${automatic.containerId}" container automatically. You can change it here.`;
   if (automatic.state === "absent")
-    return `This Intelligence project has no "${automatic.containerId}" Learning container yet. Nothing is collected.`;
+    return `This project has no "${automatic.containerId}" Learning container yet. Nothing is collected.`;
   if (automatic.state === "not_entitled")
-    return "This Intelligence project's plan doesn't include Learning. No container was assigned.";
+    return "This project's plan doesn't include Learning. No container was assigned.";
   if (automatic.state === "learning_off")
-    return "Learning is switched off in Intelligence. Nothing is collected until it's turned on there.";
+    return "Learning is switched off in the back end. Nothing is collected until it's turned on there.";
   if (automatic.state === "unavailable")
-    return "Couldn't reach Intelligence to find this project's Learning container. OpenBot will try again.";
+    return "Couldn't reach the back end to find this project's Learning container. OpenBot will try again.";
   return undefined;
 }
 
@@ -167,7 +167,7 @@ function ContainerSetup({
               : `Create the ${automatic.containerId} container`}
           </Button>
           <span className="text-muted-foreground">
-            Uses this deployment's Intelligence credentials.
+            Uses this deployment's back end credentials.
           </span>
         </div>
       )}
@@ -243,11 +243,11 @@ export function LearningPage() {
   return (
     <PageShell
       title="Automatic learning"
-      description="Learn from finished conversations, review the skills Intelligence proposes, and give published skills to Bots."
+      description="Learn from finished conversations, review the skills OpenBot proposes, and give published skills to Bots."
     >
       <PageSection
         title="Participation"
-        description="Container changes apply to new conversations. Existing ones keep their first container. Containers must already exist in the same Intelligence project. Until you save here, OpenBot uses that project's openbot container."
+        description="Container changes apply to new conversations. Existing ones keep their first container. Containers must already exist in the same project. Until you save here, OpenBot uses that project's openbot container."
       >
         {settingsQuery.isPending && (
           <p role="status">Loading Learning settings…</p>
@@ -381,7 +381,7 @@ export function LearningPage() {
       </PageSection>
       <PageSection
         title="Review and publish"
-        description="Intelligence studies finished conversations and proposes skills. Review and publish them below. Bots only use published skills."
+        description="OpenBot studies finished conversations and proposes skills. Review and publish them below. Bots only use published skills."
       >
         <div className="grid gap-4">
           <label className="grid gap-2 text-sm">
@@ -399,7 +399,7 @@ export function LearningPage() {
               ))}
             </select>
           </label>
-          {overview.isPending && <p role="status">Checking Intelligence…</p>}
+          {overview.isPending && <p role="status">Checking the back end…</p>}
           {overview.error && (
             <p role="alert" className="text-destructive">
               {overview.error.message}
@@ -450,7 +450,7 @@ export function LearningPage() {
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Manage Learning in Intelligence
+                      Manage Learning in the back end dashboard
                     </a>
                   )}
                   {snapshot.links.candidates && (
@@ -523,7 +523,7 @@ export function LearningPage() {
           <p className="text-muted-foreground text-sm">
             OpenBot keeps project credentials on the server. Turning Learning
             off here keeps settings and conversation assignments. Schedules stay
-            in Intelligence.
+            in the back end.
           </p>
         </div>
       </PageSection>
@@ -589,12 +589,12 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
         </p>
       ) : !containerId ? (
         <PageEmpty icon={IconSparkles} title="No container">
-          Choose a container under Participation to see the skills Intelligence
+          Choose a container under Participation to see the skills OpenBot
           proposes for it.
         </PageEmpty>
       ) : proposals.data.proposals.length === 0 ? (
         <PageEmpty icon={IconSparkles} title="No proposed skills yet">
-          Intelligence proposes skills once it has learned from finished
+          OpenBot proposes skills once it has learned from finished
           conversations. Learn now starts it.
         </PageEmpty>
       ) : (
@@ -661,9 +661,9 @@ const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
 
 const FAILURES: Record<string, string> = {
   LEARNING_MODEL_NOT_CONFIGURED:
-    "Intelligence has no model set up for Learning yet.",
-  LEARNING_NOT_ENABLED: "Learning isn't turned on in Intelligence.",
-  LEARNING_CONTAINER_NOT_FOUND: "Intelligence no longer has this container.",
+    "The back end has no model set up for Learning yet.",
+  LEARNING_NOT_ENABLED: "Learning isn't turned on in the back end.",
+  LEARNING_CONTAINER_NOT_FOUND: "The back end no longer has this container.",
 };
 
 /** What an admin reads for a failed run. The code itself stays in the row's title. */

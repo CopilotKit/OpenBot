@@ -261,7 +261,7 @@ export function createPersonalLearningRoutes(
     const manage = deps.manage;
     if (!manage) {
       return context.json(
-        { error: "Couldn't reach Intelligence just now. Try again." },
+        { error: "Couldn't reach the back end just now. Try again." },
         503,
       );
     }
@@ -364,7 +364,7 @@ export function createPersonalLearningRoutes(
     const manage = deps.manage;
     if (!manage) {
       return context.json(
-        { error: "Couldn't reach Intelligence just now. Try again." },
+        { error: "Couldn't reach the back end just now. Try again." },
         503,
       );
     }
@@ -415,7 +415,7 @@ export function createPersonalLearningRoutes(
       const manage = deps.manage;
       if (!manage) {
         return context.json(
-          { error: "Couldn't reach Intelligence just now. Try again." },
+          { error: "Couldn't reach the back end just now. Try again." },
           503,
         );
       }
@@ -499,7 +499,7 @@ export function createPersonalLearningRoutes(
     const manage = deps.manage;
     if (!manage) {
       return context.json(
-        { error: "Couldn't reach Intelligence just now. Try again." },
+        { error: "Couldn't reach the back end just now. Try again." },
         503,
       );
     }
@@ -567,7 +567,7 @@ export function createPersonalLearningRoutes(
       return context.json(
         {
           error:
-            "Couldn't read your skills from Intelligence just now. Try again.",
+            "Couldn't read your Skills from the back end just now. Try again.",
         },
         503,
       );
@@ -685,7 +685,7 @@ export function createPersonalLearningRoutes(
         : context.json(
             {
               error:
-                "Couldn't check your skills with Intelligence just now, so nothing changed. Try again.",
+                "Couldn't check your Skills with the back end just now, so nothing changed. Try again.",
             },
             503,
           );

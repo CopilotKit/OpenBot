@@ -338,7 +338,7 @@ export function LearningReview() {
       {unavailable && (
         <p className="mt-4 text-muted-foreground text-sm">
           {sources.every((source) => source.unavailable)
-            ? "Learning isn't available in Intelligence, so nothing is proposed here."
+            ? "Learning isn't available in the back end, so nothing is proposed here."
             : `Learning isn't available for ${[
                 ...new Set(
                   sources

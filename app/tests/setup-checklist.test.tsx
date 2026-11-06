@@ -78,7 +78,7 @@ const ADMIN: Checklist = {
   rows: [
     ROW({
       id: "intelligence",
-      title: "CopilotKit Intelligence",
+      title: "Back end",
       required: true,
       detail: "Keeps your conversations and what OpenBot remembers.",
     }),

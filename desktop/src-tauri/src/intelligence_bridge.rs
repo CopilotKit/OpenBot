@@ -1,12 +1,12 @@
 /*!
-The OpenBot app's own page asking the shell to open the local Intelligence dashboard.
+The OpenBot app's own page asking the shell to open the back end's local dashboard.
 
 The app is served from a loopback port and loaded in the main window, so to Tauri it is a remote
 origin, and a remote origin reaches no command of this app (Tauri refuses every app command to one
 that no capability names). This is the one exception, kept as small as it can be:
 
 - an inline plugin, `openbot-intelligence`, with two commands: `watch`, which hands over a channel
-  for what the sidebar row should show, and `open`, which starts the same opening as the menu;
+  for what a row on the page should show, and `open`, which starts the opening;
 - a capability added at runtime for exactly the owned app's origin, `http://127.0.0.1:<port>`, on
   the main window only, granting those two commands and nothing else. No `core:event`, so the page
   hears none of the setup window's events;
@@ -67,7 +67,7 @@ pub fn enable<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         .store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// The row's state now, from the same state the menu item uses.
+/// The row's state now.
 pub fn current<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Offer {
     let shell = app.state::<Shell>();
     if shell
@@ -161,7 +161,7 @@ fn watch<R: tauri::Runtime>(app: tauri::AppHandle<R>, on_offer: Channel<Offer>) 
     }
 }
 
-/// Start opening the dashboard, exactly as the menu does. How it goes arrives through `watch`.
+/// Start opening the dashboard. How it goes arrives through `watch`.
 #[tauri::command]
 fn open<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     super::start_intelligence_opening(app);
@@ -298,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn the_row_follows_the_menus_state() {
+    fn the_row_follows_the_offered_stack() {
         let (app, _window) = app();
         assert_eq!(current(app.handle()), Offer::Unavailable);
         let shell = app.state::<Shell>();

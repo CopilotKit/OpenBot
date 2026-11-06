@@ -282,7 +282,7 @@ export function connectLocalEval(root: string): {
   return { attempt, connection };
 }
 
-/** Whether the menus offer "Open Intelligence dashboard" for `root`. */
+/** Whether the OpenBot app's page may offer the back end dashboard for `root`. */
 export function offerLocalIntelligence(
   root: string,
   offered: boolean,
@@ -346,7 +346,7 @@ export function licenceExpiresSoon(
 }
 
 /** How main.rs starts an Intelligence stop failure (`INTELLIGENCE_STOP_FAILED`). */
-export const intelligenceStopFailed = "Intelligence stop failed: ";
+export const intelligenceStopFailed = "Back end stop failed: ";
 
 /**
  * Splits a Stop failure into OpenBot's own lines and the local Intelligence stack's. OpenBot has
@@ -372,7 +372,7 @@ export function splitStopFailure(thrown: unknown): {
 
 export function intelligenceStopProblem(line: string): Problem {
   return {
-    said: "OpenBot stopped, but could not stop the local Intelligence stack it started.",
+    said: "OpenBot stopped, but could not stop its back end.",
     detail: line,
   };
 }

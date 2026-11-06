@@ -199,7 +199,7 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Value, String> {
         || !c["database"]["rollbackCompatible"].is_boolean()
         || !strings(&c["intelligenceCapabilities"])
     {
-        return Err("invalid database or Intelligence contract".into());
+        return Err("invalid database or back end contract".into());
     }
     let u = &v["upgrade"];
     object(u, &["fromVersions", "requiresDowntime", "recovery"], &[])?;
@@ -329,7 +329,7 @@ pub fn plan(current: &Value, candidate: &Value, policy: &Distribution, source_ki
             .iter()
             .any(|c| capability == c)
         {
-            reasons.push(format!("missing Intelligence capability {capability}"));
+            reasons.push(format!("missing back end capability {capability}"));
         }
     }
     json!({"allowed": reasons.is_empty(), "reasons": reasons, "fromVersion": current["version"], "toVersion":candidate["version"], "requiresDowntime":candidate["upgrade"]["requiresDowntime"], "recovery":candidate["upgrade"]["recovery"]})

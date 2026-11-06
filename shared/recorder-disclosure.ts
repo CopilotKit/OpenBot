@@ -20,7 +20,7 @@ export const RECORDER_DISCLOSURE_TITLE = "What the Recorder collects";
  * steps). "Through OpenBot" would say the recording passes through it, which it never does.
  */
 export const RECORDER_DESTINATION =
-  "What you record goes straight from your browser to your organization's own Intelligence, with a pass from your organization's OpenBot. OpenBot is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.";
+  "What you record goes straight from your browser to the learning part of your organization's OpenBot back end, with a pass from the part of OpenBot that runs your Bots. That part is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.";
 
 /** The disclosure's lead: when it records, where it goes, and what for. */
 export const RECORDER_DISCLOSURE = `When you press Record, the Recorder records what you do in every tab you use until you stop, and each tab it records shows that it is. ${RECORDER_DESTINATION} Your recordings are used only for your organization's Skills, evaluations and insights.`;

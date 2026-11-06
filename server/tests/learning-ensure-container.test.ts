@@ -429,6 +429,6 @@ describe("creating a container with the runtime key", () => {
   test("Learning switched off in Intelligence is said, not reported as unreachable", async () => {
     await expect(
       ensureLearningContainer(credentials(serve("learning-off"))),
-    ).rejects.toThrow("Learning is switched off in this Intelligence");
+    ).rejects.toThrow("Learning is switched off in the back end");
   });
 });

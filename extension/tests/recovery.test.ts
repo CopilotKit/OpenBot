@@ -593,7 +593,7 @@ test("a service-worker restart with the document still open finishes a discard i
   // The document holds its events, retrying them while it lives on.
   storeDiscardingDrain("rec-gone", {
     kept: {
-      reason: "Intelligence could not take the events yet.",
+      reason: "OpenBot's back end could not take the events yet.",
       parked: false,
       events: 12,
       at: now - 1_000,

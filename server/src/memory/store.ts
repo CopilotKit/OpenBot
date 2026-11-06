@@ -38,7 +38,7 @@ import {
  * it from an OpenBot row id without a lookup, and so it can never collide with one.
  */
 const INTELLIGENCE_ID_PREFIX = "intelligence:";
-const INTELLIGENCE_PROVENANCE = "CopilotKit Intelligence";
+const INTELLIGENCE_PROVENANCE = "OpenBot memory";
 
 const digestOf = (content: string) =>
   createHash("sha256").update(content).digest("hex");
@@ -482,7 +482,7 @@ export function createMemoryStore(
         // Intelligence keeps the content and nothing else, so there is nothing to pause or review.
         if (patch.enabled !== undefined)
           throw new MemoryRefusedError(
-            "A memory kept in CopilotKit Intelligence can be edited or forgotten, not paused.",
+            "A memory kept in the back end can be edited or forgotten, not paused.",
           );
         const remoteId = id.slice(INTELLIGENCE_ID_PREFIX.length);
         if (!patch.content) {

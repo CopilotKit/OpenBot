@@ -31,7 +31,7 @@ const STOP_REASONS: Record<string, string> = {
  */
 function endedLabel(row: RecordingRow): string | null {
   if (row.ended === "sending") return "Still sending";
-  if (row.ended === "missing") return "Not in Intelligence";
+  if (row.ended === "missing") return "Not in the back end";
   if (row.ended === "unknown") return "No result";
   if (row.ended !== "stopped") return null;
   const reason = row.reason ? STOP_REASONS[row.reason] : undefined;
@@ -100,8 +100,8 @@ export function YourRecordings({
           {unavailable ? (
             <p className="mt-4 text-muted-foreground text-sm">
               {unavailable === "unreachable"
-                ? "Couldn't reach Intelligence to list your recordings. Try again in a moment."
-                : "Intelligence isn't available, so your recordings can't be listed."}
+                ? "Couldn't reach the back end to list your recordings. Try again in a moment."
+                : "The back end isn't available, so your recordings can't be listed."}
             </p>
           ) : null}
           {failure ? (
