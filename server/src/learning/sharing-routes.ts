@@ -108,9 +108,9 @@ async function settle<T>(read: Promise<T>): Promise<Settled<T>> {
 }
 
 /**
- * Settings, Learning: who else's Bots use the Skills learned from a person's own recordings. Theirs alone, scoped to the
- * signed-in person and never to anything in the path, like their standing instructions: there is no route for reading
- * or changing somebody else's.
+ * Settings, Learning for the signed-in person: their sharing choice, their Skills, and review of their own Learning
+ * spaces. Every route is scoped to the signed-in person, like their standing instructions: there is no route for reading
+ * or changing somebody else's, and a `container` query only picks among their own spaces (`scopesFor`).
  */
 export function createPersonalLearningRoutes(
   deps: PersonalLearningRouteDeps,
@@ -119,9 +119,29 @@ export function createPersonalLearningRoutes(
   const routes = new Hono<{ Variables: AppVariables }>();
   routes.use("*", requireUser);
 
+  /**
+   * Writes an audit row for what a person just did. A write that fails is logged and never changes the answer: the
+   * change it records has already happened, and saying it failed would send the person to repeat it.
+   */
   const audit = async (event: Parameters<typeof recordAuditEvent>[1]) => {
     if (!deps.auditStore) return;
-    await recordAuditEvent(deps.auditStore, event);
+    try {
+      await recordAuditEvent(deps.auditStore, event);
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "learning-audit-failed",
+          eventType: event.eventType,
+          change:
+            typeof event.payload.change === "string"
+              ? event.payload.change
+              : null,
+          targetId: event.targetId ?? null,
+          errorType: error instanceof Error ? error.name : typeof error,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
   };
 
   /**
@@ -372,8 +392,8 @@ export function createPersonalLearningRoutes(
   });
 
   /**
-   * Approve or reject a proposal from the person's own space. On approve, OpenBot writes its own record of who approved
-   * the skill before Intelligence is asked, and takes it back if Intelligence refuses.
+   * Approve or reject a proposal from one of the person's spaces. On approving a skill from their recordings, OpenBot
+   * writes its own record of who approved it before Intelligence is asked, and takes it back if Intelligence refuses.
    */
   for (const action of ["approve", "reject"] as const) {
     routes.post(`/proposals/:candidateId/${action}`, async (context) => {
@@ -405,44 +425,23 @@ export function createPersonalLearningRoutes(
         actor.id,
         "person",
       );
+      /*
+       * The approval row is what holds a skill the person approved for themselves back from other people's Bots. It is
+       * written before Intelligence publishes, and every run reads it fresh (learning/runtime.ts
+       * `PersonalSkillSources.withheld`), so no open-skill index has to be told.
+       */
+      let review: Awaited<ReturnType<typeof reviewProposal>>;
       try {
-        const review = await reviewProposal({
+        review = await reviewProposal({
           manage,
           containerId,
           candidateId,
           action,
           ...(action === "approve" && source.kind === "recordings"
-            ? {
-                before: async (detail) => {
-                  const undo = await recordWithApproval(detail);
-                  // The approval row is written, so the open index must stop serving this skill before Intelligence
-                  // publishes it.
-                  deps.invalidate();
-                  return undo;
-                },
-              }
+            ? { before: recordWithApproval }
             : {}),
         });
-        deps.invalidate();
-        await audit({
-          eventType: "configuration.changed",
-          targetType: "learning_skill",
-          targetId: candidateId,
-          actorUserId: actor.id,
-          payload: {
-            change: action === "approve" ? "skill_approved" : "skill_rejected",
-            containerId,
-            title: review.title,
-            operation: review.operation,
-            by: actor.email,
-          },
-        });
-        return context.json({
-          proposal: { id: candidateId, status: review.status },
-        });
       } catch (error) {
-        // A refused approval takes its row back, so the index is read again.
-        deps.invalidate();
         await audit({
           eventType: "configuration.changed",
           targetType: "learning_skill",
@@ -465,10 +464,26 @@ export function createPersonalLearningRoutes(
         const failure = learningFailure(error);
         return context.json({ error: failure.error }, failure.status);
       }
+      await audit({
+        eventType: "configuration.changed",
+        targetType: "learning_skill",
+        targetId: candidateId,
+        actorUserId: actor.id,
+        payload: {
+          change: action === "approve" ? "skill_approved" : "skill_rejected",
+          containerId,
+          title: review.title,
+          operation: review.operation,
+          by: actor.email,
+        },
+      });
+      return context.json({
+        proposal: { id: candidateId, status: review.status },
+      });
     });
   }
 
-  /** Learn now on the person's own space, only while people approve their own skills. */
+  /** Learn now on one of the person's spaces, where they review their own skills (always in the personal edition). */
   routes.post("/runs", async (context) => {
     const actor = context.var.actor;
     const source = await sourceFor(actor, context.req.query("container"));
@@ -489,24 +504,25 @@ export function createPersonalLearningRoutes(
       );
     }
     const containerId = source.containerId;
+    let run: Awaited<ReturnType<typeof manage.startLearningRun>>;
     try {
-      const run = await manage.startLearningRun({ containerId });
-      await audit({
-        eventType: "configuration.changed",
-        targetType: "learning",
-        actorUserId: actor.id,
-        payload: {
-          change: "learning_run_started",
-          containerId,
-          runId: run.id,
-          by: actor.email,
-        },
-      });
-      return context.json({ run: { id: run.id, status: run.status } });
+      run = await manage.startLearningRun({ containerId });
     } catch (error) {
       const failure = learningFailure(error);
       return context.json({ error: failure.error }, failure.status);
     }
+    await audit({
+      eventType: "configuration.changed",
+      targetType: "learning",
+      actorUserId: actor.id,
+      payload: {
+        change: "learning_run_started",
+        containerId,
+        runId: run.id,
+        by: actor.email,
+      },
+    });
+    return context.json({ run: { id: run.id, status: run.status } });
   });
 
   /** The first space with a Skill by that name; undefined when no space could be read and none had it. */
@@ -533,9 +549,20 @@ export function createPersonalLearningRoutes(
       return context.json({ error: "Name a skill to read." }, 400);
     }
     const spaces = await skillSpaces(context.var.actor);
-    const skill = spaces
-      ? await findInSpaces(spaces, name)
-      : await deps.skillOf?.(context.var.actor.id, name).catch(() => undefined);
+    let skill: LearnedSkillContent | null | undefined;
+    if (spaces) {
+      skill = await findInSpaces(spaces, name);
+    } else if (deps.skillOf) {
+      skill = await deps
+        .skillOf(context.var.actor.id, name)
+        .catch(() => undefined);
+    } else {
+      // No reader is wired here, so trying again can't help.
+      return context.json(
+        { error: "Reading your skills isn't available here." },
+        503,
+      );
+    }
     if (skill === undefined) {
       return context.json(
         {
@@ -679,10 +706,20 @@ export function createPersonalLearningRoutes(
     return context.json({ name, open: body.open });
   });
 
+  /**
+   * Ask an admin to share a skill the person approved for themselves. Only where an admin decides sharing: not in the
+   * personal edition, and not while the admin hasn't turned on sharing skills with every Bot.
+   */
   routes.post("/skills/:name/share-request", smallBody, async (context) => {
+    if (currentEdition() === "personal") {
+      return context.notFound();
+    }
     const name = context.req.param("name");
     if (!isLearnedSkillName(name)) {
       return context.json({ error: "Name a skill to ask to share." }, 400);
+    }
+    if (!(await deps.sharingAllowed())) {
+      return context.json({ error: SHARING_OFF }, 403);
     }
     const userId = context.var.actor.id;
     const row = await deps.approvals.get(userId, name);
