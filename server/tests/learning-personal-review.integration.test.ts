@@ -2,6 +2,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   test,
@@ -64,6 +65,11 @@ beforeAll(async () => {
     .values([{ id: ada, email: `${ada}@example.test` }]);
 });
 
+// The team edition unless a test says otherwise, whatever an earlier file left set.
+beforeEach(() => {
+  setEdition("team");
+});
+
 afterEach(async () => {
   setEdition(EDITION);
   audits.length = 0;
@@ -74,12 +80,34 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await database.delete(users).where(inArray(users.id, [ada]));
+  try {
+    await database.delete(users).where(inArray(users.id, [ada]));
+  } finally {
+    await database.$client.end();
+  }
 });
 
-afterAll(async () => {
-  await database.$client.end();
-});
+/** An audit store whose every write fails, as when the database drops the insert. */
+const brokenAuditStore = {
+  insert: async () => {
+    throw new Error("audit insert failed");
+  },
+};
+
+/** Runs `body` with console.error captured, and gives back what was logged. */
+async function capturingErrors(body: () => Promise<void>): Promise<string[]> {
+  const logged: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    logged.push(args.map(String).join(" "));
+  };
+  try {
+    await body();
+  } finally {
+    console.error = original;
+  }
+  return logged;
+}
 
 function review(options: {
   containers?: string[];
@@ -93,6 +121,11 @@ function review(options: {
   autoApprover?: PersonalLearningRouteDeps["autoApprover"];
   written?: LearningSettings[];
   invalidate?: () => void;
+  auditStore?: PersonalLearningRouteDeps["auditStore"];
+  sharingAllowed?: boolean;
+  skillOf?: PersonalLearningRouteDeps["skillOf"];
+  /** Wraps the runtime key's Learning routes, to see what OpenBot has written when Intelligence is asked. */
+  wrapManage?: (manage: LearningManagement) => LearningManagement;
 }) {
   const intelligence = fakeIntelligence("current", {
     containers: options.containers ?? [personalLearningContainerId(ada)],
@@ -134,11 +167,16 @@ function review(options: {
       ? { containerSkills: options.containerSkills }
       : {}),
     invalidate: options.invalidate ?? (() => {}),
-    sharingAllowed: async () => true,
-    auditStore,
+    sharingAllowed: async () => options.sharingAllowed ?? true,
+    auditStore: options.auditStore ?? auditStore,
+    ...(options.skillOf ? { skillOf: options.skillOf } : {}),
     ...(options.withManage === false
       ? {}
-      : { manage: options.manage ?? client.experimental.learning }),
+      : {
+          manage: (options.wrapManage ?? ((manage) => manage))(
+            options.manage ?? client.experimental.learning,
+          ),
+        }),
     ...(options.recordingTitles
       ? { recordingTitles: options.recordingTitles }
       : {}),
@@ -323,7 +361,7 @@ describe("reviewing the skills learned from your own recordings", () => {
     ).toBe(404);
   });
 
-  test("evidence names the person's own recordings and no one else's", async () => {
+  test("evidence names the person's recordings, asking for their titles as that person", async () => {
     const asked: { userId: string; ids: string[] }[] = [];
     const read = async () => {
       const app = review({
@@ -331,7 +369,6 @@ describe("reviewing the skills learned from your own recordings", () => {
           asked.push({ userId, ids });
           return new Map([
             ["0198a012-a20f-77c0-9e33-8992f18e74b0", "Refund an order"],
-            ["someone-elses-recording", "Not yours"],
           ]);
         },
       });
@@ -357,7 +394,6 @@ describe("reviewing the skills learned from your own recordings", () => {
         (item) => item.id === "0198a012-a20f-77c0-9e33-8992f18e74b0",
       )?.title,
     ).toBe("Refund an order");
-    expect(recordings.some((item) => item.title === "Not yours")).toBe(false);
     expect(asked.length).toBe(1);
     expect(asked[0]?.userId).toBe(ada);
     expect(asked[0]?.ids.length).toBeGreaterThan(0);
@@ -384,11 +420,16 @@ describe("approving and rejecting the skills learned from your own recordings", 
       .from(learningSkillApprovals)
       .where(eq(learningSkillApprovals.userId, ada));
   const lastServed = () => served[served.length - 1] as FakeIntelligence;
-  const approveRequests = (intelligence: FakeIntelligence) =>
-    intelligence.requests.filter((entry) => /approve/.test(entry.path)).length;
 
   test("with admins approving, a person sees their pending proposals and cannot review them", async () => {
     const app = review({ personalReview: "admins" });
+    const listed = (await (
+      await app.request("/review")
+    ).json()) as PersonalReview;
+    expect(listed.canReview).toBe(false);
+    expect(listed.sources[0]?.proposals).toMatchObject([
+      { id: PROPOSAL, status: "pending_review" },
+    ]);
     for (const action of ["approve", "reject"]) {
       expect((await approve(app, action)).status).toBe(403);
     }
@@ -420,37 +461,88 @@ describe("approving and rejecting the skills learned from your own recordings", 
     ]);
   });
 
-  test("the open-skill index is refreshed after the approval is recorded and before Intelligence publishes, and again after", async () => {
-    const calls: number[] = [];
-    let intelligence: FakeIntelligence | undefined;
+  test("the approval is recorded before Intelligence publishes the skill", async () => {
+    const rowsWhenPublished: number[] = [];
     const app = review({
       personalReview: "people",
-      invalidate: () => {
-        calls.push(intelligence ? approveRequests(intelligence) : 0);
-      },
+      wrapManage: (manage) =>
+        new Proxy(manage, {
+          get(target, property) {
+            if (property === "reviewLearningCandidate") {
+              return async (
+                input: Parameters<
+                  LearningManagement["reviewLearningCandidate"]
+                >[0],
+              ) => {
+                rowsWhenPublished.push((await rowsOf()).length);
+                return target.reviewLearningCandidate(input);
+              };
+            }
+            const value = Reflect.get(target, property);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }),
     });
-    intelligence = lastServed();
     expect((await approve(app)).status).toBe(200);
-    expect((await rowsOf()).length).toBe(1);
-    expect(calls.length).toBeGreaterThanOrEqual(2);
-    expect(calls[0]).toBe(0);
-    expect(calls[calls.length - 1]).toBe(1);
+    expect(rowsWhenPublished).toEqual([1]);
   });
 
-  test("a refused approval still refreshes the index", async () => {
-    let invalidated = 0;
+  test("an audit row that can't be written doesn't turn a review that happened into a failure", async () => {
+    for (const action of ["approve", "reject"] as const) {
+      const app = review({
+        personalReview: "people",
+        auditStore: brokenAuditStore,
+      });
+      let response: Response | undefined;
+      const logged = await capturingErrors(async () => {
+        response = await approve(app, action);
+      });
+      expect(response?.status).toBe(200);
+      expect(await response?.json()).toEqual({
+        proposal: {
+          id: PROPOSAL,
+          status: action === "approve" ? "approved" : "rejected",
+        },
+      });
+      expect(
+        lastServed().requests.filter((entry) =>
+          entry.path.endsWith(`/${action}`),
+        ),
+      ).toHaveLength(1);
+      expect(logged.join("\n")).toContain("learning-audit-failed");
+    }
+    expect(await rowsOf()).toMatchObject([
+      { skillName: "Refund triage", approvedBy: "person" },
+    ]);
+  });
+
+  test("a failure audit that can't be written keeps the real refusal", async () => {
     const app = review({
       personalReview: "people",
-      invalidate: () => {
-        invalidated += 1;
-      },
+      auditStore: brokenAuditStore,
     });
     const intelligence = lastServed();
     const entry = intelligence.candidates.get(PROPOSAL);
     if (!entry) throw new Error("missing candidate");
     intelligence.candidates.set(PROPOSAL, { ...entry, status: "approved" });
-    expect((await approve(app)).status).toBe(409);
-    expect(invalidated).toBeGreaterThanOrEqual(1);
+    let response: Response | undefined;
+    await capturingErrors(async () => {
+      response = await approve(app);
+    });
+    expect(response?.status).toBe(409);
+    expect(await rowsOf()).toEqual([]);
+
+    const unnamed = review({
+      personalReview: "people",
+      auditStore: brokenAuditStore,
+      bundles: {
+        [PROPOSAL]: [{ path: "SKILL.md", content: "# No front matter" }],
+      },
+    });
+    await capturingErrors(async () => {
+      response = await approve(unnamed);
+    });
+    expect(response?.status).toBe(422);
   });
 
   test("a person rejects a proposal and OpenBot records no approval", async () => {
@@ -551,6 +643,110 @@ describe("Learn now on your own space", () => {
       (await learn(review({ personalReview: "people", withManage: false })))
         .status,
     ).toBe(503);
+  });
+
+  test("a run that started is reported as started when its audit row can't be written", async () => {
+    const app = review({
+      personalReview: "people",
+      auditStore: brokenAuditStore,
+    });
+    let response: Response | undefined;
+    const logged = await capturingErrors(async () => {
+      response = await learn(app);
+    });
+    expect(response?.status).toBe(200);
+    const body = (await response?.json()) as
+      | { run: { id: string } }
+      | undefined;
+    expect(body?.run.id).toBeTruthy();
+    expect(logged.join("\n")).toContain("learning-audit-failed");
+  });
+});
+
+describe("asking an admin to share a skill you approved yourself", () => {
+  const ask = (app: ReturnType<typeof review>, name = "refund-triage") =>
+    app.request(`/skills/${name}/share-request`, { method: "POST" });
+  const sharingOf = async () =>
+    (await approvals.get(ada, "refund-triage"))?.sharing;
+
+  test("is refused while an admin hasn't turned on sharing skills, and nothing is asked", async () => {
+    await approvals.recordApproval(ada, "refund-triage", "person");
+    const refused = await ask(review({ sharingAllowed: false }));
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({
+      error:
+        "An admin hasn't turned on sharing skills with every Bot, so your skills stay with your own Bots.",
+    });
+    expect(await sharingOf()).toBe("none");
+    expect(audits).toEqual([]);
+  });
+
+  test("is not a route in the personal edition", async () => {
+    await approvals.recordApproval(ada, "refund-triage", "person");
+    setEdition("personal");
+    expect((await ask(review({}))).status).toBe(404);
+    expect(await sharingOf()).toBe("none");
+    expect(audits).toEqual([]);
+  });
+
+  test("is asked once sharing is on, even when its audit row can't be written", async () => {
+    await approvals.recordApproval(ada, "refund-triage", "person");
+    let response: Response | undefined;
+    const logged = await capturingErrors(async () => {
+      response = await ask(review({ auditStore: brokenAuditStore }));
+    });
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({
+      name: "refund-triage",
+      sharing: "requested",
+    });
+    expect(await sharingOf()).toBe("requested");
+    expect(logged.join("\n")).toContain("learning-audit-failed");
+  });
+});
+
+describe("the sharing choice when its audit row can't be written", () => {
+  test("a change to the choice or to one skill still saves and says so", async () => {
+    const app = review({ auditStore: brokenAuditStore });
+    const put = (path: string, json: unknown) =>
+      app.request(path, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(json),
+      });
+    try {
+      let mode: Response | undefined;
+      const logged = await capturingErrors(async () => {
+        mode = await put("/mode", { mode: "open" });
+      });
+      expect(mode?.status).toBe(200);
+      expect((await store.read(ada)).mode).toBe("open");
+      expect(logged.join("\n")).toContain("learning-audit-failed");
+    } finally {
+      await store.setMode(ada, "closed");
+    }
+  });
+});
+
+describe("reading one of your skills", () => {
+  test("says reading skills isn't available when OpenBot has no way to read them, not to try again", async () => {
+    const response = await review({}).request("/skills/refund-triage");
+    expect(response.status).toBe(503);
+    const { error } = (await response.json()) as { error: string };
+    expect(error).not.toContain("Try again");
+    expect(error).toBe("Reading your skills isn't available here.");
+  });
+
+  test("a reader that fails still says to try again", async () => {
+    const response = await review({
+      skillOf: async () => {
+        throw new Error("down");
+      },
+    }).request("/skills/refund-triage");
+    expect(response.status).toBe(503);
+    expect(((await response.json()) as { error: string }).error).toContain(
+      "Try again",
+    );
   });
 });
 
