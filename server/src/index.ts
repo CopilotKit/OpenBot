@@ -427,10 +427,7 @@ const personalLearningSpaces = createPersonalLearningSpaces({
     ).map((row) => row.name?.trim() || null)[0] ?? null,
 });
 const skillApprovalStore = createSkillApprovalStore(database);
-const learningSharingStore = createLearningSharingStore(
-  database,
-  skillApprovalStore,
-);
+const learningSharingStore = createLearningSharingStore(database);
 /** What everyone opened to every Bot, in memory: runs read this, never each person's space or the table. */
 const openSkillIndex = createOpenSkillIndex({
   read: () => learningSharingStore.openSources(),
@@ -2139,6 +2136,8 @@ const copilotRuntime = mountCopilotRuntime(
     personalSkills: {
       containerFor: personalLearningSpaces.containerFor,
       openSkills: () => openSkillIndex.sources(),
+      // Read on every run, never from the index: an approval made on another replica counts at once.
+      withheld: (userIds) => skillApprovalStore.withheld(userIds),
       sharingAllowed: skillSharingInSnapshot,
     },
     trajectoryCapture: recorderExtension.trajectoryCapture,

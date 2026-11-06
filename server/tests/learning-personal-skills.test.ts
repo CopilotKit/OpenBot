@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { VerifiedSnapshot } from "@copilotkit/runtime/internal/learned-skills";
 import {
   CopilotKitIntelligence,
@@ -33,6 +33,10 @@ function runtime(
     settings?: LearningSettings;
     published?: Published;
     open?: OpenSkillSource[] | (() => Promise<OpenSkillSource[]>);
+    /** What each person approved only for themselves, read fresh on every run. Default: nothing. */
+    withheld?: (
+      userIds: string[],
+    ) => Promise<ReadonlyMap<string, ReadonlySet<string>>>;
     personalWaitMs?: number;
     people?: false;
   } = {},
@@ -67,6 +71,7 @@ function runtime(
           people: {
             containerFor: space,
             openSkills: typeof open === "function" ? open : async () => open,
+            withheld: options.withheld ?? (async () => new Map()),
             // An administrator has turned on Skill sharing; the switch itself is learning-sharing.integration.test.ts's.
             sharingAllowed: () => true,
           },
@@ -284,7 +289,6 @@ describe("other people's opened Skills", () => {
           userId: GRACE,
           containerId: space(GRACE),
           skills: "all",
-          withheld: new Set(),
         },
       ],
     });
@@ -317,7 +321,6 @@ describe("other people's opened Skills", () => {
           userId: GRACE,
           containerId: space(GRACE),
           skills: new Set(["grace-picked"]),
-          withheld: new Set(),
         },
       ],
     });
@@ -334,7 +337,6 @@ describe("other people's opened Skills", () => {
           userId: GRACE,
           containerId: space(GRACE),
           skills: new Set(["grace-picked"]),
-          withheld: new Set(),
         },
       ],
     });
@@ -352,13 +354,11 @@ describe("other people's opened Skills", () => {
           userId: GRACE,
           containerId: space(GRACE),
           skills: "all",
-          withheld: new Set(),
         },
         {
           userId: ALAN,
           containerId: space(ALAN),
           skills: "all",
-          withheld: new Set(),
         },
       ],
     });
@@ -396,13 +396,11 @@ describe("other people's opened Skills", () => {
           userId: GRACE,
           containerId: space(GRACE),
           skills: "all",
-          withheld: new Set(),
         },
         {
           userId: ALAN,
           containerId: space(ALAN),
           skills: "all",
-          withheld: new Set(),
         },
       ],
     });
@@ -411,6 +409,71 @@ describe("other people's opened Skills", () => {
       expect.arrayContaining(["alan-only", "both-opened"]),
     );
     expect(names(run?.catalog)).not.toContain("grace-only");
+  });
+
+  test("what a person kept to themselves is read on every run, so a new approval holds a Skill back on the next run", async () => {
+    // The index's answer never changes here: only the fresh read does, as when another replica records an approval.
+    let held = new Map<string, Set<string>>();
+    const asked: string[][] = [];
+    const { learning } = runtime({
+      published,
+      open: [
+        { userId: GRACE, containerId: space(GRACE), skills: "all" },
+        { userId: ALAN, containerId: space(ALAN), skills: "all" },
+      ],
+      withheld: async (userIds) => {
+        asked.push([...userIds].sort());
+        return held;
+      },
+    });
+    expect(
+      names((await learning.acquire("bot", undefined, ADA))?.catalog),
+    ).toContain("grace-picked");
+    held = new Map([[GRACE, new Set(["grace-picked"])]]);
+    const offered = names(
+      (await learning.acquire("bot", undefined, ADA))?.catalog,
+    );
+    expect(offered).not.toContain("grace-picked");
+    expect(offered).toEqual(
+      expect.arrayContaining(["grace-only", "alan-only"]),
+    );
+    // Asked once per run, for the people whose Skills the run could get, never the run's own person.
+    expect(asked).toEqual([[ALAN, GRACE].sort(), [ALAN, GRACE].sort()]);
+    // On Grace's own run, only the other person is asked about.
+    await learning.acquire("bot", undefined, GRACE);
+    expect(asked).toHaveLength(3);
+    expect(asked[2]).toEqual([ALAN]);
+  });
+
+  test("when what people kept to themselves cannot be read, nothing from anybody else's space reaches the run", async () => {
+    const { learning } = runtime({
+      published,
+      open: [
+        { userId: GRACE, containerId: space(GRACE), skills: "all" },
+        { userId: ALAN, containerId: space(ALAN), skills: "all" },
+      ],
+      withheld: async () => {
+        throw new Error("database down");
+      },
+    });
+    const warned = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const run = await learning.acquire("bot", undefined, ADA);
+      // The Bot's own and the person's own still arrive.
+      expect(names(run?.catalog)).toEqual([
+        "ada-only",
+        "bot-only",
+        "refund-order",
+        "shared-name",
+      ]);
+      expect(
+        warned.mock.calls
+          .map((call) => String(call[0]))
+          .filter((line) => line.includes('"learning-withheld-unread"')),
+      ).toHaveLength(1);
+    } finally {
+      warned.mockRestore();
+    }
   });
 });
 
@@ -440,12 +503,8 @@ describe("mergeLearnedSkills", () => {
       own: snapshot("own", ["y", "z"]),
       opened: [
         {
-          source: {
-            userId: "g",
-            containerId: "user-g",
-            skills: "all",
-            withheld: new Set(),
-          },
+          source: { userId: "g", containerId: "user-g", skills: "all" },
+          withheld: new Set(),
           snapshot: snapshot("g", ["x", "z", "w", "v"]),
         },
         {
@@ -453,8 +512,8 @@ describe("mergeLearnedSkills", () => {
             userId: "h",
             containerId: "user-h",
             skills: new Set(["w"]),
-            withheld: new Set(),
           },
+          withheld: new Set(),
           snapshot: snapshot("h", ["w", "u"]),
         },
       ],
@@ -477,7 +536,8 @@ describe("mergeLearnedSkills", () => {
         bot: snapshot("bot", ["a"]),
         opened: [
           {
-            source: { userId: "g", containerId: "user-g", skills, withheld },
+            source: { userId: "g", containerId: "user-g", skills },
+            withheld,
             snapshot: snapshot("g", ["x", "y"]),
           },
         ],

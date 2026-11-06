@@ -59,7 +59,7 @@ const auditStore = {
   },
 };
 const approvals = createSkillApprovalStore(database);
-const store = createLearningSharingStore(database, approvals);
+const store = createLearningSharingStore(database);
 const unrecorded = { approvedBy: null, sharing: "none" } as const;
 let invalidations = 0;
 let clock = 1_000_000;
@@ -107,6 +107,7 @@ const runtimeFor = (index: typeof thisReplica) =>
     people: {
       containerFor: personalLearningContainerId,
       openSkills: () => index.sources(),
+      withheld: (userIds) => approvals.withheld(userIds),
       sharingAllowed,
     },
   });
@@ -914,7 +915,6 @@ describe("the open-Skill index", () => {
             userId: "g",
             containerId: "user-g",
             skills: "all",
-            withheld: new Set(),
           },
         ];
       },
@@ -937,7 +937,6 @@ describe("the open-Skill index", () => {
         userId: "g",
         containerId: "user-g",
         skills: "all",
-        withheld: new Set(),
       },
     ]);
   });
@@ -959,7 +958,6 @@ describe("the open-Skill index", () => {
             userId: "g",
             containerId: "user-g",
             skills: "all",
-            withheld: new Set(),
           },
         ];
       },
@@ -1005,15 +1003,41 @@ describe("the open-Skill index", () => {
     ).toBe(false);
   });
 
-  test("a person-approved skill reaches others only after an admin approves sharing", async () => {
+  test("a person-approved skill reaches others only after an admin approves sharing, on every replica from the next run", async () => {
     await store.setMode(grace, "open");
-    await approvals.recordApproval(grace, "grace-private", "person");
-    const withheldFor = async () =>
-      (await store.openSources()).find((source) => source.userId === grace)
-        ?.withheld;
-    expect(await withheldFor()).toContain("grace-private");
-    await approvals.requestSharing(grace, "grace-private");
-    await approvals.decideSharing(grace, "grace-private", "approved");
-    expect(await withheldFor()).not.toContain("grace-private");
+    await store.setMode(ada, "closed");
+    thisReplica.invalidate();
+    otherReplica.invalidate();
+    const everything = ["ada-only", "grace-picked", "grace-private"];
+    try {
+      // Both replicas read their index while Grace holds nothing back.
+      expect(await offered(learning, "ada")).toEqual(everything);
+      expect(await offered(learningElsewhere, "ada")).toEqual(everything);
+
+      // Grace approves a Skill for herself only. No index is told, and neither has aged out.
+      await approvals.recordApproval(grace, "grace-private", "person");
+      expect(await offered(learning, "ada")).toEqual([
+        "ada-only",
+        "grace-picked",
+      ]);
+      expect(await offered(learningElsewhere, "ada")).toEqual([
+        "ada-only",
+        "grace-picked",
+      ]);
+      // Her own runs still have it.
+      expect(await offered(learningElsewhere, "grace")).toEqual([
+        "grace-picked",
+        "grace-private",
+      ]);
+
+      // An administrator approves sharing it: it reaches other people's runs again, still without a fresh index.
+      await approvals.requestSharing(grace, "grace-private");
+      await approvals.decideSharing(grace, "grace-private", "approved");
+      expect(await offered(learningElsewhere, "ada")).toEqual(everything);
+    } finally {
+      await database
+        .delete(learningSkillApprovals)
+        .where(eq(learningSkillApprovals.userId, grace));
+    }
   });
 });

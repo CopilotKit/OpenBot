@@ -49,7 +49,7 @@ const PROPOSAL = "0198a012-a20f-77c0-9e33-8992f18e74d1";
 const EDITION = currentEdition();
 
 const approvals = createSkillApprovalStore(database);
-const store = createLearningSharingStore(database, approvals);
+const store = createLearningSharingStore(database);
 const served: FakeIntelligence[] = [];
 const audits: AuditEventInput[] = [];
 const auditStore = {

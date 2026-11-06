@@ -128,7 +128,7 @@ const skillApprovals = createSkillApprovalStore(database);
 args[34] = {
   recorder,
   personalLearning: {
-    store: createLearningSharingStore(database, skillApprovals),
+    store: createLearningSharingStore(database),
     approvals: skillApprovals,
     skillsOf: async () => ({ skills: [] }),
     invalidate: () => {},

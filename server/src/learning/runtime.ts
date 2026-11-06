@@ -69,9 +69,11 @@ function excludedFromLearning(
   );
 }
 
-/** Skills another person opened, with the snapshot of their space they came from. */
+/** Skills another person opened, the ones among them they approved only for themselves, and their space's snapshot. */
 export type OpenedSkills = {
   source: OpenSkillSource;
+  /** Read fresh for this run (`PersonalSkillSources.withheld`), never from the open-Skill index. */
+  withheld: ReadonlySet<string>;
   snapshot: VerifiedSnapshot;
 };
 
@@ -102,12 +104,12 @@ export function mergeLearnedSkills(input: {
     taken.add(skill.name);
   }
   const candidates = opened
-    .flatMap(({ source, snapshot }) =>
+    .flatMap(({ source, withheld, snapshot }) =>
       snapshot.skills
         .filter(
           (skill) =>
             (source.skills === "all" || source.skills.has(skill.name)) &&
-            !source.withheld.has(skill.name),
+            !withheld.has(skill.name),
         )
         .map((skill) => ({ containerId: source.containerId, skill })),
     )
@@ -132,12 +134,12 @@ export function mergeLearnedSkills(input: {
       JSON.stringify([
         input.bot ? [input.bot.revision, input.bot.etag] : null,
         input.own ? [input.own.revision, input.own.etag] : null,
-        opened.map(({ source, snapshot }) => [
+        opened.map(({ source, withheld, snapshot }) => [
           source.containerId,
           snapshot.revision,
           snapshot.etag,
           source.skills === "all" ? "all" : [...source.skills].sort(),
-          [...source.withheld].sort(),
+          [...withheld].sort(),
         ]),
       ]),
     )
@@ -198,6 +200,15 @@ export type PersonalSkillSources = {
   containerFor(userId: string): string;
   /** Everyone's opened Skills, from the in-memory index (learning/sharing.ts), never read per person per run. */
   openSkills(): Promise<readonly OpenSkillSource[]>;
+  /**
+   * The Skills each of these people approved only for themselves, which must not reach other people's Bots until an
+   * administrator approves sharing them (learning/approvals.ts `withheld`). Read on every run that has an opened
+   * source, never cached: an approval made through another replica holds a Skill back on the very next run here. A read
+   * that fails leaves every opened source out of that run.
+   */
+  withheld(
+    userIds: string[],
+  ): Promise<ReadonlyMap<string, ReadonlySet<string>>>;
   /**
    * Whether an administrator lets people open their Skills to every Bot (Admin, Automatic learning, Skill sharing).
    * Asked on every run, before the index: while it is off, a Skill somebody opened reaches no other person's Bot, and
@@ -338,15 +349,38 @@ export function createLearningRuntime(options: {
       console.warn(JSON.stringify({ type: "learning-open-skills-unread" }));
     }
     const others = sources.filter((source) => source.userId !== userId);
-    const [own, ...opened] = await Promise.all([
+    // Read alongside the spaces rather than before them, so it adds no wait of its own.
+    const withheldRead = (async (): Promise<
+      ReadonlyMap<string, ReadonlySet<string>> | undefined
+    > => {
+      if (others.length === 0) return new Map();
+      try {
+        return await people.withheld(others.map((source) => source.userId));
+      } catch {
+        console.warn(JSON.stringify({ type: "learning-withheld-unread" }));
+        return undefined;
+      }
+    })();
+    const [withheld, own, ...opened] = await Promise.all([
+      withheldRead,
       softSnapshot(people.containerFor(userId), signal, true),
       ...others.map((source) => softSnapshot(source.containerId, signal)),
     ]);
+    // FAILS SAFE: with no word on what each person kept to themselves, nothing of anyone else's reaches this run.
+    if (!withheld) return own ? { own, opened: [] } : { opened: [] };
     return {
       ...(own ? { own } : {}),
       opened: others.flatMap((source, index) => {
         const snapshot = opened[index];
-        return snapshot ? [{ source, snapshot }] : [];
+        return snapshot
+          ? [
+              {
+                source,
+                withheld: withheld.get(source.userId) ?? new Set<string>(),
+                snapshot,
+              },
+            ]
+          : [];
       }),
     };
   };

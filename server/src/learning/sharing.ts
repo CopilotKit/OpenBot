@@ -5,26 +5,24 @@ import {
   learningOpenSkills,
   learningSkillSharing,
 } from "../db/schema/learning";
-import type { SkillApprovalStore } from "./approvals";
 import { personalLearningContainerId } from "./personal-space";
 
 /**
  * One person's Skills that every Bot in the deployment may use: all of them (`open`), or the ones they opened by name
  * (`choose`). A person whose choice is `closed`, or `choose` with nothing opened, has no entry.
+ *
+ * Which of them the person approved only for themselves (and so must not reach other people's Bots) is not part of it:
+ * a run reads that fresh (learning/runtime.ts `PersonalSkillSources.withheld`), because a replica that did not handle an
+ * approval would otherwise keep sharing the Skill until its index expired.
  */
 export type OpenSkillSource = {
   userId: string;
   containerId: string;
   skills: "all" | ReadonlySet<string>;
-  /** Skills approved by the person only, which must not reach other people's Bots. */
-  withheld: ReadonlySet<string>;
 };
 
 /** The sharing choice a person made for the Skills in their own Learning space. */
-export function createLearningSharingStore(
-  database: Database,
-  approvals: Pick<SkillApprovalStore, "withheld">,
-) {
+export function createLearningSharingStore(database: Database) {
   return {
     /** Their choice (`closed` when they never made one) and every Skill they opened under `choose`. */
     async read(
@@ -127,9 +125,6 @@ export function createLearningSharingStore(
         }
         names.add(row.name);
       }
-      const withheld = await approvals.withheld(
-        sharing.map((row) => row.userId),
-      );
       return sharing.flatMap((row): OpenSkillSource[] => {
         const containerId = personalLearningContainerId(row.userId);
         if (row.mode === "open") {
@@ -138,7 +133,6 @@ export function createLearningSharingStore(
               userId: row.userId,
               containerId,
               skills: "all",
-              withheld: withheld.get(row.userId) ?? new Set<string>(),
             },
           ];
         }
@@ -149,7 +143,6 @@ export function createLearningSharingStore(
                 userId: row.userId,
                 containerId,
                 skills: names,
-                withheld: withheld.get(row.userId) ?? new Set<string>(),
               },
             ]
           : [];
