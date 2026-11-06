@@ -1,5 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { type ITheme, Terminal } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
   type Ref,
@@ -13,6 +13,7 @@ import {
   type ScreenSocket,
 } from "@/lib/computers/screen-connection";
 import { socketUrl } from "@/lib/socket-url";
+import { TERMINAL_THEME } from "./terminal-theme";
 
 /**
  * The Bot's live shell, drawn by xterm.js.
@@ -42,39 +43,6 @@ const SHOW_CURSOR = "\x1b[?47h\x1b[?47l";
 /** Acknowledged in batches: after this many bytes, or a moment after the last write. */
 const ACK_EVERY_BYTES = 32 * 1024;
 const ACK_AFTER_MS = 100;
-
-/**
- * A dark terminal in both of the app's themes: a shade deeper than the app's own dark ground, so it
- * reads as a terminal in the dark theme too, with the app's periwinkle ring as the cursor. Its sixteen
- * colours are tuned for that ground.
- */
-const TERMINAL_THEME: ITheme = {
-  background: "#0f0d16",
-  foreground: "#f0f0f4",
-  cursor: "#8d97ff",
-  cursorAccent: "#0f0d16",
-  selectionBackground: "#8d97ff4d",
-  selectionInactiveBackground: "#8d97ff26",
-  black: "#1a1624",
-  red: "#ff8a8f",
-  green: "#5fe3bb",
-  yellow: "#f5d27a",
-  blue: "#8d97ff",
-  magenta: "#d4a5ff",
-  cyan: "#7fd8f0",
-  white: "#c9c9d4",
-  brightBlack: "#6e6a7d",
-  brightRed: "#ffadb1",
-  brightGreen: "#8ff0d0",
-  brightYellow: "#ffe2a0",
-  brightBlue: "#b3baff",
-  brightMagenta: "#e5c4ff",
-  brightCyan: "#a8e6f6",
-  brightWhite: "#f0f0f4",
-};
-
-/** The terminal's ground, for the frame around it. */
-export const TERMINAL_BACKGROUND = TERMINAL_THEME.background as string;
 
 /** Tailwind's monospace stack, which the rest of the app's code is set in. */
 function monospace(): string {

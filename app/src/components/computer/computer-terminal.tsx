@@ -1,11 +1,8 @@
 import { useRef, useState } from "react";
 import { useComputerControl } from "@/lib/computers/use-control";
 import { ComputerControlButton } from "./computer-controls";
-import {
-  LiveTerminal,
-  type LiveTerminalHandle,
-  TERMINAL_BACKGROUND,
-} from "./live-terminal";
+import { LiveTerminal, type LiveTerminalHandle } from "./live-terminal";
+import { TERMINAL_BACKGROUND } from "./terminal-theme";
 
 /**
  * The Computer panel's Terminal tab: the Bot's live shell, and the wheel under it.
@@ -26,7 +23,7 @@ export function ComputerTerminal({ computerId }: { computerId: string }) {
   const [retryKey, setRetryKey] = useState(0);
 
   return (
-    <figure className="overflow-hidden rounded-2xl border">
+    <figure className="overflow-hidden rounded-2xl border dark:border-white/15">
       <div
         className="relative h-[clamp(16rem,55vh,30rem)] p-2.5"
         style={{ background: TERMINAL_BACKGROUND }}
@@ -68,8 +65,9 @@ export function ComputerTerminal({ computerId }: { computerId: string }) {
       >
         {driving ? (
           <span className="text-sm">
-            <strong className="font-medium">You have control.</strong> Type in
-            the terminal. The Bot waits until you hand it back.
+            <strong className="font-medium">You have control</strong> of the
+            terminal and the screen. Click the terminal and type. The Bot waits
+            until you hand it back.
           </span>
         ) : (
           <span className="text-muted-foreground text-xs">

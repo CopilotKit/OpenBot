@@ -8,6 +8,7 @@ import type { Message } from "@ag-ui/core";
 import { useCopilotKit } from "@copilotkit/react-core/v2";
 import { useEffect } from "react";
 import type { ToolOutcome } from "./call";
+import { followView, latestView } from "./panel-view";
 
 /**
  * What a Bot has been doing on its computer, other than browsing.
@@ -716,6 +717,8 @@ export function useConversationActivity(
   );
   useEffect(() => {
     recordActivity(computerId, conversationActivity(messages));
+    // And which of the panel's views the Bot is working in: see panel-view.ts.
+    followView(computerId, latestView(messages));
   });
 }
 
