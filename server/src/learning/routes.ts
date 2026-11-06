@@ -611,15 +611,34 @@ export function createLearningRoutes(
         const containerId = person.containerId;
         const actor = context.var.actor;
         try {
-          const review = await reviewProposal({
-            manage,
-            containerId,
-            candidateId,
-            action,
-            ...(action === "approve" && approvals
-              ? { before: recordApprovalBefore(approvals, userId, "admin") }
-              : {}),
-          });
+          const recordApproval =
+            action === "approve" && approvals
+              ? recordApprovalBefore(approvals, userId, "admin")
+              : undefined;
+          let review: Awaited<ReturnType<typeof reviewProposal>>;
+          try {
+            review = await reviewProposal({
+              manage,
+              containerId,
+              candidateId,
+              action,
+              ...(recordApproval
+                ? {
+                    before: async (
+                      ...args: Parameters<typeof recordApproval>
+                    ) => {
+                      try {
+                        return await recordApproval(...args);
+                      } finally {
+                        dependencies.invalidate?.();
+                      }
+                    },
+                  }
+                : {}),
+            });
+          } finally {
+            dependencies.invalidate?.();
+          }
           if (audit)
             await recordAuditEvent(audit, {
               eventType: "configuration.changed",

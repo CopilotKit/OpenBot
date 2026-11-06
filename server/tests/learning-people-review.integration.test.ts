@@ -203,6 +203,18 @@ const post = (
     headers,
   });
 
+test("approving a person's proposal refreshes the open-skill index", async () => {
+  let invalidated = 0;
+  const routes = admin({
+    approvals,
+    invalidate: () => {
+      invalidated += 1;
+    },
+  });
+  expect((await post(routes, reviewed, PROPOSAL, "approve")).status).toBe(200);
+  expect(invalidated).toBeGreaterThanOrEqual(2);
+});
+
 test("an admin reviews a person's proposal and it is recorded as admin-approved", async () => {
   const routes = admin({ approvals }, { audit: true });
   const response = await post(routes, reviewed, PROPOSAL, "approve");
