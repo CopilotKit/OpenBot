@@ -287,6 +287,22 @@ const decide = (
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
+/** Decides on the version `/sharing-requests` lists now, as the app does. */
+async function decideCurrent(
+  routes: ReturnType<typeof admin>,
+  userId: string,
+  skill: string,
+  action: "approve" | "decline",
+) {
+  const listed = (await (await routes.request("/sharing-requests")).json()) as {
+    requests: { userId: string; skillName: string; requestedAt: string }[];
+  };
+  const requestedAt = listed.requests.find(
+    (entry) => entry.userId === userId && entry.skillName === skill,
+  )?.requestedAt as string;
+  return decide(routes, userId, skill, action, undefined, { requestedAt });
+}
+
 async function requestSharing(skillName: string) {
   await approvals.recordApproval(reviewed, skillName, "person");
   await approvals.requestSharing(reviewed, skillName);
@@ -357,7 +373,12 @@ test("an admin approves a sharing request and the skill is no longer withheld", 
   expect(
     (await approvals.withheld([reviewed])).get(reviewed)?.has("Refund triage"),
   ).toBe(true);
-  const response = await decide(routes, reviewed, "Refund triage", "approve");
+  const response = await decideCurrent(
+    routes,
+    reviewed,
+    "Refund triage",
+    "approve",
+  );
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ sharing: "approved" });
   expect(
@@ -379,7 +400,14 @@ test("an admin approves a sharing request and the skill is no longer withheld", 
       },
     },
   ]);
-  const again = await decide(routes, reviewed, "Refund triage", "approve");
+  const again = await decide(
+    routes,
+    reviewed,
+    "Refund triage",
+    "approve",
+    undefined,
+    { requestedAt: new Date().toISOString() },
+  );
   expect(again.status).toBe(404);
   expect(audits).toHaveLength(1);
 });
@@ -396,7 +424,26 @@ test("an admin declines a sharing request, and bad requests are refused", async 
   expect(
     (await decide(routes, "nobody", "Refund triage", "approve")).status,
   ).toBe(404);
-  const declined = await decide(routes, reviewed, "Refund triage", "decline");
+  for (const requestedAt of [undefined, "x", 5]) {
+    const refused = await decide(
+      routes,
+      reviewed,
+      "Refund triage",
+      "approve",
+      undefined,
+      requestedAt === undefined ? {} : { requestedAt },
+    );
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({
+      error: "Open the request again, then decide.",
+    });
+  }
+  const declined = await decideCurrent(
+    routes,
+    reviewed,
+    "Refund triage",
+    "decline",
+  );
   expect(await declined.json()).toEqual({ sharing: "declined" });
   expect(
     (await admin({ approvals: undefined }).request("/sharing-requests")).status,

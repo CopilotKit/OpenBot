@@ -565,8 +565,15 @@ export function createLearningRoutes(
         const body = (await context.req.json().catch(() => null)) as {
           requestedAt?: unknown;
         } | null;
-        const requestedAt =
-          typeof body?.requestedAt === "string" ? body.requestedAt : undefined;
+        const requestedAt = body?.requestedAt;
+        if (
+          typeof requestedAt !== "string" ||
+          Number.isNaN(Date.parse(requestedAt))
+        )
+          return context.json(
+            { error: "Open the request again, then decide." },
+            400,
+          );
         if (
           !(await approvals.decideSharing(
             userId,
@@ -576,20 +583,19 @@ export function createLearningRoutes(
           ))
         ) {
           // A stale `requestedAt` also fails; tell the two apart so the admin knows to open the skill again.
-          if (requestedAt !== undefined)
-            if (
-              (await approvals.requests()).some(
-                (entry) =>
-                  entry.userId === userId && entry.skillName === skillName,
-              )
+          if (
+            (await approvals.requests()).some(
+              (entry) =>
+                entry.userId === userId && entry.skillName === skillName,
             )
-              return context.json(
-                {
-                  error:
-                    "This skill changed after you opened it. Open it again to see the new version.",
-                },
-                409,
-              );
+          )
+            return context.json(
+              {
+                error:
+                  "This skill changed after you opened it. Open it again to see the new version.",
+              },
+              409,
+            );
           return context.json(
             { error: "This sharing request doesn't exist." },
             404,
@@ -847,7 +853,7 @@ export function createLearningRoutes(
   });
   const skillsUnavailable = (kind: "off" | "unavailable") =>
     kind === "off"
-      ? "Automatic Learning is turned off. Turn it on to see published skills."
+      ? "Automatic learning is turned off. Turn it on to see published skills."
       : "Couldn't load published skills from Intelligence. Try again.";
   /** The Skills published to the container, by name and description. */
   routes.get("/skills", async (context) => {

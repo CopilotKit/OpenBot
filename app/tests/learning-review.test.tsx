@@ -434,6 +434,7 @@ test("the personal edition shows Learning with automatic approval on and no shar
     name: "Approve new skills automatically",
   });
   expect(approve.getAttribute("aria-checked")).toBe("true");
+  await view.findByText("Your skills");
   expect(view.queryByText("Who else's Bots use your skills")).toBeNull();
   expect(view.getByRole("button", { name: "Learn now" })).toBeTruthy();
   expect(view.queryByText("Nothing to review")).toBeNull();

@@ -766,7 +766,7 @@ describe("Settings, Learning", () => {
       expect(off.status).toBe(409);
       expect(await off.json()).toEqual({
         error:
-          "An admin has turned off Automatic Learning, so you have no skills to change.",
+          "An admin has turned off automatic learning, so you have no skills to change.",
       });
     } finally {
       settings.enabled = true;

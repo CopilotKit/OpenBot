@@ -396,7 +396,7 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
     );
   });
 
-  test("published skills say it is Automatic Learning that is off", async () => {
+  test("published skills say it is automatic learning that is off", async () => {
     const store = createLearningSettingsStore();
     await useDefault(store);
     const app = createLearningRoutes(
@@ -415,7 +415,7 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       error:
-        "Automatic Learning is turned off. Turn it on to see published skills.",
+        "Automatic learning is turned off. Turn it on to see published skills.",
     });
   });
 

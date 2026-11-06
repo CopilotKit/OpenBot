@@ -651,7 +651,7 @@ export function createPersonalLearningRoutes(
         ? context.json(
             {
               error:
-                "An admin has turned off Automatic Learning, so you have no skills to change.",
+                "An admin has turned off automatic learning, so you have no skills to change.",
             },
             409,
           )
