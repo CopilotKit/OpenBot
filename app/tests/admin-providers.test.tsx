@@ -4,6 +4,7 @@ import {
   beforeAll,
   beforeEach,
   expect,
+  mock,
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -16,18 +17,28 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { allowedSummary } from "@/components/admin/controls/model-sections";
+import type { ModelSource } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
-import { Route as EnterpriseRoute } from "@/routes/_authed/admin/enterprise";
-import { PermissionsPage } from "@/routes/_authed/admin/permissions";
-import { ProvidersPage } from "@/routes/_authed/admin/providers";
 import { settleReactWork } from "./settle-react-work";
+import { vendoredMarkFor } from "./vendored-marks";
 
 /*
  * Admin, Providers and Permissions: the pages Enterprise controls was split into. The server is
  * faked at the fetch boundary with the shapes `GET /api/admin/enterprise` and
- * `GET /api/models/available` answer with, and the writes are the enterprise routes' own.
+ * `GET /api/models/available` answer with, and the writes are the enterprise routes' own. Marks
+ * resolve as the app resolves them, from the files vendored in `shared/marks`.
  */
+mock.module("@/lib/marks", () => ({ markFor: vendoredMarkFor }));
+
+// After the stub: a static import is hoisted and would load the real marks module first.
+const { allowedSummary } = await import(
+  "@/components/admin/controls/model-sections"
+);
+const { Route: EnterpriseRoute } = await import(
+  "@/routes/_authed/admin/enterprise"
+);
+const { PermissionsPage } = await import("@/routes/_authed/admin/permissions");
+const { ProvidersPage } = await import("@/routes/_authed/admin/providers");
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -42,6 +53,8 @@ afterEach(() => {
 });
 
 let settings: Record<string, unknown>;
+/** Who serves the models; the allowlist prefix stays `openai` whatever this is. */
+let source: ModelSource;
 const writes: { path: string; body: unknown }[] = [];
 
 function serving() {
@@ -86,11 +99,23 @@ function serving() {
     if (path === "/api/models/available")
       return Response.json({
         provider: "openai",
+        source,
         default: "gpt-5.6-terra",
         listed: true,
         models: [
-          { id: "gpt-6-sol", label: "GPT-6 Sol", vendor: "openai" },
-          { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", vendor: "openai" },
+          {
+            id: "gpt-6-sol",
+            label: "GPT-6 Sol",
+            vendor: "openai",
+            efforts: ["low", "medium", "high"],
+          },
+          {
+            id: "gpt-5.6-terra",
+            label: "GPT-5.6 Terra",
+            vendor: "openai",
+            efforts: ["none", "low", "medium", "high", "xhigh"],
+            defaultEffort: "medium",
+          },
           { id: "gpt-4o", label: "GPT-4o", vendor: "openai" },
         ],
       });
@@ -111,6 +136,7 @@ beforeEach(() => {
     proactiveDailyRuns: 24,
     modelSelection: false,
   };
+  source = "openai";
   queryClient.clear();
   serving();
 });
@@ -144,6 +170,40 @@ test("Providers names the provider and its default, and turns model choice on", 
       body: { value: true },
     }),
   );
+});
+
+test("Providers names what actually serves the models, with a vendor's mark only where one is vendored", async () => {
+  const cases: [ModelSource, string, string | null][] = [
+    ["openai", "OpenAI", "OpenAI"],
+    ["anthropic", "Anthropic", "Anthropic"],
+    ["google", "Google", null],
+    ["xai", "xAI", null],
+    ["gateway", "OpenAI-compatible endpoint", null],
+    ["chatgpt", "ChatGPT plan", "ChatGPT plan"],
+    ["claude", "Claude plan", "Claude plan"],
+  ];
+  for (const [served, name, mark] of cases) {
+    source = served;
+    queryClient.clear();
+    const view = await draw(ProvidersPage);
+    const title = await view.findByText(name);
+    const row = title.closest("[data-slot=item]") as HTMLElement;
+    expect(row.querySelector("img[data-mark]")?.getAttribute("data-mark")).toBe(
+      mark ?? undefined,
+    );
+    expect(row.textContent).toContain(
+      "Default gpt-5.6-terra · 3 models listed",
+    );
+    view.unmount();
+  }
+});
+
+test("the allowlist names models by provider, whoever serves them", async () => {
+  source = "gateway";
+  const view = await draw(ProvidersPage);
+  fireEvent.click(await view.findByRole("button", { name: /Allowed models/ }));
+  const dialog = await view.findByRole("dialog");
+  await waitFor(() => expect(dialog.textContent).toContain("openai/gpt-6-sol"));
 });
 
 test("the allowlist is picked from the provider's models, and takes one it doesn't list by full name", async () => {

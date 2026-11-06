@@ -2,6 +2,7 @@ import {
   IconBrain,
   IconChartBar,
   IconChevronRight,
+  IconCloud,
   IconKey,
   IconSearch,
   IconShieldLock,
@@ -32,12 +33,34 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { modelUsageQueryOptions } from "@/lib/enterprise/queries";
-import { availableModelsQueryOptions } from "@/lib/models/queries";
+import { markFor } from "@/lib/marks";
+import {
+  availableModelsQueryOptions,
+  type ModelSource,
+} from "@/lib/models/queries";
 import { ControlsSection } from "./controls-section";
 
-const PROVIDER_NAMES: Record<string, string> = {
+/** Who serves the models, by the name an admin knows it by. */
+const SOURCE_NAMES: Record<ModelSource, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
+  google: "Google",
+  xai: "xAI",
+  gateway: "OpenAI-compatible endpoint",
+  chatgpt: "ChatGPT plan",
+  claude: "Claude plan",
+};
+
+/**
+ * The vendor whose mark stands beside a source, where `shared/marks` has one: a plan is its
+ * vendor's own product. Google and xAI have no vendored mark, and an endpoint is nobody's, so those
+ * rows get a plain icon. Nothing is drawn to stand in for a missing mark.
+ */
+const SOURCE_VENDORS: Partial<Record<ModelSource, string>> = {
+  openai: "openai",
+  anthropic: "anthropic",
+  chatgpt: "openai",
+  claude: "anthropic",
 };
 
 /**
@@ -48,31 +71,34 @@ export function ProviderSection() {
   const available = useQuery(availableModelsQueryOptions());
   return (
     <ControlsSection
-      description="Built-in Bots run on models from this provider, or from the gateway set in OPENAI_BASE_URL."
+      description="Built-in Bots and the framework picked at setup run on models from this provider."
       title="Connected"
     >
-      {() =>
-        available.isPending ? null : available.error ? (
-          <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load the provider. Reload the page.
-          </p>
-        ) : (
+      {() => {
+        if (available.isPending) return null;
+        if (available.error)
+          return (
+            <p className="mt-4 text-destructive text-sm" role="alert">
+              Couldn't load the provider. Reload the page.
+            </p>
+          );
+        const { source } = available.data;
+        const name = SOURCE_NAMES[source] ?? source;
+        const vendor = SOURCE_VENDORS[source];
+        return (
           <PageRows>
             <Item size="sm">
-              <ItemMedia>
-                <HarnessMark
-                  id={available.data.provider}
-                  name={
-                    PROVIDER_NAMES[available.data.provider] ??
-                    available.data.provider
-                  }
-                />
-              </ItemMedia>
+              {vendor && markFor(vendor) ? (
+                <ItemMedia>
+                  <HarnessMark id={vendor} name={name} />
+                </ItemMedia>
+              ) : (
+                <ItemMedia variant="icon">
+                  <IconCloud />
+                </ItemMedia>
+              )}
               <ItemContent>
-                <ItemTitle>
-                  {PROVIDER_NAMES[available.data.provider] ??
-                    available.data.provider}
-                </ItemTitle>
+                <ItemTitle>{name}</ItemTitle>
                 <ItemDescription>
                   {available.data.listed
                     ? `Default ${available.data.default} · ${available.data.models.length} models listed`
@@ -81,8 +107,8 @@ export function ProviderSection() {
               </ItemContent>
             </Item>
           </PageRows>
-        )
-      }
+        );
+      }}
     </ControlsSection>
   );
 }
@@ -106,7 +132,7 @@ export function ModelChoiceSection() {
               <ItemTitle>Let people choose a model</ItemTitle>
               <ItemDescription>
                 {data.settings.modelSelection
-                  ? "People can pick a model for built-in Bots in each conversation."
+                  ? "People can pick a model and its thinking effort for built-in Bots in each conversation."
                   : "Off. Built-in Bots use the configured model."}
               </ItemDescription>
             </ItemContent>
