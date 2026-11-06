@@ -187,3 +187,7 @@ if ((remove_app)); then
 fi
 
 say "Done. Open OpenBot from /Applications to start from the beginning."
+# Docker Desktop keeps serving the folder it last mounted, so a reinstall into the recreated
+# ~/OpenBot can fail with "bind source path does not exist" until Docker looks again. A new
+# person's machine never had the folder, so restarting Docker Desktop is what makes this fresh.
+((${#engines[@]})) && echo "    Restart Docker Desktop before reinstalling, or the first Start can fail with \"bind source path does not exist\"."
