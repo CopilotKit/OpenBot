@@ -149,7 +149,8 @@ export function DecisionCard({
         <AnimatePresence initial={false} mode="popLayout">
           <motion.span
             animate={{ opacity: 1, scale: 1 }}
-            className="shrink-0"
+            // The title's line height, centred, so the badge sits level with the title.
+            className="flex h-5 shrink-0 items-center"
             exit={{ opacity: 0, scale: 0.9 }}
             initial={{ opacity: 0, scale: 0.9 }}
             key={answer ? "answered" : "waiting"}
@@ -266,7 +267,7 @@ export function DecisionCard({
               </p>
             ) : null}
             <div className="flex justify-end px-4 py-2.5">
-              <Button disabled={!canSend} onClick={send} size="sm">
+              <Button disabled={!canSend} onClick={send}>
                 {submitting
                   ? "Sending…"
                   : picked === OTHER
@@ -327,7 +328,7 @@ function Key({ index }: { index: number }) {
   return (
     <kbd
       aria-hidden
-      className="ml-auto shrink-0 rounded border border-border px-1.5 font-mono text-[11px] text-muted-foreground leading-5"
+      className="ml-auto shrink-0 px-1 font-mono text-muted-foreground text-xs leading-5"
     >
       {index + 1}
     </kbd>
