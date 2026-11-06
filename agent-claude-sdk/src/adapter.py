@@ -36,27 +36,6 @@ logger = logging.getLogger(__name__)
 SDK_EFFORTS = frozenset(get_args(EffortLevel))
 
 
-# Claude Code's built-in tools that act outside the conversation: the shell, files and the web.
-# ToolSearch, Task and TodoWrite stay: they only load OpenBot's tools, delegate, and plan.
-CLAUDE_CODE_OUTSIDE_TOOLS = frozenset(
-    {
-        "Bash",
-        "BashOutput",
-        "KillShell",
-        "Read",
-        "Write",
-        "Edit",
-        "MultiEdit",
-        "NotebookEdit",
-        "Glob",
-        "Grep",
-        "LS",
-        "WebSearch",
-        "WebFetch",
-    }
-)
-
-
 class ModelAuthenticationError(Exception):
     pass
 
@@ -211,15 +190,13 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
 
             options.hooks["PreToolUse"] = [HookMatcher(hooks=[only_offered])]
         else:
-            # A full Bot acts through what OpenBot grants it: its computer, its apps and web
-            # search, each under the deployment's policy and audit trail. Claude Code's own
-            # versions run in this container instead, ungoverned and unapproved, so the CLI
-            # refuses them. Left in view, Claude reached for its own WebSearch, was refused,
-            # and told the person to grant it, never trying the Bot's search or asking OpenBot
-            # to turn one on. Out of view, it uses the tools that work.
-            options.disallowed_tools = sorted(
-                {*(options.disallowed_tools or []), *CLAUDE_CODE_OUTSIDE_TOOLS}
-            )
+            # A full Bot acts through what OpenBot grants it: its computer, its apps, web search,
+            # Routines and `run_subagent`, each under the deployment's policy and audit trail.
+            # Claude Code's own versions (WebSearch, Bash, Read, CronCreate, Agent, RemoteTrigger
+            # and the rest) run in this container instead, ungoverned and unapproved. Left in
+            # view, Claude reached for its own WebSearch, was refused, and told the person to
+            # grant it. No built-ins, as on the model endpoint; OpenBot's tools still load.
+            options.tools = []  # SDK 0.2.152 maps this to --tools "".
         return options
 
     async def _run_query(self, input_data):

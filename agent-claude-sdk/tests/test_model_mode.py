@@ -6,7 +6,7 @@ from ag_ui.core import RunAgentInput
 from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.adapter import CLAUDE_CODE_OUTSIDE_TOOLS, OpenBotClaudeAgentAdapter
+from src.adapter import OpenBotClaudeAgentAdapter
 from src.replay import conversation_content
 
 
@@ -136,13 +136,10 @@ def test_full_bot_cannot_see_claude_code_web_search_or_shell():
         }
     )
     options = adapter.build_options(request, request.thread_id)
-    assert {"WebSearch", "WebFetch", "Bash", "Read", "Write"} <= set(options.disallowed_tools)
-    assert CLAUDE_CODE_OUTSIDE_TOOLS <= set(options.disallowed_tools)
-    assert "ToolSearch" not in options.disallowed_tools
+    assert options.tools == []
     assert "mcp__ag_ui__show_app_access" in options.allowed_tools
     options.cli_path = "/not-executed/claude"
     command = SubprocessCLITransport(
         prompt="contract only", options=options
     )._build_command()
-    hidden = command[command.index("--disallowedTools") + 1].split(",")
-    assert "WebSearch" in hidden and "Bash" in hidden
+    assert command[command.index("--tools") + 1] == ""
