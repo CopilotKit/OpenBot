@@ -49,38 +49,89 @@ export function createSkillApprovalStore(database: Database) {
     },
 
     /**
-     * Records an approval and says whether the skill already had one. A person's approval of a skill already approved
-     * for sharing asks for sharing again, since what was shared has changed; an admin's approval clears sharing.
+     * Records an approval and says whether the skill already had one, and what that one was, so a caller that has to
+     * take the approval back can `forget` a row it created or `restore` the row it replaced. A person's approval of a
+     * skill already approved for sharing asks for sharing again, since what was shared has changed; an admin's
+     * approval clears sharing; a new row starts with no sharing.
+     *
+     * Why two statements and not one upsert: on Postgres 17 an `INSERT … ON CONFLICT DO UPDATE` cannot return the row
+     * it replaced (`RETURNING old.*` arrives in 18), and a read in the same statement, CTE or not, runs on the
+     * statement's snapshot, so it misses a row a concurrent first approval inserts and commits while this one waits
+     * on the unique index. So: lock the existing row with `FOR UPDATE` and update it, which makes the read exactly the
+     * row replaced; or, when there is none, insert with `ON CONFLICT DO NOTHING`, which waits for a concurrent insert
+     * of the same key and lets exactly one caller create the row. A caller that loses that race reads again (each
+     * statement takes a fresh snapshot under READ COMMITTED) and finds the winner's row to lock and update.
      */
     async recordApproval(
       userId: string,
       skillName: string,
       by: "person" | "admin",
-    ): Promise<{ existed: boolean }> {
+    ): Promise<{ existed: boolean; previous: SkillApproval | null }> {
       return database.transaction(async (transaction) => {
-        const [before] = await transaction
-          .select({ sharing: learningSkillApprovals.sharing })
-          .from(learningSkillApprovals)
-          .where(approvalKey(userId, skillName))
-          .for("update");
-        const sharing =
-          by === "admin"
-            ? "none"
-            : before?.sharing === "approved"
-              ? "requested"
-              : (before?.sharing ?? "none");
-        await transaction
-          .insert(learningSkillApprovals)
-          .values({ userId, skillName, approvedBy: by, sharing })
-          .onConflictDoUpdate({
-            target: [
-              learningSkillApprovals.userId,
-              learningSkillApprovals.skillName,
-            ],
-            set: { approvedBy: by, sharing, updatedAt: new Date() },
-          });
-        return { existed: before !== undefined };
+        // A row deleted between our insert and our read sends us round again; three rounds is far past any real race.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const [previous] = await transaction
+            .select({
+              userId: learningSkillApprovals.userId,
+              skillName: learningSkillApprovals.skillName,
+              approvedBy: learningSkillApprovals.approvedBy,
+              sharing: learningSkillApprovals.sharing,
+            })
+            .from(learningSkillApprovals)
+            .where(approvalKey(userId, skillName))
+            .for("update");
+          if (previous) {
+            const sharing =
+              by === "admin"
+                ? "none"
+                : previous.sharing === "approved"
+                  ? "requested"
+                  : previous.sharing;
+            await transaction
+              .update(learningSkillApprovals)
+              .set({ approvedBy: by, sharing, updatedAt: new Date() })
+              .where(approvalKey(userId, skillName));
+            return { existed: true, previous };
+          }
+          const created = await transaction
+            .insert(learningSkillApprovals)
+            .values({ userId, skillName, approvedBy: by, sharing: "none" })
+            .onConflictDoNothing({
+              target: [
+                learningSkillApprovals.userId,
+                learningSkillApprovals.skillName,
+              ],
+            })
+            .returning({ skillName: learningSkillApprovals.skillName });
+          if (created.length > 0) return { existed: false, previous: null };
+        }
+        throw new Error(
+          `The approval of skill "${skillName}" kept changing while it was being recorded.`,
+        );
       });
+    },
+
+    /** Writes back an approval exactly as `recordApproval` reported it before replacing it. */
+    async restore(previous: SkillApproval): Promise<void> {
+      await database
+        .insert(learningSkillApprovals)
+        .values({
+          userId: previous.userId,
+          skillName: previous.skillName,
+          approvedBy: previous.approvedBy,
+          sharing: previous.sharing,
+        })
+        .onConflictDoUpdate({
+          target: [
+            learningSkillApprovals.userId,
+            learningSkillApprovals.skillName,
+          ],
+          set: {
+            approvedBy: previous.approvedBy,
+            sharing: previous.sharing,
+            updatedAt: new Date(),
+          },
+        });
     },
 
     async forget(userId: string, skillName: string): Promise<void> {

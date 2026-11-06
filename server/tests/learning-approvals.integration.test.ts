@@ -28,6 +28,7 @@ describe("skill approvals", () => {
   test("a person's update to a shared skill asks for sharing again", async () => {
     expect(await store.recordApproval(ada, "invoice", "person")).toEqual({
       existed: false,
+      previous: null,
     });
     expect((await store.get(ada, "invoice"))?.sharing).toBe("none");
     expect(await store.requestSharing(ada, "invoice")).toBe(true);
@@ -36,6 +37,12 @@ describe("skill approvals", () => {
 
     expect(await store.recordApproval(ada, "invoice", "person")).toEqual({
       existed: true,
+      previous: {
+        userId: ada,
+        skillName: "invoice",
+        approvedBy: "person",
+        sharing: "approved",
+      },
     });
     expect((await store.get(ada, "invoice"))?.sharing).toBe("requested");
     expect((await store.requests()).map((row) => row.skillName)).toContain(
@@ -78,6 +85,50 @@ describe("skill approvals", () => {
     expect(await store.decideSharing(grace, "not-asked", "approved")).toBe(
       false,
     );
+  });
+
+  test("two first approvals at once both succeed and exactly one says it created the row", async () => {
+    const results = await Promise.all([
+      store.recordApproval(grace, "raced", "person"),
+      store.recordApproval(grace, "raced", "admin"),
+    ]);
+    expect(results.map((result) => result.existed).sort()).toEqual([
+      false,
+      true,
+    ]);
+    const second = results.find((result) => result.existed);
+    expect(second?.previous).toEqual({
+      userId: grace,
+      skillName: "raced",
+      approvedBy: results[0]?.existed ? "admin" : "person",
+      sharing: "none",
+    });
+  });
+
+  test("restore puts back the previous approver and sharing", async () => {
+    await store.recordApproval(grace, "restored", "person");
+    await store.requestSharing(grace, "restored");
+    await store.decideSharing(grace, "restored", "approved");
+    const { existed, previous } = await store.recordApproval(
+      grace,
+      "restored",
+      "admin",
+    );
+    expect(existed).toBe(true);
+    expect(await store.get(grace, "restored")).toEqual({
+      userId: grace,
+      skillName: "restored",
+      approvedBy: "admin",
+      sharing: "none",
+    });
+    if (!previous) throw new Error("expected the replaced approval");
+    await store.restore(previous);
+    expect(await store.get(grace, "restored")).toEqual({
+      userId: grace,
+      skillName: "restored",
+      approvedBy: "person",
+      sharing: "approved",
+    });
   });
 
   test("forget deletes the row", async () => {
