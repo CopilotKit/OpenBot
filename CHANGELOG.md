@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.3.1
+
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`. Ten
 things change for an existing deployment:
 - On OpenBot Desktop, the first Start after the app updates to this release moves the installed

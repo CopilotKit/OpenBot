@@ -220,9 +220,10 @@ describe("release policy", () => {
     const { repo, env } = publisher(
       forVersion("v0.4.0", ["v0.3.0", "v0.3.1"]),
       {
+        // Both on the migration the committed policy starts from, whichever release that is.
         tags: {
-          "v0.3.0": "0053_identity_links",
-          "v0.3.1": "0053_identity_links",
+          "v0.3.0": policy.compatibility.database.from[0],
+          "v0.3.1": policy.compatibility.database.from[0],
         },
       },
     );
