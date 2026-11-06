@@ -27,9 +27,8 @@ beforeEach(() => {
   const page = window as Page;
   page.__openbotOutsideLinks = false;
   page.__openbotNavigate = (to) => navigated.push(to);
-  // Evaluated in the page's global scope, as the window's `eval` runs it.
-  const run = globalThis.eval;
-  run(SHIM);
+  // biome-ignore lint/security/noGlobalEval: the desktop window evaluates this shim in the page's global scope; the test must run it the same way.
+  globalThis.eval(SHIM);
 });
 
 test("an app's consent claimed in a blank tab is handed over once its address arrives", () => {
