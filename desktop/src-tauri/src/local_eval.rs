@@ -638,6 +638,9 @@ pub enum Terms {
     NotRequired,
     Unavailable,
     SignedOut,
+    /// The CLI answers nothing about the agreement until a container engine answers it. On a new
+    /// Windows computer Install is still putting Podman in while the person signs in.
+    EngineNotReady,
 }
 
 /// `onboard local-terms --json`: one object, exit 0. The address must be https; the organization
@@ -659,6 +662,15 @@ pub fn normalize_terms(exit_code: i32, stdout: &[u8]) -> Result<Terms, Failure> 
         Some("not-required") => Ok(Terms::NotRequired),
         Some("unavailable") => Ok(Terms::Unavailable),
         Some("signed-out") => Ok(Terms::SignedOut),
+        Some("blocked")
+            if wire
+                .get("preflight")
+                .and_then(|preflight| preflight.get("status"))
+                .and_then(Value::as_str)
+                == Some("fail") =>
+        {
+            Ok(Terms::EngineNotReady)
+        }
         Some("required") => {
             let url = wire
                 .get("url")
@@ -4567,6 +4579,35 @@ fn main() {
         assert_eq!(
             normalize_account_sign_in(0, b"not json\n"),
             Err(Failure::InvalidJson)
+        );
+    }
+
+    /// A new Windows computer installs Podman while the person signs in, and the CLI will not say
+    /// anything about the agreement until an engine answers. Those answers, as the CLI gave them on
+    /// Windows, are "not yet", which the account screen waits out, not a failure it shows.
+    #[test]
+    fn terms_blocked_on_the_engine_are_not_ready_rather_than_failed() {
+        for wire in [
+            r#"{"command":"onboard local-terms","status":"blocked","preflight":{"status":"fail","reason":"docker_unavailable","detail":"Docker did not answer. Start Docker Desktop or the Docker service, and check that your user can run `docker info`, then try again."},"next":"Tell the developer `preflight.detail` in one sentence."}"#,
+            r#"{"command":"onboard local-terms","status":"blocked","preflight":{"status":"fail","reason":"unsupported_engine","failureDetail":"engine_mismatch","detail":"The Docker address answers with Podman. Set COPILOTKIT_LOCAL_ENGINE=podman to use Podman, then retry."},"next":"Tell the developer `preflight.detail` in one sentence."}"#,
+        ] {
+            assert_eq!(
+                normalize_terms(0, wire.as_bytes()),
+                Ok(Terms::EngineNotReady),
+                "{wire}"
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(Terms::EngineNotReady).unwrap(),
+            serde_json::json!({ "status": "engine-not-ready" })
+        );
+        // Blocked for anything but the engine is still not an answer.
+        assert_eq!(
+            normalize_terms(
+                0,
+                br#"{"command":"onboard local-terms","status":"blocked"}"#
+            ),
+            Err(Failure::InvalidStatus)
         );
     }
 

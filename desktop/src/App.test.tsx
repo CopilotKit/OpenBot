@@ -647,6 +647,33 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   expectPlain(view);
 });
 
+test("the account step waits for a container engine Install is still setting up, rather than failing", async () => {
+  // A new Windows computer installs Podman while the person signs in, and until an engine answers
+  // the CLI says nothing about the account ("engine-not-ready"). That was shown as "Couldn't check
+  // your CopilotKit account", and Try again failed the same way until Podman was up.
+  setupRootConfiguration("/tmp/local-eval-engine-wait", async () =>
+    emptyConfiguration(),
+  );
+  let asked = 0;
+  withLocalCli({
+    local_eval_terms: () => {
+      asked += 1;
+      return asked === 1
+        ? { status: "engine-not-ready" }
+        : { status: "signed-out" };
+    },
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole(
+    "button",
+    { name: "Sign in to CopilotKit" },
+    { timeout: 6000 },
+  );
+  expect(asked).toBe(2);
+  expect(view.queryByText(/Couldn.t check your CopilotKit account/)).toBeNull();
+}, 15000);
+
 const APPS_UNAVAILABLE = {
   said: "OpenBot couldn't connect your apps. Check your connection, then choose Connect apps. If it keeps happening, ask an admin.",
 };

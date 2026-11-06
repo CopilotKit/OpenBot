@@ -245,7 +245,9 @@ export type LocalTerms =
       url: string;
       organizationName: string;
     }
-  | { status: "not-required" | "unavailable" | "signed-out" };
+  | { status: "not-required" | "unavailable" | "signed-out" }
+  /** No container engine answers yet, so the CLI says nothing about the account. */
+  | { status: "engine-not-ready" };
 
 export function localEvalTerms(): {
   attempt: string;
