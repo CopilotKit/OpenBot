@@ -86,12 +86,46 @@ export function LearningReview() {
   const autoApproveOn =
     (saveAutoApprove.isPending ? saveAutoApprove.variables : undefined) ??
     autoApprove;
-  const waiting = sources.flatMap((source) =>
-    (source.proposals ?? [])
-      .filter((proposal) => proposal.status === "pending_review")
-      .map((proposal) => ({ container: source.containerId, proposal })),
-  );
   const unreadable = sources.some((source) => source.proposals === null);
+  // Sources that share a label are one group: the same words to the person, one Learn now.
+  const groups: {
+    label: string;
+    containers: string[];
+    latestRun: LearningRunSummary | null;
+    waiting: { container: string; proposal: LearningProposal }[];
+  }[] = [];
+  for (const source of sources) {
+    let group = groups.find((candidate) => candidate.label === source.label);
+    if (!group) {
+      group = {
+        label: source.label,
+        containers: [],
+        latestRun: null,
+        waiting: [],
+      };
+      groups.push(group);
+    }
+    group.containers.push(source.containerId);
+    if (
+      source.latestRun &&
+      (!group.latestRun ||
+        source.latestRun.createdAt > group.latestRun.createdAt)
+    )
+      group.latestRun = source.latestRun;
+    for (const proposal of source.proposals ?? [])
+      if (proposal.status === "pending_review")
+        group.waiting.push({ container: source.containerId, proposal });
+  }
+  const anyWaiting = groups.some((group) => group.waiting.length > 0);
+  // With automatic approval on, an empty list says nothing the switch doesn't.
+  const showList = autoApproveOn !== true || anyWaiting;
+  const learnNowFor = async (containers: string[]) => {
+    try {
+      for (const container of containers) await learnNow.mutateAsync(container);
+    } catch {
+      // Shown in the alert below.
+    }
+  };
 
   return (
     <PageSection
@@ -122,71 +156,70 @@ export function LearningReview() {
           </Item>
         </PageRows>
       )}
-      {waiting.length > 0 ? (
-        <PageRows>
-          {waiting.map(({ container, proposal }, index) => (
-            <Fragment key={`${container}:${proposal.id}`}>
-              {index > 0 ? <Separator /> : null}
-              <Item
-                render={
-                  <button
-                    onClick={() => setOpen({ container, id: proposal.id })}
-                    type="button"
-                  />
-                }
-                size="sm"
-              >
-                <ItemMedia variant="icon">
-                  <IconSparkles />
-                </ItemMedia>
+      {showList &&
+        groups
+          .filter((group) => canReview || group.waiting.length > 0)
+          .map((group) => (
+            <PageRows key={group.label}>
+              <Item size="sm">
                 <ItemContent>
-                  <ItemTitle>{proposal.title}</ItemTitle>
-                  <ItemDescription>{proposal.description}</ItemDescription>
+                  <ItemTitle>{group.label}</ItemTitle>
+                  {canReview && (
+                    <ItemDescription>
+                      {group.latestRun
+                        ? `Latest run ${RUN_STATUS[group.latestRun.status]}.`
+                        : "No run yet."}
+                    </ItemDescription>
+                  )}
                 </ItemContent>
-                <ItemActions>
-                  <span className="text-muted-foreground text-sm">
-                    {operationLabel(proposal)}
-                  </span>
-                  <IconChevronRight className="size-4 text-muted-foreground" />
-                </ItemActions>
+                {canReview && (
+                  <ItemActions>
+                    <Button
+                      disabled={learnNow.isPending}
+                      onClick={() => learnNowFor(group.containers)}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {learnNow.isPending ? "Starting…" : "Learn now"}
+                    </Button>
+                  </ItemActions>
+                )}
               </Item>
-            </Fragment>
+              {group.waiting.map(({ container, proposal }) => (
+                <Fragment key={`${container}:${proposal.id}`}>
+                  <Separator />
+                  <Item
+                    render={
+                      <button
+                        onClick={() => setOpen({ container, id: proposal.id })}
+                        type="button"
+                      />
+                    }
+                    size="sm"
+                  >
+                    <ItemMedia variant="icon">
+                      <IconSparkles />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>{proposal.title}</ItemTitle>
+                      <ItemDescription>{proposal.description}</ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <span className="text-muted-foreground text-sm">
+                        {operationLabel(proposal)}
+                      </span>
+                      <IconChevronRight className="size-4 text-muted-foreground" />
+                    </ItemActions>
+                  </Item>
+                </Fragment>
+              ))}
+            </PageRows>
           ))}
-        </PageRows>
-      ) : unreadable ? null : (
+      {showList && !anyWaiting && !unreadable && (
         <PageEmpty icon={IconSparkles} title="Nothing to review">
           New proposals show up here after Learning analyses your recordings.
         </PageEmpty>
-      )}
-      {canReview && (
-        <PageRows>
-          {sources.map((source, index) => (
-            <Fragment key={source.containerId}>
-              {index > 0 ? <Separator /> : null}
-              <Item size="sm">
-                <ItemContent>
-                  <ItemTitle>{source.label}</ItemTitle>
-                  <ItemDescription>
-                    {source.latestRun
-                      ? `Latest run ${RUN_STATUS[source.latestRun.status]}.`
-                      : "No run yet."}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Button
-                    disabled={learnNow.isPending}
-                    onClick={() => learnNow.mutate(source.containerId)}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    {learnNow.isPending ? "Starting…" : "Learn now"}
-                  </Button>
-                </ItemActions>
-              </Item>
-            </Fragment>
-          ))}
-        </PageRows>
       )}
       {canReview && learnNow.isSuccess && (
         <p className="mt-4 text-sm" role="status">

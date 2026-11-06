@@ -249,6 +249,89 @@ test("with people approving, the latest run shows and Learn now starts one", asy
   ).toBeTruthy();
 });
 
+const run = (id: string, createdAt: string) => ({
+  id,
+  status: "succeeded" as const,
+  trigger: "manual" as const,
+  proposals: 1,
+  insights: null,
+  failureCode: null,
+  createdAt,
+  startedAt: null,
+  completedAt: null,
+});
+
+test("turning automatic approval off shows proposals from recordings and from conversations to review", async () => {
+  review = {
+    canReview: true,
+    autoApprove: false,
+    sources: [
+      {
+        containerId: "user-1",
+        kind: "recordings",
+        label: "From your recordings",
+        latestRun: null,
+        proposals: [proposal("p1", "refund-order", "add")],
+      },
+      {
+        containerId: "user-1-chat",
+        kind: "conversations",
+        label: "From your conversations",
+        latestRun: run("run-2", "2026-11-02T00:00:00Z"),
+        proposals: [proposal("p5", "reply-politely", "add")],
+      },
+    ],
+  };
+  const view = draw();
+  expect(await view.findByText("From your recordings")).toBeTruthy();
+  expect(view.getByText("From your conversations")).toBeTruthy();
+  expect(view.getByText("refund-order")).toBeTruthy();
+  expect(view.getByText("reply-politely")).toBeTruthy();
+  expect(view.getByText("No run yet.")).toBeTruthy();
+  expect(view.getByText("Latest run finished.")).toBeTruthy();
+  const buttons = view.getAllByRole("button", { name: "Learn now" });
+  expect(buttons).toHaveLength(2);
+  fireEvent.click(buttons[1] as HTMLElement);
+  await waitFor(() =>
+    expect(posts).toEqual([
+      "/api/settings/learning/runs?container=user-1-chat",
+    ]),
+  );
+});
+
+test("sources with the same label make one group with one Learn now", async () => {
+  review = {
+    canReview: true,
+    autoApprove: false,
+    sources: ["a", "b"].map((id) => ({
+      containerId: `bot-${id}`,
+      kind: "conversations" as const,
+      label: "From your conversations",
+      latestRun: null,
+      proposals: [proposal(`p-${id}`, `skill-${id}`, "add")],
+    })),
+  };
+  const view = draw();
+  expect(await view.findByText("skill-a")).toBeTruthy();
+  expect(view.getAllByText("From your conversations")).toHaveLength(1);
+  fireEvent.click(view.getByText("skill-b"));
+  fireEvent.click(await view.findByText("Approve and publish"));
+  await waitFor(() =>
+    expect(posts).toEqual([
+      "/api/settings/learning/proposals/p-b/approve?container=bot-b",
+    ]),
+  );
+  posts.length = 0;
+  fireEvent.click(await view.findByText("Done"));
+  fireEvent.click(await view.findByRole("button", { name: "Learn now" }));
+  await waitFor(() =>
+    expect(posts).toEqual([
+      "/api/settings/learning/runs?container=bot-a",
+      "/api/settings/learning/runs?container=bot-b",
+    ]),
+  );
+});
+
 test("with admins approving, there is no Learn now", async () => {
   const view = draw();
   await view.findByText("Waiting for an admin");
