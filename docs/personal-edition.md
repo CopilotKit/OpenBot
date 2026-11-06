@@ -48,7 +48,8 @@ The server's container is given the supervisor by name in `docker-compose.yml` u
 
 An installation from an earlier OpenBot Desktop, which ran the team edition, becomes the personal
 edition on its next Start. Its Bots and conversations stay in the database. The team edition's
-settings stored there are not read (see [What is fixed](#what-is-fixed)). Stop still stops each
+settings stored there are not read (see [What is fixed](#what-is-fixed)). The package keeps the
+`openbot` tenant id so the picked Bot retains its package ownership across that switch. Stop still stops each
 computer the supervisor made for a Bot.
 
 ## What the server requires

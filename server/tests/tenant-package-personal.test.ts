@@ -70,3 +70,15 @@ test("it can make Bots and write skills in a conversation", async () => {
   const { agents } = await loadTenantPackage(personal);
   expect(agents[0]?.skills).toEqual(["bot-creator", "skill-creator"]);
 });
+
+// Package-owned Bot ids survive edition changes only within the same deployment package.
+test("switching an existing desktop to personal retains ownership of its picked Bot", async () => {
+  process.env.PICKED_HARNESS_URL = "http://127.0.0.1:4206/ag-ui";
+  const previous = await loadTenantPackage(fintech);
+  const next = await loadTenantPackage(personal);
+  expect(previous.agents.some((agent) => agent.id === "picked-harness")).toBe(
+    true,
+  );
+  expect(next.agents.some((agent) => agent.id === "picked-harness")).toBe(true);
+  expect(next.tenantId).toBe(previous.tenantId);
+});
