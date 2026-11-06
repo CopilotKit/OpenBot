@@ -23,6 +23,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   with "No tool by that name has been seen here".
 - The personal edition's home page has a **Meet OpenBot for Business** link at the top right, which
   stays closed for the session once you close it.
+- Approvals and a Bot's questions are drawn as one kind of card: each answer is a row saying what
+  it does, the first is picked, and one button sends the pick and is named for it. Keys 1 to 9 pick
+  a row and Enter sends it, on the newest card waiting and never while you are typing. A Bot's
+  approval and question take words instead in a last row ("Tell the Bot something else…"), which
+  replaces the reason field. Answering folds the card into one line with the answer; an app's
+  approval then folds away into the conversation's line for that action.
+- The model picker under the message box is a CPU icon, with the model and its thinking in the
+  tooltip. It opens on two columns, the models on the left and the model's thinking levels on the
+  right, and stays open after a model is picked so its thinking can be picked next.
+- Save and Cancel sit on the right of their forms, with Cancel first: Profile, Passwords, a skill
+  in Capabilities, app consent, a Bot's proposed skill or Bot, and Automatic Learning.
+- The notifications prompt over the message box has the message box's background.
 
 ## 0.3.1
 
