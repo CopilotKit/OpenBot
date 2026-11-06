@@ -1,20 +1,22 @@
+import { ownToolLabel } from "@openbot/shared/tool-name";
 import type { VisibleChatItem } from "./chat-messages";
 
 type BrowserStep = Extract<VisibleChatItem, { kind: "tool" }>;
 
-const labels: Record<string, string> = {
-  computer_navigate: "Opened page",
-  computer_read: "Read page",
-  computer_snapshot: "Inspected page",
-  computer_click: "Clicked on page",
-  computer_type: "Filled in field",
-  computer_key: "Pressed key",
-  computer_scroll: "Scrolled page",
-};
+/** The browser steps, named in the words every other line uses for them (`shared/tool-name.ts`). */
+const BROWSER_STEPS: ReadonlySet<string> = new Set([
+  "computer_navigate",
+  "computer_read",
+  "computer_snapshot",
+  "computer_click",
+  "computer_type",
+  "computer_key",
+  "computer_scroll",
+]);
 
 /** Whether a tool call is one of the browser steps a tool group draws with its page link. */
 export function isBrowserStep(item: BrowserStep): boolean {
-  return Object.hasOwn(labels, item.toolCall.function.name);
+  return BROWSER_STEPS.has(item.toolCall.function.name);
 }
 
 function objectOf(value: string | undefined): Record<string, unknown> {
@@ -48,7 +50,7 @@ export function browserStepDetails(step: BrowserStep) {
     result.refused === true ||
     step.result?.startsWith("Error:") === true;
   return {
-    label: labels[step.toolCall.function.name],
+    label: ownToolLabel(step.toolCall.function.name) ?? undefined,
     href: url?.href,
     title:
       navigation && typeof result.title === "string" && result.title.trim()

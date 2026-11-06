@@ -1359,9 +1359,29 @@ describe("GET /:id", () => {
    *
    * So the assertion is about the EVENT LOOP rather than about the body: a 1ms interval samples
    * how long the thread went unavailable while the request ran. The threshold is 40ms against a
-   * measured 62-87ms fault and a measured sub-millisecond healthy path — roughly half the fault
-   * and a wide multiple of the healthy case, which is the margin that keeps a loaded machine or a
-   * garbage collection from failing this while still catching a return to the iterator path.
+   * measured 62-87ms fault and a healthy path measured at a few milliseconds — roughly half the
+   * fault and a wide multiple of the healthy case.
+   *
+   * WHAT IS SAMPLED IS THE THREAD'S OWN CPU TIME BETWEEN TICKS, NOT THE WALL CLOCK BETWEEN THEM.
+   * The wall-clock gap also counts every millisecond the operating system had this thread off the
+   * CPU, and on a shared CI runner that is the larger number: this test failed on CI at 65ms, in a
+   * run where the whole test took 262ms against its usual 85-105ms, so the machine was slow for
+   * the length of the test and not only for the request. Measured with this repo's Bun 1.4.3 on
+   * Linux, one CPU shared with six busy loops: wall gaps of 81-89ms with 0-2ms of this thread's
+   * CPU inside them, from nothing but waiting for a turn. A process starved like that is not one
+   * this route blocked, and a wall-clock reading cannot tell the two apart. The fault is the other
+   * way round: walking the file is work the thread has to do itself, so it costs the same CPU
+   * however long the wait for the CPU is — on the same Linux setup, `Uint8Array.from` over an 8 MiB
+   * `Buffer` was 156ms of thread CPU with the CPU to itself and 154ms starved (1191ms of wall
+   * clock). So `process.threadCpuUsage()` keeps the whole of the fault and none of the waiting.
+   *
+   * AND THE GARBAGE IS COLLECTED BEFORE THE WINDOW OPENS, NOT INSIDE IT. By the time this test
+   * runs, `bun test` has run hundreds of files in this one process, and what they left for the
+   * collector is not this route's work. With the collector's own threads starved, it was done on
+   * this thread inside the window: on the same Linux setup with two CPUs and three busy loops,
+   * thread CPU alone still failed 3 runs in 100, at 52-59ms, each in a run that took 1.8-4.5s.
+   * Collected first, it failed none in 300 and none in 200 more with four busy loops, while the
+   * iterator path still failed every run, idle and loaded alike.
    *
    * `MAX_IMAGE_BYTES` and not something smaller, because the cost is linear in the file and the
    * ceiling is the size this route is documented to serve.
@@ -1382,16 +1402,23 @@ describe("GET /:id", () => {
     // Warmed, so the first request's own module and pool costs are not counted as a stall.
     expect((await app.request(`http://test/${id}`)).status).toBe(200);
 
+    /** Milliseconds of CPU this thread — the one running the event loop — has spent so far. */
+    const threadCpuMs = () => {
+      const { user, system } = process.threadCpuUsage();
+      return (user + system) / 1000;
+    };
+    // Everything earlier files left behind, collected now rather than inside the window.
+    Bun.gc(true);
     let longestPause = 0;
-    let previousTick = performance.now();
+    let previousTick = threadCpuMs();
     const sampler = setInterval(() => {
-      const now = performance.now();
+      const now = threadCpuMs();
       longestPause = Math.max(longestPause, now - previousTick);
       previousTick = now;
     }, 1);
     let response: Response;
     try {
-      previousTick = performance.now();
+      previousTick = threadCpuMs();
       response = await app.request(`http://test/${id}`);
       /*
        * ONE TURN OF THE LOOP BEFORE THE SAMPLER IS TAKEN AWAY, and without it this test cannot

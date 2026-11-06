@@ -383,7 +383,7 @@ jobs:
         working-directory: agent-computer
       # Same for the Mastra Bot: root test discovery imports its receiver tests, which load Mastra
       # from that Bot's own dependency tree.
-      - run: bun install
+      - run: bun install --frozen-lockfile
         working-directory: agent-mastra
       # Same for the desktop app: root test discovery imports its React tests, whose JSX runtime is
       # pinned by the desktop lockfile rather than the root one.
