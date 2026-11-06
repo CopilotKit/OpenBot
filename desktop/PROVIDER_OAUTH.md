@@ -1,7 +1,9 @@
 # Model provider OAuth
 
-OpenBot's Google and xAI model connections are separate from signing in to
-OpenBot or CopilotKit. API keys remain available for both providers.
+OpenBot's Google, xAI and Unbiased AI model connections are separate from signing
+in to OpenBot or CopilotKit. API keys remain available for all three providers.
+Google and xAI sign-ins leave a refreshable session in a private credential
+file; Unbiased AI's mints an API key, which is kept like a typed one.
 
 ## Google Gemini
 
@@ -55,6 +57,32 @@ apply.
 
 References: [xAI's OpenCode integration](https://x.ai/news/grok-opencode) and
 [xAI OAuth discovery](https://auth.x.ai/.well-known/openid-configuration).
+
+## Unbiased AI
+
+Unbiased AI sign-in uses the platform's device authorization (RFC 8628): OpenBot asks
+`https://platform.unbiased.ai` for a code, opens the approval page, and polls until
+the person approves. The person signs in or creates an Unbiased AI account there, so
+nobody needs an account before choosing the row. The platform then mints an API key
+for `https://api.unbiased.ai/v1` exactly once and keeps no copy, so the token request
+is never retried: a transport failure ends the sign-in and the person starts again.
+
+The key is long-lived until revoked from the Unbiased AI dashboard and has no refresh
+token, so it is not kept in the OAuth credential file above. It is carried into the
+deployment exactly as a typed endpoint key is, as `OPENAI_API_KEY` against that base
+URL, and saved in the protected store under the same endpoint-scoped entry. Bots run
+the `pareto` model; the composer lists what the gateway's `/v1/models` publishes.
+
+The row announces Unbiased AI's launch offer for new accounts, 50% off the first
+three months, until the end of November 2026 (Pacific time); from then on it reads
+as any other row, with no release needed. The offer itself is the platform's to end.
+
+A distributor can set `OPENBOT_UNBIASED_OAUTH_CLIENT_ID` to an alternative client
+registered with Unbiased AI. `OPENBOT_UNBIASED_PLATFORM_URL` points the flow at another
+platform for testing against a mock; the approval URL must belong to that platform.
+
+References: Unbiased AI's partner integration guide, which Unbiased AI shares with each
+partner, and [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628).
 
 ## Other build-time settings
 

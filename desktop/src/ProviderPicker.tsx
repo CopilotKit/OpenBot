@@ -21,6 +21,8 @@ export type Provider = {
   logins: Login[];
   mark: string | null;
   caution: { says: string; reads_more_at: string } | null;
+  /** A few words shown as a badge beside the name while the provider runs an offer. */
+  promotion?: string | null;
 };
 
 /** What the flow carries forward once this screen is done. */
@@ -92,6 +94,23 @@ const endpointPresets: Record<
     keyUrl: "https://console.x.ai/",
     keyLink: "Get an xAI API key",
   },
+  // Unbiased AI's gateway speaks the OpenAI API under the `pareto` model. The sign-in on this row
+  // mints the key; the dashboard is where somebody makes one by hand.
+  unbiased: {
+    baseUrl: "https://api.unbiased.ai/v1",
+    model: "pareto",
+    keyUrl: "https://platform.unbiased.ai/dashboard/keys",
+    keyLink: "Get an Unbiased AI API key",
+  },
+};
+
+/** What approving in the browser does, for each provider that signs in that way. */
+const oauthExplanation: Record<string, string> = {
+  google:
+    "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
+  xai: "Authorize OpenBot to use models available to your xAI account.",
+  unbiased:
+    "Sign in or create an Unbiased AI account in your browser and approve the code shown here. OpenBot receives an API key for Pareto and keeps it on this computer.",
 };
 
 function endpointIdentity(baseUrl: string | undefined): string {
@@ -315,11 +334,15 @@ export function ProviderPicker({
       } catch (error) {
         if (current()) setFailure(asProblem(error));
       }
-      await invoke("finish_model_oauth", {
+      // Nothing for a session the native side keeps for itself; the minted API key for a sign-in
+      // that produces one (Unbiased AI), held here the way a plan's token is and never shown.
+      const minted = await invoke<string | null>("finish_model_oauth", {
         attemptId: authorization.attemptId,
       });
       if (current()) {
         continueAfterSignIn.current = true;
+        if (minted)
+          setTokens((previous) => ({ ...previous, [providerId]: minted }));
         setOauthSignedIn(providerId);
         setSignInUrl(null);
         setOauthCode(null);
@@ -514,6 +537,21 @@ export function ProviderPicker({
     const trimmedBaseUrl = baseUrl.trim();
     const trimmedModel = model.trim();
     const trimmedContainerBaseUrl = containerBaseUrl.trim();
+    /*
+     * A sign-in that minted an API key for a named endpoint (Unbiased AI) is that endpoint's key, and
+     * it goes on exactly as a typed one does: the same address, the same model, the same credential
+     * shape. Nothing after this screen has to know how the key was obtained.
+     */
+    if (login === "oauth" && trimmedToken && preset) {
+      onChoose({
+        provider: "openai-compatible",
+        login: "endpoint",
+        apiKey: trimmedToken,
+        baseUrl: preset.baseUrl,
+        ...(trimmedModel ? { model: trimmedModel } : {}),
+      });
+      return;
+    }
     onChoose({
       provider: login === "endpoint" ? "openai-compatible" : row.id,
       login,
@@ -672,7 +710,16 @@ export function ProviderPicker({
             ) : (
               <Mark id={r.mark} name={r.name} />
             )}
-            <span className="tile-name">{r.name}</span>
+            <span className="tile-name">
+              {r.name}
+              {/* A real space before the badge, so the row's accessible name reads "Unbiased AI 50% off". */}
+              {r.promotion ? (
+                <>
+                  {" "}
+                  <span className="tile-badge">{r.promotion}</span>
+                </>
+              ) : null}
+            </span>
             <span className="tile-summary">{r.summary}</span>
           </label>
         ))}
@@ -720,11 +767,7 @@ export function ProviderPicker({
           {login === "oauth" && (
             <>
               {/* Set as the plan's description is, so its button has the same space above it. */}
-              <p className="lede">
-                {row.id === "google"
-                  ? "Authorize Gemini API access using the configured Google Cloud project and its API quota."
-                  : "Authorize OpenBot to use models available to your xAI account."}
-              </p>
+              <p className="lede">{oauthExplanation[row.id]}</p>
               {oauthSignedIn === row.id ? (
                 <p className="lede">
                   {confirmed === row.id && <SignedInMark />}
