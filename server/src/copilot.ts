@@ -44,7 +44,7 @@ import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { sanitizeSeededHistory } from "@openbot/toolkit/history-sanitize";
 import { executeNativeApprovalTool } from "@openbot/toolkit/native-approval";
 import { historyOrEmpty } from "@openbot/toolkit/thread-history";
-import { defer, from, switchMap } from "rxjs";
+import { catchError, defer, from, switchMap, throwError } from "rxjs";
 import { z } from "zod";
 import {
   type ActorAgentResolver,
@@ -107,7 +107,8 @@ import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
 import type { ProductTelemetry } from "./telemetry/product";
 import { productRuntimeHook } from "./telemetry/product-boundaries";
-import type { RunChoice } from "./model-catalogue";
+import { billingRefusal, providerName } from "./model-billing";
+import { modelSourceFor, type RunChoice } from "./model-catalogue";
 import { inlineToolImages } from "./tool-images";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
@@ -1329,7 +1330,22 @@ async function buildAgent(
       : new Set<string>();
     const admit = admitTools(held, runModel);
     return new BuiltInAgentWithSaneHistory(configuration, {
-      observe: observeModelConnection,
+      /*
+       * A provider out of credit or at its spending limit is told as that, with its name and its
+       * own words, rather than as "Forbidden" or a retry count. See `model-billing.ts`.
+       */
+      observe: (stream) =>
+        observeModelConnection(stream).pipe(
+          catchError((error: unknown) =>
+            throwError(
+              () =>
+                billingRefusal(
+                  error,
+                  providerName(modelSourceFor(runModel, process.env)),
+                ) ?? error,
+            ),
+          ),
+        ),
       ...(admit ? { admitTools: admit } : {}),
       ...(held.size > 0 ? { waiting: held } : {}),
       /*

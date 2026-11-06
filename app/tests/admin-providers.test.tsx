@@ -176,8 +176,8 @@ test("Providers names what actually serves the models, with a vendor's mark only
   const cases: [ModelSource, string, string | null][] = [
     ["openai", "OpenAI", "OpenAI"],
     ["anthropic", "Anthropic", "Anthropic"],
-    ["google", "Google", null],
-    ["xai", "xAI", null],
+    ["google", "Google", "Google"],
+    ["xai", "xAI", "xAI"],
     ["gateway", "OpenAI-compatible endpoint", null],
     ["chatgpt", "ChatGPT plan", "ChatGPT plan"],
     ["claude", "Claude plan", "Claude plan"],

@@ -52,15 +52,17 @@ const SOURCE_NAMES: Record<ModelSource, string> = {
 };
 
 /**
- * The vendor whose mark stands beside a source, where `shared/marks` has one: a plan is its
- * vendor's own product. Google and xAI have no vendored mark, and an endpoint is nobody's, so those
- * rows get a plain icon. Nothing is drawn to stand in for a missing mark.
+ * The mark that stands beside a source, from `shared/marks`. A Claude plan is Claude's own; a
+ * ChatGPT plan is OpenAI's, whose mark ChatGPT itself uses. An endpoint is nobody's, so that row
+ * gets a plain icon. Nothing is drawn to stand in for a missing mark.
  */
 const SOURCE_VENDORS: Partial<Record<ModelSource, string>> = {
   openai: "openai",
   anthropic: "anthropic",
+  google: "google",
+  xai: "xai",
   chatgpt: "openai",
-  claude: "anthropic",
+  claude: "claude",
 };
 
 /**

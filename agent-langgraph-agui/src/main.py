@@ -26,6 +26,7 @@ from langgraph.graph import START, MessagesState, StateGraph
 from . import chatgpt_models
 from .tool_runtime import (
     ToolAwareAgent,
+    billing_refusal,
     bind_tools,
     current_tools,
     execute_tools,
@@ -306,9 +307,11 @@ async def answer(state: MessagesState):
         if _wants_system_turns_first(model):
             messages = _system_turns_first(messages)
         return {"messages": [await bind_tools(model).ainvoke(messages)]}
-    except (AuthenticationError, PermissionDeniedError, _ChatGPTOAuthRefreshError):
-        # Typed provider boundary only. A callback or harness 401 is a different credential.
-        current_tools().connection["authentication_failed"] = True
+    except (AuthenticationError, PermissionDeniedError, _ChatGPTOAuthRefreshError) as error:
+        # Typed provider boundary only. A callback or harness 401 is a different credential. A
+        # 403 for an account out of credit (xAI answers so) is not a sign-in problem at all.
+        if not billing_refusal(error):
+            current_tools().connection["authentication_failed"] = True
         raise
     except Exception as error:
         if provider_refusal(error) and chatgpt_models.is_model_refusal(provider_message(error)):

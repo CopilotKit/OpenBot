@@ -165,7 +165,7 @@ test("the trigger names a model that takes no effort on its own", () => {
   );
 });
 
-test("the trigger draws no mark for a model whose maker has none vendored", () => {
+test("a model whose maker has no mark vendored gets the app's plain model icon, never an empty gap", () => {
   const { getByRole } = render(
     <ModelPicker
       catalogue={{
@@ -177,9 +177,38 @@ test("the trigger draws no mark for a model whose maker has none vendored", () =
     />,
   );
   const trigger = getByRole("combobox", { name: "Model: fast" });
+  // No brand mark is invented for it.
   expect(trigger.querySelector("img")).toBeNull();
-  // Nor an empty tile standing in for one: the label starts the button.
-  expect(trigger.firstElementChild?.textContent).toBe("fast");
+  // The app's own icon holds the place, so the label never starts on an empty gap.
+  expect(trigger.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+  expect(
+    trigger.firstElementChild?.classList.contains("tabler-icon-cube"),
+  ).toBe(true);
+});
+
+test("Google and xAI models carry their makers' marks", () => {
+  const { getByRole } = render(
+    <ModelPicker
+      catalogue={{
+        ...catalogue,
+        models: [
+          ...catalogue.models,
+          {
+            id: "gemini-3.8-flash",
+            label: "Gemini 3.8 Flash",
+            vendor: "google",
+          },
+          { id: "grok-4.7", label: "Grok 4.7", vendor: "xai" },
+        ],
+      }}
+      onChange={() => {}}
+      value={{ model: "grok-4.7", effort: null }}
+    />,
+  );
+  const trigger = getByRole("combobox", { name: "Model: Grok 4.7" });
+  expect(trigger.querySelector("img")?.getAttribute("data-mark")).toBe(
+    "Grok 4.7",
+  );
 });
 
 test("the trigger names the chosen effort beside the model", () => {
@@ -240,6 +269,21 @@ test("there is no picker before the models have loaded", () => {
     <ModelPicker catalogue={undefined} onChange={() => {}} value={undefined} />,
   );
   expect(container.innerHTML).toBe("");
+});
+
+test("the Default tag is one badge, the same on a model row and an effort row", async () => {
+  // The model row's tag used to share the highlight's fill and vanish on the row in use.
+  saved["conversation-a"] = { model: "gpt-5.5", effort: null };
+  const { popup } = await openPicker(/GPT-5\.5/);
+  const tags = within(popup)
+    .getAllByText("Default")
+    .filter((tag) => tag.closest("[role=option]")?.textContent !== "Default");
+  // The default model's row, and its default effort's row.
+  expect(tags).toHaveLength(2);
+  const [model, effort] = tags.map((tag) => tag.className);
+  expect(model).toBe(effort);
+  // The app's own neutral Badge, a tint over whatever row is under it.
+  expect(model).toContain("bg-foreground/5");
 });
 
 test("choosing an effort saves the model with it, and the trigger names it", async () => {

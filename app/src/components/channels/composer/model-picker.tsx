@@ -1,7 +1,8 @@
 import { Combobox as ComboboxPrimitive } from "@base-ui/react";
-import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconCube } from "@tabler/icons-react";
 import { useMemo } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
+import { Badge } from "@/components/gallery/frame";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -47,12 +48,33 @@ const sameChoice = (a: Choice, b: Choice) =>
     ? b.kind === "model" && a.model.id === b.model.id
     : b.kind === "effort" && a.effort === b.effort;
 
-/** The tag beside OpenBot's own model, and beside a model's own effort. */
+/**
+ * The tag beside OpenBot's own model, and beside a model's own effort: the app's own Badge, in one
+ * style on every row. Its tint is drawn over whatever is under it, so it stays visible on the row
+ * the pointer or the keyboard is on, where a muted fill matched the highlight and vanished.
+ */
 function DefaultTag() {
   return (
-    <span className="ml-auto shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
-      Default
+    <span className="ml-auto shrink-0">
+      <Badge tone="neutral">Default</Badge>
     </span>
+  );
+}
+
+/**
+ * A model's mark, or a plain model icon where its maker has none vendored (a gateway's own alias,
+ * such as `fast`), so no row starts with an empty gap. The icon is the app's, never a stand-in
+ * drawn for somebody's brand; see `shared/marks/README.md`.
+ */
+function ModelMark({ model }: { model: ModelOption }) {
+  return markFor(model.vendor) ? (
+    <HarnessMark
+      className="size-3.5"
+      id={model.vendor ?? null}
+      name={model.label}
+    />
+  ) : (
+    <IconCube aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
   );
 }
 
@@ -197,13 +219,7 @@ function Picker({
               render={<Button size="sm" type="button" variant="ghost" />}
               nativeButton
             >
-              {markFor(selected.vendor) ? (
-                <HarnessMark
-                  className="size-3.5"
-                  id={selected.vendor ?? null}
-                  name={selected.label}
-                />
-              ) : null}
+              <ModelMark model={selected} />
               {/*
                * In a narrow column the name gives way first, down to a few letters, and only then
                * the effort: the name says which model this is, and the tooltip has the rest.
@@ -251,11 +267,7 @@ function Picker({
                         key={choice.model.id}
                         value={choice}
                       >
-                        <HarnessMark
-                          className="size-3.5"
-                          id={choice.model.vendor ?? null}
-                          name={choice.model.label}
-                        />
+                        <ModelMark model={choice.model} />
                         <span className="min-w-0 truncate">
                           {choice.model.label}
                         </span>

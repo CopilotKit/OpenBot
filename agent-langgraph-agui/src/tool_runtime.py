@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from contextlib import aclosing
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -109,6 +110,90 @@ def provider_refusal(error: BaseException) -> bool:
     return False
 
 
+# What the providers say when the money has run out, in any of their spellings: OpenAI's 429
+# `insufficient_quota` / `credit_balance_exhausted`, xAI's 403 "used all available credits or
+# reached its monthly spending limit", Anthropic's "credit balance is too low" and "usage limits",
+# Google's "exceeded your current quota". The server's `model-billing.ts` reads the same.
+BILLING = re.compile(
+    r"(no credits remaining|credit[_ ]balance|insufficient[_ ]quota|used all available credits"
+    r"|spending limit|exceeded your current quota|usage limits?|purchase (more )?credits)",
+    re.IGNORECASE,
+)
+
+
+def provider_name() -> str:
+    """Who serves this harness's model, by the name a person knows it by."""
+    from urllib.parse import urlparse
+
+    if (os.environ.get("CHATGPT_AUTH_FILE") or "").strip():
+        return "ChatGPT"
+    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip().lower()
+    if provider == "anthropic":
+        return "Anthropic"
+    if provider in ("google", "google_genai"):
+        return "Google"
+    base = (os.environ.get("OPENAI_BASE_URL") or "").strip()
+    if not base:
+        return "OpenAI"
+    host = urlparse(base).hostname or ""
+    if host == "api.openai.com":
+        return "OpenAI"
+    if host == "api.x.ai":
+        return "xAI"
+    if host == "generativelanguage.googleapis.com":
+        return "Google"
+    if "/api/model-provider/" in base:
+        # OpenBot's own sign-in proxy, which serves Google or xAI: the model says which.
+        model = (os.environ.get("BOT_MODEL") or "").strip().lower()
+        if model.startswith("grok"):
+            return "xAI"
+        if model.startswith("gemini"):
+            return "Google"
+    return "Your model provider"
+
+
+def billing_refusal(error: BaseException) -> str | None:
+    """The refusal as a person should read it, when the provider is out of credit or at its limit.
+
+    Told as that, with which provider and in its own words, rather than as "sign in again", which
+    an account with no credit cannot fix. None for any other error, which keeps its own handling.
+    """
+    if not provider_refusal(error):
+        return None
+    said = _provider_detail(error) or str(error)
+    if not BILLING.search(f"{said} {error}"):
+        return None
+    name = provider_name()
+    who = "your model provider" if name == "Your model provider" else name
+    return (
+        f"{name} didn't answer: the account is out of credit or has reached its spending limit. "
+        f'Add credit or raise the limit with {who}, then try again. {name} said: "{said}"'
+    )
+
+
+def _provider_detail(error: BaseException) -> str | None:
+    """The provider's own message from the error's body, in the shapes the providers use."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        body = getattr(error, "body", None)
+        # The OpenAI SDK keeps only a body's `error` field when it has one, so xAI's
+        # `{"code": "permission-denied", "error": "Your team ..."}` arrives as that bare string.
+        if isinstance(body, str) and body.strip():
+            return body.strip()
+        if isinstance(body, dict):
+            nested = body.get("error")
+            for value in (
+                nested.get("message") if isinstance(nested, dict) else nested,
+                body.get("message"),
+                body.get("detail"),
+            ):
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        error = error.__cause__
+    return None
+
+
 def provider_message(error: BaseException) -> str:
     """A provider refusal in the provider's own words.
 
@@ -193,7 +278,17 @@ class ToolAwareAgent(WholeThreadAgent):
                 message="The model requested a tool that was not offered for this run.",
             )
         except Exception as error:
-            if context.connection.get("authentication_failed"):
+            billing = billing_refusal(error)
+            if billing:
+                # Out of credit is not a sign-in problem: signing in again changes nothing, and the
+                # desktop must not be told to ask for it.
+                logger.warning("The model provider refused the run for billing: %s", billing)
+                yield RunErrorEvent(
+                    type=EventType.RUN_ERROR,
+                    message=billing,
+                    code="OPENBOT_MODEL_BILLING",
+                )
+            elif context.connection.get("authentication_failed"):
                 yield RunErrorEvent(
                     type=EventType.RUN_ERROR,
                     message="Sign in to your model provider again.",
