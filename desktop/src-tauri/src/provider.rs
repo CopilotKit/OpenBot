@@ -1,7 +1,9 @@
 //! The model provider screen's list, as data.
 //!
 //! OpenAI and Anthropic offer plan sign-in alongside API keys. Google and xAI use named endpoint
-//! presets with API keys; their official addresses are supplied by the frontend.
+//! presets with API keys; their official addresses are supplied by the frontend. Unbiased AI signs in
+//! through its own device authorization, which ends in an API key for the same named endpoint
+//! shape, so the key is then carried like a typed one.
 //!
 //! The row that asks for a URL is the last one, and it is the only one that asks. Keeping it there
 //! is what keeps a base URL off the main path, which the audience rule at the top of the build doc
@@ -11,6 +13,12 @@
 //! so nothing chosen there may narrow what is offered here.
 
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// When the Unbiased AI launch offer stops being announced: the end of November 2026, Pacific
+/// time (2026-12-01T08:00:00Z). From then on the row reads as if it never carried one. The offer
+/// itself is the platform's to end; this only stops the picker promising it.
+const UNBIASED_OFFER_ENDS: u64 = 1_796_112_000;
 
 /// How a person proves they may use a provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +50,11 @@ pub struct Provider {
     pub mark: Option<String>,
     /// One sentence the screen must show when this provider is chosen, and the page it links to.
     pub caution: Option<Caution>,
+    /// A few words the row shows as a badge beside its name while the provider runs an offer,
+    /// such as "50% off". Absent for every row with nothing to announce, and left out of the
+    /// serialized row rather than sent as null, so the window treats it as optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promotion: Option<String>,
 }
 
 /// Something true about a provider that a person finds out too late otherwise.
@@ -52,6 +65,15 @@ pub struct Caution {
 }
 
 pub fn catalogue() -> Vec<Provider> {
+    catalogue_at(SystemTime::now())
+}
+
+/// The rows as of `now`, so an offer's end is a fact about time rather than about a release.
+pub fn catalogue_at(now: SystemTime) -> Vec<Provider> {
+    let launch_offer = now
+        .duration_since(UNIX_EPOCH)
+        .map(|since| since.as_secs() < UNBIASED_OFFER_ENDS)
+        .unwrap_or(false);
     vec![
         Provider {
             id: "openai".into(),
@@ -68,6 +90,7 @@ pub fn catalogue() -> Vec<Provider> {
             logins: vec![Login::Plan, Login::ApiKey],
             mark: Some("openai".into()),
             caution: None,
+            promotion: None,
         },
         Provider {
             id: "anthropic".into(),
@@ -87,6 +110,7 @@ pub fn catalogue() -> Vec<Provider> {
                 reads_more_at: "https://support.anthropic.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan"
                     .into(),
             }),
+            promotion: None,
         },
         Provider {
             id: "google".into(),
@@ -95,6 +119,7 @@ pub fn catalogue() -> Vec<Provider> {
             logins: vec![Login::Endpoint, Login::Oauth],
             mark: None,
             caution: None,
+            promotion: None,
         },
         Provider {
             id: "xai".into(),
@@ -103,6 +128,30 @@ pub fn catalogue() -> Vec<Provider> {
             logins: vec![Login::Endpoint, Login::Oauth],
             mark: None,
             caution: None,
+            promotion: None,
+        },
+        Provider {
+            id: "unbiased".into(),
+            name: "Unbiased AI".into(),
+            summary: if launch_offer {
+                "Sign in with Unbiased AI to use Pareto at 50% off for your first 3 months, or use an API key."
+            } else {
+                "Sign in with Unbiased AI to use Pareto, or use an API key."
+            }
+            .into(),
+            /*
+             * Sign-in first, because it is the whole point of the row: the person signs in or
+             * creates an account in the browser and comes back holding a key they never saw.
+             * The sign-in is a device authorization that ends in an API key for Unbiased AI's
+             * OpenAI-compatible gateway, so what it produces is exactly what the API key tab
+             * takes, and the key travels the same way from here on. The key tab is for somebody
+             * who already made one in the Unbiased AI dashboard.
+             */
+            logins: vec![Login::Oauth, Login::Endpoint],
+            mark: Some("unbiased".into()),
+            caution: None,
+            // The launch offer for accounts created through this sign-in, through November 2026.
+            promotion: launch_offer.then(|| "50% off".into()),
         },
         Provider {
             id: "openai-compatible".into(),
@@ -113,6 +162,7 @@ pub fn catalogue() -> Vec<Provider> {
             // vendor's logo here would be a lie about what the row does.
             mark: None,
             caution: None,
+            promotion: None,
         },
     ]
 }
@@ -129,7 +179,10 @@ mod tests {
             .filter(|p| p.logins.contains(&Login::Endpoint))
             .map(|p| p.id)
             .collect();
-        assert_eq!(asking, vec!["google", "xai", "openai-compatible"]);
+        assert_eq!(
+            asking,
+            vec!["google", "xai", "unbiased", "openai-compatible"]
+        );
         for provider in catalogue()
             .into_iter()
             .filter(|provider| provider.logins.contains(&Login::Endpoint))
@@ -156,12 +209,86 @@ mod tests {
 
     /// Named providers stay ahead of the custom endpoint escape hatch.
     #[test]
-    fn four_named_providers_and_one_custom_endpoint() {
+    fn five_named_providers_and_one_custom_endpoint() {
         let rows = catalogue();
         let ids: Vec<&str> = rows.iter().map(|provider| provider.id.as_str()).collect();
         assert_eq!(
             ids,
-            vec!["openai", "anthropic", "google", "xai", "openai-compatible"]
+            vec![
+                "openai",
+                "anthropic",
+                "google",
+                "xai",
+                "unbiased",
+                "openai-compatible"
+            ]
+        );
+    }
+
+    /// Unbiased AI's sign-in mints an API key, so the row leads with it and never asks for a plan.
+    #[test]
+    fn unbiased_signs_in_before_asking_for_a_key() {
+        let unbiased = catalogue()
+            .into_iter()
+            .find(|p| p.id == "unbiased")
+            .expect("unbiased is not offered");
+        assert_eq!(unbiased.logins, vec![Login::Oauth, Login::Endpoint]);
+        assert_eq!(unbiased.name, "Unbiased AI");
+    }
+
+    /// A second before the offer ends, and the second it does.
+    fn offer_edge(seconds_before: u64) -> SystemTime {
+        UNIX_EPOCH + std::time::Duration::from_secs(UNBIASED_OFFER_ENDS - seconds_before)
+    }
+
+    /// The launch offer is announced on the one row that carries it, and nowhere else.
+    #[test]
+    fn only_unbiased_announces_a_promotion() {
+        for provider in catalogue_at(offer_edge(1)) {
+            assert_eq!(
+                provider.promotion.as_deref(),
+                (provider.id == "unbiased").then_some("50% off"),
+                "{} promotion",
+                provider.id
+            );
+        }
+    }
+
+    /// The offer ends with November 2026: from the first second of December (Pacific) the row
+    /// announces nothing and its summary no longer names the discount, with no release needed.
+    #[test]
+    fn the_launch_offer_ends_with_november_2026() {
+        let before = catalogue_at(offer_edge(1));
+        let unbiased = before.iter().find(|p| p.id == "unbiased").unwrap();
+        assert_eq!(unbiased.promotion.as_deref(), Some("50% off"));
+        assert!(unbiased.summary.contains("50% off for your first 3 months"));
+
+        let after = catalogue_at(offer_edge(0));
+        let unbiased = after.iter().find(|p| p.id == "unbiased").unwrap();
+        assert_eq!(unbiased.promotion, None);
+        assert!(!unbiased.summary.contains("50%"), "{}", unbiased.summary);
+        assert!(after.iter().all(|p| p.promotion.is_none()));
+        // Nothing else about the row moves with the date.
+        assert_eq!(unbiased.name, "Unbiased AI");
+        assert_eq!(unbiased.logins, vec![Login::Oauth, Login::Endpoint]);
+        assert_eq!(after.len(), before.len());
+        // The date is the one that was agreed: 2026-12-01T08:00:00Z, the end of November, Pacific.
+        assert_eq!(UNBIASED_OFFER_ENDS, 1_796_112_000);
+    }
+
+    /// A row with nothing to announce serializes without the field, so the window's optional
+    /// `promotion` stays absent rather than null.
+    #[test]
+    fn a_missing_promotion_is_left_out_of_the_row() {
+        let rows = serde_json::to_value(catalogue_at(offer_edge(1))).unwrap();
+        assert!(rows[0].get("promotion").is_none());
+        assert_eq!(
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["id"] == "unbiased")
+                .unwrap()["promotion"],
+            "50% off"
         );
     }
 
