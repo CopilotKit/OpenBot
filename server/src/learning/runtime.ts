@@ -19,7 +19,7 @@ import { z } from "zod";
 import type { LearningSettingsStore } from "./settings";
 import type { OpenSkillSource } from "./sharing";
 
-// This published internal export is pinned to runtime 1.73.1. Keep its use here: the SDK owns
+// This published internal export is pinned with @copilotkit/runtime in server/package.json. Keep its use here: the SDK owns
 // archive verification, refresh, revocation and stale-cache policy for every OpenBot framework.
 export type LearnedSkillInvocation = {
   readonly catalog: string;

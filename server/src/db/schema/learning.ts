@@ -99,7 +99,7 @@ export const learningOpenSkills = pgTable(
 );
 
 /**
- * One row per person and Skill they or an admin approved in the person's space. No row means an admin approved it.
+ * One row per person and Skill they or an admin approved in the person's space. No row means it was approved before OpenBot recorded approvals (or in the Intelligence dashboard), and is treated as admin-approved.
  * `sharing` follows the request to open the Skill to every Bot.
  */
 export const learningSkillApprovals = pgTable(

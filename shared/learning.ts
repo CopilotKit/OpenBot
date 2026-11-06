@@ -7,7 +7,7 @@ export type LearningSettings = {
   agents: Record<string, LearningTarget | null>;
   /** Who reviews what a person's own Learning space proposes. Missing means "admins". */
   personalReview?: LearningPersonalReview;
-  /** Whether proposals are approved without a review. Missing means true. */
+  /** Whether proposals are approved without a review. Only the personal edition reads it; there, missing means true. */
   autoApprove?: boolean;
 };
 
@@ -49,7 +49,7 @@ export type LearningOverview = {
   };
 };
 
-/** A Skill change Intelligence proposed, as Admin → Automatic learning lists it. */
+/** A Skill change Intelligence proposed, as Admin → Automatic learning and Settings → Learning list it. */
 export type LearningProposal = {
   id: string;
   title: string;
@@ -139,7 +139,7 @@ export type LearningAutoAssignState =
       containerId: string;
       /** Exactly what an operator runs to create it, for the Intelligence this deployment uses. */
       instructions?: string;
-      /** Whether this deployment holds a credential that can create it (Admin's "Create it now"). */
+      /** Whether this deployment holds a credential that can create it (Admin's Create the <id> container button). */
       canCreate?: boolean;
       /** Why the last attempt with that credential failed. */
       createError?: string;
@@ -181,7 +181,7 @@ export function isLearningPersonalReview(
   );
 }
 
-/** A learned Skill's name as Intelligence publishes it: 1 to 200 characters, no slash and no control characters. */
+/** A learned Skill's name as Intelligence publishes it, a safe single path segment: 1 to 200 UTF-16 units, no slash or backslash, no control characters, not "." or "..", and no leading or trailing whitespace. */
 export function isLearnedSkillName(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -204,7 +204,7 @@ export type PersonalLearnedSkill = {
   name: string;
   description: string;
   open: boolean;
-  /** Who approved it into the space; null when no approval is on record, which counts as an administrator's. */
+  /** Who approved it into the space; null when no approval is on record, which counts as an administrator's; also always null for skills from a Bot's conversations, which keep no record. */
   approvedBy: "person" | "admin" | null;
   /** Where the person's request to share it with every Bot stands; "none" when there is no record. */
   sharing: "none" | "requested" | "approved" | "declined";
@@ -261,6 +261,7 @@ export type LearningSource = {
 /** The person's own review of what their sources proposed. `proposals` and `latestRun` are null when they could not be read. */
 export type PersonalReview = {
   canReview: boolean;
+  /** Null outside the personal edition, where there is no automatic approval. */
   autoApprove: boolean | null;
   /**
    * How many proposals opening the page approved automatically; 0 when no sweep ran, as in the team edition. The server
@@ -270,7 +271,7 @@ export type PersonalReview = {
   sources: (LearningSource & {
     proposals: LearningProposal[] | null;
     latestRun: LearningRunSummary | null;
-    /** Set when Learning is switched off in Intelligence, so there is nothing to read. */
+    /** Set when Learning is switched off in Intelligence (or, for now, not in its licence), so there is nothing to read. */
     unavailable?: "learning-off";
   })[];
 };
