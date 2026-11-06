@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   requestSkillSharingMutationOptions,
   setLearnedSkillOpenMutationOptions,
@@ -83,7 +84,12 @@ function choiceSentence(data: PersonalLearningSharing): string {
 function emptySentence(
   data: PersonalLearningSharing,
   mode: LearningSharingMode,
+  personal: boolean,
 ): string {
+  if (personal)
+    return data.skills === null
+      ? "Couldn't read your Skills from Intelligence just now. Reload the page to try again."
+      : "No Skills learned from your recordings yet. Once there are, they show up here.";
   if (data.unavailable === "off")
     return "An admin has turned off Automatic Learning, so no Skills are learned from your recordings.";
   if (data.skills === null)
@@ -115,8 +121,11 @@ export function LearningSharing() {
   const requestShare = useMutation(
     requestSkillSharingMutationOptions(queryClient),
   );
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
   const [reading, setReading] = React.useState<string | null>(null);
-  if (sharing.isPending) return null;
+  // Which edition decides the layout, so nothing draws until it is known. A failed read counts as the team edition.
+  if (sharing.isPending || capabilities.isPending) return null;
+  const personal = capabilities.data?.edition === "personal";
   if (sharing.error) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
@@ -128,6 +137,53 @@ export function LearningSharing() {
   // Shown at once while the save is on its way, as a switch is.
   const mode = (setMode.isPending ? setMode.variables : undefined) ?? data.mode;
   const failure = setMode.error ?? setOpen.error ?? requestShare.error;
+
+  if (personal) {
+    // One person, one computer: nobody to share with, so every row simply opens its Skill.
+    return (
+      <PageSection
+        title="Your Skills"
+        description="Open a Skill to read what it does."
+      >
+        {data.skills === null || data.skills.length === 0 ? (
+          <PageEmpty>{emptySentence(data, mode, true)}</PageEmpty>
+        ) : (
+          <PageRows>
+            {data.skills.map((skill, index) => (
+              <React.Fragment key={skill.name}>
+                {index > 0 ? <Separator /> : null}
+                <Item
+                  size="sm"
+                  render={
+                    <button
+                      onClick={() => setReading(skill.name)}
+                      type="button"
+                    />
+                  }
+                >
+                  <ItemMedia variant="icon">
+                    <IconSparkles />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{skill.name}</ItemTitle>
+                    <ItemDescription>{skill.description}</ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <IconChevronRight className="size-4 text-muted-foreground" />
+                  </ItemActions>
+                </Item>
+              </React.Fragment>
+            ))}
+          </PageRows>
+        )}
+        <LearnedSkillDialog
+          name={reading}
+          onClose={() => setReading(null)}
+          source={{ kind: "personal" }}
+        />
+      </PageSection>
+    );
+  }
 
   return (
     <>
@@ -180,7 +236,7 @@ export function LearningSharing() {
       </PageSection>
       <PageSection title="Your Skills" description={SKILLS_DESCRIPTION[mode]}>
         {data.skills === null || data.skills.length === 0 ? (
-          <PageEmpty>{emptySentence(data, mode)}</PageEmpty>
+          <PageEmpty>{emptySentence(data, mode, false)}</PageEmpty>
         ) : (
           <PageRows>
             {data.skills.map((skill, index) => {

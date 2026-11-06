@@ -31,6 +31,7 @@ const originalFetch = global.fetch;
 let answer: PersonalLearningSharing;
 let failRead = false;
 let failWrite = false;
+let edition: "team" | "personal" = "team";
 const fetched: string[] = [];
 const sent: { path: string; method: string; body: unknown }[] = [];
 
@@ -40,6 +41,7 @@ beforeEach(() => {
   fetched.length = 0;
   failRead = false;
   failWrite = false;
+  edition = "team";
   answer = {
     mode: "closed",
     sharingAllowed: true,
@@ -103,6 +105,7 @@ beforeEach(() => {
           },
         });
       }
+      if (url === "/api/capabilities") return Response.json({ edition });
       if (url === "/api/settings/learning") {
         if (failRead) return new Response(null, { status: 500 });
         return Response.json(answer);
@@ -442,4 +445,42 @@ test("a skill the person approved shows Ask to share instead of the Open switch"
   expect(refundRow?.textContent).toContain("Only your Bots use it.");
   const reopenRow = open.getByText("reopen-ticket").closest("div");
   expect(reopenRow?.textContent ?? "").not.toContain("Only your Bots use it.");
+});
+
+test("the personal edition lists Your Skills with no sharing choice and no switches", async () => {
+  edition = "personal";
+  answer = {
+    ...answer,
+    mode: "choose",
+    skills: [
+      {
+        name: "refund-order",
+        description: "Refunds an order.",
+        open: false,
+        approvedBy: "person",
+        sharing: "none",
+      },
+      {
+        name: "close-ticket",
+        description: "Closes a ticket.",
+        open: true,
+        approvedBy: "admin",
+        sharing: "approved",
+      },
+    ],
+  };
+  const view = draw();
+  await view.findByText("Your Skills");
+  await view.findByText("refund-order");
+  expect(view.queryByText("Who else's Bots use your Skills")).toBeNull();
+  expect(choices(view)).toHaveLength(0);
+  expect(view.queryAllByRole("switch")).toHaveLength(0);
+  expect(view.queryByRole("button", { name: "Ask to share" })).toBeNull();
+  expect(view.queryByText(/Bots use it|Every Bot|Asked to share/)).toBeNull();
+  expect(
+    view.queryByText(/Only the Bots you use|Open a Skill to let/),
+  ).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: /refund-order/ }));
+  await view.findByText(/Step one: look up the order/);
+  expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
 });
