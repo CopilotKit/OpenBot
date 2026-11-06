@@ -291,7 +291,7 @@ export function SharingRequestsSection() {
   } | null>(null);
   const rows = requests.data ?? [];
   const people = settings.data?.personalReview === "people";
-  if (!people && rows.length === 0) return null;
+  if (!people && rows.length === 0 && !requests.error) return null;
   const close = () => {
     setOpen(null);
     decide.reset();

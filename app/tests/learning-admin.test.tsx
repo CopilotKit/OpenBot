@@ -541,6 +541,21 @@ describe("reviewing proposed skills", () => {
     );
   });
 
+  test("a failed sharing requests read shows its error instead of hiding the section", async () => {
+    intelligence();
+    const base = global.fetch;
+    global.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input) === "/api/admin/learning/sharing-requests"
+          ? new Response("{}", { status: 500 })
+          : base(input, init),
+      { preconnect: originalFetch.preconnect },
+    );
+    const view = shared();
+    await view.findByText("Sharing requests");
+    await view.findByText("Couldn't load sharing requests. Try again.");
+  });
+
   test("people's proposals are not listed once each person approves their own", async () => {
     intelligence();
     const base = global.fetch;
