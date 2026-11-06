@@ -80,12 +80,12 @@ function nativeNarrationSentence(voice: LauncherState["voice"]): string {
   }
 }
 
-/** The narration row on OpenBot Desktop while nothing records. The switch says on or off, so the sentence stays the same. */
+/** The narration row for a window on the person's desktop while nothing records. The switch says on or off, so the sentence stays the same. */
 export const NARRATION_DESCRIPTION =
   "Talk through the task as you do it, and what you say is added to the recording.";
 
 /**
- * The narration row on OpenBot Desktop. While nothing records it is the person's choice, a switch that takes effect at
+ * The narration row for a window on the person's desktop. While nothing records it is the person's choice, a switch that takes effect at
  * once: the next Record tells the Recorder in their browser whether to open the microphone. While a recording runs, the
  * Recorder hears the microphone itself, so the row says what it reports, read every second with the rest of the
  * browser's state, so a microphone that is muted or cannot be heard shows here while the person records.

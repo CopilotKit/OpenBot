@@ -2,11 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { reservePort } from "../../tests/support/reserved-port";
 import type {
   BrowserState,
   LauncherConnection,
 } from "../../shared/openbot-browser";
+import { reservePort } from "../../tests/support/reserved-port";
 import { NOT_ITS_OWN_COMPUTER, ONLY_THE_PERSONS } from "../src/person-access";
 
 /**
@@ -536,6 +536,45 @@ describe("a person's browser on a computer that is not its own", () => {
       );
   }, 30_000);
 
+  test("is refused on a team's person's computer, where Bots anybody shares with them run", async () => {
+    const theirs = await startComputer("a-person", {
+      OPENBOT_RECORDER_DIR: FIXTURE,
+      COMPUTER_PERSON_ID: "u-ada",
+      PROFILES_DIR: join(dir, "a-person", "profiles"),
+    });
+    const opening = await open(theirs);
+    expect(opening.status).toBe(503);
+    expect(await opening.json()).toEqual({ error: NOT_ITS_OWN_COMPUTER });
+    expect(await readdir(join(dir, "a-person", "profiles"))).toEqual([]);
+  }, 30_000);
+
+  test("runs on the personal edition's one computer, beside the one person's own Bots", async () => {
+    const personal = await startComputer("personal", {
+      OPENBOT_RECORDER_DIR: FIXTURE,
+      COMPUTER_PERSON_ID: "personal",
+      OPENBOT_EDITION: "personal",
+    });
+    // The person's own routes go on to the browser host, which says the browser is not open yet.
+    const state = await call("/browser/state", { on: personal });
+    expect(state.status).toBe(200);
+    expect(await state.json()).toMatchObject({ open: false });
+    expect((await call("/egress-policy", { on: personal })).status).not.toBe(
+      503,
+    );
+    // Still never a Bot's route for the person's id, and Bots are served as before.
+    expect(
+      (
+        await call("/exec", {
+          body: { command: "env" },
+          on: personal,
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (await call("/control", { botId: "sales-bot", on: personal })).status,
+    ).toBe(200);
+  }, 30_000);
+
   test("on OpenBot Desktop's computer, which runs people's browsers and no Bot, a Bot is refused", async () => {
     const desktop = await startComputer("people-only", {
       OPENBOT_RECORDER_DIR: FIXTURE,
@@ -554,6 +593,40 @@ describe("a person's browser on a computer that is not its own", () => {
     expect((await call("/browser/state", { on: desktop })).status).toBe(200);
   }, 30_000);
 });
+
+describe.skipIf(!asked)(
+  "a person's browser on the personal edition's one computer",
+  () => {
+    test("opens in the page with the Recorder connected, and the person holds the wheel", async () => {
+      const personal = await startComputer("personal-browser", {
+        OPENBOT_RECORDER_DIR: FIXTURE,
+        COMPUTER_PERSON_ID: "personal",
+        OPENBOT_EDITION: "personal",
+      });
+      try {
+        const opening = await call("/browser/open", {
+          body: { connection: connection() },
+          on: personal,
+        });
+        expect(opening.status).toBe(200);
+        expect((await opening.json()) as BrowserState).toMatchObject({
+          open: true,
+          browser: "chromium",
+          window: "screen",
+          recorder: { connected: true, narration: "external" },
+        });
+        const control = (await (
+          await call("/control", { on: personal })
+        ).json()) as { holder: string };
+        expect(control.holder).toBe("human");
+      } finally {
+        await call("/browser/close", { body: {}, on: personal }).catch(
+          () => undefined,
+        );
+      }
+    }, 60_000);
+  },
+);
 
 describe.skipIf(!online)(
   "the open internet through the computer's egress filter",

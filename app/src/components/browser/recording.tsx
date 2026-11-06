@@ -78,7 +78,7 @@ export type RecordingHooks = {
  * Record and Stop for the person's browser, from the Recorder's own report in `state`. Record asks about narration
  * first when the person has never said (`useRecordingWith`).
  *
- * With `opens` (OpenBot Desktop, where the browser is a window on the person's desktop), Record opens the browser, or
+ * With `opens` (where the browser is a window on the person's desktop), Record opens the browser, or
  * brings it forward, and starts recording in it, so a closed browser holds nothing back.
  */
 export function useRecording(
@@ -291,7 +291,7 @@ export function StoppedIcon({
 }
 
 /**
- * The recording Stop ended last, by name, on a page of rows (OpenBot Desktop, a Bot's screen), until the next one
+ * The recording Stop ended last, by name, on a page of rows (Teach a Bot's steps, a Bot's screen), until the next one
  * starts: Stop says where the recording went and what it held, or that it held nothing. `ended` comes first when
  * something other than Stop ended it, in a sentence saying what did.
  */
@@ -363,7 +363,7 @@ function progressLine(recording: Recording): string {
 }
 
 /**
- * The recording row on a page of rows (OpenBot Desktop, a Bot's screen): a task name and Record, or while recording its
+ * The recording row on a page of rows (Teach a Bot's steps, a Bot's screen): a task name and Record, or while recording its
  * name, how long it has run, its actions and Stop. `placeholder` is shorter where the row is narrow (the column beside
  * a Bot's screen), so the field says what it is for rather than half an example.
  */

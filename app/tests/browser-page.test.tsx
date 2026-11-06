@@ -1708,17 +1708,6 @@ test("where the server says why there is no browser of the person's own, the pag
   expect(opens()).toBe(0);
 });
 
-test("on OpenBot Desktop with no Chrome or Edge it can open, the browser in the page says why", async () => {
-  // Chrome installed only as a Flatpak, which used to be said only in Desktop's log.
-  const why =
-    "OpenBot can't open the Flatpak version of Google Chrome, so install Chrome from google.com/chrome to use your own browser.";
-  state = { ...screenState(), note: why };
-  openAnswer = answerFor("screen");
-  const view = draw(<BrowserPage />);
-  await view.findByLabelText(SCREEN);
-  expect(view.getByText(why)).toBeTruthy();
-});
-
 /**
  * Chrome's speech recognition where it cannot hear the person: each recognition started while `error` is set fails
  * with it and then ends, as Chrome does for a microphone it may not use (`not-allowed`), none at all

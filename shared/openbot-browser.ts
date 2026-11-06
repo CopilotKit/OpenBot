@@ -338,8 +338,7 @@ export type BrowserApiState = BrowserState & {
   /** False when this OpenBot has no way to run a person's browser; the app then hides the Browser button. */
   available: boolean;
   /**
-   * Why the person's browser is not the one they would expect, in one plain sentence for them: why this OpenBot cannot
-   * run one at all (with `available` false), or, on OpenBot Desktop, why it is not their own installed Chrome or Edge.
+   * Why this OpenBot cannot run the person's browser at all (with `available` false), in one plain sentence for them.
    * Absent when there is nothing to explain.
    */
   note?: string;
@@ -361,36 +360,13 @@ export type BrowserApiState = BrowserState & {
 /* CONFIGURATION, by name. */
 /** On the computer: the built Recorder (`extension/dist`), absolute. Without it `/browser/open` refuses. */
 export const RECORDER_DIR_ENV = "OPENBOT_RECORDER_DIR";
-/** On the server: the computer that runs people's browsers here, when it is not the Bots' computer (OpenBot Desktop's
- * host-side local Chrome computer, `http://127.0.0.1:4101`). Unset: the normal computer provider locates it. */
+/** On the server: the computer that runs people's browsers here, when it is not the Bots' computer (a host-side local
+ * Chrome computer, `http://127.0.0.1:4101`, as scripts/start.sh starts it). Unset: the normal computer provider
+ * locates it. */
 export const BROWSER_URL_ENV = "OPENBOT_BROWSER_URL";
 /**
- * On the computer: `on` when it runs people's own browsers and nothing else (OpenBot Desktop's host-side local Chrome
- * computer). Such a computer refuses every Bot, and a computer without it runs a person's browser only when it was
- * started for that one browser (`COMPUTER_BOT_ID` names it: a supervisor's container, a Sandbox).
+ * On the computer: `on` when it runs people's own browsers and nothing else (a host-side local Chrome computer). Such a
+ * computer refuses every Bot, and a computer without it runs a person's browser only when it was started for that one
+ * browser (`COMPUTER_BOT_ID` names it: a supervisor's container, a Sandbox), or is the personal edition's one computer.
  */
 export const PEOPLE_ONLY_ENV = "COMPUTER_PEOPLE_ONLY";
-/**
- * On the server: why OpenBot Desktop runs no browser of the person's own on this machine, as one of
- * {@link BROWSER_ABSENCES}' names. Desktop writes it at every Start where it found none, and takes it out where it
- * found one. The server tells the person in the sentence beside it.
- */
-export const BROWSER_ABSENT_ENV = "OPENBOT_BROWSER_ABSENT";
-/** Each reason OpenBot Desktop can give, and what the person is told. */
-export const BROWSER_ABSENCES = {
-  "no-chrome-or-edge":
-    "OpenBot can't find Google Chrome or Microsoft Edge on this computer, so it can't open your own browser.",
-  "flatpak-chrome":
-    "OpenBot can't open the Flatpak version of Google Chrome, so install Chrome from google.com/chrome to use your own browser.",
-  "flatpak-edge":
-    "OpenBot can't open the Flatpak version of Microsoft Edge, so install Edge from microsoft.com/edge to use your own browser.",
-  "recorder-not-built":
-    "Your own browser isn't set up yet, so quit OpenBot and open it again.",
-  "no-home-folder":
-    "OpenBot can't find your home folder, so it has nowhere to keep your own browser's profile.",
-} satisfies Record<string, string>;
-export type BrowserAbsence = keyof typeof BROWSER_ABSENCES;
-
-export function isBrowserAbsence(value: string): value is BrowserAbsence {
-  return Object.hasOwn(BROWSER_ABSENCES, value);
-}

@@ -22,12 +22,13 @@ bash scripts/start.sh
 because the Personal Assistant runs inside the server on the model in
 [`examples/personal/model.yaml`](../examples/personal/model.yaml).
 
-It also starts your own browser, as OpenBot Desktop does: your installed Google
-Chrome, or Microsoft Edge, as a window on your desktop with the OpenBot Recorder in it. It builds the
-Recorder (`extension/dist`) if it isn't built, runs `scripts/start-local-chrome-computer.ts` on port
-`BROWSER_PORT` (4101) with `COMPUTER_PEOPLE_ONLY=on`, and points the server at it with
-`OPENBOT_BROWSER_URL`. **Teach a Bot** in the sidebar takes you to a page whose Open opens or brings forward that window, and Record
-there goes to your own Learning space. Its profile is kept under
+It also starts your own browser: your installed Google Chrome, or Microsoft Edge, as a window on
+your desktop with the OpenBot Recorder in it. It builds the Recorder (`extension/dist`) if it isn't
+built, runs `scripts/start-local-chrome-computer.ts` on port `BROWSER_PORT` (4101) with
+`COMPUTER_PEOPLE_ONLY=on`, and points the server at it with `OPENBOT_BROWSER_URL`. **Teach a Bot**
+in the sidebar takes you to a page whose Open opens or brings forward that window, and Record there
+goes to your own Learning space. OpenBot Desktop does not do this: it shows your browser inside its
+window (see [OpenBot Desktop](#openbot-desktop)). Its profile is kept under
 `~/Library/Application Support/OpenBot/local-computer` on macOS (see
 [configuration](configuration.md#openbot-desktop-runs-it-for-the-person) for the other systems).
 Without Chrome or Edge, OpenBot starts without it and `start.sh` says why. `scripts/stop.sh` stops it
@@ -45,6 +46,20 @@ row in [`examples/personal/agents.yaml`](../examples/personal/agents.yaml) is dr
 The server's container is given the supervisor by name in `docker-compose.yml` unless
 `COMPUTER_SUPERVISOR_CONTAINER_URL` is set, so the desktop sets it empty as well as
 `COMPUTER_SUPERVISOR_URL`.
+
+**Teach a Bot** shows your browser inside the OpenBot window, as hosted OpenBot does: its tabs, its
+address bar and the live page, with the Recorder already in it and Record and Stop in OpenBot. It
+runs on the one computer, beside your Bots (see [Teach a Bot](#teach-a-bot) below); no separate
+Chrome window opens. Narration comes from the OpenBot window, as on hosted OpenBot. The desktop runs
+no browser of its own on your machine, and writes no `OPENBOT_BROWSER_URL`; Start takes out one an
+earlier version wrote.
+
+The Recorder reaches OpenBot only at an https address or at this machine's loopback, so the browser
+in the computer's container is handed `http://127.0.0.1:<port>`, which in there is the container.
+The desktop writes `COMPUTER_LOOPBACK_RELAYS` (`<port>=<host>:<port>`, comma-separated): the app's
+and the server's ports to the server's container, and a local Intelligence gateway's port to
+`host.docker.internal`. The computer listens on those ports at its own loopback and passes each
+connection on (`agent-computer/src/loopback-relay.ts`). Unset, it relays nothing.
 
 An installation from an earlier OpenBot Desktop, which ran the team edition, becomes the personal
 edition on its next Start. Its Bots and conversations stay in the database. The team edition's
@@ -90,11 +105,19 @@ settings and team rules, and a paused Automatic Learning.
 The password manager uses a saved login only after the person picks it in the private sign-in
 form, and taking over the browser is always offered.
 
+### Teach a Bot
+
 You can also teach a Bot a task in its own browser: take control of it and press **Record**. The recording goes to your
 own Learning space. The team edition refuses Record on a computer its Bots share, because another
 Bot's shell could read the Recorder's connection there. Here every Bot on the one computer is yours,
-so `scripts/start.sh` starts it as yours (`COMPUTER_PERSON_ID`) and the server allows Record. Your
-own browser never runs on that computer: it is the window on your desktop above.
+so `scripts/start.sh` and the desktop start it as yours (`COMPUTER_PERSON_ID`) and the server allows
+Record.
+
+For the same reason your own browser (**Teach a Bot**) may run on that computer here, where the team
+edition refuses it: the one computer is told the edition (`OPENBOT_EDITION`, beside
+`COMPUTER_PERSON_ID`), and the server and the computer both allow it only in the personal edition. Its
+profile sits beside your Bots' profiles, which already hold the sites you signed in to for them.
+Where `OPENBOT_BROWSER_URL` is set, as `scripts/start.sh` sets it, your browser runs there instead.
 
 ## What the app shows
 

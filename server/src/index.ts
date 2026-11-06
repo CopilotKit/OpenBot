@@ -594,7 +594,7 @@ const { resolveRequestActor, identifyUser, identifyActor } = createRequestActor(
   },
 );
 // Where a person's own OpenBot browser may go: not where Bots may, but where their browser on their own laptop would
-// (browser/egress.ts). On OpenBot Desktop's host-side computer that is their own desktop, so everywhere.
+// (browser/egress.ts). On a host-side computer of people's browsers that is their own desktop, so everywhere.
 const personBrowserPolicy = personBrowserEgressPolicy({
   native: config.browser !== undefined,
   allowPrivateHosts: config.computer?.allowPrivateHosts ?? false,
@@ -609,6 +609,7 @@ const computerProvider = config.computer
       withPersonBrowsers(
         createComputerProvider(config.computer),
         config.browser?.url,
+        config.edition,
       ),
       {
         policyForBot: (botId) =>
@@ -2963,15 +2964,16 @@ const app = createApp(
           },
         }
       : {}),
-    // Only where a person's browser can run: OpenBot Desktop's host-side computer, or computers Bots run on that give
-    // each its own. Where every Bot shares one, the routes have no computers and say why (browser/host.ts).
+    // Only where a person's browser can run: a host-side computer of people's browsers, computers Bots run on that give
+    // each its own, or the personal edition's one computer. Where every Bot shares one, the routes have no computers and
+    // say why (browser/host.ts).
     ...(computerGateway || config.browser
       ? {
           browser: {
             ...personBrowserPlace({
               provider: computerProvider,
               browserUrl: config.browser?.url,
-              ...(config.browserAbsent ? { absent: config.browserAbsent } : {}),
+              edition: config.edition,
               computers: () =>
                 computerGateway
                   ? gatewayBrowserComputers(

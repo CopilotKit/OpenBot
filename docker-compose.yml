@@ -303,6 +303,18 @@ services:
       # person's: it is theirs, so Record runs in their Bots' browsers here (person-access.ts). Empty
       # everywhere else, where the Bots here may be anybody's and Record is refused.
       COMPUTER_PERSON_ID: ${COMPUTER_PERSON_ID:-}
+      # The edition, read beside it: the personal edition's one computer also runs the person's own
+      # browser, shown in the page, because every Bot here is theirs (person-access.ts). A team's
+      # person's computer never does.
+      OPENBOT_EDITION: ${OPENBOT_EDITION:-}
+      # The laptop's loopback addresses a browser here is handed, as this container reaches them
+      # (`<port>=<host>:<port>`, comma-separated). The Recorder reaches OpenBot only at https or at
+      # loopback, so on a laptop it is given `http://127.0.0.1:<port>`, which in here is this
+      # container. OpenBot Desktop sets it; unset, nothing is relayed (loopback-relay.ts).
+      COMPUTER_LOOPBACK_RELAYS: ${COMPUTER_LOOPBACK_RELAYS:-}
+    # Where a relay above sends a local Intelligence gateway: this machine. As for the server.
+    extra_hosts:
+      - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
     volumes:
       - agent-workspace:/workspace
       # Chromium's user-data directory is volume-backed so logins survive container restarts.

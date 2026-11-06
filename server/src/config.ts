@@ -9,12 +9,7 @@ import {
   type LearningTarget,
 } from "@openbot/shared/learning";
 import { listenPort } from "@openbot/shared/listen-port";
-import {
-  BROWSER_ABSENT_ENV,
-  BROWSER_URL_ENV,
-  type BrowserAbsence,
-  isBrowserAbsence,
-} from "@openbot/shared/openbot-browser";
+import { BROWSER_URL_ENV } from "@openbot/shared/openbot-browser";
 import {
   addressesBeyondThisMachine,
   deploymentAddresses,
@@ -456,18 +451,12 @@ export type DeploymentConfig = {
    */
   computer?: ComputerConfig;
   /**
-   * The computer that runs people's own OpenBot browsers here when it is not the Bots' (`OPENBOT_BROWSER_URL`): OpenBot
-   * Desktop's host-side local Chrome computer, so a person's browser is a window on their own desktop while Bots'
-   * computers stay where they are. Called with the same COMPUTER_TOKEN as every computer. Absent, the Bots' computer
-   * provider runs people's browsers too.
+   * The computer that runs people's own OpenBot browsers here when it is not the Bots' (`OPENBOT_BROWSER_URL`): a
+   * host-side local Chrome computer (`scripts/start-local-chrome-computer.ts`), so a person's browser is a window on
+   * their own desktop while Bots' computers stay where they are. Called with the same COMPUTER_TOKEN as every computer.
+   * Absent, the Bots' computer provider runs people's browsers too, shown in the page.
    */
   browser?: { url: string; token?: string };
-  /**
-   * Why OpenBot Desktop found no browser of the person's own to run on this machine (`OPENBOT_BROWSER_ABSENT`), which
-   * the person is told beside whatever browser runs for them instead. A name this server does not know is left out:
-   * Desktop and the deployment it runs are released apart, and an explanation is no reason to refuse to start.
-   */
-  browserAbsent?: BrowserAbsence;
   /** How far one Bot handing work to another may go. */
   handoff: HandoffCaps;
   /**
@@ -1376,13 +1365,9 @@ export function durationMs(value: string): number {
 
 function browserConfig(
   environment: Environment,
-): Pick<DeploymentConfig, "browser" | "browserAbsent"> {
+): Pick<DeploymentConfig, "browser"> {
   const address = url(environment, BROWSER_URL_ENV);
-  if (!address) {
-    // Only where there is no browser of the person's own: one that runs needs no reason why it does not.
-    const absent = optional(environment, BROWSER_ABSENT_ENV);
-    return absent && isBrowserAbsence(absent) ? { browserAbsent: absent } : {};
-  }
+  if (!address) return {};
   const token = optional(environment, "COMPUTER_TOKEN");
   return { browser: { url: address, ...(token ? { token } : {}) } };
 }

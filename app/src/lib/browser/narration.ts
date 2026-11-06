@@ -1,9 +1,9 @@
 /*
- * NARRATION FROM THE PAGE. On hosted OpenBot the person's browser runs on a computer with no microphone, so this page
- * listens to them instead, in their own browser, with the Web Speech API, and hands each final phrase to the Recorder
- * with when they started and stopped saying it. It also says when a phrase began, as soon as its first words come
- * back, so the Recorder holds the steps taken while it is said until it arrives. On OpenBot Desktop none of this runs:
- * the Recorder hears the microphone itself.
+ * NARRATION FROM THE PAGE. On hosted OpenBot and OpenBot Desktop the person's browser runs on a computer with no
+ * microphone, so this page listens to them instead, in their own browser, with the Web Speech API, and hands each final
+ * phrase to the Recorder with when they started and stopped saying it. It also says when a phrase began, as soon as its
+ * first words come back, so the Recorder holds the steps taken while it is said until it arrives. In a window on the
+ * person's desktop none of this runs: the Recorder hears the microphone itself.
  *
  * It is the browser's own speech recognition (`SpeechRecognition`, or the `webkitSpeechRecognition` Chrome and Safari
  * still answer to), continuous and with interim results, which is what lets a phrase be timed from its first words
@@ -80,7 +80,7 @@ export type Phrase = { text: string; startedAt: number; endedAt: number };
  * - Every event repeats the final results before it. A phrase is sent once, the first time it is final.
  *
  * A phrase never starts before the one ahead of it ended, which holds the order if Chrome shows a phrase's first words
- * while the one before is still being finished. The Recorder times the phrases it hears on OpenBot Desktop by the same
+ * while the one before is still being finished. The Recorder times the phrases it hears in a window on the desktop by the same
  * rule (extension/src/offscreen/voice.ts), so a recording's narration lines up with its steps the same way either way.
  */
 export class PhraseClock {

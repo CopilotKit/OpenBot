@@ -1,6 +1,4 @@
 import {
-  BROWSER_ABSENCES,
-  type BrowserAbsence,
   type BrowserWindow,
   isPersonBrowserId,
 } from "@openbot/shared/openbot-browser";
@@ -25,22 +23,30 @@ import type { BrowserComputers, BrowserRouteDeps } from "./routes";
  * A PERSON'S BROWSER RUNS ONLY ON A COMPUTER OF ITS OWN. On the shared computer it would sit beside every Bot's
  * browser, in the container where a Bot may run a shell, and its profile holds what the person signed in to by hand: a
  * prompt-injected Bot could read their cookies off the disk. A supervisor's container and a Sandbox are made for the one
- * computer named, so the person's browser is alone there; OpenBot Desktop's host-side computer runs people's browsers
- * and no Bot. The computer refuses it too (agent-computer's `person-access.ts`), so neither can be talked into it alone.
+ * computer named, so the person's browser is alone there; a host-side computer started with `OPENBOT_BROWSER_URL` runs
+ * people's browsers and no Bot. The computer refuses it too (agent-computer's `person-access.ts`), so neither can be
+ * talked into it alone.
+ *
+ * The personal edition's one computer is the exception, as it is for Record (`botRecordRefusal`): every Bot on it is the
+ * one person's, and they already sign in to sites in those Bots' browsers there, so their own browser runs there too,
+ * shown in the page as a hosted one is. That computer is started as theirs in the personal edition
+ * (`COMPUTER_PERSON_ID` with `OPENBOT_EDITION`) and allows it for the same reason.
  */
 export const SHARED_COMPUTER =
   "This OpenBot can't open a browser of your own, because its Bots share one computer.";
 
 /**
- * Why a person's browser cannot run on these computers, or null where it can: on OpenBot Desktop's host-side computer
- * (`browserUrl`), or on a provider that gives every computer named its own (`per-bot`). Null too where there is no
- * provider at all, which says nothing about sharing: the routes have no computers then, and say so their own way.
+ * Why a person's browser cannot run on these computers, or null where it can: on a host-side computer of people's
+ * browsers (`browserUrl`), on a provider that gives every computer named its own (`per-bot`), or on the personal
+ * edition's one computer, whose every Bot is the one person's. Null too where there is no provider at all, which says
+ * nothing about sharing: the routes have no computers then, and say so their own way.
  */
 export function personBrowserRefusal(
   provider: Pick<ComputerProvider, "isolation"> | undefined,
   browserUrl: string | undefined,
+  edition: Edition = "team",
 ): string | null {
-  if (browserUrl || !provider) return null;
+  if (browserUrl || !provider || edition === "personal") return null;
   return provider.isolation === "shared" ? SHARED_COMPUTER : null;
 }
 
@@ -78,22 +84,21 @@ export function botRecordRefusal(
 
 /**
  * Where the browser routes find people's browsers here, and what the person is told about it: no computers, and why,
- * where their Bots share one computer (`personBrowserRefusal`); otherwise `computers`, with OpenBot Desktop's reason
- * for not running the person's own Chrome or Edge (`absent`) where it gave one. The server and the tests of its routes
- * both build the routes' half from this, so the two cannot disagree about where a person's browser may run.
+ * where their Bots share one computer (`personBrowserRefusal`); otherwise `computers`. The server and the tests of its
+ * routes both build the routes' half from this, so the two cannot disagree about where a person's browser may run.
  */
 export function personBrowserPlace(input: {
   provider: Pick<ComputerProvider, "isolation"> | undefined;
   browserUrl: string | undefined;
-  absent?: BrowserAbsence;
+  edition?: Edition;
   computers: () => BrowserComputers;
 }): Pick<BrowserRouteDeps, "computers" | "note"> {
-  const refusal = personBrowserRefusal(input.provider, input.browserUrl);
-  if (refusal) return { note: refusal };
-  return {
-    computers: input.computers(),
-    ...(input.absent ? { note: BROWSER_ABSENCES[input.absent] } : {}),
-  };
+  const refusal = personBrowserRefusal(
+    input.provider,
+    input.browserUrl,
+    input.edition,
+  );
+  return refusal ? { note: refusal } : { computers: input.computers() };
 }
 
 /**
@@ -101,17 +106,19 @@ export function personBrowserPlace(input: {
  *
  * Unset `browserUrl`: a person's browser is a computer like a Bot's, named for the person (browser/person.ts), so a
  * provider that gives each computer its own (a supervisor's container, a Sandbox) already carries it. The one shared
- * computer does not: there a person's browser is refused at `locate`, which every way of reaching it goes through, and
- * is never reported running. Set, it is the one computer OpenBot Desktop runs on the person's own machine
- * (`OPENBOT_BROWSER_URL`, its host-side local Chrome computer), while Bots' computers stay where they were. Wrapped
+ * computer does not, outside the personal edition: there a person's browser is refused at `locate`, which every way of
+ * reaching it goes through, and is never reported running. Set, it is the host-side local Chrome computer on the
+ * person's own machine (`OPENBOT_BROWSER_URL`, as `scripts/start.sh` starts it), while Bots' computers stay where they
+ * were. Wrapped
  * here, under the policy push, so every way a computer is reached (the browser routes, the live screen, the network
  * policy pushed on the way) reaches the same one.
  */
 export function withPersonBrowsers(
   provider: ComputerProvider,
   browserUrl: string | undefined,
+  edition: Edition = "team",
 ): ComputerProvider {
-  const refusal = personBrowserRefusal(provider, browserUrl);
+  const refusal = personBrowserRefusal(provider, browserUrl, edition);
   if (refusal)
     return Object.assign(Object.create(provider) as ComputerProvider, {
       locate: (seat: ComputerSeat) =>
@@ -153,10 +160,10 @@ export function withPersonBrowsers(
 }
 
 /**
- * Where a person's browser shows here, from where it runs, by the rule `withPersonBrowsers` finds it by: on OpenBot
- * Desktop's host-side local Chrome computer (`browserUrl`, which Desktop sets for nothing else) it is the person's own
- * Chrome or Edge, a native window on their desktop; on the computers Bots run on it is a cloud browser the app shows as
- * a screen. Known before the browser is opened, so the sidebar's Browser button knows what one click does.
+ * Where a person's browser shows here, from where it runs, by the rule `withPersonBrowsers` finds it by: on a host-side
+ * local Chrome computer (`browserUrl`, set for nothing else) it is the person's own Chrome or Edge, a native window on
+ * their desktop; on the computers Bots run on (OpenBot Desktop's among them) it is a browser the app shows in the page,
+ * as a screen. Known before the browser is opened, so the sidebar's Browser button knows what one click does.
  */
 export function personBrowserShows(
   browserUrl: string | undefined,
