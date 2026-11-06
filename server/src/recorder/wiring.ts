@@ -203,6 +203,7 @@ export function createRecorderExtension(deps: {
   const recordings = createRecordings({
     pageForUser: trajectoryBindings.pageForUser,
     isBoundTo: trajectoryBindings.isBoundTo,
+    boundTo: trajectoryBindings.boundTo,
     summaries: (ids) =>
       fetchTrajectorySummaries({
         apiUrl,
