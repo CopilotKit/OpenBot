@@ -279,7 +279,7 @@ test("Skills Intelligence did not deliver show a plain unavailable line, and the
   );
 });
 
-test("Automatic Learning off says no skills are learned", async () => {
+test("Automatic learning off says no skills are learned", async () => {
   answer = {
     mode: "choose",
     sharingAllowed: true,
@@ -288,7 +288,7 @@ test("Automatic Learning off says no skills are learned", async () => {
   };
   const view = draw();
   await view.findByText(
-    "An admin has turned off Automatic Learning, so no skills are learned from your recordings.",
+    "An admin has turned off automatic learning, so no skills are learned from your recordings.",
   );
 });
 

@@ -92,7 +92,7 @@ function emptySentence(
       : "No skills learned from your recordings and conversations yet. Once there are, they show up here.";
   }
   if (data.unavailable === "off")
-    return "An admin has turned off Automatic Learning, so no skills are learned from your recordings.";
+    return "An admin has turned off automatic learning, so no skills are learned from your recordings.";
   if (data.skills === null)
     return "Couldn't read your skills from Intelligence just now. Your choice above still applies to them.";
   return mode === "choose"

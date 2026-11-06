@@ -12,10 +12,17 @@ import type {
   LearningProposalDetail,
   PersonalReview,
 } from "@openbot/shared/learning";
-import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
+import {
+  environmentManager,
+  QueryClientProvider,
+  QueryObserver,
+} from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { LearningReview } from "@/components/settings/learning-review";
-import { personalReviewQueryOptions } from "@/lib/learning/queries";
+import {
+  personalLearningQueryOptions,
+  personalReviewQueryOptions,
+} from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
 import { LearningSettingsPage } from "@/routes/_authed/settings/learning";
 
@@ -427,7 +434,7 @@ test("the personal edition shows Learning with automatic approval on and no shar
     name: "Approve new skills automatically",
   });
   expect(approve.getAttribute("aria-checked")).toBe("true");
-  expect(view.queryByText("Who else's Bots use your Skills")).toBeNull();
+  expect(view.queryByText("Who else's Bots use your skills")).toBeNull();
   expect(view.getByRole("button", { name: "Learn now" })).toBeTruthy();
   expect(view.queryByText("Nothing to review")).toBeNull();
   fireEvent.click(approve);
@@ -541,5 +548,31 @@ test("when a refetch finds fewer proposals waiting, Your skills is refreshed", a
     );
   } finally {
     queryClient.invalidateQueries = original;
+  }
+});
+
+test("skills approved while opening refresh Your skills on the first load", async () => {
+  review = { ...body(true), approved: 1 };
+  let skillsReads = 0;
+  const inner = global.fetch;
+  global.fetch = Object.assign(
+    (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      if (String(path) === "/api/settings/learning") skillsReads += 1;
+      return inner(path, init);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  // Your skills sits next to this section on the page, so its query is watched.
+  const watcher = new QueryObserver(
+    queryClient,
+    personalLearningQueryOptions(),
+  );
+  const unsubscribe = watcher.subscribe(() => {});
+  try {
+    const view = draw();
+    await view.findByText("refund-order");
+    await waitFor(() => expect(skillsReads).toBeGreaterThanOrEqual(2));
+  } finally {
+    unsubscribe();
   }
 });

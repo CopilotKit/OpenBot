@@ -90,6 +90,12 @@ export function LearningReview() {
     0,
   );
   const previousWaiting = useRef<number | undefined>(undefined);
+  // Skills the sweep approved while the page opened are in Your skills too, including on the first load.
+  const reviewData = review.data;
+  useEffect(() => {
+    if ((reviewData?.approved ?? 0) > 0)
+      queryClient.invalidateQueries({ queryKey: learningKeys.personal });
+  }, [reviewData]);
   useEffect(() => {
     if (waitingCount === undefined) return;
     if (
