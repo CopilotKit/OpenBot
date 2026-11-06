@@ -1818,8 +1818,9 @@ test.each(["model", "intelligence"])(
     ).toBe(true);
     expect(view.queryByRole("button", { name: "Install" })).toBeNull();
     if (connection === "model") {
+      // The provider's fields render after the heading: wait for the one typed into.
       await userEvent.type(
-        view.getByLabelText("OpenAI API key"),
+        await view.findByLabelText("OpenAI API key"),
         "refreshed-provider-key",
       );
       await userEvent.click(view.getByRole("button", { name: "Continue" }));
