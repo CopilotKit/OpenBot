@@ -4,7 +4,11 @@ import {
   DEPLOYMENT_INITIATOR,
   recordAuditEvent,
 } from "../audit";
-import { recordApprovalBefore, type SkillApprovalStore } from "./approvals";
+import {
+  recordApprovalBefore,
+  type SkillApprovalStore,
+  UnnamedSkillError,
+} from "./approvals";
 import {
   type LearningManagement,
   readProposals,
@@ -31,10 +35,14 @@ function logFailure(
 
 /**
  * The personal edition's sweep: approves every pending proposal of the person's Learning sources while automatic
- * approval is on, recording a person's approval for skills learned from recordings first. One sweep runs at a time; a
- * call while one runs gets that sweep. A proposal another review already settled (409) counts as done; any other
- * failure, of one proposal or one source, is logged and the sweep goes on. A sweep never rejects: settings that can't
- * be read are logged and approve nothing.
+ * approval is on, recording a person's approval for skills learned from recordings first. Whether it is on is read
+ * again before each proposal, so switching it off stops a sweep part-way. One sweep runs at a time; a call while one
+ * runs waits for it and then gets one more sweep, shared by every call made meanwhile, so a sweep always starts after
+ * the call that asked for it. A proposal another review already settled (LEARNING_CANDIDATE_CONFLICT) is skipped
+ * quietly and not counted. A skill from recordings with no name can't be recorded as the person's: it is logged once
+ * and skipped by later sweeps in this process (a changed skill is a new proposal, with a new id). Any other failure, of
+ * one proposal or one source, is logged and the sweep goes on. A sweep never rejects: settings that can't be read are
+ * logged and approve nothing.
  */
 export function createAutoApprover(deps: {
   manage: LearningManagement;
@@ -45,6 +53,21 @@ export function createAutoApprover(deps: {
   audit?: AuditStore;
 }): { sweep(): Promise<{ approved: number }> } {
   let running: Promise<{ approved: number }> | undefined;
+  let queued: Promise<{ approved: number }> | undefined;
+  /** Proposals with no skill name, as container and candidate id: logged once, then left for the person. */
+  const unnamed = new Set<string>();
+  const key = (containerId: string, candidateId: string) =>
+    JSON.stringify([containerId, candidateId]);
+
+  /** Whether automatic approval is still on; a failed read is logged and counts as off. */
+  async function stillOn(): Promise<boolean> {
+    try {
+      return await deps.enabled();
+    } catch (error) {
+      logFailure(error, {});
+      return false;
+    }
+  }
 
   async function approveOne(
     source: LearningSource,
@@ -63,6 +86,8 @@ export function createAutoApprover(deps: {
             : undefined,
       });
     } catch (error) {
+      if (error instanceof UnnamedSkillError)
+        unnamed.add(key(source.containerId, candidateId));
       if (requestFailure(error).code !== "LEARNING_CANDIDATE_CONFLICT")
         logFailure(error, { containerId: source.containerId, candidateId });
       return false;
@@ -113,19 +138,39 @@ export function createAutoApprover(deps: {
           logFailure(error, { containerId: source.containerId });
         continue;
       }
-      for (const candidateId of pending)
+      for (const candidateId of pending) {
+        if (unnamed.has(key(source.containerId, candidateId))) continue;
+        if (!(await stillOn())) return { approved };
         if (await approveOne(source, candidateId)) approved++;
+      }
     }
     return { approved };
   }
 
+  function start(): Promise<{ approved: number }> {
+    const current = run().finally(() => {
+      if (running === current) running = undefined;
+    });
+    running = current;
+    return current;
+  }
+
   return {
     sweep() {
-      if (running) return running;
-      running = run().finally(() => {
-        running = undefined;
-      });
-      return running;
+      if (queued) return queued;
+      if (!running) return start();
+      // Settings may have changed since the running sweep read them: run once more after it, for every call meanwhile.
+      queued = running.then(
+        () => {
+          queued = undefined;
+          return start();
+        },
+        () => {
+          queued = undefined;
+          return start();
+        },
+      );
+      return queued;
     },
   };
 }
