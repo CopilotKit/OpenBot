@@ -118,9 +118,16 @@ export const recorderConnectWaitQueryOptions = (id: string, since: number) =>
     refetchOnWindowFocus: true,
   });
 
+/** How often the list of recordings asks again while one of them is still sending. */
+export const RECORDINGS_POLL_MS = 10_000;
+
 /**
  * The person's own recordings, newest first, a page at a time. The pages are kept as they came, not flattened: the
- * first one carries `unavailable` when Intelligence could not list them, which a flat list of rows would lose.
+ * last one fetched carries `unavailable` when Intelligence could not list it (a later page keeps its cursor, so Show
+ * more retries it), which a flat list of rows would lose.
+ *
+ * Asked again every {@link RECORDINGS_POLL_MS} while any loaded row is still sending, so it turns into its final state,
+ * and when the person comes back to the tab, which is how a recording finished elsewhere shows up.
  */
 export const recordingsQueryOptions = () =>
   infiniteQueryOptions({
@@ -137,4 +144,11 @@ export const recordingsQueryOptions = () =>
     },
     getNextPageParam: (page: RecordingsPage) => page.nextCursor ?? undefined,
     staleTime: 10_000,
+    refetchInterval: (query) =>
+      query.state.data?.pages.some((page) =>
+        page.recordings.some((row) => row.ended === "sending"),
+      )
+        ? RECORDINGS_POLL_MS
+        : false,
+    refetchOnWindowFocus: true,
   });

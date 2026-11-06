@@ -25,27 +25,42 @@ const STOP_REASONS: Record<string, string> = {
   interrupted: "browser closed",
 };
 
-/** How a recording ended, in words; null when it needs no badge (it arrived, or nobody can tell). */
+/**
+ * How a recording ended, in words; null when it needs no badge (it arrived). An `unknown` one, whose outcome never
+ * arrived, is badged too, so it never reads as a success.
+ */
 function endedLabel(row: RecordingRow): string | null {
   if (row.ended === "sending") return "Still sending";
   if (row.ended === "missing") return "Not in Intelligence";
+  if (row.ended === "unknown") return "No result";
   if (row.ended !== "stopped") return null;
   const reason = row.reason ? STOP_REASONS[row.reason] : undefined;
   return reason ? `Stopped early: ${reason}` : "Stopped early";
 }
 
-/** The browser section's list of the person's own recordings, with how each one ended. */
-export function YourRecordings() {
+/**
+ * The browser section's list of the person's own recordings, with how each one ended.
+ *
+ * `variant="pane"` frames it as a strip of its own under a browser that fills the page: capped, scrolling, and drawn
+ * only once there is something to show, so no empty strip appears while the list loads.
+ */
+export function YourRecordings({
+  variant = "page",
+}: {
+  variant?: "page" | "pane";
+}) {
   const recordings = useInfiniteQuery(recordingsQueryOptions());
   if (recordings.isPending) return null;
   const unavailable = recordings.data?.pages.at(-1)?.unavailable;
   const rows = recordings.data?.pages.flatMap((page) => page.recordings) ?? [];
 
-  return (
+  // A failed "Show more" or refresh keeps the rows already loaded: the error goes below them, where Show more retries.
+  const failure = recordings.error;
+  const section = (
     <PageSection title="Your recordings">
-      {recordings.error ? (
+      {failure && rows.length === 0 ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {recordings.error.message}
+          {failure.message}
         </p>
       ) : rows.length === 0 && !recordings.hasNextPage && !unavailable ? (
         <PageEmpty>
@@ -89,6 +104,13 @@ export function YourRecordings() {
                 : "Intelligence isn't available, so your recordings can't be listed."}
             </p>
           ) : null}
+          {failure ? (
+            <p className="mt-4 text-destructive text-sm">
+              {recordings.isFetchNextPageError
+                ? "Couldn't load more recordings. Try again."
+                : "Couldn't refresh your recordings."}
+            </p>
+          ) : null}
           {recordings.hasNextPage ? (
             <Button
               className="mt-3"
@@ -103,5 +125,14 @@ export function YourRecordings() {
         </>
       )}
     </PageSection>
+  );
+  if (variant === "page") return section;
+  // Capped and scrolling on its own, in the page column's width and padding, so many rows cannot squeeze the browser.
+  return (
+    <div className="max-h-[40%] shrink-0 overflow-y-auto border-t border-border">
+      <div className="mx-auto w-full max-w-3xl px-4 pb-8 [&>section]:mt-6">
+        {section}
+      </div>
+    </div>
   );
 }

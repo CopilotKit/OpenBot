@@ -1254,10 +1254,27 @@ test("after sending, the popup links to Teach a Bot", async () => {
   );
   const link = await sent.findByRole("link", { name: "See it on Teach a Bot" });
   expect(link.getAttribute("href")).toBe(
-    "https://openbot.example.test/browser",
+    "https://openbot.example.test/browser?recordings=1",
   );
   expect(link.getAttribute("target")).toBe("_blank");
   expect(link.getAttribute("rel")).toBe("noreferrer");
+});
+
+test("the Teach a Bot link keeps a path prefix on the OpenBot address", async () => {
+  const sent = setup(
+    stateResponse({
+      state: { ...STOPPED, learning: learning("assigned"), draining: 0 },
+      connection: {
+        openbotUrl: "https://example.test/openbot",
+        user: { name: "Ada Lovelace", email: "ada@example.test" },
+        via: "web",
+      },
+    }),
+  );
+  const link = await sent.findByRole("link", { name: "See it on Teach a Bot" });
+  expect(link.getAttribute("href")).toBe(
+    "https://example.test/openbot/browser?recordings=1",
+  );
 });
 
 test("after stop with Automatic Learning off, the popup says Learning will not see the recording, and that it still went to Intelligence", async () => {
