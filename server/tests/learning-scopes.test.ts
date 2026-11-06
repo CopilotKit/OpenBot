@@ -71,4 +71,34 @@ describe("learningScopes", () => {
       }),
     ).toEqual([own]);
   });
+
+  test("the person's own space named as a Bot's or the default target stays listed once, as recordings", () => {
+    expect(
+      learningScopes({
+        edition: "personal",
+        userId: "ada",
+        settings: settings({
+          defaultTarget: { containerId: own.containerId },
+          agents: {
+            a: { containerId: own.containerId },
+            b: { containerId: "bot-b" },
+          },
+        }),
+      }),
+    ).toEqual([own, conversations("bot-b")]);
+  });
+
+  test("with Learning switched off, the personal edition still lists the Bot spaces, so what is waiting can be reviewed", () => {
+    expect(
+      learningScopes({
+        edition: "personal",
+        userId: "ada",
+        settings: settings({
+          enabled: false,
+          defaultTarget: { containerId: "shared" },
+          agents: { a: { containerId: "bot-a" } },
+        }),
+      }),
+    ).toEqual([own, conversations("shared"), conversations("bot-a")]);
+  });
 });
