@@ -223,8 +223,8 @@ export async function readProposal(
   return proposalDetail(candidate, insights);
 }
 
-/** Logs a failure while deciding whether, or while, taking OpenBot's own record back. */
-function logUndoFailure(type: string, candidateId: string, error: unknown) {
+/** Logs a failure while taking OpenBot's own record back, or while finishing it. */
+function logRecordFailure(type: string, candidateId: string, error: unknown) {
   console.error(
     JSON.stringify({
       type,
@@ -236,36 +236,34 @@ function logUndoFailure(type: string, candidateId: string, error: unknown) {
 }
 
 /**
- * Whether Intelligence surely did not take the review that failed with `error`: it answered with a
- * 4xx, or the proposal still reads as pending. A timeout, network error or 5xx may land after the
- * skill was published, so the proposal is read again; when that read fails too, the answer is no.
+ * Whether Intelligence surely did not take the review that failed with `error`: only an answer with a 4xx. A timeout,
+ * a network error or a 5xx may still land, and a proposal that reads as pending right after one can be published a
+ * moment later, so none of them counts.
  */
-async function surelyRefused(
-  manage: LearningManagement,
-  containerId: string,
-  candidateId: string,
-  error: unknown,
-): Promise<boolean> {
+function surelyRefused(error: unknown): boolean {
   const { status } = requestFailure(error);
-  if (status !== undefined && status >= 400 && status < 500) return true;
-  try {
-    const candidate = await manage.getLearningCandidate({
-      containerId,
-      candidateId,
-    });
-    return candidate.status === "pending_review";
-  } catch (readError) {
-    logUndoFailure("learning-review-reread-failed", candidateId, readError);
-    return false;
-  }
+  return status !== undefined && status >= 400 && status < 500;
 }
 
 /**
+ * What a `before` step hands `reviewProposal`: OpenBot's own record of the review, in two halves. A bare function is
+ * the `undo` alone.
+ */
+export type ReviewSteps = {
+  /** Takes the record back. Runs only when Intelligence surely refused the review (a 4xx). */
+  undo?: () => Promise<void>;
+  /** Finishes the record. Runs only once Intelligence has taken the review. */
+  after?: () => Promise<void>;
+};
+
+/**
  * Approves or rejects a proposal. `before` runs once the proposal is read and before Intelligence is asked, so OpenBot
- * can write its own record first (callers pass it only on approve). The undo it returned takes that record back only
- * when Intelligence surely refused: a 4xx, or the proposal still pending when read again. Otherwise the record stays,
- * since the skill may already be published. If `before` throws, Intelligence is never asked. A failing re-read or undo
- * is logged and never hides Intelligence's error, which is what the caller gets.
+ * can write its own record first (callers pass it only on approve). Its `undo` takes that record back only when
+ * Intelligence surely refused, with a 4xx; on any other failure the record stays, since the skill may be published
+ * after all, and a record of a skill that never appears only holds it back. Its `after` runs once Intelligence has
+ * taken the review, for a record that must not change before then. If `before` throws, Intelligence is never asked. A
+ * failing undo or `after` is logged: an undo never hides Intelligence's error, which is what the caller gets, and an
+ * `after` never turns the review Intelligence took into a failure.
  */
 export async function reviewProposal({
   manage,
@@ -278,7 +276,9 @@ export async function reviewProposal({
   containerId: string;
   candidateId: string;
   action: "approve" | "reject";
-  before?: (detail: LearningProposalDetail) => Promise<() => Promise<void>>;
+  before?: (
+    detail: LearningProposalDetail,
+  ) => Promise<ReviewSteps | (() => Promise<void>)>;
 }): Promise<{
   id: string;
   status: "approved" | "rejected";
@@ -289,7 +289,9 @@ export async function reviewProposal({
     containerId,
     candidateId,
   });
-  const undo = before ? await before(proposalDetail(candidate, [])) : undefined;
+  const handed = before ? await before(proposalDetail(candidate, [])) : {};
+  const steps: ReviewSteps =
+    typeof handed === "function" ? { undo: handed } : handed;
   let review: Awaited<
     ReturnType<LearningManagement["reviewLearningCandidate"]>
   >;
@@ -300,17 +302,21 @@ export async function reviewProposal({
       action,
     });
   } catch (error) {
-    if (
-      undo &&
-      (await surelyRefused(manage, containerId, candidateId, error))
-    ) {
+    if (steps.undo && surelyRefused(error)) {
       try {
-        await undo();
+        await steps.undo();
       } catch (undoError) {
-        logUndoFailure("learning-review-undo-failed", candidateId, undoError);
+        logRecordFailure("learning-review-undo-failed", candidateId, undoError);
       }
     }
     throw error;
+  }
+  if (steps.after) {
+    try {
+      await steps.after();
+    } catch (afterError) {
+      logRecordFailure("learning-review-after-failed", candidateId, afterError);
+    }
   }
   return {
     id: candidateId,

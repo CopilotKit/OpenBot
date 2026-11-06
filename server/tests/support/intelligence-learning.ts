@@ -131,8 +131,8 @@ export function candidate(
       "Sort refund requests by whether they are inside the 30-day window.",
     id,
     operation: "add",
-    publishedRegistryRevision: null,
-    publishedSkillId: null,
+    publishedRegistryRevision: null as number | null,
+    publishedSkillId: null as string | null,
     reason:
       "Three support conversations checked the order date by hand before answering.",
     registryBaseRevision: 0,
@@ -147,14 +147,21 @@ export function candidate(
 }
 
 export const INSIGHT_ID = "0198a012-a20f-77c0-9e33-8992f18e74a9";
+/** The Skill an approval publishes, and the registry revision it publishes at. */
+export const PUBLISHED_SKILL_ID = "0198a012-a20f-77c0-9e33-8992f18e74a2";
+const PUBLISHED_REVISION = 2;
 
-/** The same, as `getLearningSkillCandidate` returns it: the bundle and the Insights behind it. */
+/**
+ * The same, as `getLearningSkillCandidate` returns it: the bundle and the Insights behind it. `stored` is the
+ * candidate as it stands now (reviewed or not), read from the same row the list reads.
+ */
 export function candidateDetail(
   id: string,
   files?: { path: string; content: string }[],
+  stored: ReturnType<typeof candidate> = candidate(id),
 ) {
   return {
-    ...candidate(id),
+    ...stored,
     bundle: {
       schemaVersion: 1,
       files: files
@@ -442,31 +449,48 @@ export function fakeIntelligence(
           ? Response.json({ run: run() }, { status: 202 })
           : Response.json({ runs: [run("succeeded")] });
       if (collection === "insights")
-        return itemId === INSIGHT_ID && action === "evidence"
+        return itemId === INSIGHT_ID &&
+          action === "evidence" &&
+          request.method === "GET"
           ? Response.json({ evidence: EVIDENCE })
           : intelligenceError("ROUTE_NOT_FOUND");
+      // Candidates have a list and a detail to GET, and approve and reject to POST; nothing else is routed.
+      const reviewing = action === "approve" || action === "reject";
+      if (
+        action === "evidence" ||
+        request.method !== (reviewing ? "POST" : "GET")
+      )
+        return intelligenceError("ROUTE_NOT_FOUND");
       if (!itemId)
         return Response.json({ candidates: [...candidates.values()] });
       const proposal = candidates.get(itemId);
       if (!proposal) return intelligenceError("LEARNING_CANDIDATE_NOT_FOUND");
       if (!action)
         return Response.json({
-          candidate: candidateDetail(itemId, options.bundles?.[itemId]),
+          candidate: candidateDetail(
+            itemId,
+            options.bundles?.[itemId],
+            proposal,
+          ),
         });
       if (proposal.status !== "pending_review")
         return intelligenceError("LEARNING_CANDIDATE_CONFLICT");
-      const status = action === "approve" ? "approved" : "rejected";
-      candidates.set(itemId, { ...proposal, status, reviewedAt: NOW });
+      const approved = action === "approve";
+      const reviewed = {
+        ...proposal,
+        status: approved ? ("approved" as const) : ("rejected" as const),
+        reviewedAt: NOW,
+        publishedSkillId: approved ? PUBLISHED_SKILL_ID : null,
+        publishedRegistryRevision: approved ? PUBLISHED_REVISION : null,
+      };
+      candidates.set(itemId, reviewed);
       return Response.json({
         review: {
           candidateId: itemId,
-          operation: "add",
-          publishedRegistryRevision: status === "approved" ? 2 : null,
-          publishedSkillId:
-            status === "approved"
-              ? "0198a012-a20f-77c0-9e33-8992f18e74a2"
-              : null,
-          status,
+          operation: reviewed.operation,
+          publishedRegistryRevision: reviewed.publishedRegistryRevision,
+          publishedSkillId: reviewed.publishedSkillId,
+          status: reviewed.status,
         },
       });
     },
