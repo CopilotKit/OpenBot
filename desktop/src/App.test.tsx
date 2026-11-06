@@ -200,7 +200,7 @@ async function emitProgress(payload: ProgressEvent) {
   });
 }
 
-test("installation shows its active stage immediately and advances elapsed time", async () => {
+test("installation shows its active stage immediately without an elapsed timer", async () => {
   const { view, preparation } = await beginPendingInstallation();
   const preparing = within(
     view.getByRole("listitem", { name: "Preparing this computer" }),
@@ -210,9 +210,7 @@ test("installation shows its active stage immediately and advances elapsed time"
   ).toBeTruthy();
   expect(preparing.getByText("In progress")).toBeTruthy();
   expect(preparing.queryByText("✓")).toBeNull();
-  await waitFor(() => expect(preparing.getByText(/1s elapsed/)).toBeTruthy(), {
-    timeout: 1800,
-  });
+  expect(preparing.queryByText(/elapsed/)).toBeNull();
   await act(async () => preparation.resolve());
   // Installed: on to the AI provider screen, with nothing left in progress.
   await view.findByRole("heading", { name: "Connect your AI" });
@@ -510,6 +508,17 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     step: "images",
     ok: true,
     running: true,
+    detail: "Checking which local software to download.",
+  });
+  const checking = rowStatus(view, "Installing OpenBot");
+  expect(
+    checking.getByText("Checking which local software to download."),
+  ).toBeTruthy();
+  expect(checking.queryByRole("progressbar")).toBeNull();
+  await emitProgress({
+    step: "images",
+    ok: true,
+    running: true,
     detail: "Downloading local software (2/4).",
     downloadBytes: 2_400_000,
   });
@@ -522,11 +531,8 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     view.getByRole("listitem", { name: "Installing OpenBot" }),
   );
   expect(installing.getByText("In progress")).toBeTruthy();
-  expect(
-    installing.getByText(/Downloading local software \(2\/4\)\./),
-  ).toBeTruthy();
-  expect(installing.getByText(/2.4 MB downloaded/)).toBeTruthy();
-  // The native side's per-image report: what is downloading now, and the whole download.
+  expect(installing.queryByText(/Downloading local software/)).toBeNull();
+  expect(installing.queryByRole("progressbar")).toBeNull();
   await emitProgress({
     step: "images",
     ok: true,
@@ -542,9 +548,11 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     },
   });
   expect(
-    installing.getByText("52.0 MB downloaded · 3.0 MB/s · 2 of 7 images done"),
-  ).toBeTruthy();
-  expect(installing.getByText("12.0 MB of 40.0 MB")).toBeTruthy();
+    installing.queryByText("Checking which local software to download."),
+  ).toBeNull();
+  expect(installing.getByText("5 of 7 items remaining")).toBeTruthy();
+  expect(installing.getByRole("progressbar").getAttribute("value")).toBe("2");
+  expect(installing.queryByText("agent-bot")).toBeNull();
   expectPlain(view);
   expect(
     setupEvents().filter(
