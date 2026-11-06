@@ -1,14 +1,17 @@
 import { offersStandingRule } from "@openbot/shared/standing-rule";
 import { approvalWords } from "@openbot/shared/tool-name";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { type ReactNode, useState } from "react";
+import { DecisionCard } from "@/components/decisions/decision-card";
+import type { Tone } from "@/components/gallery/frame";
 import {
   type ApprovalDecision,
   approvalInboxOptions,
   decideApproval,
 } from "@/lib/approvals";
 import { noteWatched } from "@/lib/computers/activity";
+import { EASE_OUT } from "@/lib/motion";
 
 /**
  * A pending approval, drawn in the conversation where the action it holds would have been.
@@ -17,6 +20,37 @@ import { noteWatched } from "@/lib/computers/activity";
  * in either place is the one decision. Once decided the server runs the action exactly once and
  * continues the conversation, and this gives the line back to the tool's own renderer.
  */
+/** What each answer does, as the row under it says it. */
+const CHOICE_WORDS: Record<
+  ApprovalDecision,
+  { label: string; description: string; done: string; tone: Tone }
+> = {
+  allow_once: {
+    label: "Allow once",
+    description: "The Bot does it this time. You're asked again next time.",
+    done: "Allowed once",
+    tone: "positive",
+  },
+  allow_always: {
+    label: "Always allow here",
+    description: "The Bot does it now, and here without asking from now on.",
+    done: "Always allowed",
+    tone: "positive",
+  },
+  deny: {
+    label: "Deny",
+    description: "The Bot doesn't do it, and is told you said no.",
+    done: "Denied",
+    tone: "negative",
+  },
+  handled: {
+    label: "I did it myself",
+    description: "You've done it, so the Bot carries on from there.",
+    done: "Done by you",
+    tone: "positive",
+  },
+};
+
 export function InlineApproval({
   toolCallId,
   fallback,
@@ -26,10 +60,18 @@ export function InlineApproval({
 }) {
   const cache = useQueryClient();
   const inbox = useQuery(approvalInboxOptions());
+  const reduceMotion = useReducedMotion();
+  /*
+   * The answer given here: the card folds into it at once, and then, when the inbox says the request
+   * is no longer pending, folds away and gives the line back to the tool's own renderer, which says
+   * what came of it.
+   */
+  const [answered, setAnswered] = useState<ApprovalDecision | null>(null);
   const decision = useMutation({
     mutationFn: (choice: ApprovalDecision) =>
       decideApproval(request?.id ?? "", choice),
-    onSuccess: () => {
+    onSuccess: (_, choice) => {
+      setAnswered(choice);
       // Answered here, so the step's entry in Activity says when, even on a page opened after it was asked.
       if (toolCallId) noteWatched(toolCallId);
       return cache.invalidateQueries({ queryKey: ["approvals"] });
@@ -40,57 +82,67 @@ export function InlineApproval({
         (candidate) => candidate.action.toolCallId === toolCallId,
       )
     : undefined;
-  if (request?.status !== "pending") return <>{fallback}</>;
-  const handOff = request.action.policy?.behaviour === "hand_off";
-  const words = approvalWords(request.action);
-  const choices: [ApprovalDecision, string][] = handOff
-    ? [
-        ["handled", "I did it myself"],
-        ["deny", "Don't do it"],
-      ]
-    : [
-        ["allow_once", "Allow once"],
-        ...(offersStandingRule(request.action)
-          ? [
-              ["allow_always", "Always allow here"] as [
-                ApprovalDecision,
-                string,
-              ],
-            ]
-          : []),
-        ["deny", "Deny"],
-      ];
+  const pending = request?.status === "pending";
+  const handOff = request?.action.policy?.behaviour === "hand_off";
+  const choices: ApprovalDecision[] = !request
+    ? []
+    : handOff
+      ? ["handled", "deny"]
+      : [
+          "allow_once",
+          ...(offersStandingRule(request.action)
+            ? (["allow_always"] as ApprovalDecision[])
+            : []),
+          "deny",
+        ];
+  const words = request ? approvalWords(request.action) : undefined;
+  const title = words ? `${words.action} on ${words.place}` : "";
   return (
-    <section
-      aria-label="Waiting for your approval"
-      className="space-y-2 rounded-lg border p-3 text-sm"
-    >
-      <p className="font-medium">
-        {handOff ? "This needs you" : "Waiting for your approval"}:{" "}
-        {words.action} on {words.place}
-      </p>
-      {request.action.policy ? (
-        <p className="text-muted-foreground">{request.action.policy.reason}</p>
-      ) : null}
-      {decision.error ? (
-        <p role="alert" className="text-destructive">
-          {decision.error.message}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        {choices.map(([choice, label], index) => (
-          <Button
-            key={choice}
-            size="sm"
-            variant={index === 0 ? "default" : "outline"}
-            disabled={decision.isPending}
-            onClick={() => decision.mutate(choice)}
+    <>
+      {/* The card leaves by folding away; what is left behind is the tool's own line. */}
+      <AnimatePresence initial={false}>
+        {pending && request ? (
+          <motion.section
+            aria-label="Waiting for your approval"
+            exit={{ height: 0, opacity: 0 }}
+            key="approval"
+            style={{ overflow: "hidden" }}
+            transition={{
+              duration: reduceMotion ? 0 : 0.22,
+              ease: EASE_OUT,
+            }}
           >
-            {label}
-          </Button>
-        ))}
-      </div>
-    </section>
+            <DecisionCard
+              answer={
+                answered
+                  ? {
+                      label: CHOICE_WORDS[answered].done,
+                      tone: CHOICE_WORDS[answered].tone,
+                    }
+                  : undefined
+              }
+              caption={
+                request.action.policy?.reason ??
+                (handOff ? "This one is yours to do." : undefined)
+              }
+              error={decision.error?.message ?? null}
+              onSubmit={(value) => decision.mutate(value as ApprovalDecision)}
+              options={choices.map((choice) => ({
+                value: choice,
+                label:
+                  handOff && choice === "deny"
+                    ? "Don't do it"
+                    : CHOICE_WORDS[choice].label,
+                description: CHOICE_WORDS[choice].description,
+              }))}
+              submitting={decision.isPending}
+              title={title.charAt(0).toUpperCase() + title.slice(1)}
+            />
+          </motion.section>
+        ) : null}
+      </AnimatePresence>
+      {pending ? null : fallback}
+    </>
   );
 }
 

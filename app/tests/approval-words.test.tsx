@@ -115,9 +115,9 @@ test("in the conversation, an app's approval names the action in words and the a
     name: "Waiting for your approval",
   });
   expect(cards.map((card) => card.querySelector("p")?.textContent)).toEqual([
-    "Waiting for your approval: get request on Requests",
-    "Waiting for your approval: send email on Gmail",
-    "Waiting for your approval: click on example.com",
+    "Get request on Requests",
+    "Send email on Gmail",
+    "Click on example.com",
   ]);
 });
 
