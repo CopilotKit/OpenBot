@@ -206,3 +206,17 @@ export function savePersonalReviewMutationOptions(queryClient: QueryClient) {
       queryClient.invalidateQueries({ queryKey: learningKeys.all }),
   });
 }
+
+/** Switch automatic approval of the skills learned from your own recordings on or off. */
+export function saveAutoApproveMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (autoApprove: boolean): Promise<{ autoApprove: boolean }> =>
+      client("/api/settings/learning/auto-approve", {
+        method: "PUT",
+        body: { autoApprove },
+        fallback: "Couldn't save automatic approval. Try again.",
+      }).then((response) => response.json()),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: learningKeys.all }),
+  });
+}

@@ -16,6 +16,7 @@ import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { LearningReview } from "@/components/settings/learning-review";
 import { queryClient } from "@/query-client";
+import { LearningSettingsPage } from "@/routes/_authed/settings/learning";
 
 let wasServer = true;
 beforeAll(() => {
@@ -32,6 +33,7 @@ const originalFetch = global.fetch;
 let review: PersonalReview | null;
 let insights: LearningProposalDetail["insights"] = [];
 const posts: string[] = [];
+const puts: { url: string; body: unknown }[] = [];
 
 const proposal = (
   id: string,
@@ -71,6 +73,7 @@ const body = (canReview: boolean): PersonalReview => ({
 beforeEach(() => {
   queryClient.clear();
   posts.length = 0;
+  puts.length = 0;
   review = body(false);
   insights = [];
   global.fetch = Object.assign(
@@ -78,6 +81,19 @@ beforeEach(() => {
       const url = String(path);
       const method = init?.method ?? "GET";
       if (url === "/api/settings/learning/review") return Response.json(review);
+      if (url === "/api/capabilities")
+        return Response.json({ edition: "personal" });
+      if (url === "/api/settings/learning")
+        return Response.json({
+          mode: "closed",
+          sharingAllowed: true,
+          skills: [],
+        });
+      if (method === "PUT") {
+        const sent = JSON.parse(String(init?.body));
+        puts.push({ url, body: sent });
+        return Response.json(sent);
+      }
       const detail =
         /^\/api\/settings\/learning\/proposals\/([^/?]+)\?container=(.+)$/.exec(
           url,
@@ -262,4 +278,27 @@ test("evidence names the recording by its title", async () => {
   expect(await view.findByText("Refund an order")).toBeTruthy();
   expect(view.getByText("A recording")).toBeTruthy();
   expect(view.getAllByText("Open the order, Click Refund")).toHaveLength(2);
+});
+
+test("the personal edition shows Learning with automatic approval on and no sharing", async () => {
+  review = { ...body(true), autoApprove: true };
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <LearningSettingsPage />
+    </QueryClientProvider>,
+  );
+  const approve = await view.findByRole("switch", {
+    name: "Approve new skills automatically",
+  });
+  expect(approve.getAttribute("aria-checked")).toBe("true");
+  expect(view.queryByText("Who else's Bots use your Skills")).toBeNull();
+  fireEvent.click(approve);
+  await waitFor(() =>
+    expect(puts).toEqual([
+      {
+        url: "/api/settings/learning/auto-approve",
+        body: { autoApprove: false },
+      },
+    ]),
+  );
 });

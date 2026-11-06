@@ -21,8 +21,10 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import {
   reviewPersonalProposalMutationOptions,
+  saveAutoApproveMutationOptions,
   startPersonalLearningRunMutationOptions,
 } from "@/lib/learning/mutations";
 import {
@@ -65,6 +67,9 @@ export function LearningReview() {
   const learnNow = useMutation(
     startPersonalLearningRunMutationOptions(queryClient),
   );
+  const saveAutoApprove = useMutation(
+    saveAutoApproveMutationOptions(queryClient),
+  );
   const [open, setOpen] = useState<{ container: string; id: string } | null>(
     null,
   );
@@ -76,7 +81,11 @@ export function LearningReview() {
       </p>
     );
   }
-  const { canReview, sources } = review.data;
+  const { canReview, sources, autoApprove } = review.data;
+  // Shown at once while the save is on its way, as a switch is.
+  const autoApproveOn =
+    (saveAutoApprove.isPending ? saveAutoApprove.variables : undefined) ??
+    autoApprove;
   const waiting = sources.flatMap((source) =>
     (source.proposals ?? [])
       .filter((proposal) => proposal.status === "pending_review")
@@ -93,6 +102,26 @@ export function LearningReview() {
           : "An admin reviews these. You can read what Learning proposes here."
       }
     >
+      {autoApproveOn !== null && (
+        <PageRows>
+          <Item size="sm">
+            <ItemContent>
+              <ItemTitle>Approve new skills automatically</ItemTitle>
+              <ItemDescription>
+                New skills go to your Bots without waiting for your review.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-label="Approve new skills automatically"
+                checked={autoApproveOn}
+                disabled={saveAutoApprove.isPending}
+                onCheckedChange={(checked) => saveAutoApprove.mutate(checked)}
+              />
+            </ItemActions>
+          </Item>
+        </PageRows>
+      )}
       {waiting.length > 0 ? (
         <PageRows>
           {waiting.map(({ container, proposal }, index) => (
@@ -162,6 +191,11 @@ export function LearningReview() {
       {canReview && learnNow.isSuccess && (
         <p className="mt-4 text-sm" role="status">
           Learning started. New proposals show up here when it finishes.
+        </p>
+      )}
+      {saveAutoApprove.error && (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {saveAutoApprove.error.message}
         </p>
       )}
       {canReview && learnNow.error && (
