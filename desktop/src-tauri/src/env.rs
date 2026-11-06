@@ -301,7 +301,10 @@ mod port_tests {
                 continue; // no IPv6 on this machine
             };
             let port = foreign.local_addr().unwrap().port();
-            assert!(bind_loopbacks(port).is_err(), "{wildcard} port {port} looked free");
+            assert!(
+                bind_loopbacks(port).is_err(),
+                "{wildcard} port {port} looked free"
+            );
             let preferred = Ports {
                 app: port,
                 server: port,
@@ -314,7 +317,10 @@ mod port_tests {
                 browser: None,
             };
             let chosen = preferred.available(&HashSet::new(), None, false).unwrap();
-            assert!(!chosen.settings().values().any(|value| value == &port.to_string()));
+            assert!(!chosen
+                .settings()
+                .values()
+                .any(|value| value == &port.to_string()));
         }
     }
 
