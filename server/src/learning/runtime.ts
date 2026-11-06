@@ -80,10 +80,10 @@ export type OpenedSkills = {
  *
  * 1. The Bot's own (its Learning target, as before). Always kept as they are.
  * 2. The run's person's own space. A Skill whose name the Bot already has is left out: the Bot's own wins.
- * 3. Skills other people opened (`open`, or picked under `choose`). One whose name the Bot or the person already has is
- *    left out. When two or more people opened a Skill with the same name, all of them are kept, each named
- *    `<their space id>/<name>` (the SDK's own multi-container naming), so none is lost and the choice never depends on
- *    timing; a name only one person opened keeps its plain name.
+ * 3. Skills other people opened (`open`, or picked under `choose`), never one the person withheld. One whose name the Bot
+ *    or the person already has is left out. When two or more people opened a Skill with the same name, all of them are
+ *    kept, each named `<their space id>/<name>` (the SDK's own multi-container naming), so none is lost and the choice
+ *    never depends on timing; a name only one person opened keeps its plain name.
  *
  * Nothing merged is the Bot's own snapshot unchanged.
  */
@@ -105,7 +105,9 @@ export function mergeLearnedSkills(input: {
     .flatMap(({ source, snapshot }) =>
       snapshot.skills
         .filter(
-          (skill) => source.skills === "all" || source.skills.has(skill.name),
+          (skill) =>
+            (source.skills === "all" || source.skills.has(skill.name)) &&
+            !source.withheld.has(skill.name),
         )
         .map((skill) => ({ containerId: source.containerId, skill })),
     )
@@ -135,6 +137,7 @@ export function mergeLearnedSkills(input: {
           snapshot.revision,
           snapshot.etag,
           source.skills === "all" ? "all" : [...source.skills].sort(),
+          [...source.withheld].sort(),
         ]),
       ]),
     )

@@ -15,6 +15,8 @@ export type OpenSkillSource = {
   userId: string;
   containerId: string;
   skills: "all" | ReadonlySet<string>;
+  /** Skills approved by the person only, which must not reach other people's Bots. */
+  withheld: ReadonlySet<string>;
 };
 
 /** The sharing choice a person made for the Skills in their own Learning space. */
@@ -124,11 +126,25 @@ export function createLearningSharingStore(database: Database) {
       return sharing.flatMap((row): OpenSkillSource[] => {
         const containerId = personalLearningContainerId(row.userId);
         if (row.mode === "open") {
-          return [{ userId: row.userId, containerId, skills: "all" }];
+          return [
+            {
+              userId: row.userId,
+              containerId,
+              skills: "all",
+              withheld: new Set<string>(),
+            },
+          ];
         }
         const names = byPerson.get(row.userId);
         return names && names.size > 0
-          ? [{ userId: row.userId, containerId, skills: names }]
+          ? [
+              {
+                userId: row.userId,
+                containerId,
+                skills: names,
+                withheld: new Set<string>(),
+              },
+            ]
           : [];
       });
     },

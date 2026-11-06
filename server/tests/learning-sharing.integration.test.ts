@@ -779,7 +779,14 @@ describe("the open-Skill index", () => {
       read: async () => {
         reads++;
         if (fail) throw new Error("database down");
-        return [{ userId: "g", containerId: "user-g", skills: "all" }];
+        return [
+          {
+            userId: "g",
+            containerId: "user-g",
+            skills: "all",
+            withheld: new Set(),
+          },
+        ];
       },
       ttlMs: 1_000,
       now: () => now,
@@ -796,7 +803,12 @@ describe("the open-Skill index", () => {
     now += 1_001;
     fail = true;
     expect(await index.sources()).toEqual([
-      { userId: "g", containerId: "user-g", skills: "all" },
+      {
+        userId: "g",
+        containerId: "user-g",
+        skills: "all",
+        withheld: new Set(),
+      },
     ]);
   });
 
@@ -812,7 +824,14 @@ describe("the open-Skill index", () => {
           });
           return [];
         }
-        return [{ userId: "g", containerId: "user-g", skills: "all" }];
+        return [
+          {
+            userId: "g",
+            containerId: "user-g",
+            skills: "all",
+            withheld: new Set(),
+          },
+        ];
       },
     });
     const stale = index.sources();

@@ -279,7 +279,14 @@ describe("other people's opened Skills", () => {
   test("open: every Skill joins another person's run, under the clash rule", async () => {
     const { learning } = runtime({
       published,
-      open: [{ userId: GRACE, containerId: space(GRACE), skills: "all" }],
+      open: [
+        {
+          userId: GRACE,
+          containerId: space(GRACE),
+          skills: "all",
+          withheld: new Set(),
+        },
+      ],
     });
     const run = await learning.acquire("bot", undefined, ADA);
     expect(names(run?.catalog)).toEqual([
@@ -310,6 +317,7 @@ describe("other people's opened Skills", () => {
           userId: GRACE,
           containerId: space(GRACE),
           skills: new Set(["grace-picked"]),
+          withheld: new Set(),
         },
       ],
     });
@@ -326,6 +334,7 @@ describe("other people's opened Skills", () => {
           userId: GRACE,
           containerId: space(GRACE),
           skills: new Set(["grace-picked"]),
+          withheld: new Set(),
         },
       ],
     });
@@ -339,8 +348,18 @@ describe("other people's opened Skills", () => {
     const { learning } = runtime({
       published,
       open: [
-        { userId: GRACE, containerId: space(GRACE), skills: "all" },
-        { userId: ALAN, containerId: space(ALAN), skills: "all" },
+        {
+          userId: GRACE,
+          containerId: space(GRACE),
+          skills: "all",
+          withheld: new Set(),
+        },
+        {
+          userId: ALAN,
+          containerId: space(ALAN),
+          skills: "all",
+          withheld: new Set(),
+        },
       ],
     });
     const run = await learning.acquire("bot", undefined, ADA);
@@ -373,8 +392,18 @@ describe("other people's opened Skills", () => {
         [space(GRACE)]: new LearnedSkillsError("NETWORK_ERROR", true),
       },
       open: [
-        { userId: GRACE, containerId: space(GRACE), skills: "all" },
-        { userId: ALAN, containerId: space(ALAN), skills: "all" },
+        {
+          userId: GRACE,
+          containerId: space(GRACE),
+          skills: "all",
+          withheld: new Set(),
+        },
+        {
+          userId: ALAN,
+          containerId: space(ALAN),
+          skills: "all",
+          withheld: new Set(),
+        },
       ],
     });
     const run = await learning.acquire("bot", undefined, ADA);
@@ -411,7 +440,12 @@ describe("mergeLearnedSkills", () => {
       own: snapshot("own", ["y", "z"]),
       opened: [
         {
-          source: { userId: "g", containerId: "user-g", skills: "all" },
+          source: {
+            userId: "g",
+            containerId: "user-g",
+            skills: "all",
+            withheld: new Set(),
+          },
           snapshot: snapshot("g", ["x", "z", "w", "v"]),
         },
         {
@@ -419,6 +453,7 @@ describe("mergeLearnedSkills", () => {
             userId: "h",
             containerId: "user-h",
             skills: new Set(["w"]),
+            withheld: new Set(),
           },
           snapshot: snapshot("h", ["w", "u"]),
         },
@@ -434,6 +469,25 @@ describe("mergeLearnedSkills", () => {
       ["user-g/w", "g:w"],
       ["user-h/w", "h:w"],
     ]);
+  });
+
+  test("an opened source never delivers a withheld skill, under all or a chosen set", () => {
+    for (const skills of ["all", new Set(["x"])] as const) {
+      const input = (withheld: ReadonlySet<string>) => ({
+        bot: snapshot("bot", ["a"]),
+        opened: [
+          {
+            source: { userId: "g", containerId: "user-g", skills, withheld },
+            snapshot: snapshot("g", ["x", "y"]),
+          },
+        ],
+      });
+      const merged = mergeLearnedSkills(input(new Set(["x"])));
+      expect(merged?.skills.map((skill) => skill.name)).not.toContain("x");
+      expect(merged?.revision).not.toBe(
+        mergeLearnedSkills(input(new Set()))?.revision,
+      );
+    }
   });
 
   test("the merged snapshot's identity changes with any source and stays the same for the same sources", () => {
