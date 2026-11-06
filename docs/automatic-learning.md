@@ -68,6 +68,18 @@ Recordings made with the OpenBot Recorder do not belong to a Bot. Every recordin
 
 Thread assignment is unchanged: a conversation's evidence still goes to its Bot's container.
 
+## Reviewing learned skills
+
+Skills learned from a person's recordings are reviewed in OpenBot, so nobody has to open the Intelligence dashboard for it.
+
+- **Who approves.** On **Admin → Automatic learning**, **Who approves skills learned from people's recordings** is either **Admins** or **Each person, for their own Bots**. With admins, a skill from a recording waits under **Waiting for an admin** on the person's Settings → Learning page and under **From people's recordings** for an admin. With each person, it waits under **Waiting for your review** on their own Settings → Learning page.
+- **Reaching other Bots.** A skill a person approves for themselves reaches only their own Bots. To open it to everybody, the person chooses **Ask to share** under **Your Skills**; it then reads **Asked to share**, and an admin decides under **Sharing requests** on the Automatic learning page.
+- **Your recordings.** **Teach a Bot** lists each person's recordings under **Your recordings**, and the Recorder's popup links to it after a recording is sent (**See it on Teach a Bot**). The list needs Intelligence 0.16 with recordings (trajectories) switched on. Recordings cannot be deleted from OpenBot.
+- **Reading a skill.** Every waiting skill shows its SKILL.md, why it was proposed, and the conversations and recordings it came from. Read it before approving or rejecting it.
+- **Learn now.** **Learn now** on Settings → Learning starts an analysis at once. In the personal edition, **Approve new skills automatically** is on by default. It runs when Learning opens, every 15 minutes, and when it is switched on.
+- **Analysis runs and published skills.** **Analysis runs** and **Published skills** on the Automatic learning page show what Intelligence has analysed and what Bots can now use.
+- **Still in the dashboard.** Schedules and insights stay in the Intelligence dashboard.
+
 ## Credentials and permissions
 
 OpenBot reuses its **server-side** `INTELLIGENCE_API_KEY` and `INTELLIGENCE_API_URL`. The server creates containers with the runtime key where Intelligence allows it, and the setup helper with the authenticated account where it does not. Automatic assignment reads with the runtime key whether `openbot` exists in its own project. Never put the project key in browser environment variables. The Learning settings and inspection endpoints require an OpenBot administrator; settings writes also require same-origin JSON requests (or an explicitly trusted app origin).
