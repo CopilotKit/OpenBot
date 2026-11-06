@@ -137,13 +137,16 @@ for engine in "${engines[@]}"; do
     vols+=$'\n'$("$engine" volume ls -q --filter "label=com.docker.compose.project=$project")
     nets+=$'\n'$("$engine" network ls -q --filter "label=com.docker.compose.project=$project")
   done
-  ids=$({
-    echo "$ids"
-    "$engine" ps -aq --filter "name=^openbot-"
-  } | sed '/^$/d' | sort -u)
+  # The supervisor's per-Bot computers and their volumes carry no compose label: match them by
+  # OpenBot's own namespace only, never a bare `openbot-` prefix, which also names other local
+  # stacks (openbot-kite-demo, a worktree's start.sh) that this reset must leave alone.
+  for project in "${PROJECTS[@]}"; do
+    ids+=$'\n'$("$engine" ps -aq --filter "label=openbot.namespace=$project")
+  done
+  ids=$(echo "$ids" | sed '/^$/d' | sort -u)
   vols=$({
     echo "$vols"
-    "$engine" volume ls -q | grep -E '^openbot[_-]'
+    "$engine" volume ls -q | grep -E '^(openbot-desktop[_-]|openbot-(profile|workspace)-)'
   } | sed '/^$/d' | sort -u)
   nets=$(echo "$nets" | sed '/^$/d' | sort -u)
   # shellcheck disable=SC2086 # one argument per id

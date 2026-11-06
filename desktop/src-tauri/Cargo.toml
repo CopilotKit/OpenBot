@@ -51,6 +51,8 @@ tauri-plugin-updater = "2"
 # Restarting into the version the updater just wrote. The updater can replace the bundle
 # but cannot relaunch it, and an update nobody is running is not an update.
 tauri-plugin-process = "2"
+# Probing a local port without SO_REUSEADDR, which std sets on Unix. See `env::bind_loopbacks`.
+socket2 = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

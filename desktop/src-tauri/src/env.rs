@@ -213,10 +213,10 @@ fn parse_port(key: &str, value: &str) -> std::io::Result<u16> {
 }
 
 fn bind_loopbacks(port: u16) -> std::io::Result<Vec<std::net::TcpListener>> {
-    let ipv4 = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))?;
+    let ipv4 = bind_exclusive((std::net::Ipv4Addr::LOCALHOST, port).into())?;
     let port = ipv4.local_addr()?.port();
     let mut held = vec![ipv4];
-    match std::net::TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, port)) {
+    match bind_exclusive((std::net::Ipv6Addr::LOCALHOST, port).into()) {
         Ok(ipv6) => held.push(ipv6),
         Err(error)
             if matches!(
@@ -226,6 +226,28 @@ fn bind_loopbacks(port: u16) -> std::io::Result<Vec<std::net::TcpListener>> {
         Err(error) => return Err(error),
     }
     Ok(held)
+}
+
+/**
+Bind one address the way a port check must: without `SO_REUSEADDR`.
+
+`std::net::TcpListener::bind` sets `SO_REUSEADDR` on Unix, and on macOS that lets a bind to
+`127.0.0.1:3001` succeed while another program listens on `*:3001`. A developer's own server on the
+wildcard address then looked free, OpenBot chose its port, and its server could not start.
+*/
+fn bind_exclusive(address: std::net::SocketAddr) -> std::io::Result<std::net::TcpListener> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(
+        Domain::for_address(address),
+        Type::STREAM,
+        Some(Protocol::TCP),
+    )?;
+    if address.is_ipv6() {
+        socket.set_only_v6(true)?;
+    }
+    socket.bind(&address.into())?;
+    socket.listen(16)?;
+    Ok(socket.into())
 }
 
 /**
@@ -269,6 +291,32 @@ mod port_tests {
     // These tests probe the same default ports. Keep each complete scenario exclusive,
     // including the gap between releasing a probe and binding its simulated conflict.
     static PORT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn a_port_another_program_holds_on_every_address_is_not_chosen() {
+        // A dev server on `*:PORT` (Bun, Node and Vite listen this way) must count as busy.
+        let _ports = PORT_TEST_LOCK.lock().unwrap();
+        for wildcard in ["0.0.0.0:0", "[::]:0"] {
+            let Ok(foreign) = TcpListener::bind(wildcard) else {
+                continue; // no IPv6 on this machine
+            };
+            let port = foreign.local_addr().unwrap().port();
+            assert!(bind_loopbacks(port).is_err(), "{wildcard} port {port} looked free");
+            let preferred = Ports {
+                app: port,
+                server: port,
+                postgres: port,
+                computer: port,
+                bot: port,
+                langgraph: port,
+                supervisor: port,
+                harness: None,
+                browser: None,
+            };
+            let chosen = preferred.available(&HashSet::new(), None, false).unwrap();
+            assert!(!chosen.settings().values().any(|value| value == &port.to_string()));
+        }
+    }
 
     #[test]
     fn occupied_ports_are_replaced_with_distinct_bindable_loopback_ports() {

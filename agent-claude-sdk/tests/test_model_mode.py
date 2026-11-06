@@ -6,7 +6,7 @@ from ag_ui.core import RunAgentInput
 from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.adapter import OpenBotClaudeAgentAdapter
+from src.adapter import CLAUDE_CODE_OUTSIDE_TOOLS, OpenBotClaudeAgentAdapter
 from src.replay import conversation_content
 
 
@@ -112,3 +112,37 @@ def test_model_history_keeps_role_labels_and_real_image_blocks():
         "type": "image",
         "source": {"type": "base64", "media_type": "image/png", "data": "AQID"},
     } in content
+
+
+def test_full_bot_cannot_see_claude_code_web_search_or_shell():
+    # Seen live: asked to search the web, a Claude Agent SDK Bot called Claude Code's WebSearch
+    # four times, was refused each time, and asked the person to grant it.
+    adapter = OpenBotClaudeAgentAdapter(name="openbot")
+    request = RunAgentInput.model_validate(
+        {
+            "threadId": "channel",
+            "runId": "run",
+            "state": {},
+            "messages": [{"id": "user", "role": "user", "content": "Search the web"}],
+            "tools": [
+                {
+                    "name": "show_app_access",
+                    "description": "Offer to turn on an app",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            "context": [],
+            "forwardedProps": {"disallowed_tools": ["Task"]},
+        }
+    )
+    options = adapter.build_options(request, request.thread_id)
+    assert {"WebSearch", "WebFetch", "Bash", "Read", "Write"} <= set(options.disallowed_tools)
+    assert CLAUDE_CODE_OUTSIDE_TOOLS <= set(options.disallowed_tools)
+    assert "ToolSearch" not in options.disallowed_tools
+    assert "mcp__ag_ui__show_app_access" in options.allowed_tools
+    options.cli_path = "/not-executed/claude"
+    command = SubprocessCLITransport(
+        prompt="contract only", options=options
+    )._build_command()
+    hidden = command[command.index("--disallowedTools") + 1].split(",")
+    assert "WebSearch" in hidden and "Bash" in hidden
