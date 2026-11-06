@@ -234,10 +234,12 @@ export function afterStopLearningSentence(
 export function AfterStop({
   state,
   connected,
+  openbotUrl,
   onDiscard,
 }: {
   state: RecorderState;
   connected: boolean;
+  openbotUrl?: string;
   onDiscard: () => void;
 }) {
   const [asking, setAsking] = useState(false);
@@ -272,6 +274,16 @@ export function AfterStop({
                   {line}
                 </ItemDescription>
               ))}
+              {sent && openbotUrl ? (
+                <a
+                  href={new URL("/browser", openbotUrl).toString()}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm underline"
+                >
+                  See it on Teach a Bot
+                </a>
+              ) : null}
             </ItemContent>
           </Item>
         ) : null}
