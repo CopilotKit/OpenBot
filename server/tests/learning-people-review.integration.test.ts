@@ -49,6 +49,9 @@ afterEach(async () => {
 afterAll(async () => {
   await database.delete(users).where(inArray(users.id, [reviewed]));
 });
+afterAll(async () => {
+  await database.$client.end();
+});
 
 function admin(
   extra: Partial<LearningAdminDependencies> = {},

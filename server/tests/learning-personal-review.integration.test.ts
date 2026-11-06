@@ -77,6 +77,10 @@ afterAll(async () => {
   await database.delete(users).where(inArray(users.id, [ada]));
 });
 
+afterAll(async () => {
+  await database.$client.end();
+});
+
 function review(options: {
   containers?: string[];
   personalReview?: LearningSettings["personalReview"];
@@ -245,7 +249,7 @@ describe("reviewing the skills learned from your own recordings", () => {
       proposals: [],
       latestRun: null,
     });
-    expect(body.sources[0]?.unavailable).toBeUndefined();
+    expect(body.sources[0]).not.toHaveProperty("unavailable");
   });
 
   test("Learning switched off in Intelligence reads as unavailable, not as empty", async () => {
