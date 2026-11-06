@@ -1,6 +1,7 @@
 import {
   isLearnedSkillName,
   isLearningSharingMode,
+  type LearnedSkillContent,
   type PersonalLearningSharing,
 } from "@openbot/shared/learning";
 import { Hono, type MiddlewareHandler } from "hono";
@@ -18,6 +19,11 @@ export type PersonalLearningRouteDeps = {
     | { skills: { name: string; description: string }[] }
     | { unavailable: "off" | "unavailable" }
   >;
+  /** One Skill's files from this person's own space; null when they have none by that name. */
+  skillOf?: (
+    userId: string,
+    name: string,
+  ) => Promise<LearnedSkillContent | null>;
   /** Tells this replica's open-Skill index to read again; other replicas see the change within its TTL. */
   invalidate: () => void;
   /**
@@ -81,6 +87,29 @@ export function createPersonalLearningRoutes(
             unavailable: read.unavailable,
           };
     return context.json(answer);
+  });
+
+  routes.get("/skills/:name", async (context) => {
+    const name = context.req.param("name");
+    if (!isLearnedSkillName(name)) {
+      return context.json({ error: "Name a Skill to read." }, 400);
+    }
+    const skill = await deps
+      .skillOf?.(context.var.actor.id, name)
+      .catch(() => undefined);
+    if (skill === undefined) {
+      return context.json(
+        {
+          error:
+            "Couldn't read your Skills from Intelligence just now. Try again.",
+        },
+        503,
+      );
+    }
+    if (skill === null) {
+      return context.json({ error: "You have no Skill by that name." }, 404);
+    }
+    return context.json({ skill });
   });
 
   routes.put("/mode", smallBody, async (context) => {

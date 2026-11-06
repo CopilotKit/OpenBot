@@ -140,9 +140,20 @@ args[1] = {
 } as never;
 args[2] = roleRepository;
 args[12] = auditStore;
+const skillReads: string[] = [];
 args[34] = {
   personalLearning: {
     store,
+    skillOf: async (userId: string, name: string) => {
+      skillReads.push(userId);
+      return name === "mine"
+        ? {
+            name,
+            description: "Mine.",
+            files: [{ path: "SKILL.md", text: "# Mine" }],
+          }
+        : null;
+    },
     skillsOf: (userId: string) => learning.personalSkills(userId),
     invalidate: () => {
       invalidations++;
@@ -553,6 +564,25 @@ describe("Settings, Learning", () => {
         })
       ).status,
     ).toBe(400);
+  });
+
+  test("a person reads a skill from their own space and nobody else's", async () => {
+    skillReads.length = 0;
+    const found = await call(
+      `/api/settings/learning/skills/mine?userId=${grace}`,
+      "ada",
+    );
+    expect(found.status).toBe(200);
+    expect(await found.json()).toMatchObject({
+      skill: { name: "mine", files: [{ path: "SKILL.md", text: "# Mine" }] },
+    });
+    expect(
+      (await call("/api/settings/learning/skills/none", "ada")).status,
+    ).toBe(404);
+    expect(
+      (await call("/api/settings/learning/skills/a%2Fb", "ada")).status,
+    ).toBe(400);
+    expect(skillReads).toEqual([ada, ada]);
   });
 
   test("Skills Intelligence does not deliver show as unavailable, and the choice still saves", async () => {
