@@ -243,12 +243,27 @@ export function ProviderPicker({
   // A sign-in that just finished on this screen moves on by itself once the screen is ready.
   const continueAfterSignIn = useRef(false);
   const oauthAttempt = useRef<string | null>(null);
+  /*
+   * The run of a ChatGPT sign-in still waiting for the browser, if any.
+   *
+   * Leaving it stops it. Left running, its tab could still finish: the browser said "You're signed
+   * in" while this screen had moved on and dropped the result.
+   */
+  const chatGptRun = useRef<number | null>(null);
   const [oauthCode, setOauthCode] = useState<string | null>(null);
   const [oauthSignedIn, setOauthSignedIn] = useState<string | null>(
     initialChoice?.login === "oauth" && initialChoice.saved
       ? initialChoice.provider
       : null,
   );
+
+  function stopChatGptSignIn() {
+    if (chatGptRun.current === null) return;
+    chatGptRun.current = null;
+    invoke("cancel_chatgpt_sign_in").catch(() => {
+      console.error("OpenBot could not stop the ChatGPT sign-in.");
+    });
+  }
 
   async function cancelOAuth() {
     signInRunRef.current += 1;
@@ -322,6 +337,12 @@ export function ProviderPicker({
   useEffect(
     () => () => {
       signInRunRef.current += 1;
+      if (chatGptRun.current !== null) {
+        chatGptRun.current = null;
+        invoke("cancel_chatgpt_sign_in").catch(() => {
+          console.error("OpenBot could not stop the ChatGPT sign-in.");
+        });
+      }
       const attemptId = oauthAttempt.current;
       if (attemptId) {
         invoke("cancel_model_oauth", { attemptId }).catch(() => {
@@ -361,6 +382,7 @@ export function ProviderPicker({
         providerId === "anthropic"
           ? "begin_claude_sign_in"
           : "begin_chatgpt_sign_in";
+      if (providerId !== "anthropic") chatGptRun.current = run;
       const nextSignInUrl = await invoke<string>(start, { root: root.trim() });
       if (!stillCurrent()) return;
       setSignInUrl(nextSignInUrl);
@@ -384,6 +406,7 @@ export function ProviderPicker({
         setSignInUrl(null);
       }
     } finally {
+      if (chatGptRun.current === run) chatGptRun.current = null;
       if (stillCurrent()) {
         setBusy(false);
         setProgress(null);
@@ -543,6 +566,7 @@ export function ProviderPicker({
   /** Back to every provider: the chosen one's sign-in, if any, stops. */
   function chooseAnother() {
     if (oauthAttempt.current) void cancelOAuth();
+    stopChatGptSignIn();
     signInRunRef.current += 1;
     setOpen(null);
     setFailure(null);
@@ -595,6 +619,7 @@ export function ProviderPicker({
               checked={open === r.id}
               onChange={() => {
                 if (oauthAttempt.current) void cancelOAuth();
+                stopChatGptSignIn();
                 signInRunRef.current += 1;
                 setOpen(r.id);
                 // A failure belongs to the row that produced it. Left in place, a refused OpenAI

@@ -240,6 +240,7 @@ test("a pending plan sign-in completion is ignored after switching provider rows
       return "https://chatgpt.test";
     }
     if (command === "finish_chatgpt_sign_in") return chatgpt.promise;
+    if (command === "cancel_chatgpt_sign_in") return null;
     throw new Error(`unexpected command ${command}`);
   };
 
@@ -272,6 +273,74 @@ test("a pending plan sign-in completion is ignored after switching provider rows
   );
   expect(view.queryByText(/Signed in to Anthropic/)).toBeNull();
   expect(choices).toEqual([]);
+});
+
+/*
+ * A ChatGPT sign-in left behind keeps listening for the browser. Its tab can still finish, and the
+ * browser then says "You're signed in" while this screen has moved on and dropped the result. So
+ * leaving it stops it: the tab then gets OpenBot's own page saying the sign-in ended.
+ */
+test("leaving a ChatGPT sign-in that is still waiting stops it", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    if (command === "finish_chatgpt_sign_in") return new Promise(() => {});
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const cancelled = () =>
+    invokeCalls.filter((call) => call.command === "cancel_chatgpt_sign_in")
+      .length;
+
+  const view = await renderPicker();
+  await pick(view, /OpenAI/);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
+  );
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "finish_chatgpt_sign_in"),
+    ).toBe(true),
+  );
+  expect(cancelled()).toBe(0);
+
+  await pick(view, /Anthropic/);
+  await waitFor(() => expect(cancelled()).toBe(1));
+
+  // And when the screen goes away mid-wait, as Back does.
+  await pick(view, /OpenAI/);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
+  );
+  await waitFor(() =>
+    expect(
+      invokeCalls.filter((call) => call.command === "finish_chatgpt_sign_in")
+        .length,
+    ).toBe(2),
+  );
+  view.unmount();
+  await waitFor(() => expect(cancelled()).toBe(2));
+});
+
+test("a ChatGPT sign-in that finished is not cancelled when the screen moves on", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    if (command === "finish_chatgpt_sign_in") return "chatgpt-token";
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderPicker();
+  await pick(view, /OpenAI/);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
+  );
+  await view.findByText(/Signed in to OpenAI/);
+  view.unmount();
+  expect(
+    invokeCalls.some((call) => call.command === "cancel_chatgpt_sign_in"),
+  ).toBe(false);
 });
 
 test("a saved provider-scoped plan session enables continue without exposing a token", async () => {
