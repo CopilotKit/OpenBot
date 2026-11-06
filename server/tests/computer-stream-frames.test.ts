@@ -69,7 +69,7 @@ async function browser(port: number, path: string) {
   const open = new Promise<void>((resolve) => {
     upgraded = resolve;
   });
-  let pending = Buffer.alloc(0);
+  let pending: Buffer = Buffer.alloc(0);
   let isOpen = false;
   socket.on("data", (chunk: Buffer) => {
     pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
