@@ -17,7 +17,7 @@ import {
   offerLocalIntelligence,
   splitStopFailure,
 } from "./localEvalCli";
-import { asProblem, Failure, type Problem } from "./Problem";
+import { asProblem, Failure, InlineFailure, type Problem } from "./Problem";
 import {
   type HeldConfiguration,
   type ModelChoice,
@@ -59,6 +59,14 @@ type AlreadyConfigured = {
     /** OpenBot holds the key `local connect` gave it for this stack. */
     connected?: boolean;
   };
+};
+
+/** This installation's deployment is on an older release than this app, so Start moves it first. */
+type ReleaseMove = { from: string; to: string };
+type ReleaseOutcome = ReleaseMove & {
+  moved: boolean;
+  /** The move did not happen and the previous release started again. */
+  notice?: Problem | null;
 };
 
 function installationKeyFor(root: string, harness: HarnessChoice | null) {
@@ -118,6 +126,8 @@ function Setup() {
   // Running-screen actions that wait on the native side, said while they do.
   const [stopping, setStopping] = useState(false);
   const [showing, setShowing] = useState(false);
+  // Start could not move the deployment to this app's release, and started the one it had.
+  const [releaseNotice, setReleaseNotice] = useState<Problem | null>(null);
   const [step, setStep] = useState<SetupStep>("welcome");
   const [steps, setSteps] = useState<Progress[]>([]);
   const [busy, setBusy] = useState(false);
@@ -485,9 +495,10 @@ function Setup() {
     }
     setBusy(true);
     setFailure(null);
+    setReleaseNotice(null);
     setSteps([]);
     try {
-      await invoke("start_stack", {
+      const startWith = {
         root: root.trim(),
         // The key `local connect` gave OpenBot is in the vault; Start takes it from there.
         apiUrl: intelligence.apiUrl,
@@ -499,7 +510,18 @@ function Setup() {
         // By id only. The image, the port and how it is dialled are facts about the harness, and
         // the window carrying them would be a second list to keep in step with the catalogue.
         harness,
-      });
+      };
+      // The deployment never runs older than this app: an older release is moved to the app's own
+      // as part of this Start. A move that fails is undone and the release it had starts instead.
+      const due = await invoke<ReleaseMove | null>("app_release_move", {
+        root: root.trim(),
+      }).catch(() => null);
+      let outcome: ReleaseOutcome | null = null;
+      if (due) {
+        outcome = await invoke<ReleaseOutcome>("follow_app_release", startWith);
+      } else {
+        await invoke("start_stack", startWith);
+      }
       setSteps((current) => settleProgress(current));
       setRunning(true);
       setRecoveryFailure(null);
@@ -508,6 +530,13 @@ function Setup() {
       savedLaunch.current = installationKey;
       setStep("connect");
       setRefreshIntelligence(false);
+      // A move that did not happen is said on the running screen first; Show OpenBot hands over.
+      if (outcome?.notice) {
+        // The notice says what the rows would: it is the one thing on the screen.
+        setSteps([]);
+        setReleaseNotice(outcome.notice);
+        return true;
+      }
       await invoke("show_openbot");
       return true;
     } catch (error) {
@@ -882,6 +911,17 @@ function Setup() {
   }
 
   const localStarting = local.running;
+  // Start is moving the deployment to this app's release: said while it runs, which can be minutes.
+  const updating = busy
+    ? [...steps]
+        .reverse()
+        .find(
+          (row) =>
+            (row.step === "release" || row.step === "update-images") &&
+            row.running,
+        )
+    : undefined;
+  const updatingLine = updating && <StatusLine>{updating.detail}</StatusLine>;
 
   if (!running && returningToInstallation && !refreshIntelligence) {
     return (
@@ -894,6 +934,7 @@ function Setup() {
               : "Your installation and saved connections are ready to reopen."}
           </p>
           <LocalIntelligence sequence={local} offerStart />
+          {updatingLine}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {/* While a local step runs, its Cancel is the only control. */}
           {!localStarting && (
@@ -967,6 +1008,7 @@ function Setup() {
             it’s ready. This can take a few minutes.
           </p>
           <LocalIntelligence sequence={local} offerStart />
+          {updatingLine}
           {/* Leftover data is a choice, offered above, not a failure to report here. */}
           {displayedFailure && leftoverVolumes.length === 0 && (
             <Failure problem={displayedFailure} />
@@ -999,11 +1041,15 @@ function Setup() {
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
         <h1>{displayedFailure ? "OpenBot stopped" : "OpenBot is running"}</h1>
-        {!displayedFailure && (
+        {!displayedFailure && !releaseNotice && (
           <p className="lede">
             OpenBot is open in this window. You can also show it or stop it from
             the menu bar.
           </p>
+        )}
+        {/* Start went back to the release this installation had. Said before handing over. */}
+        {!displayedFailure && releaseNotice && (
+          <InlineFailure problem={releaseNotice} />
         )}
         <SetupProgress steps={steps} />
         {displayedFailure && <Failure problem={displayedFailure} />}

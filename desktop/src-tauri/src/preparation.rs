@@ -577,6 +577,35 @@ pub fn other_release(
     }
 }
 
+/// Every image Install pulls for the release laid out in `release`, run as `root`'s project: the
+/// Compose services desktop runs with the picked Bot, the migration, and the two sign-in images.
+/// Install asks with `release` = `root`; staging an update asks the same question of the staged
+/// release, so an update downloads exactly what installing that release would, and never the
+/// agents this installation does not run or the all-in-one image desktop never runs.
+pub fn installation_pull_set(
+    address: &Address,
+    root: &Path,
+    release: &Path,
+    harness: Option<&HarnessChoice>,
+) -> Result<Vec<String>, Problem> {
+    let picked = crate::harness::picked(harness, release).map_err(Problem::from)?;
+    let settings = image_settings(release, picked.as_ref())?;
+    let installed = picked
+        .as_ref()
+        .and_then(|picked| picked.installed_port())
+        .is_some();
+    let mut images = stack::installation_images_in(address, root, release, installed, &settings)?;
+    for published in [
+        crate::plan::SIGN_IN_IMAGE,
+        crate::plan::CHATGPT_SIGN_IN_IMAGE,
+    ] {
+        images.push(deployment::reference(release, published)?);
+    }
+    images.sort();
+    images.dedup();
+    Ok(images)
+}
+
 /// Public Compose overrides suffice to identify and download software before authentication.
 pub fn image_settings(
     root: &Path,

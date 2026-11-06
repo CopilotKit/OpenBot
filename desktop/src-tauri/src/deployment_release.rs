@@ -14,6 +14,9 @@ use crate::deployment;
 /// a repair at its own version would only lay out again) asks this distribution for its latest
 /// release. The fetcher records the exact tag after the source and image manifest have both
 /// downloaded. Uses blocking HTTP, so callers in an async runtime must use a blocking task.
+///
+/// Install and Repair keep a followed release. Start is what moves one older than the app to the
+/// app's own release, through the runtime updater (see `follow`).
 pub fn resolve_version(root: &Path) -> Result<String, String> {
     resolve_version_with(root, deployment::pinned().as_ref(), || {
         let policy = crate::updates::distribution(root)?;

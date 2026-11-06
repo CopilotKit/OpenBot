@@ -15,8 +15,8 @@ mod intelligence_bridge;
 mod test_support;
 
 use openbot_desktop_lib::{
-    acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
-    install, local_browser, local_eval, local_eval_state, preparation,
+    acquire, deployment, deployment_release, engine, env as openbot_env, follow, harness,
+    host_access, install, local_browser, local_eval, local_eval_state, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install,
     shell_updates, stack, supervise, telemetry, tray, updates, windows as win,
@@ -703,20 +703,42 @@ async fn stage_runtime_update(
     require_update_root(&app.state::<Shell>(), &root)?;
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let saved=preparation::saved_engine(&root).ok_or("This installation has no saved engine. Complete its original installation before updating.")?;
-        let found=engine::detect_saved(Some(saved));
-        let address=found.address.filter(|_|found.responding).ok_or("Start the installation's saved container engine before staging an update.")?.pin()?;
-        let staged=updates::stage(&root,&version)?;
-        let candidate=updates::staged_manifest(&root)?;
-        let images=updates::candidate_images(&candidate)?;
-        for (index,image) in images.iter().enumerate() {
-            let detail=format!("Staging update software ({}/{}).",index+1,images.len());
-            report_running(&handle,"update-images",&detail,None);
-            pull_metrics::pull_image(&address,image,|bytes|report_running(&handle,"update-images",&detail,Some(bytes.bytes)),|metrics|desktop_telemetry::pull_completed(&handle,metrics))?;
-        }
-        updates::mark_images_staged(&root,saved)?;
-        Ok::<_,Problem>(staged)
-    }).await.map_err(|e|Problem::from(e.to_string()))?
+        // The Bot this installation was prepared with, whose images it runs.
+        let harness = preparation::installation(&root).and_then(|found| found.harness);
+        stage_with_images(&handle, &root, harness.as_ref(), |root| {
+            updates::stage(root, &version)
+        })
+    })
+    .await
+    .map_err(|e| Problem::from(e.to_string()))?
+}
+/// Stage a release beside the installation, then pull what installing it would pull onto the
+/// installation's saved engine (`updates::stage_images`). Nothing that runs is stopped or changed.
+fn stage_with_images(
+    handle: &tauri::AppHandle,
+    root: &Path,
+    harness: Option<&harness::HarnessChoice>,
+    stage: impl FnOnce(&Path) -> Result<serde_json::Value, String>,
+) -> Result<serde_json::Value, Problem> {
+    let saved=preparation::saved_engine(root).ok_or("This installation has no saved engine. Complete its original installation before updating.")?;
+    let found = engine::detect_saved(Some(saved));
+    let address = found
+        .address
+        .filter(|_| found.responding)
+        .ok_or("Start the installation's saved container engine before staging an update.")?
+        .pin()?;
+    let staged = stage(root)?;
+    updates::stage_images(&address, root, harness, |index, total, image| {
+        let detail = format!("Staging update software ({}/{total}).", index + 1);
+        report_running(handle, "update-images", &detail, None);
+        pull_metrics::pull_image(
+            &address,
+            image,
+            |bytes| report_running(handle, "update-images", &detail, Some(bytes.bytes)),
+            |metrics| desktop_telemetry::pull_completed(handle, metrics),
+        )
+    })?;
+    Ok(staged)
 }
 #[tauri::command]
 #[allow(
@@ -739,20 +761,34 @@ async fn apply_runtime_update(
     let _update = RuntimeUpdateGuard::begin(&app)?;
     let root = stack::root_from(&root);
     require_update_root(&app.state::<Shell>(), &root)?;
+    apply_staged_update(app, root, model, harness, None).await
+}
+
+/// Apply the staged release, with the update guard already held: stop, back up, install, prepare,
+/// start, verify, accept. A failure puts the previous release's files back, and its database when
+/// that is safe without asking (see `after_failed_candidate`). `intelligence`: the local
+/// Intelligence addresses to start with, or `None` for the ones this installation last started with.
+async fn apply_staged_update(
+    app: tauri::AppHandle,
+    root: PathBuf,
+    model: ChosenModel,
+    harness: Option<harness::HarnessChoice>,
+    intelligence: Option<(String, String)>,
+) -> Result<serde_json::Value, Problem> {
     let target = root.clone();
     let (mut journal, address, identity, database_identity) =
         tauri::async_runtime::spawn_blocking(move || {
             let journal = updates::prepare_apply(&target)?;
             let saved = preparation::saved_engine(&target)
                 .ok_or("This installation has no saved engine.")?;
-            updates::require_staged_images(&target, saved)?;
+            let staged = updates::require_staged_images(&target, saved)?;
             let found = engine::detect_saved(Some(saved));
             let address = found
                 .address
                 .filter(|_| found.responding)
                 .ok_or("The saved container engine is not answering.")?
                 .pin()?;
-            preparation::require_images(&address, &updates::candidate_images(&journal.candidate)?)?;
+            preparation::require_images(&address, &staged)?;
             let secrets = openbot_desktop_lib::vault::already_given_no_ui(
                 &target,
                 &target.join(".env"),
@@ -839,14 +875,18 @@ async fn apply_runtime_update(
     updates::mark_starting(&root, &mut journal)?;
     // The local Intelligence addresses this installation last started with. The window holds them
     // only while its local sequence runs, and an update is applied from a stopped screen too.
-    let mut addresses = openbot_env::already_set(
-        &root.join(".env"),
-        &["INTELLIGENCE_API_URL", "INTELLIGENCE_GATEWAY_WS_URL"],
-    );
-    let api_url = addresses.remove("INTELLIGENCE_API_URL").unwrap_or_default();
-    let gateway_ws_url = addresses
-        .remove("INTELLIGENCE_GATEWAY_WS_URL")
-        .unwrap_or_default();
+    let (api_url, gateway_ws_url) = intelligence.unwrap_or_else(|| {
+        let mut addresses = openbot_env::already_set(
+            &root.join(".env"),
+            &["INTELLIGENCE_API_URL", "INTELLIGENCE_GATEWAY_WS_URL"],
+        );
+        (
+            addresses.remove("INTELLIGENCE_API_URL").unwrap_or_default(),
+            addresses
+                .remove("INTELLIGENCE_GATEWAY_WS_URL")
+                .unwrap_or_default(),
+        )
+    });
     let launched = start_stack_inner(
         app.clone(),
         root.clone(),
@@ -1000,6 +1040,148 @@ fn restore_previous_release_owned(
             "the previous release is restored, but its database service did not stop: {error}"
         )),
         (Err(error), _) => Err(error),
+    }
+}
+
+/// The move Start makes first: this installation's deployment is on an older release than this
+/// app (see `follow`). `None` when it starts as it is.
+#[tauri::command]
+async fn app_release_move(root: String) -> Option<follow::Move> {
+    follow::due(
+        &stack::root_from(&root),
+        deployment::pinned().as_ref(),
+        &follow::app_release(),
+    )
+}
+
+/// Start, moving the deployment to this app's release first, through the runtime updater: staged
+/// beside the installation while nothing is stopped, then applied with its backup, journal and
+/// verification. A failed move is undone, its database included, and the previous release starts;
+/// the outcome says so. Takes what `start_stack` takes.
+#[tauri::command]
+async fn follow_app_release(
+    app: tauri::AppHandle,
+    root: String,
+    api_url: String,
+    gateway_ws_url: String,
+    model: ChosenModel,
+    harness: Option<harness::HarnessChoice>,
+) -> Result<follow::Outcome, Problem> {
+    let selected = stack::root_from(&root);
+    let Some(planned) = follow::due(
+        &selected,
+        deployment::pinned().as_ref(),
+        &follow::app_release(),
+    ) else {
+        // Moved or decided meanwhile: an ordinary Start.
+        let kept = deployment::installed(&selected)
+            .map(|found| found.version)
+            .unwrap_or_default();
+        start_stack(app, root, api_url, gateway_ws_url, model, harness).await?;
+        return Ok(follow::Outcome::unchanged(kept));
+    };
+    if app
+        .state::<Shell>()
+        .updating
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err(Problem::plain(
+            "A runtime update is in progress. Wait for it to finish before starting.",
+        ));
+    }
+    report_running(&app, "release", follow::moving_said(&planned), None);
+    let moved = {
+        let _update = RuntimeUpdateGuard::begin(&app)?;
+        let handle = app.clone();
+        let target = selected.clone();
+        let wanted = planned.clone();
+        let chosen = harness.clone();
+        let staged = match require_update_root(&app.state::<Shell>(), &selected) {
+            Err(problem) => Err(problem),
+            Ok(()) => tauri::async_runtime::spawn_blocking(move || {
+                stage_with_images(&handle, &target, chosen.as_ref(), |root| {
+                    follow::stage(root, &wanted, &deployment::get)
+                })
+            })
+            .await
+            .map_err(|e| Problem::from(e.to_string()))
+            .and_then(|staged| staged),
+        };
+        match staged {
+            // Nothing was stopped or changed, so the next Start tries again.
+            Err(problem) => Err((false, problem)),
+            Ok(_) => apply_staged_update(
+                app.clone(),
+                selected.clone(),
+                model.clone(),
+                harness.clone(),
+                Some((api_url.clone(), gateway_ws_url.clone())),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|problem| (true, problem)),
+        }
+    };
+    let (applied, problem) = match moved {
+        Ok(()) => {
+            let _ = follow::clear_failure(&selected);
+            report(
+                &app,
+                "release",
+                true,
+                format!("OpenBot is on {}.", planned.to),
+            );
+            refresh_menus(&app);
+            desktop_telemetry::record(&app, telemetry::EventData::Activated);
+            return Ok(follow::Outcome::moved(&planned));
+        }
+        Err(failed) => failed,
+    };
+    // Stop or Quit during the move outranks it: nothing starts again on its own. Anything left half
+    // done is recovered by the next Start, as for an update applied from Runtime updates.
+    if app
+        .state::<Shell>()
+        .update_cancelled
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err(problem);
+    }
+    let detail = problem_detail(problem);
+    if applied {
+        let _ = follow::record_failure(&selected, &planned);
+    }
+    // A candidate that may have changed the database leaves its update record. Nobody asked for
+    // this move, so the database backup it took is put back with the previous release's files.
+    if updates::interruption(&selected).ok().flatten().is_some() {
+        if let Err(undo) = recover_runtime_update(app.clone(), root.clone()).await {
+            return Err(Problem::with(
+                format!(
+                    "OpenBot couldn't update to {} or go back to {}. {}",
+                    planned.to,
+                    planned.from,
+                    updates::RESTORE_ACTION
+                ),
+                format!("{detail}\nundo: {}", problem_detail(undo)),
+            ));
+        }
+    }
+    report(&app, "release", false, follow::kept_said(&planned, applied));
+    // The previous release starts as it was. Install prepares it again only when putting its files
+    // back required that.
+    let restarted = match prepare_installation(app.clone(), root.clone(), harness.clone()).await {
+        Ok(()) => start_stack(app, root, api_url, gateway_ws_url, model, harness).await,
+        Err(problem) => Err(problem),
+    };
+    match restarted {
+        Ok(()) => Ok(follow::Outcome::kept(&planned, applied, detail)),
+        Err(problem) => Err(Problem {
+            said: format!("{} {}", follow::undone_said(&planned), problem.said),
+            detail: Some(format!(
+                "{}\nupdate: {detail}",
+                problem.detail.clone().unwrap_or_default()
+            )),
+            ..problem
+        }),
     }
 }
 
@@ -1259,7 +1441,7 @@ async fn prepare_installation_inner(
         // And the Compose project it runs as, decided once on that engine and recorded beside it,
         // before anything is created under it. See `stack::project`.
         stack::project(&address, &root)?;
-        let picked = harness::picked(harness.as_ref(), &root).map_err(Problem::from)?;
+        harness::picked(harness.as_ref(), &root).map_err(Problem::from)?;
         let handle = app.clone();
         let _startup = attempt.lock_current()?;
         if preparation::require(&root, Some(&harness), &address).is_ok() {
@@ -1297,20 +1479,8 @@ async fn prepare_installation_inner(
             "Checking which local software to download.",
             None,
         );
-        let settings = preparation::image_settings(&root, picked.as_ref())?;
-        let installed = picked
-            .as_ref()
-            .and_then(|picked| picked.installed_port())
-            .is_some();
-        let mut images = stack::installation_images(&address, &root, installed, &settings)?;
-        for published in [
-            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
-            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
-        ] {
-            images.push(deployment::reference(&root, published)?);
-        }
-        images.sort();
-        images.dedup();
+        // The same question a staged update asks of its release: see `installation_pull_set`.
+        let images = preparation::installation_pull_set(&address, &root, &root, harness.as_ref())?;
         // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.
         let pacer = Mutex::new(pull_metrics::Pacer::default());
         pull_metrics::pull_images_limited(
@@ -1722,7 +1892,7 @@ fn sign_in_reference(
 /// Deliberately not the same type as `ModelCredential`: this is whatever arrived over the bridge,
 /// and turning it into a credential is a conversion that can fail. Accepting the credential type
 /// directly would make an impossible combination representable at the boundary.
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ChosenModel {
     provider: String,
@@ -7183,6 +7353,8 @@ fn main() {
             stage_runtime_update,
             establish_runtime_baseline,
             apply_runtime_update,
+            app_release_move,
+            follow_app_release,
             runtime_update_status,
             recover_runtime_update,
             start_stack,

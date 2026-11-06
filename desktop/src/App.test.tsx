@@ -1359,6 +1359,106 @@ test("relaunch starts a connected local stack that reports ready and valid", asy
   expect(view.getByRole("button", { name: "Start OpenBot" })).toBeTruthy();
 });
 
+/** Start finds the deployment on an older release than this app, and `follow_app_release` answers. */
+function withOlderDeployment(outcome: unknown) {
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "app_release_move") return { from: "v0.3.0", to: "v0.3.1" };
+    if (command === "follow_app_release")
+      return typeof outcome === "function" ? outcome() : outcome;
+    return previous(command, args);
+  };
+}
+
+test("relaunch moves an older deployment to this app's release as part of Start, then opens OpenBot", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-older-release",
+    localStatus("ready", "valid"),
+  );
+  const moving = deferred<unknown>();
+  withOlderDeployment(() => moving.promise);
+  const view = await renderApp();
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "follow_app_release"),
+    ).toBe(true),
+  );
+  // Said while the move runs, which can take minutes.
+  const said =
+    "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.";
+  await emitProgress({
+    step: "release",
+    ok: true,
+    running: true,
+    detail: said,
+  });
+  expect(view.getByRole("heading", { name: "Starting OpenBot" })).toBeTruthy();
+  expect(view.getByText(said)).toBeTruthy();
+  await act(async () =>
+    moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+  );
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  await expectHandover();
+  const sequence = invokeCalls
+    .map((call) => call.command)
+    .filter((command) =>
+      [
+        "run_local_eval",
+        "app_release_move",
+        "follow_app_release",
+        "start_stack",
+        "show_openbot",
+      ].includes(command),
+    );
+  // The move is the Start: nothing starts the older release first.
+  expect(sequence).toEqual([
+    "run_local_eval",
+    "app_release_move",
+    "follow_app_release",
+    "show_openbot",
+  ]);
+  expect(
+    invokeCalls.find((call) => call.command === "follow_app_release")?.args,
+  ).toMatchObject({
+    root: "/tmp/local-eval-older-release",
+    ...LOCAL_ADDRESSES,
+  });
+});
+
+test("a move that did not finish says so on the running screen before handing over", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-move-undone",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "OpenBot couldn't update to v0.3.1, so it's still running v0.3.0. Your Bots, sign-ins and data are unchanged. To try again, open Runtime updates.";
+  withOlderDeployment({
+    from: "v0.3.0",
+    to: "v0.3.1",
+    moved: false,
+    notice: { said, detail: "The updated release could not be verified." },
+  });
+  const view = await renderApp();
+  await view.findByText(said);
+  expect(
+    view.getByRole("heading", { name: "OpenBot is running" }),
+  ).toBeTruthy();
+  expect(view.getByText("Technical details")).toBeTruthy();
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+  // The release it had is running; the person opens it when they have read why.
+  expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(
+    false,
+  );
+  await userEvent.click(view.getByRole("button", { name: "Show OpenBot" }));
+  await waitFor(() =>
+    expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(
+      true,
+    ),
+  );
+});
+
 test("relaunch never starts a local stack that is not exactly ready and valid", async () => {
   for (const [readiness, licence, said] of [
     [

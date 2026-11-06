@@ -657,15 +657,17 @@ fn current(root: &Path) -> Result<Value, String> {
 /// Explicit adoption uses the installed pin and independently configured publisher, then compares
 /// every managed source leaf with the checksum-verified archive. It never rewrites source.
 pub fn establish_baseline(root: &Path) -> Result<Value, String> {
+    establish_baseline_with(root, &deployment::get)
+}
+/// [`establish_baseline`], downloading through `get`.
+pub fn establish_baseline_with(root: &Path, get: deployment::Download) -> Result<Value, String> {
     require_no_interruption(root)?;
     let installed=deployment::installed(root).ok_or("No installed release pin exists. Restore the original installation record before establishing a baseline.")?;
     let policy = distribution(root)?;
-    let manifest = read_candidate(&policy, &installed.version)?;
-    let archive = deployment::get(
-        manifest["artifacts"]["source"]["url"]
-            .as_str()
-            .ok_or("missing source URL")?,
-    )?;
+    let manifest = read_candidate_with(&policy, &installed.version, get)?;
+    let archive = get(manifest["artifacts"]["source"]["url"]
+        .as_str()
+        .ok_or("missing source URL")?)?;
     establish_baseline_bytes(root, &manifest, &policy, &archive)
 }
 fn establish_baseline_bytes(
@@ -790,7 +792,14 @@ pub fn check(root: &Path, version: &str) -> Result<Value, String> {
     Ok(plan(&current, &candidate, &policy, "extended"))
 }
 fn read_candidate(policy: &Distribution, version: &str) -> Result<Value, String> {
-    let candidate = parse_manifest(&deployment::get(&manifest_url(policy, version)?)?)?;
+    read_candidate_with(policy, version, &deployment::get)
+}
+fn read_candidate_with(
+    policy: &Distribution,
+    version: &str,
+    get: deployment::Download,
+) -> Result<Value, String> {
+    let candidate = parse_manifest(&get(&manifest_url(policy, version)?)?)?;
     if candidate["version"] != version {
         return Err("candidate version does not match requested tag".into());
     }
@@ -840,14 +849,16 @@ fn unpack_safe(destination: &Path, body: &[u8]) -> Result<(), String> {
 }
 
 pub fn stage(root: &Path, version: &str) -> Result<Value, String> {
+    stage_with(root, version, &deployment::get)
+}
+/// [`stage`], downloading through `get`.
+pub fn stage_with(root: &Path, version: &str, get: deployment::Download) -> Result<Value, String> {
     require_no_interruption(root)?;
     let policy = distribution(root)?;
-    let candidate = read_candidate(&policy, version)?;
-    let archive = deployment::get(
-        candidate["artifacts"]["source"]["url"]
-            .as_str()
-            .ok_or("missing source URL")?,
-    )?;
+    let candidate = read_candidate_with(&policy, version, get)?;
+    let archive = get(candidate["artifacts"]["source"]["url"]
+        .as_str()
+        .ok_or("missing source URL")?)?;
     stage_bytes(root, &candidate, &policy, &archive)
 }
 fn stage_bytes(
@@ -942,6 +953,7 @@ pub fn accepted_database_identity(root: &Path) -> Result<String, String> {
 pub fn staged_manifest(root: &Path) -> Result<Value, String> {
     read_manifest(&stage_path(root)?.join(STAGED))
 }
+/// Every image the candidate release publishes. A started candidate may run only these.
 pub fn candidate_images(candidate: &Value) -> Result<Vec<String>, String> {
     let images = candidate["artifacts"]["images"]
         .as_object()
@@ -951,25 +963,46 @@ pub fn candidate_images(candidate: &Value) -> Result<Vec<String>, String> {
         .map(|image| image["reference"].as_str().unwrap_or("").into())
         .collect())
 }
-pub fn mark_images_staged(root: &Path, engine: crate::engine::Engine) -> Result<(), String> {
+const STAGED_IMAGES: &str = ".openbot-staged-images.json";
+/// Pull exactly what installing the staged release would pull, for the Bot this installation runs
+/// (`preparation::installation_pull_set`, the one list Install uses), and record it for apply. A
+/// release names every agent and its all-in-one image as well: v0.3.0 named 19 images where an
+/// installation pulls 8, and its all-in-one image had no arm64 build, so staging it failed on an
+/// Apple silicon Mac. `pull` is called once per image, with its index and the total.
+pub fn stage_images(
+    address: &crate::engine::Address,
+    root: &Path,
+    harness: Option<&crate::harness::HarnessChoice>,
+    mut pull: impl FnMut(usize, usize, &str) -> Result<(), crate::problem::Problem>,
+) -> Result<Vec<String>, crate::problem::Problem> {
+    let staged = stage_path(root)?;
     let candidate = staged_manifest(root)?;
+    let images = crate::preparation::installation_pull_set(address, root, &staged, harness)?;
+    for (index, image) in images.iter().enumerate() {
+        pull(index, images.len(), image)?;
+    }
     write_json(
-        &stage_path(root)?.join(".openbot-staged-images.json"),
-        &json!({"engine":engine,"images":candidate_images(&candidate)?}),
-    )
+        &staged.join(STAGED_IMAGES),
+        &json!({"engine":address.engine,"version":candidate["version"],"images":images}),
+    )?;
+    Ok(images)
 }
-pub fn require_staged_images(root: &Path, engine: crate::engine::Engine) -> Result<(), String> {
+/// The images staging pulled for the staged candidate on this engine, which apply requires.
+pub fn require_staged_images(
+    root: &Path,
+    engine: crate::engine::Engine,
+) -> Result<Vec<String>, String> {
     let record: Value = serde_json::from_slice(
-        &std::fs::read(stage_path(root)?.join(".openbot-staged-images.json")).map_err(|_| {
+        &std::fs::read(stage_path(root)?.join(STAGED_IMAGES)).map_err(|_| {
             "Candidate images have not finished staging on this installation's saved engine"
                 .to_string()
         })?,
     )
     .map_err(|e| e.to_string())?;
-    if record != json!({"engine":engine,"images":candidate_images(&staged_manifest(root)?)?}) {
+    if record["engine"] != json!(engine) || record["version"] != staged_manifest(root)?["version"] {
         return Err("staged images belong to another engine or candidate".into());
     }
-    Ok(())
+    serde_json::from_value(record["images"].clone()).map_err(|e| e.to_string())
 }
 
 pub fn runtime_build_environment(root: &Path) -> Result<BTreeMap<String, String>, String> {

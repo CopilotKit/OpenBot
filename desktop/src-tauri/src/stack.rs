@@ -1036,9 +1036,29 @@ pub fn installation_images(
     harness: bool,
     settings: &Secrets,
 ) -> Result<Vec<String>, Problem> {
+    installation_images_in(engine, root, root, harness, settings)
+}
+
+/// [`installation_images`] for a release laid out in `release`, a staged update beside the
+/// installation, resolved as `root`'s own project with `root`'s settings.
+pub fn installation_images_in(
+    engine: &Address,
+    root: &Path,
+    release: &Path,
+    harness: bool,
+    settings: &Secrets,
+) -> Result<Vec<String>, Problem> {
     let mut requested = selected_services(harness, BundledBots::openai_compatible());
     requested.push("migrate");
     let mut command = compose_command(engine, root, settings);
+    if release != root {
+        // Compose reads the release's file from where it runs, and `.env` from there too, so the
+        // installation's own settings are named explicitly.
+        command.current_dir(release);
+        if root.join(".env").is_file() {
+            command.arg("--env-file").arg(root.join(".env"));
+        }
+    }
     if harness {
         command.args(["--profile", "harness"]);
     }
