@@ -1085,7 +1085,7 @@ test("on OpenBot Desktop the narration row says what the Recorder hears, as it r
     ],
     [
       "unavailable",
-      "Narration is off. Turn it on from the Recorder's button in your browser's toolbar. Recording still works.",
+      "The Recorder can't hear your microphone, so what you say isn't recorded. The Recorder's button in your browser's toolbar says why. Recording still works.",
     ],
   ] as const) {
     state = { ...nativeState(), recorder: recorder(voice) };
@@ -1100,7 +1100,7 @@ test("on hosted OpenBot in a browser with no speech recognition, the page says n
   const view = draw(<BrowserPage />);
   expect(
     await view.findByText(
-      "Narration is off: this browser can't turn speech into text. Recording still works.",
+      "Narration isn't available in this browser, so what you say isn't recorded. Recording still works.",
     ),
   ).toBeTruthy();
   expect(view.queryByRole("switch", { name: "Narration" })).toBeNull();

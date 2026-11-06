@@ -42,7 +42,7 @@ export function narrationProblemSentence(
 ): string {
   switch (problem) {
     case "unsupported":
-      return `Narration is off: this browser can't turn speech into text. ${GOES_ON}`;
+      return `Narration isn't available in this browser, so what you say isn't recorded. ${GOES_ON}`;
     case "on-device":
       return `This browser can't turn speech into text on your computer, and OpenBot sends your voice nowhere else, so narration is off. ${GOES_ON}`;
     case "speech-pack":
@@ -73,7 +73,7 @@ function nativeNarrationSentence(voice: LauncherState["voice"]): string {
     case "muted":
       return "Muted in the Recorder, so what you say isn't recorded. Turn it on again from the Recorder's button in your browser's toolbar.";
     case "unavailable":
-      return `Narration is off. Turn it on from the Recorder's button in your browser's toolbar. ${GOES_ON}`;
+      return `The Recorder can't hear your microphone, so what you say isn't recorded. The Recorder's button in your browser's toolbar says why. ${GOES_ON}`;
     // Nothing is being recorded yet, or the Recorder has not said.
     default:
       return "On. The Recorder hears your microphone while you record, so say what you're doing as you go.";
