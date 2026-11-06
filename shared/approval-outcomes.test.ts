@@ -67,6 +67,30 @@ test("any other step not done keeps why, and loses the Bot's next step", () => {
   );
 });
 
+test("a reason whose parentheses do not close still loses the Bot's next step", () => {
+  // The reason is an error message as thrown. One with a stray "(" left the depth count above zero,
+  // so no sentence end was found and the whole text, Bot's step included, reached the person.
+  expect(
+    outcomeForPerson(
+      outcomes.notCarriedOut("Unexpected token ( in JSON at position 4"),
+    ),
+  ).toBe(
+    "Not done: this action could not be carried out (Unexpected token ( in JSON at position 4).",
+  );
+  // A long reason is cut at 300 characters, which can drop its own closing ")".
+  const long = `400 Invalid request (${"x".repeat(320)})`;
+  const read = outcomeForPerson(outcomes.notCarriedOut(long));
+  expect(read).not.toContain("before asking the person again");
+  expect(read.endsWith(").")).toBe(true);
+});
+
+test("a long reason is cut between characters, not inside one", () => {
+  const sent = outcomes.notCarriedOut(`${"a".repeat(299)}😀 and more`);
+  expect(sent).toContain("😀)");
+  // No lone surrogate: every UTF-16 high surrogate is followed by its low half.
+  expect(sent).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u);
+});
+
 test("a boundary's or the computer's own sentence is already for a person, and is left as it is", () => {
   const boundary = "Commands that delete files are not allowed here.";
   expect(outcomeForPerson(boundary)).toBe(boundary);
