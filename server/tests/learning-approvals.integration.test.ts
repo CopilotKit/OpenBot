@@ -1,26 +1,33 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import { createSkillApprovalStore } from "../src/learning/approvals";
+import { learningSkillApprovals } from "../src/db/schema/learning";
+import {
+  createSkillApprovalStore,
+  recordApprovalBefore,
+  UnnamedSkillError,
+} from "../src/learning/approvals";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const prefix = `learning-approvals-${randomUUID()}`;
 const ada = `${prefix}-ada`;
 const grace = `${prefix}-grace`;
+const hopper = `${prefix}-hopper`;
 const store = createSkillApprovalStore(database);
 
 beforeAll(async () => {
   await database.insert(users).values([
     { id: ada, email: `${ada}@example.test` },
     { id: grace, email: `${grace}@example.test` },
+    { id: hopper, email: `${hopper}@example.test` },
   ]);
 });
 
 afterAll(async () => {
-  await database.delete(users).where(inArray(users.id, [ada, grace]));
+  await database.delete(users).where(inArray(users.id, [ada, grace, hopper]));
   await database.$client.close();
 });
 
@@ -135,5 +142,124 @@ describe("skill approvals", () => {
     await store.recordApproval(grace, "gone", "person");
     await store.forget(grace, "gone");
     expect(await store.get(grace, "gone")).toBeNull();
+  });
+});
+
+const skill = (name: string | null) => [
+  {
+    path: "SKILL.md",
+    content: name === null ? "No front matter" : `---\nname: ${name}\n---\n`,
+  },
+];
+
+describe("recordApprovalBefore", () => {
+  test("an unnamed skill approved by a person throws and writes no row", async () => {
+    const before = recordApprovalBefore(store, hopper, "person");
+    await expect(
+      before({ files: skill(null), operation: "add" }),
+    ).rejects.toBeInstanceOf(UnnamedSkillError);
+    const rows = await database
+      .select()
+      .from(learningSkillApprovals)
+      .where(eq(learningSkillApprovals.userId, hopper));
+    expect(rows).toEqual([]);
+  });
+
+  test("an unnamed skill approved by an admin gets an undo that does nothing", async () => {
+    const undo = await recordApprovalBefore(
+      store,
+      hopper,
+      "admin",
+    )({ files: skill(null), operation: "update" });
+    await undo();
+    const rows = await database
+      .select()
+      .from(learningSkillApprovals)
+      .where(eq(learningSkillApprovals.userId, hopper));
+    expect(rows).toEqual([]);
+  });
+
+  test("a new name writes a person row and the undo removes it", async () => {
+    const undo = await recordApprovalBefore(
+      store,
+      hopper,
+      "person",
+    )({ files: skill("fresh"), operation: "add" });
+    expect(await store.get(hopper, "fresh")).toEqual({
+      userId: hopper,
+      skillName: "fresh",
+      approvedBy: "person",
+      sharing: "none",
+    });
+    await undo();
+    expect(await store.get(hopper, "fresh")).toBeNull();
+  });
+
+  test("an existing row survives the undo, as it was before", async () => {
+    await store.recordApproval(hopper, "kept", "person");
+    await store.requestSharing(hopper, "kept");
+    await store.decideSharing(hopper, "kept", "approved");
+    const undo = await recordApprovalBefore(
+      store,
+      hopper,
+      "admin",
+    )({ files: skill("kept"), operation: "update" });
+    expect((await store.get(hopper, "kept"))?.approvedBy).toBe("admin");
+    await undo();
+    expect(await store.get(hopper, "kept")).toEqual({
+      userId: hopper,
+      skillName: "kept",
+      approvedBy: "person",
+      sharing: "approved",
+    });
+  });
+
+  test("remove forgets the row and the undo restores its approver", async () => {
+    await store.recordApproval(hopper, "removed", "admin");
+    const undo = await recordApprovalBefore(
+      store,
+      hopper,
+      "person",
+    )({ files: skill("removed"), operation: "remove" });
+    expect(await store.get(hopper, "removed")).toBeNull();
+    await undo();
+    expect((await store.get(hopper, "removed"))?.approvedBy).toBe("admin");
+  });
+
+  test("an undo of a remove leaves alone a row approved since", async () => {
+    await store.recordApproval(hopper, "reapproved", "admin");
+    const undo = await recordApprovalBefore(
+      store,
+      hopper,
+      "admin",
+    )({ files: skill("reapproved"), operation: "remove" });
+    await store.recordApproval(hopper, "reapproved", "person");
+    await undo();
+    expect((await store.get(hopper, "reapproved"))?.approvedBy).toBe("person");
+  });
+
+  test("an undo leaves alone a row another approval changed since", async () => {
+    const created = await recordApprovalBefore(
+      store,
+      hopper,
+      "person",
+    )({ files: skill("overlap"), operation: "add" });
+    const updated = await recordApprovalBefore(
+      store,
+      hopper,
+      "admin",
+    )({ files: skill("overlap"), operation: "update" });
+    await created();
+    expect((await store.get(hopper, "overlap"))?.approvedBy).toBe("admin");
+
+    const later = await recordApprovalBefore(
+      store,
+      hopper,
+      "person",
+    )({ files: skill("overlap"), operation: "update" });
+    await updated();
+    expect((await store.get(hopper, "overlap"))?.approvedBy).toBe("person");
+    await later();
+    expect((await store.get(hopper, "overlap"))?.approvedBy).toBe("admin");
   });
 });

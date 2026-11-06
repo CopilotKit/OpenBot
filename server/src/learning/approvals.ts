@@ -1,4 +1,7 @@
-import { isLearnedSkillName } from "@openbot/shared/learning";
+import {
+  isLearnedSkillName,
+  type LearningProposalDetail,
+} from "@openbot/shared/learning";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { learningSkillApprovals } from "../db/schema/learning";
@@ -28,25 +31,111 @@ const approvalKey = (userId: string, skillName: string) =>
     eq(learningSkillApprovals.skillName, skillName),
   );
 
+const approvalColumns = {
+  userId: learningSkillApprovals.userId,
+  skillName: learningSkillApprovals.skillName,
+  approvedBy: learningSkillApprovals.approvedBy,
+  sharing: learningSkillApprovals.sharing,
+};
+
+/**
+ * The `updated_at` an approval write set, as Postgres prints it, so a later undo can tell whether the row is still
+ * that write. Text, not a Date: a Date keeps milliseconds and Postgres keeps microseconds.
+ */
+const writtenStamp = sql<string>`${learningSkillApprovals.updatedAt}::text`;
+
+const stillWritten = (userId: string, skillName: string, written: string) =>
+  and(
+    approvalKey(userId, skillName),
+    sql`${learningSkillApprovals.updatedAt} = ${written}::timestamptz`,
+  );
+
 /** Who approved each skill in a person's own space, and where a person's request to share it with every Bot stands. */
 export function createSkillApprovalStore(database: Database) {
+  /**
+   * `recordApproval`, also saying what it wrote (`written`, the row's new `updated_at`), so its undo can act only
+   * while the row is still exactly this write: see `forgetIfUnchanged` and `restoreIfUnchanged`. The write stamps
+   * `clock_timestamp()`, not the transaction's start time, so a later write to the same row, which has to wait for
+   * this one's lock, always stamps a different time.
+   */
+  async function recordApprovalStamped(
+    userId: string,
+    skillName: string,
+    by: "person" | "admin",
+  ): Promise<{
+    existed: boolean;
+    previous: SkillApproval | null;
+    written: string;
+  }> {
+    return database.transaction(async (transaction) => {
+      // A row deleted between our insert and our read sends us round again; three rounds is far past any real race.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const [previous] = await transaction
+          .select(approvalColumns)
+          .from(learningSkillApprovals)
+          .where(approvalKey(userId, skillName))
+          .for("update");
+        if (previous) {
+          const sharing =
+            by === "admin"
+              ? "none"
+              : previous.sharing === "approved"
+                ? "requested"
+                : previous.sharing;
+          const [updated] = await transaction
+            .update(learningSkillApprovals)
+            .set({
+              approvedBy: by,
+              sharing,
+              updatedAt: sql`clock_timestamp()`,
+            })
+            .where(approvalKey(userId, skillName))
+            .returning({ written: writtenStamp });
+          if (updated) {
+            return { existed: true, previous, written: updated.written };
+          }
+          continue;
+        }
+        const [created] = await transaction
+          .insert(learningSkillApprovals)
+          .values({
+            userId,
+            skillName,
+            approvedBy: by,
+            sharing: "none",
+            updatedAt: sql`clock_timestamp()`,
+          })
+          .onConflictDoNothing({
+            target: [
+              learningSkillApprovals.userId,
+              learningSkillApprovals.skillName,
+            ],
+          })
+          .returning({ written: writtenStamp });
+        if (created) {
+          return { existed: false, previous: null, written: created.written };
+        }
+      }
+      throw new Error(
+        `The approval of skill "${skillName}" kept changing while it was being recorded.`,
+      );
+    });
+  }
+
   return {
     async get(
       userId: string,
       skillName: string,
     ): Promise<SkillApproval | null> {
       const [row] = await database
-        .select({
-          userId: learningSkillApprovals.userId,
-          skillName: learningSkillApprovals.skillName,
-          approvedBy: learningSkillApprovals.approvedBy,
-          sharing: learningSkillApprovals.sharing,
-        })
+        .select(approvalColumns)
         .from(learningSkillApprovals)
         .where(approvalKey(userId, skillName))
         .limit(1);
       return row ?? null;
     },
+
+    recordApprovalStamped,
 
     /**
      * Records an approval and says whether the skill already had one, and what that one was, so a caller that has to
@@ -67,48 +156,12 @@ export function createSkillApprovalStore(database: Database) {
       skillName: string,
       by: "person" | "admin",
     ): Promise<{ existed: boolean; previous: SkillApproval | null }> {
-      return database.transaction(async (transaction) => {
-        // A row deleted between our insert and our read sends us round again; three rounds is far past any real race.
-        for (let attempt = 0; attempt < 3; attempt++) {
-          const [previous] = await transaction
-            .select({
-              userId: learningSkillApprovals.userId,
-              skillName: learningSkillApprovals.skillName,
-              approvedBy: learningSkillApprovals.approvedBy,
-              sharing: learningSkillApprovals.sharing,
-            })
-            .from(learningSkillApprovals)
-            .where(approvalKey(userId, skillName))
-            .for("update");
-          if (previous) {
-            const sharing =
-              by === "admin"
-                ? "none"
-                : previous.sharing === "approved"
-                  ? "requested"
-                  : previous.sharing;
-            await transaction
-              .update(learningSkillApprovals)
-              .set({ approvedBy: by, sharing, updatedAt: new Date() })
-              .where(approvalKey(userId, skillName));
-            return { existed: true, previous };
-          }
-          const created = await transaction
-            .insert(learningSkillApprovals)
-            .values({ userId, skillName, approvedBy: by, sharing: "none" })
-            .onConflictDoNothing({
-              target: [
-                learningSkillApprovals.userId,
-                learningSkillApprovals.skillName,
-              ],
-            })
-            .returning({ skillName: learningSkillApprovals.skillName });
-          if (created.length > 0) return { existed: false, previous: null };
-        }
-        throw new Error(
-          `The approval of skill "${skillName}" kept changing while it was being recorded.`,
-        );
-      });
+      const { existed, previous } = await recordApprovalStamped(
+        userId,
+        skillName,
+        by,
+      );
+      return { existed, previous };
     },
 
     /** Writes back an approval exactly as `recordApproval` reported it before replacing it. */
@@ -134,10 +187,71 @@ export function createSkillApprovalStore(database: Database) {
         });
     },
 
-    async forget(userId: string, skillName: string): Promise<void> {
-      await database
+    /**
+     * Puts back what `recordApprovalStamped` replaced, but only while the row is still the one it wrote (`written`).
+     * A row another approval changed since, or deleted, is left alone. One conditional UPDATE is the check and the
+     * write at once: under READ COMMITTED it waits for a concurrent writer's lock and then tests the stamp against the
+     * row that writer committed.
+     */
+    async restoreIfUnchanged(
+      previous: SkillApproval,
+      written: string,
+    ): Promise<boolean> {
+      const restored = await database
+        .update(learningSkillApprovals)
+        .set({
+          approvedBy: previous.approvedBy,
+          sharing: previous.sharing,
+          updatedAt: sql`clock_timestamp()`,
+        })
+        .where(stillWritten(previous.userId, previous.skillName, written))
+        .returning({ name: learningSkillApprovals.skillName });
+      return restored.length > 0;
+    },
+
+    /** Puts back an approval `forget` deleted, unless the skill has been approved again since. */
+    async restoreIfAbsent(previous: SkillApproval): Promise<boolean> {
+      const restored = await database
+        .insert(learningSkillApprovals)
+        .values({
+          userId: previous.userId,
+          skillName: previous.skillName,
+          approvedBy: previous.approvedBy,
+          sharing: previous.sharing,
+        })
+        .onConflictDoNothing({
+          target: [
+            learningSkillApprovals.userId,
+            learningSkillApprovals.skillName,
+          ],
+        })
+        .returning({ name: learningSkillApprovals.skillName });
+      return restored.length > 0;
+    },
+
+    /** Deletes an approval and returns what it deleted, or null when there was none. */
+    async forget(
+      userId: string,
+      skillName: string,
+    ): Promise<SkillApproval | null> {
+      const [deleted] = await database
         .delete(learningSkillApprovals)
-        .where(approvalKey(userId, skillName));
+        .where(approvalKey(userId, skillName))
+        .returning(approvalColumns);
+      return deleted ?? null;
+    },
+
+    /** Deletes the approval `recordApprovalStamped` created, but only while the row is still that write (`written`). */
+    async forgetIfUnchanged(
+      userId: string,
+      skillName: string,
+      written: string,
+    ): Promise<boolean> {
+      const deleted = await database
+        .delete(learningSkillApprovals)
+        .where(stillWritten(userId, skillName, written))
+        .returning({ name: learningSkillApprovals.skillName });
+      return deleted.length > 0;
     },
 
     /** Asks to share a skill the person approved. False for any other skill. */
@@ -225,3 +339,51 @@ export function createSkillApprovalStore(database: Database) {
   };
 }
 export type SkillApprovalStore = ReturnType<typeof createSkillApprovalStore>;
+
+export class UnnamedSkillError extends Error {
+  constructor() {
+    super(
+      "This skill has no name OpenBot can record, so it can't be approved here.",
+    );
+    this.name = "UnnamedSkillError";
+  }
+}
+
+/**
+ * The approval hook: records who approved a proposal in OpenBot before Intelligence is asked to publish it, and returns
+ * the undo to call when Intelligence refuses. A person can't approve a skill without a usable name, since OpenBot could
+ * not record it; an admin's approval of one records nothing, since an admin's skill needs no row.
+ *
+ * Each undo acts only while the row is still what its own call left, so when two approvals of the same skill overlap
+ * and the first is refused, its undo leaves the second's row alone.
+ */
+export function recordApprovalBefore(
+  approvals: SkillApprovalStore,
+  userId: string,
+  by: "person" | "admin",
+): (
+  detail: Pick<LearningProposalDetail, "files" | "operation">,
+) => Promise<() => Promise<void>> {
+  return async (detail) => {
+    const name = skillNameOf(detail.files);
+    if (name === null) {
+      if (by === "person") throw new UnnamedSkillError();
+      return async () => {};
+    }
+    if (detail.operation === "remove") {
+      const removed = await approvals.forget(userId, name);
+      return async () => {
+        if (removed) await approvals.restoreIfAbsent(removed);
+      };
+    }
+    const { previous, written } = await approvals.recordApprovalStamped(
+      userId,
+      name,
+      by,
+    );
+    return async () => {
+      if (previous) await approvals.restoreIfUnchanged(previous, written);
+      else await approvals.forgetIfUnchanged(userId, name, written);
+    };
+  };
+}
