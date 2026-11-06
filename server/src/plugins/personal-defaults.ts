@@ -73,6 +73,13 @@ export const EVERY_BOT_REFUSAL =
   "In OpenBot Personal every Bot can use every app you connect. Turn the app off to take it from all of them.";
 
 /**
+ * What the personal edition's server answers when somebody tries to stop one Bot asking another.
+ * Every Bot there is the one person's, so each can ask the others (see `botsReachableFrom`).
+ */
+export const EVERY_BOT_ASKS_REFUSAL =
+  "In OpenBot Personal every Bot can ask your other Bots for help.";
+
+/**
  * Gives Bots every tool of these apps they don't hold yet. Writes nothing when they hold them all,
  * so asking on every run costs reads and no trail rows. The trail names why: Routines' grants as
  * always on, any other app's as `by`.
