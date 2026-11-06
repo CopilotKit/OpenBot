@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -13,174 +13,175 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 const repositoryRoot = join(import.meta.dir, "..");
+const tauriSource = join(repositoryRoot, "desktop", "src-tauri", "src");
 
-// Desktop installs a release from GitHub's tag tarball, keeping only the top-level entries and the
-// single files that deployment.rs names, then runs `bun install --frozen-lockfile --ignore-scripts`.
-function copiedLists(): { entries: string[]; files: string[] } {
-  const source = readFileSync(
-    join(repositoryRoot, "desktop", "src-tauri", "src", "deployment.rs"),
-    "utf8",
-  )
+// The string literals of one `pub const NAME: [&str; N] = [...]` in a desktop source file, with
+// comments taken out first.
+function constant(file: string, name: string): string[] {
+  const source = readFileSync(join(tauriSource, file), "utf8")
     .split("\n")
     .map((line) => line.replace(/\/\/.*$/, ""))
     .join("\n");
-  const literals = (constant: string): string[] => {
-    const block = source.match(
-      new RegExp(`pub const ${constant}: \\[&str; \\d+\\] = \\[([^\\]]*)\\]`),
-    );
-    expect(block).not.toBeNull();
-    return [...(block?.[1] ?? "").matchAll(/"([^"]*)"/g)].map(
-      (match) => match[1] ?? "",
-    );
-  };
-  return {
-    entries: [...literals("REQUIRED"), ...literals("ALSO_COPIED")],
-    files: literals("ALSO_COPIED_FILES"),
-  };
-}
-
-// A workspace reaches a deployment whole, or as its manifest alone, which is all the install needs.
-function copiedWorkspace(workspace: string): boolean {
-  const { entries, files } = copiedLists();
-  return (
-    entries.includes(workspace.split("/")[0] ?? "") ||
-    files.includes(`${workspace}/package.json`)
+  const block = source.match(
+    new RegExp(`pub const ${name}: \\[&str; \\d+\\] = \\[([^\\]]*)\\]`),
   );
-}
-
-function lockfileWorkspaceKeys(): string[] {
-  const lock = readFileSync(join(repositoryRoot, "bun.lock"), "utf8");
-  const start = lock.indexOf('"workspaces": {');
-  expect(start).toBeGreaterThan(-1);
-  const end = lock.indexOf("\n  },", start);
-  expect(end).toBeGreaterThan(start);
-  return [...lock.slice(start, end).matchAll(/^ {4}"([^"]*)": \{/gm)].map(
+  expect({ file, name, found: block !== null }).toEqual({
+    file,
+    name,
+    found: true,
+  });
+  return [...(block?.[1] ?? "").matchAll(/"([^"]*)"/g)].map(
     (match) => match[1] ?? "",
   );
 }
 
-// Chrome's id for an extension with a manifest `key`: the SHA-256 of the key's DER bytes, its first
-// 32 hex digits written with the letters a to p. https://developer.chrome.com/docs/extensions/reference/manifest/key
-function extensionIdOf(key: string): string {
-  return [
-    ...createHash("sha256")
-      .update(Buffer.from(key, "base64"))
-      .digest("hex")
-      .slice(0, 32),
-  ]
-    .map((digit) => String.fromCharCode(97 + Number.parseInt(digit, 16)))
-    .join("");
-}
+// What OpenBot Desktop keeps of a release's tag tarball (deployment.rs `LAYOUT`): the Compose file
+// the containers run from, and the files the person's own browser runs from on the host.
+const layout = () => constant("deployment.rs", "LAYOUT");
+// The packages the browser's `shared` files import, put beside them from the browser's own install
+// (stack.rs `SHARED_PACKAGES`).
+const sharedPackages = () => constant("stack.rs", "SHARED_PACKAGES");
+const BROWSER = "agent-computer";
 
-// Lay out what GitHub's tag tarball carries (the tracked files) and deployment.rs keeps of it.
-function layOutDeployment(root: string): void {
-  const { entries, files } = copiedLists();
-  const kept = execFileSync(
-    "git",
-    ["ls-files", "-z", "--", ...entries, ...files],
-    {
-      cwd: repositoryRoot,
-    },
-  )
+// GitHub's tag tarball carries the tracked files. Lay out what Desktop keeps of them.
+function trackedUnder(paths: string[]): string[] {
+  return execFileSync("git", ["ls-files", "-z", "--", ...paths], {
+    cwd: repositoryRoot,
+  })
     .toString()
     .split("\0")
     .filter(Boolean);
-  for (const file of kept) {
+}
+
+function layOutDeployment(root: string): void {
+  for (const file of trackedUnder(layout())) {
     mkdirSync(dirname(join(root, file)), { recursive: true });
     copyFileSync(join(repositoryRoot, file), join(root, file));
   }
 }
 
-function bun(args: string[], cwd: string, env = process.env): void {
+function bun(args: string[], cwd: string): { exitCode: number; said: string } {
   const run = Bun.spawnSync([process.execPath, ...args], {
     cwd,
-    env,
+    env: { ...process.env, COMPUTER_TOKEN: "" },
     stdout: "pipe",
     stderr: "pipe",
   });
-  expect({
-    command: args.join(" "),
-    exitCode: run.exitCode,
-    said: run.exitCode === 0 ? "" : `${run.stdout}${run.stderr}`,
-  }).toEqual({ command: args.join(" "), exitCode: 0, said: "" });
+  return { exitCode: run.exitCode, said: `${run.stdout}${run.stderr}` };
 }
 
-function tracked(path: string): boolean {
-  return (
-    execFileSync("git", ["ls-files", "--cached", "-z", "--", path], {
-      cwd: repositoryRoot,
-    }).length > 0
-  );
+// Relative module specifiers a file loads at run time. `import type` and `import("./x").Type` name
+// types, which Bun erases.
+function runtimeRelativeImports(source: string): string[] {
+  const found: string[] = [];
+  for (const match of source.matchAll(
+    /(?:^|\n)\s*(import|export)(\s+type)?[^;]*?\sfrom\s+["'](\.{1,2}\/[^"']+)["']/g,
+  )) {
+    if (!match[2]) found.push(match[3] ?? "");
+  }
+  for (const match of source.matchAll(
+    /import\(\s*["'](\.{1,2}\/[^"']+)["']\s*\)(\.[A-Z])?/g,
+  )) {
+    if (!match[2]) found.push(match[1] ?? "");
+  }
+  return found;
 }
 
-describe("OpenBot Desktop's copied tree", () => {
-  test("every root workspace is in Desktop's copied tree", () => {
-    const manifest = JSON.parse(
-      readFileSync(join(repositoryRoot, "package.json"), "utf8"),
-    ) as { workspaces: string[] };
-    for (const workspace of manifest.workspaces) {
-      expect({ workspace, copied: copiedWorkspace(workspace) }).toEqual({
-        workspace,
-        copied: true,
-      });
-    }
-  });
-
-  test("every workspace the lockfile names is in Desktop's copied tree", () => {
-    const keys = lockfileWorkspaceKeys().filter((key) => key !== "");
-    expect(keys.length).toBeGreaterThan(0);
-
-    for (const key of keys) {
-      expect({ key, copied: copiedWorkspace(key) }).toEqual({
-        key,
-        copied: true,
-      });
-      expect(tracked(join(key, "package.json"))).toBe(true);
-    }
-  });
-
-  test("every dependency patch package.json names is in Desktop's copied tree", () => {
-    const manifest = JSON.parse(
-      readFileSync(join(repositoryRoot, "package.json"), "utf8"),
-    ) as { patchedDependencies?: Record<string, string> };
-    const { entries, files } = copiedLists();
-    for (const patch of Object.values(manifest.patchedDependencies ?? {})) {
-      const copied =
-        entries.includes(patch.split("/")[0] ?? "") || files.includes(patch);
-      expect({ patch, copied, tracked: tracked(patch) }).toEqual({
-        patch,
-        copied: true,
+describe("OpenBot Desktop's release tree", () => {
+  test("lays out the Compose file and the person's browser, and nothing the containers run", () => {
+    const paths = layout();
+    expect(paths).toContain("docker-compose.yml");
+    for (const path of paths) {
+      // A path the tag tarball does not carry is a deployment Desktop cannot lay out.
+      expect({ path, tracked: trackedUnder([path]).length > 0 }).toEqual({
+        path,
         tracked: true,
       });
+      for (const container of [
+        "server",
+        "app",
+        "worker",
+        "toolkit",
+        "examples",
+        "scripts",
+        "patches",
+      ]) {
+        expect({ path, inside: path.startsWith(`${container}/`) }).toEqual({
+          path,
+          inside: false,
+        });
+      }
     }
   });
 
-  // The person's browser on OpenBot Desktop loads the Recorder from `extension/dist` in the
-  // deployment, which installation builds there (preparation::build_recorder). Lay a deployment out
-  // as Desktop does, install it as Desktop does, and build the Recorder as installation does.
-  test("the Recorder builds inside Desktop's copied tree, with its own extension id", () => {
+  test("everything the person's browser loads is in the tree Desktop lays out", () => {
+    const kept = new Set(trackedUnder(layout()));
+    const pending = [...kept].filter(
+      (file) => file.startsWith(`${BROWSER}/src/`) && file.endsWith(".ts"),
+    );
+    expect(pending).toContain(`${BROWSER}/src/index.ts`);
+    const seen = new Set<string>();
+    const missing: string[] = [];
+    while (pending.length > 0) {
+      const file = pending.pop() ?? "";
+      if (seen.has(file) || file.includes("/tests/")) continue;
+      seen.add(file);
+      const source = readFileSync(join(repositoryRoot, file), "utf8");
+      for (const specifier of runtimeRelativeImports(source)) {
+        const base = join(dirname(file), specifier);
+        const target = ["", ".ts", ".tsx", ".js", ".json", "/index.ts"]
+          .map((suffix) => `${base}${suffix}`)
+          .find((candidate) => kept.has(candidate));
+        if (target) pending.push(target);
+        else missing.push(`${file} imports ${specifier}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  // Laid out as Desktop lays it out, installed as Desktop installs it (stack::install_dependencies:
+  // the browser's own frozen install, and its shared files' packages put beside them), and loaded
+  // with Bun's auto-install off, so nothing missing is fetched behind the install's back.
+  test("the person's browser installs and loads from that tree alone", () => {
     const root = mkdtempSync(join(tmpdir(), "openbot-desktop-tree-"));
     try {
       layOutDeployment(root);
-      bun(["install", "--frozen-lockfile", "--ignore-scripts"], root);
-      const env = { ...process.env };
-      delete env.RECORDER_BUILD_VARIANT;
-      bun(["run", "build"], join(root, "extension"), env);
+      expect(existsSync(join(root, "package.json"))).toBe(false);
+      const browser = join(root, BROWSER);
+      expect(
+        bun(["install", "--frozen-lockfile", "--ignore-scripts"], browser),
+      ).toMatchObject({ exitCode: 0 });
+      for (const name of sharedPackages()) {
+        cpSync(
+          join(browser, "node_modules", name),
+          join(root, "shared", "node_modules", name),
+          { recursive: true, dereference: true },
+        );
+      }
 
-      const dist = join(root, "extension", "dist");
-      const manifest = JSON.parse(
-        readFileSync(join(dist, "manifest.json"), "utf8"),
-      ) as { key: string; background: { service_worker: string } };
-      const recorder = JSON.parse(
-        readFileSync(
-          join(repositoryRoot, "shared", "recorder-extension.json"),
-          "utf8",
-        ),
-      ) as { extensionId: string };
-      expect(extensionIdOf(manifest.key)).toBe(recorder.extensionId);
-      expect(existsSync(join(dist, manifest.background.service_worker))).toBe(
-        true,
+      for (const file of layout().filter(
+        (path) => path.startsWith("shared/") && path.endsWith(".ts"),
+      )) {
+        const loaded = bun(
+          [
+            "--no-install",
+            "--no-env-file",
+            "-e",
+            `await import(${JSON.stringify(`../${file}`)})`,
+          ],
+          browser,
+        );
+        expect({ file, ...loaded }).toEqual({ file, exitCode: 0, said: "" });
+      }
+
+      // Every import resolves; the computer then refuses to start without its token, which is the
+      // first thing its own code does.
+      const started = bun(
+        ["--no-install", "--no-env-file", "src/index.ts"],
+        browser,
       );
+      expect(started.said).toContain("COMPUTER_TOKEN is not set");
+      expect(started.said).not.toContain("Cannot find");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

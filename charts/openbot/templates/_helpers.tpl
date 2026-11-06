@@ -648,6 +648,35 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
       name: {{ include "openbot.secretName" . }}
       key: model-api-key
       optional: true
+- name: ANTHROPIC_API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: anthropic-api-key
+      optional: true
+{{- /*
+  The provider, model and endpoints, each only when set. PARENTHESISED, because
+  `helm upgrade --reuse-values` leaves `config.model` absent on a release from before it. And absent
+  rather than blank on purpose: the server reads an empty BOT_PROVIDER as OpenAI, which would override
+  a tenant package on Anthropic, and reads a set BOT_MODEL as the model an operator chose.
+*/}}
+{{- $model := .Values.config.model | default dict }}
+{{- with $model.provider }}
+- name: BOT_PROVIDER
+  value: {{ . | quote }}
+{{- end }}
+{{- with $model.name }}
+- name: BOT_MODEL
+  value: {{ . | quote }}
+{{- end }}
+{{- with $model.openaiBaseUrl }}
+- name: OPENAI_BASE_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with $model.anthropicBaseUrl }}
+- name: ANTHROPIC_BASE_URL
+  value: {{ . | quote }}
+{{- end }}
 - name: COMPUTER_TOKEN
   valueFrom:
     secretKeyRef:

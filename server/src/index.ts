@@ -2692,7 +2692,10 @@ repeatAfterEach(
 const channelSummaries = {
   database,
   queue: createWorkQueue(database),
-  transcript: routineIntelligence,
+  // Not `routineIntelligence`: this sweep runs on every replica and often asks about a conversation
+  // before its first run has created the thread, and the base client printed that ordinary 404 as
+  // `Intelligence platform request failed` on whichever replica claimed it.
+  transcript: createIntelligenceClient(config.runtime.intelligence),
   title: createChannelTitler({
     provider: runtimeModel.provider,
     model: runtimeModel.defaultModel,

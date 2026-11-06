@@ -76,6 +76,13 @@ export type BuiltInAgentHooks = {
   admitTools?: (toolNames: readonly string[]) => string | undefined;
   /** The configured tools that wait behind tool search, which {@link toolNamesSent} leaves out. */
   waiting?: ReadonlySet<string>;
+  /**
+   * Say whose words each message is, where the role alone would say it wrong: another Bot's answer
+   * stored in this Bot's thread as an assistant message. The last thing done to the history before
+   * the provider, after the sanitiser and the attachments, so neither of those reads a re-roled
+   * message as something the person said. Absent, the history goes up as those two left it.
+   */
+  attribute?: (messages: Message[]) => Message[];
 };
 
 /**
@@ -267,7 +274,19 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
       (input.resume ?? []).map((entry) => entry.interruptId),
     );
     const history = sanitizeSeededHistory(input.messages, answeredByResume);
-    const { inline, observe } = this.hooks;
+    const { inline, observe, attribute } = this.hooks;
+    /*
+     * Last, after both passes that read roles, and only on the way to the model. The approval
+     * continuation keeps the conversation as the thread holds it, and is attributed again when it
+     * resumes. See `BuiltInAgentHooks.attribute`.
+     */
+    const toModel = (messages: Message[]) =>
+      observe(
+        super.run({
+          ...input,
+          messages: attribute ? attribute(messages) : messages,
+        }),
+      );
     /*
      * ALONGSIDE THE GUARD ABOVE, NOT INSTEAD OF IT. One drops a conversation the model provider is
      * going to refuse; this replaces the stored reference a person's attachment arrives as with the
@@ -280,7 +299,7 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
     if (!inline)
       return nativeApprovalRun(
         { ...input, messages: history },
-        () => observe(super.run({ ...input, messages: history })),
+        () => toModel(history),
         this.scope,
       );
     /*
@@ -296,7 +315,7 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
         switchMap((messages) =>
           nativeApprovalRun(
             { ...input, messages },
-            () => observe(super.run({ ...input, messages })),
+            () => toModel(messages),
             this.scope,
           ),
         ),

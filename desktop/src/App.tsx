@@ -792,7 +792,10 @@ function Setup() {
               ? "OpenBot’s local software is ready. Next, connect your AI."
               : INSTALL_BLURB}
           </p>
-          <SetupProgress steps={plainInstallSteps(steps, busy)} />
+          <SetupProgress
+            steps={plainInstallSteps(steps, busy)}
+            showElapsed={false}
+          />
           {/* Intelligence sets itself up alongside, once the install has Docker answering. */}
           <LocalStatus sequence={local} />
           {displayedFailure && <Failure problem={displayedFailure} />}

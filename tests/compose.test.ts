@@ -710,13 +710,28 @@ test("gives the server container addresses, not the host's loopback", () => {
     SERVER_PORT: "3001",
     DATABASE_URL: "postgres://openbot:openbot@postgres:5432/openbot",
     AGENT_COMPUTER_URL: "http://agent-computer:4100",
-    COMPUTER_SUPERVISOR_URL: "http://supervisor:4300",
   });
   for (const [name, value] of Object.entries(environment)) {
     expect(`${name}=${value}`).not.toMatch(/localhost|127\.0\.0\.1|\[::1\]/);
   }
   // Production refuses `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS`, which a local OpenBot needs.
   expect(environment.NODE_ENV).toBe("");
+});
+
+/**
+ * The supervisor by name unless the deployment says there is none.
+ *
+ * Unset is every deployment that predates the setting. Set empty is OpenBot Desktop, which runs the
+ * personal edition on one computer, and that edition refuses to start with a supervisor.
+ */
+test("gives the server the supervisor unless the deployment empties it", () => {
+  expect(
+    runComposeConfig({}).services.server?.environment.COMPUTER_SUPERVISOR_URL,
+  ).toBe("http://supervisor:4300");
+  const none = runComposeConfig({ COMPUTER_SUPERVISOR_CONTAINER_URL: "" })
+    .services.server?.environment;
+  expect(none?.COMPUTER_SUPERVISOR_URL ?? "").toBe("");
+  expect(none?.AGENT_COMPUTER_URL).toBe("http://agent-computer:4100");
 });
 
 test("puts the server beside the database and the Bots, and the worker beside the database only", () => {

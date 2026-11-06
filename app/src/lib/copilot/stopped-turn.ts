@@ -1,4 +1,4 @@
-import { useAgent } from "@copilotkit/react-core/v2";
+import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
 
 /**
@@ -30,6 +30,57 @@ export function stoppedReason(reported: unknown): string {
         ? reported
         : "";
   return said.trim() || "The Bot stopped without saying why.";
+}
+
+/**
+ * How the last run in a thread's history ended, heard while the history is replayed.
+ *
+ * THE FAILURE IS NOT IN THE MESSAGES. A run that fails ends with a RUN_ERROR, which is an event, and
+ * a thread's stored messages are only what was said. So a reload, or coming back later, showed the
+ * person's message with nothing under it and no sign the run had failed.
+ *
+ * THE EVENT IS KEPT, THOUGH. The runtime stores every run's events, its terminal one included, and
+ * joining the thread replays them to this browser run after run: the Intelligence gateway from its
+ * event store, the in-memory runner from its own. That replay is the record of how each run ended,
+ * in the words that ended it, so it is read here rather than kept a second time somewhere else.
+ *
+ * ONLY THE LAST RUN COUNTS. A run that started after a failure supersedes it, whatever came of it:
+ * one that answered makes the failure old news, and one still going is not over yet.
+ *
+ * A STOP IS NOT A FAILURE, and needs nothing special: a run the person stopped ends with
+ * RUN_FINISHED, outcome cancelled, as the runtime records it.
+ *
+ * NOTHING WHEN THE REPLAY BROKE. A connect that failed part way may have stopped after an old failure
+ * and before the run that answered it, and a stale failure is worse than none. The caller drops the
+ * answer the same way when the join ran out of time.
+ *
+ * Subscribe before the connect starts: the agent hands a connect the subscribers it has then.
+ */
+export function followLastRun(agent: Pick<AbstractAgent, "subscribe">): {
+  /** The last run's failure, in its own words, or null when it did not fail. */
+  failure: () => string | null;
+  stop: () => void;
+} {
+  let failure: string | null = null;
+  let broken = false;
+  const subscription = agent.subscribe({
+    onRunStartedEvent: () => {
+      failure = null;
+    },
+    onRunFinishedEvent: () => {
+      failure = null;
+    },
+    onRunErrorEvent: ({ event }) => {
+      failure = stoppedReason(event?.message);
+    },
+    onRunFailed: () => {
+      broken = true;
+    },
+  });
+  return {
+    failure: () => (broken ? null : failure),
+    stop: () => subscription.unsubscribe(),
+  };
 }
 
 /**

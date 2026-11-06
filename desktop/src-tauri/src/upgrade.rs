@@ -1290,14 +1290,7 @@ volumes:
         fn start(&mut self) -> Result<(), Problem> {
             self.ran.push("start");
             let secrets = self.secrets();
-            stack::up(
-                &self.fixture.address,
-                &self.fixture.root,
-                false,
-                stack::BundledBots::none(),
-                &secrets,
-            )
-            .map(|_| ())
+            stack::up(&self.fixture.address, &self.fixture.root, false, &secrets).map(|_| ())
         }
         fn restore(&mut self, from: &Path) -> Result<(), Problem> {
             self.ran.push("restore");
@@ -1371,7 +1364,7 @@ volumes:
         assert_eq!(due(&fixture.root, &own), None);
         assert!(!interrupted(&fixture.root));
         let running = fixture.running();
-        for service in ["agent-computer", "server", "supervisor", "worker"] {
+        for service in ["agent-computer", "server", "worker"] {
             assert!(
                 running.contains(&format!("{service} {next}")),
                 "{service} is not running {next}: {running:?}"
@@ -1444,7 +1437,7 @@ volumes:
         assert!(!interrupted(&fixture.root));
         // N is running, with its data, and the next release's migration never ran.
         let running = fixture.running();
-        for service in ["agent-computer", "server", "supervisor", "worker"] {
+        for service in ["agent-computer", "server", "worker"] {
             assert!(
                 running.contains(&format!("{service} {previous}")),
                 "{service} is not running {previous}: {running:?}"
@@ -1500,7 +1493,7 @@ volumes:
         assert!(!interrupted(&fixture.root));
         assert_eq!(deployment::installed(&fixture.root).unwrap().version, N);
         let running = fixture.running();
-        for service in ["agent-computer", "server", "supervisor", "worker"] {
+        for service in ["agent-computer", "server", "worker"] {
             assert!(
                 running.contains(&format!("{service} {previous}")),
                 "{service} is not running {previous}: {running:?}"

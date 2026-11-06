@@ -8,17 +8,50 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop installs the personal edition: nobody signs in, one computer is shared by your
+  Bots, and you start with the Personal Assistant. Before, it installed the team edition, with its
+  admin screens, the fintech example's Bots and a computer for each Bot. An existing installation
+  becomes the personal edition on its next Start. It runs no supervisor and no bundled Bot
+  containers, so an installation downloads three fewer images. The Bot picked during setup joins
+  the Personal Assistant. See [Personal edition](docs/personal-edition.md#openbot-desktop).
+- `docker-compose.yml` gives the `server` container no supervisor when
+  `COMPUTER_SUPERVISOR_CONTAINER_URL` is set empty. Unset, it is the supervisor, as before.
+- The Helm chart takes an Anthropic key: `secrets.anthropicApiKey` (or `anthropic-api-key` in your
+  own Secret) reaches the server as `ANTHROPIC_API_KEY`, the way the OpenAI key does. A new
+  `config.model` block names the provider (`BOT_PROVIDER`), the Bots' default model (`BOT_MODEL`)
+  and a model router's endpoints (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`), each set only when
+  given, and a provider the server would silently ignore is refused at install. Automatic Learning
+  follows the keys: with an Anthropic key alone, the bundled Intelligence's Learning agent runs
+  `anthropic/claude-sonnet-5-5` on it; otherwise it stays on `openai/gpt-5.5` and the OpenAI key.
+  `config.learning.model` names another. The chart now sets that model through the agent's Secret,
+  so an upgrade leaves `intelligence.learning.agent.model` empty and refuses one set there. The
+  agent reads its model when it starts: after changing `config.learning.model`, or adding or
+  removing a key, restart the `openbot-intelligence-learning-agent` Deployment.
+- A Bot knows that an answer it got from another Bot with `message_bot` is that Bot's. Asked to
+  quote what Knowledge said, General Assistant quotes it, instead of saying it never arrived or
+  calling the words its own.
+- Every Bot knows its own name. "Ask the Knowledge Bot for one sentence on Helm", sent to
+  Knowledge, is answered by Knowledge, instead of Knowledge saying it can't reach the Knowledge Bot.
 - The Helm chart installs Intelligence 0.16.0-rc.8 instead of rc.5. A run that fails shows its own
   error in the chat instead of "Runner connection dropped". A first install logs no PostgreSQL
   errors. Intelligence's services, Learning and its jobs stay up while PostgreSQL restarts, as the
   bundled one does on an upgrade that changes its image. The Learning agent reads its model key from
   a mounted file before every run, so a new `secrets.modelApiKey` reaches it on its next run after
   `helm upgrade`, without a restart. The skills Learning proposes have descriptions that read
-  correctly. Nothing in this chart's values changes.
+  correctly.
 - OpenBot Desktop's local Intelligence is 0.16.0-rc.8, the same release the Helm chart installs.
   The app carries the Intelligence CLI built from the rc.8 commit to install exactly that release
   (`copilotkit` 4.33.1-pre.90163f5, from 4.33.1-pre.256cc68), where the stable CLI would install
   the newest stable Intelligence, 0.15.1.
+- The Job that installs Learning's queue in the bundled Intelligence waits up to 15 minutes for
+  Intelligence's PostgreSQL, up from Intelligence's own 5
+  (`intelligence.learning.queue.migration.activeDeadlineSeconds: 900`). An upgrade that moves the
+  bundled Intelligence replaces that database's pod, and on 5 minutes an in-place upgrade from rc.5
+  stopped with `UPGRADE FAILED` and the Job `DeadlineExceeded` while the database came back.
+  `--reuse-values` drops this chart's defaults, so an upgrade run with it keeps the 5 minutes: pass
+  the value, or drop the flag. The chart README's upgrade section says what to do when the Job runs
+  out of time, and why to give your values again rather than `--reuse-values` after a failed
+  revision.
 - OpenBot runs on CopilotKit 1.85.0 (`@copilotkit/runtime`, `react-core` and `shared`, from 1.83.0,
   and `@copilotkit/learning`, from a patched 0.0.1). AG-UI stays 1.0.2, the version CopilotKit
   1.85.0 itself pins. A run keeps its conversation until its last events reach Intelligence, so a
@@ -27,6 +60,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   ten seconds of pressing Stop no longer stays on "Thinking". Each run's analytics context reaches
   Intelligence. Generated interfaces write A2UI's version as `1.0`, and the ones a Bot drew on 0.3.0
   and 0.3.1, written `v1.0`, still draw when their conversation is reopened.
+- A new conversation's sidebar name no longer waits a minute when another server replica tries to
+  name it before Intelligence has its thread. That miss is now "not readable yet", retried in 15
+  seconds without using up a real failure's backoff, and it no longer logs
+  `Intelligence platform request failed` with `THREAD_NOT_FOUND`.
 - Skills (Admin → Skills, and Settings → Skills in the personal edition) lists each skill as one
   row with its name, what it does and how many Bots offer it, and the row opens the skill's own
   page. There, each Bot has a switch, the skill's words can be edited, and deleting asks first.

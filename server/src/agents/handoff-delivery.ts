@@ -17,7 +17,7 @@ import {
   EventType,
   type RunAgentInput,
 } from "@ag-ui/client";
-import { answerMessageId } from "@openbot/shared/handoff-markers";
+import { answeredBy, answerMessageId } from "@openbot/shared/handoff-markers";
 import { THREAD_LOCK_TTL_SECONDS } from "@openbot/toolkit/copilotkit/thread-lock";
 import { keepLease } from "@openbot/toolkit/lease";
 import type { ThreadLock, TurnAdmission } from "@openbot/toolkit/ports";
@@ -200,6 +200,13 @@ export function createHandoffDelivery(options: {
    * `serverTurnAdmission` in turn-admission.ts.
    */
   admission: TurnAdmission;
+  /**
+   * The display names of these Bots, by id, for another Bot's answer in the conversation a forward
+   * hop quotes. A Bot missing from the answer is quoted as another Bot. Absent, every one is.
+   */
+  botNames?: (
+    botIds: readonly string[],
+  ) => Promise<ReadonlyMap<string, string>>;
 }): HandoffDelivery {
   const {
     admission,
@@ -211,6 +218,7 @@ export function createHandoffDelivery(options: {
     announce,
     setBusy,
     newRunId,
+    botNames,
     deadlineMs = DEFAULT_DELIVERY_DEADLINE_MS,
     busyWaitMs = BUSY_WAIT_MS,
     renewEveryMs = LOCK_RENEW_EVERY_MS,
@@ -359,6 +367,22 @@ export function createHandoffDelivery(options: {
           : conversationOnly(
               await history({ threadId: work.threadId, actorId: work.actorId }),
             );
+        /*
+         * Whose answer each handed-over answer in it is, for a forward hop, which quotes the
+         * conversation by speaker. Read here, before the lock, for the reason the history is. A
+         * failed read costs the names, not the hop.
+         */
+        const answerers = [
+          ...new Set(
+            prior
+              .map((turn) => answeredBy(String((turn as { id?: unknown }).id)))
+              .filter((botId): botId is string => botId !== null),
+          ),
+        ];
+        const names =
+          !work.answerIn && answerers.length > 0 && botNames
+            ? await botNames(answerers).catch(() => new Map<string, string>())
+            : new Map<string, string>();
 
         /*
          * The conversation's lock, before a single event is streamed.
@@ -444,7 +468,7 @@ export function createHandoffDelivery(options: {
                 {
                   id: `handoff-${runId}`,
                   role: "user",
-                  content: inConversation(prior, work, message),
+                  content: inConversation(prior, work, message, names),
                 },
               ];
         agent.threadId = where.threadId;
@@ -657,10 +681,27 @@ function inConversation(
   prior: readonly unknown[],
   work: HandoffWork,
   message: string,
+  /** Display names by Bot id, for another Bot's answer in the conversation. */
+  names: ReadonlyMap<string, string> = new Map(),
 ): string | unknown[] {
   if (prior.length === 0) return message;
   const asker = work.fromName ?? work.fromBotId;
   const self = work.toName ?? work.toBotId;
+  /*
+   * An assistant turn is the asking Bot's, unless it is an answer another Bot handed back, which the
+   * id says (`answerMessageId`). Said as the asking Bot's, an earlier answer from the Bot now being
+   * asked read to it as something the asking Bot had said.
+   */
+  const speakerOf = (turn: { id?: unknown; role?: unknown }) => {
+    if (turn.role === "user") return "The person";
+    const answerer = answeredBy(String(turn.id));
+    if (answerer === null) return asker;
+    if (answerer === work.toBotId) return `You (${self}), answering ${asker}`;
+    const name = names.get(answerer);
+    return name
+      ? `${name}, another Bot, answering ${asker}`
+      : `Another Bot, answering ${asker}`;
+  };
   const parts: unknown[] = [
     {
       type: "text",
@@ -668,9 +709,15 @@ function inConversation(
     },
   ];
   for (const turn of prior) {
-    const { role, content } = turn as { role?: unknown; content?: unknown };
-    const speaker = role === "user" ? "The person" : asker;
-    parts.push({ type: "text", text: `${speaker}: ${textOf(content)}` });
+    const { id, role, content } = turn as {
+      id?: unknown;
+      role?: unknown;
+      content?: unknown;
+    };
+    parts.push({
+      type: "text",
+      text: `${speakerOf({ id, role })}: ${textOf(content)}`,
+    });
     if (Array.isArray(content)) {
       for (const part of content) {
         if (

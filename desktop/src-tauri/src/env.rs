@@ -11,9 +11,9 @@
 //!   `server/src/config.ts` only throws on it under `NODE_ENV=production`. A desktop install is not
 //!   production, so it would land in the warn branch and encrypt the credential vault with a key
 //!   printed in a public repository, objected to by a `console.warn` nobody running a window reads.
-//! - **`COMPUTER_SUPERVISOR_URL` is not optional.** Without it the server runs every Bot against one
-//!   shared browser and says so only in a startup line. `start.sh` sets it at run time, so a `.env`
-//!   copied from a developer's machine does not have it.
+//! - **The personal edition, always.** This app runs OpenBot for one person, so it writes
+//!   `OPENBOT_EDITION=personal` and the settings that edition requires: its own package, one computer
+//!   and no supervisor. Unset, the server runs the team edition.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -791,16 +791,10 @@ pub fn compose(
         "AGENT_COMPUTER_URL".into(),
         format!("http://127.0.0.1:{}", ports.computer),
     );
-    env.insert(
-        "MANAGED_AGENT_AG_UI_URL".into(),
-        if crate::stack::BundledBots::for_credential(&model.credential).agent_langgraph {
-            format!("http://127.0.0.1:{}/ag-ui", ports.langgraph)
-        } else {
-            // An owned empty value also clears a previously advertised API-key Bot on plan switch.
-            // The package loader omits its row while the endpoint is blank.
-            String::new()
-        },
-    );
+    // No bundled Bot: the personal edition's Personal Assistant runs inside the server. Written empty
+    // rather than left out, because `write` keeps a line it does not own, and an earlier Start
+    // advertised the bundled Bot here.
+    env.insert("MANAGED_AGENT_AG_UI_URL".into(), String::new());
 
     /*
      * The picked harness, if there is one.
@@ -887,16 +881,25 @@ pub fn compose(
         }
     }
 
-    // Without this the server gives every Bot the same browser. It is the difference between the
-    // product this installs and a demo of it.
-    env.insert(
-        "COMPUTER_SUPERVISOR_URL".into(),
-        format!("http://127.0.0.1:{}", ports.supervisor),
-    );
+    /*
+     * One computer, and every Bot on it is this person's.
+     *
+     * The personal edition refuses a supervisor (`personalEditionRequirements` in
+     * server/src/config.ts), so both addresses are written empty: the host's, and the one
+     * `docker-compose.yml` gives the server's container, which defaults to the supervisor only while
+     * it is unset. Empty rather than left out, because `write` keeps a line it does not own and an
+     * earlier Start wrote the supervisor's address here.
+     *
+     * The computer is started as the person's (`COMPUTER_PERSON_ID`, as `scripts/start.sh` does for
+     * the personal edition), which is what lets them record in a Bot's browser.
+     */
+    env.insert("COMPUTER_SUPERVISOR_URL".into(), String::new());
+    env.insert("COMPUTER_SUPERVISOR_CONTAINER_URL".into(), String::new());
+    env.insert("COMPUTER_PERSON_ID".into(), "personal".into());
 
     /*
      * The person's own browser, where this machine runs one: the host-side local Chrome computer
-     * started beside the server (see `local_browser`). Bots keep the supervisor above; only a
+     * started beside the server (see `local_browser`). The Bots keep the one computer above; only a
      * person's browser is sent here.
      *
      * Left out rather than written blank where there is none, so it is not set at all. `write`
@@ -931,14 +934,19 @@ pub fn compose(
     // The whole deployment is on this machine, so the server must be allowed to talk to it.
     //
     // The private-address floor stops a hosted deployment reaching into its own network, which is
-    // right there and wrong here: the supervisor, the computers and the Bots are all on loopback by
-    // design. Without this the server refuses to call its own supervisor and the failure arrives as
-    // an Unauthorized wrapped in a 500, which names neither the address nor the rule.
+    // right there and wrong here: the computer, the person's browser and the Bots are all on
+    // loopback by design. Without this the server refuses to call its own computer and the failure
+    // arrives as an Unauthorized wrapped in a 500, which names neither the address nor the rule.
     env.insert("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS".into(), "true".into());
+
+    // The personal edition: one person on their own machine, which is who this app installs OpenBot
+    // for. Unset, the server runs the team edition, with its admin screens, its fintech Bots and a
+    // computer per Bot. See docs/personal-edition.md.
+    env.insert("OPENBOT_EDITION".into(), "personal".into());
 
     // Which package the deployment runs. Without it the server falls back rather than using the one
     // that came with the deployment, and the Bots somebody was given are not the Bots they get.
-    env.insert("TENANT_PACKAGE_DIR".into(), "../examples/fintech".into());
+    env.insert("TENANT_PACKAGE_DIR".into(), "../examples/personal".into());
 
     // The one person, named. `OPENBOT_SINGLE_USER` says there is nobody else; this says who that
     // somebody is, so the routes that ask what an actor may do have an actor to answer about.
@@ -1769,7 +1777,7 @@ HTTPS_PROXY=http://proxy:8080
     }
 
     #[test]
-    fn the_server_may_reach_its_own_supervisor_on_loopback() {
+    fn the_server_may_reach_its_own_computer_on_loopback() {
         let env = compose(
             &intelligence(),
             &Model::default(),
@@ -1788,7 +1796,7 @@ HTTPS_PROXY=http://proxy:8080
     }
 
     #[test]
-    fn the_deployment_runs_its_own_package_rather_than_a_fallback() {
+    fn the_deployment_runs_the_personal_edition_and_its_package() {
         let env = compose(
             &intelligence(),
             &Model::default(),
@@ -1799,8 +1807,12 @@ HTTPS_PROXY=http://proxy:8080
             &BTreeMap::new(),
         );
         assert_eq!(
+            env.get("OPENBOT_EDITION").map(String::as_str),
+            Some("personal")
+        );
+        assert_eq!(
             env.get("TENANT_PACKAGE_DIR").map(String::as_str),
-            Some("../examples/fintech")
+            Some("../examples/personal")
         );
     }
 
@@ -1839,7 +1851,7 @@ HTTPS_PROXY=http://proxy:8080
     }
 
     #[test]
-    fn the_supervisor_url_is_set_or_every_bot_shares_one_browser() {
+    fn one_computer_and_no_supervisor_or_the_personal_edition_refuses_to_start() {
         let env = compose(
             &intelligence(),
             &Model::default(),
@@ -1850,9 +1862,72 @@ HTTPS_PROXY=http://proxy:8080
             &BTreeMap::new(),
         );
         assert_eq!(
-            env.get("COMPUTER_SUPERVISOR_URL").map(String::as_str),
-            Some("http://127.0.0.1:4500")
+            env.get("AGENT_COMPUTER_URL").map(String::as_str),
+            Some("http://127.0.0.1:4100")
         );
+        // Both written empty: the host's, and the one docker-compose.yml gives the server's
+        // container, which is the supervisor unless this says otherwise.
+        for key in [
+            "COMPUTER_SUPERVISOR_URL",
+            "COMPUTER_SUPERVISOR_CONTAINER_URL",
+        ] {
+            assert_eq!(env.get(key).map(String::as_str), Some(""), "{key}");
+        }
+        assert_eq!(
+            env.get("COMPUTER_PERSON_ID").map(String::as_str),
+            Some("personal")
+        );
+    }
+
+    /// An installation from before this app ran the personal edition is moved to it by its next
+    /// Start: the team settings it wrote are replaced, once each, and the person's own lines stay.
+    #[test]
+    fn an_earlier_team_installation_becomes_the_personal_edition_on_start() {
+        let dir = temp_root("env-team-to-personal");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "TENANT_PACKAGE_DIR=../examples/fintech\n\
+             COMPUTER_SUPERVISOR_URL=http://127.0.0.1:4500\n\
+             MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/ag-ui\n\
+             MY_OWN=kept\n",
+        )
+        .unwrap();
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::OpenAi {
+                    api_key: "sk-test".into(),
+                },
+            },
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        write(&path, &env, &BTreeMap::new()).unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        // Every value each key is given, in order, blank included.
+        let lines = |key: &str| -> Vec<&str> {
+            written
+                .lines()
+                .filter_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+                .collect()
+        };
+        assert_eq!(lines("OPENBOT_EDITION"), ["personal"]);
+        assert_eq!(lines("TENANT_PACKAGE_DIR"), ["../examples/personal"]);
+        assert_eq!(lines("MY_OWN"), ["kept"]);
+        for key in [
+            "COMPUTER_SUPERVISOR_URL",
+            "COMPUTER_SUPERVISOR_CONTAINER_URL",
+            "MANAGED_AGENT_AG_UI_URL",
+        ] {
+            assert_eq!(lines(key), [""], "{key}:\n{written}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1886,7 +1961,7 @@ HTTPS_PROXY=http://proxy:8080
         assert!(!without.contains_key("OPENBOT_BROWSER_URL"));
         assert!(!without.contains_key("BROWSER_PORT"));
         for key in ["AGENT_COMPUTER_URL", "COMPUTER_SUPERVISOR_URL"] {
-            assert_eq!(with[key], without[key], "a Bot's computer moved: {key}");
+            assert_eq!(with[key], without[key], "the Bots' computer moved: {key}");
         }
     }
 
@@ -2061,7 +2136,7 @@ HTTPS_PROXY=http://proxy:8080
     }
 
     #[test]
-    fn no_model_choice_does_not_advertise_an_unselected_bundled_service() {
+    fn no_model_choice_advertises_a_bundled_bot() {
         let env = compose(
             &intelligence(),
             &Model::default(),
@@ -2072,11 +2147,6 @@ HTTPS_PROXY=http://proxy:8080
             &BTreeMap::new(),
         );
         assert_eq!(env["MANAGED_AGENT_AG_UI_URL"], "");
-        assert!(!crate::stack::selected_services(
-            false,
-            crate::stack::BundledBots::for_credential(&ModelCredential::None)
-        )
-        .contains(&"agent-langgraph"));
     }
 
     #[test]

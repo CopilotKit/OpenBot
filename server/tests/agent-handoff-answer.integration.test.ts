@@ -9,7 +9,7 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
-import { answeredBy } from "@openbot/shared/handoff-markers";
+import { answeredBy, answerMessageId } from "@openbot/shared/handoff-markers";
 import { IntelligenceKnowingANewThread } from "@openbot/toolkit/copilotkit/agents";
 import { createIntelligenceThreadLock } from "@openbot/toolkit/copilotkit/thread-lock";
 import { and, eq, gte, like, sql } from "drizzle-orm";
@@ -22,7 +22,7 @@ import {
   type ThreadRunner,
 } from "../src/agents/handoff-delivery";
 import { createHandoffRunner } from "../src/agents/handoff-runner";
-import { answerGoneFrom } from "../src/agents/handoff-wiring";
+import { answerGoneFrom, botNamesFrom } from "../src/agents/handoff-wiring";
 import {
   createCoordinationTools,
   handoffTool,
@@ -556,6 +556,80 @@ describe("one Bot asking another, on two replicas", () => {
       shown.filter((message) => message.role === "assistant"),
     ).toHaveLength(1);
   });
+  /*
+   * Asked a second time, Knowledge reads the conversation it is brought into, and its own earlier
+   * answer is in it. That answer is stored in General Assistant's thread under General Assistant's
+   * voice, and was quoted to Knowledge as something General Assistant had said.
+   */
+  test("an earlier answer in the conversation is quoted as the Bot's that gave it", async () => {
+    endpoint = startOpenAICompatibleEndpoint();
+    const built = await botsAgainst(endpoint.baseUrl);
+    const intelligence = platform();
+    const EARLIER = "Helm is a package manager for Kubernetes.";
+    intelligence.seed(THREAD, [
+      {
+        id: "person-1",
+        role: "user",
+        content: "Ask the Knowledge Bot what Helm is.",
+      },
+      {
+        id: answerMessageId(KNOWLEDGE, "earlier-run"),
+        role: "assistant",
+        content: EARLIER,
+      },
+      {
+        id: answerMessageId(RESEARCH, "other-run"),
+        role: "assistant",
+        content: "Helm charts are versioned.",
+      },
+      { id: "person-2", role: "user", content: PERSON },
+    ]);
+    const delivery = createHandoffRunner({
+      queue: createWorkQueue(database),
+      owner: `replica-a-${suite}`,
+      sign: () => "signed",
+      auditStore,
+      delivery: createHandoffDelivery({
+        admission: serverTurnAdmission,
+        agentFor: async ({ botId }) =>
+          (built[botId]?.clone() as AbstractAgent | undefined) ?? null,
+        history: intelligence.history,
+        lock: intelligence.lock,
+        runner: intelligence.runner,
+        mintThreadId: () => `scratch-${randomUUID()}`,
+        newRunId: () => randomUUID(),
+        botNames: botNamesFrom(database),
+      }),
+    });
+    const handed = await handoffTool({
+      desk,
+      from: {
+        botId: ASKER,
+        actorId: ACTOR,
+        runId: `asking-run-again-${suite}`,
+        threadId: THREAD,
+        depth: 0,
+      },
+      hasSomebodyToAsk: true,
+      maxDepth: 2,
+      maxPerRun: 3,
+    })?.execute({
+      bot: KNOWLEDGE,
+      task: "Say what kinds of questions you answer.",
+    });
+    expect(String(handed)).toStartWith("Handed to Knowledge");
+    expect((await delivery.sweep()).delivered).toContain(KNOWLEDGE);
+
+    const [asked] = turns(endpoint.conversations[0], "user");
+    expect(asked).toContain(
+      `You (Knowledge), answering General Assistant: ${EARLIER}`,
+    );
+    expect(asked).toContain(
+      "Research, another Bot, answering General Assistant: Helm charts are versioned.",
+    );
+    expect(asked?.split("\n\n")).not.toContain(`General Assistant: ${EARLIER}`);
+  });
+
   /*
    * "Ask the Knowledge Bot for help with this": the model sent `bot: "Knowledge Bot"`, the desk
    * looked for a Bot with exactly that name, and the person saw a red "Blocked: Asked Knowledge Bot"

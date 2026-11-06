@@ -425,7 +425,10 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 | `OPENBOT_ORGANIZATION_AUTH_URL` | An OpenBot deployment that verifies employee identity and roles. Decides sign-in ahead of `OPENBOT_SINGLE_USER`. |
 | `OPENBOT_RECORDER_EXTRA_EXTENSION_IDS` | Extra extension ids OpenBot trusts besides the Recorder's own, for a fork or a build signed with another key. Comma separated, each 32 letters from a to p, or the server refuses to start. Unset trusts only the Recorder's own id. |
 
-**Some variables belong to the desktop app, not to you.** A desktop installation writes these into
+**Some variables belong to the desktop app, not to you.** A desktop installation runs the
+[personal edition](personal-edition.md#openbot-desktop), so it writes `OPENBOT_EDITION=personal`,
+`TENANT_PACKAGE_DIR=../examples/personal` and `COMPUTER_PERSON_ID=personal`, and writes
+`COMPUTER_SUPERVISOR_URL` and `COMPUTER_SUPERVISOR_CONTAINER_URL` empty. It also writes these into
 its own deployment's `.env` and owns their values: `OPENBOT_MODEL_OAUTH_FILE`, `CHATGPT_AUTH_FILE`,
 `CLAUDE_CODE_OAUTH_TOKEN`, `OPENBOT_BROWSER_URL` and `BROWSER_PORT` (the person's own browser, see
 [OpenBot Desktop runs it for the person](#openbot-desktop-runs-it-for-the-person)), and the
@@ -962,8 +965,8 @@ above needs doing. Desktop gives it a loopback port of its own (`BROWSER_PORT`, 
 computer token the stack already shares, the default data root above, and `OPENBOT_RECORDER_DIR`
 pointing at the Recorder that installation copies into the deployment (`extension/dist`) out of the
 release's own computer image, prebuilt, and `COMPUTER_PEOPLE_ONLY=on`. It points
-the server at it with `OPENBOT_BROWSER_URL=http://127.0.0.1:<port>`. Bots' own computers stay with
-the supervisor; only the person's browser runs here. It starts and stops with the rest of OpenBot,
+the server at it with `OPENBOT_BROWSER_URL=http://127.0.0.1:<port>`. The Bots share the one computer
+the [personal edition](personal-edition.md) runs; only the person's browser runs here. It starts and stops with the rest of OpenBot,
 is restarted the way the other processes are, and its browser is asked to close before Stop or Quit
 takes the rest down (SIGTERM to the computer on macOS and Linux, `taskkill` without `/F` to the
 browser's windows on Windows), and ended only if it has not closed within ten seconds.
