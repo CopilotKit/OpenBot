@@ -7,7 +7,7 @@ import { botBrowserRequestSeconds } from "./browser/bot-browser";
 import { browserRequestSeconds } from "./browser/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import type { ComputerGateway } from "./computer/gateway";
-import { streamPathBotId } from "./computer/stream-path";
+import { computerSocketPath } from "./computer/stream-path";
 import type { DeploymentConfig } from "./config";
 import {
   closeGatewaySocket,
@@ -39,6 +39,53 @@ type StreamData = {
   upstream: string;
   inward?: WebSocket;
 };
+
+/**
+ * How much a proxied socket may hold for a person who is not reading it, before it is closed.
+ *
+ * The terminal's own flow control (agent-computer/src/live-shell.ts) keeps what is in flight far
+ * below this. A socket past it is a browser that has stopped reading, and closing it costs that
+ * viewer a reconnect, which redraws its terminal from the computer's copy of the screen.
+ */
+const MAX_PROXY_BUFFER = 8 * 1024 * 1024;
+
+/** Whether a proxied socket is a Bot's terminal rather than its live screen, from where it goes. */
+function isTerminalUpstream(upstream: string): boolean {
+  try {
+    return new URL(upstream).pathname.endsWith("/terminal");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Carry a terminal's frames outward as they came: its output binary, its control messages text. The
+ * terminal's own flow control keeps what is in flight small; a person's side holding more than
+ * `MAX_PROXY_BUFFER` has stopped reading, and is closed so its terminal reconnects and is redrawn.
+ */
+function carryTerminal(
+  ws: {
+    send(data: string | Uint8Array): number;
+    getBufferedAmount(): number;
+    close(): void;
+  },
+  inward: WebSocket,
+): void {
+  inward.binaryType = "arraybuffer";
+  inward.onmessage = (event) => {
+    try {
+      const data = event.data;
+      const sent = ws.send(
+        typeof data === "string" ? data : new Uint8Array(data as ArrayBuffer),
+      );
+      if (sent === 0 || ws.getBufferedAmount() > MAX_PROXY_BUFFER)
+        throw new Error("The person's side has stopped reading.");
+    } catch {
+      inward.close();
+      ws.close();
+    }
+  };
+}
 
 /**
  * Bun takes exactly one WebSocket handler for the server, and three features need one: the app
@@ -89,6 +136,7 @@ export function startHttpServer(deps: {
     baseUrl: string,
     seat: { botId: string; personId?: string },
     token: string | undefined,
+    socket: "stream" | "terminal" = "stream",
   ) =>
     // The Bot travels in the query, because a websocket upgrade carries no custom header for the
     // computer to read and every call it serves is per Bot. So does the person, on the one computer
@@ -96,7 +144,7 @@ export function startHttpServer(deps: {
     // same reason, this socket is the one a person can type into, so it is the last thing that should
     // be reachable without it. The secret of that computer, which on a computer of one person's own
     // is its own token and never the deployment's (computer/computer-token.ts).
-    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(token ?? "")}`;
+    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/${socket}?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(token ?? "")}`;
 
   const trusted = trustedOrigin(config);
 
@@ -177,8 +225,15 @@ export function startHttpServer(deps: {
         }
         return new Response("Expected a WebSocket upgrade.", { status: 400 });
       }
-      const streamBotId = streamPathBotId(url.pathname);
+      /*
+       * The live screen and the terminal (the Bot's live shell). The same doors for both: whoever may
+       * watch a Bot's screen may watch its terminal, and typing into either is the computer's own
+       * question, asked of the wheel.
+       */
+      const named = computerSocketPath(url.pathname);
+      const streamBotId = named?.botId ?? null;
       if (
+        named &&
         streamBotId !== null &&
         request.headers.get("upgrade")?.toLowerCase() === "websocket"
       ) {
@@ -235,6 +290,7 @@ export function startHttpServer(deps: {
             streamBase,
             computerGateway.addressOf(seat),
             computerGateway.tokenFor(seat),
+            named.socket,
           );
         } catch (error) {
           // Said out loud rather than falling back to another Bot's computer, which is the failure this
@@ -277,6 +333,8 @@ export function startHttpServer(deps: {
         };
         inward.onclose = () => ws.close();
         inward.onerror = () => ws.close();
+        // The terminal's output is binary, and is carried as it came rather than as the screen's text.
+        if (isTerminalUpstream(stream.upstream)) carryTerminal(ws, inward);
       },
       message(ws, raw) {
         if (isGatewaySocket(ws.data)) {
