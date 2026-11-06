@@ -1,4 +1,5 @@
 import { IconLayoutSidebar } from "@tabler/icons-react";
+import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useOptionalSidebar } from "@/components/ui/sidebar";
@@ -114,11 +115,14 @@ export function SidebarToggle({ className }: { className?: string }) {
  * The band keeps its height even when `SidebarToggle` draws nothing, which on a desktop window is
  * most of the time. That is deliberate: reserving it means the screen beneath does not jump by 48px
  * each time the sidebar is collapsed and the toggle reappears.
+ *
+ * `children` sit at the band's right end, so a screen can put something there without a second bar.
  */
-export function SidebarToggleBar() {
+export function SidebarToggleBar({ children }: { children?: ReactNode }) {
   return (
     <div className="h-12 shrink-0 flex items-center px-3">
       <SidebarToggle />
+      {children ? <div className="ml-auto">{children}</div> : null}
     </div>
   );
 }

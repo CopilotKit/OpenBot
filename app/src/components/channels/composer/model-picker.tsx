@@ -1,14 +1,17 @@
 import { Combobox as ComboboxPrimitive } from "@base-ui/react";
-import { IconCheck, IconChevronDown, IconCube } from "@tabler/icons-react";
-import { useMemo } from "react";
+import {
+  IconCheck,
+  IconChevronDown,
+  IconCpu,
+  IconCube,
+} from "@tabler/icons-react";
+import { useMemo, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
-import { Badge } from "@/components/gallery/frame";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
   ComboboxCollection,
   ComboboxContent,
-  ComboboxEmpty,
   ComboboxGroup,
   ComboboxInput,
   ComboboxItem,
@@ -20,6 +23,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { markFor } from "@/lib/marks";
 import {
   effortLabel,
   type ModelPick,
@@ -28,7 +32,6 @@ import {
   thinks,
 } from "@/lib/models/effort";
 import type { ModelCatalogue, ModelOption } from "@/lib/models/queries";
-import { markFor } from "@/lib/marks";
 import { cn } from "@/lib/utils";
 
 /** One row of the popup: a model, or a thinking effort for the model in use. */
@@ -49,14 +52,14 @@ const sameChoice = (a: Choice, b: Choice) =>
     : b.kind === "effort" && a.effort === b.effort;
 
 /**
- * The tag beside OpenBot's own model, and beside a model's own effort: the app's own Badge, in one
- * style on every row. Its tint is drawn over whatever is under it, so it stays visible on the row
- * the pointer or the keyboard is on, where a muted fill matched the highlight and vanished.
+ * The word beside OpenBot's own model, and beside a model's own effort: quiet text at the row's end,
+ * in one style on every row, so it reads on the highlighted row too (a filled tag once matched the
+ * highlight and vanished). The row's own right padding keeps it clear of the check.
  */
 function DefaultTag() {
   return (
-    <span className="ml-auto shrink-0">
-      <Badge tone="neutral">Default</Badge>
+    <span className="ml-auto shrink-0 pr-5 text-muted-foreground text-xs">
+      Default
     </span>
   );
 }
@@ -81,17 +84,20 @@ function ModelMark({ model }: { model: ModelOption }) {
 /**
  * The model a conversation's Bot answers on, and how hard it thinks, picked in the composer.
  *
- * A quiet text button in the controls row naming the model and its effort, "GPT-6.1 Terra · High",
- * as VS Code's chat does. The popup is searchable, because a provider's own list runs to dozens,
+ * A quiet icon button in the controls row, a CPU and a chevron, rather than the model's mark and
+ * name: the row has the send and dictation controls to fit, and a name of any length crowded them.
+ * The tooltip and the button's accessible name say the model and its effort ("GPT-6.1 Terra ·
+ * High"). The popup is searchable, because a provider's own list runs to dozens,
  * newest first as the server sends it, with OpenBot's own model marked.
  *
- * THE EFFORTS SIT UNDER THE LIST, NOT IN A SUBMENU. VS Code opens a submenu from an arrow on each
- * model; a listbox option cannot hold a second control, so here the model in use gets a "Thinking"
- * group pinned at the bottom of the same list. One list means one keyboard model: the arrows run
- * from the models into the efforts and Enter picks either, and a screen reader hears the efforts as
- * options in a labelled group. The group stays put while the models scroll, and steps aside while a
- * search is typed, so a search is only ever a search for a model. A model that takes no effort has
- * no group at all.
+ * TWO COLUMNS, ONE LIST, as T3 Code lays it out: the search and the models on the left, and the
+ * model in use's efforts in a "Thinking" column on the right. A listbox option cannot hold a second
+ * control, so the efforts are a second group of the same listbox, placed beside the models by the
+ * popup's grid (the list itself is `display: contents`). One list means one keyboard model: the
+ * arrows run from the models into the efforts and Enter picks either, and a screen reader hears the
+ * efforts as options in a labelled group. The models scroll on their own; the efforts stay put, and
+ * stay while a search is typed, since a search only ever looks for a model. A model that takes no
+ * effort has no column, and the popup is one column wide.
  *
  * Renders nothing when there is nothing to pick: a plan, a provider that could not be read, or an
  * allowlist that leaves one model.
@@ -145,6 +151,15 @@ function Picker({
   className?: string;
 }) {
   const { contains } = ComboboxPrimitive.useFilter();
+  /** What is typed in the search, to say when no model matches: the efforts always do. */
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  /*
+   * PICKING A MODEL LEAVES THE POPUP OPEN when that model thinks, so its efforts can be chosen next
+   * in the column beside it; picking an effort is the last step and closes it. Set when a model is
+   * picked and read by the close that the same press asks for.
+   */
+  const stayOpen = useRef(false);
   const current: Choice = useMemo(
     () => ({ kind: "model", model: selected }),
     [selected],
@@ -168,6 +183,13 @@ function Picker({
     return [models, { value: "thinking", items: efforts }];
   }, [catalogue.models, selected]);
 
+  const matches = (model: ModelOption, typed: string) =>
+    contains(model.label, typed) || contains(model.id, typed);
+  const noModels =
+    query.trim() !== "" &&
+    !catalogue.models.some((model) => matches(model, query));
+  const twoColumns = groups.length > 1;
+
   const effortText = running ? effortLabel(running) : null;
   const shown = effortText
     ? `${selected.label} · ${effortText}`
@@ -176,25 +198,32 @@ function Picker({
   return (
     <Combobox<Choice>
       disabled={disabled}
-      // A search looks for a model; the efforts belong to the model in use and step aside.
-      filter={(choice, query) =>
-        choice.kind === "model" &&
-        (contains(choice.model.label, query) ||
-          contains(choice.model.id, query))
+      // A search looks for a model; the efforts belong to the model in use and stay in their column.
+      filter={(choice, typed) =>
+        choice.kind === "effort" || matches(choice.model, typed)
       }
       isItemEqualToValue={sameChoice}
       items={groups}
       itemToStringLabel={(choice) =>
         choice.kind === "model" ? choice.model.label : choice.label
       }
+      onInputValueChange={setQuery}
+      onOpenChange={(next, details) => {
+        const keep =
+          !next && stayOpen.current && details.reason === "item-press";
+        stayOpen.current = false;
+        if (!keep) setOpen(next);
+      }}
       onValueChange={(choice) => {
         if (!choice) return;
+        stayOpen.current = choice.kind === "model" && thinks(choice.model);
         onChange(
           choice.kind === "model"
             ? switchModel({ model: selected.id, effort }, choice.model)
             : { model: selected.id, effort: choice.effort },
         );
       }}
+      open={open}
       value={current}
     >
       <Tooltip>
@@ -202,8 +231,7 @@ function Picker({
           render={
             /*
              * Base UI's trigger rather than `ComboboxTrigger`, which draws its own larger chevron:
-             * this one is a ghost button like its neighbours in the row. It shrinks before the
-             * send and dictation controls do, and the model's name gives way before its effort.
+             * this one is a ghost button like its neighbours in the row.
              */
             <ComboboxPrimitive.Trigger
               aria-label={
@@ -212,24 +240,14 @@ function Picker({
                   : `Model: ${selected.label}`
               }
               className={cn(
-                "h-8 min-w-0 shrink gap-1.5 px-2 font-normal text-muted-foreground",
+                "h-8 shrink-0 gap-1 px-2 font-normal text-muted-foreground",
                 className,
               )}
               data-slot="composer-model"
               render={<Button size="sm" type="button" variant="ghost" />}
               nativeButton
             >
-              <ModelMark model={selected} />
-              {/*
-               * In a narrow column the name gives way first, down to a few letters, and only then
-               * the effort: the name says which model this is, and the tooltip has the rest.
-               */}
-              <span className="flex min-w-0 overflow-hidden">
-                <span className="min-w-12 truncate">{selected.label}</span>
-                {effortText ? (
-                  <span className="shrink-0">{` · ${effortText}`}</span>
-                ) : null}
-              </span>
+              <IconCpu aria-hidden className="size-4 shrink-0" />
               <IconChevronDown aria-hidden className="size-3.5 shrink-0" />
             </ComboboxPrimitive.Trigger>
           }
@@ -238,23 +256,32 @@ function Picker({
       </Tooltip>
       <ComboboxContent
         align="start"
-        className="flex w-72 flex-col *:data-[slot=input-group]:m-2 *:data-[slot=input-group]:mt-0"
+        className={cn(
+          // A grid: the search over the models on the left, the efforts down the right.
+          "grid grid-rows-[auto_minmax(0,1fr)] *:data-[slot=input-group]:m-2 *:data-[slot=input-group]:mb-1",
+          twoColumns
+            ? "w-[30rem] grid-cols-[minmax(0,1fr)_11rem]"
+            : "w-72 grid-cols-1",
+        )}
         side="top"
         sideOffset={8}
       >
-        <p className="px-3 pt-3 pb-2 text-sm font-medium">Choose a model</p>
-        <ComboboxInput placeholder="Search models" showTrigger={false} />
-        <ComboboxEmpty>No models match.</ComboboxEmpty>
-        {/*
-         * The list is a column rather than the scroller: the models scroll inside it, and the
-         * thinking group under them stays in view however long the list of models runs.
-         */}
-        <ComboboxList className="flex max-h-104 min-h-0 flex-col overflow-hidden p-0">
+        <ComboboxInput
+          className="col-start-1 row-start-1"
+          placeholder="Search models"
+          showTrigger={false}
+        />
+        {noModels ? (
+          <p className="col-start-1 row-start-2 px-3 py-6 text-center text-muted-foreground text-sm">
+            No models match.
+          </p>
+        ) : null}
+        <ComboboxList className="contents">
           {(group: ChoiceGroup) =>
             group.value === "models" ? (
               <ComboboxGroup
                 aria-label="Models"
-                className="no-scrollbar min-h-0 flex-1 scroll-py-1 overflow-y-auto overscroll-contain p-1.5 pt-1"
+                className="no-scrollbar col-start-1 row-start-2 max-h-[min(20rem,calc(var(--available-height)-4rem))] min-h-0 scroll-py-1 overflow-y-auto overscroll-contain p-1.5 pt-0.5"
                 items={group.items}
                 key="models"
               >
@@ -281,11 +308,23 @@ function Picker({
               </ComboboxGroup>
             ) : (
               <ComboboxGroup
-                className="shrink-0 border-t p-1.5"
+                className="col-start-2 row-span-2 row-start-1 min-h-0 overflow-y-auto border-l p-1.5"
                 items={group.items}
                 key="thinking"
               >
-                <ComboboxLabel className="px-2.5">Thinking</ComboboxLabel>
+                {/*
+                 * Headed with the model it belongs to, as the column beside a list of models. The
+                 * name sits outside the label, so the group is still called "Thinking".
+                 */}
+                <div className="flex h-10 items-center gap-2 px-2.5">
+                  <ComboboxLabel className="p-0">Thinking</ComboboxLabel>
+                  <span
+                    aria-hidden
+                    className="ml-auto min-w-0 truncate text-muted-foreground text-xs"
+                  >
+                    {selected.label}
+                  </span>
+                </div>
                 <ComboboxCollection>
                   {(choice: Choice) =>
                     choice.kind === "effort" ? (
@@ -293,7 +332,7 @@ function Picker({
                         // The combobox's own value is the model, so an effort says itself whether
                         // it is the one in use, and draws its own check where the model's sits.
                         aria-selected={choice.effort === running}
-                        className="h-8 pl-2.5"
+                        className="h-9 pl-2.5"
                         key={choice.effort ?? "default"}
                         value={choice}
                       >

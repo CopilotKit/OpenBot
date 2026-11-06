@@ -150,7 +150,7 @@ function thinking(popup: HTMLElement) {
   return within(popup).queryByRole("group", { name: "Thinking" });
 }
 
-test("the trigger names a model that takes no effort on its own", () => {
+test("the trigger is a CPU icon, and names a model that takes no effort on its own", () => {
   const { getByRole } = render(
     <ModelPicker
       catalogue={catalogue}
@@ -159,15 +159,23 @@ test("the trigger names a model that takes no effort on its own", () => {
     />,
   );
   const trigger = getByRole("combobox", { name: "Model: GPT-4o" });
-  expect(trigger.textContent).toBe("GPT-4o");
-  // Its maker's mark, as the list rows draw it.
-  expect(trigger.querySelector("img")?.getAttribute("data-mark")).toBe(
-    "GPT-4o",
+  // No name and no maker's mark in the row: the CPU icon and a chevron, named for screen readers.
+  expect(trigger.textContent).toBe("");
+  expect(trigger.querySelector("img")).toBeNull();
+  expect(trigger.firstElementChild?.classList.contains("tabler-icon-cpu")).toBe(
+    true,
   );
 });
 
-test("a model whose maker has no mark vendored gets the app's plain model icon, never an empty gap", () => {
-  const { getByRole } = render(
+/** The open popup of a picker drawn on its own. */
+async function openStandalone(view: ReturnType<typeof render>, name: string) {
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("combobox", { name }));
+  return await view.findByRole("dialog");
+}
+
+test("a model whose maker has no mark vendored gets the app's plain model icon in the list, never an empty gap", async () => {
+  const view = render(
     <ModelPicker
       catalogue={{
         ...catalogue,
@@ -177,18 +185,15 @@ test("a model whose maker has no mark vendored gets the app's plain model icon, 
       value={{ model: "fast", effort: null }}
     />,
   );
-  const trigger = getByRole("combobox", { name: "Model: fast" });
-  // No brand mark is invented for it.
-  expect(trigger.querySelector("img")).toBeNull();
-  // The app's own icon holds the place, so the label never starts on an empty gap.
-  expect(trigger.firstElementChild?.tagName.toLowerCase()).toBe("svg");
-  expect(
-    trigger.firstElementChild?.classList.contains("tabler-icon-cube"),
-  ).toBe(true);
+  const popup = await openStandalone(view, "Model: fast");
+  const row = within(popup).getByRole("option", { name: "fast" });
+  // No brand mark is invented for it, and the app's own icon holds the place.
+  expect(row.querySelector("img")).toBeNull();
+  expect(row.querySelector("svg.tabler-icon-cube")).not.toBeNull();
 });
 
-test("Google and xAI models carry their makers' marks", () => {
-  const { getByRole } = render(
+test("Google and xAI models carry their makers' marks in the list", async () => {
+  const view = render(
     <ModelPicker
       catalogue={{
         ...catalogue,
@@ -206,10 +211,14 @@ test("Google and xAI models carry their makers' marks", () => {
       value={{ model: "grok-4.7", effort: null }}
     />,
   );
-  const trigger = getByRole("combobox", { name: "Model: Grok 4.7" });
-  expect(trigger.querySelector("img")?.getAttribute("data-mark")).toBe(
-    "Grok 4.7",
-  );
+  const popup = await openStandalone(view, "Model: Grok 4.7");
+  for (const label of ["Grok 4.7", "Gemini 3.8 Flash"])
+    expect(
+      within(popup)
+        .getByRole("option", { name: label })
+        .querySelector("img")
+        ?.getAttribute("data-mark"),
+    ).toBe(label);
 });
 
 test("the trigger names the chosen effort beside the model", () => {
@@ -220,11 +229,11 @@ test("the trigger names the chosen effort beside the model", () => {
       value={{ model: "gpt-6.1-terra", effort: "xhigh" }}
     />,
   );
-  const trigger = getByRole("combobox", {
-    name: "Model: GPT-6.1 Terra, thinking: Extra high",
-  });
-  // A non-breaking space before the dot, so it never starts a line of its own.
-  expect(trigger.textContent).toBe("GPT-6.1 Terra · Extra high");
+  expect(
+    getByRole("combobox", {
+      name: "Model: GPT-6.1 Terra, thinking: Extra high",
+    }),
+  ).toBeTruthy();
 });
 
 test("with no effort chosen, the trigger names the model's own default", () => {
@@ -236,9 +245,8 @@ test("with no effort chosen, the trigger names the model's own default", () => {
     />,
   );
   expect(
-    getByRole("combobox", { name: "Model: GPT-6.1 Terra, thinking: Medium" })
-      .textContent,
-  ).toBe("GPT-6.1 Terra · Medium");
+    getByRole("combobox", { name: "Model: GPT-6.1 Terra, thinking: Medium" }),
+  ).toBeTruthy();
 });
 
 test("with no effort chosen and no default known, the trigger names the model alone", () => {
@@ -249,9 +257,7 @@ test("with no effort chosen and no default known, the trigger names the model al
       value={{ model: "gpt-6-sol", effort: null }}
     />,
   );
-  expect(getByRole("combobox", { name: "Model: GPT-6 Sol" }).textContent).toBe(
-    "GPT-6 Sol",
-  );
+  expect(getByRole("combobox", { name: "Model: GPT-6 Sol" })).toBeTruthy();
 });
 
 test("there is no picker when there is nothing to pick", () => {
@@ -272,7 +278,7 @@ test("there is no picker before the models have loaded", () => {
   expect(container.innerHTML).toBe("");
 });
 
-test("the Default tag is one badge, the same on a model row and an effort row", async () => {
+test("the Default tag is the same quiet text on a model row and an effort row", async () => {
   // The model row's tag used to share the highlight's fill and vanish on the row in use.
   saved["conversation-a"] = { model: "gpt-5.5", effort: null };
   const { popup } = await openPicker(/GPT-5\.5/);
@@ -283,8 +289,8 @@ test("the Default tag is one badge, the same on a model row and an effort row", 
   expect(tags).toHaveLength(2);
   const [model, effort] = tags.map((tag) => tag.className);
   expect(model).toBe(effort);
-  // The app's own neutral Badge, a tint over whatever row is under it.
-  expect(model).toContain("bg-foreground/5");
+  // Muted text, which reads on the highlighted row too.
+  expect(model).toContain("text-muted-foreground");
 });
 
 test("choosing an effort saves the model with it, and the trigger names it", async () => {
@@ -397,18 +403,26 @@ test("a model that takes no effort shows no thinking control", async () => {
   ).toEqual(["GPT-6.1 Terra", "GPT-6 Sol", "GPT-5.5Default", "GPT-4o"]);
 });
 
-test("a search looks only for models, and the efforts step aside while it does", async () => {
+test("a search looks only for models, and the efforts stay in their column", async () => {
   saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
   const { user, popup } = await openPicker(/GPT-6\.1 Terra/);
   await user.type(within(popup).getByPlaceholderText("Search models"), "sol");
-  await waitFor(() =>
-    expect(
-      within(popup)
-        .getAllByRole("option")
-        .map((option) => option.textContent),
-    ).toEqual(["GPT-6 Sol"]),
+  const models = () =>
+    within(within(popup).getByRole("group", { name: "Models" }))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+  await waitFor(() => expect(models()).toEqual(["GPT-6 Sol"]));
+  expect(thinking(popup)).not.toBeNull();
+});
+
+test("a search no model matches says so", async () => {
+  saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
+  const { user, popup } = await openPicker(/GPT-6\.1 Terra/);
+  await user.type(
+    within(popup).getByPlaceholderText("Search models"),
+    "nothing like it",
   );
-  expect(thinking(popup)).toBeNull();
+  expect(await within(popup).findByText("No models match.")).toBeTruthy();
 });
 
 test("a conversation shows the pick the server holds for it", async () => {
@@ -546,4 +560,36 @@ test("sending waits for the model save and refuses a failed save", async () => {
     await expect(refused).rejects.toThrow("save failed");
   });
   expect(saved["conversation-a"]).toEqual({ model: "gpt-4o", effort: null });
+});
+
+test("picking a model that thinks leaves the popup open on its efforts, and picking one closes it", async () => {
+  saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
+  const { view, user, popup } = await openPicker(/GPT-6\.1 Terra/);
+  await user.click(within(popup).getByRole("option", { name: "GPT-6 Sol" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  // Still open, now offering GPT-6 Sol's efforts.
+  const open = view.getByRole("dialog");
+  expect(
+    within(thinking(open) as HTMLElement)
+      .getAllByRole("option")
+      .map((option) => option.textContent),
+  ).toEqual(["Default", "Low", "Medium", "High"]);
+  // Every model is still listed: picking one did not turn the search into its name.
+  expect(
+    within(within(open).getByRole("group", { name: "Models" })).getAllByRole(
+      "option",
+    ),
+  ).toHaveLength(4);
+
+  await user.click(within(open).getByRole("option", { name: "High" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+});
+
+test("picking a model that takes no effort closes the popup", async () => {
+  saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
+  const { view, user, popup } = await openPicker(/GPT-6\.1 Terra/);
+  await user.click(within(popup).getByRole("option", { name: "GPT-4o" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
 });

@@ -55,6 +55,8 @@ export type CoworkerRoutingInput = {
   text: string;
   /** An explicit picker selection from a surface such as the web composer. */
   agentId?: string | null;
+  /** Every selected skill must be offered by the recipient. */
+  skillSlugs?: readonly string[];
 };
 
 export type CoworkerRouteDetail = {
@@ -76,6 +78,7 @@ export type CreateCoworkerRoutingServiceOptions = {
   router: IntentRouter;
   auditStore?: AuditStore;
   reachableSystems?: (agentId: string) => Promise<readonly string[]>;
+  skillsFor?: (agentId: string) => Promise<readonly string[]>;
 };
 
 /** Normalize people-facing names before matching, without making matching fuzzy. */
@@ -404,9 +407,21 @@ export function createCoworkerRoutingService(
     }
     // The store applies this same policy in SQL; keep this canonical policy check at the service
     // boundary so a broader store implementation cannot leak a coworker into routing.
-    const roster = (await options.store.list(input.actor, false)).filter(
+    let roster = (await options.store.list(input.actor, false)).filter(
       (profile) => canAccessAgent(input.actor, profile),
     );
+    // Resolve grants on the server before intent routing and its canonical audit write.
+    // No reader means no eligible Bot; a failed read must not remove the constraint.
+    const required = input.skillSlugs ?? [];
+    if (required.length > 0) {
+      const eligible = await Promise.all(
+        roster.map(async (profile) => {
+          const held = (await options.skillsFor?.(profile.id)) ?? [];
+          return required.every((slug) => held.includes(slug));
+        }),
+      );
+      roster = roster.filter((_, index) => eligible[index]);
+    }
     const namedId = input.agentId?.trim() || null;
     if (namedId) {
       const chosen = roster.find(({ id }) => id === namedId);

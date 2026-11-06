@@ -45,6 +45,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { grantRoster } from "@/lib/agents/grant-roster";
+import { grantSummary } from "@/lib/agents/grant-summary";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { storeMcpToken } from "@/lib/credentials/mutations";
@@ -104,20 +105,7 @@ function toggled(
 }
 
 /**
- * How widely a tool is granted, in words rather than a fraction.
- *
- * "0/3" needs decoding and reads as a score. The two ends are the ones worth recognising without
- * reading — nothing holds this, or everything does — so they are named, and the middle is the only
- * case that gets a number.
- */
-function grantSummary(held: number, total: number): string {
-  if (held === 0) return "No Bots";
-  if (held === total) return total === 1 ? "1 Bot" : "All Bots";
-  return `${held} of ${total} Bots`;
-}
-
-/**
- * How much of this vendor one Bot holds, in the same voice as {@link grantSummary}.
+ * How much of this vendor one Bot holds, in the same voice as `grantSummary`.
  *
  * The same decision counted the other way round, for the rows that open a Bot's own page against
  * this app. Named ends rather than a fraction, for the reason recorded above: "0/167" reads as a

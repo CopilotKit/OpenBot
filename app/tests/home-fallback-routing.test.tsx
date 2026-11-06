@@ -15,9 +15,14 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { takeFailedStart } from "@/lib/channels/pending-start";
+import { pluginKeys } from "@/lib/plugins/queries";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 
-beforeAll(() => GlobalRegistrator.register());
+beforeAll(() => {
+  GlobalRegistrator.register();
+  // prompt-area positions its skill menu at a caret with a non-empty box.
+  Range.prototype.getBoundingClientRect = () => new DOMRect(8, 8, 1, 16);
+});
 
 const originalFetch = global.fetch;
 
@@ -342,3 +347,51 @@ test("a start that fails while the person is writing something else on home leav
   // Kept for the next home page, which is not this test's to open.
   expect(takeFailedStart()?.text).toBe("ask analyst");
 });
+
+for (const status of [409, 500]) {
+  test(`skill routing failure ${status} preserves the message without starting an incompatible fallback`, async () => {
+    const starts: string[][] = [];
+    const requests: unknown[] = [];
+    installHomeRoutingFetch({
+      routeResponse: Response.json(
+        { error: "Cannot route these skills" },
+        { status },
+      ),
+      starts,
+    });
+    const installed = global.fetch;
+    global.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (input === "/api/route")
+          requests.push(JSON.parse(String(init?.body)));
+        return installed(input, init);
+      },
+      { preconnect: originalFetch.preconnect },
+    );
+    const client = queryClientWithAgents([
+      agent({ id: "default", name: "Default", visibility: "public" }),
+    ]);
+    client.setQueryData(pluginKeys.forAgent("default"), {
+      tools: [],
+      skills: [
+        { slug: "first", title: "First skill", instructions: "Use first" },
+      ],
+    });
+    const view = renderHome(client);
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    await user.click(await view.findByRole("textbox", { name: "Message" }));
+    await user.keyboard("/first");
+    await user.click(await view.findByRole("option", { name: /First skill/ }));
+    await user.click(await view.findByRole("button", { name: "Send message" }));
+    await waitFor(() =>
+      expect(view.getByRole("alert").textContent).toContain(
+        "Cannot route these skills",
+      ),
+    );
+    expect(requests).toEqual([{ text: "/first", skillSlugs: ["first"] }]);
+    expect(starts).toEqual([]);
+    expect(
+      view.getByRole("textbox", { name: "Message" }).textContent,
+    ).toContain("/first");
+  });
+}

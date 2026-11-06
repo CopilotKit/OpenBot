@@ -52,6 +52,16 @@ describe("toDraft", () => {
     expect(draft.commandIds).toEqual(["search", "summarize"]);
   });
 
+  test("a skill chip shows its name but sends its command", () => {
+    const draft = toDraft([
+      command("standup", "Standup notes"),
+      text(" for the design team"),
+    ]);
+
+    expect(draft.text).toBe("/standup for the design team");
+    expect(draft.commandIds).toEqual(["standup"]);
+  });
+
   test("treats whitespace-only content as empty", () => {
     expect(toDraft([text("   ")]).isEmpty).toBe(true);
     expect(toDraft([]).isEmpty).toBe(true);

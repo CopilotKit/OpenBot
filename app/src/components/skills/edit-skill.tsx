@@ -65,8 +65,8 @@ export function EditSkill({ slug }: { slug: string }) {
       <header>
         <h1 className="text-2xl font-semibold">Edit skill</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Changes apply the next time someone uses <code>/{skill.slug}</code>.
-          Bots that have it keep it.
+          Changes apply the next time someone uses {skill.title}. Bots that have
+          it keep it.
         </p>
       </header>
 

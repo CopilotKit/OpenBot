@@ -16,7 +16,13 @@ export const AGENT_TRIGGER = "@";
 export const COMMAND_TRIGGER = "/";
 
 export type ComposerDraft = {
-  /** Plain text, with chips flattened back to `@Agent` / `/command`. */
+  /**
+   * Plain text, with chips flattened back to `@Agent` / `/command`.
+   *
+   * A `/` chip shows a skill's name in the box, but flattens to its command (`/standup`, not
+   * `/Standup notes`): the command never changes, while a skill can be renamed, so a message keeps
+   * naming the skill it ran, and the transcript can find the skill again to draw its badge.
+   */
   text: string;
   /**
    * The single agent this message is addressed to, or `null` to let the channel pick its default.
@@ -39,7 +45,13 @@ export function toDraft(
   const commandChips = getChipsByTrigger(segments, COMMAND_TRIGGER);
 
   return {
-    text: segmentsToPlainText(segments).trim(),
+    text: segmentsToPlainText(
+      segments.map((segment) =>
+        segment.type === "chip" && segment.trigger === COMMAND_TRIGGER
+          ? { ...segment, displayText: segment.value }
+          : segment,
+      ),
+    ).trim(),
     agentId: agentChips.at(-1)?.value ?? null,
     commandIds: commandChips.map((chip) => chip.value),
     isEmpty: isSegmentsEmpty(segments),
