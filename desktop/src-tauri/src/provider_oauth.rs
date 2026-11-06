@@ -21,6 +21,19 @@ pub const FILE: &str = ".openbot/model-oauth.json";
 const XAI_CLIENT: &str = "b1a00492-073a-47ea-816f-4c329264a828";
 const XAI_SCOPE: &str = "openid profile email offline_access grok-cli:access api:access";
 const GOOGLE_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
+/*
+ * Unbiased AI's partner sign-in: an RFC 8628 device authorization against its platform, which mints an
+ * API key for its OpenAI-compatible gateway exactly once and keeps no copy (Unbiased AI's partner
+ * integration guide). The client id is public by design, like xAI's: it carries no secret and only
+ * names this build on the approval page, where the person sees the code and has to click Approve.
+ */
+const UNBIASED_CLIENT: &str = "zywRFag72307dYfU4H_EcQ";
+const UNBIASED_PLATFORM: &str = "https://platform.unbiased.ai";
+const UNBIASED_DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
+const UNBIASED_EXPIRED: &str =
+    "The Unbiased AI sign-in code expired before it was approved. Sign in again.";
+const UNBIASED_UNREGISTERED: &str =
+    "This build of OpenBot is not registered for Unbiased AI sign-in. Update OpenBot, or use an API key from the Unbiased AI dashboard.";
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +83,13 @@ enum Pending {
         interval: u64,
         expires: Instant,
     },
+    Unbiased {
+        platform: String,
+        client_id: String,
+        device_code: String,
+        interval: u64,
+        expires: Instant,
+    },
 }
 static ACTIVE: OnceLock<Mutex<Option<Arc<Flow>>>> = OnceLock::new();
 fn active() -> &'static Mutex<Option<Arc<Flow>>> {
@@ -92,6 +112,7 @@ fn configured(name: &str) -> Option<String> {
             option_env!("OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT")
         }
         "OPENBOT_XAI_MODEL_OAUTH_CLIENT_ID" => option_env!("OPENBOT_XAI_MODEL_OAUTH_CLIENT_ID"),
+        "OPENBOT_UNBIASED_OAUTH_CLIENT_ID" => option_env!("OPENBOT_UNBIASED_OAUTH_CLIENT_ID"),
         _ => None,
     };
     std::env::var(name)
@@ -232,6 +253,12 @@ pub fn begin(root: &Path, provider: &str) -> Result<Authorization, String> {
                 Some(user_code),
             )
         }
+        "unbiased" => {
+            let client_id = configured("OPENBOT_UNBIASED_OAUTH_CLIENT_ID")
+                .unwrap_or_else(|| UNBIASED_CLIENT.into());
+            let (pending, url, user_code) = begin_unbiased(&unbiased_platform(), &client_id)?;
+            (pending, url, Some(user_code))
+        }
         _ => return Err("That provider does not support this sign-in flow.".into()),
     };
     check(&flow)?;
@@ -290,7 +317,180 @@ fn xai_verification_url(body: &serde_json::Value) -> Result<String, String> {
     Ok(parsed.into())
 }
 
-pub fn finish(id: &str) -> Result<(), String> {
+/// Where the Unbiased AI flow starts: the platform, or an override for driving this client against a
+/// mock of it (Unbiased AI ships a conformance kit that works that way).
+fn unbiased_platform() -> String {
+    configured("OPENBOT_UNBIASED_PLATFORM_URL")
+        .map(|url| url.trim_end_matches('/').to_owned())
+        .unwrap_or_else(|| UNBIASED_PLATFORM.into())
+}
+
+/// The platform's reason for a refusal, as RFC 6749 §5.2 has it say it.
+fn unbiased_reason(body: &serde_json::Value) -> &str {
+    body.get("error_description")
+        .or_else(|| body.get("error"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("request refused")
+}
+
+/// Step one of the Unbiased AI flow: ask the platform for a code. `device_name` is display only on
+/// the platform side: the approval page shows it after the product's name, and the platform puts
+/// the partner's registered name in front of it to suggest the name of a new workload, so it is
+/// the one word that reads well behind either.
+fn begin_unbiased(platform: &str, client_id: &str) -> Result<(Pending, String, String), String> {
+    let response = http()?
+        .post(format!("{platform}/api/oauth/device_authorization"))
+        .form(&[("client_id", client_id), ("device_name", "Desktop")])
+        .send()
+        .map_err(|_| {
+            "Could not reach Unbiased AI to start sign-in. Check your connection and try again."
+        })?;
+    let status = response.status();
+    let body: serde_json::Value = response
+        .json()
+        .map_err(|_| "Unbiased AI returned an unreadable sign-in response.")?;
+    if !status.is_success() {
+        return Err(match body.get("error").and_then(|v| v.as_str()) {
+            Some("invalid_client") => UNBIASED_UNREGISTERED.into(),
+            Some("temporarily_unavailable") if status.as_u16() == 429 => {
+                "Too many Unbiased AI sign-in attempts from this network. Wait a minute and try again."
+                    .into()
+            }
+            Some("temporarily_unavailable") => {
+                "Unbiased AI sign-in is temporarily unavailable. Try again shortly.".into()
+            }
+            _ => format!(
+                "Unbiased AI sign-in failed ({}): {}",
+                status.as_u16(),
+                unbiased_reason(&body)
+            ),
+        });
+    }
+    let url = unbiased_verification_url(&body, platform)?;
+    let user_code = required(&body, "user_code")?;
+    let device_code = required(&body, "device_code")?;
+    let interval = body
+        .get("interval")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5)
+        .max(1);
+    let expires = Instant::now()
+        + Duration::from_secs(
+            body.get("expires_in")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(900)
+                .min(1800),
+        );
+    Ok((
+        Pending::Unbiased {
+            platform: platform.into(),
+            client_id: client_id.into(),
+            device_code,
+            interval,
+            expires,
+        },
+        url,
+        user_code,
+    ))
+}
+
+/// The approval page, which has to belong to the platform just spoken to: the URL is handed to the
+/// browser, so one pointing anywhere else is refused before it is opened.
+fn unbiased_verification_url(body: &serde_json::Value, platform: &str) -> Result<String, String> {
+    let value = body
+        .get("verification_uri_complete")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .map(Ok)
+        .unwrap_or_else(|| required(body, "verification_uri"))?;
+    let invalid = "Unbiased AI returned an unsupported sign-in URL.";
+    let expected = reqwest::Url::parse(platform).map_err(|_| invalid)?;
+    let parsed = reqwest::Url::parse(&value).map_err(|_| invalid)?;
+    if parsed.scheme() != expected.scheme()
+        || parsed.host_str() != expected.host_str()
+        || parsed.port_or_known_default() != expected.port_or_known_default()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(invalid.into());
+    }
+    Ok(parsed.into())
+}
+
+/// Step three of the Unbiased AI flow: poll until the person approves, declines or the code dies, and
+/// return the API key the platform minted.
+fn finish_unbiased(
+    flow: &Flow,
+    platform: &str,
+    client_id: &str,
+    device_code: &str,
+    mut interval: u64,
+    expires: Instant,
+) -> Result<String, String> {
+    loop {
+        if Instant::now() >= expires {
+            return Err(UNBIASED_EXPIRED.into());
+        }
+        // Sleeps FIRST. Polling on arrival is the RFC's textbook slow_down.
+        wait(flow, Duration::from_secs(interval))?;
+        /*
+         * EXACTLY ONCE. The platform mints the key the moment it answers 200 and keeps no copy, so
+         * it cannot tell a lost response from a replay: any further poll of a redeemed code revokes
+         * the key it just issued. So a transport failure ends the sign-in rather than being retried
+         * (starting again costs the person ten seconds; a retry could revoke a key nobody saw, or
+         * leave one live that nobody holds), and nothing at all is sent after the 200.
+         */
+        let response = http()?
+            .post(format!("{platform}/api/oauth/token"))
+            .form(&[
+                ("grant_type", UNBIASED_DEVICE_GRANT),
+                ("device_code", device_code),
+                ("client_id", client_id),
+            ])
+            .send()
+            .map_err(|_| {
+                "Lost the connection to Unbiased AI while waiting for approval. Sign in again."
+            })?;
+        let status = response.status();
+        let body: serde_json::Value = response
+            .json()
+            .map_err(|_| "Unbiased AI returned an unreadable sign-in response. Sign in again.")?;
+        if status.is_success() {
+            return required(&body, "access_token").map_err(|_| {
+                "Unbiased AI returned an incomplete sign-in response. Sign in again.".to_string()
+            });
+        }
+        match body.get("error").and_then(|v| v.as_str()) {
+            Some("authorization_pending") => continue,
+            // RFC 8628 §3.5: five seconds more between polls, for the rest of the flow.
+            Some("slow_down") => interval = interval.saturating_add(5),
+            // A platform hiccup that never reached the grant; the code is still pending.
+            Some("temporarily_unavailable") => continue,
+            // Terminal, with the platform's reason: Deny on the approval page, an organization
+            // whose access lapsed, or a workload not ready yet, each saying what to do next.
+            Some("access_denied") => {
+                return Err(format!(
+                    "Unbiased AI sign-in was not approved: {}.",
+                    unbiased_reason(&body)
+                ))
+            }
+            Some("expired_token") => return Err(UNBIASED_EXPIRED.into()),
+            Some("invalid_client") => return Err(UNBIASED_UNREGISTERED.into()),
+            _ => {
+                return Err(format!(
+                    "Unbiased AI sign-in failed ({}): {}. Sign in again.",
+                    status.as_u16(),
+                    unbiased_reason(&body)
+                ))
+            }
+        }
+    }
+}
+
+/// Finish the sign-in. Google and xAI leave a refreshable session in the private credential file
+/// and answer nothing; Unbiased AI answers the API key it minted, which the window carries on exactly
+/// as a typed endpoint key.
+pub fn finish(id: &str) -> Result<Option<String>, String> {
     let flow = active()
         .lock()
         .unwrap()
@@ -379,8 +579,18 @@ fn receive_callback(stream: &mut TcpStream, state: &str) -> Result<Option<String
     Ok(Some(code))
 }
 
-fn finish_flow(flow: &Flow, pending: Pending) -> Result<(), String> {
+fn finish_flow(flow: &Flow, pending: Pending) -> Result<Option<String>, String> {
     let (provider, client_id, client_secret, project, scope, tokens) = match pending {
+        Pending::Unbiased {
+            platform,
+            client_id,
+            device_code,
+            interval,
+            expires,
+        } => {
+            return finish_unbiased(flow, &platform, &client_id, &device_code, interval, expires)
+                .map(Some)
+        }
         Pending::Google {
             listener,
             verifier,
@@ -485,7 +695,8 @@ fn finish_flow(flow: &Flow, pending: Pending) -> Result<(), String> {
     check(flow)?;
     let credentials =
         credentials_from_tokens(provider, client_id, client_secret, project, scope, &tokens)?;
-    write(&flow.root, &credentials, || check(flow))
+    write(&flow.root, &credentials, || check(flow))?;
+    Ok(None)
 }
 fn credentials_from_tokens(
     provider: &str,
@@ -634,6 +845,492 @@ mod tests {
     }
 
     #[test]
+    fn unbiased_verification_url_must_belong_to_the_platform_spoken_to() {
+        let platform = "https://platform.unbiased.ai";
+        for url in [
+            "http://platform.unbiased.ai/activate",
+            "https://platform.unbiased.ai.evil.example/activate",
+            "https://evil.example/activate",
+            "https://user@platform.unbiased.ai/activate",
+            "https://user:password@platform.unbiased.ai/activate",
+            "https://platform.unbiased.ai:444/activate",
+            "javascript:alert(1)",
+            "file:///tmp/signin",
+            "/activate",
+        ] {
+            for field in ["verification_uri", "verification_uri_complete"] {
+                let body = serde_json::json!({field: url});
+                assert!(
+                    unbiased_verification_url(&body, platform).is_err(),
+                    "accepted {field}: {url}"
+                );
+            }
+        }
+        let plain = "https://platform.unbiased.ai/activate";
+        let complete = "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK";
+        assert_eq!(
+            unbiased_verification_url(&serde_json::json!({"verification_uri": plain}), platform)
+                .unwrap(),
+            plain
+        );
+        assert_eq!(
+            unbiased_verification_url(
+                &serde_json::json!({"verification_uri": plain, "verification_uri_complete": complete}),
+                platform
+            )
+            .unwrap(),
+            complete
+        );
+        // A test override is its own authority, port and all.
+        assert_eq!(
+            unbiased_verification_url(
+                &serde_json::json!({"verification_uri_complete": "http://127.0.0.1:4321/activate?user_code=X"}),
+                "http://127.0.0.1:4321"
+            )
+            .unwrap(),
+            "http://127.0.0.1:4321/activate?user_code=X"
+        );
+    }
+
+    /*
+     * A scripted stand-in for platform.unbiased.ai, so the polling discipline Unbiased AI's guide
+     * requires is checked from the wire, as its conformance kit checks it: request counts and
+     * timings, not the shape of the client. One answer to the start, then one answer per token
+     * poll in order; `None` reads the request and closes the connection without replying.
+     */
+    type Scripted = Option<(u16, serde_json::Value)>;
+
+    struct MockPlatform {
+        url: String,
+        requests: Arc<Mutex<Vec<(String, String, Instant)>>>,
+    }
+
+    fn read_http_request(stream: &mut TcpStream) -> Option<(String, String)> {
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 1024];
+        let header_end = loop {
+            let count = stream.read(&mut chunk).ok()?;
+            if count == 0 {
+                return None;
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+            if let Some(at) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                break at + 4;
+            }
+        };
+        let head = String::from_utf8_lossy(&bytes[..header_end]).into_owned();
+        let path = head.lines().next()?.split_whitespace().nth(1)?.to_owned();
+        let mut length = 0;
+        for line in head.lines() {
+            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = value.trim().parse().unwrap_or(0);
+            }
+        }
+        while bytes.len() < header_end + length {
+            let count = stream.read(&mut chunk).ok()?;
+            if count == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+        }
+        Some((
+            path,
+            String::from_utf8_lossy(&bytes[header_end..]).into_owned(),
+        ))
+    }
+
+    fn mock_platform(start: impl FnOnce(&str) -> Scripted, polls: Vec<Scripted>) -> MockPlatform {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let start = start(&url);
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let seen = requests.clone();
+        std::thread::spawn(move || {
+            let mut polls = polls.into_iter();
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let Some((path, body)) = read_http_request(&mut stream) else {
+                    continue;
+                };
+                seen.lock()
+                    .unwrap()
+                    .push((path.clone(), body, Instant::now()));
+                let scripted = if path == "/api/oauth/device_authorization" {
+                    start.clone()
+                } else {
+                    polls.next().flatten()
+                };
+                if let Some((status, json)) = scripted {
+                    let payload = json.to_string();
+                    let _ = stream.write_all(
+                        format!(
+                            "HTTP/1.1 {status} Scripted\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                            payload.len()
+                        )
+                        .as_bytes(),
+                    );
+                }
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+        });
+        MockPlatform { url, requests }
+    }
+
+    fn grant(interval: u64, expires_in: u64) -> impl FnOnce(&str) -> Scripted {
+        move |platform| {
+            Some((
+                200,
+                serde_json::json!({
+                    "device_code": "device-code-for-tests",
+                    "user_code": "BCDF-GHJK",
+                    "verification_uri": format!("{platform}/activate"),
+                    "verification_uri_complete": format!("{platform}/activate?user_code=BCDF-GHJK"),
+                    "expires_in": expires_in,
+                    "interval": interval,
+                }),
+            ))
+        }
+    }
+
+    fn refusal(error: &str) -> Scripted {
+        Some((400, serde_json::json!({"error": error})))
+    }
+
+    fn issued(key: &str) -> Scripted {
+        Some((
+            200,
+            serde_json::json!({"access_token": key, "token_type": "bearer", "workload_name": "copilotkit-openbot-desktop"}),
+        ))
+    }
+
+    /// A flow of its own, off the global slot, so parallel tests cannot cancel one another.
+    fn unbiased_flow() -> Flow {
+        Flow {
+            id: random(),
+            root: std::env::temp_dir(),
+            canceled: AtomicBool::new(false),
+            pending: Mutex::new(None),
+        }
+    }
+
+    fn run_unbiased(platform: &MockPlatform) -> Result<String, String> {
+        let (pending, url, code) = begin_unbiased(&platform.url, "client-for-tests")?;
+        assert_eq!(code, "BCDF-GHJK");
+        assert_eq!(
+            url,
+            format!("{}/activate?user_code=BCDF-GHJK", platform.url)
+        );
+        let Pending::Unbiased {
+            platform: base,
+            client_id,
+            device_code,
+            interval,
+            expires,
+        } = pending
+        else {
+            panic!("the Unbiased AI start produced another provider's flow");
+        };
+        finish_unbiased(
+            &unbiased_flow(),
+            &base,
+            &client_id,
+            &device_code,
+            interval,
+            expires,
+        )
+    }
+
+    fn token_polls(platform: &MockPlatform) -> Vec<(String, Instant)> {
+        platform
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(path, _, _)| path == "/api/oauth/token")
+            .map(|(_, body, at)| (body.clone(), *at))
+            .collect()
+    }
+
+    fn form(body: &str) -> std::collections::HashMap<String, String> {
+        reqwest::Url::parse(&format!("http://form/?{body}"))
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect()
+    }
+
+    #[test]
+    fn unbiased_polls_after_the_interval_and_sends_nothing_after_the_key() {
+        let platform = mock_platform(
+            grant(1, 900),
+            vec![refusal("authorization_pending"), issued("sk_pareto_test")],
+        );
+        let started = Instant::now();
+        assert_eq!(run_unbiased(&platform).unwrap(), "sk_pareto_test");
+        let polls = token_polls(&platform);
+        assert_eq!(polls.len(), 2);
+        assert!(
+            polls[0].1.duration_since(started) >= Duration::from_secs(1),
+            "polled before the interval had passed"
+        );
+        for (body, _) in &polls {
+            let fields = form(body);
+            assert_eq!(
+                fields.get("grant_type").map(String::as_str),
+                Some(UNBIASED_DEVICE_GRANT)
+            );
+            assert_eq!(
+                fields.get("device_code").map(String::as_str),
+                Some("device-code-for-tests")
+            );
+            assert_eq!(
+                fields.get("client_id").map(String::as_str),
+                Some("client-for-tests")
+            );
+        }
+        let start = form(&platform.requests.lock().unwrap()[0].1);
+        assert_eq!(
+            start.get("client_id").map(String::as_str),
+            Some("client-for-tests")
+        );
+        assert_eq!(
+            start.get("device_name").map(String::as_str),
+            Some("Desktop")
+        );
+        std::thread::sleep(Duration::from_millis(1500));
+        assert_eq!(
+            token_polls(&platform).len(),
+            2,
+            "something was sent after the key was issued"
+        );
+    }
+
+    #[test]
+    fn unbiased_slow_down_adds_five_seconds_for_the_rest_of_the_flow() {
+        let platform = mock_platform(
+            grant(1, 900),
+            vec![refusal("slow_down"), issued("sk_pareto_test")],
+        );
+        assert_eq!(run_unbiased(&platform).unwrap(), "sk_pareto_test");
+        let polls = token_polls(&platform);
+        assert_eq!(polls.len(), 2);
+        assert!(polls[1].1.duration_since(polls[0].1) >= Duration::from_secs(6));
+    }
+
+    /// The body the platform sends for Deny on the approval page, description included.
+    #[test]
+    fn unbiased_access_denied_is_terminal() {
+        let platform = mock_platform(
+            grant(1, 900),
+            vec![Some((
+                400,
+                serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "the user denied this authorization",
+                }),
+            ))],
+        );
+        let error = run_unbiased(&platform).unwrap_err();
+        assert_eq!(
+            error,
+            "Unbiased AI sign-in was not approved: the user denied this authorization."
+        );
+        std::thread::sleep(Duration::from_millis(1500));
+        assert_eq!(token_polls(&platform).len(), 1);
+    }
+
+    #[test]
+    fn unbiased_access_denied_says_why_when_the_platform_does() {
+        let platform = mock_platform(
+            grant(1, 900),
+            vec![Some((
+                400,
+                serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "this organization's access is not active; restart login",
+                }),
+            ))],
+        );
+        let error = run_unbiased(&platform).unwrap_err();
+        assert_eq!(
+            error,
+            "Unbiased AI sign-in was not approved: this organization's access is not active; restart login."
+        );
+        assert_eq!(token_polls(&platform).len(), 1);
+    }
+
+    #[test]
+    fn unbiased_temporarily_unavailable_while_polling_keeps_polling() {
+        let platform = mock_platform(
+            grant(1, 900),
+            vec![
+                Some((503, serde_json::json!({"error": "temporarily_unavailable"}))),
+                issued("sk_pareto_test"),
+            ],
+        );
+        assert_eq!(run_unbiased(&platform).unwrap(), "sk_pareto_test");
+        assert_eq!(token_polls(&platform).len(), 2);
+    }
+
+    /// Every error the platform sends that is not pending, slow_down or a hiccup ends the flow on
+    /// that poll: one more poll of a dead code would spin until expiry, and of a redeemed one
+    /// would revoke the key.
+    #[test]
+    fn unbiased_server_sent_terminal_errors_end_polling_at_once() {
+        std::thread::scope(|scope| {
+            for (status, error, expected) in [
+                (400, "expired_token", UNBIASED_EXPIRED),
+                (401, "invalid_client", UNBIASED_UNREGISTERED),
+                (
+                    400,
+                    "invalid_grant",
+                    "Unbiased AI sign-in failed (400): scripted. Sign in again.",
+                ),
+                (
+                    500,
+                    "server_error",
+                    "Unbiased AI sign-in failed (500): scripted. Sign in again.",
+                ),
+                (
+                    400,
+                    "unsupported_grant_type",
+                    "Unbiased AI sign-in failed (400): scripted. Sign in again.",
+                ),
+            ] {
+                scope.spawn(move || {
+                    let platform = mock_platform(
+                        grant(1, 900),
+                        vec![
+                            Some((
+                                status,
+                                serde_json::json!({"error": error, "error_description": "scripted"}),
+                            )),
+                            issued("sk_pareto_never"),
+                        ],
+                    );
+                    let failure = run_unbiased(&platform).unwrap_err();
+                    assert_eq!(failure, expected, "{error}");
+                    std::thread::sleep(Duration::from_millis(1500));
+                    assert_eq!(token_polls(&platform).len(), 1, "{error} was polled again");
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn unbiased_expiry_ends_polling() {
+        let platform = mock_platform(grant(1, 1), vec![refusal("authorization_pending")]);
+        let error = run_unbiased(&platform).unwrap_err();
+        assert_eq!(error, UNBIASED_EXPIRED);
+        assert_eq!(token_polls(&platform).len(), 1);
+    }
+
+    #[test]
+    fn unbiased_transport_failure_is_terminal_and_never_retried() {
+        let platform = mock_platform(grant(1, 900), vec![None]);
+        let error = run_unbiased(&platform).unwrap_err();
+        assert!(error.contains("Lost the connection"), "{error}");
+        std::thread::sleep(Duration::from_millis(1500));
+        assert_eq!(token_polls(&platform).len(), 1);
+    }
+
+    #[test]
+    fn unbiased_unknown_client_at_start_sends_no_token_poll() {
+        let platform = mock_platform(
+            |_| Some((401, serde_json::json!({"error": "invalid_client"}))),
+            vec![issued("sk_pareto_never")],
+        );
+        let error = run_unbiased(&platform).unwrap_err();
+        assert_eq!(error, UNBIASED_UNREGISTERED);
+        assert!(token_polls(&platform).is_empty());
+    }
+
+    #[test]
+    fn unbiased_unreadable_success_is_not_retried() {
+        // The key was minted and is lost; a retry would revoke it, so the flow ends instead.
+        let platform = mock_platform(
+            grant(1, 900),
+            vec![Some((200, serde_json::json!({"token_type": "bearer"})))],
+        );
+        let error = run_unbiased(&platform).unwrap_err();
+        assert!(error.contains("incomplete"), "{error}");
+        std::thread::sleep(Duration::from_millis(1500));
+        assert_eq!(token_polls(&platform).len(), 1);
+    }
+
+    #[test]
+    fn unbiased_cancel_stops_the_wait() {
+        let platform = mock_platform(grant(5, 900), vec![issued("sk_pareto_never")]);
+        let (pending, _, _) = begin_unbiased(&platform.url, "client-for-tests").unwrap();
+        let Pending::Unbiased {
+            platform: base,
+            client_id,
+            device_code,
+            interval,
+            expires,
+        } = pending
+        else {
+            panic!("the Unbiased AI start produced another provider's flow");
+        };
+        let flow = Arc::new(unbiased_flow());
+        let canceller = flow.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            canceller.canceled.store(true, Ordering::SeqCst);
+        });
+        let started = Instant::now();
+        let error =
+            finish_unbiased(&flow, &base, &client_id, &device_code, interval, expires).unwrap_err();
+        assert_eq!(error, "Sign-in was canceled.");
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(token_polls(&platform).is_empty());
+    }
+
+    /// Held by every test that goes through the one active sign-in slot, which is process-wide:
+    /// a `begin` in one test would cancel the flow another is finishing.
+    static ACTIVE_SLOT: Mutex<()> = Mutex::new(());
+
+    /// The tests above call the start and poll halves directly. This one goes through the public
+    /// `begin` and `finish` pair the Tauri commands call, with the platform override pointed at
+    /// the mock: the slot bookkeeping, the embedded client id, and the override's trailing slash.
+    #[test]
+    fn unbiased_begin_and_finish_hand_back_the_key_and_clear_the_slot() {
+        let _slot = ACTIVE_SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        let platform = mock_platform(grant(1, 900), vec![issued("sk_pareto_public")]);
+        std::env::remove_var("OPENBOT_UNBIASED_OAUTH_CLIENT_ID");
+        std::env::set_var(
+            "OPENBOT_UNBIASED_PLATFORM_URL",
+            format!("{}/", platform.url),
+        );
+        let authorization = begin(&std::env::temp_dir(), "unbiased").unwrap();
+        std::env::remove_var("OPENBOT_UNBIASED_PLATFORM_URL");
+        assert_eq!(authorization.user_code.as_deref(), Some("BCDF-GHJK"));
+        assert_eq!(
+            authorization.url,
+            format!("{}/activate?user_code=BCDF-GHJK", platform.url)
+        );
+        assert_eq!(
+            finish(&authorization.attempt_id).unwrap(),
+            Some("sk_pareto_public".to_string())
+        );
+        assert!(
+            active().lock().unwrap().is_none(),
+            "the finished sign-in stayed active"
+        );
+        assert!(
+            finish(&authorization.attempt_id).is_err(),
+            "a finished sign-in could be finished again"
+        );
+        let start = form(&platform.requests.lock().unwrap()[0].1);
+        assert_eq!(
+            start.get("client_id").map(String::as_str),
+            Some(UNBIASED_CLIENT)
+        );
+        assert_eq!(token_polls(&platform).len(), 1);
+    }
+
+    #[test]
     fn callback_read_keeps_its_time_and_size_bounds() {
         for (payload, expected) in [
             (Vec::new(), std::io::ErrorKind::TimedOut),
@@ -759,6 +1456,7 @@ mod tests {
     }
     #[test]
     fn late_begin_cannot_cancel_newer_authorization() {
+        let _slot = ACTIVE_SLOT.lock().unwrap_or_else(|e| e.into_inner());
         let root = crate::test_support::temp_root("oauth-out-of-order");
         let delayed = reserve(&root);
         let newer = reserve(&root);

@@ -624,6 +624,22 @@ button.text-link.change-provider {
   line-height: 20px;
 }
 
+/* A row's offer, a few words in a warm badge beside the name: announced, not shouted. */
+.tile-badge {
+  display: inline-block;
+  vertical-align: 2px;
+  margin-left: 8px;
+  padding: 0 7px;
+  border-radius: var(--r-full);
+  background: #f59e0b;
+  color: #1a1a1a;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 /* A brand's mark, or its name where no usable mark exists. Same box either way. */
 .mark-tile {
   width: 36px;
