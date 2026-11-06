@@ -18,7 +18,7 @@ A Bot can use a browser, work with files, and call the tools you grant it. You c
 
 </div>
 
-https://github.com/user-attachments/assets/6d89fc4b-c3ec-4d87-a359-ca9dbf5f7d39
+https://github.com/user-attachments/assets/c60f07da-8b6d-46eb-a573-17fc1e65a644
 
 <div align="center">
 
