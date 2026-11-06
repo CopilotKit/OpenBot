@@ -1368,6 +1368,9 @@ struct CliEngine {
     engine: crate::engine::Engine,
     /// The Podman API OpenBot's machine forwards to this computer, when it could be found.
     api: Option<String>,
+    /// The machine's rootful connection, for the `podman` the CLI runs, when `api` is a named pipe
+    /// that `podman` cannot open itself (Windows).
+    connection: Option<String>,
     /// A Podman machine running rootless, which local Intelligence does not run on.
     rootless: bool,
 }
@@ -1392,6 +1395,7 @@ impl CliEngine {
         let named_only = || Self {
             engine: address.engine,
             api: None,
+            connection: None,
             rootless: false,
         };
         // Linux runs OpenBot's containers without local Intelligence for now, and its Podman has
@@ -1403,9 +1407,19 @@ impl CliEngine {
             .connection
             .clone()
             .or_else(|| address.pin().ok().and_then(|pinned| pinned.connection));
-        match connection.map(|connection| machine_behind(&connection)) {
-            Some(Ok(facts)) => Self {
+        let Some(connection) = connection else {
+            return named_only();
+        };
+        match machine_behind(&connection) {
+            Ok(facts) => Self {
                 engine: Engine::Podman,
+                // Podman names a machine's rootful connection `<machine>-root`, the engine its
+                // forwarded API reaches.
+                connection: facts
+                    .api
+                    .as_deref()
+                    .is_some_and(|api| api.starts_with("npipe:"))
+                    .then(|| format!("{}-root", crate::acquire::machine_of(&connection))),
                 api: facts.api,
                 rootless: facts.rootful == Some(false),
             },
@@ -1426,7 +1440,9 @@ fn recorded_engine() -> Option<CliEngine> {
 /// The variables that name the engine, and those the CLI must not inherit beside them.
 ///
 /// For Podman, `CONTAINER_HOST` is what the CLI and the Podman CLI read and `DOCKER_HOST` is what
-/// k3d reads, so both name the machine's API. An inherited `DOCKER_HOST` or `DOCKER_CONTEXT` names
+/// k3d reads, so both name the machine's API. On Windows that API is a named pipe, which the Podman
+/// CLI refuses (`"npipe" is not a supported schema`), so it is also given the machine's connection
+/// by name in `CONTAINER_CONNECTION`, which it prefers to `CONTAINER_HOST`. An inherited `DOCKER_HOST` or `DOCKER_CONTEXT` names
 /// a Docker, and is dropped rather than handed to k3d beside a Podman. For Docker nothing else is
 /// set: the CLI finds Docker as Docker's own CLI does, through what it inherits.
 fn engine_environment(engine: Option<&CliEngine>) -> Vec<(&'static str, Option<String>)> {
@@ -1440,6 +1456,7 @@ fn engine_environment(engine: Option<&CliEngine>) -> Vec<(&'static str, Option<S
     )];
     if engine.engine == Engine::Podman {
         environment.push(("CONTAINER_HOST", engine.api.clone()));
+        environment.push(("CONTAINER_CONNECTION", engine.connection.clone()));
         environment.push(("DOCKER_HOST", engine.api.clone()));
         environment.push(("DOCKER_CONTEXT", None));
     }
@@ -3440,9 +3457,10 @@ mod tests {
             .collect()
     }
 
-    const ENGINE_VARIABLES: [&str; 4] = [
+    const ENGINE_VARIABLES: [&str; 5] = [
         "COPILOTKIT_LOCAL_ENGINE",
         "CONTAINER_HOST",
+        "CONTAINER_CONNECTION",
         "DOCKER_HOST",
         "DOCKER_CONTEXT",
     ];
@@ -3453,6 +3471,7 @@ mod tests {
         let docker = CliEngine {
             engine: Engine::Docker,
             api: None,
+            connection: None,
             rootless: false,
         };
         let variables = engine_variables(Some(&docker));
@@ -3469,6 +3488,7 @@ mod tests {
         let podman = CliEngine {
             engine: Engine::Podman,
             api: Some(api.into()),
+            connection: None,
             rootless: false,
         };
         let variables = engine_variables(Some(&podman));
@@ -3502,6 +3522,7 @@ mod tests {
             engine_environment(Some(&unfound))[1..],
             [
                 ("CONTAINER_HOST", None),
+                ("CONTAINER_CONNECTION", None),
                 ("DOCKER_HOST", None),
                 ("DOCKER_CONTEXT", None)
             ]
@@ -3530,11 +3551,13 @@ mod tests {
             Some(CliEngine {
                 engine: Engine::Docker,
                 api: None,
+                connection: None,
                 rootless: false,
             }),
             Some(CliEngine {
                 engine: Engine::Podman,
                 api: Some("npipe:////./pipe/podman-openbot".into()),
+                connection: None,
                 rootless: false,
             }),
         ] {
@@ -3571,6 +3594,7 @@ mod tests {
                 CliEngine {
                     engine: Engine::Podman,
                     api: Some(api.into()),
+                    connection: None,
                     rootless: false,
                 },
                 "{connection}"
@@ -3582,12 +3606,60 @@ mod tests {
         }
     }
 
+    /// Windows: a Podman machine's API is a named pipe, which k3d, Docker clients and the CLI's own
+    /// requests open, but which the `podman` the CLI runs (`podman run` to measure the machine)
+    /// refuses: `"npipe" is not a supported schema`, exit 125, and Intelligence never starts. That
+    /// `podman` is given the machine's rootful connection by name, which it prefers to any
+    /// `CONTAINER_HOST`, so both read the same engine.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn the_podman_the_cli_runs_on_windows_is_given_a_connection_it_can_open() {
+        use crate::acquire::MachineFacts;
+        use crate::engine::{Address, Engine};
+        let pipe = "npipe:////./pipe/podman-openbot";
+        for connection in ["openbot", "openbot-root"] {
+            let address = Address::new(Engine::Podman, Some(connection.into()));
+            let engine = CliEngine::of_with(&address, |_| {
+                Ok(MachineFacts {
+                    rootful: Some(true),
+                    api: Some(pipe.into()),
+                })
+            });
+            let variables = engine_variables(Some(&engine));
+            assert_eq!(
+                variables.get("CONTAINER_HOST"),
+                Some(&Some(pipe.to_string())),
+                "{connection}"
+            );
+            assert_eq!(variables.get("DOCKER_HOST"), Some(&Some(pipe.to_string())));
+            assert_eq!(
+                variables.get("CONTAINER_CONNECTION"),
+                Some(&Some("openbot-root".to_string())),
+                "{connection}: a named pipe in CONTAINER_HOST needs the connection beside it"
+            );
+        }
+
+        // A Unix socket (macOS) is an address `podman` opens itself; nothing more is added.
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        let engine = CliEngine::of_with(&address, |_| {
+            Ok(MachineFacts {
+                rootful: Some(true),
+                api: Some("unix:///tmp/podman/openbot-api.sock".into()),
+            })
+        });
+        assert!(!matches!(
+            engine_variables(Some(&engine)).get("CONTAINER_CONNECTION"),
+            Some(Some(_))
+        ));
+    }
+
     #[test]
     fn a_rootless_podman_declines_setup_and_start_and_nothing_else() {
         use crate::engine::Engine;
         let rootless = CliEngine {
             engine: Engine::Podman,
             api: Some("unix:///tmp/podman.sock".into()),
+            connection: None,
             rootless: true,
         };
         let rootful = CliEngine {
