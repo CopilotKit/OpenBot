@@ -4,6 +4,7 @@ import type {
 } from "@openbot/shared/learning";
 import {
   IconCheck,
+  IconChevronRight,
   IconListCheck,
   IconLock,
   IconSparkles,
@@ -16,6 +17,7 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
+import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import {
   Item,
   ItemActions,
@@ -108,6 +110,7 @@ export function LearningSharing() {
     setLearningSharingModeMutationOptions(queryClient),
   );
   const setOpen = useMutation(setLearnedSkillOpenMutationOptions(queryClient));
+  const [reading, setReading] = React.useState<string | null>(null);
   if (sharing.isPending) return null;
   if (sharing.error) {
     return (
@@ -183,27 +186,34 @@ export function LearningSharing() {
               return (
                 <React.Fragment key={skill.name}>
                   {index > 0 ? <Separator /> : null}
+                  {/* The row opens the Skill; the Switch sits beside that button, not inside it. */}
                   <Item size="sm">
-                    <ItemMedia variant="icon">
-                      <IconSparkles />
-                    </ItemMedia>
-                    <ItemContent>
-                      <ItemTitle>{skill.name}</ItemTitle>
-                      <ItemDescription>
-                        {[
-                          mode === "choose"
-                            ? open
-                              ? "Every Bot may use it."
-                              : "Only your Bots use it."
-                            : "",
-                          skill.description,
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                      </ItemDescription>
-                    </ItemContent>
-                    {mode === "choose" ? (
-                      <ItemActions>
+                    <button
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      onClick={() => setReading(skill.name)}
+                      type="button"
+                    >
+                      <ItemMedia variant="icon">
+                        <IconSparkles />
+                      </ItemMedia>
+                      <ItemContent>
+                        <ItemTitle>{skill.name}</ItemTitle>
+                        <ItemDescription>
+                          {[
+                            mode === "choose"
+                              ? open
+                                ? "Every Bot may use it."
+                                : "Only your Bots use it."
+                              : "",
+                            skill.description,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                        </ItemDescription>
+                      </ItemContent>
+                    </button>
+                    <ItemActions>
+                      {mode === "choose" ? (
                         <Switch
                           aria-label={`Open ${skill.name} to everyone`}
                           checked={open}
@@ -218,14 +228,21 @@ export function LearningSharing() {
                             })
                           }
                         />
-                      </ItemActions>
-                    ) : null}
+                      ) : (
+                        <IconChevronRight className="size-4 text-muted-foreground" />
+                      )}
+                    </ItemActions>
                   </Item>
                 </React.Fragment>
               );
             })}
           </PageRows>
         )}
+        <LearnedSkillDialog
+          name={reading}
+          onClose={() => setReading(null)}
+          source={{ kind: "personal" }}
+        />
       </PageSection>
       {failure ? (
         <p className="mt-4 text-destructive text-sm" role="alert">

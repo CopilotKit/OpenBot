@@ -31,11 +31,13 @@ const originalFetch = global.fetch;
 let answer: PersonalLearningSharing;
 let failRead = false;
 let failWrite = false;
+const fetched: string[] = [];
 const sent: { path: string; method: string; body: unknown }[] = [];
 
 beforeEach(() => {
   queryClient.clear();
   sent.length = 0;
+  fetched.length = 0;
   failRead = false;
   failWrite = false;
   answer = {
@@ -83,6 +85,23 @@ beforeEach(() => {
             ),
           };
         return Response.json({ ok: true });
+      }
+      const detail = /^\/api\/settings\/learning\/skills\/(.+)$/.exec(url);
+      if (detail) {
+        const name = decodeURIComponent(detail[1] ?? "");
+        fetched.push(url);
+        return Response.json({
+          skill: {
+            name,
+            description: "Refunds an order.",
+            files: [
+              {
+                path: "SKILL.md",
+                text: `---\nname: ${name}\n---\nStep one: look up the order.`,
+              },
+            ],
+          },
+        });
       }
       if (url === "/api/settings/learning") {
         if (failRead) return new Response(null, { status: 500 });
@@ -326,4 +345,21 @@ test("a read that fails says so, and a save that fails says why", async () => {
   await view.findByText("Only my Bots");
   fireEvent.click(choice(view, "Everyone's Bots"));
   await view.findByText("Your Learning settings could not be saved.");
+});
+
+test("each of Your Skills opens its SKILL.md", async () => {
+  answer = { ...answer, mode: "choose" };
+  const view = draw();
+  await view.findByText("Your Skills");
+  // Toggling the switch does not open the Skill.
+  fireEvent.click(
+    view.getByRole("switch", { name: "Open refund-order to everyone" }),
+  );
+  await waitFor(() => expect(sent).toHaveLength(1));
+  expect(fetched).toEqual([]);
+  expect(view.queryByText(/Step one: look up the order/)).toBeNull();
+  // Pressing the row does.
+  fireEvent.click(view.getByRole("button", { name: /refund-order/ }));
+  await view.findByText(/Step one: look up the order/);
+  expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
 });
