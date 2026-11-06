@@ -278,11 +278,12 @@ test("a model and effort picked before the first message are both saved before i
       name: "GPT-6.1 Terra",
     }),
   );
-  await user.click(
+  // The popup stays open on the model's efforts, so the effort is picked in the same go.
+  expect(
     await view.findByRole("combobox", {
       name: "Model: GPT-6.1 Terra, thinking: Medium",
     }),
-  );
+  ).toBeTruthy();
   await user.click(
     within(await view.findByRole("dialog")).getByRole("option", {
       name: "Extra high",

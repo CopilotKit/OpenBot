@@ -555,3 +555,35 @@ test("sending waits for the model save and refuses a failed save", async () => {
   });
   expect(saved["conversation-a"]).toEqual({ model: "gpt-4o", effort: null });
 });
+
+test("picking a model that thinks leaves the popup open on its efforts, and picking one closes it", async () => {
+  saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
+  const { view, user, popup } = await openPicker(/GPT-6\.1 Terra/);
+  await user.click(within(popup).getByRole("option", { name: "GPT-6 Sol" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  // Still open, now offering GPT-6 Sol's efforts.
+  const open = view.getByRole("dialog");
+  expect(
+    within(thinking(open) as HTMLElement)
+      .getAllByRole("option")
+      .map((option) => option.textContent),
+  ).toEqual(["Default", "Low", "Medium", "High"]);
+  // Every model is still listed: picking one did not turn the search into its name.
+  expect(
+    within(within(open).getByRole("group", { name: "Models" })).getAllByRole(
+      "option",
+    ),
+  ).toHaveLength(4);
+
+  await user.click(within(open).getByRole("option", { name: "High" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+});
+
+test("picking a model that takes no effort closes the popup", async () => {
+  saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
+  const { view, user, popup } = await openPicker(/GPT-6\.1 Terra/);
+  await user.click(within(popup).getByRole("option", { name: "GPT-4o" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+});

@@ -1,6 +1,6 @@
 import { Combobox as ComboboxPrimitive } from "@base-ui/react";
 import { IconCheck, IconChevronDown, IconCube } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import { Button } from "@/components/ui/button";
 import {
@@ -146,6 +146,13 @@ function Picker({
   const { contains } = ComboboxPrimitive.useFilter();
   /** What is typed in the search, to say when no model matches: the efforts always do. */
   const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  /*
+   * PICKING A MODEL LEAVES THE POPUP OPEN when that model thinks, so its efforts can be chosen next
+   * in the column beside it; picking an effort is the last step and closes it. Set when a model is
+   * picked and read by the close that the same press asks for.
+   */
+  const stayOpen = useRef(false);
   const current: Choice = useMemo(
     () => ({ kind: "model", model: selected }),
     [selected],
@@ -194,14 +201,22 @@ function Picker({
         choice.kind === "model" ? choice.model.label : choice.label
       }
       onInputValueChange={setQuery}
+      onOpenChange={(next, details) => {
+        const keep =
+          !next && stayOpen.current && details.reason === "item-press";
+        stayOpen.current = false;
+        if (!keep) setOpen(next);
+      }}
       onValueChange={(choice) => {
         if (!choice) return;
+        stayOpen.current = choice.kind === "model" && thinks(choice.model);
         onChange(
           choice.kind === "model"
             ? switchModel({ model: selected.id, effort }, choice.model)
             : { model: selected.id, effort: choice.effort },
         );
       }}
+      open={open}
       value={current}
     >
       <Tooltip>
