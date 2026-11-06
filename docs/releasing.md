@@ -128,23 +128,48 @@ Tauri refuses to finish any bundle that asks for updater artifacts without
 build above. Do not rename the overlay `tauri.macos.conf.json`: Tauri merges that filename into
 every Mac build automatically.
 
-The overlay also holds the updater itself, `plugins.updater` with its endpoint and public key.
+The overlay also holds the updater itself, `plugins.updater` with its endpoints and public key.
 The app registers the updater plugin only when its config has that block, so desktop CI, local
 builds and the unsigned release installers have no updater. They never offer an update and never
 show an update error, because they could not verify one.
 
 ### The updater
 
-A signed app checks `https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json`
-once at launch. If a newer version is listed, the window offers **Update and restart**. Nothing
-installs without that click. GitHub redirects that address to the `latest.json` attached to the
-release marked Latest, so the newest non-draft, non-prerelease release is always the one offered.
+A signed app reads `https://downloads.copilotkit.ai/latest/latest.json` at launch and every six
+hours while it runs. When that address does not answer, it reads
+`https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json`, the file
+[Downloads sync](#downloadscopilotkitai) copies there. Both addresses are `plugins.updater.endpoints`
+in `tauri.macos-signing.conf.json`, in that order, and the install reads them the same way, so what
+the app offers and what it installs come from one file. GitHub redirects its address to the
+`latest.json` attached to the release marked Latest, so the newest non-draft, non-prerelease release
+is always the one offered.
+
+When the feed lists a newer stable version, OpenBot's own window shows a bar, "OpenBot 0.3.2 is
+available.", with **Update and restart** and a close button, and the setup window offers the same.
+Nothing installs without that click. Closing either hides both until a newer version comes out,
+through reloads and restarts. The click downloads the archive and verifies its signature while
+OpenBot keeps running, installs it, stops OpenBot (the local Intelligence keeps running), and
+restarts the app; that Start [moves the installation to the app's release](desktop-updates.md#the-deployment-follows-the-app).
+The shell does all of it (`desktop/src-tauri/src/app_update.rs`); neither page reaches the feed or
+holds the updater's permissions. A self-hosted OpenBot in a browser has no shell, and never reads
+the feed.
+
+To see the bar without a release, build the desktop in debug with `TAURI_CONFIG` set to an overlay
+that gives it its own `identifier` and a `plugins.updater` with the real `pubkey`,
+`"endpoints": ["http://127.0.0.1:<port>/latest.json"]` and
+`"dangerousInsecureTransportProtocol": true`. Serve a `latest.json` there with a newer `version`,
+start an OpenBot of your own (server and app), and run the binary with
+`OPENBOT_DESKTOP_TEST_APP_URL` set to that app's address: a debug build shows it in its window as
+its own OpenBot. Give the run its own `HOME` as well, so nothing it does can reach an installed
+OpenBot in `~/OpenBot`. Release builds never read the variable.
 
 After it attaches `latest.json`, and marks the release Latest when it should (see below), the
-signing workflow fetches that address the way the app does, following redirects, and fails unless
-the answer is JSON whose `version` is the release version and which has a `darwin-*` platform with
-a URL and signature. A release that is not Latest is not checked, because the apps never read its
-feed: a candidate, a patch to an older line, or a release signed again by hand.
+signing workflow fetches the GitHub address the way the app does, following redirects, and fails
+unless the answer is JSON whose `version` is the release version and which has a `darwin-*` platform
+with a URL and signature. Downloads sync, which that same step starts, then puts a copy of that file,
+checked against GitHub's digest, at the downloads address within minutes. A release that is not
+Latest is not checked, because the apps never read its feed: a candidate, a patch to an older line,
+or a release signed again by hand.
 
 ### Which release is Latest
 
@@ -468,8 +493,8 @@ signed installers:
 
 Each stable release's installers also stay under their versioned names, for example
 `https://downloads.copilotkit.ai/releases/v0.3.0/OpenBot_0.3.0_aarch64.dmg`. Those never change, so
-they are cached for a year; the `latest/` addresses are cached for five minutes. The installed apps
-still read their update feed from GitHub.
+they are cached for a year; the `latest/` addresses are cached for five minutes. Signed apps read
+their [update feed](#the-updater) here, and GitHub's copy only when this address does not answer.
 
 **Downloads sync** ([`downloads-sync.yml`](../.github/workflows/downloads-sync.yml), running
 [`scripts/downloads-sync.sh`](../scripts/downloads-sync.sh)) keeps it in step. The signing run that

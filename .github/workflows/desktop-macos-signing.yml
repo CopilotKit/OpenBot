@@ -153,17 +153,23 @@ jobs:
           # carries `plugins.updater`, so every build without the overlay (desktop CI, local, the
           # unsigned release installers) has no updater to offer an update it would then refuse.
           test "$(jq -r '.plugins.updater // empty' "$config")" = ''
-          test "$(jq -r '.plugins.updater.endpoints[0]' "$overlay")" \
-            = 'https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json'
+          # The apps read downloads.copilotkit.ai, the same file the update banner reads, and fall
+          # back to the GitHub release it mirrors only when that address does not answer.
+          test "$(jq -r '.plugins.updater.endpoints | join(" ")' "$overlay")" \
+            = 'https://downloads.copilotkit.ai/latest/latest.json https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json'
           test "$(jq -r '.plugins.updater.pubkey | length > 0' "$overlay")" = 'true'
           grep -q 'tauri-plugin-updater' desktop/src-tauri/Cargo.toml
           grep -q 'tauri_plugin_updater::Builder::new().build()' desktop/src-tauri/src/main.rs
           grep -q 'contains_key("updater")' desktop/src-tauri/src/main.rs
-          grep -q 'tauri_plugin_process::init()' desktop/src-tauri/src/main.rs
-          jq -e '.permissions | index("updater:default")' \
-            desktop/src-tauri/capabilities/default.json > /dev/null
-          jq -e '.permissions | index("process:allow-restart")' \
-            desktop/src-tauri/capabilities/default.json > /dev/null
+          # The shell reads the feed and installs; the setup window and OpenBot's page only ask it.
+          # No page is granted the updater itself.
+          grep -q 'watch_for_app_updates(app.handle())' desktop/src-tauri/src/main.rs
+          grep -q 'install_app_update' desktop/src-tauri/src/main.rs
+          if jq -e '.permissions | index("updater:default")' \
+            desktop/src-tauri/capabilities/default.json > /dev/null; then
+            echo '::error::No window needs the updater plugin; the shell drives it.'
+            exit 1
+          fi
           echo 'Updater wiring is consistent across Cargo.toml, main.rs, the capability and the config.'
 
   # One native runner per architecture, for the same reason `publish-release.yml` builds its images
