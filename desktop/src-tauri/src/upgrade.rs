@@ -4,8 +4,8 @@
 //! deployment (`.openbot-deployment`) is not the app's own release is upgraded before it starts:
 //!
 //! 1. Stop OpenBot.
-//! 2. Take one `pg_dump` of its database, and keep the previous version's files (`KEPT`) in
-//!    `.openbot-previous/`.
+//! 2. Take one `pg_dump` of its database, if it has one, and keep the previous version's files
+//!    (`KEPT`) in `.openbot-previous/`.
 //! 3. Lay the app's release out exactly as Install does.
 //! 4. Pull its images.
 //! 5. Start. Its migrations run once, as the dependency Compose starts before the server.
@@ -141,6 +141,11 @@ pub fn previous_version(root: &Path) -> Option<String> {
 pub trait Steps {
     /// Stop OpenBot: every container and host process of this installation. Volumes stay.
     fn stop(&mut self) -> Result<(), Problem>;
+    /// Whether the installation has a database to back up. One that never started has none, and
+    /// starting its Postgres to back it up would create one.
+    fn has_database(&mut self) -> Result<bool, Problem> {
+        Ok(true)
+    }
     /// Take one `pg_dump` of the database into `to`, with the files laid out now, and stop the
     /// database again.
     fn back_up(&mut self, to: &Path) -> Result<(), Problem>;
@@ -185,7 +190,15 @@ pub fn run(root: &Path, steps: &mut dyn Steps) -> Ran {
             Problem::with(UNCHANGED, format!("{}: {error}", previous.display())),
         );
     }
-    if let Err(failed) = steps.back_up(&previous.join(DUMP)) {
+    // No database, no dump: `undo` then restores nothing, and nothing here creates one.
+    let backed_up = steps.has_database().and_then(|has| {
+        if has {
+            steps.back_up(&previous.join(DUMP))
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(failed) = backed_up {
         let _ = clear(&previous);
         return restart(steps, failed);
     }
@@ -579,6 +592,8 @@ mod tests {
         ran: Vec<String>,
         fail: Option<&'static str>,
         database: String,
+        /// Whether the installation has a database at all. One that never started has none.
+        has_database: bool,
     }
 
     impl Recorded {
@@ -594,6 +609,9 @@ mod tests {
     impl Steps for Recorded {
         fn stop(&mut self) -> Result<(), Problem> {
             self.step("stop")
+        }
+        fn has_database(&mut self) -> Result<bool, Problem> {
+            Ok(self.has_database)
         }
         fn back_up(&mut self, to: &Path) -> Result<(), Problem> {
             self.step("back_up")?;
@@ -651,6 +669,7 @@ mod tests {
             ran: Vec::new(),
             fail: None,
             database: "rows at v0.3.0".into(),
+            has_database: true,
         };
         (root, steps)
     }
@@ -683,6 +702,33 @@ mod tests {
         // The browser an earlier version ran on the desktop went with its files: this one runs none.
         assert!(!root.join("agent-computer").exists());
         untouched(&root);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An installation that never started (on Windows every 0.3.1 one: Intelligence never set up)
+    /// has no database. Backing it up would start Postgres, which creates an empty database volume
+    /// with no encryption key beside it, and the new version's Start then refuses it as a previous
+    /// installation's data ("Start fresh"). Nothing is backed up, and nothing is restored.
+    #[test]
+    fn an_installation_with_no_database_is_upgraded_without_creating_one() {
+        let (root, mut steps) = installation();
+        steps.has_database = false;
+        assert!(matches!(run(&root, &mut steps), Ran::Moved));
+        assert_eq!(steps.ran, ["stop", "lay_out", "install", "start"]);
+        assert_eq!(deployment::installed(&root).unwrap().version, "v0.3.1");
+        std::fs::remove_dir_all(&root).unwrap();
+
+        let (root, mut steps) = installation();
+        steps.has_database = false;
+        steps.fail = Some("install");
+        let ran = run(&root, &mut steps);
+        assert!(matches!(ran, Ran::Kept(_)), "{ran:?}");
+        assert_eq!(
+            steps.ran,
+            ["stop", "lay_out", "install", "stop", "start"],
+            "no backup, so no restore"
+        );
+        assert_eq!(deployment::installed(&root).unwrap().version, "v0.3.0");
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -737,6 +737,15 @@ impl upgrade::Steps for DesktopSteps {
             .map_err(|error| Problem::with("OpenBot could not stop to update.", error))
     }
 
+    fn has_database(&mut self) -> Result<bool, Problem> {
+        let secrets = openbot_desktop_lib::vault::already_given_no_ui(
+            &self.root,
+            &self.root.join(".env"),
+            &openbot_env::MINTED[..],
+        )?;
+        stack::postgres_volume_exists(&self.address, &self.root, &secrets)
+    }
+
     fn back_up(&mut self, to: &Path) -> Result<(), Problem> {
         report_running(&self.app, "release", "Backing up OpenBot's database.", None);
         self.with_database(|engine, root, secrets| {
