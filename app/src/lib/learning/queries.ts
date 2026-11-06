@@ -8,6 +8,7 @@ import type {
   LearningRunSummary,
   LearningSettings,
   PersonalLearningSharing,
+  PeopleProposals,
   PersonalReview,
 } from "@openbot/shared/learning";
 import { queryOptions } from "@tanstack/react-query";
@@ -19,6 +20,9 @@ export const learningKeys = {
   automatic: ["learning", "automatic"] as const,
   personal: ["learning", "personal"] as const,
   review: ["learning", "review"] as const,
+  peopleProposals: ["learning", "people-proposals"] as const,
+  personProposal: (userId: string, proposalId: string) =>
+    ["learning", "person-proposal", { userId, proposalId }] as const,
   personalProposal: (container: string, proposalId: string) =>
     ["learning", "personal-proposal", { container, proposalId }] as const,
   proposals: (agentId?: string) =>
@@ -246,6 +250,34 @@ export function personalProposalQueryOptions(
     queryFn: (): Promise<LearningProposalDetail> =>
       client(
         `/api/settings/learning/proposals/${encodeURIComponent(proposalId)}?container=${encodeURIComponent(container)}`,
+        "proposal",
+        { fallback: "Couldn't load this skill. Try again." },
+      ),
+  });
+}
+
+/** Admin → Learning, People: the skills proposed from each person's own recordings. */
+export function peopleProposalsQueryOptions() {
+  return queryOptions({
+    queryKey: learningKeys.peopleProposals,
+    retry: false,
+    queryFn: async (): Promise<PeopleProposals> =>
+      (
+        await client("/api/admin/learning/people/proposals", {
+          fallback: "Couldn't load people's skills to review. Try again.",
+        })
+      ).json(),
+  });
+}
+
+/** One skill proposed from a person's own recordings, with every file it publishes. */
+export function personProposalQueryOptions(userId: string, proposalId: string) {
+  return queryOptions({
+    queryKey: learningKeys.personProposal(userId, proposalId),
+    retry: false,
+    queryFn: (): Promise<LearningProposalDetail> =>
+      client(
+        `/api/admin/learning/people/${encodeURIComponent(userId)}/proposals/${encodeURIComponent(proposalId)}`,
         "proposal",
         { fallback: "Couldn't load this skill. Try again." },
       ),

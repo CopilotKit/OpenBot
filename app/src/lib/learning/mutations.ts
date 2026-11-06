@@ -124,3 +124,25 @@ export function startPersonalLearningRunMutationOptions(
       queryClient.invalidateQueries({ queryKey: learningKeys.all }),
   });
 }
+
+/** Approve a skill proposed from a person's own recordings, which publishes it to their Bots, or reject it. */
+export function reviewPersonProposalMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (variables: {
+      userId: string;
+      proposalId: string;
+      decision: "approve" | "reject";
+    }): Promise<{ id: string; status: "approved" | "rejected" }> =>
+      client(
+        `/api/admin/learning/people/${encodeURIComponent(variables.userId)}/proposals/${encodeURIComponent(variables.proposalId)}/${encodeURIComponent(variables.decision)}`,
+        "proposal",
+        {
+          method: "POST",
+          body: {},
+          fallback: "Couldn't save your decision. Try again.",
+        },
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: learningKeys.all }),
+  });
+}
