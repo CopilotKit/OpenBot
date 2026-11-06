@@ -422,7 +422,10 @@ function activityOf(view: ReturnType<typeof render>) {
 /** The transcript's line for each tool call, as its text: everything drawn outside the Activity pane. */
 function transcriptLines(view: ReturnType<typeof render>): string[] {
   const pane = view.getByRole("region", { name: "Activity" });
-  return Array.from(view.container.querySelectorAll("details, div.my-1\\.5"))
+  return Array.from(
+    // A command is a terminal block (`section`); every other call is still a line.
+    view.container.querySelectorAll("details, div.my-1\\.5, section.my-1\\.5"),
+  )
     .filter((line) => !pane.contains(line))
     .map((line) => line.textContent ?? "");
 }
@@ -502,7 +505,8 @@ test("a command the gate runs at once shows in Activity with what it printed and
   expect(
     pane.getByText("ls: cannot access '/nope': No such file or directory"),
   ).toBeTruthy();
-  expect(pane.getByText("Exit code 2.")).toBeTruthy();
+  // How it exited, as the terminal block's status.
+  expect(pane.getByText("Exit 2")).toBeTruthy();
   // Newest first, each once, though the conversation redrew on every streamed word after them.
   const [newest, oldest] = entries(view);
   expect(newest).toContain("ls /nope");
@@ -697,7 +701,7 @@ test("a command the person declines shows as declined in their words, not in the
   const line = transcriptLines(view).find((text) =>
     text.includes("Ran a command"),
   );
-  expect(line).toContain("Blocked: Ran a command");
+  expect(line).toContain("Declined");
   expect(line).toContain("You declined it.");
   expect(view.container.textContent).not.toContain("It printed nothing.");
 });
@@ -801,7 +805,7 @@ test("a command the person did themselves shows as done by them, not as refused,
   const line = transcriptLines(view).find((text) =>
     text.includes("Ran a command"),
   );
-  expect(line).toContain("Ran a command, done by you");
+  expect(line).toContain("Done by you");
   expect(line).toContain("passwd");
   expect(line).not.toContain("Blocked");
   // Nothing ran on the computer, so nothing claims it printed nothing.
@@ -959,10 +963,10 @@ test("a command the person declines on the Bot's own approval card is listed onc
   // Nothing reached the computer or its gate.
   expect(gated).toEqual([]);
   expect(direct.filter((route) => route === "/exec")).toEqual([]);
-  // The card says the same: declined, the command shown once. Activity's line says it too, so the
-  // word appears twice, once on the card and once in the pane.
-  expect(view.getAllByText("Declined")).toHaveLength(2);
-  expect(activityOf(view).getAllByText("Declined")).toHaveLength(1);
+  // The card says the same: declined, the command shown once. Activity's terminal block says it in its
+  // header and its status, so the word appears three times: once on the card and twice in the pane.
+  expect(view.getAllByText("Declined")).toHaveLength(3);
+  expect(activityOf(view).getAllByText("Declined")).toHaveLength(2);
   expect(
     view.container.querySelectorAll("code").length -
       view.getByRole("region", { name: "Activity" }).querySelectorAll("code")
