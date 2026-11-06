@@ -2,7 +2,6 @@ import type {
   LearningPersonalReview,
   LearningSettings,
   LearningSharingMode,
-  SharingRequest,
 } from "@openbot/shared/learning";
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { client } from "@/lib/client";
@@ -177,7 +176,7 @@ export function decideSharingMutationOptions(queryClient: QueryClient) {
       userId: string;
       skillName: string;
       decision: "approve" | "decline";
-    }): Promise<SharingRequest> =>
+    }): Promise<"approved" | "declined"> =>
       client(
         `/api/admin/learning/sharing-requests/${encodeURIComponent(variables.userId)}/${encodeURIComponent(variables.skillName)}/${encodeURIComponent(variables.decision)}`,
         "sharing",
@@ -192,7 +191,7 @@ export function decideSharingMutationOptions(queryClient: QueryClient) {
   });
 }
 
-/** Choose who reviews the skills proposed from people's own recordings. */
+/** Choose who approves the skills learned from people's own recordings. */
 export function savePersonalReviewMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (
@@ -201,7 +200,7 @@ export function savePersonalReviewMutationOptions(queryClient: QueryClient) {
       client("/api/admin/learning/personal-review", "settings", {
         method: "PUT",
         body: { personalReview },
-        fallback: "Couldn't save who reviews. Try again.",
+        fallback: "Couldn't save who approves. Try again.",
       }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: learningKeys.all }),
