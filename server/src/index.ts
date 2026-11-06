@@ -20,6 +20,7 @@ import {
   skillSharingAllowed,
   skillSharingInSnapshot,
 } from "./admin/controls";
+import { fixSettings } from "./admin/settings-store";
 import {
   CoworkerUnavailableError,
   createActorAgentResolver,
@@ -170,8 +171,7 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
-import { setEdition } from "./edition";
-import { fixSettings } from "./admin/settings-store";
+import { currentEdition, setEdition } from "./edition";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -187,6 +187,8 @@ import {
   observeIntelligenceAuthentication,
 } from "./intelligence-client";
 import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
+import { createSkillApprovalStore } from "./learning/approvals";
+import { createAutoApprover } from "./learning/auto-approve";
 import {
   createLearningAutoAssign,
   probeLearningContainer,
@@ -202,11 +204,13 @@ import {
   learningSetupInstructions,
 } from "./learning/ensure-container";
 import { createInspectorLearningReader } from "./learning/inspector";
+import { createLearningPeople } from "./learning/people";
 import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
 } from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
+import { learningScopes } from "./learning/scopes";
 import { createLearningSettingsStore } from "./learning/settings";
 import {
   createLearningSharingStore,
@@ -421,6 +425,7 @@ const personalLearningSpaces = createPersonalLearningSpaces({
         .limit(1)
     ).map((row) => row.name?.trim() || null)[0] ?? null,
 });
+const skillApprovalStore = createSkillApprovalStore(database);
 const learningSharingStore = createLearningSharingStore(database);
 /** What everyone opened to every Bot, in memory: runs read this, never each person's space or the table. */
 const openSkillIndex = createOpenSkillIndex({
@@ -1528,6 +1533,46 @@ const recorderExpirySweep = repeatAfterEach(async () => {
     );
   }
 }, 60_000);
+/*
+ * The personal edition has one reviewer, who is DEV_ACTOR (it requires single-user mode, which admits every request as
+ * DEV_ACTOR), so what its Bots learn is approved for them while automatic approval is on: once shortly after boot, so
+ * what waited while the app was closed doesn't wait another 15 minutes, then every 15 minutes.
+ */
+const autoApprover = createAutoApprover({
+  manage: learningProbeIntelligence.experimental.learning,
+  enabled: async () =>
+    currentEdition() === "personal" &&
+    ((await learningSettings.read()).autoApprove ?? true),
+  sources: async () =>
+    learningScopes({
+      edition: "personal",
+      userId: DEV_ACTOR.id,
+      settings: await learningSettings.read(),
+    }),
+  approvals: skillApprovalStore,
+  userId: DEV_ACTOR.id,
+  audit: bootAuditStore,
+});
+const sweepAutoApprovals = () =>
+  void autoApprover.sweep().catch((error) =>
+    console.error(
+      JSON.stringify({
+        type: "learning-auto-approve-sweep-error",
+        error: error instanceof Error ? error.name : "UnknownError",
+        timestamp: new Date().toISOString(),
+      }),
+    ),
+  );
+const firstAutoApproveSweep =
+  currentEdition() === "personal"
+    ? setTimeout(sweepAutoApprovals, 10_000)
+    : undefined;
+firstAutoApproveSweep?.unref();
+const autoApproveTimer =
+  currentEdition() === "personal"
+    ? setInterval(sweepAutoApprovals, 15 * 60_000)
+    : undefined;
+autoApproveTimer?.unref();
 const memoryIngestion = createMemoryIngestion({
   store: personalMemoryStore,
   plugins: pluginStore,
@@ -2094,11 +2139,22 @@ const copilotRuntime = mountCopilotRuntime(
     personalSkills: {
       containerFor: personalLearningSpaces.containerFor,
       openSkills: () => openSkillIndex.sources(),
+      // Read on every run, never from the index: an approval made on another replica counts at once.
+      withheld: (userIds) => skillApprovalStore.withheld(userIds),
       sharingAllowed: skillSharingInSnapshot,
     },
     trajectoryCapture: recorderExtension.trajectoryCapture,
   },
 );
+
+/** Reads one named skill from a container; throws when the runtime or the read is unavailable, null when absent. */
+const skillIn = async (containerId: string, name: string) => {
+  const read = await copilotRuntime.learning?.containerSkills(containerId);
+  if (!read || "unavailable" in read) {
+    throw new Error("Skills are unavailable.");
+  }
+  return read.skills.find((skill) => skill.name === name) ?? null;
+};
 
 const responsibilityEngine = createServerResponsibilityEngine({
   productTelemetry,
@@ -2924,6 +2980,13 @@ const app = createApp(
       ? createInspectorLearningReader(config.runtime.intelligence)
       : undefined,
     manage: learningProbeIntelligence.experimental.learning,
+    skills: copilotRuntime.learning?.containerSkills,
+    approvals: skillApprovalStore,
+    people: createLearningPeople(database),
+    personSkill: (userId, name) =>
+      skillIn(personalLearningSpaces.containerFor(userId), name),
+    invalidate: () => openSkillIndex.invalidate(),
+    recordingTitles: recorderExtension.recordingTitles,
   },
   {
     productTelemetry,
@@ -2995,11 +3058,27 @@ const app = createApp(
       : {}),
     personalLearning: {
       store: learningSharingStore,
+      approvals: skillApprovalStore,
+      autoApprover,
       skillsOf: (userId) =>
         copilotRuntime.learning?.personalSkills(userId) ??
         Promise.resolve({ unavailable: "unavailable" as const }),
+      skillOf: (userId, name) =>
+        skillIn(personalLearningSpaces.containerFor(userId), name),
+      containerSkills: (id) =>
+        copilotRuntime.learning?.containerSkills(id) ??
+        Promise.resolve({ unavailable: "unavailable" as const }),
       invalidate: () => openSkillIndex.invalidate(),
       sharingAllowed: skillSharingAllowed,
+      manage: learningProbeIntelligence.experimental.learning,
+      recordingTitles: recorderExtension.recordingTitles,
+      settings: learningSettings,
+      scopesFor: async (actor) =>
+        learningScopes({
+          edition: currentEdition(),
+          userId: actor.id,
+          settings: await learningSettings.read(),
+        }),
     },
     delivery: {
       authenticated: {
@@ -3124,6 +3203,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     personResponseSweep.stop();
     groupSweep.stop();
     recorderExpirySweep.stop();
+    if (firstAutoApproveSweep) clearTimeout(firstAutoApproveSweep);
+    if (autoApproveTimer) clearInterval(autoApproveTimer);
     for (const sweep of deliverySweeps) sweep.stop();
     void Promise.allSettled([
       productTelemetry.flush(),

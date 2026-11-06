@@ -27,6 +27,7 @@ import {
   type RecorderRefusalSink,
   type RecorderResolver,
 } from "./guard";
+import { createRecordings, fetchTrajectorySummaries } from "./recordings";
 import { createRecorderRefusalAudit } from "./refusal-audit";
 import type { RecorderRouteDeps } from "./routes";
 import { createRecorderSignOut, type SignOutRecorders } from "./sign-out";
@@ -104,12 +105,19 @@ export function createRecorderExtension(deps: {
    * transaction commits.
    */
   auditFor?: (executor: Database) => AuditStore;
+  /** How Intelligence is reached for recording summaries; `fetch` unless a test says otherwise. */
+  intelligenceFetch?: typeof fetch;
 }): RecorderExtensionDeps & {
   /** The capture pass, for `mountCopilotRuntime`: its gate (an onBeforeHandler hook) and its Learning space selector. */
   trajectoryCapture: {
     gate: NonNullable<CopilotRuntimeHooks["onBeforeHandler"]>;
     selectLearningContainers: GetTrajectoryLearningContainerIds;
   };
+  /** The titles of a person's recordings by id, for the evidence shown with skills learned from them. */
+  recordingTitles: (
+    userId: string,
+    ids: string[],
+  ) => Promise<Map<string, string | null>>;
 } {
   const { config, database, organizationAuth } = deps;
   const trajectoryBindings = createTrajectoryBindingStore(database);
@@ -191,8 +199,24 @@ export function createRecorderExtension(deps: {
         }
       : async () => null;
 
+  const { apiUrl, apiKey } = config.runtime.intelligence;
+  const recordings = createRecordings({
+    pageForUser: trajectoryBindings.pageForUser,
+    isBoundTo: trajectoryBindings.isBoundTo,
+    boundTo: trajectoryBindings.boundTo,
+    summaries: (ids) =>
+      fetchTrajectorySummaries({
+        apiUrl,
+        apiKey,
+        fetch: deps.intelligenceFetch ?? fetch,
+        ids,
+      }),
+  });
+
   return {
     connections,
+    recordings,
+    recordingTitles: (userId, ids) => recordings.recordingTitles(userId, ids),
     allowedExtensionIds: () => allowedExtensionIds(config),
     // Bounded like a capture pass, so the popup is not held by a slow Intelligence; a creation it started goes on.
     learningSpace: (actor) =>

@@ -4,15 +4,18 @@ import type {
   RealBrowserOpenResponse,
 } from "@openbot/shared/openbot-browser";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useSearch } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
+import { recorderKeys } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
 import { TEACH_A_BOT } from "./browser-nav-item";
 import { ScreenBrowser } from "./browser-screen";
 import { TeachSteps } from "./teach-steps";
+import { YourRecordings } from "./your-recordings";
 
 const TITLE = TEACH_A_BOT;
 const DESCRIPTION =
@@ -26,6 +29,15 @@ const DESCRIPTION =
  */
 export function BrowserPage() {
   const state = useQuery(browserStateQueryOptions({ poll: true }));
+  // A recording that stops, here or in the browser, is a new row or a final state in the list beneath.
+  const phase = state.data?.recorder?.phase;
+  const before = useRef(phase);
+  useEffect(() => {
+    const was = before.current;
+    before.current = phase;
+    if ((was === "recording" || was === "stopping") && phase === "idle")
+      queryClient.invalidateQueries({ queryKey: recorderKeys.recordings() });
+  }, [phase]);
   if (state.isPending) return null;
   // Branched on the data rather than the error: a poll that fails after the page has opened keeps the browser on
   // screen, where tearing it down would open it all over again.
@@ -35,6 +47,7 @@ export function BrowserPage() {
         <p className="mt-6 text-destructive text-sm" role="alert">
           Couldn't load your browser. Reload the page.
         </p>
+        <YourRecordings />
       </PageShell>
     );
   }
@@ -46,6 +59,7 @@ export function BrowserPage() {
           {state.data.note ??
             "OpenBot isn't set up to run a browser for you. Ask an admin."}
         </PageEmpty>
+        <YourRecordings />
       </PageShell>
     );
   }
@@ -58,6 +72,8 @@ export function BrowserPage() {
  */
 function OpenedBrowser({ state }: { state: BrowserApiState }) {
   const native = state.shows === "native";
+  // The Recorder's "See it on Teach a Bot" link (`?recordings`) is to the list, so it opens no browser on arrival.
+  const recordingsOnly = "recordings" in useSearch({ strict: false });
   const open = useMutation(openBrowserMutationOptions(queryClient));
   // Its own mutation, so bringing the browser forward never blanks the page while it is asked.
   const reopen = useMutation(openBrowserMutationOptions(queryClient));
@@ -65,10 +81,10 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
   const asked = useRef(false);
   const { mutate } = open;
   useEffect(() => {
-    if (native || asked.current) return;
+    if (native || recordingsOnly || asked.current) return;
     asked.current = true;
     mutate();
-  }, [mutate, native]);
+  }, [mutate, native, recordingsOnly]);
 
   // A window on the person's desktop opens with Start recording, from the page itself.
   if (native) return <NativeBrowser state={state} />;
@@ -81,6 +97,13 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
       <PageShell title={TITLE} description={DESCRIPTION}>
         {/* While it opens, nothing: OpenBot draws no loading placeholder (openbot-data-access), and what arrives is the
             browser itself. */}
+        {recordingsOnly && !said ? (
+          <div className="mt-6">
+            <Button onClick={() => open.mutate()} size="sm" variant="outline">
+              Open browser
+            </Button>
+          </div>
+        ) : null}
         {said ? (
           <div className="mt-6 flex flex-col items-start gap-3">
             <p className="text-destructive text-sm" role="alert">
@@ -93,18 +116,23 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
             ) : null}
           </div>
         ) : null}
+        <YourRecordings />
       </PageShell>
     );
   }
   // The person's own everyday browser (OpenBot Desktop) has no screen here: it is a window on their desktop.
   if ("window" in opened && opened.window === "screen") {
+    // ScreenBrowser is deliberately not a PageShell (it fills the pane), so the list sits beneath it unframed.
     return (
-      <ScreenBrowser
-        computerId={opened.computerId}
-        state={state}
-        reopen={() => reopen.mutate()}
-        reopening={reopen.isPending}
-      />
+      <>
+        <ScreenBrowser
+          computerId={opened.computerId}
+          state={state}
+          reopen={() => reopen.mutate()}
+          reopening={reopen.isPending}
+        />
+        <YourRecordings variant="pane" />
+      </>
     );
   }
   // Only an older server says nothing of where its browser shows, and it may answer with a window after all.
@@ -121,6 +149,7 @@ function NativeBrowser({ state }: { state: BrowserApiState }) {
   return (
     <PageShell title={TITLE}>
       <TeachSteps state={state} />
+      <YourRecordings />
     </PageShell>
   );
 }

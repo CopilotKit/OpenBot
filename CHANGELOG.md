@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Skills learned from a person's recordings can be reviewed in OpenBot. An admin chooses who approves
+  them under Admin → Automatic learning: admins, or each person for their own Bots, and a skill a
+  person approves reaches only their own Bots until an admin approves sharing it. Settings → Learning
+  shows what is waiting for review, and Teach a Bot lists your recordings, which needs the back end
+  at 0.16 with recordings switched on. In the personal edition, Settings → Learning is now there, and
+  it approves new skills automatically until you turn that off. See [Automatic Learning](docs/automatic-learning.md#reviewing-learned-skills).
 - OpenBot Desktop's menu bar and tray no longer have an item that opens the back end's own
   dashboard, which is branded as another product. The Status window and Settings, This computer
   list each part by what it does: "Front end and Bots", "Background jobs", "Database" and "Bot

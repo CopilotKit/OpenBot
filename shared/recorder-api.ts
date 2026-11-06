@@ -60,6 +60,24 @@ export type RecorderConnectionsResponse = {
   connections: ListedRecorderConnection[];
   extensionIds: string[];
 };
+export type RecordingEnded =
+  | "succeeded"
+  | "stopped"
+  | "sending"
+  | "unknown"
+  | "missing";
+export type RecordingRow = {
+  id: string;
+  title: string | null;
+  recordedAt: string;
+  ended: RecordingEnded;
+  reason: string | null;
+};
+export type RecordingsPage = {
+  recordings: RecordingRow[];
+  nextCursor: string | null;
+  unavailable?: "unavailable" | "unreachable";
+};
 export type ExchangeResponse = {
   token: string;
   connection: RecorderConnection;
@@ -170,6 +188,8 @@ export const recorderPaths = {
     `/api/recorder/connections/${id(connectionId)}`,
   currentConnection: "/api/recorder/connections/current",
   me: "/api/recorder/me",
+  /** GET, the signed-in person's own recordings, `?cursor=`. */
+  recordings: "/api/recorder/recordings",
   learning: "/api/recorder/learning",
   /** POST `RecorderActivity`, with the Recorder's bearer: what this browser's Recorder is doing now (the red dot). */
   activity: "/api/recorder/activity",
