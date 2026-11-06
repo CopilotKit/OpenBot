@@ -4,7 +4,7 @@ import type {
 } from "@openbot/shared/learning";
 import { IconChevronRight, IconSparkles } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -28,6 +28,7 @@ import {
   startPersonalLearningRunMutationOptions,
 } from "@/lib/learning/mutations";
 import {
+  learningKeys,
   personalProposalQueryOptions,
   personalReviewQueryOptions,
 } from "@/lib/learning/queries";
@@ -79,6 +80,25 @@ export function LearningReview() {
     started: boolean;
     error: string | null;
   }>({ pending: false, started: false, error: null });
+  // When a refetch finds fewer proposals waiting, some were approved on their own: Your skills shows them now.
+  const waitingCount = review.data?.sources.reduce(
+    (count, source) =>
+      count +
+      (source.proposals ?? []).filter(
+        (proposal) => proposal.status === "pending_review",
+      ).length,
+    0,
+  );
+  const previousWaiting = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (waitingCount === undefined) return;
+    if (
+      previousWaiting.current !== undefined &&
+      waitingCount < previousWaiting.current
+    )
+      queryClient.invalidateQueries({ queryKey: learningKeys.personal });
+    previousWaiting.current = waitingCount;
+  }, [waitingCount]);
   if (review.isPending) return null;
   if (review.error) {
     return (
@@ -92,7 +112,10 @@ export function LearningReview() {
   const autoApproveOn =
     (saveAutoApprove.isPending ? saveAutoApprove.variables : undefined) ??
     autoApprove;
-  const unreadable = sources.some((source) => source.proposals === null);
+  const unreadable = sources.some(
+    (source) => source.proposals === null && !source.unavailable,
+  );
+  const unavailable = sources.some((source) => source.unavailable);
   // Sources that share a label are one group: the same words to the person, one Learn now.
   const groups: {
     label: string;
@@ -228,13 +251,16 @@ export function LearningReview() {
             ))}
           </PageRows>
         ))}
-      {showList && !anyWaiting && !unreadable && (
-        <PageEmpty icon={IconSparkles} title="Nothing to review">
-          {autoApprove !== null
-            ? "New proposals show up here after Learning analyses your recordings and conversations."
-            : "New proposals show up here after Learning analyses your recordings."}
-        </PageEmpty>
-      )}
+      {showList &&
+        !anyWaiting &&
+        !unreadable &&
+        !(unavailable && sources.every((source) => source.unavailable)) && (
+          <PageEmpty icon={IconSparkles} title="Nothing to review">
+            {autoApprove !== null
+              ? "New proposals show up here after Learning analyses your recordings and conversations."
+              : "New proposals show up here after Learning analyses your recordings."}
+          </PageEmpty>
+        )}
       {canReview && !starting.pending && starting.started && (
         <p className="mt-4 text-sm" role="status">
           Learning started. New proposals show up here when it finishes.
@@ -250,9 +276,16 @@ export function LearningReview() {
           {starting.error}
         </p>
       )}
+      {unavailable && (
+        <p className="mt-4 text-muted-foreground text-sm">
+          Learning isn't available in Intelligence, so nothing is proposed here.
+        </p>
+      )}
       {unreadable && (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {sources.every((source) => source.proposals === null)
+          {sources
+            .filter((source) => !source.unavailable)
+            .every((source) => source.proposals === null)
             ? "Couldn't read your proposed skills. Reload the page."
             : "Couldn't read some of your proposed skills. Reload the page."}
         </p>

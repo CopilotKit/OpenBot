@@ -15,6 +15,7 @@ import type {
 import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { LearningReview } from "@/components/settings/learning-review";
+import { personalReviewQueryOptions } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
 import { LearningSettingsPage } from "@/routes/_authed/settings/learning";
 
@@ -438,4 +439,107 @@ test("the personal edition shows Learning with automatic approval on and no shar
       },
     ]),
   );
+});
+
+test("a source Learning is off for says so plainly, without the read failure alert", async () => {
+  review = {
+    canReview: true,
+    autoApprove: false,
+    sources: [
+      {
+        containerId: "user-1",
+        kind: "recordings",
+        label: "From your recordings",
+        latestRun: null,
+        proposals: null,
+        unavailable: "learning-off",
+      },
+    ],
+  };
+  const view = draw();
+  expect(
+    await view.findByText(
+      "Learning isn't available in Intelligence, so nothing is proposed here.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByText("Nothing to review")).toBeNull();
+});
+
+test("a source that failed to read still alerts next to one that is unavailable", async () => {
+  const source = (id: string) => ({
+    containerId: id,
+    kind: "recordings" as const,
+    label: `Source ${id}`,
+    latestRun: null,
+  });
+  review = {
+    canReview: true,
+    autoApprove: false,
+    sources: [
+      { ...source("a"), proposals: null, unavailable: "learning-off" },
+      { ...source("b"), proposals: null },
+    ],
+  };
+  const view = draw();
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Couldn't read your proposed skills. Reload the page.",
+  );
+});
+
+test("the review is read again every ten seconds only while a run is going", () => {
+  const options = personalReviewQueryOptions();
+  const interval = (status: string | null) => {
+    const data = {
+      canReview: true,
+      autoApprove: false,
+      sources: [
+        {
+          containerId: "user-1",
+          kind: "recordings",
+          label: "From your recordings",
+          proposals: [],
+          latestRun: status ? { status } : null,
+        },
+      ],
+    };
+    const refetchInterval = options.refetchInterval as (
+      query: unknown,
+    ) => unknown;
+    return refetchInterval({ state: { data } });
+  };
+  expect(interval("batching")).toBe(10_000);
+  expect(interval("queued")).toBe(10_000);
+  expect(interval("succeeded")).toBe(false);
+  expect(interval("failed")).toBe(false);
+  expect(interval(null)).toBe(false);
+});
+
+test("when a refetch finds fewer proposals waiting, Your skills is refreshed", async () => {
+  review = body(true);
+  const view = draw();
+  await view.findByText("refund-order");
+  const invalidated: unknown[] = [];
+  const original = queryClient.invalidateQueries.bind(queryClient);
+  queryClient.invalidateQueries = ((filters: { queryKey?: unknown }) => {
+    invalidated.push(filters?.queryKey);
+    return original(filters as never);
+  }) as typeof queryClient.invalidateQueries;
+  try {
+    review = {
+      ...body(true),
+      sources: [
+        {
+          ...body(true).sources[0]!,
+          proposals: [proposal("p1", "refund-order", "add", "approved")],
+        },
+      ],
+    };
+    await queryClient.invalidateQueries({ queryKey: ["learning", "review"] });
+    await waitFor(() =>
+      expect(invalidated).toContainEqual(["learning", "personal"]),
+    );
+  } finally {
+    queryClient.invalidateQueries = original;
+  }
 });

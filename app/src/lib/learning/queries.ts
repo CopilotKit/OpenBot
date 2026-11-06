@@ -232,6 +232,15 @@ export function personalReviewQueryOptions() {
   return queryOptions({
     queryKey: learningKeys.review,
     retry: false,
+    // While a run is going the review is read again, so what it proposes (or approves) shows up without a reload.
+    refetchInterval: (query) =>
+      query.state.data?.sources.some(
+        (source) =>
+          source.latestRun &&
+          !["succeeded", "failed"].includes(source.latestRun.status),
+      )
+        ? 10_000
+        : false,
     queryFn: async (): Promise<PersonalReview> =>
       (
         await client("/api/settings/learning/review", {
