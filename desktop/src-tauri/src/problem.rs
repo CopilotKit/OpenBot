@@ -17,7 +17,8 @@ use serde::Serialize;
 pub enum Connection {
     Model,
     Intelligence,
-    Organization,
+    /// Not a credential: Install has to run again before Start can, and the window goes back to it.
+    Installation,
 }
 
 /// A failure, in both registers.

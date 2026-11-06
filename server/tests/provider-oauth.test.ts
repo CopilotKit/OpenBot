@@ -24,6 +24,7 @@ import {
   mountProviderOAuthProxy,
 } from "../src/provider-oauth";
 import { lockProviderCredentials } from "../src/provider-oauth-lock";
+import { createModelCatalogue } from "../src/model-catalogue";
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -621,4 +622,77 @@ test("Windows validates the opened credential identity before reading a replaced
   } finally {
     Object.defineProperty(process, "platform", originalPlatform);
   }
+});
+
+/*
+ * A Google or xAI sign-in lists its models through the same proxy, so the composer's model list
+ * works for a signed-in desktop as it does for a key. The provider's own listing is passed through
+ * as it came; the catalogue reads either shape. Captured from Google and xAI on 2026-11-05.
+ */
+const LISTINGS = `${import.meta.dir}/fixtures/model-listings/`;
+
+async function listThroughProxy(provider: "google" | "xai", botModel: string) {
+  const listing = await Bun.file(
+    `${LISTINGS}${provider === "xai" ? "xai-language-models.json" : "gemini-native-models.json"}`,
+  ).json();
+  const f = await fixture(
+    record(provider === "xai" ? { provider, quotaProject: undefined } : {}),
+    (request) => {
+      expect(request.method).toBe("GET");
+      expect(request.headers.get("authorization")).toBe(
+        "Bearer provider-access-token",
+      );
+      expect(request.headers.get("x-goog-user-project")).toBe(
+        provider === "google" ? "google-quota-project" : null,
+      );
+      return Response.json(listing);
+    },
+  );
+  const catalogue = createModelCatalogue({
+    model: { provider: "openai", defaultModel: botModel },
+    apiKey: async () => "local-proxy-token",
+    environment: {
+      OPENAI_BASE_URL: "http://127.0.0.1:3001/api/model-provider/v1",
+      BOT_MODEL: botModel,
+    },
+    capabilitiesUrl: null,
+    fetch: (async (input: string | URL | Request, init?: RequestInit) =>
+      f.app.request(new URL(String(input)).pathname, init)) as typeof fetch,
+  });
+  return { read: await catalogue.read(), destinations: f.destinations };
+}
+
+test("a signed-in xAI lists its models through the proxy, with xAI's own efforts", async () => {
+  const { read, destinations } = await listThroughProxy("xai", "grok-4.5");
+  expect(destinations).toEqual(["https://api.x.ai/v1/language-models"]);
+  expect(read.source).toBe("xai");
+  expect(read.choosable).toBe(true);
+  expect(read.models.find((model) => model.id === "grok-4.7")).toMatchObject({
+    efforts: ["low", "medium", "high", "xhigh"],
+    defaultEffort: "high",
+  });
+});
+
+test("a signed-in Google lists the models that generate text, by their bare names", async () => {
+  const { read, destinations } = await listThroughProxy(
+    "google",
+    "gemini-3.8-flash",
+  );
+  expect(destinations).toEqual([
+    "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+  ]);
+  expect(read.source).toBe("google");
+  const ids = read.models.map((model) => model.id);
+  expect(ids).toContain("gemini-3.8-flash");
+  expect(ids).toContain("gemini-4-argon");
+  // Embeddings cannot chat, and speech-only models never answer in text.
+  expect(ids).not.toContain("gemini-embedding-2");
+  expect(ids).not.toContain("gemini-3.8-flash-tts");
+});
+
+test("the listing route needs the proxy's own bearer too", async () => {
+  const f = await fixture(record(), () => new Response("not called"));
+  const response = await f.app.request("/api/model-provider/v1/models");
+  expect(response.status).toBe(401);
+  expect(f.destinations).toEqual([]);
 });

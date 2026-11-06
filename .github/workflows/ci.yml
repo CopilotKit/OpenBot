@@ -142,7 +142,7 @@ jobs:
           tests/webrtc-proxy.test.ts tests/web-bot-auth-browser.test.ts
           tests/handoff-page-restore.test.ts tests/enter-text.test.ts tests/person-browser.test.ts tests/person-browser-computer.test.ts
           tests/bot-browser.test.ts tests/bot-browser-computer.test.ts
-          tests/screencast-keys-browser.test.ts tests/browser-memory.test.ts
+          tests/screencast-keys-browser.test.ts tests/screencast-pacing-browser.test.ts tests/browser-memory.test.ts
         working-directory: agent-computer
         env:
           OPENBOT_COMPUTER_BROWSER: '1'
@@ -383,7 +383,7 @@ jobs:
         working-directory: agent-computer
       # Same for the Mastra Bot: root test discovery imports its receiver tests, which load Mastra
       # from that Bot's own dependency tree.
-      - run: bun install
+      - run: bun install --frozen-lockfile
         working-directory: agent-mastra
       # Same for the desktop app: root test discovery imports its React tests, whose JSX runtime is
       # pinned by the desktop lockfile rather than the root one.

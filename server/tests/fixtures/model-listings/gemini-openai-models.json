@@ -1,0 +1,371 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "models/gemini-2.5-flash",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 2.5 Flash"
+    },
+    {
+      "id": "models/gemini-2.5-pro",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 2.5 Pro"
+    },
+    {
+      "id": "models/gemini-2.5-flash-preview-tts",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 2.5 Flash Preview TTS"
+    },
+    {
+      "id": "models/gemini-2.5-pro-preview-tts",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 2.5 Pro Preview TTS"
+    },
+    {
+      "id": "models/gemma-4-26b-a4b-it",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemma 4 26B A4B IT"
+    },
+    {
+      "id": "models/gemma-4-31b-it",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemma 4 31B IT"
+    },
+    {
+      "id": "models/gemini-flash-latest",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Flash Latest"
+    },
+    {
+      "id": "models/gemini-flash-lite-latest",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Flash-Lite Latest"
+    },
+    {
+      "id": "models/gemini-pro-latest",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Pro Latest"
+    },
+    {
+      "id": "models/gemini-2.5-flash-lite",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 2.5 Flash-Lite"
+    },
+    {
+      "id": "models/gemini-2.5-flash-image",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Nano Banana"
+    },
+    {
+      "id": "models/gemini-3-flash-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3 Flash Preview"
+    },
+    {
+      "id": "models/gemini-3.1-pro-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.1 Pro Preview"
+    },
+    {
+      "id": "models/gemini-3.1-pro-preview-customtools",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.1 Pro Preview Custom Tools"
+    },
+    {
+      "id": "models/gemini-3.1-flash-lite-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.1 Flash Lite Preview"
+    },
+    {
+      "id": "models/gemini-3.1-flash-lite",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.1 Flash Lite"
+    },
+    {
+      "id": "models/gemini-3-pro-image-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Nano Banana Pro"
+    },
+    {
+      "id": "models/gemini-3-pro-image",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Nano Banana Pro"
+    },
+    {
+      "id": "models/nano-banana-pro-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Nano Banana Pro"
+    },
+    {
+      "id": "models/gemini-3.1-flash-image-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Nano Banana 2"
+    },
+    {
+      "id": "models/gemini-3.1-flash-image",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Nano Banana 2"
+    },
+    {
+      "id": "models/gemini-3.1-flash-lite-image",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Nano Banana 2 Lite"
+    },
+    {
+      "id": "models/gemini-nano-banana-2.1",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Nano Banana 2.1"
+    },
+    {
+      "id": "models/gemini-3.5-flash",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.5 Flash"
+    },
+    {
+      "id": "models/gemini-3.5-flash-lite",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.5 Flash Lite"
+    },
+    {
+      "id": "models/gemini-omni-flash-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Omni Flash Preview"
+    },
+    {
+      "id": "models/gemini-omni-1.1-flash",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Omni 1.1 Flash"
+    },
+    {
+      "id": "models/gemini-omni-1.2-flash",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Omni 1.2 Flash"
+    },
+    {
+      "id": "models/gemini-3.5-transcribe",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.5 Transcribe"
+    },
+    {
+      "id": "models/gemini-3.6-flash",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.6 Flash"
+    },
+    {
+      "id": "models/gemini-3.7-flash",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.7 Flash"
+    },
+    {
+      "id": "models/gemini-3.8-flash",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.8 Flash"
+    },
+    {
+      "id": "models/gemini-4-argon",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 4 Argon"
+    },
+    {
+      "id": "models/lyria-3-clip-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Lyria 3 Clip Preview"
+    },
+    {
+      "id": "models/lyria-3-pro-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Lyria 3 Pro Preview"
+    },
+    {
+      "id": "models/lyria-3.5",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Lyria 3.5"
+    },
+    {
+      "id": "models/gemini-3.1-flash-tts-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.1 Flash TTS Preview"
+    },
+    {
+      "id": "models/gemini-3.8-flash-tts",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.8 Flash TTS"
+    },
+    {
+      "id": "models/gemini-3.8-flash-lite-tts",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.8 Flash Lite TTS"
+    },
+    {
+      "id": "models/gemini-robotics-er-2-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Robotics-ER 2 Preview"
+    },
+    {
+      "id": "models/gemini-2.5-computer-use-preview-10-2025",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 2.5 Computer Use Preview 10-2025"
+    },
+    {
+      "id": "models/antigravity-preview-05-2026",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Antigravity Agent Preview"
+    },
+    {
+      "id": "models/antigravity-preview-09-2026",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Antigravity Agent Preview"
+    },
+    {
+      "id": "models/antigravity-preview-latest",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Antigravity Agent Preview Latest"
+    },
+    {
+      "id": "models/deep-research-max-preview-04-2026",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Deep Research Max Preview (Apr-21-2026)"
+    },
+    {
+      "id": "models/deep-research-preview-04-2026",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Deep Research Preview (Apr-21-2026)"
+    },
+    {
+      "id": "models/deep-research-pro-preview-12-2025",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Deep Research Pro Preview (Dec-12-2025) [Rerouted]"
+    },
+    {
+      "id": "models/gemini-embedding-001",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Embedding 001"
+    },
+    {
+      "id": "models/gemini-embedding-2-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Embedding 2 Preview"
+    },
+    {
+      "id": "models/gemini-embedding-2",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Embedding 2"
+    },
+    {
+      "id": "models/aqa",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Model that performs Attributed Question Answering."
+    },
+    {
+      "id": "models/gemini-3.5-transcribe-live",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.5 Transcribe Live"
+    },
+    {
+      "id": "models/gemini-2.5-flash-native-audio-latest",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 2.5 Flash Native Audio Latest"
+    },
+    {
+      "id": "models/gemini-2.5-flash-native-audio-preview-09-2025",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 2.5 Flash Native Audio Preview 09-2025"
+    },
+    {
+      "id": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 2.5 Flash Native Audio Preview 12-2025"
+    },
+    {
+      "id": "models/gemini-3.1-flash-live-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.1 Flash Live Preview"
+    },
+    {
+      "id": "models/gemini-3.8-live",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.8 Live"
+    },
+    {
+      "id": "models/gemini-3.8-live-extended-thinking",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.8 Live Extended Thinking"
+    },
+    {
+      "id": "models/gemini-robotics-er-2-streaming-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini Robotics-ER 2 Streaming Preview"
+    },
+    {
+      "id": "models/gemini-3.5-live-translate-preview",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Gemini 3.5 Live Translate Preview"
+    },
+    {
+      "id": "models/lyria-realtime-exp",
+      "object": "model",
+      "owned_by": "google",
+      "display_name": "Lyria Realtime Experimental"
+    }
+  ]
+}

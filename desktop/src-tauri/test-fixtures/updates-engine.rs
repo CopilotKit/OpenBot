@@ -105,6 +105,9 @@ fn main() {
                     files.push(value.clone());
                     rest = tail;
                 }
+                [flag, _, tail @ ..] if flag == "--env-file" || flag == "--profile" => {
+                    rest = tail;
+                }
                 _ => break,
             }
         }
@@ -118,7 +121,26 @@ fn main() {
                 .is_some_and(|parent| parent != fixture)
         });
         let database = root.join("fixture-journal.json");
-        if command == "config --format json" {
+        if let Some(services) = command.strip_prefix("config --images ") {
+            // As Compose resolves this repository's file for each requested service: the published
+            // image the installation names in its environment, or Postgres's own.
+            for service in services.split_whitespace() {
+                let variable = match service {
+                    "postgres" => {
+                        println!("pgvector/pgvector:pg17");
+                        continue;
+                    }
+                    "migrate" | "server" | "worker" => "SERVER_IMAGE",
+                    "supervisor" => "SUPERVISOR_IMAGE",
+                    "agent-computer" => "COMPUTER_IMAGE",
+                    "agent-bot" => "BOT_IMAGE",
+                    "agent-langgraph" => "LANGGRAPH_IMAGE",
+                    "agent-harness" => "PICKED_HARNESS_IMAGE",
+                    other => panic!("unexpected service {other}"),
+                };
+                println!("{}", std::env::var(variable).unwrap());
+            }
+        } else if command == "config --format json" {
             let template = if candidate {
                 "fixture-candidate-config.json"
             } else {

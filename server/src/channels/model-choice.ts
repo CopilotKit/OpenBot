@@ -1,5 +1,6 @@
 /**
- * The model a person picked for one conversation, kept on the server and read when a run starts.
+ * The model and thinking effort a person picked for one conversation, kept on the server and read
+ * when a run starts.
  *
  * WHY THE SERVER HOLDS IT. A run is the server's own decision about which model to pay for, so the
  * browser never names the model on the run itself: it saves a pick here, through a route that checks
@@ -10,29 +11,20 @@
  * Per person, on the row that already maps a person and a conversation to their thread
  * (`intelligence_channel_mappings`), so a run finds its pick by the thread it is answering in.
  *
- * Read only while an admin lets people pick (`modelSelection`, always on in the personal edition).
- * Off, every run uses the configured model and the saved picks are left alone, so turning it back
- * on brings them back. A saved pick the catalogue no longer offers (the allowlist narrowed, the
- * provider retired it, the deployment moved to another provider) is not used either: the run takes
- * the configured model, which is also what the picker then shows.
+ * What may be picked is the catalogue's to say: every model the credential lists for one person on
+ * their own machine, the models an admin allowed in a team (`model-catalogue.ts`). A saved pick the
+ * catalogue no longer offers (an admin withdrew it, the provider retired it, the deployment moved to
+ * another provider) is not used: the run takes the default, which is also what the picker then
+ * shows, and the pick is kept for when it is offered again. An effort is only ever sent to a model
+ * that takes it.
  */
 import { and, eq } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
-import { enterpriseControls } from "../admin/controls";
 import type { AppVariables } from "../auth/guards";
 import type { RuntimeModel } from "../copilot";
 import type { Database } from "../db/client";
 import { intelligenceChannelMappings } from "../db/schema";
-import { currentEdition } from "../edition";
-import type { ModelCatalogueReader } from "../model-catalogue";
-
-/** Whether people may pick a model right now. From the controls' snapshot, so a run pays no query. */
-export function modelSelectionOn(): boolean {
-  const settings = enterpriseControls()?.snapshot()?.settings;
-  if (settings) return settings.modelSelection;
-  // No controls installed yet: only the personal edition, which fixes it on, may pick.
-  return currentEdition() === "personal";
-}
+import type { ModelCatalogueReader, RunChoice } from "../model-catalogue";
 
 export class ModelChoiceError extends Error {
   constructor(
@@ -44,6 +36,15 @@ export class ModelChoiceError extends Error {
   }
 }
 
+/** One person's pick for one conversation, as the routes answer it. Null: the default. */
+export type ConversationModel = { model: string | null; effort: string | null };
+
+type Saved = {
+  provider: string;
+  model?: string | null;
+  effort?: string | null;
+} | null;
+
 export function createModelChoices(deps: {
   database: Database;
   model: RuntimeModel;
@@ -52,22 +53,39 @@ export function createModelChoices(deps: {
   enabled?: () => boolean;
 }) {
   const { database, model, catalogue } = deps;
-  const enabled = deps.enabled ?? modelSelectionOn;
+  /*
+   * Always, now that what may be picked is the catalogue's to say: everything for one person on
+   * their own machine, what an admin allowed in a team. A pick of anything else is refused below.
+   */
+  const enabled = deps.enabled ?? (() => true);
 
-  /** The saved pick for one person's conversation, when it is one this deployment can use. */
-  async function usable(
-    saved: { provider: string; model: string } | null | undefined,
-  ): Promise<string | undefined> {
-    if (!saved || saved.provider !== model.provider) return undefined;
-    return (await catalogue.allows(saved.model)) ? saved.model : undefined;
+  /** The saved pick, when it was made under this deployment's provider and picking is on. */
+  const applicable = (saved: Saved | undefined) =>
+    enabled() && saved && saved.provider === model.provider ? saved : null;
+
+  /** What the pick means today: a model still offered, and an effort that model still takes. */
+  async function shown(saved: Saved | undefined): Promise<ConversationModel> {
+    const pick = applicable(saved);
+    if (!pick) return { model: null, effort: null };
+    const choice = await catalogue.choose(pick);
+    const read = await catalogue.read();
+    return {
+      model:
+        pick.model &&
+        choice.model === pick.model &&
+        choice.model !== read.default
+          ? choice.model
+          : null,
+      effort: choice.effort ?? null,
+    };
   }
 
   return {
     /**
-     * What one person's conversation runs on: their pick when it can be used, or null for the
-     * configured model. Null too while picking is off.
+     * What one person's conversation runs on, as they picked it: their model and effort when they
+     * can be used, null for each that falls back to the default. Null too while picking is off.
      */
-    async read(actorId: string, channelId: string): Promise<string | null> {
+    async read(actorId: string, channelId: string): Promise<ConversationModel> {
       const [row] = await database
         .select({ saved: intelligenceChannelMappings.modelSelection })
         .from(intelligenceChannelMappings)
@@ -80,33 +98,50 @@ export function createModelChoices(deps: {
         .limit(1);
       if (!row)
         throw new ModelChoiceError("Couldn't find that conversation.", 404);
-      if (!enabled()) return null;
-      return (await usable(row.saved)) ?? null;
+      return shown(row.saved);
     },
 
-    /** Save a pick, or forget it with null. Refused while picking is off or for a model not offered. */
+    /**
+     * Save a pick, or forget it with nulls. Refused while picking is off, for a model not offered,
+     * and for an effort the model does not take.
+     */
     async save(
       actorId: string,
       channelId: string,
-      picked: string | null,
-    ): Promise<string | null> {
+      picked: ConversationModel,
+    ): Promise<ConversationModel> {
       if (!enabled())
         throw new ModelChoiceError(
           "Choosing a model is turned off. Ask an admin to turn it on.",
           403,
         );
-      const next =
-        picked === null || picked === model.defaultModel ? null : picked;
-      if (next !== null && !(await catalogue.allows(next)))
+      const current = await catalogue.read();
+      const nextModel =
+        picked.model === null || picked.model === current.default
+          ? null
+          : picked.model;
+      if (nextModel !== null && !(await catalogue.allows(nextModel)))
         throw new ModelChoiceError(
           "That model isn't available. Pick another one.",
           400,
         );
+      const efforts = await catalogue.effortsFor(nextModel ?? current.default);
+      if (picked.effort !== null && !efforts.includes(picked.effort))
+        throw new ModelChoiceError(
+          "That model can't think at that level. Pick another one.",
+          400,
+        );
+      const next: ConversationModel = {
+        model: nextModel,
+        effort: picked.effort,
+      };
       const updated = await database
         .update(intelligenceChannelMappings)
         .set({
           modelSelection:
-            next === null ? null : { provider: model.provider, model: next },
+            next.model === null && next.effort === null
+              ? null
+              : { provider: model.provider, ...next },
           updatedAt: new Date(),
         })
         .where(
@@ -122,25 +157,24 @@ export function createModelChoices(deps: {
     },
 
     /**
-     * The model a run in this thread should use, or undefined for the configured one. Bound to the
+     * The model and effort a run in this thread uses: the person's pick when it can be used,
+     * otherwise the default, which is the middle of the provider's current line. Bound to the
      * person running it: the thread is theirs, so another person's pick is never read.
      */
-    async forRun(
-      actorId: string,
-      threadId: string,
-    ): Promise<string | undefined> {
-      if (!enabled() || model.plan) return undefined;
-      const [row] = await database
-        .select({ saved: intelligenceChannelMappings.modelSelection })
-        .from(intelligenceChannelMappings)
-        .where(
-          and(
-            eq(intelligenceChannelMappings.userId, actorId),
-            eq(intelligenceChannelMappings.threadId, threadId),
-          ),
-        )
-        .limit(1);
-      return usable(row?.saved);
+    async forRun(actorId: string, threadId: string): Promise<RunChoice> {
+      const [row] = enabled()
+        ? await database
+            .select({ saved: intelligenceChannelMappings.modelSelection })
+            .from(intelligenceChannelMappings)
+            .where(
+              and(
+                eq(intelligenceChannelMappings.userId, actorId),
+                eq(intelligenceChannelMappings.threadId, threadId),
+              ),
+            )
+            .limit(1)
+        : [];
+      return catalogue.choose(applicable(row?.saved));
     },
   };
 }
@@ -150,8 +184,8 @@ export type ModelChoices = ReturnType<typeof createModelChoices>;
 /**
  * `GET` and `PUT /api/channels/:channelId/model`: one person's pick for one conversation.
  *
- * Answers `{ model }`, null meaning the configured model. A conversation the person is not in has no
- * mapping row for them, so it is a 404 like any conversation they cannot see.
+ * Answers `{ model, effort }`, null meaning the default for each. A conversation the person is not
+ * in has no mapping row for them, so it is a 404 like any conversation they cannot see.
  */
 export function createModelChoiceRoutes(
   choices: ModelChoices,
@@ -169,31 +203,34 @@ export function createModelChoiceRoutes(
   });
 
   routes.get("/:channelId/model", async (context) =>
-    context.json({
-      model: await choices.read(
-        context.var.actor.id,
-        context.req.param("channelId"),
-      ),
-    }),
+    context.json(
+      await choices.read(context.var.actor.id, context.req.param("channelId")),
+    ),
   );
 
   routes.put("/:channelId/model", async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
       model?: unknown;
+      effort?: unknown;
     } | null;
     const picked = body?.model;
+    const effort = body?.effort ?? null;
     if (picked !== null && (typeof picked !== "string" || !picked.trim()))
       return context.json(
         { error: "Send a model id, or null for the default." },
         400,
       );
-    return context.json({
-      model: await choices.save(
-        context.var.actor.id,
-        context.req.param("channelId"),
-        picked === null ? null : picked.trim(),
-      ),
-    });
+    if (effort !== null && (typeof effort !== "string" || !effort.trim()))
+      return context.json(
+        { error: "Send an effort, or null for the model's own." },
+        400,
+      );
+    return context.json(
+      await choices.save(context.var.actor.id, context.req.param("channelId"), {
+        model: picked === null ? null : picked.trim(),
+        effort: effort === null ? null : effort.trim().toLowerCase(),
+      }),
+    );
   });
 
   return routes;

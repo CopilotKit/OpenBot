@@ -95,6 +95,20 @@ export type ModelUsageSummary = {
   lastUsedAt: string;
 };
 
+/**
+ * Settings this deployment fixes whatever is stored. Set once at startup (`fixSettings`).
+ */
+let fixed: Partial<EnterpriseSettings> = {};
+
+/**
+ * One person on their own machine (`OPENBOT_SINGLE_USER`) is shown every model their credential
+ * lists, so nothing stored, by an earlier team deployment or anybody, narrows it: the model
+ * allowlist is off for them, as it is for the personal edition.
+ */
+export function fixSettings(settings: Partial<EnterpriseSettings>) {
+  fixed = settings;
+}
+
 /** Stored as `{ value }` so every key is a JSON object, which the jsonb column type requires. */
 function unwrap<K extends keyof EnterpriseSettings>(
   key: K,
@@ -141,11 +155,14 @@ export function createEnterpriseStore(database: Database) {
       if (currentEdition() === "personal") return PERSONAL_ENTERPRISE_SETTINGS;
       const rows = await database.select().from(enterpriseSettings);
       const byKey = new Map(rows.map((row) => [row.key, row.value]));
-      return Object.fromEntries(
-        (Object.keys(SETTING_KEYS) as (keyof EnterpriseSettings)[]).map(
-          (key) => [key, unwrap(key, byKey.get(SETTING_KEYS[key]))],
-        ),
-      ) as EnterpriseSettings;
+      return {
+        ...(Object.fromEntries(
+          (Object.keys(SETTING_KEYS) as (keyof EnterpriseSettings)[]).map(
+            (key) => [key, unwrap(key, byKey.get(SETTING_KEYS[key]))],
+          ),
+        ) as EnterpriseSettings),
+        ...fixed,
+      };
     },
 
     async setSetting<K extends keyof EnterpriseSettings>(

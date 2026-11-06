@@ -53,20 +53,28 @@ test("the example environment and the changelog name the variable and that a bad
   );
   expect(example).toContain("# OPENBOT_RECORDER_EXTRA_EXTENSION_IDS=");
   expect(example).toMatch(/Any\s+other value stops the server at boot/);
-  const [unreleased = ""] = readFileSync(
+  // Everything written since 0.2.0: `## Unreleased` until the release workflow promotes it, then the
+  // release's own section. Reading `## Unreleased` alone fails on the release commit, where it is
+  // empty, and that commit's checks gate the publish.
+  const changelog = readFileSync(
     new URL("../../CHANGELOG.md", import.meta.url),
     "utf8",
-  )
-    .split("## Unreleased")[1]
-    ?.split(/^## /m) ?? [""];
+  );
+  const notes = changelog.slice(
+    changelog.indexOf("## Unreleased"),
+    changelog.search(/^## 0\.2\.0$/m),
+  );
+  const runtime = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ).dependencies["@copilotkit/runtime"];
   for (const term of [
     "0066_recorder_extension",
     "OPENBOT_RECORDER_EXTRA_EXTENSION_IDS",
     "stops the server at boot",
     "Settings → Browsers",
-    "1.79.1",
+    `CopilotKit ${runtime}`,
     "COPILOTKIT_OPENAI_API=responses",
   ]) {
-    expect(unreleased).toContain(term);
+    expect(notes).toContain(term);
   }
 });

@@ -21,6 +21,7 @@ import {
   subscribeToActivity,
 } from "@/lib/computers/activity";
 import { CommandOutput } from "./command-output";
+import { commandStatus, TerminalBlock } from "./terminal-block";
 
 const ICONS = {
   command: IconTerminal2,
@@ -43,6 +44,48 @@ function timeOf(at: number): string {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+/**
+ * A command, drawn as the chat draws it: a terminal block, which opens the live terminal above. Its
+ * time sits in the header, where the chat has its words.
+ */
+function CommandEntry({
+  computerId,
+  entry,
+}: {
+  computerId: string;
+  entry: ComputerActivity;
+}) {
+  return (
+    <li>
+      <TerminalBlock
+        aside={
+          entry.at === undefined ? null : (
+            <time
+              className="shrink-0 text-[10px] text-muted-foreground tabular-nums"
+              dateTime={new Date(entry.at).toISOString()}
+            >
+              {timeOf(entry.at)}
+            </time>
+          )
+        }
+        command={entry.subject}
+        computerId={computerId}
+        label={entry.declined === true ? "Declined" : "Ran"}
+        output={entry.output}
+        status={commandStatus({
+          running: false,
+          refused: entry.refused === true,
+          declined: entry.declined === true,
+          byYou: entry.doneByPerson === true,
+          ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
+          timedOut: entry.timedOut === true,
+        })}
+        truncated={entry.truncated === true}
+      />
+    </li>
+  );
 }
 
 function Entry({ entry }: { entry: ComputerActivity }) {
@@ -129,9 +172,13 @@ export function ActivityLog({ computerId }: { computerId: string }) {
 
   return (
     <ul className="min-w-0">
-      {newestFirst.map((entry) => (
-        <Entry entry={entry} key={entry.id} />
-      ))}
+      {newestFirst.map((entry) =>
+        entry.kind === "command" ? (
+          <CommandEntry computerId={computerId} entry={entry} key={entry.id} />
+        ) : (
+          <Entry entry={entry} key={entry.id} />
+        ),
+      )}
     </ul>
   );
 }

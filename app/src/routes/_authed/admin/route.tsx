@@ -34,7 +34,7 @@ export const Route = createFileRoute("/_authed/admin")({
 function RouteComponent() {
   return (
     // The same inset panel as the app's shell; see `_app.tsx`.
-    <SidebarShell className="h-svh overflow-hidden" width="300px">
+    <SidebarShell className="h-svh overflow-hidden" name="admin" width="300px">
       <AdminSidebar />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
         <Outlet />

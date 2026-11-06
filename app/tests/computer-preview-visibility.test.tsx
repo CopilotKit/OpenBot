@@ -205,7 +205,7 @@ test("hidden live screen keeps the stream open and draws the latest hidden frame
   expect(socket.readyState).toBe(SocketDouble.OPEN);
 });
 
-test("an older pending live screen decode cannot replace a newer frame", async () => {
+test("an older live screen decode cannot replace a newer frame, and frames waiting behind it are not all decoded", async () => {
   type PendingDecode = {
     bitmap: ImageBitmap & { label: string };
     resolve: (bitmap: ImageBitmap & { label: string }) => void;
@@ -238,17 +238,21 @@ test("an older pending live screen decode cannot replace a newer frame", async (
   await waitFor(() => expect(SocketDouble.latest).toBeDefined());
   const socket = SocketDouble.latest as SocketDouble;
 
+  // One decode at a time: frames that arrive behind it wait, and only the newest of them is decoded.
   sendFrame(socket, "AAAA");
   sendFrame(socket, "BBBB");
+  sendFrame(socket, "CCCC");
+  await waitFor(() => expect(pending.length).toBe(1));
+
+  // The first finishes after newer frames arrived, so it is not drawn.
+  pending[0].resolve(pending[0].bitmap);
   await waitFor(() => expect(pending.length).toBe(2));
+  expect(drawn).toEqual([]);
 
   pending[1].resolve(pending[1].bitmap);
   await waitFor(() => expect(drawn).toEqual(["second"]));
-
-  pending[0].resolve(pending[0].bitmap);
   await new Promise((resolve) => setTimeout(resolve, 0));
-
-  expect(drawn).toEqual(["second"]);
+  expect(pending.length).toBe(2);
 });
 
 test("hidden computer preview pauses screenshot polling while control polling continues", async () => {

@@ -27,6 +27,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { desktopShell } from "@/lib/desktop/shell";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
@@ -41,6 +42,8 @@ type SettingsSidebarItem = {
    * everywhere else, so an entry stays lit on the pages beneath it.
    */
   exact?: boolean;
+  /** Shown only inside OpenBot Desktop, which is what the page reads from. */
+  desktopOnly?: boolean;
   icon: React.ComponentType<{ className?: string }>;
   linkOptions: LinkOptions;
   title: string;
@@ -91,6 +94,13 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     title: "Passwords",
     icon: IconKey,
     linkOptions: { to: "/settings/passwords" },
+  },
+  {
+    /* What OpenBot runs here and the memory it takes, with Restart and Stop. */
+    title: "This computer",
+    icon: IconDeviceDesktop,
+    desktopOnly: true,
+    linkOptions: { to: "/settings/this-computer" },
   },
   {
     /* The same mark Admin gives UI Components. It is the same subject seen from the other side. */
@@ -195,7 +205,11 @@ export function SettingsSidebar({
         <SidebarGroup>
           <SidebarMenu className="gap-px">
             {items
-              .filter((option) => !option.setup || canSetUp)
+              .filter(
+                (option) =>
+                  (!option.setup || canSetUp) &&
+                  (!option.desktopOnly || desktopShell() !== null),
+              )
               .map((option) => (
                 <SidebarMenuItem key={option.title}>
                   <SidebarMenuButton

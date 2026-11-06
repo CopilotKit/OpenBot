@@ -223,9 +223,57 @@ pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
     }
     match installed(root) {
         // A deployment laid out by an app that copied less is missing something this one runs.
-        Some(found) => found.version != wanted || found.layout != layout(),
+        Some(found) => {
+            found.version != wanted || found.layout != layout() || predates_containers(root)
+        }
         None => true,
     }
+}
+
+/// Whether the deployment on disk is a release from before OpenBot's server and worker were
+/// Compose services.
+///
+/// Such a release ran both as Bun processes on the host, and this app no longer starts those. Its
+/// Compose file has no `server` or `worker` to raise, and its server image has no worker in it, so
+/// keeping its pin would leave an installation that used to start unable to. Answered from the
+/// Compose file because that is what is missing; an unreadable or absent file is a damaged
+/// deployment, not an old one, and the ordinary repair of the pinned version covers it.
+pub fn predates_containers(root: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(root.join("docker-compose.yml")) else {
+        return false;
+    };
+    let services = compose_services(&text);
+    !(services.contains(&"server") && services.contains(&"worker"))
+}
+
+/// The service names in a Compose file, read line by line.
+///
+/// Not a YAML parser, and not meant to be one: it reads the shape `docker-compose.yml` in this
+/// repository has always had, a top-level `services:` with each service two spaces in. That is the
+/// only file this is ever pointed at, and it is enough to tell whether a service is declared.
+fn compose_services(text: &str) -> Vec<&str> {
+    let mut in_services = false;
+    let mut services = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            in_services = line.starts_with("services:");
+            continue;
+        }
+        let Some(entry) = line.strip_prefix("  ").filter(|_| in_services) else {
+            continue;
+        };
+        if entry.starts_with(' ') {
+            continue;
+        }
+        if let Some((name, _)) = entry.split_once(':') {
+            services.push(name.trim().trim_matches(|c| c == '"' || c == '\''));
+        }
+    }
+    services
 }
 
 /// What this app lays out, in a fixed order, as recorded in the stamp.
@@ -298,7 +346,11 @@ pub type Download<'a> = &'a dyn Fn(&str) -> Result<Vec<u8>, String>;
 pub fn fetch_with(root: &Path, version: &str, get: Download) -> Result<(), String> {
     crate::updates::require_no_interruption(root)?;
     let policy = crate::updates::distribution(root)?;
-    if let Some(installed) = installed(root) {
+    // A release from before the server and worker were Compose services cannot run in this app,
+    // so `deployment_release` moves it to the latest release. That move is not a runtime update:
+    // it is the whole layout again, as for a new deployment.
+    let installed = installed(root).filter(|_| !predates_containers(root));
+    if let Some(installed) = installed {
         if installed.version != version {
             return Err(
                 "Use the explicit runtime update controls to change an installed release".into(),
@@ -478,42 +530,98 @@ fn fetch_images(root: &Path, version: &str, get: Download) -> Result<(), String>
         .map_err(|error| format!("could not write {IMAGES}: {error}"))
 }
 
-/// Fetch a URL into memory.
-///
-/// Shared with `install.rs`, which fetches the engine's installers through it and then checks their
-/// digests. One client, one user agent, one set of TLS defaults.
+/**
+Fetch a URL into memory, trying again when the connection fails.
+
+Shared with `install.rs`, which fetches the engine's installers through it and then checks their
+digests. One client, one user agent, one set of TLS defaults.
+
+TRIED UP TO THREE TIMES. One connection cut part-way through Bun's download used to fail the whole
+Start ("the download did not finish: error decoding response body"), though the same download
+finished in under three seconds a minute later. So a failure that says nothing about the file is
+tried again after a short wait: the server could not be reached, the body did not all arrive, or the
+server answered 5xx or 429. Any other answer, a 404 in particular, means the file is not there, and
+is reported at once: the release lookups depend on seeing that promptly. A second attempt downloads
+the whole file again, and `install.rs` still checks the digest of the copy that is kept.
+*/
 pub fn get(url: &str) -> Result<Vec<u8>, String> {
-    get_waiting(url, IDLE_TIMEOUT)
+    get_with(url, IDLE_TIMEOUT, &RETRY_DELAYS)
 }
 
 /// How long a download may go without receiving anything before it is given up.
 const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// The waits before the second and third attempts.
+const RETRY_DELAYS: [std::time::Duration; 2] = [
+    std::time::Duration::from_secs(1),
+    std::time::Duration::from_secs(3),
+];
+
+/// `get`, with one attempt more than there are `delays`, waiting each delay in turn before trying
+/// again. The last error says how many attempts were made, so Technical details shows it tried again.
+fn get_with(
+    url: &str,
+    idle: std::time::Duration,
+    delays: &[std::time::Duration],
+) -> Result<Vec<u8>, String> {
+    let mut attempts = 1;
+    loop {
+        match get_waiting(url, idle) {
+            Ok(body) => return Ok(body),
+            Err(Failed::ForGood(error)) => return Err(error),
+            Err(Failed::ForNow(error)) => match delays.get(attempts - 1) {
+                Some(delay) => {
+                    std::thread::sleep(*delay);
+                    attempts += 1;
+                }
+                None if attempts == 1 => return Err(error),
+                None => return Err(format!("{error} ({attempts} attempts)")),
+            },
+        }
+    }
+}
+
+/// Why one attempt at a download failed, and so whether another could succeed.
+enum Failed {
+    /// The connection or the server failed; the same request may work in a moment.
+    ForNow(String),
+    /// The server answered that it will not give the file.
+    ForGood(String),
+}
+
 /**
-`get`, giving up only when nothing arrives for `idle`.
+One attempt at `get`, giving up only when nothing arrives for `idle`.
 
 READ AS A STREAM, NOT WITH `bytes()`. The blocking client's timeout (30 s by default) bounds each
 read on a stream, but `bytes()` waits for the whole body within it, and reports running out of time
 as "error decoding response body". So any download that took longer than 30 seconds failed, however
 steadily it was arriving: Bun's 30 MB on a connection under about 1 MB/s, every time.
 */
-fn get_waiting(url: &str, idle: std::time::Duration) -> Result<Vec<u8>, String> {
+fn get_waiting(url: &str, idle: std::time::Duration) -> Result<Vec<u8>, Failed> {
     use std::io::Read;
     let mut response = reqwest::blocking::Client::builder()
         .user_agent("openbot-desktop")
         .timeout(idle)
         .build()
-        .map_err(|error| format!("could not prepare the download: {error}"))?
+        .map_err(|error| Failed::ForGood(format!("could not prepare the download: {error}")))?
         .get(url)
         .send()
-        .map_err(|error| format!("could not reach {url}: {error}"))?;
-    if !response.status().is_success() {
-        return Err(format!("{url} answered {}", response.status()));
+        .map_err(|error| Failed::ForNow(format!("could not reach {url}: {error}")))?;
+    let status = response.status();
+    if !status.is_success() {
+        let error = format!("{url} answered {status}");
+        return Err(
+            if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                Failed::ForNow(error)
+            } else {
+                Failed::ForGood(error)
+            },
+        );
     }
     let mut body = Vec::new();
     response
         .read_to_end(&mut body)
-        .map_err(|error| format!("the download did not finish: {error}"))?;
+        .map_err(|error| Failed::ForNow(format!("the download did not finish: {error}")))?;
     Ok(body)
 }
 
@@ -555,7 +663,7 @@ mod tests {
         // Six pieces 300 ms apart take 1.8 s in all, longer than the 1 s allowed between pieces.
         // `bytes()` gave up here with "error decoding response body"; a stream does not.
         let (url, served) = dripping(6, std::time::Duration::from_millis(300));
-        let body = get_waiting(&url, std::time::Duration::from_secs(1)).unwrap();
+        let body = get_with(&url, std::time::Duration::from_secs(1), &[]).unwrap();
         assert_eq!(body, b"data".repeat(6));
         served.join().unwrap();
     }
@@ -563,9 +671,145 @@ mod tests {
     #[test]
     fn a_download_that_stalls_is_given_up() {
         let (url, served) = dripping(2, std::time::Duration::from_millis(1500));
-        let error = get_waiting(&url, std::time::Duration::from_millis(500)).unwrap_err();
+        let error = get_with(&url, std::time::Duration::from_millis(500), &[]).unwrap_err();
         assert!(error.starts_with("the download did not finish"), "{error}");
         served.join().unwrap();
+    }
+
+    /// What one connection to `scripted` gets.
+    #[derive(Clone, Copy)]
+    enum Reply {
+        /// The whole body.
+        Whole,
+        /// Half the promised body, then the connection is closed.
+        Cut,
+        /// This status and nothing else.
+        Status(u16),
+    }
+
+    /// A server that answers its connections with `replies` in order, repeating the last one, and
+    /// counts them. It is left running; the test process ends it.
+    fn scripted(replies: Vec<Reply>) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read, Write};
+        use std::sync::atomic::Ordering;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/file", listener.local_addr().unwrap());
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = count.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let index = counted.fetch_add(1, Ordering::SeqCst);
+                let reply = replies[index.min(replies.len() - 1)];
+                let mut request = [0u8; 1024];
+                let _ = stream.read(&mut request);
+                let (status, sent) = match reply {
+                    Reply::Whole => (200, &b"datadata"[..]),
+                    Reply::Cut => (200, &b"data"[..]),
+                    Reply::Status(code) => (code, &b"datadata"[..]),
+                };
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 {status} X\r\ncontent-length: 8\r\nconnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                );
+                let _ = stream.write_all(sent);
+                let _ = stream.flush();
+            }
+        });
+        (url, count)
+    }
+
+    const NO_WAIT: [std::time::Duration; 2] = [std::time::Duration::ZERO; 2];
+
+    fn get_quickly(url: &str) -> Result<Vec<u8>, String> {
+        get_with(url, std::time::Duration::from_secs(5), &NO_WAIT)
+    }
+
+    fn connections(count: &std::sync::atomic::AtomicUsize) -> usize {
+        count.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[test]
+    fn a_download_cut_off_once_is_tried_again() {
+        let (url, count) = scripted(vec![Reply::Cut, Reply::Whole]);
+        assert_eq!(get_quickly(&url).unwrap(), b"datadata");
+        assert_eq!(connections(&count), 2);
+    }
+
+    #[test]
+    fn a_download_cut_off_every_time_is_given_up_after_three_attempts() {
+        let (url, count) = scripted(vec![Reply::Cut]);
+        let error = get_quickly(&url).unwrap_err();
+        assert!(error.starts_with("the download did not finish"), "{error}");
+        assert!(error.ends_with("(3 attempts)"), "{error}");
+        assert_eq!(connections(&count), 3);
+    }
+
+    #[test]
+    fn a_missing_file_is_reported_at_once() {
+        let (url, count) = scripted(vec![Reply::Status(404), Reply::Whole]);
+        let error = get_quickly(&url).unwrap_err();
+        assert_eq!(error, format!("{url} answered 404 Not Found"));
+        assert_eq!(connections(&count), 1);
+    }
+
+    #[test]
+    fn a_server_error_is_tried_again() {
+        let (url, count) = scripted(vec![Reply::Status(503), Reply::Whole]);
+        assert_eq!(get_quickly(&url).unwrap(), b"datadata");
+        assert_eq!(connections(&count), 2);
+    }
+
+    #[test]
+    fn being_asked_to_slow_down_is_tried_again() {
+        let (url, count) = scripted(vec![Reply::Status(429), Reply::Whole]);
+        assert_eq!(get_quickly(&url).unwrap(), b"datadata");
+        assert_eq!(connections(&count), 2);
+    }
+
+    #[test]
+    fn this_repositorys_compose_file_runs_the_server_and_worker_as_services() {
+        let text = include_str!("../../../docker-compose.yml");
+        let services = compose_services(text);
+        for name in ["postgres", "supervisor", "server", "worker"] {
+            assert!(services.contains(&name), "{name} not in {services:?}");
+        }
+    }
+
+    #[test]
+    fn a_release_whose_server_ran_on_the_host_is_fetched_again_at_its_own_version() {
+        let root = crate::test_support::temp_root("deployment-host-server");
+        std::fs::create_dir_all(&root).unwrap();
+        // The shape of every release before the server moved into Compose: services, none of them
+        // OpenBot's own, and one commented-out line that must not count.
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  postgres:\n    image: postgres\n  # server: on the host\n  supervisor:\n    \
+             environment:\n      server: x\nvolumes:\n  worker:\n",
+        )
+        .unwrap();
+        std::fs::write(images_path(&root), "{}").unwrap();
+        record(&root, "v0.0.15", false).unwrap();
+        assert!(predates_containers(&root));
+        assert!(needs_fetch(&root, "v0.0.15"));
+
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  postgres: {}\n  server:\n    profiles: [\"openbot\"]\n  worker:\n    \
+             profiles: [\"openbot\"]\n",
+        )
+        .unwrap();
+        assert!(!predates_containers(&root));
+        assert!(!needs_fetch(&root, "v0.0.15"));
+
+        std::fs::remove_file(root.join("docker-compose.yml")).unwrap();
+        assert!(
+            !predates_containers(&root),
+            "a missing file is damage, not age"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn manifest(names: &[&str]) -> Images {
@@ -697,6 +941,66 @@ mod tests {
         );
         // A different version still goes through the explicit update controls.
         assert!(fetch_with(&root, "v0.0.8", &get).is_err());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A release from before the server was a container is moved to the latest release by
+    /// `deployment_release`. The runtime update guard must not refuse that move, or such an
+    /// installation could never Install or Start again.
+    #[test]
+    fn a_release_whose_server_ran_on_the_host_is_laid_out_at_the_latest_version() {
+        let root = crate::test_support::temp_root("deployment-host-server-move");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  postgres: {}\n  supervisor: {}\n",
+        )
+        .unwrap();
+        std::fs::write(images_path(&root), "{}").unwrap();
+        record(&root, "v0.0.15", false).unwrap();
+        assert!(predates_containers(&root));
+
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut tarball = tar::Builder::new(encoder);
+        for entry in REQUIRED.iter().chain(ALSO_COPIED.iter()) {
+            // The latest release's Compose file is a file, with the server and worker in it.
+            let (path, body) = if *entry == "docker-compose.yml" {
+                (
+                    format!("OpenBot-0.0.16/{entry}"),
+                    "services:\n  server: {}\n  worker: {}\n".to_string(),
+                )
+            } else {
+                (
+                    format!("OpenBot-0.0.16/{entry}/release.txt"),
+                    format!("release {entry}"),
+                )
+            };
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tarball
+                .append_data(&mut header, path, body.as_bytes())
+                .unwrap();
+        }
+        let tarball = tarball.into_inner().unwrap().finish().unwrap();
+        let published: Vec<&str> = IMAGE_VARIABLES.iter().map(|(name, _)| *name).collect();
+        let images = serde_json::to_vec(&manifest(&published)).unwrap();
+        let get = |url: &str| -> Result<Vec<u8>, String> {
+            match url {
+                "https://github.com/CopilotKit/OpenBot/archive/refs/tags/v0.0.16.tar.gz" => {
+                    Ok(tarball.clone())
+                }
+                "https://github.com/CopilotKit/OpenBot/releases/download/v0.0.16/container-images.json" => {
+                    Ok(images.clone())
+                }
+                other => Err(format!("unexpected download {other}")),
+            }
+        };
+        fetch_with(&root, "v0.0.16", &get).expect("a host-server release moves to latest");
+        assert_eq!(installed(&root).unwrap().version, "v0.0.16");
+        assert!(!predates_containers(&root));
+        assert!(!needs_fetch(&root, "v0.0.16"));
         std::fs::remove_dir_all(&root).unwrap();
     }
 

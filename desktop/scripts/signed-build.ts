@@ -104,6 +104,8 @@ export function planSignedBuild(options: {
   workDir: string;
   bun: string;
   run: Runner;
+  /** The Developer ID a Mac build signs with. The bundled CLI's binaries are signed with it. */
+  signingIdentity?: string;
 }): Plan {
   const { desktop, platform, arch, overlay, repository, workDir, run } =
     options;
@@ -188,6 +190,22 @@ export function planSignedBuild(options: {
       [options.bun, join(desktop, "scripts", "cli-bundle.ts"), platform, arch],
       desktop,
     );
+    // Notarization refuses any Mach-O in the app that is not signed with a Developer ID, hardened
+    // and timestamped, and Tauri signs none of its resources: Node ships with get-task-allow, and
+    // npm installs native modules signed for the Mac App Store. Signed here, before the build pins
+    // the runtime's digest, since signing rewrites the file.
+    if (platform === "darwin" && options.signingIdentity) {
+      runChecked(
+        run,
+        [
+          join(desktop, "scripts", "sign-cli-bundle.sh"),
+          join(desktop, "src-tauri", "cli-bundle"),
+          options.signingIdentity,
+          join(desktop, "src-tauri", "cli-bundle.entitlements.plist"),
+        ],
+        desktop,
+      );
+    }
     plan.configs.push(CLI_OVERLAY);
     plan.env.OPENBOT_BUNDLED_CLI = "1";
   }
@@ -252,6 +270,8 @@ function main(argv: string[]) {
     workDir: join(process.env.RUNNER_TEMP ?? tmpdir(), "signed-build"),
     bun,
     run: realRun,
+    signingIdentity:
+      platform === "darwin" ? (process.env.APPLE_SIGNING_IDENTITY ?? "") : "",
   });
   console.log(
     plan.pinned

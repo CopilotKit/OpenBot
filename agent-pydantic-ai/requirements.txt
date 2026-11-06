@@ -4,6 +4,10 @@ pydantic-ai-slim[openai,anthropic,google,ag-ui]
 # 2.59.0 asks only for anthropic>=1.12.1, so a fresh install picks up 2.0.0. 1.17.0 works.
 # Lift this when pydantic-ai supports anthropic 2.
 anthropic<2
+# google-genai 3.0.0 (2026-11-06) moved generateContent from /v1beta to /v1, and
+# pydantic-ai-slim[google] asks only for google-genai>=2.30, so a fresh install picks it up.
+# Held on 2.x with the other Gemini harnesses until the move is checked against the models Bots use.
+google-genai>=2.34,<3
 fastapi
 python-multipart
 uvicorn[standard]

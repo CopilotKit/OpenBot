@@ -7,7 +7,7 @@ import { botBrowserRequestSeconds } from "./browser/bot-browser";
 import { browserRequestSeconds } from "./browser/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import type { ComputerGateway } from "./computer/gateway";
-import { streamPathBotId } from "./computer/stream-path";
+import { computerSocketPath } from "./computer/stream-path";
 import type { DeploymentConfig } from "./config";
 import {
   closeGatewaySocket,
@@ -38,7 +38,66 @@ import {
 type StreamData = {
   upstream: string;
   inward?: WebSocket;
+  /** Input that arrived before the socket to the computer had opened, sent once it does. */
+  early?: string[];
+  /** The computer counts the frames the screen confirms (it said so in its hello). */
+  confirms?: boolean;
+  /** The person's screen has confirmed a frame, so it confirms every frame it receives. */
+  viewerConfirms?: boolean;
+  /** Frames let go before the screen had confirmed one, not yet said to the computer. See `frameLetGo`. */
+  unsaidConfirms?: number;
+  /** The newest frame not sent yet, because the browser was still receiving the ones before it. */
+  heldFrame?: string;
+  /** Looks again for room for `heldFrame`; see `sendHeldFrame`. */
+  heldRetry?: ReturnType<typeof setTimeout>;
 };
+
+/**
+ * How much a proxied socket may hold for a person who is not reading it, before it is closed.
+ *
+ * The terminal's own flow control (agent-computer/src/live-shell.ts) keeps what is in flight far
+ * below this. A socket past it is a browser that has stopped reading, and closing it costs that
+ * viewer a reconnect, which redraws its terminal from the computer's copy of the screen.
+ */
+const MAX_PROXY_BUFFER = 8 * 1024 * 1024;
+
+/** Whether a proxied socket is a Bot's terminal rather than its live screen, from where it goes. */
+function isTerminalUpstream(upstream: string): boolean {
+  try {
+    return new URL(upstream).pathname.endsWith("/terminal");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Carry a terminal's frames outward as they came: its output binary, its control messages text. The
+ * terminal's own flow control keeps what is in flight small; a person's side holding more than
+ * `MAX_PROXY_BUFFER` has stopped reading, and is closed so its terminal reconnects and is redrawn.
+ */
+function carryTerminal(
+  ws: {
+    send(data: string | Uint8Array): number;
+    getBufferedAmount(): number;
+    close(): void;
+  },
+  inward: WebSocket,
+): void {
+  inward.binaryType = "arraybuffer";
+  inward.onmessage = (event) => {
+    try {
+      const data = event.data;
+      const sent = ws.send(
+        typeof data === "string" ? data : new Uint8Array(data as ArrayBuffer),
+      );
+      if (sent === 0 || ws.getBufferedAmount() > MAX_PROXY_BUFFER)
+        throw new Error("The person's side has stopped reading.");
+    } catch {
+      inward.close();
+      ws.close();
+    }
+  };
+}
 
 /**
  * Bun takes exactly one WebSocket handler for the server, and three features need one: the app
@@ -49,6 +108,78 @@ type StreamData = {
  */
 type ChannelSocket = Parameters<typeof channelSocket.open>[0];
 type SocketData = StreamData | GatewaySocketData | ChannelSocket["data"];
+
+/** How every screencast frame from the computer starts: `JSON.stringify({ type: "frame", ... })`. */
+const FRAME_PREFIX = '{"type":"frame"';
+
+/** What a person's screen sends as a frame reaches it; the proxy says it for a frame it let go. */
+const FRAME_RECEIVED = '{"type":"frame-received"}';
+
+/** How many inputs are held while the socket to the computer opens. A person, not a script, fills it. */
+const EARLY_INPUT_LIMIT = 256;
+
+/** How much may sit unsent to a person's browser before a new frame is held back: about one frame. */
+const STREAM_BUFFER_LIMIT = 128 * 1024;
+
+/** How often a held frame looks again for room, besides when Bun says the socket drained. */
+const HELD_FRAME_RETRY_MS = 50;
+
+type HeldFrameSocket = {
+  data: StreamData;
+  getBufferedAmount(): number;
+  send(message: string): unknown;
+};
+
+/**
+ * Send the frame held for this browser, once the frames ahead of it have gone.
+ *
+ * Held, not dropped. The frame that arrives while the browser is still receiving is often the last one
+ * the page makes, and Chrome sends nothing more for a page that has gone still: dropped, the screen
+ * stayed on the page as it was a moment before it stopped, for as long as it stayed still.
+ *
+ * Bun's `drain` is the quick way to hear there is room, and not the only one: a frame sent from inside
+ * `drain` that did not fit was, about one time in twenty, followed by no further `drain` at all, and
+ * the held frame waited for ever. So while one is held, the socket is also looked at again shortly.
+ */
+function sendHeldFrame(ws: HeldFrameSocket) {
+  const held = ws.data.heldFrame;
+  if (held === undefined) return;
+  if (ws.getBufferedAmount() > STREAM_BUFFER_LIMIT) {
+    ws.data.heldRetry ??= setTimeout(() => {
+      ws.data.heldRetry = undefined;
+      sendHeldFrame(ws);
+    }, HELD_FRAME_RETRY_MS);
+    return;
+  }
+  clearTimeout(ws.data.heldRetry);
+  ws.data.heldRetry = undefined;
+  ws.data.heldFrame = undefined;
+  try {
+    ws.send(held);
+  } catch {
+    ws.data.inward?.close();
+  }
+}
+
+/**
+ * A frame let go because a newer one replaced it while it was held, said as received to a computer
+ * that counts the frames on their way, so it does not wait on one that is never coming.
+ *
+ * Only once the person's screen has itself confirmed a frame. The computer starts counting at the
+ * first confirmation it hears, and a screen loaded before confirmations existed never sends one: told
+ * of a let-go frame on its behalf, the computer counted frames that screen would never confirm and
+ * fell to one frame every two seconds. Those let go before then are kept count of and said right
+ * after the screen's first confirmation, so the computer's count still comes out exact.
+ */
+function frameLetGo(stream: StreamData) {
+  if (!stream.confirms) return;
+  if (!stream.viewerConfirms) {
+    stream.unsaidConfirms = (stream.unsaidConfirms ?? 0) + 1;
+    return;
+  }
+  if (stream.inward?.readyState === WebSocket.OPEN)
+    stream.inward.send(FRAME_RECEIVED);
+}
 
 export function startHttpServer(deps: {
   port: number;
@@ -89,6 +220,7 @@ export function startHttpServer(deps: {
     baseUrl: string,
     seat: { botId: string; personId?: string },
     token: string | undefined,
+    socket: "stream" | "terminal" = "stream",
   ) =>
     // The Bot travels in the query, because a websocket upgrade carries no custom header for the
     // computer to read and every call it serves is per Bot. So does the person, on the one computer
@@ -96,7 +228,7 @@ export function startHttpServer(deps: {
     // same reason, this socket is the one a person can type into, so it is the last thing that should
     // be reachable without it. The secret of that computer, which on a computer of one person's own
     // is its own token and never the deployment's (computer/computer-token.ts).
-    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(token ?? "")}`;
+    `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/${socket}?bot=${encodeURIComponent(seat.botId)}${seat.personId ? `&person=${encodeURIComponent(seat.personId)}` : ""}&token=${encodeURIComponent(token ?? "")}`;
 
   const trusted = trustedOrigin(config);
 
@@ -177,8 +309,15 @@ export function startHttpServer(deps: {
         }
         return new Response("Expected a WebSocket upgrade.", { status: 400 });
       }
-      const streamBotId = streamPathBotId(url.pathname);
+      /*
+       * The live screen and the terminal (the Bot's live shell). The same doors for both: whoever may
+       * watch a Bot's screen may watch its terminal, and typing into either is the computer's own
+       * question, asked of the wheel.
+       */
+      const named = computerSocketPath(url.pathname);
+      const streamBotId = named?.botId ?? null;
       if (
+        named &&
         streamBotId !== null &&
         request.headers.get("upgrade")?.toLowerCase() === "websocket"
       ) {
@@ -235,6 +374,7 @@ export function startHttpServer(deps: {
             streamBase,
             computerGateway.addressOf(seat),
             computerGateway.tokenFor(seat),
+            named.socket,
           );
         } catch (error) {
           // Said out loud rather than falling back to another Bot's computer, which is the failure this
@@ -266,17 +406,36 @@ export function startHttpServer(deps: {
         const stream = ws.data;
         const inward = new WebSocket(stream.upstream);
         stream.inward = inward;
-        // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
-        // should be dropped, not queued, because a stale frame is worse than a missing one.
+        // Frames outward, input inward. A frame the browser is too slow for is not queued, because a
+        // stale frame is worse than a late one. Bun queues whatever `send` cannot write yet, so that is
+        // decided here: while the frames before it are still going out, a new one is held, a newer one
+        // replaces it, and the newest goes when there is room (`drain` below). Anything that is not a
+        // frame, such as an error the person has to read, always goes at once.
         inward.onmessage = (event) => {
+          const message = String(event.data);
+          // Only a computer that said it counts confirmations is sent one for a frame let go.
+          if (message.startsWith('{"type":"hello"'))
+            stream.confirms = message.includes('"confirmFrames":true');
+          if (message.startsWith(FRAME_PREFIX)) {
+            if (stream.heldFrame !== undefined) frameLetGo(stream);
+            stream.heldFrame = message;
+            sendHeldFrame(ws as typeof ws & { data: StreamData });
+            return;
+          }
           try {
-            ws.send(String(event.data));
+            ws.send(message);
           } catch {
             inward.close();
           }
         };
+        inward.onopen = () => {
+          for (const message of stream.early ?? []) inward.send(message);
+          stream.early = undefined;
+        };
         inward.onclose = () => ws.close();
         inward.onerror = () => ws.close();
+        // The terminal's output is binary, and is carried as it came rather than as the screen's text.
+        if (isTerminalUpstream(stream.upstream)) carryTerminal(ws, inward);
       },
       message(ws, raw) {
         if (isGatewaySocket(ws.data)) {
@@ -290,7 +449,31 @@ export function startHttpServer(deps: {
           channelSocket.message(asChannelSocket(ws), raw);
           return;
         }
-        if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
+        const stream = ws.data;
+        const inward = stream.inward;
+        const message = String(raw);
+        // A click made the moment the screen appeared used to be lost here, before the socket to the
+        // computer had finished opening. Held until it has, in order, and only that long.
+        if (inward?.readyState === WebSocket.CONNECTING) {
+          stream.early ??= [];
+          if (stream.early.length < EARLY_INPUT_LIMIT)
+            stream.early.push(message);
+          return;
+        }
+        if (inward?.readyState !== WebSocket.OPEN) return;
+        inward.send(message);
+        // The screen's first confirmation: the frames let go before it can be said now. See `frameLetGo`.
+        if (message === FRAME_RECEIVED && !stream.viewerConfirms) {
+          stream.viewerConfirms = true;
+          for (let i = 0; i < (stream.unsaidConfirms ?? 0); i += 1)
+            inward.send(FRAME_RECEIVED);
+          stream.unsaidConfirms = undefined;
+        }
+      },
+      /** Room to the browser again: the frame held while it was busy goes now. */
+      drain(ws) {
+        if (isProxiedStream(ws.data))
+          sendHeldFrame(ws as typeof ws & { data: StreamData });
       },
       close(ws, code, reason) {
         if (isGatewaySocket(ws.data)) {
@@ -305,6 +488,8 @@ export function startHttpServer(deps: {
           channelSocket.close(asChannelSocket(ws), code, reason);
           return;
         }
+        clearTimeout(ws.data.heldRetry);
+        ws.data.heldFrame = undefined;
         ws.data.inward?.close();
       },
     },

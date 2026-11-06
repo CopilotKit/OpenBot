@@ -18,6 +18,7 @@ import {
   PORT_OFFSCREEN,
 } from "../src/protocol/messages";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
+import { contextTimers } from "./support/context-timers";
 
 let fake: ChromeFake;
 let seen: {
@@ -551,6 +552,7 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
   const asked: CapturedEvent[] = [];
   let networkDeps: NetworkCaptureDeps | undefined;
   let document: ReturnType<ChromeFake["connectFrom"]> | undefined;
+  const worker = contextTimers();
   try {
     fake.storage.local.set("connection", {
       openbotUrl: "http://127.0.0.1:9",
@@ -595,6 +597,12 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
     } satisfies StreamSession);
     fake.offscreen.open = true;
     const handlers = installRecording({
+      // The recording this resumes is live, so its worker reports its activity and checks its connection every 30 s,
+      // against an OpenBot at 127.0.0.1:9 that is not there. On the browser's own timers it went on doing both for the
+      // rest of the suite, and a later file watching the global `fetch` took those calls for its own
+      // (support/context-timers.ts). The worker stops with this test instead.
+      timers: worker,
+      stepTimers: worker,
       createNetworkCapture: (deps) => {
         networkDeps = deps;
         return {
@@ -654,6 +662,7 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
       ),
     ).toEqual([]);
   } finally {
+    worker.end();
     document?.disconnect();
   }
 });

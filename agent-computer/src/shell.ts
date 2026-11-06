@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
-
 import { egressShellEnvironment, splitProxyCredentials } from "./egress";
+import { createLiveShell } from "./live-shell";
+import { readableOutput } from "./shell-marks";
 
 /**
  * Running a command on the Bot's computer.
@@ -44,6 +44,8 @@ export type ShellResult = {
   truncated: boolean;
   timedOut: boolean;
   elapsedMs: number;
+  /** Never typed: the shell was busy with something a person started. */
+  notRun?: boolean;
 };
 
 /**
@@ -210,7 +212,30 @@ function clamp(text: string): { text: string; truncated: boolean } {
 export function createShell(
   workspaceDir: string,
   sourceEnv: NodeJS.ProcessEnv = process.env,
+  options: { bash?: string } = {},
 ) {
+  /*
+   * One live shell for this Bot, which its commands are typed into and a person can watch and take
+   * over (live-shell.ts). It used to be a fresh `bash -c` for each command.
+   *
+   * The shell is interactive now, and still never reads a startup file from the workspace: it starts
+   * with one the computer writes elsewhere, because HOME is the workspace and a Bot writes files
+   * there. A `.bash_profile` or `.bashrc` it left behind would otherwise run before every later
+   * command while the audit row recorded only what was asked for. The allow-list above means such a
+   * file can no longer recover a secret, but it could still change what a command does.
+   *
+   * The environment is built when a shell starts, with the egress filter's address last, so a command
+   * cannot be pointed around it.
+   */
+  const live = createLiveShell({
+    cwd: workspaceDir,
+    env: () => ({
+      ...environmentForCommand(sourceEnv, workspaceDir),
+      ...egressShellEnvironment(),
+    }),
+    ...(options.bash ? { bash: options.bash } : {}),
+  });
+
   return {
     async run(input: {
       command: string;
@@ -220,13 +245,12 @@ export function createShell(
       const started = Date.now();
       /*
        * Bounded at both ends. Only `Math.min` was applied, so a zero or negative `timeoutMs` from a
-       * caller made `setTimeout` fire immediately: the command was killed before it did anything and
+       * caller made the timer fire immediately: the command was killed before it did anything and
        * the answer said it had timed out, which is true and useless.
        *
-       * A non-finite value is the same failure one step earlier: `Math.max(NaN, 1000)` is `NaN`,
-       * and `setTimeout(NaN)` fires immediately too. The HTTP layer rejects those with a 400, so
-       * this is defence in depth for a direct caller — fall back to the default rather than run a
-       * command that is already out of time.
+       * A non-finite value is the same failure one step earlier: `Math.max(NaN, 1000)` is `NaN`.
+       * The HTTP layer rejects those with a 400, so this is defence in depth for a direct caller —
+       * fall back to the default rather than run a command that is already out of time.
        */
       const requested =
         typeof input.timeoutMs === "number" && Number.isFinite(input.timeoutMs)
@@ -246,130 +270,53 @@ export function createShell(
        * safe way to read a command's intent from its text, so nothing here tries. The policy decides
        * whether this Bot may run commands at all and what they may say; the container decides what a
        * command can reach.
-       */
-      /*
-       * `-c`, not `-lc`. A login shell sources `$HOME/.bash_profile`, and HOME is the workspace a Bot
-       * writes with `computer_write_file`. That let a Bot leave a file which every later command ran
-       * first: it could put its own `apt-get` earlier on PATH, and the audit row would still read
-       * `apt-get --version`. The allow-list above means such a file can no longer recover a secret,
-       * but it could still change what a command does. A permissive shell is a decision a deployment
-       * can make. A trail that describes something other than what ran is not.
-       */
-      /*
-       * Its own process group, so stopping it stops what it started.
        *
-       * `child.kill` signals bash alone. `bash -c "sleep 600 | cat"` leaves the sleep and the cat
-       * holding the inherited pipes, so `close` never fires and the await never settles: the command
-       * runs on and the caller waits for the transport to give up instead. Killing the negative pid
-       * signals the whole group.
+       * The deadline starts now, not when the command is typed: a command waiting behind another of
+       * the Bot's own is still inside the time it was given.
+       *
+       * The person's Stop reaches the command too: the shell presses Ctrl-C for it, then stops its
+       * process group, then the shell, so nothing the command started outlives it.
        */
-      const child = spawn("/bin/bash", ["-c", input.command], {
-        cwd: workspaceDir,
-        // The egress filter's address last, so a command cannot be pointed around it.
-        env: {
-          ...environmentForCommand(sourceEnv, workspaceDir),
-          ...egressShellEnvironment(),
-        },
-        detached: true,
+      const outcome = await live.run({
+        command: input.command,
+        deadline: started + timeoutMs,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
-
-      let timedOut = false;
 
       /*
-       * Trimmed while it arrives, not at the end.
-       *
-       * `clamp` ran after `close`, so the string grew without limit until then. `cat` of a large file
-       * or `base64 /dev/urandom` allocated until the process died, and that process owns the browser
-       * every Bot on this computer is using.
-       *
-       * Trimming here has to carry the fact that it happened. Clamping at the end could tell, by
-       * looking at the size; a stream that was already trimmed arrives under the limit and looks
-       * complete. Losing the flag would be worse than the allocation: output that quietly ends is
-       * output a model reads as the whole answer.
+       * One stream, because a terminal has one: stdout and stderr arrive interleaved, as a person
+       * watching sees them, so they come back as `stdout`.
        */
-      const collect = () => {
-        let text = "";
-        let dropped = false;
-        return {
-          add(chunk: unknown) {
-            text += String(chunk);
-            if (Buffer.byteLength(text, "utf8") <= MAX_OUTPUT_BYTES * 2) return;
-            text = Buffer.from(text, "utf8")
-              .subarray(-MAX_OUTPUT_BYTES)
-              .toString("utf8");
-            dropped = true;
-          },
-          get text() {
-            return text;
-          },
-          get dropped() {
-            return dropped;
-          },
-        };
-      };
-
-      const outBuffer = collect();
-      const errBuffer = collect();
-
-      child.stdout.on("data", (chunk) => {
-        outBuffer.add(chunk);
-      });
-      child.stderr.on("data", (chunk) => {
-        errBuffer.add(chunk);
-      });
-
-      const stop = () => {
-        const { pid } = child;
-        if (pid === undefined) return;
-        try {
-          // The group, so nothing the command backgrounded outlives it.
-          process.kill(-pid, "SIGKILL");
-        } catch {
-          // Already gone, or the group went with it. Either way there is nothing left to stop.
-        }
-      };
-
-      const timer = setTimeout(() => {
-        timedOut = true;
-        stop();
-      }, timeoutMs);
-
-      // The person's Stop reaches the command, not just the request that started it.
-      const onAbort = stop;
-      input.signal?.addEventListener("abort", onAbort, { once: true });
-      // A listener added to an already-aborted signal never fires, so listening alone only honours a
-      // Stop that arrives from here on. The abort can beat the spawn above: the surface aborts, the
-      // server aborts the request it made to this computer, and Bun aborts this one in turn, which
-      // happens before this line whenever the person was quick. Reading the flag is what makes the
-      // Stop mean the same thing whenever it landed.
-      if (input.signal?.aborted) stop();
-
-      const exitCode = await new Promise<number>((resolve) => {
-        child.on("close", (code) => resolve(code ?? -1));
-        child.on("error", () => resolve(-1));
-      });
-
-      clearTimeout(timer);
-      input.signal?.removeEventListener("abort", onAbort);
-
-      const out = clamp(outBuffer.text);
-      const err = clamp(errBuffer.text);
+      const text = outcome.busy
+        ? ""
+        : readableOutput(outcome.raw) +
+          (outcome.incomplete ? INCOMPLETE_COMMAND : "");
+      const out = clamp(text);
       return {
         command: input.command,
-        exitCode,
+        exitCode: outcome.exitCode,
         stdout: out.text,
-        stderr: err.text,
-        // Either end of the pipe, and either point it was cut: while arriving, or on the way out.
-        truncated:
-          out.truncated ||
-          err.truncated ||
-          outBuffer.dropped ||
-          errBuffer.dropped,
-        timedOut,
+        stderr: outcome.busy ? SHELL_BUSY : "",
+        // Either point it was cut: while arriving, or on the way out.
+        truncated: out.truncated || outcome.dropped,
+        timedOut: outcome.timedOut,
         elapsedMs: Date.now() - started,
+        ...(outcome.busy ? { notRun: true } : {}),
       };
     },
+    /** What a person watching or driving the shell reaches. See live-shell.ts. */
+    terminal: live,
+    /** End this shell for good. */
+    dispose: () => live.dispose(),
   };
 }
+
+/** Said when the shell was left waiting for the rest of a command the Bot sent. */
+const INCOMPLETE_COMMAND =
+  "\nbash: the command was incomplete (an unclosed quote, bracket or here-document), so it did not run.\n";
+
+/** Said when a person left something running in the shell's foreground and handed it back. */
+const SHELL_BUSY =
+  "The command was not run: the shell is still running something a person started. Ask them to finish it.";
 
 export type Shell = ReturnType<typeof createShell>;

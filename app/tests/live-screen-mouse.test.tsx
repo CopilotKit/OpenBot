@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import { LiveScreen } from "@/components/computer/live-screen";
 
 /**
@@ -118,6 +124,7 @@ test("an ordinary click is still one click", async () => {
       x: 40,
       y: 30,
       button: "left",
+      buttons: 0,
       clickCount: 1,
       modifiers: 0,
     },
@@ -127,6 +134,7 @@ test("an ordinary click is still one click", async () => {
       x: 40,
       y: 30,
       button: "left",
+      buttons: 0,
       clickCount: 1,
       modifiers: 0,
     },
@@ -143,6 +151,15 @@ test("a press that claims no click at all is still a click", async () => {
   expect(socket.sent.map((message) => message.clickCount)).toEqual([1, 1]);
 });
 
+/** One animation frame, which is when a held move or scroll goes out. */
+const nextFrame = () =>
+  act(
+    () =>
+      new Promise<void>((resolve) =>
+        window.requestAnimationFrame(() => resolve()),
+      ),
+  );
+
 test("moving the mouse is not a click", async () => {
   const { canvas, socket } = await liveCanvas();
 
@@ -152,6 +169,7 @@ test("moving the mouse is not a click", async () => {
     button: 0,
     detail: 0,
   });
+  await nextFrame();
 
   expect(socket.sent).toEqual([
     {
@@ -159,11 +177,48 @@ test("moving the mouse is not a click", async () => {
       event: "moved",
       x: 40,
       y: 30,
-      button: "left",
+      // Nothing held: a hover, not a drag.
+      button: "none",
+      buttons: 0,
       clickCount: 0,
       modifiers: 0,
     },
   ]);
+});
+
+test("a move with the left button held is a drag", async () => {
+  const { canvas, socket } = await liveCanvas();
+  fireEvent.mouseMove(canvas, { clientX: 40, clientY: 30, buttons: 1 });
+  await nextFrame();
+  expect(socket.sent).toMatchObject([
+    { event: "moved", button: "left", buttons: 1 },
+  ]);
+});
+
+test("a button let go off the screen is let go on the Bot's page too, at the edge", async () => {
+  // The release used to go nowhere, so the Bot's browser went on believing the button was held.
+  const { canvas, socket } = await liveCanvas();
+  fireEvent.mouseDown(canvas, {
+    clientX: 40,
+    clientY: 30,
+    button: 0,
+    buttons: 1,
+    detail: 1,
+  });
+  fireEvent.mouseUp(document.body, {
+    clientX: 2000,
+    clientY: 30,
+    button: 0,
+    buttons: 0,
+    detail: 1,
+  });
+  expect(socket.sent).toMatchObject([
+    { event: "pressed", x: 40, y: 30 },
+    { event: "released", x: FRAME.width - 1, y: 30, button: "left" },
+  ]);
+  // Over once it is let go: a later release elsewhere on the page is that page's.
+  fireEvent.mouseUp(document.body, { clientX: 2000, clientY: 30 });
+  expect(socket.sent).toHaveLength(2);
 });
 
 test("a turn of the wheel is stopped here as well as sent there", async () => {
@@ -198,10 +253,86 @@ test("a turn of the wheel is stopped here as well as sent there", async () => {
     canvas.dispatchEvent(wheel);
 
     expect(wheel.defaultPrevented).toBe(true);
+    await nextFrame();
     expect(socket.sent).toEqual([
       { type: "wheel", x: 40, y: 30, deltaX: 0, deltaY: 120, modifiers: 0 },
     ]);
   } finally {
     HTMLCanvasElement.prototype.addEventListener = addEventListener;
   }
+});
+
+test("moves within one frame go as the last of them, and a click still lands after them", async () => {
+  // Every move used to be its own message, each a trip into the remote browser applied in turn, so
+  // a click landed behind every move the hand made on its way to the button.
+  const { canvas, socket } = await liveCanvas();
+
+  for (const x of [10, 20, 30, 40])
+    fireEvent.mouseMove(canvas, { clientX: x, clientY: 30, detail: 0 });
+  expect(socket.sent).toEqual([]);
+  fireEvent.mouseDown(canvas, { clientX: 40, clientY: 30, detail: 1 });
+
+  expect(socket.sent).toMatchObject([
+    { type: "mouse", event: "moved", x: 40, y: 30 },
+    { type: "mouse", event: "pressed", x: 40, y: 30 },
+  ]);
+  await nextFrame();
+  expect(socket.sent).toHaveLength(2);
+});
+
+test("turns of the wheel within one frame add up to one", async () => {
+  const { canvas, socket } = await liveCanvas();
+  for (const deltaY of [40, 40, -20]) {
+    const wheel = new MouseEvent("wheel", {
+      clientX: 40,
+      clientY: 30,
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperties(wheel, {
+      deltaX: { value: 0 },
+      deltaY: { value: deltaY },
+    });
+    canvas.dispatchEvent(wheel);
+  }
+  await nextFrame();
+  expect(socket.sent).toEqual([
+    { type: "wheel", x: 40, y: 30, deltaX: 0, deltaY: 60, modifiers: 0 },
+  ]);
+});
+
+test("a wheel that counts in lines, as Firefox's does, scrolls by pixels", async () => {
+  const { canvas, socket } = await liveCanvas();
+  const wheel = new MouseEvent("wheel", {
+    clientX: 40,
+    clientY: 30,
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperties(wheel, {
+    deltaX: { value: 0 },
+    deltaY: { value: 3 },
+    deltaMode: { value: 1 },
+  });
+  canvas.dispatchEvent(wheel);
+  await nextFrame();
+  expect(socket.sent).toMatchObject([{ type: "wheel", deltaY: 120 }]);
+});
+
+test("each frame is confirmed on arrival, but only once the computer asks", async () => {
+  // A computer from before confirmations would refuse a message it does not know, so none is sent
+  // until it says it wants them.
+  const { socket } = await liveCanvas();
+  socket.onmessage?.({
+    data: JSON.stringify({ type: "frame", data: "AAAA", ...FRAME }),
+  });
+  expect(socket.sent).toEqual([]);
+
+  socket.onmessage?.({
+    data: JSON.stringify({ type: "hello", confirmFrames: true }),
+  });
+  socket.onmessage?.({
+    data: JSON.stringify({ type: "frame", data: "AAAA", ...FRAME }),
+  });
+  expect(socket.sent).toEqual([{ type: "frame-received" }]);
 });
