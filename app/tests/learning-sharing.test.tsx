@@ -363,3 +363,13 @@ test("each of Your Skills opens its SKILL.md", async () => {
   await view.findByText(/Step one: look up the order/);
   expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
 });
+
+test("pressing a Your Skills row opens its SKILL.md where there is no switch", async () => {
+  answer = { ...answer, mode: "closed" };
+  const view = draw();
+  await view.findByText("Your Skills");
+  expect(view.queryByRole("switch")).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: /refund-order/ }));
+  await view.findByText(/Step one: look up the order/);
+  expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
+});

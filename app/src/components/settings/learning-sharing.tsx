@@ -186,34 +186,30 @@ export function LearningSharing() {
               return (
                 <React.Fragment key={skill.name}>
                   {index > 0 ? <Separator /> : null}
-                  {/* The row opens the Skill; the Switch sits beside that button, not inside it. */}
-                  <Item size="sm">
-                    <button
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                      onClick={() => setReading(skill.name)}
-                      type="button"
-                    >
-                      <ItemMedia variant="icon">
-                        <IconSparkles />
-                      </ItemMedia>
-                      <ItemContent>
-                        <ItemTitle>{skill.name}</ItemTitle>
-                        <ItemDescription>
-                          {[
-                            mode === "choose"
-                              ? open
+                  {mode === "choose" ? (
+                    // The row opens the Skill; the Switch sits beside that button, not inside it.
+                    <Item size="sm">
+                      <button
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                        onClick={() => setReading(skill.name)}
+                        type="button"
+                      >
+                        <ItemMedia variant="icon">
+                          <IconSparkles />
+                        </ItemMedia>
+                        <ItemContent>
+                          <ItemTitle>{skill.name}</ItemTitle>
+                          <ItemDescription>
+                            {[
+                              open
                                 ? "Every Bot may use it."
-                                : "Only your Bots use it."
-                              : "",
-                            skill.description,
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                        </ItemDescription>
-                      </ItemContent>
-                    </button>
-                    <ItemActions>
-                      {mode === "choose" ? (
+                                : "Only your Bots use it.",
+                              skill.description,
+                            ].join(" ")}
+                          </ItemDescription>
+                        </ItemContent>
+                      </button>
+                      <ItemActions>
                         <Switch
                           aria-label={`Open ${skill.name} to everyone`}
                           checked={open}
@@ -228,11 +224,31 @@ export function LearningSharing() {
                             })
                           }
                         />
-                      ) : (
+                      </ItemActions>
+                    </Item>
+                  ) : (
+                    // No switch here, so the whole row opens the Skill.
+                    <Item
+                      size="sm"
+                      render={
+                        <button
+                          onClick={() => setReading(skill.name)}
+                          type="button"
+                        />
+                      }
+                    >
+                      <ItemMedia variant="icon">
+                        <IconSparkles />
+                      </ItemMedia>
+                      <ItemContent>
+                        <ItemTitle>{skill.name}</ItemTitle>
+                        <ItemDescription>{skill.description}</ItemDescription>
+                      </ItemContent>
+                      <ItemActions>
                         <IconChevronRight className="size-4 text-muted-foreground" />
-                      )}
-                    </ItemActions>
-                  </Item>
+                      </ItemActions>
+                    </Item>
+                  )}
                 </React.Fragment>
               );
             })}
