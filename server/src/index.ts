@@ -2929,6 +2929,7 @@ const app = createApp(
       ? createInspectorLearningReader(config.runtime.intelligence)
       : undefined,
     manage: learningProbeIntelligence.experimental.learning,
+    skills: copilotRuntime.learning?.containerSkills,
   },
   {
     productTelemetry,
@@ -3004,6 +3005,15 @@ const app = createApp(
       skillsOf: (userId) =>
         copilotRuntime.learning?.personalSkills(userId) ??
         Promise.resolve({ unavailable: "unavailable" as const }),
+      skillOf: async (userId, name) => {
+        const read = await copilotRuntime.learning?.containerSkills(
+          personalLearningSpaces.containerFor(userId),
+        );
+        if (!read || "unavailable" in read) {
+          throw new Error("Skills are unavailable.");
+        }
+        return read.skills.find((skill) => skill.name === name) ?? null;
+      },
       invalidate: () => openSkillIndex.invalidate(),
       sharingAllowed: skillSharingAllowed,
     },
