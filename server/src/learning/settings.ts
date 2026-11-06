@@ -1,5 +1,6 @@
 import {
   isLearningContainerId,
+  isLearningPersonalReview,
   type LearningSettings,
   type LearningTarget,
 } from "@openbot/shared/learning";
@@ -65,7 +66,14 @@ export function parseLearningSettings(
     !target(input.defaultTarget) ||
     !object(input.agents) ||
     Object.keys(input).some(
-      (key) => !["enabled", "defaultTarget", "agents"].includes(key),
+      (key) =>
+        ![
+          "enabled",
+          "defaultTarget",
+          "agents",
+          "personalReview",
+          "autoApprove",
+        ].includes(key),
     )
   ) {
     return {
@@ -84,6 +92,17 @@ export function parseLearningSettings(
       ok: false,
       error:
         "Each Bot mapping must name a valid container or be null to exclude the Bot.",
+    };
+  }
+  if (
+    (input.personalReview !== undefined &&
+      !isLearningPersonalReview(input.personalReview)) ||
+    (input.autoApprove !== undefined && typeof input.autoApprove !== "boolean")
+  ) {
+    return {
+      ok: false,
+      error:
+        "Choose who reviews personal Learning (admins or people), and turn automatic approval on or off.",
     };
   }
   return { ok: true, settings: structuredClone(input) as LearningSettings };
