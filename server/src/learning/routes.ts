@@ -1,5 +1,6 @@
 import {
   isLearnedSkillName,
+  isLearningPersonalReview,
   type LearnedSkillContent,
   type LearningAutoAssignState,
   type LearningDeliveryStatus,
@@ -266,6 +267,47 @@ export function createLearningRoutes(
             enabled: settings.enabled,
             defaultContainerId: settings.defaultTarget?.containerId ?? null,
             botMappingCount: Object.keys(settings.agents).length,
+          },
+        });
+      return context.json({ settings });
+    },
+  );
+  routes.put(
+    "/personal-review",
+    bodyLimit({ maxSize: 4 * 1024 }),
+    async (context) => {
+      if (!sameOriginJson(context)) {
+        return context.json(
+          {
+            error:
+              "Use a same-origin JSON request to change who approves skills.",
+          },
+          403,
+        );
+      }
+      const body = (await context.req.json().catch(() => null)) as {
+        personalReview?: unknown;
+      } | null;
+      const personalReview = body?.personalReview;
+      if (!isLearningPersonalReview(personalReview))
+        return context.json(
+          { error: "Choose admins or people to approve skills." },
+          400,
+        );
+      const current = await dependencies.store.read();
+      const settings = await dependencies.store.write({
+        ...current,
+        personalReview,
+      });
+      if (audit)
+        await recordAuditEvent(audit, {
+          eventType: "configuration.changed",
+          targetType: "learning",
+          actorUserId: context.var.actor.id,
+          payload: {
+            change: "personal_review",
+            from: current.personalReview ?? "admins",
+            to: personalReview,
           },
         });
       return context.json({ settings });

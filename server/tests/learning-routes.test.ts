@@ -143,6 +143,56 @@ test("a settings save keeps who approves and automatic approval when it leaves t
   });
 });
 
+test("an admin switches who approves, and a later settings save keeps it", async () => {
+  const store = createLearningSettingsStore();
+  const events: AuditEventInput[] = [];
+  const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
+    context,
+    next,
+  ) => {
+    context.set("actor", {
+      id: "admin-ada",
+      email: "ada@example.com",
+      role: "admin",
+    });
+    await next();
+  };
+  const app = createLearningRoutes(
+    { store },
+    requireUser,
+    ["https://openbot.example.com"],
+    { insert: async (event) => void events.push(event) },
+  );
+  const put = (path: string, body: unknown, origin = true) =>
+    app.request(`https://openbot.example.com${path}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...(origin ? { origin: "https://openbot.example.com" } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+  expect((await put("/personal-review", { personalReview: "people" }, false)).status).toBe(403);
+  expect((await put("/personal-review", { personalReview: "nobody" })).status).toBe(400);
+  const response = await put("/personal-review", { personalReview: "people" });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    settings: { personalReview: "people" },
+  });
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    eventType: "configuration.changed",
+    targetType: "learning",
+    actorUserId: "admin-ada",
+    payload: { change: "personal_review", from: "admins", to: "people" },
+  });
+  expect(
+    (await put("/settings", { enabled: true, defaultTarget: null, agents: {} }))
+      .status,
+  ).toBe(200);
+  expect((await store.read()).personalReview).toBe("people");
+});
+
 test("upstream errors never expose credentials", async () => {
   const { app } = routes();
   const response = await app.request("/overview");
