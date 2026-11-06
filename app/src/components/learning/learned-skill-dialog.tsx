@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { SkillFiles } from "@/components/learning/skill-files";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +32,13 @@ export function LearnedSkillDialog({
     ...learnedSkillQueryOptions(source, name ?? ""),
     enabled: name !== null,
   });
-  const skill = detail.data;
+  // The dialog animates closed after `name` goes null; keep showing the last skill until it is gone.
+  const shown = useRef<{ name: string | null; skill: typeof detail.data }>({
+    name,
+    skill: detail.data,
+  });
+  if (name !== null) shown.current = { name, skill: detail.data };
+  const skill = shown.current.skill;
   return (
     <Dialog
       onOpenChange={(next) => (next ? undefined : onClose())}
@@ -40,7 +46,7 @@ export function LearnedSkillDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{name}</DialogTitle>
+          <DialogTitle>{shown.current.name}</DialogTitle>
           {skill && <DialogDescription>{skill.description}</DialogDescription>}
         </DialogHeader>
         <DialogBody className="mt-4 gap-5 overflow-y-auto">

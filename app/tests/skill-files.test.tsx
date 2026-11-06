@@ -48,3 +48,16 @@ test("a binary file shows its path and no pre", () => {
   expect(getByText("logo.png")).toBeTruthy();
   expect(container.querySelector("pre")).toBeNull();
 });
+
+test("front matter with Windows line endings is dropped too", () => {
+  const crlf = skill.replace(/\n/g, "\r\n");
+  expect(skillBody(crlf)).toBe("Check the order first.");
+});
+
+test("a SKILL.md that is binary shows its path", () => {
+  const { getByText, container } = render(
+    <SkillFiles files={[{ path: "SKILL.md", text: null }]} />,
+  );
+  expect(getByText("SKILL.md")).toBeTruthy();
+  expect(container.querySelector("pre")).toBeNull();
+});

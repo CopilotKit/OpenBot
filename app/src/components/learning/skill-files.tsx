@@ -3,7 +3,7 @@ import { markdownComponents } from "@/lib/markdown";
 
 /** SKILL.md without its front matter, whose name and description the screen's header already shows. */
 export function skillBody(markdown: string): string {
-  return markdown.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+  return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
 }
 
 /** A learned skill's files: SKILL.md rendered, any other file in a collapsible row. A null text is a binary file. */
@@ -13,7 +13,10 @@ export function SkillFiles({
   files: { path: string; text: string | null }[];
 }) {
   const skill = files.find((file) => file.path === "SKILL.md");
-  const others = files.filter((file) => file.path !== "SKILL.md");
+  // A SKILL.md that is binary has no text to render, so it is listed like any other binary file.
+  const others = files.filter(
+    (file) => file.path !== "SKILL.md" || file.text === null,
+  );
   return (
     <>
       {skill?.text != null && (

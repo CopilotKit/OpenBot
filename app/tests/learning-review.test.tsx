@@ -40,6 +40,7 @@ afterAll(() => {
 const originalFetch = global.fetch;
 let review: PersonalReview | null;
 let insights: LearningProposalDetail["insights"] = [];
+let detailOperation: LearningProposal["operation"] = "add";
 const posts: string[] = [];
 const puts: { url: string; body: unknown }[] = [];
 
@@ -59,9 +60,13 @@ const proposal = (
   reviewedAt: null,
 });
 
-const body = (canReview: boolean): PersonalReview => ({
+// A team has no automatic approval (autoApprove null); the personal edition has it on or off.
+const body = (
+  canReview: boolean,
+  autoApprove: boolean | null = null,
+): PersonalReview => ({
   canReview,
-  autoApprove: false,
+  autoApprove,
   sources: [
     {
       containerId: "user-1",
@@ -84,6 +89,7 @@ beforeEach(() => {
   puts.length = 0;
   review = body(false);
   insights = [];
+  detailOperation = "add";
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(path);
@@ -109,7 +115,7 @@ beforeEach(() => {
       if (detail && method === "GET")
         return Response.json({
           proposal: {
-            ...proposal(detail[1] ?? "", "refund-order", "add"),
+            ...proposal(detail[1] ?? "", "refund-order", detailOperation),
             files: [{ path: "SKILL.md", content: "Look up the order." }],
             insights,
           },
@@ -218,7 +224,7 @@ test("says some were unreadable when another source was read", async () => {
   expect(alert.textContent).toContain("Couldn't read some of your");
 });
 
-test("says what to expect when nothing is waiting", async () => {
+test("on a team, says what to expect when nothing is waiting", async () => {
   review = { canReview: true, autoApprove: null, sources: [] };
   const view = draw();
   expect(await view.findByText("Nothing to review")).toBeTruthy();
@@ -230,7 +236,7 @@ test("says what to expect when nothing is waiting", async () => {
 });
 
 test("in the personal edition the empty state mentions conversations", async () => {
-  review = { canReview: true, autoApprove: false, sources: [] };
+  review = { canReview: true, autoApprove: false, sources: [] }; // personal: autoApprove is a boolean
   const view = draw();
   expect(
     await view.findByText(
@@ -384,7 +390,7 @@ test("Learn now starts every source in the group even when one fails", async () 
       "/api/settings/learning/runs?container=bot-b",
     ]),
   );
-  expect((await view.findByRole("alert")).textContent).toBeTruthy();
+  expect((await view.findByRole("alert")).textContent).toBe("Nope");
 });
 
 test("with admins approving, there is no Learn now", async () => {
@@ -472,6 +478,94 @@ test("a source Learning is off for says so plainly, without the read failure ale
   ).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();
   expect(view.queryByText("Nothing to review")).toBeNull();
+});
+
+test("when only some sources are unavailable, the empty state is hidden and the notice names them", async () => {
+  review = {
+    canReview: true,
+    autoApprove: false,
+    sources: [
+      {
+        containerId: "user-1",
+        kind: "recordings",
+        label: "From your recordings",
+        latestRun: null,
+        proposals: null,
+        unavailable: "learning-off",
+      },
+      {
+        containerId: "user-2",
+        kind: "conversations",
+        label: "From your conversations",
+        latestRun: null,
+        proposals: [],
+      },
+    ],
+  };
+  const view = draw();
+  expect(
+    await view.findByText(
+      "Learning isn't available for From your recordings, so nothing is proposed there.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText("Nothing to review")).toBeNull();
+});
+
+test("a Learn now failure in one group does not show in another", async () => {
+  review = {
+    canReview: true,
+    autoApprove: false,
+    sources: ["a", "b"].map((id) => ({
+      containerId: `src-${id}`,
+      kind: "conversations" as const,
+      label: `Group ${id}`,
+      latestRun: null,
+      proposals: [],
+    })),
+  };
+  const ok = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      if (
+        String(path) === "/api/settings/learning/runs?container=src-a" &&
+        init?.method === "POST"
+      )
+        return Response.json({ error: "Nope" }, { status: 500 });
+      return ok(path, init);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = draw();
+  const buttons = await view.findAllByRole("button", { name: "Learn now" });
+  fireEvent.click(buttons[0] as HTMLElement);
+  expect((await view.findByRole("alert")).textContent).toBe("Nope");
+  fireEvent.click(view.getAllByRole("button", { name: "Learn now" })[1]!);
+  await waitFor(() => expect(view.getByText(/Learning started/)).toBeTruthy());
+  // Group b's start does not wipe or borrow group a's failure.
+  expect(view.getByRole("alert").textContent).toBe("Nope");
+  expect(view.getAllByText(/Learning started/)).toHaveLength(1);
+});
+
+test("Learning started goes away once the run it started has finished", async () => {
+  review = body(true);
+  const first = review.sources[0];
+  if (first) first.latestRun = run("run-1", "2026-11-01T00:00:00Z");
+  const view = draw();
+  fireEvent.click(await view.findByRole("button", { name: "Learn now" }));
+  await view.findByText(/Learning started/);
+  const next = review.sources[0];
+  if (next)
+    next.latestRun = {
+      ...run("run-2", "2026-11-02T00:00:00Z"),
+      status: "batching",
+    };
+  await queryClient.invalidateQueries({ queryKey: ["learning", "review"] });
+  await view.findByText("Latest run analyzing.");
+  expect(view.getByText(/Learning started/)).toBeTruthy();
+  if (next) next.latestRun = run("run-2", "2026-11-02T00:00:00Z");
+  await queryClient.invalidateQueries({ queryKey: ["learning", "review"] });
+  await view.findByText("Latest run finished.");
+  expect(view.queryByText(/Learning started/)).toBeNull();
 });
 
 test("a source that failed to read still alerts next to one that is unavailable", async () => {
@@ -576,4 +670,43 @@ test("skills approved while opening refresh Your skills on the first load", asyn
   } finally {
     unsubscribe();
   }
+});
+
+test("a removal proposal says approve removal, then removed", async () => {
+  review = body(true);
+  detailOperation = "remove";
+  const view = draw();
+  fireEvent.click(await view.findByText("old-skill"));
+  expect(view.queryByText("Approve and publish")).toBeNull();
+  fireEvent.click(await view.findByText("Approve removal"));
+  expect(
+    await view.findByText(
+      "Removed. Bots stop using it from their next conversation.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/Published/)).toBeNull();
+});
+
+test("a recording without named steps says 1 step, then 2 steps", async () => {
+  const recording = (id: string, eventCount: number) => ({
+    kind: "recording" as const,
+    id,
+    title: `Recording ${id}`,
+    available: true,
+    eventCount,
+    events: [],
+  });
+  insights = [
+    {
+      id: "i1",
+      statement: "Refunds start from the order page.",
+      impact: "Faster refunds.",
+      evidence: [recording("r1", 1), recording("r2", 2)],
+    },
+  ];
+  review = body(false);
+  const view = draw();
+  fireEvent.click(await view.findByText("refund-order"));
+  expect(await view.findByText("1 step")).toBeTruthy();
+  expect(view.getByText("2 steps")).toBeTruthy();
 });

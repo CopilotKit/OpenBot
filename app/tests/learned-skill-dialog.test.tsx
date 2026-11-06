@@ -11,6 +11,7 @@ import type { LearnedSkillContent } from "@openbot/shared/learning";
 import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
+import type { LearnedSkillSource } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
 
 let wasServer = true;
@@ -46,6 +47,11 @@ beforeEach(() => {
       asked.push(url);
       if (url === "/api/settings/learning/skills/refund-order")
         return Response.json({ skill });
+      if (
+        url ===
+        `/api/admin/learning/skills/${encodeURIComponent("a b/c")}?agentId=bot-1`
+      )
+        return Response.json({ skill: { ...skill, name: "a b/c" } });
       return Response.json(
         { error: "That skill is no longer there." },
         { status: 404 },
@@ -59,16 +65,24 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-function draw(name: string | null, onClose = () => {}) {
-  return render(
+function tree(
+  name: string | null,
+  onClose = () => {},
+  source: LearnedSkillSource = { kind: "personal" },
+) {
+  return (
     <QueryClientProvider client={queryClient}>
-      <LearnedSkillDialog
-        name={name}
-        onClose={onClose}
-        source={{ kind: "personal" }}
-      />
-    </QueryClientProvider>,
+      <LearnedSkillDialog name={name} onClose={onClose} source={source} />
+    </QueryClientProvider>
   );
+}
+
+function draw(
+  name: string | null,
+  onClose = () => {},
+  source: LearnedSkillSource = { kind: "personal" },
+) {
+  return render(tree(name, onClose, source));
 }
 
 test("the personal source fetches the skill and renders its SKILL.md", async () => {
@@ -101,4 +115,10 @@ test("Done closes the dialog", async () => {
   });
   fireEvent.click(await view.findByRole("button", { name: "Done" }));
   expect(closed).toBe(1);
+});
+
+test("the admin source reads the Bot's skill with its name encoded", async () => {
+  const view = draw("a b/c", () => {}, { kind: "admin", agentId: "bot-1" });
+  await view.findByText("Open the order, then refund it.");
+  expect(asked).toEqual(["/api/admin/learning/skills/a%20b%2Fc?agentId=bot-1"]);
 });

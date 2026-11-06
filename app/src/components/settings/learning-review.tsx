@@ -56,6 +56,43 @@ const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
   failed: "failed",
 };
 
+type StartState = {
+  pending: boolean;
+  started: { from: string | null } | null;
+  error: string | null;
+};
+
+/** What Learn now says for one group: that it started until its run finishes, or why it couldn't. */
+function GroupNotices({
+  group,
+  state,
+}: {
+  group: { latestRun: LearningRunSummary | null };
+  state: StartState | undefined;
+}) {
+  if (!state || state.pending) return null;
+  const run = group.latestRun;
+  // A newer run than the one there was at the click, and it is over: the notice has done its job.
+  const finished =
+    run !== null &&
+    run.id !== state.started?.from &&
+    (run.status === "succeeded" || run.status === "failed");
+  return (
+    <>
+      {state.started && !finished && (
+        <p className="mt-4 text-sm" role="status">
+          Learning started. New proposals show up here when it finishes.
+        </p>
+      )}
+      {state.error && (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {state.error}
+        </p>
+      )}
+    </>
+  );
+}
+
 /**
  * Settings, Learning: the skills Learning proposed from the person's own recordings. Where people approve their own,
  * a row opens a dialog with Approve and Reject; where admins do, the same dialog is read-only.
@@ -75,11 +112,17 @@ export function LearningReview() {
     null,
   );
   // One Learn now covers a whole group: every source is tried, and the button waits for all of them.
-  const [starting, setStarting] = useState<{
-    pending: boolean;
-    started: boolean;
-    error: string | null;
-  }>({ pending: false, started: false, error: null });
+  // Each group keeps its own state, keyed by label. `from` is the group's latest run when it started.
+  const [starting, setStarting] = useState<
+    Record<
+      string,
+      {
+        pending: boolean;
+        started: { from: string | null } | null;
+        error: string | null;
+      }
+    >
+  >({});
   // When a refetch finds fewer proposals waiting, some were approved on their own: Your skills shows them now.
   const waitingCount = review.data?.sources.reduce(
     (count, source) =>
@@ -154,11 +197,20 @@ export function LearningReview() {
   const anyWaiting = groups.some((group) => group.waiting.length > 0);
   // With automatic approval on, an empty list says nothing the switch doesn't.
   const showList = autoApproveOn !== true || anyWaiting;
-  const learnNowFor = async (containers: string[]) => {
-    setStarting({ pending: true, started: false, error: null });
+  const learnNowFor = async (group: {
+    label: string;
+    containers: string[];
+  }) => {
+    const from =
+      groups.find((candidate) => candidate.label === group.label)?.latestRun
+        ?.id ?? null;
+    setStarting((all) => ({
+      ...all,
+      [group.label]: { pending: true, started: null, error: null },
+    }));
     let started = false;
     let error: string | null = null;
-    for (const container of containers) {
+    for (const container of group.containers) {
       try {
         await learnNow.mutateAsync(container);
         started = true;
@@ -166,7 +218,14 @@ export function LearningReview() {
         error = failure instanceof Error ? failure.message : String(failure);
       }
     }
-    setStarting({ pending: false, started, error });
+    setStarting((all) => ({
+      ...all,
+      [group.label]: {
+        pending: false,
+        started: started ? { from } : null,
+        error,
+      },
+    }));
   };
 
   return (
@@ -201,90 +260,92 @@ export function LearningReview() {
       {groups
         .filter((group) => canReview || group.waiting.length > 0)
         .map((group) => (
-          <PageRows key={group.label}>
-            <Item size="sm">
-              <ItemContent>
-                <ItemTitle>{group.label}</ItemTitle>
+          <Fragment key={group.label}>
+            <PageRows>
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>{group.label}</ItemTitle>
+                  {canReview && (
+                    <ItemDescription>
+                      {group.latestRun
+                        ? `Latest run ${RUN_STATUS[group.latestRun.status]}.`
+                        : "No run yet."}
+                    </ItemDescription>
+                  )}
+                </ItemContent>
                 {canReview && (
-                  <ItemDescription>
-                    {group.latestRun
-                      ? `Latest run ${RUN_STATUS[group.latestRun.status]}.`
-                      : "No run yet."}
-                  </ItemDescription>
-                )}
-              </ItemContent>
-              {canReview && (
-                <ItemActions>
-                  <Button
-                    disabled={starting.pending}
-                    onClick={() => learnNowFor(group.containers)}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    {starting.pending ? "Starting…" : "Learn now"}
-                  </Button>
-                </ItemActions>
-              )}
-            </Item>
-            {group.waiting.map(({ container, proposal }) => (
-              <Fragment key={`${container}:${proposal.id}`}>
-                <Separator />
-                <Item
-                  render={
-                    <button
-                      onClick={() => setOpen({ container, id: proposal.id })}
-                      type="button"
-                    />
-                  }
-                  size="sm"
-                >
-                  <ItemMedia variant="icon">
-                    <IconSparkles />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>{proposal.title}</ItemTitle>
-                    <ItemDescription>{proposal.description}</ItemDescription>
-                  </ItemContent>
                   <ItemActions>
-                    <span className="text-muted-foreground text-sm">
-                      {operationLabel(proposal)}
-                    </span>
-                    <IconChevronRight className="size-4 text-muted-foreground" />
+                    <Button
+                      disabled={starting[group.label]?.pending === true}
+                      onClick={() => learnNowFor(group)}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {starting[group.label]?.pending
+                        ? "Starting…"
+                        : "Learn now"}
+                    </Button>
                   </ItemActions>
-                </Item>
-              </Fragment>
-            ))}
-          </PageRows>
+                )}
+              </Item>
+              {group.waiting.map(({ container, proposal }) => (
+                <Fragment key={`${container}:${proposal.id}`}>
+                  <Separator />
+                  <Item
+                    render={
+                      <button
+                        onClick={() => setOpen({ container, id: proposal.id })}
+                        type="button"
+                      />
+                    }
+                    size="sm"
+                  >
+                    <ItemMedia variant="icon">
+                      <IconSparkles />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>{proposal.title}</ItemTitle>
+                      <ItemDescription>{proposal.description}</ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <span className="text-muted-foreground text-sm">
+                        {operationLabel(proposal)}
+                      </span>
+                      <IconChevronRight className="size-4 text-muted-foreground" />
+                    </ItemActions>
+                  </Item>
+                </Fragment>
+              ))}
+            </PageRows>
+            {canReview && (
+              <GroupNotices group={group} state={starting[group.label]} />
+            )}
+          </Fragment>
         ))}
-      {showList &&
-        !anyWaiting &&
-        !unreadable &&
-        !(unavailable && sources.every((source) => source.unavailable)) && (
-          <PageEmpty icon={IconSparkles} title="Nothing to review">
-            {autoApprove !== null
-              ? "New proposals show up here after Learning analyses your recordings and conversations."
-              : "New proposals show up here after Learning analyses your recordings."}
-          </PageEmpty>
-        )}
-      {canReview && !starting.pending && starting.started && (
-        <p className="mt-4 text-sm" role="status">
-          Learning started. New proposals show up here when it finishes.
-        </p>
+      {showList && !anyWaiting && !unreadable && !unavailable && (
+        <PageEmpty icon={IconSparkles} title="Nothing to review">
+          {autoApprove !== null
+            ? "New proposals show up here after Learning analyses your recordings and conversations."
+            : "New proposals show up here after Learning analyses your recordings."}
+        </PageEmpty>
       )}
       {saveAutoApprove.error && (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {saveAutoApprove.error.message}
         </p>
       )}
-      {canReview && !starting.pending && starting.error && (
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          {starting.error}
-        </p>
-      )}
       {unavailable && (
         <p className="mt-4 text-muted-foreground text-sm">
-          Learning isn't available in Intelligence, so nothing is proposed here.
+          {sources.every((source) => source.unavailable)
+            ? "Learning isn't available in Intelligence, so nothing is proposed here."
+            : `Learning isn't available for ${[
+                ...new Set(
+                  sources
+                    .filter((source) => source.unavailable)
+                    .map((source) => source.label),
+                ),
+              ].join(", ")}, so nothing is proposed there.`}
         </p>
       )}
       {unreadable && (

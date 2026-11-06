@@ -60,7 +60,8 @@ function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
                 {entry.available ? "" : " (no longer available)"}
               </p>
               <p className="text-pretty">
-                {entry.events.join(", ") || `${entry.eventCount} steps`}
+                {entry.events.join(", ") ||
+                  `${entry.eventCount} ${entry.eventCount === 1 ? "step" : "steps"}`}
               </p>
             </>
           )}
@@ -101,6 +102,7 @@ export function ProposalDialog<TKey extends QueryKey>({
   const detail = useQuery(load);
   const proposal = detail.data;
   const status = decided ?? proposal?.status;
+  const removal = proposal?.operation === "remove";
   return (
     <Dialog onOpenChange={(next) => (next ? undefined : onClose())} open>
       <DialogContent>
@@ -166,7 +168,11 @@ export function ProposalDialog<TKey extends QueryKey>({
                 size="sm"
                 type="button"
               >
-                {deciding ? "Saving…" : "Approve and publish"}
+                {deciding
+                  ? "Saving…"
+                  : removal
+                    ? "Approve removal"
+                    : "Approve and publish"}
               </Button>
             </>
           ) : (
@@ -177,8 +183,12 @@ export function ProposalDialog<TKey extends QueryKey>({
                   role="status"
                 >
                   {status === "approved"
-                    ? publishedNote
-                    : "Rejected. It won't be published."}
+                    ? removal
+                      ? "Removed. Bots stop using it from their next conversation."
+                      : publishedNote
+                    : removal
+                      ? "Rejected. The skill stays."
+                      : "Rejected. It won't be published."}
                 </span>
               )}
               <Button onClick={onClose} size="sm" type="button">
