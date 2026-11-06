@@ -1,6 +1,9 @@
-import type { RecorderConnectionsResponse } from "@openbot/shared/recorder-api";
+import type {
+  RecorderConnectionsResponse,
+  RecordingsPage,
+} from "@openbot/shared/recorder-api";
 import { recorderPaths } from "@openbot/shared/recorder-api";
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { BROWSER_CLOSED_POLL_MS, BROWSER_POLL_MS } from "@/lib/browser/queries";
 import { client } from "@/lib/client";
 import {
@@ -13,6 +16,7 @@ import {
 export const recorderKeys = {
   all: ["recorder"] as const,
   connections: () => ["recorder", "connections"] as const,
+  recordings: () => ["recorder", "recordings"] as const,
   /** The Recorder in the browser OpenBot is open in. Asked of the browser, never of the server. */
   here: () => ["recorder", "here"] as const,
   /** Where one connect, by when it started, has got to on the Recorder's Connect page. Asked of the browser too. */
@@ -112,4 +116,25 @@ export const recorderConnectWaitQueryOptions = (id: string, since: number) =>
     refetchInterval: CONNECT_WAIT_POLL_MS,
     // Asking costs no request, unlike the app's server reads (query-client.ts).
     refetchOnWindowFocus: true,
+  });
+
+/**
+ * The person's own recordings, newest first, a page at a time. The pages are kept as they came, not flattened: the
+ * first one carries `unavailable` when Intelligence could not list them, which a flat list of rows would lose.
+ */
+export const recordingsQueryOptions = () =>
+  infiniteQueryOptions({
+    queryKey: recorderKeys.recordings(),
+    initialPageParam: "",
+    queryFn: async ({ pageParam }): Promise<RecordingsPage> => {
+      const suffix = pageParam
+        ? `?cursor=${encodeURIComponent(pageParam)}`
+        : "";
+      const response = await client(`${recorderPaths.recordings}${suffix}`, {
+        fallback: "Couldn't load your recordings.",
+      });
+      return response.json();
+    },
+    getNextPageParam: (page: RecordingsPage) => page.nextCursor ?? undefined,
+    staleTime: 10_000,
   });
