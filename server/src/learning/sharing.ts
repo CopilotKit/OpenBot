@@ -24,24 +24,32 @@ export type OpenSkillSource = {
 /** The sharing choice a person made for the Skills in their own Learning space. */
 export function createLearningSharingStore(database: Database) {
   return {
-    /** Their choice (`closed` when they never made one) and every Skill they opened under `choose`. */
+    /**
+     * Their choice (`closed` when they never made one) and every Skill they opened under `choose`, both from one
+     * snapshot, so a change saved between the two reads cannot produce a pair that never existed.
+     */
     async read(
       userId: string,
     ): Promise<{ mode: LearningSharingMode; openSkills: string[] }> {
-      const [row] = await database
-        .select({ mode: learningSkillSharing.mode })
-        .from(learningSkillSharing)
-        .where(eq(learningSkillSharing.userId, userId))
-        .limit(1);
-      const opened = await database
-        .select({ name: learningOpenSkills.skillName })
-        .from(learningOpenSkills)
-        .where(eq(learningOpenSkills.userId, userId))
-        .orderBy(learningOpenSkills.skillName);
-      return {
-        mode: row?.mode ?? "closed",
-        openSkills: opened.map((skill) => skill.name),
-      };
+      return database.transaction(
+        async (transaction) => {
+          const [row] = await transaction
+            .select({ mode: learningSkillSharing.mode })
+            .from(learningSkillSharing)
+            .where(eq(learningSkillSharing.userId, userId))
+            .limit(1);
+          const opened = await transaction
+            .select({ name: learningOpenSkills.skillName })
+            .from(learningOpenSkills)
+            .where(eq(learningOpenSkills.userId, userId))
+            .orderBy(learningOpenSkills.skillName);
+          return {
+            mode: row?.mode ?? "closed",
+            openSkills: opened.map((skill) => skill.name),
+          };
+        },
+        { isolationLevel: "repeatable read", accessMode: "read only" },
+      );
     },
 
     /** Saves the choice and says what it was before. Two saves at once are taken in turn, so each `from` is true. */
