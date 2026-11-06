@@ -4,6 +4,7 @@ import type {
   RecordingRow,
 } from "@openbot/shared/recorder-api";
 import {
+  createRecordings,
   fetchTrajectorySummaries,
   type TrajectorySummary,
   toRow,
@@ -169,5 +170,82 @@ describe("toRow", () => {
       ended: "missing",
       reason: null,
     });
+  });
+});
+
+describe("createRecordings", () => {
+  const now = new Date("2026-11-06T12:00:00.000Z");
+  const bound = {
+    trajectoryId: "t-1",
+    createdAt: new Date("2026-11-06T09:00:00.000Z"),
+  };
+  const summary: TrajectorySummary = {
+    trajectoryId: "t-1",
+    createdAt: "2026-11-06T09:00:00.000Z",
+    firstEventAt: "2026-11-06T09:01:00.000Z",
+    lastEventAt: null,
+    eventCount: 3,
+    workflow: "Refund an order",
+    outcome: { phase: "succeeded", reason: null },
+  };
+  type Summaries = Parameters<typeof createRecordings>[0]["summaries"];
+  function build(
+    ids: (typeof bound)[],
+    result: Awaited<ReturnType<Summaries>>,
+  ) {
+    const asked: string[][] = [];
+    const recordings = createRecordings({
+      pageForUser: async () => ({ ids, nextCursor: "next" }),
+      isBoundTo: async () => true,
+      summaries: async (requested) => {
+        asked.push(requested);
+        return result;
+      },
+      now: () => now,
+    });
+    return { recordings, asked };
+  }
+
+  test("no recordings means no call to Intelligence", async () => {
+    const { recordings, asked } = build([], { items: [] });
+    expect(await recordings.list("u-1", null)).toEqual({
+      recordings: [],
+      nextCursor: "next",
+    });
+    expect(asked).toHaveLength(0);
+  });
+
+  test("a 404 from Intelligence says unavailable and still lists nothing", async () => {
+    const { recordings } = build([bound], { unavailable: "unavailable" });
+    expect(await recordings.list("u-1", null)).toEqual({
+      recordings: [],
+      nextCursor: null,
+      unavailable: "unavailable",
+    });
+  });
+
+  test("a recording is joined to its summary by id", async () => {
+    const { recordings, asked } = build([bound], { items: [summary] });
+    const page = await recordings.list("u-1", null);
+    expect(asked).toEqual([["t-1"]]);
+    expect(page.nextCursor).toBe("next");
+    expect(page.recordings).toEqual([
+      {
+        id: "t-1",
+        title: "Refund an order",
+        recordedAt: "2026-11-06T09:01:00.000Z",
+        ended: "succeeded",
+        reason: null,
+      },
+    ]);
+  });
+
+  test("a discarded recording is left out", async () => {
+    const { recordings } = build([bound], {
+      items: [
+        { ...summary, outcome: { phase: "failed", reason: "discarded" } },
+      ],
+    });
+    expect((await recordings.list("u-1", null)).recordings).toEqual([]);
   });
 });

@@ -1,4 +1,7 @@
-import type { RecordingRow } from "@openbot/shared/recorder-api";
+import type {
+  RecordingRow,
+  RecordingsPage,
+} from "@openbot/shared/recorder-api";
 
 export type TrajectorySummary = {
   trajectoryId: string;
@@ -97,4 +100,46 @@ export function toRow(
   const lastSeen = new Date(summary.lastEventAt ?? binding.createdAt);
   const recent = now.getTime() - lastSeen.getTime() <= SENDING_WINDOW_MS;
   return { ...row, ended: recent ? "sending" : "unknown", reason: null };
+}
+
+/**
+ * A person's recordings: their page of bindings, each joined to what Intelligence says of it.
+ * `isBoundTo` is declared here so the wiring passes it to the routes that check ownership.
+ */
+export function createRecordings(deps: {
+  pageForUser: (
+    userId: string,
+    cursor: string | null,
+    limit?: number,
+  ) => Promise<{
+    ids: { trajectoryId: string; createdAt: Date }[];
+    nextCursor: string | null;
+  }>;
+  isBoundTo: (trajectoryId: string, userId: string) => Promise<boolean>;
+  summaries: (ids: string[]) => ReturnType<typeof fetchTrajectorySummaries>;
+  now?: () => Date;
+}) {
+  const now = deps.now ?? (() => new Date());
+  return {
+    async list(userId: string, cursor: string | null): Promise<RecordingsPage> {
+      const { ids, nextCursor } = await deps.pageForUser(userId, cursor, 50);
+      if (ids.length === 0) return { recordings: [], nextCursor };
+      const result = await deps.summaries(ids.map((id) => id.trajectoryId));
+      if ("unavailable" in result)
+        return {
+          recordings: [],
+          nextCursor: null,
+          unavailable: result.unavailable,
+        };
+      const byId = new Map(
+        result.items.map((item) => [item.trajectoryId, item]),
+      );
+      const at = now();
+      const recordings = ids.flatMap((binding) => {
+        const row = toRow(binding, byId.get(binding.trajectoryId), at);
+        return row ? [row] : [];
+      });
+      return { recordings, nextCursor };
+    },
+  };
 }
