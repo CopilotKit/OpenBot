@@ -213,6 +213,15 @@ fn parse_port(key: &str, value: &str) -> std::io::Result<u16> {
 }
 
 fn bind_loopbacks(port: u16) -> std::io::Result<Vec<std::net::TcpListener>> {
+    // Windows lets a loopback bind succeed beside another program's wildcard listener even without
+    // `SO_REUSEADDR`, so a port something already answers on is taken whatever the bind says. The
+    // bind still decides the rest: it is what catches Windows' excluded port ranges.
+    if port != 0 && something_listens(port) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            format!("something already listens on port {port}"),
+        ));
+    }
     let ipv4 = bind_exclusive((std::net::Ipv4Addr::LOCALHOST, port).into())?;
     let port = ipv4.local_addr()?.port();
     let mut held = vec![ipv4];
@@ -226,6 +235,18 @@ fn bind_loopbacks(port: u16) -> std::io::Result<Vec<std::net::TcpListener>> {
         Err(error) => return Err(error),
     }
     Ok(held)
+}
+
+/// Whether anything accepts a connection on this port on either loopback right now.
+fn something_listens(port: u16) -> bool {
+    [
+        std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
+        std::net::SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, port)),
+    ]
+    .iter()
+    .any(|address| {
+        std::net::TcpStream::connect_timeout(address, std::time::Duration::from_millis(250)).is_ok()
+    })
 }
 
 /**
