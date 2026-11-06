@@ -437,4 +437,9 @@ test("a skill the person approved shows Ask to share instead of the Open switch"
   await open.findByText("refund-order");
   expect(open.queryAllByRole("switch")).toHaveLength(0);
   expect(open.getByRole("button", { name: "Ask to share" })).toBeTruthy();
+  // The row says so in open mode too: the skill stays with their own Bots.
+  const refundRow = open.getByText("refund-order").closest("button");
+  expect(refundRow?.textContent).toContain("Only your Bots use it.");
+  const reopenRow = open.getByText("reopen-ticket").closest("div");
+  expect(reopenRow?.textContent ?? "").not.toContain("Only your Bots use it.");
 });

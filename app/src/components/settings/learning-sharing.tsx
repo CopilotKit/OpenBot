@@ -211,11 +211,13 @@ export function LearningSharing() {
                           <ItemTitle>{skill.name}</ItemTitle>
                           <ItemDescription>
                             {[
-                              mode === "choose"
-                                ? open && !needsAdmin
-                                  ? "Every Bot may use it."
-                                  : "Only your Bots use it."
-                                : null,
+                              needsAdmin
+                                ? "Only your Bots use it."
+                                : mode === "choose"
+                                  ? open
+                                    ? "Every Bot may use it."
+                                    : "Only your Bots use it."
+                                  : null,
                               skill.description,
                             ]
                               .filter(Boolean)
