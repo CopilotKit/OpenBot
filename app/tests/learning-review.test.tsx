@@ -54,7 +54,7 @@ const body = (canReview: boolean): PersonalReview => ({
     {
       containerId: "user-1",
       kind: "recordings",
-      label: "Your recordings",
+      label: "From your recordings",
       latestRun: null,
       proposals: [
         proposal("p1", "refund-order", "add"),
@@ -152,7 +152,7 @@ test("says so when proposals couldn't be read", async () => {
       {
         containerId: "user-1",
         kind: "recordings",
-        label: "Your recordings",
+        label: "From your recordings",
         latestRun: null,
         proposals: null,
       },
@@ -173,7 +173,7 @@ test("says some were unreadable when another source was read", async () => {
       {
         containerId: "user-1",
         kind: "recordings",
-        label: "Your recordings",
+        label: "From your recordings",
         latestRun: null,
         proposals: null,
       },
@@ -218,16 +218,14 @@ test("with people approving, the latest run shows and Learn now starts one", asy
       completedAt: null,
     };
   const view = draw();
-  expect(
-    await view.findByText("Your recordings: latest run finished."),
-  ).toBeTruthy();
+  expect(await view.findByText("Latest run finished.")).toBeTruthy();
   fireEvent.click(await view.findByRole("button", { name: "Learn now" }));
   await waitFor(() =>
     expect(posts).toEqual(["/api/settings/learning/runs?container=user-1"]),
   );
   expect(
     await view.findByText(
-      "Learning started. New skills show up here when it finishes.",
+      "Learning started. New proposals show up here when it finishes.",
     ),
   ).toBeTruthy();
 });
@@ -236,5 +234,5 @@ test("with admins approving, there is no Learn now", async () => {
   const view = draw();
   await view.findByText("Waiting for an admin");
   expect(view.queryByRole("button", { name: "Learn now" })).toBeNull();
-  expect(view.queryByText(/latest run/)).toBeNull();
+  expect(view.queryByText(/Latest run/)).toBeNull();
 });

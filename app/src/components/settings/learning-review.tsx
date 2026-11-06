@@ -129,31 +129,39 @@ export function LearningReview() {
           New proposals show up here after Learning analyses your recordings.
         </PageEmpty>
       )}
-      {canReview &&
-        sources.map((source) => (
-          <div
-            className="mt-4 flex items-center justify-between gap-3"
-            key={source.containerId}
-          >
-            <p className="text-muted-foreground text-sm">
-              {source.latestRun
-                ? `${source.label}: latest run ${RUN_STATUS[source.latestRun.status]}.`
-                : `${source.label}: no run yet.`}
-            </p>
-            <Button
-              disabled={learnNow.isPending}
-              onClick={() => learnNow.mutate(source.containerId)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              {learnNow.isPending ? "Starting…" : "Learn now"}
-            </Button>
-          </div>
-        ))}
+      {canReview && (
+        <PageRows>
+          {sources.map((source, index) => (
+            <Fragment key={source.containerId}>
+              {index > 0 ? <Separator /> : null}
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>{source.label}</ItemTitle>
+                  <ItemDescription>
+                    {source.latestRun
+                      ? `Latest run ${RUN_STATUS[source.latestRun.status]}.`
+                      : "No run yet."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    disabled={learnNow.isPending}
+                    onClick={() => learnNow.mutate(source.containerId)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {learnNow.isPending ? "Starting…" : "Learn now"}
+                  </Button>
+                </ItemActions>
+              </Item>
+            </Fragment>
+          ))}
+        </PageRows>
+      )}
       {canReview && learnNow.isSuccess && (
         <p className="mt-4 text-sm" role="status">
-          Learning started. New skills show up here when it finishes.
+          Learning started. New proposals show up here when it finishes.
         </p>
       )}
       {canReview && learnNow.error && (
