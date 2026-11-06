@@ -303,6 +303,29 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
     );
   });
 
+  test("published skills say it is Automatic Learning that is off", async () => {
+    const store = createLearningSettingsStore();
+    await useDefault(store);
+    const app = createLearningRoutes(
+      { store, skills: async () => ({ unavailable: "off" }) },
+      async (context, next) => {
+        context.set("actor", {
+          id: "admin-ada",
+          email: "ada@example.com",
+          name: "Ada",
+          role: "admin",
+        });
+        await next();
+      },
+    );
+    const response = await app.request("/skills");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error:
+        "Automatic Learning is turned off. Turn it on to see published skills.",
+    });
+  });
+
   test("an admin reads a published skill's files", async () => {
     const store = createLearningSettingsStore();
     await useDefault(store);

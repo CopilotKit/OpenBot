@@ -671,8 +671,8 @@ export function createLearningRoutes(
   });
   const skillsUnavailable = (kind: "off" | "unavailable") =>
     kind === "off"
-      ? "Learning is switched off in Intelligence. Turn it on there to see published skills."
-      : "Published skills can't be read right now. Try again.";
+      ? "Automatic Learning is turned off. Turn it on to see published skills."
+      : "Couldn't load published skills from Intelligence. Try again.";
   /** The Skills published to the container, by name and description. */
   routes.get("/skills", async (context) => {
     const skills = dependencies.skills;
