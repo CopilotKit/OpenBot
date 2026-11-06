@@ -6,11 +6,13 @@ import {
   type LearningDeliveryStatus,
   type LearningOverview,
   type LearningTarget,
+  type PeopleProposals,
 } from "@openbot/shared/learning";
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { type AppVariables, requireAdmin } from "../auth/guards";
+import type { SkillApprovalStore } from "./approvals";
 import type { LearningAutoAssign } from "./auto-assign";
 import type { InspectorLearning, InspectorLearningRequest } from "./inspector";
 import {
@@ -37,6 +39,17 @@ export type LearningAdminDependencies = {
   inspect?: (input: InspectorLearningRequest) => Promise<InspectorLearning>;
   /** Review and publish here, which an Intelligence with no dashboard of its own needs. */
   manage?: LearningManagement;
+  /** What admins decided about skills people learned, kept by OpenBot. */
+  approvals?: SkillApprovalStore;
+  /** The people whose recordings are learned from, each with their own Learning space. */
+  people?: () => Promise<
+    { userId: string; name: string; containerId: string }[]
+  >;
+  /** The titles of a person's recordings, by recording id. */
+  recordingTitles?: (
+    userId: string,
+    ids: string[],
+  ) => Promise<Map<string, string | null>>;
   /** The Skills published to a container, with their files. */
   skills?: (
     containerId: string,
@@ -413,6 +426,57 @@ export function createLearningRoutes(
     try {
       return context.json({
         proposal: await readProposal(manage, containerId, candidateId),
+      });
+    } catch (error) {
+      const failure = learningFailure(error);
+      return context.json({ error: failure.error }, failure.status);
+    }
+  });
+  /** Each person's pending proposals, or null for a person whose space can't be read. */
+  routes.get("/people/proposals", async (context) => {
+    const { manage, people } = dependencies;
+    if (!manage || !people)
+      return context.json(
+        { error: "Reviewing skills from people is unavailable." },
+        503,
+      );
+    const listed = await people();
+    const result: PeopleProposals = {
+      people: await Promise.all(
+        listed.map(async (person) => ({
+          userId: person.userId,
+          name: person.name,
+          proposals: await readProposals(manage, person.containerId)
+            .then((all) => all.filter((p) => p.status === "pending_review"))
+            .catch(() => null),
+        })),
+      ),
+    };
+    return context.json(result);
+  });
+  /** One proposal learned from a person's recordings, with their titles. */
+  routes.get("/people/:userId/proposals/:candidateId", async (context) => {
+    const { manage, people, recordingTitles } = dependencies;
+    if (!manage || !people)
+      return context.json(
+        { error: "Reviewing skills from people is unavailable." },
+        503,
+      );
+    const candidateId = context.req.param("candidateId");
+    if (!CANDIDATE_ID.test(candidateId))
+      return context.json({ error: "Invalid skill ID." }, 400);
+    const userId = context.req.param("userId");
+    const person = (await people()).find((entry) => entry.userId === userId);
+    if (!person)
+      return context.json({ error: "This person doesn't exist." }, 404);
+    try {
+      return context.json({
+        proposal: await readProposal(
+          manage,
+          person.containerId,
+          candidateId,
+          recordingTitles ? (ids) => recordingTitles(userId, ids) : undefined,
+        ),
       });
     } catch (error) {
       const failure = learningFailure(error);
