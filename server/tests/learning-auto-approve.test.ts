@@ -146,6 +146,7 @@ describe("createAutoApprover", () => {
       targetType: "learning_skill",
       targetId: "r1",
       actorUserId: "user-1",
+      initiator: { kind: "deployment" },
       payload: {
         change: "skill_approved",
         containerId: RECORDINGS,
