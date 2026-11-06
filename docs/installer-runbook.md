@@ -104,6 +104,36 @@ is older than those workflows, merge `main` into it first.
 
 5. Check the build. Do [Check a build](#4-check-a-build) before you give the installer to anybody.
 
+### On your own Mac
+
+To try a branch on your own Apple silicon Mac without waiting for the workflow, make the same
+build locally:
+
+```sh
+git commit ...                      # it builds HEAD, never uncommitted work
+desktop/scripts/local-build.sh
+```
+
+The script:
+
+1. pushes the branch to origin (never `main`, never forced), because a pinned app downloads its
+   deployment from `https://github.com/CopilotKit/OpenBot/archive/<commit>.tar.gz`;
+2. starts a registry container, `openbot-local-registry`, on `127.0.0.1:5050`;
+3. builds `server`, `supervisor`, `agent-computer` and `agent-claude-sdk` from the commit for
+   linux/arm64 and pushes them there;
+4. writes `container-images.json` with version `local-<first 12 characters of the commit>`: the
+   images it built by their local digest, every other image at the latest release's digest;
+5. builds `OpenBot.app` pinned to that manifest, with the bundled CLI, ad-hoc signed.
+
+**Expected:** it ends by printing each stage's time, the manifest, and the app's path under
+`~/.openbot-local-build/apps/`. To install it, quit OpenBot and copy the app into `/Applications`.
+
+Set `OPENBOT_LOCAL_IMAGES` to build other images (`OPENBOT_LOCAL_IMAGES="server"`), or to an empty
+string to take every image from the release. The other settings are at the top of the script.
+
+A local build is for Docker only. Podman cannot pull from a registry on the Mac's own `127.0.0.1`.
+Like any build without the update key, it has no **Check for Updates…** menu item.
+
 ## 2. Make a release candidate, then the final release
 
 Use a candidate to test what will become a release. The details are in
