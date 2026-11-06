@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useManagePaths } from "@/lib/manage-paths";
 import {
   consentBreadth,
   coverageWarning,
@@ -62,6 +63,7 @@ import { queryClient } from "@/query-client";
 const LOADING_ROWS = ["a", "b", "c", "d", "e", "f"];
 
 export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
+  const paths = useManagePaths();
   const { name, directoryLabel } = providerVocabulary(provider);
   const [search, setSearch] = React.useState("");
   /*
@@ -90,7 +92,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
    *
    * THE MUTATION-LEVEL `onError` STILL FIRES AFTER `removeObserver`, which is why this works and
    * reading the observer does not. It is the shape the sibling grant screen already uses
-   * (`$key_.bots.$agentId.tsx`), arriving at the one screen that was reading the observer instead.
+   * (`plugin-bot-page.tsx`), arriving at the one screen that was reading the observer instead.
    */
   const [enableError, setEnableError] = React.useState<string | null>(null);
   /*
@@ -129,7 +131,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
 
   return (
     <PageShell
-      backButton={{ label: "Plugins", linkProps: { to: "/admin/plugins" } }}
+      backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
       description={`${name}'s app directory. Add an app to make its tools available to Bots. Each person still connects their own account before it reads anything.`}
       title={directoryLabel}
     >

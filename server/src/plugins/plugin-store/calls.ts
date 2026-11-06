@@ -1,5 +1,6 @@
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, eq } from "drizzle-orm";
+import { safetyRequirement } from "../../approvals/policy";
 import { currentApprovalContext } from "../../approvals/types";
 import { type AuditInitiator, recordAuditEvent } from "../../audit";
 import {
@@ -106,6 +107,12 @@ export function callMethods(context: StoreContext) {
        * reaching its owner's account (team-bots/team-bots.ts). Every gate is still the asker's.
        */
       credentialActorId?: string;
+      /**
+       * The thread of the run making the call. A Bot running here is in a run already, and its
+       * thread is read from that run when this is absent; a Bot running its own loop says it
+       * through its signed run assertion. See the transport's `threadId`.
+       */
+      threadId?: string;
     }): Promise<{ text: string; isError: boolean }> {
       const [serverId, ...rest] = input.ref.split("/");
       const toolName = rest.join("/");
@@ -400,7 +407,24 @@ export function callMethods(context: StoreContext) {
        * open chat both turn into a paused tool call; denied is a refusal like any other.
        */
       const share =
-        effect === "write" && options.privateShareCheck
+        effect === "write" &&
+        options.privateShareCheck &&
+        /*
+         * ONE ASK FOR ONE SEND. The approval gate below asks about every send, share and post on the
+         * safety policy's own floor, with what it sends, whatever any rule says. Asking here as well
+         * put two cards in front of the person for one message.
+         */
+        !(
+          options.approvalGate &&
+          safetyRequirement({
+            actorId: input.actorId,
+            botId: input.botId,
+            toolRef: input.ref,
+            effect,
+            scope: serverId,
+            args: vendorArgs,
+          })
+        )
           ? shareTargetOf(serverId, toolName, vendorArgs)
           : null;
       if (share && options.privateShareCheck) {
@@ -555,6 +579,7 @@ export function callMethods(context: StoreContext) {
             tokenHeader: tokenHeaderFor(entry),
             actorId: vendorUserId ?? input.credentialActorId ?? input.actorId,
             botId: input.botId,
+            threadId: input.threadId ?? currentApprovalContext()?.threadId,
           },
           /*
            * THE NAME THE VENDOR KNOWS, WHICH IS THE ONLY ONE IT WILL ANSWER TO. `toolName` is this

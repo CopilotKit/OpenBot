@@ -28,6 +28,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "./support/reserved-port";
 import {
   applyLocalUpdate,
   type CommandRunner,
@@ -53,18 +54,6 @@ function available(command: string[]) {
 }
 const docker = available(["docker", "info", "--format", "{{.ServerVersion}}"]);
 const pgDump = available(["pg_dump", "--version"]);
-/** A port nothing on this machine is listening on. Chosen here rather than by `-p 127.0.0.1::5000`,
- * because Docker Desktop's engine cannot reach a host port it picked itself for a push. */
-function freePort() {
-  const listener = Bun.listen({
-    hostname: "127.0.0.1",
-    port: 0,
-    socket: { data() {} },
-  });
-  const { port } = listener;
-  listener.stop(true);
-  return port;
-}
 function sh(command: string[], input?: string) {
   return execFileSync(command[0] ?? "", command.slice(1), {
     encoding: "utf8",
@@ -145,15 +134,60 @@ const isComposeConfig = (command: readonly string[]) =>
   command[1] === "compose" &&
   command.includes("config");
 
+function imageRunner(
+  f: ReturnType<typeof installation>,
+  calls: string[],
+  reference: string,
+  actualMigrationOutput?: string,
+) {
+  const run: CommandRunner = async (command, commandOptions) => {
+    calls.push(command.join(" "));
+    if (
+      isGit(command) ||
+      isComposeConfig(command) ||
+      (command[0] === "docker" &&
+        command[1] === "compose" &&
+        command.includes("pull")) ||
+      (command[0] === "docker" &&
+        command[1] === "image" &&
+        command[2] === "inspect")
+    )
+      return runCommand(command, commandOptions);
+    if (
+      actualMigrationOutput &&
+      command.includes("migrate") &&
+      (command.includes("run") || command.includes("--exit-code-from"))
+    )
+      return runCommand(command, {
+        ...commandOptions,
+        stdoutFile: actualMigrationOutput,
+      });
+    // Other lifecycle boundaries stay recorded in this scoped real-tool test.
+    if (commandOptions.stdoutFile)
+      writeFileSync(commandOptions.stdoutFile, "PGDMP fixture backup");
+    if (command.includes("exec") && command.includes("bun"))
+      return JSON.stringify(f.identity);
+    if (command.includes("ps")) return "fixture-container\n";
+    if (command[0] === "docker" && command[1] === "inspect")
+      return command.includes("{{.State.Running}}")
+        ? "true\n"
+        : `${reference}\n`;
+    return "";
+  };
+  return run;
+}
+
 describe.skipIf(!docker)(
   "image topology pulls with real Docker Compose",
   () => {
     let registry = "";
     let reference = "";
     // A pinned digest that exists only in a local registry, and not yet in this engine.
-    beforeAll(() => {
+    beforeAll(async () => {
       const name = `fix979-registry-${id}`;
-      const port = freePort();
+      // Chosen here rather than by `-p 127.0.0.1::5000`, because Docker Desktop's engine cannot
+      // reach a host port it picked itself for a push.
+      const port = await reservePort();
       sh([
         "docker",
         "run",
@@ -198,41 +232,12 @@ describe.skipIf(!docker)(
       expect(available(["docker", "image", "inspect", reference])).toBe(false);
     });
 
-    function imageRunner(f: ReturnType<typeof installation>, calls: string[]) {
-      const run: CommandRunner = async (command, commandOptions) => {
-        calls.push(command.join(" "));
-        if (
-          isGit(command) ||
-          isComposeConfig(command) ||
-          (command[0] === "docker" &&
-            command[1] === "compose" &&
-            command.includes("pull")) ||
-          (command[0] === "docker" &&
-            command[1] === "image" &&
-            command[2] === "inspect")
-        )
-          return runCommand(command, commandOptions);
-        // Stopping, backing up, migrating and starting are recorded, not performed.
-        if (commandOptions.stdoutFile)
-          writeFileSync(commandOptions.stdoutFile, "PGDMP fixture backup");
-        if (command.includes("exec") && command.includes("bun"))
-          return JSON.stringify(f.identity);
-        if (command.includes("ps")) return "fixture-container\n";
-        if (command[0] === "docker" && command[1] === "inspect")
-          return command.includes("{{.State.Running}}")
-            ? "true\n"
-            : `${reference}\n`;
-        return "";
-      };
-      return run;
-    }
-
     test("the update pulls the pinned server image before it stops anything", async () => {
       const f = installation("COMPOSE_PROFILES=openbot\n");
       f.candidate.artifacts.images.server = { reference };
       const calls: string[] = [];
       const result = await applyLocalUpdate(
-        options(f, "image", imageRunner(f, calls)),
+        options(f, "image", imageRunner(f, calls, reference)),
       );
       expect(result.phase).toBe("accepted");
       expect(available(["docker", "image", "inspect", reference])).toBe(true);
@@ -251,7 +256,7 @@ describe.skipIf(!docker)(
       };
       const calls: string[] = [];
       await expect(
-        applyLocalUpdate(options(f, "image", imageRunner(f, calls))),
+        applyLocalUpdate(options(f, "image", imageRunner(f, calls, reference))),
       ).rejects.toThrow("nothing was stopped");
       expect(calls.some((call) => call.includes(" stop "))).toBe(false);
       expect(f.git("rev-parse", "HEAD")).toBe(f.old);
@@ -431,4 +436,67 @@ describe.skipIf(!docker || !pgDump)("host backups with real pg_dump", () => {
       else process.env.DATABASE_URL = inherited;
     }
   });
+});
+
+describe.skipIf(!docker)("image migration with real Docker Compose", () => {
+  test.each([0, 7])(
+    "executes the image without building and propagates migration exit %s",
+    async (exitCode) => {
+      const project = `fix979-migrate-${id}-${exitCode}`;
+      const f = installation(
+        `COMPOSE_PROJECT_NAME=${project}\nCOMPOSE_PROFILES=openbot\n`,
+      );
+      const reference = sh([
+        "docker",
+        "image",
+        "inspect",
+        "--format",
+        "{{index .RepoDigests 0}}",
+        "registry:2",
+      ]);
+      f.candidate.artifacts.images.server = { reference };
+      // An executable cached image and no Dockerfile in the checkout: any accidental build fails.
+      // SQL/backup/server boundaries remain recorded; the actual migration CLI must reach this process.
+      writeFileSync(
+        join(f.root, "docker-compose.override.yml"),
+        `services:\n  migrate:\n    entrypoint: ["/bin/sh"]\n    command: ${JSON.stringify(["-ec", `printf 'compose-migration-executed\\n'; exit ${exitCode}`])}\n`,
+      );
+      cleanup.push(() =>
+        sh([
+          "docker",
+          "compose",
+          "--project-directory",
+          f.root,
+          "--project-name",
+          project,
+          "down",
+          "--volumes",
+        ]),
+      );
+      const output = join(f.root, "migration-output.log");
+      const run = imageRunner(f, [], reference, output);
+      if (exitCode === 0) {
+        expect((await applyLocalUpdate(options(f, "image", run))).phase).toBe(
+          "accepted",
+        );
+      } else {
+        await expect(
+          applyLocalUpdate(options(f, "image", run)),
+        ).rejects.toThrow(`exit ${exitCode}`);
+        expect(
+          JSON.parse(
+            readFileSync(join(f.root, ".openbot-update-journal.json"), "utf8"),
+          ).phase,
+        ).toBe("recovery-required");
+        expect(
+          JSON.parse(
+            readFileSync(join(f.root, ".openbot-release.json"), "utf8"),
+          ).source.commit,
+        ).toBe(f.old);
+      }
+      expect(readFileSync(output, "utf8")).toContain(
+        "compose-migration-executed",
+      );
+    },
+  );
 });

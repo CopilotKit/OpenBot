@@ -21,7 +21,7 @@ import type { WorkQueue } from "../work/queue";
 import type { RunAssertion } from "./callback-token";
 import { isBotPaused } from "./lifecycle";
 import type { AgentProfileStore } from "./profile-store";
-import type { AgentActor } from "./profile-types";
+import type { AgentActor, AgentProfile } from "./profile-types";
 
 /** The kind of work a hop is, on the shared queue. */
 export const HANDOFF_KIND = "bot.message";
@@ -55,6 +55,74 @@ export type HandoffCaps = {
   /** How many other Bots one run may address. */
   maxPerRun: number;
 };
+
+/**
+ * A Bot's name or id as a person or a model is likely to say it, reduced to what identifies it.
+ *
+ * People say "the Knowledge Bot", "@knowledge" and "knowledge-bot" for a Bot called Knowledge, and a
+ * model asked to "ask the Knowledge Bot" passes those words through. Refused as "no such Bot", the
+ * person watched a red Blocked step and a second try. So case, a leading "the" or "@", a trailing
+ * "Bot" said as a word of its own, and the separators between words are all set aside, on both
+ * sides of the comparison. "Chatbot" keeps its "bot": it is part of the name, not a word after it.
+ */
+export function addressKey(said: string): string {
+  return said
+    .toLowerCase()
+    .trim()
+    .replace(/^@+/, "")
+    .replace(/[\s_-]+/g, " ")
+    .trim()
+    .replace(/^the /, "")
+    .replace(/ bot$/, "")
+    .trim();
+}
+
+export type AddressedBot<Profile> =
+  | { kind: "found"; bot: Profile }
+  | { kind: "ambiguous"; candidates: Profile[] }
+  | { kind: "none" };
+
+/**
+ * Which Bot in a person's roster a handoff names, decided by the deployment rather than the model.
+ *
+ * EXACT FIRST, AND AN EXACT MATCH ALWAYS WINS. An id outright, because an id is exact and a name is
+ * not; then a display name, as long as only one Bot the person can reach has it. Only when nothing
+ * matches exactly is the looser reading tried (`addressKey`), and it has to land on exactly one
+ * reachable Bot, by name or by id. Two Bots that read the same are refused as ambiguous rather than
+ * guessed between: the work would go to a Bot nobody meant, and the refusal names both so the
+ * asking Bot can say which.
+ *
+ * Shared by the desk and by the private-share check, which must find the same Bot the desk is about
+ * to send to: resolved two different ways, a loose name could reach another person's Bot without
+ * the owner being asked first.
+ */
+export function resolveAddressedBot<
+  Profile extends Pick<AgentProfile, "id" | "name" | "hidden" | "deletedAt">,
+>(roster: readonly Profile[], target: string): AddressedBot<Profile> {
+  const wanted = target.trim().toLowerCase();
+  const byId = roster.find(
+    (candidate) => candidate.id.toLowerCase() === wanted,
+  );
+  if (byId) return { kind: "found", bot: byId };
+  const reachable = roster.filter(
+    (candidate) => !candidate.hidden && candidate.deletedAt === null,
+  );
+  const byName = reachable.filter(
+    (candidate) => candidate.name.toLowerCase() === wanted,
+  );
+  if (byName.length > 1) return { kind: "ambiguous", candidates: byName };
+  const [named] = byName;
+  if (named) return { kind: "found", bot: named };
+  const key = addressKey(target);
+  if (!key) return { kind: "none" };
+  const loose = reachable.filter(
+    (candidate) =>
+      addressKey(candidate.name) === key || addressKey(candidate.id) === key,
+  );
+  if (loose.length > 1) return { kind: "ambiguous", candidates: loose };
+  const [read] = loose;
+  return read ? { kind: "found", bot: read } : { kind: "none" };
+}
 
 export type HandoffOutcome =
   | { ok: true; to: string; toName: string }
@@ -93,6 +161,12 @@ export function createHandoffDesk(options: {
    * fix something else. `mayAddress` beside it catches for exactly this reason.
    */
   actorFor: (userId: string) => Promise<AgentActor | null>;
+  /**
+   * The Bots the asking Bot has been granted, by id, so a refusal for a name that matches nothing
+   * can say which Bots it may ask. Read per refusal, never cached. Absent, or failing, the refusal
+   * says only that there is no such Bot.
+   */
+  addressable?: (fromBotId: string) => Promise<readonly string[]>;
   auditStore: AuditStore;
   caps: HandoffCaps;
   /**
@@ -102,8 +176,43 @@ export function createHandoffDesk(options: {
    */
   onOffered?: (threadId: string) => Promise<void>;
 }): HandoffDesk {
-  const { queue, profiles, mayAddress, actorFor, auditStore, caps, onOffered } =
-    options;
+  const {
+    queue,
+    profiles,
+    mayAddress,
+    actorFor,
+    addressable,
+    auditStore,
+    caps,
+    onOffered,
+  } = options;
+
+  /*
+   * The Bots this one may ask, by the names the person knows them by. The same list whatever was
+   * asked for, and only Bots the person can already see and this Bot was already given, so it says
+   * nothing about the rest of the roster.
+   */
+  async function canAsk(
+    from: RunAssertion,
+    roster: readonly AgentProfile[],
+  ): Promise<string> {
+    if (!addressable) return "";
+    const granted = new Set(
+      await addressable(from.botId).catch(() => [] as string[]),
+    );
+    const names = roster
+      .filter(
+        (candidate) =>
+          granted.has(candidate.id) &&
+          candidate.id !== from.botId &&
+          !candidate.hidden &&
+          candidate.deletedAt === null,
+      )
+      .map((candidate) => candidate.name);
+    return names.length > 0
+      ? ` The Bots you can ask are: ${names.join(", ")}.`
+      : " You have not been given any Bot to ask.";
+  }
 
   /** Said once, so the trail carries the same words the Bot was given. */
   async function refuse(
@@ -208,9 +317,8 @@ export function createHandoffDesk(options: {
         );
       }
       const roster = await profiles.list(actor);
-      const wanted = target.trim().toLowerCase();
       /*
-       * An id is exact and a name is not, so an id wins outright.
+       * An id is exact and a name is not, so an id wins outright; see `resolveAddressedBot`.
        *
        * `agents.name` has no unique constraint and duplicating a Bot deliberately makes a second one
        * with the same name, so a person can be looking at two Bots called Knowledge. Taking whichever
@@ -218,16 +326,8 @@ export function createHandoffDesk(options: {
        * so with only the other twin granted a perfectly legitimate hop is refused as "not granted".
        * Neither failure says a word about there having been two.
        */
-      const byId = roster.find(
-        (candidate) => candidate.id.toLowerCase() === wanted,
-      );
-      const byName = roster.filter(
-        (candidate) => candidate.name.toLowerCase() === wanted,
-      );
-      const reachable = byName.filter(
-        (candidate) => !candidate.hidden && candidate.deletedAt === null,
-      );
-      if (!byId && reachable.length > 1) {
+      const resolved = resolveAddressedBot(roster, target);
+      if (resolved.kind === "ambiguous") {
         /*
          * Named rather than guessed at. The ids are the escape hatch this refusal is pointing at,
          * and they are all Bots this person can already see, so naming them tells the model nothing
@@ -237,28 +337,26 @@ export function createHandoffDesk(options: {
           from,
           target,
           "ambiguous_bot",
-          `More than one Bot is called "${target.trim().slice(0, 60)}": ${reachable
-            .map((candidate) => candidate.id)
-            .join(", ")}. Ask again using the one you mean.`,
+          `More than one Bot answers to "${target.trim().slice(0, 60)}": ${resolved.candidates
+            .map((candidate) => `${candidate.name} (${candidate.id})`)
+            .join(", ")}. Ask again using the id of the one you mean.`,
         );
       }
-      // `reachable`, not `byName`: the same list the ambiguity check one line above counted. The
-      // roster already filters hidden and deleted today, so these agree — but a fallback that could
-      // disagree with the check guarding it is one refactor away from being wrong.
-      const found = byId ?? reachable[0];
+      const found = resolved.kind === "found" ? resolved.bot : undefined;
 
       /*
        * The same answer whether it does not exist or is not theirs to see.
        *
        * Two different sentences here would let a Bot enumerate the deployment's roster by asking for
-       * names and reading which refusal came back.
+       * names and reading which refusal came back. What it does add, the Bots this one may ask, is
+       * the same list whatever was asked for.
        */
       if (!found || found.hidden || found.deletedAt !== null) {
         return refuse(
           from,
           target,
           "no_such_bot",
-          `There is no Bot called "${target.trim().slice(0, 60)}" that you can reach.`,
+          `There is no Bot called "${target.trim().slice(0, 60)}" that you can reach.${await canAsk(from, roster)}`,
         );
       }
 

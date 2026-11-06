@@ -163,25 +163,18 @@ describe("frame pacing", () => {
     frame(1);
     await tick();
     expect(acks).toEqual([1]);
-    // The server's proxy tells a frame from an error by this prefix, to drop only frames when behind.
+    // The server's proxy tells a frame from an error by this prefix, to hold back only frames when behind.
     expect(sent[0]?.startsWith('{"type":"frame"')).toBe(true);
   });
 
-  test("Chrome is not asked for the next frame until the viewer's connection has taken this one", async () => {
+  test("a frame is acked as it arrives, however long the viewer takes over it", async () => {
+    // Held until the viewer had it, Chrome dropped what the page did meanwhile and never sent it:
+    // see screencast-pacing-browser.test.ts, which measures that against Chromium itself.
     const { page, acks, frame } = casting();
-    let drained: () => void = () => {};
-    await startScreencast(
-      page,
-      () =>
-        new Promise<void>((resolve) => {
-          drained = resolve;
-        }),
-    );
+    await startScreencast(page, () => new Promise<void>(() => {}));
     frame(7);
+    frame(8);
     await tick();
-    expect(acks).toEqual([]);
-    drained();
-    await tick();
-    expect(acks).toEqual([7]);
+    expect(acks).toEqual([7, 8]);
   });
 });

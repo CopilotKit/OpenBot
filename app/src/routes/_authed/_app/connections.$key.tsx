@@ -15,6 +15,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { PluginPage } from "@/components/manage/plugin-page";
 import {
   BrokeredAccountRow,
   useBrokeredAccount,
@@ -36,6 +37,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   brokeredProvenance,
@@ -131,10 +133,18 @@ export const Route = createFileRoute("/_authed/_app/connections/$key")({
  */
 function RouteComponent() {
   const { key } = Route.useParams();
-  const { linked } = Route.useSearch();
+  const { linked, action } = Route.useSearch();
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   if (key === "github" || key === "slack") {
     return <IdentityConnectionPage linked={linked} provider={key} />;
   }
+  /*
+   * The personal edition's app page is the whole app: turning it on, your account, its tools and
+   * which Bots use them, because one person makes all of those decisions. A per-action
+   * authorization (`?action=`) keeps its own page, which is what that flow comes back to.
+   */
+  if (personal && action === undefined) return <PluginPage pluginKey={key} />;
   return <AppConnectionPage />;
 }
 
@@ -448,6 +458,27 @@ function AppConnectionPage() {
    * way in demonstrably drew a row for. Falling through to the `user-oauth` branch instead is no
    * better: its title and summary are the catalogue's, and there is none.
    */
+  /*
+   * AN APP THAT CAN ONLY HOLD A SHARED ACCOUNT, NOT YET MADE SHARED. It signs in with this
+   * deployment's own client, so there is no account here that is this person's: the server refuses
+   * a personal Connect, and this page draws none. Read off the listing's `sharedOnly`, never off the
+   * app's name. The list on the way in leaves it out; a link from elsewhere still lands here.
+   */
+  if (brokered && server?.sharedOnly) {
+    return (
+      <PageShell
+        backButton={back}
+        description="You don't connect this app yourself."
+        title={server.title}
+      >
+        <PageEmpty icon={IconUsers} title="Shared account only">
+          An admin connects {server.title} once as a shared account and gives it
+          to Bots.
+        </PageEmpty>
+      </PageShell>
+    );
+  }
+
   if (brokered && server) {
     /* Bound once because the row below is told it twice — once inside the whole disconnected
        sentence and once on its own — and two copies of it would drift. */
@@ -466,7 +497,7 @@ function AppConnectionPage() {
         title={server.title}
       >
         {notice ? (
-          <p className="text-destructive text-sm" role="alert">
+          <p className="break-words text-destructive text-sm" role="alert">
             {notice}
           </p>
         ) : null}
@@ -546,7 +577,7 @@ function AppConnectionPage() {
       title={entry.title}
     >
       {notice ? (
-        <p className="text-destructive text-sm" role="alert">
+        <p className="break-words text-destructive text-sm" role="alert">
           {notice}
         </p>
       ) : null}

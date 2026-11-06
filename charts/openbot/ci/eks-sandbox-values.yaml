@@ -111,3 +111,7 @@ networkPolicy:
       ports:
         - port: 5432
           protocol: TCP
+
+# Managed Intelligence, named in config.intelligence above, rather than the one the chart installs.
+intelligence:
+  enabled: false

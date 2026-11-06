@@ -1,12 +1,26 @@
-import { expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import type {
+  LearningOverview,
+  LearningProposalDetail,
+} from "@openbot/shared/learning";
 import type { MiddlewareHandler } from "hono";
+import type { AuditEventInput } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import {
   createLearningAutoAssign,
+  runtimeKeyClient,
   withLearningAutoAssign,
 } from "../src/learning/auto-assign";
+import { createInspectorLearningReader } from "../src/learning/inspector";
 import { createLearningRoutes } from "../src/learning/routes";
 import { createLearningSettingsStore } from "../src/learning/settings";
+import {
+  type FakeIntelligence,
+  fakeIntelligence,
+  INSPECTOR_WITH_DASHBOARD,
+  RUNTIME_KEY,
+  SKILL_MD,
+} from "./support/intelligence-learning";
 
 function routes(role: "admin" | "user" = "admin") {
   const store = createLearningSettingsStore();
@@ -197,5 +211,275 @@ test("an administrator creates the container with the deployment's credential, s
   expect(creates).toBe(2);
   expect((await store.read()).defaultTarget).toEqual({
     containerId: "openbot",
+  });
+});
+
+describe("reviewing proposed skills in Admin, against Intelligence's project-key routes", () => {
+  const PROPOSAL = "0198a012-a20f-77c0-9e33-8992f18e74d1";
+  const served: FakeIntelligence[] = [];
+  afterEach(() => {
+    for (const intelligence of served.splice(0)) intelligence.stop();
+  });
+  function admin(
+    version: Parameters<typeof fakeIntelligence>[0] = "current",
+    role: "admin" | "user" = "admin",
+    inspector?: "no-dashboard" | "dashboard" | "dashboard-before-opt-in",
+  ) {
+    const intelligence = fakeIntelligence(version, {
+      containers: ["openbot"],
+      candidates: [PROPOSAL],
+      ...(inspector ? { inspector } : {}),
+    });
+    served.push(intelligence);
+    const client = runtimeKeyClient(
+      intelligence.url,
+      RUNTIME_KEY,
+      "ws://127.0.0.1:9",
+    );
+    const store = createLearningSettingsStore();
+    const events: AuditEventInput[] = [];
+    const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
+      context,
+      next,
+    ) => {
+      context.set("actor", {
+        id: "admin-ada",
+        email: "ada@example.com",
+        name: "Ada",
+        role,
+      });
+      await next();
+    };
+    const app = createLearningRoutes(
+      {
+        store,
+        inspect: createInspectorLearningReader({
+          apiUrl: intelligence.url,
+          apiKey: RUNTIME_KEY,
+        }),
+        manage: client.experimental.learning,
+      },
+      requireUser,
+      ["https://openbot.example.com"],
+      { insert: async (event) => void events.push(event) },
+    );
+    return { app, store, events, intelligence };
+  }
+  const post = (app: ReturnType<typeof createLearningRoutes>, path: string) =>
+    app.request(`https://openbot.example.com${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://openbot.example.com",
+      },
+      body: "{}",
+    });
+  const useDefault = async (
+    store: ReturnType<typeof createLearningSettingsStore>,
+  ) =>
+    store.write({
+      enabled: true,
+      defaultTarget: { containerId: "openbot" },
+      agents: {},
+    });
+
+  test("only an admin may list, read, approve, reject or start Learning", async () => {
+    const { app, intelligence } = admin("current", "user");
+    for (const response of [
+      await app.request("/proposals"),
+      await app.request(`/proposals/${PROPOSAL}`),
+      await post(app, `/proposals/${PROPOSAL}/approve`),
+      await post(app, `/proposals/${PROPOSAL}/reject`),
+      await post(app, "/runs"),
+    ])
+      expect(response.status).toBe(403);
+    expect(intelligence.requests).toEqual([]);
+  });
+
+  test("an admin reads the SKILL.md and evidence, approves it, and OpenBot's audit names them", async () => {
+    const { app, store, events, intelligence } = admin();
+    await useDefault(store);
+    expect(await (await app.request("/proposals")).json()).toMatchObject({
+      containerId: "openbot",
+      proposals: [
+        { id: PROPOSAL, title: "Refund triage", status: "pending_review" },
+      ],
+    });
+    const detail = (await (
+      await app.request(`/proposals/${PROPOSAL}`)
+    ).json()) as { proposal: LearningProposalDetail };
+    expect(detail.proposal.files[0]).toEqual({
+      path: "SKILL.md",
+      content: SKILL_MD,
+    });
+    expect(detail.proposal.insights[0]?.evidence).toEqual([
+      {
+        kind: "conversation",
+        id: "thread-1",
+        title: "Refund for order 1182",
+        available: true,
+        messages: [
+          {
+            id: "message-1",
+            role: "user",
+            content: "Can I get a refund on order 1182?",
+          },
+          {
+            id: "message-2",
+            role: "assistant",
+            content: "That order is 12 days old, so yes.",
+          },
+        ],
+      },
+      {
+        kind: "recording",
+        id: "0198a012-a20f-77c0-9e33-8992f18e74b0",
+        available: true,
+        eventCount: 1,
+        events: ["click"],
+      },
+    ]);
+
+    const approved = await post(app, `/proposals/${PROPOSAL}/approve`);
+    expect(approved.status).toBe(200);
+    expect(await approved.json()).toEqual({
+      proposal: { id: PROPOSAL, status: "approved" },
+    });
+    expect(intelligence.candidates.get(PROPOSAL)?.status).toBe("approved");
+    expect(events).toEqual([
+      {
+        eventType: "configuration.changed",
+        targetType: "learning_skill",
+        targetId: PROPOSAL,
+        actorUserId: "admin-ada",
+        payload: {
+          change: "skill_approved",
+          containerId: "openbot",
+          title: "Refund triage",
+          operation: "add",
+          publishedSkillId: "0198a012-a20f-77c0-9e33-8992f18e74a2",
+          by: "ada@example.com",
+        },
+      },
+    ]);
+
+    // Reviewed once is reviewed: a second decision is refused, said plainly, and audited.
+    const again = await post(app, `/proposals/${PROPOSAL}/reject`);
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toContain(
+      "already reviewed",
+    );
+    expect(events[1]?.payload).toMatchObject({
+      change: "skill_review_failed",
+      decision: "reject",
+      code: "LEARNING_CANDIDATE_CONFLICT",
+      by: "ada@example.com",
+    });
+  });
+
+  test("a cross-site approval is refused before Intelligence is asked", async () => {
+    const { app, store, intelligence } = admin();
+    await useDefault(store);
+    const response = await app.request(
+      `https://openbot.example.com/proposals/${PROPOSAL}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://evil.example",
+        },
+        body: "{}",
+      },
+    );
+    expect(response.status).toBe(403);
+    expect(intelligence.requests).toEqual([]);
+  });
+
+  test("Learn now starts a run on the container and is audited", async () => {
+    const { app, store, events } = admin();
+    await useDefault(store);
+    const response = await post(app, "/runs");
+    expect(await response.json()).toEqual({
+      run: { id: "0198a012-a20f-77c0-9e33-8992f18e74c1", status: "queued" },
+    });
+    expect(events[0]).toMatchObject({
+      actorUserId: "admin-ada",
+      payload: { change: "learning_run_started", containerId: "openbot" },
+    });
+  });
+
+  test("with no dashboard, the overview has the Inspector panel's counts and links nowhere", async () => {
+    const { app, store } = admin("current", "admin", "no-dashboard");
+    await useDefault(store);
+    const response = await app.request("/overview");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      overview: {
+        configuration: "configured",
+        container: { id: "openbot", name: "OpenBot" },
+        pendingThreadCount: 1,
+        pendingCandidateCount: 1,
+        publishedSkillCount: 1,
+        insightCount: 1,
+        hasActiveRun: false,
+        latestRunStatus: "succeeded",
+        links: { learning: null, candidates: null, runs: null },
+      },
+    });
+  });
+
+  test("with a dashboard, the overview has the same counts and links into it, on any Intelligence", async () => {
+    for (const inspector of ["dashboard", "dashboard-before-opt-in"] as const) {
+      const { app, store, intelligence } = admin("current", "admin", inspector);
+      await useDefault(store);
+      const response = await app.request("/overview");
+      expect(response.status).toBe(200);
+      expect(
+        ((await response.json()) as { overview: LearningOverview }).overview,
+      ).toMatchObject({
+        pendingThreadCount: 1,
+        publishedSkillCount: 1,
+        insightCount: 1,
+        links: INSPECTOR_WITH_DASHBOARD.links,
+      });
+      // An older Intelligence refuses the opt-in it does not know; the plain call answers.
+      expect(
+        intelligence.requests.filter(
+          (request) => request.path === "/api/inspector/learning",
+        ).length,
+      ).toBe(inspector === "dashboard" ? 1 : 2);
+    }
+  });
+
+  test("an Intelligence with no Inspector panel gives the overview from the key's own routes", async () => {
+    const { app, store } = admin();
+    await useDefault(store);
+    const response = await app.request("/overview");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      overview: {
+        configuration: "configured",
+        container: { id: "openbot", name: "openbot" },
+        pendingThreadCount: null,
+        pendingCandidateCount: 1,
+        publishedSkillCount: null,
+        insightCount: null,
+        hasActiveRun: false,
+        latestRunStatus: "succeeded",
+        links: { learning: null, candidates: null, runs: null },
+      },
+    });
+  });
+
+  test("Learning switched off in Intelligence is said as that, on the list and the overview", async () => {
+    const { app, store } = admin("learning-off");
+    await useDefault(store);
+    for (const path of ["/proposals", "/overview"]) {
+      const response = await app.request(path);
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { error: string }).error).toContain(
+        "Learning is switched off in Intelligence",
+      );
+    }
   });
 });

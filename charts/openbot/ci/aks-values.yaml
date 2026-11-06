@@ -54,3 +54,7 @@ ingress:
 
 computers:
   mode: shared
+
+# Managed Intelligence, named in config.intelligence above, rather than the one the chart installs.
+intelligence:
+  enabled: false

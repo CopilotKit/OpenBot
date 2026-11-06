@@ -4,6 +4,7 @@ import { brokerSentence, schemeKind } from "../broker";
 import { CATALOGUE } from "../catalogue";
 import { vendorSentence } from "../composio";
 import { redirectUriFor } from "../oauth";
+import { ALWAYS_ON_REFUSAL, isAlwaysOn } from "../personal-defaults";
 import { asAccountMode } from "../shared-accounts";
 import { asSharedUseApproval, type SharedUseApproval } from "../shared-use";
 import {
@@ -45,6 +46,16 @@ export function mountServerRoutes({
          */
         auth: entry.auth.kind,
         perInstance: entry.host === null,
+        /*
+         * Whether connecting needs nothing typed first: no account at all, or an OAuth vendor this
+         * deployment registers itself with. The personal edition lists only these on Connections.
+         */
+        oneStep:
+          entry.host !== null &&
+          (entry.auth.kind === "none" ||
+            entry.auth.kind === "builtin" ||
+            (entry.auth.kind === "user-oauth" &&
+              entry.auth.clientRegistration === "dynamic")),
       })),
       /*
        * Whether a Bot with no credential of its own can still call a tool back.
@@ -392,6 +403,8 @@ export function mountServerRoutes({
     if (forbidden) return forbidden;
 
     const serverId = context.req.param("id");
+    if (isAlwaysOn(serverId))
+      return context.json({ error: ALWAYS_ON_REFUSAL }, 403);
     /*
      * READ BEFORE THE ROW GOES. The ask-before-write rule a Shared app was given lives in the
      * approval policy, not on the row, so nothing cascades it away; asked afterwards, the mode is

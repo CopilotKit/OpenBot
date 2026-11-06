@@ -1,0 +1,17 @@
+# The vanilla install the chart README gives, exactly: one person, from their own computer, over
+# `kubectl port-forward`, with OpenBot's bundled database and the bundled Intelligence.
+#
+# The README has the person write the licence and the model key into a file of their own that is
+# kept and never committed; these are placeholders in its place. Nothing else is theirs to make: the
+# chart generates the key encryption key, the computer token and the database password, and keeps
+# them across upgrades. The licence is given once, and the chart writes it to OpenBot's Secret and
+# the bundled Intelligence's.
+config:
+  singleUser: true
+postgresql:
+  enabled: true
+secrets:
+  licenseToken: "example-for-rendering-only"
+  modelApiKey: "example-for-rendering-only"
+  # CI passes a keyEncryptionKey for every target, which also renders the path where one is given;
+  # tests/chart-vanilla-secrets.test.ts renders this file without one.

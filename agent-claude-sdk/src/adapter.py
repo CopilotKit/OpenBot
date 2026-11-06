@@ -1,5 +1,7 @@
 """Keep client tools inside their original Claude SDK query.
 
+Every new query answers from the whole thread the server sent; see `replay`.
+
 ag-ui-claude-sdk 0.1.5 returns a placeholder from its MCP tool, then sends
 the client's real result as a new user prompt. A synchronous PostToolUse hook
 replaces that placeholder before Claude sees it. AG-UI requests consume
@@ -17,6 +19,8 @@ from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, RunStartedEve
 from ag_ui_claude_sdk import ClaudeAgentAdapter
 from claude_agent_sdk import AssistantMessage, HookMatcher, ToolResultBlock, UserMessage
 from claude_agent_sdk.types import StreamEvent
+
+from .replay import run_replayed_query, system_instructions
 
 
 class ModelAuthenticationError(Exception):
@@ -50,6 +54,17 @@ class _Turn:
         return self.results[tool_id]
 
 
+def _with_instructions(system_prompt, instructions):
+    """The server's instructions first, then whatever the adapter already put there."""
+    if isinstance(system_prompt, dict):  # A preset keeps its own prompt; add to its append.
+        append = system_prompt.get("append")
+        return {
+            **system_prompt,
+            "append": f"{instructions}\n\n{append}" if append else instructions,
+        }
+    return f"{instructions}\n\n{system_prompt}" if system_prompt else instructions
+
+
 class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
     def __init__(self, *args, model_only=False, **kwargs):
         super().__init__(*args, **kwargs)
@@ -65,6 +80,14 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 update={"state": None, "forwarded_props": {}}
             )
         options = super().build_options(input_data, thread_id)
+        if not self._model_only and input_data:
+            # The model endpoint gets its instructions in context. A full Bot gets its standing
+            # role only as a system message, which a user prompt cannot carry.
+            instructions = system_instructions(input_data.messages)
+            if instructions:
+                options.system_prompt = _with_instructions(
+                    options.system_prompt, instructions
+                )
         tool_names = {tool.name for tool in input_data.tools} if input_data else set()
 
         async def client_result(input_data, tool_use_id, context):
@@ -128,14 +151,10 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         return options
 
     async def _run_query(self, input_data):
-        if self._model_only:
-            from .model_mode import run_model_query
-
-            async for event in run_model_query(self, input_data):
-                yield event
-        else:
-            async for event in super().run(input_data):
-                yield event
+        # Never upstream `run`: it sends only the newest message to a worker that remembers the
+        # rest, so a restart or an idle eviction forgets the thread. See `replay`.
+        async for event in run_replayed_query(self, input_data):
+            yield event
 
     async def _stream_claude_sdk(
         self, message_stream, thread_id, run_id, input_data, frontend_tool_names
@@ -265,6 +284,16 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         thread_id, run_id = input_data.thread_id, input_data.run_id
         lock = self._segment_locks.setdefault(thread_id, asyncio.Lock())
         async with lock:
+            answer_only = (
+                self._model_only
+                and (input_data.forwarded_props or {}).get("openbotAnswerOnly") is True
+            )
+            if answer_only:
+                # An SDK query keeps the tools it started with. The last model step must
+                # replay the real collected results in a fresh query with no tools, rather
+                # than resume a query that can keep calling them until the step cap.
+                await self.interrupt(thread_id)
+                input_data = input_data.model_copy(update={"tools": []})
             turn = self._turns.get(thread_id)
             if turn is not None and turn.task.done():
                 self._turns.pop(thread_id)
@@ -291,7 +320,11 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     yield RunFinishedEvent(thread_id=thread_id, run_id=run_id)
                     return
             else:
-                if input_data.messages and input_data.messages[-1].role == "tool":
+                if (
+                    not answer_only
+                    and input_data.messages
+                    and input_data.messages[-1].role == "tool"
+                ):
                     yield RunErrorEvent(
                         message="The Claude query for this tool result is no longer running. Start a new message."
                     )

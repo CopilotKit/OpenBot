@@ -141,16 +141,9 @@ export type Screencast = {
  * the metadata, which the surface needs in order to map a click back. Capping matters because the cost
  * of a frame is mostly encoding, and oversized casts waste bandwidth.
  */
-/** How long a frame may wait for the viewer's connection before the next one is asked for anyway. */
-const FRAME_ACK_LIMIT_MS = 1_000;
-
 export async function startScreencast(
   page: Page,
-  /**
-   * Takes each frame. Answering a promise holds the next frame back until it settles: the viewer's
-   * connection is still busy with the ones before it.
-   */
-  onFrame: (frame: FrameMessage) => void | Promise<void>,
+  onFrame: (frame: FrameMessage) => void,
   options: { maxWidth?: number; maxHeight?: number; quality?: number } = {},
 ): Promise<Screencast> {
   const client: CDPSession = await page.context().newCDPSession(page);
@@ -165,40 +158,29 @@ export async function startScreencast(
   client.on("Page.screencastFrame", (event: ScreencastFrame) => {
     const { data, sessionId, metadata } = event;
     /*
-     * Acknowledge every frame, once the viewer's connection has taken it.
+     * Acknowledge every frame, the moment it arrives.
      *
-     * Chrome will not send the next frame until this one is acked, which is the backpressure that
-     * stops a slow client drowning in frames. Forgetting the ack is why a naive implementation
-     * delivers one frame and then appears to hang. Acking the moment a frame arrived threw that
-     * backpressure away: Chrome sent at full rate, up to 60 a second while a page scrolled, the
-     * socket queued what the connection could not carry, and the person watched the page fall
-     * further behind the longer it moved. Acked after `onFrame` settles, the next frame Chrome sends
-     * is the page as it is then. Capped, so a connection that never drains cannot freeze the cast.
+     * Chrome will not send the next frame until this one is acked. Forgetting the ack is why a naive
+     * implementation delivers one frame and then appears to hang.
+     *
+     * Not held back to pace a slow viewer, though that looks like the backpressure it is for. Chrome
+     * keeps two frames unacked at most, and a change it makes while two are out is never sent, then
+     * or later: a page that has gone still has nothing new to send. Holding the ack until the
+     * viewer's connection had taken the frame left the screen on the page as it was a moment before
+     * it stopped, measured on Chromium 151 as the last of five quick changes never arriving
+     * (screencast-pacing-browser.test.ts). The viewer is paced where the frames leave instead, by
+     * holding only the newest one while its connection is busy (index.ts).
      */
-    const ack = () =>
-      void client
-        .send("Page.screencastFrameAck", { sessionId })
-        .catch(() => undefined);
-    if (stopped) return ack();
-    const taken = onFrame({
+    void client
+      .send("Page.screencastFrameAck", { sessionId })
+      .catch(() => undefined);
+    if (stopped) return;
+    onFrame({
       type: "frame",
       data,
       width: metadata.deviceWidth,
       height: metadata.deviceHeight,
     });
-    if (!taken) return ack();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    void Promise.race([
-      taken,
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, FRAME_ACK_LIMIT_MS);
-      }),
-    ])
-      .catch(() => undefined)
-      .finally(() => {
-        clearTimeout(timer);
-        ack();
-      });
   });
 
   await client.send("Page.startScreencast", {

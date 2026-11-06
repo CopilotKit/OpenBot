@@ -29,6 +29,8 @@ export type ChannelActivityEvent = {
   lastMessageAgentId: string | null;
   /** Newly written summary, on its own event: the sweep runs seconds after the activity it follows. */
   summary?: string;
+  /** A person's first words, newly written, on its own event: the row's name until `summary`. */
+  opening?: string;
   /** The channel is hidden from every member's roster. Absent on an ordinary activity event. */
   deleted?: true;
   /**

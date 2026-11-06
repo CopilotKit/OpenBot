@@ -42,17 +42,50 @@ export type ProductRunContext = {
   environment: "production" | "development" | "test" | "unknown";
   purpose: "ordinary" | "setup" | "unknown";
 };
+/**
+ * What Intelligence is told about a run: the shared contract, version 1 ("OpenBot telemetry:
+ * Intelligence build" in Notion). Only these fields, and only pseudonyms: no name, prompt, URL or
+ * raw identifier of a person or a task.
+ */
+export type AppAnalyticsContext = {
+  app_context_version: 1;
+  app_id: "openbot";
+  deployment_id: string;
+  app_user_hash: string;
+  trigger: ProductTrigger;
+  surface: ProductSurface;
+  environment: ProductRunContext["environment"];
+  purpose: ProductRunContext["purpose"];
+  root_task_id: string | null;
+  parent_run_id?: string;
+  attempt: number | null;
+};
+/**
+ * Where CopilotKit's runtime looks for an app's analytics context. It takes it off the run's
+ * forwardedProps and sends it, as `analyticsContext`, on the request that locks the run's thread.
+ */
+export const ANALYTICS_CONTEXT_KEY = "__copilotkitAnalyticsContext";
 export type RunPreparation = {
   actorUserId: string;
   threadId: string;
   runId: string;
   rootTaskId?: string;
+  /**
+   * The root task of the run this one continues or works for, as already derived (64 hex). Carried
+   * unchanged by a subagent or a followup, so a request with ten subagent runs stays one root task.
+   */
+  inheritedRootTaskId?: string;
   parentRunId?: string;
   attempt?: number;
   trigger: ProductTrigger;
   surface: ProductSurface;
   purpose?: ProductRunContext["purpose"];
 };
+const taskHash = /^[0-9a-f]{64}$/;
+const contractDeploymentId = /^[A-Za-z0-9_:.-]{1,128}$/;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 const boundedId = z
   .string()
   .min(1)
@@ -287,6 +320,26 @@ export async function createProductTelemetry(options: {
   }
   const user = (actor: string) =>
     scopedProductUser(options.privacyKey, deploymentId, actor);
+  /*
+   * Runs this process knows were stopped, and why, until each run's terminal event reads it. Only
+   * the process running a run marks it (the stop reaches that run's own runner), so nothing here
+   * needs sharing. Bounded, since a stop can be marked for a run that never reports.
+   */
+  const stops = new Map<string, "cancelled" | "timeout">();
+  /** A known stop of a run. The first reason given stands: it is the one that stopped it. */
+  function markStopped(runId: string, reason: "cancelled" | "timeout") {
+    if (!enabled || stops.has(runId)) return;
+    if (stops.size >= 1024) {
+      const oldest = stops.keys().next().value;
+      if (oldest !== undefined) stops.delete(oldest);
+    }
+    stops.set(runId, reason);
+  }
+  function takeStop(runId: string) {
+    const reason = stops.get(runId);
+    stops.delete(runId);
+    return reason;
+  }
   function emit(
     name: string,
     key: string,
@@ -341,7 +394,10 @@ export async function createProductTelemetry(options: {
       root_task_id:
         input.trigger === "human" || input.trigger === "routine"
           ? stableId(`${userId}:${input.rootTaskId ?? input.runId}`)
-          : null,
+          : input.inheritedRootTaskId &&
+              taskHash.test(input.inheritedRootTaskId)
+            ? input.inheritedRootTaskId
+            : null,
       run_id: input.runId,
       ...(input.parentRunId && boundedId.safeParse(input.parentRunId).success
         ? { parent_run_id: input.parentRunId }
@@ -359,29 +415,23 @@ export async function createProductTelemetry(options: {
       purpose: input.purpose ?? "ordinary",
     };
   }
+  /*
+   * Only a run this deployment stated as work is counted: a person's, a routine's, a subagent's, a
+   * hop's. A run with no context of its own is one the runtime makes for itself on the agent, such
+   * as naming a new conversation or offering suggestions, and is not work anybody asked for.
+   */
   function middleware(actorUserId: string): MiddlewareFunction {
     return (input, next) =>
       defer(async () => {
         const parsed = contextSchema.safeParse(
           input.forwardedProps?.openbotTelemetry,
         );
-        const supplied =
-          parsed.success &&
+        return parsed.success &&
           parsed.data.user_id === user(actorUserId) &&
           parsed.data.deployment_id === deploymentId &&
           parsed.data.run_id === input.runId
-            ? parsed.data
-            : undefined;
-        const context =
-          supplied ??
-          (await prepare({
-            actorUserId,
-            threadId: input.threadId,
-            runId: input.runId,
-            trigger: "unknown",
-            surface: "unknown",
-          }));
-        return context;
+          ? parsed.data
+          : undefined;
       }).pipe(switchToRun(input, next));
     function switchToRun(
       input: RunAgentInput,
@@ -455,27 +505,46 @@ export async function createProductTelemetry(options: {
             },
           }),
           finalize(() => {
-            void emit(
-              "run_terminal",
-              `terminal:${context.user_id}:${input.threadId}:${input.runId}`,
-              {
-                ...context,
-                thread_id: input.threadId,
-                outcome,
-                failure_category: failure,
-                duration_ms: Math.max(0, now().getTime() - started.getTime()),
-                result_message_ids: [...messageIds],
-                is_root:
-                  context.parent_run_id ||
-                  context.trigger === "subagent" ||
-                  context.trigger === "followup"
-                    ? false
-                    : context.trigger === "human" ||
-                        context.trigger === "routine"
-                      ? true
-                      : null,
-              },
-            );
+            const observed = { outcome, failure };
+            const duration = Math.max(0, now().getTime() - started.getTime());
+            /*
+             * Decided a tick later, for a run OpenBot stopped. A stopped run's stream can end before
+             * the stop is known here: the runner aborts the agent, which can end its stream on the
+             * spot, and only then detaches it, which is what says it was a stop. A run that finished
+             * before it was stopped keeps its finish; a lost lock is never marked, and stays as seen.
+             */
+            const decided = new Promise<void>((resolve) => {
+              setTimeout(resolve, 0);
+            }).then(() => {
+              const stopped = takeStop(input.runId);
+              const ended =
+                stopped && observed.outcome !== "success"
+                  ? { outcome: stopped, failure: "none" }
+                  : observed;
+              return emit(
+                "run_terminal",
+                `terminal:${context.user_id}:${input.threadId}:${input.runId}`,
+                {
+                  ...context,
+                  thread_id: input.threadId,
+                  outcome: ended.outcome,
+                  failure_category: ended.failure,
+                  duration_ms: duration,
+                  result_message_ids: [...messageIds],
+                  is_root:
+                    context.parent_run_id ||
+                    context.trigger === "subagent" ||
+                    context.trigger === "followup"
+                      ? false
+                      : context.trigger === "human" ||
+                          context.trigger === "routine"
+                        ? true
+                        : null,
+                },
+              );
+            });
+            pending.add(decided);
+            void decided.finally(() => pending.delete(decided));
           }),
         );
       });
@@ -519,15 +588,46 @@ export async function createProductTelemetry(options: {
         : {}),
     });
   }
+  /**
+   * The root task and surface of the run whose forwardedProps these are, when this deployment stated
+   * them there for this same person: what a subagent or a resumed turn carries on. Read from
+   * `openbotTelemetry`, which stays on the run's input wherever the run goes; the analytics key is
+   * taken off before the agent sees it.
+   */
+  function lineageOf(
+    actorUserId: string,
+    forwardedProps: unknown,
+  ): { rootTaskId?: string; surface?: ProductSurface } {
+    if (!enabled || !isRecord(forwardedProps)) return {};
+    const parsed = contextSchema.safeParse(forwardedProps.openbotTelemetry);
+    if (
+      !parsed.success ||
+      parsed.data.user_id !== user(actorUserId) ||
+      parsed.data.deployment_id !== deploymentId
+    )
+      return {};
+    const root = parsed.data.root_task_id;
+    return {
+      ...(root && taskHash.test(root) ? { rootTaskId: root } : {}),
+      ...(parsed.data.surface !== "unknown"
+        ? { surface: parsed.data.surface }
+        : {}),
+    };
+  }
   return {
     prepare,
+    lineageOf,
     middleware,
     recordAudit,
     enabled: () => enabled,
-    deploymentProperties: () => ({
-      app_id: "openbot",
-      deployment_id: deploymentId,
-    }),
+    /*
+     * What CopilotKit's own runtime events carry for OpenBot. The app always, so OpenBot's traffic
+     * is separable; this deployment's ID only while product telemetry is on.
+     */
+    deploymentProperties: (): { app_id: "openbot"; deployment_id?: string } =>
+      enabled
+        ? { app_id: "openbot", deployment_id: deploymentId }
+        : { app_id: "openbot" },
     flush: async () => {
       await Promise.allSettled([...pending]);
     },
@@ -544,11 +644,14 @@ export async function createProductTelemetry(options: {
         },
       );
     },
+    markStopped,
     stopKnown: async (
       actor: string,
       runId: string,
       reason: "cancelled" | "timeout",
     ) => {
+      // Marked before anything is awaited: the run is stopped straight after this is called.
+      markStopped(runId, reason);
       if (boundedId.safeParse(runId).success)
         await emit(
           "run_stop_requested",
@@ -558,11 +661,47 @@ export async function createProductTelemetry(options: {
     },
   };
 }
+/** The contract's projection of a prepared run. Nothing outside the contract is carried. */
+export function appAnalyticsContext(
+  context: ProductRunContext | undefined,
+): AppAnalyticsContext | undefined {
+  if (!context) return;
+  return {
+    app_context_version: 1,
+    app_id: context.app_id,
+    deployment_id: contractDeploymentId.test(context.deployment_id)
+      ? context.deployment_id
+      : "unknown",
+    app_user_hash: context.user_id,
+    trigger: context.trigger,
+    surface: context.surface,
+    environment: context.environment,
+    purpose: context.purpose,
+    root_task_id: context.root_task_id,
+    ...(context.parent_run_id ? { parent_run_id: context.parent_run_id } : {}),
+    attempt: context.attempt,
+  };
+}
+/**
+ * A run's forwardedProps carrying this deployment's own context, and nothing a client sent under
+ * the same two keys. `openbotTelemetry` is read back by the product middleware; the analytics key
+ * is for the thread lock. With telemetry off there is no context, and neither key is present.
+ */
 export function productRunForwardedProps(
-  input: RunAgentInput,
-  context: unknown,
-) {
-  return { ...input.forwardedProps, openbotTelemetry: context };
+  forwardedProps: unknown,
+  context: ProductRunContext | undefined,
+): Record<string, unknown> {
+  const own = Object.fromEntries(
+    Object.entries(isRecord(forwardedProps) ? forwardedProps : {}).filter(
+      ([key]) => key !== "openbotTelemetry" && key !== ANALYTICS_CONTEXT_KEY,
+    ),
+  );
+  const analytics = appAnalyticsContext(context);
+  return {
+    ...own,
+    ...(context ? { openbotTelemetry: context } : {}),
+    ...(analytics ? { [ANALYTICS_CONTEXT_KEY]: analytics } : {}),
+  };
 }
 export function triggerForInitiator(
   initiator?: AuditInitiator,

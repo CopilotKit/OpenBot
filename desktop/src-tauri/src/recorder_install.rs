@@ -1015,6 +1015,119 @@ mod tests {
             .all(|c| c[7] == manifest.to_string_lossy().as_ref()));
     }
 
+    // The CLI's detached sign-in service runs the bundled node.exe after the app quits; an install
+    // or uninstall that does not stop it first cannot replace or delete that file.
+    #[test]
+    fn installing_and_uninstalling_on_windows_first_stop_only_this_installations_bundled_cli() {
+        let hooks = include_str!("../windows/hooks.nsh");
+        let body = |hook: &str| {
+            hooks
+                .split(&format!("!macro {hook}\n"))
+                .nth(1)
+                .and_then(|rest| rest.split("!macroend").next())
+                .unwrap_or_else(|| panic!("hooks.nsh has no {hook}"))
+                .to_string()
+        };
+        for hook in ["NSIS_HOOK_PREINSTALL", "NSIS_HOOK_PREUNINSTALL"] {
+            assert!(
+                body(hook).contains("!insertmacro OPENBOT_STOP_BUNDLED_CLI"),
+                "{hook}"
+            );
+        }
+        let stop = body("OPENBOT_STOP_BUNDLED_CLI");
+        assert!(
+            stop.contains(
+                r#"SetEnvironmentVariable(t, t)i ("OPENBOT_CLI_BUNDLE", "$INSTDIR\cli-bundle")"#
+            ),
+            "{stop}"
+        );
+        assert!(stop.contains("Stop-Process -Force"));
+    }
+
+    /// The text of `hooks.nsh`'s macro `name`, between `!macro name` and `!macroend`.
+    fn nsis_macro(name: &str) -> String {
+        include_str!("../windows/hooks.nsh")
+            .split(&format!("!macro {name}\n"))
+            .nth(1)
+            .and_then(|rest| rest.split("!macroend").next())
+            .unwrap_or_else(|| panic!("hooks.nsh has no {name}"))
+            .to_string()
+    }
+
+    /// The PowerShell script the bundled CLI's stop runs, as NSIS writes it (`$$` for `$`).
+    fn bundled_cli_stop_script() -> String {
+        let stop = nsis_macro("OPENBOT_STOP_BUNDLED_CLI");
+        stop.split("-Command \"")
+            .nth(1)
+            .and_then(|rest| rest.split("\"`").next())
+            .unwrap_or_else(|| panic!("no PowerShell command in {stop}"))
+            .to_string()
+    }
+
+    /// A person whose Windows profile folder has an apostrophe in it (`C:\Users\O'Brien`) has
+    /// OpenBot installed under it. Put inside the script, the folder ended the script's string
+    /// early, PowerShell refused the whole command, and the uninstaller failed on the locked
+    /// node.exe again. `[` and `]` are wildcards to `-like`. The folder reaches the script as data.
+    #[test]
+    fn the_installation_folder_reaches_the_bundled_cli_stop_as_data_not_as_script() {
+        let script = bundled_cli_stop_script();
+        assert!(!script.contains("$INSTDIR"), "{script}");
+        assert!(!script.contains("-like"), "{script}");
+        assert!(script.contains("$$env:OPENBOT_CLI_BUNDLE"), "{script}");
+    }
+
+    /// The script itself, run by PowerShell against a folder with an apostrophe and brackets in
+    /// its name: what runs from that folder's cli-bundle stops, and what runs beside it does not.
+    #[cfg(windows)]
+    #[test]
+    fn the_bundled_cli_stop_ends_only_what_runs_from_this_installations_cli_bundle() {
+        let script = bundled_cli_stop_script().replace("$$", "$");
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("hook-test-{}", std::process::id()))
+            .join("O'Brien [OpenBot]");
+        let runtime = base.join("cli-bundle").join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        let source = base.join("waiter.rs");
+        std::fs::write(
+            &source,
+            "fn main() { std::thread::sleep(std::time::Duration::from_secs(120)); }",
+        )
+        .unwrap();
+        let inside = runtime.join("node.exe");
+        let beside = base.join("node.exe");
+        crate::test_support::compile_fixture(&source, &inside);
+        std::fs::copy(&inside, &beside).unwrap();
+        let mut bundled = std::process::Command::new(&inside).spawn().unwrap();
+        let mut other = std::process::Command::new(&beside).spawn().unwrap();
+        let status = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+            ])
+            .arg(&script)
+            .env("OPENBOT_CLI_BUNDLE", base.join("cli-bundle"))
+            .status()
+            .unwrap();
+        assert!(status.success(), "{script}");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while bundled.try_wait().unwrap().is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let stopped = bundled.try_wait().unwrap().is_some();
+        let spared = other.try_wait().unwrap().is_none();
+        let _ = bundled.kill();
+        let _ = other.kill();
+        let _ = bundled.wait();
+        let _ = other.wait();
+        let _ = std::fs::remove_dir_all(base.parent().unwrap());
+        assert!(stopped, "the process under cli-bundle is still running");
+        assert!(spared, "a process outside cli-bundle was stopped");
+    }
+
     #[test]
     fn uninstalling_on_windows_removes_every_key_and_the_manifest_the_install_writes() {
         let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
@@ -1181,7 +1294,7 @@ mod tests {
     fn the_install_runs_again_after_each_wait_and_a_failure_does_not_stop_it() {
         let calls = AtomicUsize::new(0);
         let job = || {
-            if calls.fetch_add(1, Ordering::SeqCst) % 2 == 0 {
+            if calls.fetch_add(1, Ordering::SeqCst).is_multiple_of(2) {
                 Err(Problem::plain("nope"))
             } else {
                 Ok(vec![])

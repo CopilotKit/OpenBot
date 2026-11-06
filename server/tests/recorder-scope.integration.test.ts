@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type { ExchangeResponse } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
+import { IntelligenceKnowingANewThread } from "@openbot/toolkit/copilotkit/agents";
 import { count, eq, inArray } from "drizzle-orm";
 import { GATED_ROUTES, runtimeRun } from "../src/admin/gate";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
@@ -173,15 +174,17 @@ beforeAll(async () => {
       threadsFor.push(input.userId);
       throw new Error("No thread is opened in this test.");
     }),
-    // The Learning assignment asks whether the thread exists first: it does not.
-    spyOn(CopilotKitIntelligence.prototype, "getThread").mockImplementation(
-      async () => {
-        const error = new Error("Missing synthetic Thread");
-        error.name = "PlatformRequestError";
-        Object.assign(error, { status: 404 });
-        throw error;
-      },
-    ),
+    // The Learning assignment asks whether the thread exists first: it does not. Asked of the
+    // runtime's own client class, which answers that question itself (copilot.ts).
+    spyOn(
+      IntelligenceKnowingANewThread.prototype,
+      "getThread",
+    ).mockImplementation(async () => {
+      const error = new Error("Missing synthetic Thread");
+      error.name = "PlatformRequestError";
+      Object.assign(error, { status: 404 });
+      throw error;
+    }),
     // `typeof fetch` carries Bun's `preconnect` as well as the call, so the stand-in has one too.
     spyOn(globalThis, "fetch").mockImplementation(
       Object.assign(

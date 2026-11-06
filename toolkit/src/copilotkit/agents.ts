@@ -23,6 +23,7 @@ import {
   takeUntil,
 } from "rxjs";
 import { sanitizeSeededHistory } from "../history-sanitize";
+import { answersOnLastStep, type RunSteps } from "./last-step";
 import {
   type NativeRunScope,
   nativeApprovalRun,
@@ -30,11 +31,17 @@ import {
   withinNativeRun,
 } from "../native-approval";
 import { historyOrEmpty } from "../thread-history";
+import {
+  answered,
+  askPlatform,
+  bodyOf,
+  expectedRefusal,
+} from "./expected-answers";
 
 /**
  * The CopilotKit agents OpenBot runs its Bots as: a built-in Bot that will not send a broken
  * conversation, one whose tools are chosen when its run starts, a remote Bot that survives being
- * cloned, a Bot that is no longer there, and the platform client with one answer corrected.
+ * cloned, a Bot that is no longer there, and the platform client with its expected answers kept quiet.
  *
  * Moved out of the server's copilot.ts. What the server does around a run — inlining attachments,
  * watching the model connection — comes in as {@link BuiltInAgentHooks}, so nothing here imports it.
@@ -209,16 +216,28 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
    * and so one per clone: the runtime clones before every run. See `NativeRunScope`.
    */
   private readonly scope: NativeRunScope;
+  /** Where this run's steps began, so its last one is sent without tools. See `answersOnLastStep`. */
+  private readonly steps: RunSteps;
 
   constructor(
     configuration: BuiltInAgentConfiguration,
     hooks: BuiltInAgentHooks,
   ) {
     const scope = nativeRunScope();
-    super(toolsWithin(configuration, scope));
+    const steps: RunSteps = {};
+    super(toolsWithin(answersOnLastStep(configuration, steps), scope));
     this.configuration = configuration;
     this.hooks = hooks;
     this.scope = scope;
+    this.steps = steps;
+    /*
+     * The runtime names where a model is hosted from its name, for its own telemetry, and a model
+     * handed over already wrapped has no name to read. Named from the configuration it was given.
+     */
+    if (!("factory" in configuration))
+      (this as { modelHostClass: string }).modelHostClass = new BuiltInAgent({
+        model: configuration.model,
+      }).modelHostClass;
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
@@ -242,6 +261,8 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
           code: TOOL_LIMIT_EXCEEDED,
         } as BaseEvent,
       );
+    // A new run counts its steps from where it starts, never from where an earlier run stopped.
+    this.steps.before = undefined;
     const answeredByResume = new Set(
       (input.resume ?? []).map((entry) => entry.interruptId),
     );
@@ -468,39 +489,181 @@ export class UnavailableAgent extends AbstractAgent {
  * returns `Response.json` of whatever comes back, so an empty history here is the `{ messages: [] }`
  * the browser expects and a 200 instead of a 500.
  *
- * `ɵgetClientWsUrl` is the other, and only when `browserWsUrl` is given. That address is the one
+ * `getThread`, `getThreadMessages` and `ɵacquireThreadLock` also ask without the base client's
+ * print for the one answer each is expected to get (see expected-answers.ts). A conversation is
+ * opened before its thread exists, so the browser's history read and Learning's "is this thread
+ * new?" both get a 404 on every new conversation, and the base client printed each as
+ * `Intelligence platform request failed`. And a Bot's answer to another Bot goes into a
+ * conversation whose own run is often still finishing, so its lock is refused with a 409 the hop
+ * waits out (handoff-delivery.ts), which printed the same way. The 404 and the 409 are still the
+ * client's own `PlatformRequestError` (or, for the history, the empty one), just not printed;
+ * every other answer is the base client's to give and to print.
+ *
+ * `ɵgetClientWsUrl` is corrected too, and only when `browserWsUrl` is given. That address is the one
  * the runtime sends the browser in `/info`, and the browser opens it itself, so it has to be the
  * gateway as the browser can reach it. A server in a container reaches local Intelligence at
  * `host.docker.internal`, which a browser on the host cannot resolve, while the browser's
  * `localhost` is, inside the container, the container. Everything the server opens itself, the
  * runner and channel sockets, stays on `wsUrl`.
+ *
+ * `browserWsUrl` may be a path, where the server carries the socket on its own address and has no
+ * public URL to write before it: the page resolves a path against itself. The runtime also hands the
+ * same address to the Recorder in its capture pass, which is not on the page and which the runtime
+ * refuses a path for, so a path is made whole on `ownOrigin`, the server's own origin as that caller
+ * reached it, whenever the server has one it may name.
  */
 export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
   readonly #browserClientWsUrl: string | undefined;
+  readonly #ownOrigin: (() => string | undefined) | undefined;
+  readonly #lockConflictWaitMs: number;
 
   constructor(
     config: ConstructorParameters<typeof CopilotKitIntelligence>[0] & {
       browserWsUrl?: string;
+      /** The server's own origin (`http://127.0.0.1:3101`) for the request being answered, if it may be named. */
+      ownOrigin?: () => string | undefined;
+      /** How long a lock refused as retryable is asked for again. See `LOCK_CONFLICT_WAIT_MS`. */
+      lockConflictWaitMs?: number;
     },
   ) {
-    const { browserWsUrl, ...platform } = config;
+    const { browserWsUrl, ownOrigin, lockConflictWaitMs, ...platform } = config;
     super(platform);
     const browser = browserWsUrl?.trim();
     this.#browserClientWsUrl = browser ? clientSocket(browser) : undefined;
+    this.#ownOrigin = ownOrigin;
+    this.#lockConflictWaitMs = lockConflictWaitMs ?? LOCK_CONFLICT_WAIT_MS;
   }
 
   override ɵgetClientWsUrl(): string {
-    return this.#browserClientWsUrl ?? super.ɵgetClientWsUrl();
+    const address = this.#browserClientWsUrl ?? super.ɵgetClientWsUrl();
+    if (!address.startsWith("/")) return address;
+    const origin = this.#ownOrigin?.();
+    return origin ? `${origin.replace(/^http/, "ws")}${address}` : address;
   }
 
-  override getThreadMessages(
+  /** A thread, or the client's 404 for one nobody has run yet, unprinted. */
+  override async getThread(
+    params: Parameters<CopilotKitIntelligence["getThread"]>[0],
+  ): ReturnType<CopilotKitIntelligence["getThread"]> {
+    const answer = await askPlatform(this, {
+      method: "GET",
+      path: `/api/threads/${encodeURIComponent(params.threadId)}?${new URLSearchParams({ userId: params.userId })}`,
+    });
+    if (answer?.status === 404) throw expectedRefusal(answer);
+    if (answered(answer))
+      return bodyOf<{
+        thread: Awaited<ReturnType<CopilotKitIntelligence["getThread"]>>;
+      }>(answer).thread;
+    return super.getThread(params);
+  }
+
+  /** A thread's history, and none at all for a thread nobody has run yet, without printing its 404. */
+  override async getThreadMessages(
     params: Parameters<CopilotKitIntelligence["getThreadMessages"]>[0],
-  ) {
+  ): ReturnType<CopilotKitIntelligence["getThreadMessages"]> {
+    const answer = await askPlatform(this, {
+      method: "GET",
+      path: `/api/threads/${encodeURIComponent(params.threadId)}/messages?${new URLSearchParams({ userId: params.userId })}`,
+      ...(params.channelDeliveryId
+        ? {
+            headers: { "X-Cpki-Channel-Delivery-Id": params.channelDeliveryId },
+          }
+        : {}),
+    });
+    if (answer?.status === 404) return { messages: [] };
+    if (answered(answer))
+      return bodyOf<
+        Awaited<ReturnType<CopilotKitIntelligence["getThreadMessages"]>>
+      >(answer);
     return historyOrEmpty(() => super.getThreadMessages(params), {
       messages: [],
     });
   }
+
+  /**
+   * A conversation's run lock, or the client's 409 for one somebody is running in, unprinted.
+   *
+   * The body is the base client's, field for field: what the runtime's own runs send and what a
+   * hop sends must be the same request, and a test sends both and compares them.
+   *
+   * A REFUSAL THE PLATFORM CALLS RETRYABLE IS ASKED AGAIN, for a few seconds, before it is given
+   * back. A Bot's computer tools run in the browser, so each command ends the run and the browser
+   * starts the next one with the result at once, while the platform is still letting go of the
+   * run before: that follow-up was refused (THREAD_LOCK_FAILED, retryable), the runtime answered
+   * the browser 409, and the browser stopped there, a command short and with no answer. The base
+   * client gives the refusal back at once and always did; the run before usually let go in time.
+   */
+  override async ɵacquireThreadLock(
+    params: Parameters<CopilotKitIntelligence["ɵacquireThreadLock"]>[0],
+  ): ReturnType<CopilotKitIntelligence["ɵacquireThreadLock"]> {
+    const giveUpAt = Date.now() + this.#lockConflictWaitMs;
+    let delayMs = LOCK_CONFLICT_RETRY_FIRST_MS;
+    for (;;) {
+      const answer = await this.#askForLock(params);
+      if (answer?.status === 409) {
+        const left = giveUpAt - Date.now();
+        const refusal = expectedRefusal(answer);
+        if (refusal.retryable !== true || left <= 0) throw refusal;
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(delayMs, left)),
+        );
+        delayMs = Math.min(delayMs * 2, LOCK_CONFLICT_RETRY_MAX_MS);
+        continue;
+      }
+      if (answered(answer))
+        return bodyOf<
+          Awaited<ReturnType<CopilotKitIntelligence["ɵacquireThreadLock"]>>
+        >(answer);
+      return super.ɵacquireThreadLock(params);
+    }
+  }
+
+  /** The base client's lock request, unprinted. */
+  #askForLock(
+    params: Parameters<CopilotKitIntelligence["ɵacquireThreadLock"]>[0],
+  ) {
+    return askPlatform(this, {
+      method: "POST",
+      path: `/api/threads/${encodeURIComponent(params.threadId)}/lock`,
+      body: {
+        runId: params.runId,
+        userId: params.userId,
+        agentId: params.agentId,
+        ...(params.supportsBackendThreadId === undefined
+          ? {}
+          : { supportsBackendThreadId: params.supportsBackendThreadId }),
+        ...(params.learningContainerId !== undefined
+          ? { learningContainerId: params.learningContainerId }
+          : {}),
+        ...(params.requestId !== undefined
+          ? { requestId: params.requestId }
+          : {}),
+        ...(params.lockKeyPrefix !== undefined
+          ? { lockKeyPrefix: params.lockKeyPrefix }
+          : {}),
+        ...(params.ttlSeconds !== undefined
+          ? { ttlSeconds: params.ttlSeconds }
+          : {}),
+      },
+      ...(params.channelDeliveryId
+        ? {
+            headers: { "X-Cpki-Channel-Delivery-Id": params.channelDeliveryId },
+          }
+        : {}),
+    });
+  }
 }
+
+/**
+ * How long a lock refused as retryable is asked for again before the refusal is given back.
+ *
+ * Long enough for the platform to let go of the run before (well under a second when it was seen),
+ * short enough that a conversation somebody is genuinely running in is refused about as promptly as
+ * before. The first look again is quick, then doubling to the cap.
+ */
+const LOCK_CONFLICT_WAIT_MS = 5_000;
+const LOCK_CONFLICT_RETRY_FIRST_MS = 100;
+const LOCK_CONFLICT_RETRY_MAX_MS = 1_000;
 
 /**
  * The gateway's client socket, from any of the three addresses the platform names it by.

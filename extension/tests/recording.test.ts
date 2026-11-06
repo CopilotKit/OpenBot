@@ -2301,6 +2301,73 @@ test("a discard the document could not be sent still lets the live recording's e
 
 // ---- Disconnect ------------------------------------------------------------------------------
 
+test("Stop on the recording mark, answered Save, ends the recording as the popup's Stop does", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const recordingId = await record();
+  const top = contentPort(7, 0);
+  top.postMessage({ type: "content.event", event: event("click", { i: 0 }) });
+  await until(async () => (await state()).actions === 1, "one action");
+  top.postMessage({ type: "content.stop", save: true });
+  await until(
+    () => sentToDocument("offscreen.stop").length === 1,
+    "offscreen.stop",
+  );
+  expect(sentToDocument("offscreen.stop")[0]).toEqual({
+    type: "offscreen.stop",
+    outcome: "succeeded",
+  });
+  expect(sentToDocument("offscreen.discard")).toEqual([]);
+  doc?.postMessage({ type: "offscreen.stopped", recordingId });
+  await until(async () => (await state()).phase === "idle", "stopped");
+  expect((await state()).lastStopped).toMatchObject({
+    recordingId,
+    actions: 1,
+  });
+  expect((await state()).lastStopped?.discarded).toBeUndefined();
+});
+
+test("Stop on the recording mark, answered Discard, ends the recording failed and clears what it had not sent", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const recordingId = await record();
+  const top = contentPort(7, 0);
+  // The document is closed once nothing is left for it to send: what it was told is read from the one that was open.
+  const document = doc;
+  top.postMessage({ type: "content.stop", save: false });
+  await until(
+    () => sentToDocument("offscreen.discard", document).length === 1,
+    "offscreen.discard",
+  );
+  // What it streamed live is in Intelligence already: its outcome says the person discarded it.
+  expect(sentToDocument("offscreen.stop", document).at(-1)).toEqual({
+    type: "offscreen.stop",
+    outcome: "failed",
+    reason: "discarded",
+  });
+  expect(sentToDocument("offscreen.discard", document)[0]).toEqual({
+    type: "offscreen.discard",
+    recordingIds: [recordingId],
+  });
+  await until(async () => (await state()).phase === "idle", "stopped");
+  expect(drains()).toEqual([]);
+  // Named, so OpenBot says it was discarded rather than saved; the connection stays.
+  expect((await state()).lastStopped).toMatchObject({
+    recordingId,
+    discarded: true,
+  });
+  expect((await state()).error).toBeUndefined();
+  expect(storedConnection()).toBeDefined();
+});
+
+test("a frame inside the page cannot stop the recording from a mark it does not have", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  await record();
+  const frame = contentPort(7, 3);
+  frame.postMessage({ type: "content.stop", save: false });
+  await settle();
+  expect(sentToDocument("offscreen.stop")).toEqual([]);
+  expect((await state()).phase).toBe("recording");
+});
+
 test("Disconnect discards the kept recordings and the one recording, and nothing else does", async () => {
   fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
   const first = await record();

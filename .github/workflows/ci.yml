@@ -142,7 +142,7 @@ jobs:
           tests/webrtc-proxy.test.ts tests/web-bot-auth-browser.test.ts
           tests/handoff-page-restore.test.ts tests/enter-text.test.ts tests/person-browser.test.ts tests/person-browser-computer.test.ts
           tests/bot-browser.test.ts tests/bot-browser-computer.test.ts
-          tests/screencast-keys-browser.test.ts tests/browser-memory.test.ts
+          tests/screencast-keys-browser.test.ts tests/screencast-pacing-browser.test.ts tests/browser-memory.test.ts
         working-directory: agent-computer
         env:
           OPENBOT_COMPUTER_BROWSER: '1'
@@ -166,7 +166,7 @@ jobs:
       # One red target must not hide whether another is red too.
       fail-fast: false
       matrix:
-        target: [self-hosted, eks, eks-sandbox, gke, aks]
+        target: [vanilla, self-hosted, eks, eks-sandbox, gke, aks]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -203,6 +203,16 @@ jobs:
       # question: every secret key a container demands has to be one the chart actually writes.
       # Getting that wrong is invisible until a pod starts, and every shipped target had it wrong.
       - run: bun scripts/check-rendered-chart.ts rendered.yaml
+      # The README's vanilla secrets file is the licence and the model key and nothing else: with the
+      # bundled database the chart generates the rest. Rendered without a key encryption key, and held
+      # to the same coherence check, so that stays true.
+      - name: Renders from the licence and the model key alone
+        if: matrix.target == 'vanilla'
+        run: |
+          helm template ci charts/openbot \
+            --values charts/openbot/ci/vanilla-values.yaml \
+            > rendered-generated.yaml
+          bun scripts/check-rendered-chart.ts rendered-generated.yaml
       # No target names a Learning credential, so the setup Job renders nowhere above. Render it with
       # one of each, and hold it to the same coherence check.
       - name: Learning setup Job renders
@@ -292,6 +302,24 @@ jobs:
             --set-string config.push.projectId=not-a-uuid
           refuses "a delivery public URL that is not http(s)" \
             --set-string config.deliveryPublicUrl=hooks.example.com
+          # The bundled Intelligence beside one somebody named, and without the licence a self-hosted
+          # Intelligence needs. Armed only on targets that bundle it.
+          if ! grep -qE '^ *enabled: false' <(sed -n '/^intelligence:/,/^[a-z]/p' charts/openbot/ci/${{ matrix.target }}-values.yaml); then
+            refuses "the bundled Intelligence beside an Intelligence address of your own" \
+              --set-string config.intelligence.apiUrl=https://api.intelligence.copilotkit.ai
+            refuses "the bundled Intelligence with no licence for it" \
+              --set-string secrets.licenseToken= \
+              --set-string intelligence.appApi.licenseSecret.existingSecret=openbot-intel-license
+            refuses "the bundled Intelligence with no project key for OpenBot" \
+              --set intelligence.bootstrap.projects=null
+          else
+            echo "skipped: the bundled-Intelligence refusals are armed only where the target bundles it"
+            refuses "no Intelligence at all" \
+              --set-string config.intelligence.apiUrl= --set-string config.intelligence.gatewayWsUrl=
+          fi
+          # A release from before the bundled Intelligence, upgraded with --reuse-values: refused by
+          # name rather than installing a second Intelligence on that chart's bare defaults.
+          refuses "a release with no intelligence.enabled" --set intelligence=null
           # A warm pool nothing claims from. Only meaningful where the target asks for per-Bot
           # computers; on the others the mode is not sandbox and the refusal is not armed.
           if grep -qE '^ *mode: sandbox' charts/openbot/ci/${{ matrix.target }}-values.yaml; then
@@ -754,8 +782,39 @@ jobs:
 
           [ "$failed" -eq 0 ] || exit 1
           echo "pwuser cannot reach KEY_ENCRYPTION_KEY, run anything as root but a package install, or change /app"
+      # A Bot's computer, run the way the chart runs it: as 1001, with the command overridden to the
+      # browser process alone (charts/openbot/templates/computer/statefulset.yaml), which starts its
+      # own X display. What that prints at start is in every install's logs, so it must be the
+      # computer's own lines: the X server once said `_XSERVTransmkdir: ERROR` there on every start,
+      # and xkbcomp a warning for each of seventeen keysyms, though the display worked.
+      - name: A Bot's computer starts as the chart runs it, with nothing from the X server
+        run: |
+          set -euo pipefail
+          docker run -d --name openbot-ci-computer --user 1001 \
+            -e PORT=4100 -e WORKSPACE_DIR=/workspace -e PROFILES_DIR=/profiles \
+            -e HOME=/home/pwuser -e BUN_INSTALL=/home/pwuser/.bun \
+            -e COMPUTER_TOKEN=ci-not-a-real-token -e COMPUTER_SEPARATE_WORKSPACES=on \
+            --entrypoint /usr/local/bin/bun openbot:ci /app/agent-computer/src/index.ts
+          for attempt in $(seq 1 60); do
+            if docker logs openbot-ci-computer 2>&1 | grep -q "agent-computer listening"; then
+              break
+            fi
+            if [ -z "$(docker ps -q -f name=openbot-ci-computer)" ] || [ "$attempt" -eq 60 ]; then
+              echo "::error::The computer did not start."
+              docker logs openbot-ci-computer
+              exit 1
+            fi
+            sleep 1
+          done
+          logs="$(docker logs openbot-ci-computer 2>&1)"
+          if printf '%s\n' "$logs" | grep -Eq '_XSERVTrans|xkbcomp|Could not resolve keysym|ERROR'; then
+            echo "::error::The X server printed at the computer's start."
+            printf '%s\n' "$logs"
+            exit 1
+          fi
+          echo "the computer started headed as 1001 with nothing from the X server"
       - if: always()
-        run: docker rm -f openbot-ci >/dev/null 2>&1 || true
+        run: docker rm -f openbot-ci openbot-ci-computer >/dev/null 2>&1 || true
 
   # The five images the release publishes alongside the one above. Nothing else here builds them:
   # they are built by `docker compose up --build`, which only the smoke journey runs and which

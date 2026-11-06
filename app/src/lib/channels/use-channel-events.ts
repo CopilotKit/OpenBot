@@ -80,6 +80,8 @@ export type ChannelActivityEvent = {
   lastMessageAgentId: string | null;
   /** The channel's newly written summary. Absent on an ordinary activity event. */
   summary?: string;
+  /** A person's first words, newly written: the row's name until its summary. Absent otherwise. */
+  opening?: string;
   /** The channel is gone from every member's roster. Absent on an ordinary activity event. */
   deleted?: true;
   /**
@@ -161,6 +163,19 @@ export function applyChannelEvent(
     if (previous.summary === activity.summary) return data;
     const channels = page.channels.slice();
     channels[index] = { ...previous, summary: activity.summary };
+    const pages = data.pages.slice();
+    pages[holdingPage] = { ...page, channels };
+    return { ...data, pages };
+  }
+
+  /*
+   * An opening patches the one field too, for the same reason. It can come from a person's message
+   * the server found stale as the last message, so the spread below would carry nulls onto the row.
+   */
+  if (activity.opening !== undefined) {
+    if (previous.opening === activity.opening) return data;
+    const channels = page.channels.slice();
+    channels[index] = { ...previous, opening: activity.opening };
     const pages = data.pages.slice();
     pages[holdingPage] = { ...page, channels };
     return { ...data, pages };

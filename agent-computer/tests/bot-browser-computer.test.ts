@@ -2,6 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
+import type { BotBrowserState } from "../../shared/bot-browser";
+import type { ComputerControlState } from "../../shared/computer-control";
+import type { LauncherConnection } from "../../shared/openbot-browser";
 import type { MiddlewareHandler } from "hono";
 import type { AuditEventInput, AuditStore } from "../../server/src/audit";
 import type {
@@ -12,9 +16,6 @@ import { createComputerGateway } from "../../server/src/computer/gateway";
 import type { PolicyStore } from "../../server/src/computer/policy-store";
 import type { ComputerProvider } from "../../server/src/computer/provider";
 import { createComputerRoutes } from "../../server/src/computer/routes";
-import type { BotBrowserState } from "../../shared/bot-browser";
-import type { ComputerControlState } from "../../shared/computer-control";
-import type { LauncherConnection } from "../../shared/openbot-browser";
 import {
   NOT_ITS_OWN_COMPUTER,
   NOT_ITS_OWN_COMPUTER_RECORD,
@@ -55,23 +56,11 @@ let root = "";
 let site: ReturnType<typeof Bun.serve> | undefined;
 let origin = "";
 
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: () => new Response(),
-  });
-  const { port } = probe;
-  await probe.stop(true);
-  if (port === undefined) throw new Error("The port probe did not listen.");
-  return port;
-}
-
 async function startComputer(
   name: string,
   env: Record<string, string>,
 ): Promise<Computer> {
-  const port = await freePort();
+  const port = await reservePort();
   const base = `http://127.0.0.1:${port}`;
   const child = Bun.spawn([process.execPath, "src/index.ts"], {
     cwd: join(import.meta.dir, ".."),

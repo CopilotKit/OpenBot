@@ -21,7 +21,7 @@ import { REFUSAL_MARKER } from "../plugins/tools";
 import { createPrivateShareCheck } from "../proactive/private-share";
 import { createWorkQueue } from "../work/queue";
 import { type RunAssertion, readRunAssertion } from "./callback-token";
-import type { HandoffDesk } from "./handoff";
+import { type HandoffDesk, resolveAddressedBot } from "./handoff";
 import {
   authoriseCoordinationRun,
   createCoordinationTools,
@@ -85,21 +85,15 @@ export function wireCoordination(deps: {
     approvalGate: approvalService.gate,
     privateShare: {
       check: createPrivateShareCheck({ approvals: approvalService.store }),
-      // Resolved the way the desk resolves it: an id wins, then a single visible name. Null for the
-      // owner's own Bot or a deployment Bot, since nobody else reads that work.
+      // Resolved by the same function the desk resolves it with, so a loosely named Bot (the
+      // Knowledge Bot) is the same Bot here as there. Null for the owner's own Bot or a deployment
+      // Bot, since nobody else reads that work, and for a name the desk will refuse anyway.
       audienceFor: async (from, target) => {
         const roster = await agentProfileStore.list(
           await actorFor(from.actorId),
         );
-        const wanted = target.trim().toLowerCase();
-        const found =
-          roster.find((candidate) => candidate.id.toLowerCase() === wanted) ??
-          roster.find(
-            (candidate) =>
-              !candidate.hidden &&
-              candidate.deletedAt === null &&
-              candidate.name.toLowerCase() === wanted,
-          );
+        const resolved = resolveAddressedBot(roster, target);
+        const found = resolved.kind === "found" ? resolved.bot : undefined;
         if (!found?.ownerUserId || found.ownerUserId === from.actorId)
           return null;
         return {
@@ -138,6 +132,23 @@ export function wireCoordination(deps: {
       },
     },
     botsReachableFrom: (botId) => pluginStore.botsReachableFrom(botId),
+    // The Bots it may ask, by name, for the tool's own schema: granted, and visible to the person.
+    addressableBots: async (from) => {
+      const granted = new Set(
+        await pluginStore.botsReachableFrom(from.botId).catch(() => []),
+      );
+      if (granted.size === 0) return [];
+      const roster = await agentProfileStore.list(await actorFor(from.actorId));
+      return roster
+        .filter(
+          (bot) =>
+            granted.has(bot.id) &&
+            bot.id !== from.botId &&
+            !bot.hidden &&
+            bot.deletedAt === null,
+        )
+        .map((bot) => ({ id: bot.id, name: bot.name }));
+    },
     auditStore: bootAuditStore,
     authoriseRun: (run) =>
       authoriseCoordinationRun(run, {
@@ -182,6 +193,7 @@ export function wireCoordination(deps: {
           args: {
             question: question.question,
             ...(question.why ? { why: question.why } : {}),
+            ...(question.parts ? { parts: question.parts } : {}),
           },
         },
       });

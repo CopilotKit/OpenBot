@@ -195,7 +195,7 @@ export type PersonalSkillSources = {
   /** Everyone's opened Skills, from the in-memory index (learning/sharing.ts), never read per person per run. */
   openSkills(): Promise<readonly OpenSkillSource[]>;
   /**
-   * Whether an administrator lets people open their Skills to every Bot (Admin, Enterprise controls, Skill sharing).
+   * Whether an administrator lets people open their Skills to every Bot (Admin, Automatic learning, Skill sharing).
    * Asked on every run, before the index: while it is off, a Skill somebody opened reaches no other person's Bot, and
    * their choice is kept for when it is on again. A gate that cannot be read counts as off.
    */
@@ -245,6 +245,8 @@ export function createLearningRuntime(options: {
   const refusedUntil = new Map<string, number>();
   /** One log line per container per refusal window, so a missing space does not write a line per run. */
   const warned = new Map<string, number>();
+  /** People whose own space was not there yet, said once each. */
+  const notMadeYet = new Set<string>();
 
   /**
    * A person's or an opened space's snapshot, or undefined. FAILS SOFT: whatever goes wrong (the space is missing,
@@ -254,6 +256,8 @@ export function createLearningRuntime(options: {
   const softSnapshot = async (
     containerId: string,
     signal?: AbortSignal,
+    /** The run's own person's space, which may not have been made yet; an opened one was. */
+    own = false,
   ): Promise<VerifiedSnapshot | undefined> => {
     if ((refusedUntil.get(containerId) ?? 0) > now()) return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -267,12 +271,31 @@ export function createLearningRuntime(options: {
     } catch (error) {
       if (signal?.aborted) return undefined;
       refusedUntil.set(containerId, now() + PERSONAL_RETRY_MS);
+      const code =
+        error !== null && typeof error === "object" && "code" in error
+          ? String((error as { code: unknown }).code)
+          : "";
+      /*
+       * A person's own space is made when they first connect a browser to record with
+       * (learning/personal-space.ts, docs/automatic-learning.md), so somebody who never has has none,
+       * and that is how it is meant to be rather than a fault. Said once, as information; looked
+       * for again on the same minute's rhythm, so a space made later is picked up.
+       */
+      if (own && code === "CONTAINER_NOT_FOUND") {
+        if (!notMadeYet.has(containerId)) {
+          notMadeYet.add(containerId);
+          console.info(
+            JSON.stringify({
+              type: "learning-personal-space-not-made",
+              containerId,
+              note: "This person has no Learning space of their own yet. It is made when they connect a browser to record with; until then their runs go on without it.",
+            }),
+          );
+        }
+        return undefined;
+      }
       if ((warned.get(containerId) ?? 0) <= now()) {
         warned.set(containerId, now() + PERSONAL_RETRY_MS);
-        const code =
-          error !== null && typeof error === "object" && "code" in error
-            ? String((error as { code: unknown }).code)
-            : "";
         console.warn(
           JSON.stringify({
             type: "learning-personal-skills-unavailable",
@@ -301,7 +324,7 @@ export function createLearningRuntime(options: {
     }
     const others = sources.filter((source) => source.userId !== userId);
     const [own, ...opened] = await Promise.all([
-      softSnapshot(people.containerFor(userId), signal),
+      softSnapshot(people.containerFor(userId), signal, true),
       ...others.map((source) => softSnapshot(source.containerId, signal)),
     ]);
     return {
@@ -450,9 +473,6 @@ export function createLearningRuntime(options: {
         ...(status?.lastError ? { error: status.lastError } : {}),
       };
     },
-    inspect: (
-      input: Parameters<CopilotKitIntelligence["getInspectorLearning"]>[0],
-    ) => client.getInspectorLearning(input),
   };
 }
 export type LearningRuntime = ReturnType<typeof createLearningRuntime>;

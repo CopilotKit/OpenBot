@@ -11,7 +11,7 @@ import { ExternalLink } from "./ExternalLink";
 export type Problem = {
   said: string;
   detail?: string | null;
-  connection?: "model" | "intelligence" | "organization" | null;
+  connection?: "model" | "intelligence" | "installation" | null;
   database_reset?: string | null;
   /** Every volume a confirmed fresh-install reset removes, the database included. */
   leftover_reset?: string[] | null;
@@ -42,7 +42,7 @@ function SetupHelp() {
 export function Failure({ problem }: { problem: Problem }) {
   return (
     <div className="blocker" role="alert">
-      <h2>That did not finish</h2>
+      <h2>That didn’t finish</h2>
       <p>{problem.said}</p>
       {/* The real output, kept but not the headline. Whoever is debugging opens this; the person
           reading the sentence above never has to. */}
@@ -66,7 +66,7 @@ export function Failure({ problem }: { problem: Problem }) {
  */
 export function InlineFailure({ problem }: { problem: Problem }) {
   return (
-    <div role="alert">
+    <div className="inline-failure" role="alert">
       <p className="caution">{problem.said}</p>
       {problem.detail && (
         <details className="detail-of">

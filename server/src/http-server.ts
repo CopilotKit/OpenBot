@@ -10,6 +10,14 @@ import type { ComputerGateway } from "./computer/gateway";
 import { streamPathBotId } from "./computer/stream-path";
 import type { DeploymentConfig } from "./config";
 import {
+  closeGatewaySocket,
+  type GatewaySocketData,
+  gatewayClientSocketUrl,
+  gatewaySocketMessage,
+  isIntelligenceClientSocketPath,
+  openGatewaySocket,
+} from "./intelligence-gateway-proxy";
+import {
   CROSS_SITE_REFUSAL,
   crossSiteRequest,
   type FrontDoorBindings,
@@ -32,30 +40,99 @@ type StreamData = {
   inward?: WebSocket;
   /** Input that arrived before the socket to the computer had opened, sent once it does. */
   early?: string[];
-  /** The computer counts the frames the screen confirms. */
+  /** The computer counts the frames the screen confirms (it said so in its hello). */
   confirms?: boolean;
+  /** The person's screen has confirmed a frame, so it confirms every frame it receives. */
+  viewerConfirms?: boolean;
+  /** Frames let go before the screen had confirmed one, not yet said to the computer. See `frameLetGo`. */
+  unsaidConfirms?: number;
+  /** The newest frame not sent yet, because the browser was still receiving the ones before it. */
+  heldFrame?: string;
+  /** Looks again for room for `heldFrame`; see `sendHeldFrame`. */
+  heldRetry?: ReturnType<typeof setTimeout>;
 };
 
 /**
- * Bun takes exactly one WebSocket handler for the server, and two features need one: the app proxies
- * the computer stream, and it pushes channel activity through Hono's adapter. So this one
- * dispatches on what the upgrade attached, a proxy socket carries `upstream`, a Hono socket does
- * not, rather than either feature quietly taking the slot and breaking the other on connect.
+ * Bun takes exactly one WebSocket handler for the server, and three features need one: the app
+ * proxies the computer stream and the Intelligence gateway's client socket, and it pushes channel
+ * activity through Hono's adapter. So this one dispatches on what the upgrade attached, a stream
+ * carries `upstream`, a gateway socket `gatewayUpstream`, and a Hono socket neither, rather than any
+ * feature quietly taking the slot and breaking the others on connect.
  */
 type ChannelSocket = Parameters<typeof channelSocket.open>[0];
-type SocketData = StreamData | ChannelSocket["data"];
+type SocketData = StreamData | GatewaySocketData | ChannelSocket["data"];
 
 /** How every screencast frame from the computer starts: `JSON.stringify({ type: "frame", ... })`. */
 const FRAME_PREFIX = '{"type":"frame"';
 
-/** What a person's screen sends as a frame reaches it; the proxy says it for a frame it dropped. */
+/** What a person's screen sends as a frame reaches it; the proxy says it for a frame it let go. */
 const FRAME_RECEIVED = '{"type":"frame-received"}';
 
 /** How many inputs are held while the socket to the computer opens. A person, not a script, fills it. */
 const EARLY_INPUT_LIMIT = 256;
 
-/** How much may sit unsent to a person's browser before a new frame is dropped: about one frame. */
+/** How much may sit unsent to a person's browser before a new frame is held back: about one frame. */
 const STREAM_BUFFER_LIMIT = 128 * 1024;
+
+/** How often a held frame looks again for room, besides when Bun says the socket drained. */
+const HELD_FRAME_RETRY_MS = 50;
+
+type HeldFrameSocket = {
+  data: StreamData;
+  getBufferedAmount(): number;
+  send(message: string): unknown;
+};
+
+/**
+ * Send the frame held for this browser, once the frames ahead of it have gone.
+ *
+ * Held, not dropped. The frame that arrives while the browser is still receiving is often the last one
+ * the page makes, and Chrome sends nothing more for a page that has gone still: dropped, the screen
+ * stayed on the page as it was a moment before it stopped, for as long as it stayed still.
+ *
+ * Bun's `drain` is the quick way to hear there is room, and not the only one: a frame sent from inside
+ * `drain` that did not fit was, about one time in twenty, followed by no further `drain` at all, and
+ * the held frame waited for ever. So while one is held, the socket is also looked at again shortly.
+ */
+function sendHeldFrame(ws: HeldFrameSocket) {
+  const held = ws.data.heldFrame;
+  if (held === undefined) return;
+  if (ws.getBufferedAmount() > STREAM_BUFFER_LIMIT) {
+    ws.data.heldRetry ??= setTimeout(() => {
+      ws.data.heldRetry = undefined;
+      sendHeldFrame(ws);
+    }, HELD_FRAME_RETRY_MS);
+    return;
+  }
+  clearTimeout(ws.data.heldRetry);
+  ws.data.heldRetry = undefined;
+  ws.data.heldFrame = undefined;
+  try {
+    ws.send(held);
+  } catch {
+    ws.data.inward?.close();
+  }
+}
+
+/**
+ * A frame let go because a newer one replaced it while it was held, said as received to a computer
+ * that counts the frames on their way, so it does not wait on one that is never coming.
+ *
+ * Only once the person's screen has itself confirmed a frame. The computer starts counting at the
+ * first confirmation it hears, and a screen loaded before confirmations existed never sends one: told
+ * of a let-go frame on its behalf, the computer counted frames that screen would never confirm and
+ * fell to one frame every two seconds. Those let go before then are kept count of and said right
+ * after the screen's first confirmation, so the computer's count still comes out exact.
+ */
+function frameLetGo(stream: StreamData) {
+  if (!stream.confirms) return;
+  if (!stream.viewerConfirms) {
+    stream.unsaidConfirms = (stream.unsaidConfirms ?? 0) + 1;
+    return;
+  }
+  if (stream.inward?.readyState === WebSocket.OPEN)
+    stream.inward.send(FRAME_RECEIVED);
+}
 
 export function startHttpServer(deps: {
   port: number;
@@ -110,6 +187,11 @@ export function startHttpServer(deps: {
   const isProxiedStream = (data: SocketData): data is StreamData =>
     typeof (data as StreamData).upstream === "string";
 
+  const isGatewaySocket = (data: SocketData): data is GatewaySocketData =>
+    typeof (data as GatewaySocketData).gatewayUpstream === "string";
+
+  const intelligence = config.runtime?.intelligence;
+
   // Hono owns the socket's data once it has upgraded it; this hands its own back to it.
   const asChannelSocket = (ws: { data: SocketData }) =>
     ws as unknown as ChannelSocket;
@@ -150,6 +232,35 @@ export function startHttpServer(deps: {
         browserRequestSeconds(url.pathname) ??
         botBrowserRequestSeconds(url.pathname);
       if (browserSeconds !== undefined) server.timeout(request, browserSeconds);
+      /*
+       * The Intelligence gateway's client socket, when this server carries it
+       * (intelligence-gateway-proxy.ts). Behind the same doors as the live screen: a single-user
+       * deployment admits only who it admits, and a socket needs a session, applied here by hand
+       * because middleware does not run on an upgrade. The gateway then checks the join token itself.
+       */
+      if (
+        intelligence?.gatewayProxy &&
+        isIntelligenceClientSocketPath(url.pathname) &&
+        isWebSocketUpgrade(request.headers)
+      ) {
+        const notHere = config.singleUser
+          ? singleUserRefusal(request, caller, config.singleUserAccess)
+          : null;
+        if (notHere) return new Response(notHere, { status: 403 });
+        const actor = await resolveRequestActor(request).catch(() => null);
+        if (!actor) return new Response("Sign in first.", { status: 401 });
+        const data: GatewaySocketData = {
+          gatewayUpstream: gatewayClientSocketUrl(
+            intelligence.gatewayWsUrl,
+            url,
+          ),
+          pending: [],
+        };
+        if (server.upgrade(request, { data })) {
+          return undefined as unknown as Response;
+        }
+        return new Response("Expected a WebSocket upgrade.", { status: 400 });
+      }
       const streamBotId = streamPathBotId(url.pathname);
       if (
         streamBotId !== null &&
@@ -228,6 +339,10 @@ export function startHttpServer(deps: {
     },
     websocket: {
       open(ws) {
+        if (isGatewaySocket(ws.data)) {
+          openGatewaySocket(ws as typeof ws & { data: GatewaySocketData });
+          return;
+        }
         if (!isProxiedStream(ws.data)) {
           channelSocket.open(asChannelSocket(ws));
           return;
@@ -235,24 +350,20 @@ export function startHttpServer(deps: {
         const stream = ws.data;
         const inward = new WebSocket(stream.upstream);
         stream.inward = inward;
-        // Frames outward, input inward. A frame the browser is too slow for is dropped, not queued,
-        // because a stale frame is worse than a missing one. Bun queues whatever `send` cannot write
-        // yet, so the drop has to be decided here: while the frames before it are still going out, a
-        // new one is let go and the next one Chrome sends, the page as it is by then, takes its place.
-        // Anything that is not a frame, such as an error the person has to read, always goes.
+        // Frames outward, input inward. A frame the browser is too slow for is not queued, because a
+        // stale frame is worse than a late one. Bun queues whatever `send` cannot write yet, so that is
+        // decided here: while the frames before it are still going out, a new one is held, a newer one
+        // replaces it, and the newest goes when there is room (`drain` below). Anything that is not a
+        // frame, such as an error the person has to read, always goes at once.
         inward.onmessage = (event) => {
           const message = String(event.data);
-          // Only a computer that said it counts confirmations is sent one for a dropped frame.
+          // Only a computer that said it counts confirmations is sent one for a frame let go.
           if (message.startsWith('{"type":"hello"'))
             stream.confirms = message.includes('"confirmFrames":true');
-          if (
-            message.startsWith(FRAME_PREFIX) &&
-            ws.getBufferedAmount() > STREAM_BUFFER_LIMIT
-          ) {
-            // Said as received, so a computer counting the frames on their way does not wait on one
-            // that is never coming. A computer that is not counting ignores it.
-            if (stream.confirms && inward.readyState === WebSocket.OPEN)
-              inward.send(FRAME_RECEIVED);
+          if (message.startsWith(FRAME_PREFIX)) {
+            if (stream.heldFrame !== undefined) frameLetGo(stream);
+            stream.heldFrame = message;
+            sendHeldFrame(ws as typeof ws & { data: StreamData });
             return;
           }
           try {
@@ -269,25 +380,58 @@ export function startHttpServer(deps: {
         inward.onerror = () => ws.close();
       },
       message(ws, raw) {
+        if (isGatewaySocket(ws.data)) {
+          gatewaySocketMessage(
+            ws as typeof ws & { data: GatewaySocketData },
+            raw,
+          );
+          return;
+        }
         if (!isProxiedStream(ws.data)) {
           channelSocket.message(asChannelSocket(ws), raw);
           return;
         }
-        const inward = ws.data.inward;
+        const stream = ws.data;
+        const inward = stream.inward;
+        const message = String(raw);
         // A click made the moment the screen appeared used to be lost here, before the socket to the
         // computer had finished opening. Held until it has, in order, and only that long.
         if (inward?.readyState === WebSocket.CONNECTING) {
-          if ((ws.data.early?.length ?? 0) < EARLY_INPUT_LIMIT)
-            ws.data.early = [...(ws.data.early ?? []), String(raw)];
+          stream.early ??= [];
+          if (stream.early.length < EARLY_INPUT_LIMIT)
+            stream.early.push(message);
           return;
         }
-        if (inward?.readyState === WebSocket.OPEN) inward.send(String(raw));
+        if (inward?.readyState !== WebSocket.OPEN) return;
+        inward.send(message);
+        // The screen's first confirmation: the frames let go before it can be said now. See `frameLetGo`.
+        if (message === FRAME_RECEIVED && !stream.viewerConfirms) {
+          stream.viewerConfirms = true;
+          for (let i = 0; i < (stream.unsaidConfirms ?? 0); i += 1)
+            inward.send(FRAME_RECEIVED);
+          stream.unsaidConfirms = undefined;
+        }
+      },
+      /** Room to the browser again: the frame held while it was busy goes now. */
+      drain(ws) {
+        if (isProxiedStream(ws.data))
+          sendHeldFrame(ws as typeof ws & { data: StreamData });
       },
       close(ws, code, reason) {
+        if (isGatewaySocket(ws.data)) {
+          closeGatewaySocket(
+            ws as typeof ws & { data: GatewaySocketData },
+            code,
+            reason,
+          );
+          return;
+        }
         if (!isProxiedStream(ws.data)) {
           channelSocket.close(asChannelSocket(ws), code, reason);
           return;
         }
+        clearTimeout(ws.data.heldRetry);
+        ws.data.heldFrame = undefined;
         ws.data.inward?.close();
       },
     },

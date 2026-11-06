@@ -21,10 +21,12 @@ import {
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { navigationRender } from "@/components/edition/team-features-dialog";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -148,7 +150,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
             <LinkRow
               icon={item.icon}
               key={item.id}
-              render={<Link onClick={onClose} to={item.to} />}
+              render={navigationRender(item, { onClick: onClose })}
               tint={item.section === "account" ? "plain" : "sky"}
               title={item.label}
             />
@@ -196,9 +198,7 @@ function ConversationRow({
   const unread = isUnread(channel, openId);
   const busy = channel.busy || (channel.work?.length ?? 0) > 0;
   const title =
-    channel.summary?.trim() ||
-    channel.lastMessage?.trim() ||
-    "New conversation";
+    channel.summary?.trim() || untitledLine(channel) || "New conversation";
   const who = group
     ? channel.agentIds
         .map((id) => agents.data?.find((agent) => agent.id === id)?.name)

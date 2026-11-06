@@ -24,15 +24,27 @@ describe("naming a tool call", () => {
       label: "Read web pages",
     });
     // Only the research pair is relabelled; a provider's other tools keep their own names.
-    expect(readToolName("mcp__firecrawl__firecrawl_map").label).toBe(
-      "Firecrawl map",
-    );
+    expect(readToolName("mcp__firecrawl__firecrawl_map")).toEqual({
+      label: "Map",
+      detail: "Firecrawl",
+    });
   });
 
   test("an MCP tool reads as an action against a named server", () => {
     expect(readToolName("mcp__slack__post_message")).toEqual({
       label: "Post message",
       detail: "slack",
+    });
+  });
+
+  test("a vendor that leads its tools with its own name is named once, as the app", () => {
+    expect(readToolName("mcp__notion__notion-fetch")).toEqual({
+      label: "Fetch",
+      detail: "Notion",
+    });
+    expect(readToolName("mcp__google-drive__google_drive_search")).toEqual({
+      label: "Search",
+      detail: "Google Drive",
     });
   });
 

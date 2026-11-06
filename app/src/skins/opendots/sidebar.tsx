@@ -22,6 +22,7 @@ import {
 } from "@/components/app-sidebar/app-sidebar";
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -34,6 +35,7 @@ import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { groupRoster } from "@/lib/agents/roster";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -41,7 +43,7 @@ import {
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { memoriesQueryOptions } from "@/lib/memory";
-import { useNavigationItems } from "@/lib/navigation";
+import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -166,7 +168,9 @@ function BotsSection({
 }) {
   const agents = useQuery(agentListQueryOptions());
   const dots = agents.data ? dotOrder(agents.data) : [];
-  const bots = useNavigationItems().find((item) => item.id === "bots");
+  const bots = useNavigationItems()
+    .filter(isNavigationLink)
+    .find((item) => item.id === "bots");
   return (
     <section aria-label="Bots">
       <NavLabel
@@ -282,7 +286,7 @@ function ThreadRow({
   const [confirming, setConfirming] = useState(false);
   const [pinProblem, setPinProblem] = useState<string | null>(null);
   const unread = isUnread(channel, open ? channel.id : undefined);
-  const title = channel.summary || channel.lastMessage || channel.name;
+  const title = channel.summary || untitledLine(channel) || channel.name;
   const link: LinkProps =
     channel.agentIds.length > 1
       ? { to: "/group/$channelId", params: { channelId: channel.id } }
@@ -529,16 +533,16 @@ function WorkspaceLinks({
       </Link>
       {/* OpenBot's own destinations, from the one list every frame reads. */}
       {navigation.map((item) => (
-        <Link
+        <NavigationTarget
           aria-current={place.section === item.id ? "page" : undefined}
           className={cn(row(item.id), item.section === "primary" && drawerOnly)}
+          item={item}
           key={item.id}
           onClick={onNavigate}
-          to={item.to}
         >
           <item.icon />
           <span className="min-w-0 flex-1 truncate">{item.label}</span>
-        </Link>
+        </NavigationTarget>
       ))}
       <UserRow />
     </nav>

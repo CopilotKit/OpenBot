@@ -1,0 +1,441 @@
+name: Desktop macOS signing
+
+# The Mac counterpart of `desktop-signing.yml`, and deliberately the same shape: a credential-free
+# job that runs on every change, and a signing job behind a protected environment that an ordinary
+# pull request cannot reach. What differs is what the signature buys. On Windows an unsigned build
+# collects a SmartScreen warning; on macOS an ad-hoc signed build is refused outright, and the only
+# way in is Finder's "Open Anyway", which is a thing nobody should be taught to do to install a
+# product. So this job is also the only place updater artifacts are produced: an update the app
+# installs by itself has to be one Gatekeeper would have accepted had a person downloaded it.
+on:
+  workflow_dispatch:
+    inputs:
+      signing-mode:
+        description: Opt in to signing with the protected Developer ID certificate
+        type: choice
+        options: [none, developer-id]
+        default: none
+        required: true
+      release-tag:
+        description: Attach the signed artifacts and latest.json to this existing release
+        type: string
+        default: ""
+        required: false
+      # publish-release.yml says whether the release becomes Latest. A stable release is published
+      # not Latest, and becomes Latest once both this and Desktop Windows signing have attached their
+      # signed installers, in whichever finishes second. Signing a release again by hand leaves
+      # Latest where it is unless this is set.
+      make-latest:
+        description: Mark the release Latest once every signed installer is attached, unless a newer release already is
+        type: boolean
+        default: false
+        required: false
+  # Pull requests and pushes to main run only the credential-free checks; the signing job's `if`
+  # admits a `v*` tag or an explicit dispatch and nothing else, so no pull request reaches the
+  # environment.
+  pull_request:
+    paths:
+      - desktop/**
+      - package.json
+      - .github/workflows/desktop-macos-signing.yml
+      - .github/workflows/publish-release.yml
+      - .github/workflows/desktop-build.yml
+      - .github/workflows/desktop-signing.yml
+      - scripts/release-*
+      - scripts/downloads-*
+      - .github/workflows/downloads-sync.yml
+      - docs/releasing.md
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - desktop/**
+      - package.json
+      - .github/workflows/desktop-macos-signing.yml
+      - .github/workflows/publish-release.yml
+      - .github/workflows/desktop-build.yml
+      - .github/workflows/desktop-signing.yml
+      - scripts/release-*
+      - scripts/downloads-*
+      - .github/workflows/downloads-sync.yml
+      - docs/releasing.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-macos-signing-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Everything about the updater that can be checked without a certificate, checked on every push.
+  # The wiring is four files that have to agree — the plugin in Cargo.toml, the plugin registered in
+  # main.rs, the permissions in the capability, and the endpoint and public key in the signing
+  # overlay — and three of the four fail silently at runtime rather than at build time if they drift
+  # apart.
+  checks:
+    name: Updater regressions (no Apple access)
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - run: bun run typecheck
+        working-directory: desktop
+      - name: Update offer regressions
+        run: bun test src/UpdateOffer.test.tsx
+        working-directory: desktop
+      # What a release signs and attaches: a candidate pinned to its own images with no updater,
+      # a stable release made Latest only once its signed Mac and Windows installers are both on
+      # it, every signed installer under its fixed download name too, and downloads.copilotkit.ai
+      # serving only the Latest stable release's signed installers. And every signed build carries
+      # the Intelligence CLI, its Mac binaries signed for notarization: an app without it cannot set
+      # up Intelligence, and the updater would put it on every Mac.
+      - name: Signed release regressions
+        run: >-
+          bun test scripts/signed-build.test.ts scripts/publish-signed-mac.test.ts
+          scripts/publish-signed-windows.test.ts scripts/signing-workflows.test.ts
+          ../scripts/release-latest.test.ts ../scripts/release-download-names.test.ts
+          ../scripts/downloads-sync.test.ts scripts/release-cli-bundle.test.ts
+        working-directory: desktop
+      - name: Importing the Developer ID intermediate twice succeeds
+        # The first real signing run stopped here: the .p12 already carried the intermediate, and a
+        # second import failed. The signing job runs this script on a keychain that may hold it.
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/intermediate-check.keychain-db"
+          security create-keychain -p check "$keychain"
+          trap 'security delete-keychain "$keychain"' EXIT
+          desktop/scripts/import-developer-id-intermediate.sh "$keychain"
+          desktop/scripts/import-developer-id-intermediate.sh "$keychain"
+          security find-certificate -c "Developer ID Certification Authority" "$keychain" > /dev/null
+      - name: Stapling retries a dropped connection and still fails a missing ticket
+        # The first real signing run had Apple accept the Intel image, then lost the connection
+        # while stapling and failed the job. A stand-in for xcrun fails twice, then succeeds.
+        run: |
+          set -euo pipefail
+          fake="$RUNNER_TEMP/fake-xcrun"
+          export STAPLE_CALLS="$RUNNER_TEMP/staple-calls"
+          printf '0' > "$STAPLE_CALLS"
+          cat > "$fake" <<'FAKE'
+          #!/usr/bin/env bash
+          n=$(( $(cat "$STAPLE_CALLS") + 1 ))
+          printf '%s' "$n" > "$STAPLE_CALLS"
+          [ "$n" -ge 3 ]
+          FAKE
+          chmod +x "$fake"
+          XCRUN="$fake" STAPLE_RETRY_DELAY=0 desktop/scripts/staple-with-retry.sh image.dmg 5
+          test "$(cat "$STAPLE_CALLS")" = 3
+          printf '#!/usr/bin/env bash\nexit 1\n' > "$fake"
+          if XCRUN="$fake" STAPLE_RETRY_DELAY=0 desktop/scripts/staple-with-retry.sh image.dmg 3; then
+            echo "A ticket that never arrives must fail the job." >&2
+            exit 1
+          fi
+      - name: Check the updater is wired together
+        run: |
+          set -euo pipefail
+          config=desktop/src-tauri/tauri.conf.json
+          overlay=desktop/src-tauri/tauri.macos-signing.conf.json
+          test "$(jq -r '.bundle.createUpdaterArtifacts' "$overlay")" = 'true'
+          # And nowhere else. Tauri refuses to finish any bundle that asks for updater artifacts
+          # without `TAURI_SIGNING_PRIVATE_KEY`, so this setting in the base config breaks ordinary
+          # desktop CI and the local build in docs/releasing.md on all three platforms.
+          test "$(jq -r '.bundle.createUpdaterArtifacts // false' "$config")" = 'false'
+          # The updater lives in the overlay too. main.rs registers the plugin only when the config
+          # carries `plugins.updater`, so every build without the overlay (desktop CI, local, the
+          # unsigned release installers) has no updater to offer an update it would then refuse.
+          test "$(jq -r '.plugins.updater // empty' "$config")" = ''
+          test "$(jq -r '.plugins.updater.endpoints[0]' "$overlay")" \
+            = 'https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json'
+          test "$(jq -r '.plugins.updater.pubkey | length > 0' "$overlay")" = 'true'
+          grep -q 'tauri-plugin-updater' desktop/src-tauri/Cargo.toml
+          grep -q 'tauri_plugin_updater::Builder::new().build()' desktop/src-tauri/src/main.rs
+          grep -q 'contains_key("updater")' desktop/src-tauri/src/main.rs
+          grep -q 'tauri_plugin_process::init()' desktop/src-tauri/src/main.rs
+          jq -e '.permissions | index("updater:default")' \
+            desktop/src-tauri/capabilities/default.json > /dev/null
+          jq -e '.permissions | index("process:allow-restart")' \
+            desktop/src-tauri/capabilities/default.json > /dev/null
+          echo 'Updater wiring is consistent across Cargo.toml, main.rs, the capability and the config.'
+
+  # One native runner per architecture, for the same reason `publish-release.yml` builds its images
+  # that way: the machines installing this are laptops of both kinds, and a cross build is a thing
+  # nobody has run. Each produces its own signed, notarized, stapled .app and .dmg, and, for a build
+  # that is not pinned, the updater archive.
+  sign:
+    name: Sign and notarize (${{ matrix.platform.target }})
+    needs: checks
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.signing-mode == 'developer-id') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    environment: macos-signing
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: macos-15
+            target: darwin-aarch64
+            arch: arm64
+          - runner: macos-15-intel
+            target: darwin-x86_64
+            arch: x64
+    env:
+      SIGNING_SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check signing configuration
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8 TAURI_SIGNING_PRIVATE_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing macos-signing secret: $name"
+              exit 1
+            fi
+          done
+          test "$(git rev-parse HEAD)" = "$SIGNING_SOURCE_SHA"
+          # The placeholder shipped with the pull request that added this lane. An app built with it
+          # installs nothing: every update it is offered fails signature verification. Refusing here
+          # is the difference between noticing on the first signing run and noticing in the field.
+          pubkey="$(jq -r '.plugins.updater.pubkey' desktop/src-tauri/tauri.macos-signing.conf.json)"
+          if [ "$pubkey" = 'REPLACE_WITH_UPDATER_PUBKEY' ]; then
+            echo '::error::tauri.macos-signing.conf.json still holds the updater public key placeholder.'
+            exit 1
+          fi
+      - name: Import the Developer ID certificate into a temporary keychain
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/openbot-signing.keychain-db"
+          password="$(openssl rand -base64 24)"
+          echo "::add-mask::$password"
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "SIGNING_KEYCHAIN_PASSWORD=$password" >> "$GITHUB_ENV"
+
+          security create-keychain -p "$password" "$keychain"
+          # The runner's login keychain relocks on a timer and takes codesign's key access with it.
+          security set-keychain-settings -lut 7200 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate"
+          security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security -f pkcs12
+          rm -f "$certificate"
+
+          # The leaf alone does not chain to a root the runner trusts; see the script for why it
+          # imports the G2 intermediate only when the .p12 did not already bring it.
+          desktop/scripts/import-developer-id-intermediate.sh "$keychain"
+
+          # Without this codesign stops for a UI prompt that a runner has nobody to answer.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+          existing=()
+          while IFS= read -r line; do
+            existing+=("$(echo "$line" | tr -d '" ')")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$keychain" "${existing[@]}"
+          security find-identity -v -p codesigning "$keychain"
+      - name: Write the App Store Connect key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/AuthKey.p8"
+          umask 077
+          printf '%s' "$APPLE_API_KEY_P8" > "$key"
+          echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      # No caches in this job, Rust or Bun: it runs on release tags, and a signed, notarized build
+      # must come from the tree and the lockfiles, not from anything an earlier run left behind.
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - run: bun run typecheck
+        working-directory: desktop
+      - name: Prepare the build version
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = 'tag' ]; then
+            bun desktop/scripts/desktop-version.ts release
+          else
+            bun desktop/scripts/desktop-version.ts internal
+          fi
+          cat desktop/build-version.json
+      # The overlay carries `createUpdaterArtifacts` and the `app, dmg` targets, and only this job
+      # passes it. The .dmg is what a person downloads and the .app is what becomes the
+      # `.app.tar.gz` the updater installs; asking for the dmg alone would leave no .app to verify,
+      # because Tauri deletes it once the image is written.
+      #
+      # signed-build.ts builds what desktop-build.yml built for the same release: a candidate or
+      # beta pinned to its release's images and with no updater, and the CLI whenever the tree can
+      # bundle one. This signed .dmg replaces the ad-hoc one on the release, so it must be the same
+      # product. `updater` says whether this build made an updater archive.
+      - name: Build, sign and notarize
+        id: build
+        env:
+          ARCH: ${{ matrix.platform.arch }}
+          # To read the release's container-images.json when this build is a candidate.
+          GH_TOKEN: ${{ github.token }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
+        run: bun desktop/scripts/signed-build.ts darwin "$ARCH" src-tauri/tauri.macos-signing.conf.json
+      # Tauri notarizes and staples the .app. The disk image is assembled afterwards, so it is
+      # submitted here rather than assumed: a stapled image is the one that installs on a machine
+      # that is offline or behind a proxy Apple's notary service cannot be reached through.
+      - name: Notarize and staple the disk image
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          set -euo pipefail
+          images=(desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          test "${#images[@]}" -eq 1
+          xcrun notarytool submit "${images[0]}" \
+            --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
+            --wait --timeout 30m
+          # Apple has accepted it by now; stapling only fetches the ticket, and retries a dropped
+          # connection rather than failing a notarized build (see the script).
+          desktop/scripts/staple-with-retry.sh "${images[0]}"
+      - name: Verify the signature, Gatekeeper and the notarization ticket
+        run: |
+          set -euo pipefail
+          app=desktop/src-tauri/target/release/bundle/macos/OpenBot.app
+          images=(desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+
+          # What the RED case fails. An ad-hoc build passes none of these three.
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl -a -t exec -vv "$app"
+          xcrun stapler validate "$app"
+
+          codesign --verify --strict --verbose=2 "${images[0]}"
+          spctl -a -t open --context context:primary-signature -vv "${images[0]}"
+          xcrun stapler validate "${images[0]}"
+
+          # Hardened runtime is what notarization requires and what the Entitlements.plist assumes;
+          # a build that lost the flag is notarized today and rejected by the next macOS.
+          codesign -dv --verbose=4 "$app" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
+          grep -q 'flags=.*runtime' "$RUNNER_TEMP/codesign.txt"
+          if grep -q 'Signature=adhoc' "$RUNNER_TEMP/codesign.txt"; then
+            echo '::error::The app is ad-hoc signed.'
+            exit 1
+          fi
+
+          # The CLI is in the app, and every Mach-O in it is ours, hardened and timestamped.
+          desktop/scripts/verify-cli-bundle.sh "$app" developer-id
+      # Named by architecture because both runners produce `OpenBot.app.tar.gz`, and latest.json
+      # points at one URL per platform. A pinned build made no updater archive.
+      - name: Collect the artifacts
+        env:
+          TARGET: ${{ matrix.platform.target }}
+          UPDATER: ${{ steps.build.outputs.updater }}
+        run: |
+          set -euo pipefail
+          mkdir -p signed
+          cp desktop/src-tauri/target/release/bundle/dmg/*.dmg signed/
+          if [ "$UPDATER" = true ]; then
+            cp "desktop/src-tauri/target/release/bundle/macos/OpenBot.app.tar.gz" \
+              "signed/OpenBot-$TARGET.app.tar.gz"
+            cp "desktop/src-tauri/target/release/bundle/macos/OpenBot.app.tar.gz.sig" \
+              "signed/OpenBot-$TARGET.app.tar.gz.sig"
+          elif [ -e desktop/src-tauri/target/release/bundle/macos/OpenBot.app.tar.gz ]; then
+            echo '::error::A build with no updater made an updater archive.'
+            exit 1
+          fi
+          cp desktop/build-version.json signed/
+          ls -l signed
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: openbot-macos-signed-${{ matrix.platform.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: signed/
+          if-no-files-found: error
+          retention-days: 14
+      # Always, and by name rather than by pattern: a signing key left unlocked in a keychain on a
+      # runner that is about to be reused is the one piece of this that does not clean itself up.
+      - name: Remove the temporary keychain
+        if: ${{ always() }}
+        run: |
+          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/developer-id.p12"
+          if [ -n "${SIGNING_KEYCHAIN:-}" ] && [ -f "$SIGNING_KEYCHAIN" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+          fi
+
+  # latest.json is the whole updater. It names a version, a URL per platform, and the minisign
+  # signature of the archive at that URL; the app refuses anything whose signature does not verify
+  # against the public key it was built with. It is written here, from both architectures' real
+  # `.sig` files, rather than by hand.
+  #
+  # This job, or Desktop Windows signing's, is also where a stable release becomes Latest:
+  # publish-release.yml publishes it not Latest, so `releases/latest` keeps serving the previous
+  # signed installers until both signing runs have attached theirs, and whichever finishes second
+  # marks it (scripts/release-make-latest.sh). A candidate or beta attaches its pinned .dmg files
+  # and nothing else. The details are in desktop/scripts/publish-signed-mac.sh.
+  publish:
+    name: Publish latest.json
+    needs: sign
+    # One attach job at a time per release, across Desktop macOS signing and Desktop Windows
+    # signing: each ends by asking whether every signed installer is on the release, and the one
+    # that runs second must see what the first attached, or neither would make it Latest. Same
+    # group in both workflows; an attach that is running is never cancelled.
+    concurrency:
+      group: release-attach-${{ inputs.release-tag || github.ref_name }}
+      cancel-in-progress: false
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.release-tag != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # `actions: write` to start Downloads sync when this run makes the release Latest
+    # (scripts/release-make-latest.sh).
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.release-tag || github.ref_name }}
+      # Empty on a pushed tag, which therefore never moves Latest.
+      MAKE_LATEST: ${{ inputs.make-latest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: openbot-macos-signed-*
+          path: artifacts
+          merge-multiple: true
+      - name: Attach to the release, and make it Latest when it should be
+        run: desktop/scripts/publish-signed-mac.sh

@@ -1,10 +1,30 @@
-import { IconPlus } from "@tabler/icons-react";
+import {
+  IconBook,
+  IconBrain,
+  IconChevronRight,
+  IconPlus,
+} from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { NewBotSheet } from "@/components/agents/new-bot-sheet";
 import { BotRoster } from "@/components/bots/bot-roster";
-import { PageShell } from "@/components/layout/page-shell";
+import {
+  PageRows,
+  PageSection,
+  PageShell,
+} from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /** Just longer than the sheet's 200ms exit, so it has finished sliding away before the page changes. */
 const SHEET_CLOSE_MS = 240;
@@ -18,6 +38,8 @@ export const Route = createFileRoute("/_authed/_app/bots/")({
 function BotsPage() {
   const { new: creating } = Route.useSearch();
   const navigate = Route.useNavigate();
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   return (
     <PageShell
       action={
@@ -32,10 +54,15 @@ function BotsPage() {
           New Bot
         </Button>
       }
-      description="Manage your Bots and access those shared with you."
+      description={
+        personal
+          ? "Your Bots for everyday work."
+          : "Manage your Bots and access those shared with you."
+      }
       title="Bots"
     >
       <BotRoster />
+      {personal ? <WhatYourBotsKnow /> : null}
       <NewBotSheet
         onClose={() => void navigate({ search: {} })}
         onCreated={(agentId) => {
@@ -58,5 +85,47 @@ function BotsPage() {
         open={creating === true}
       />
     </PageShell>
+  );
+}
+
+/**
+ * Capabilities, in the personal edition, where it is not a page of its own: what a person's Bots
+ * know how to do and what they know about them, beneath the Bots themselves.
+ */
+function WhatYourBotsKnow() {
+  return (
+    <PageSection title="What your Bots know">
+      <PageRows>
+        <Item render={<Link to="/capabilities/skills" />} size="sm">
+          <ItemMedia variant="icon">
+            <IconBook />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>Skills</ItemTitle>
+            <ItemDescription>
+              Step-by-step instructions you wrote or your Bots learned.
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+          </ItemActions>
+        </Item>
+        <Separator />
+        <Item render={<Link to="/capabilities/memory" />} size="sm">
+          <ItemMedia variant="icon">
+            <IconBrain />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>Memory</ItemTitle>
+            <ItemDescription>
+              What your Bots remember about you.
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+          </ItemActions>
+        </Item>
+      </PageRows>
+    </PageSection>
   );
 }

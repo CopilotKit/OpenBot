@@ -9,10 +9,10 @@ name: Desktop
 # it at runtime with an `expect`, so a bad row panics the window rather than failing a type check.
 on:
   pull_request:
-    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "package.json", ".github/workflows/desktop.yml", ".github/workflows/desktop-build.yml"]
   push:
     branches: [main]
-    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "package.json", ".github/workflows/desktop.yml", ".github/workflows/desktop-build.yml"]
   workflow_call:
     secrets:
       OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:
@@ -57,140 +57,16 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: desktop/src-tauri
 
-  # The three artifacts. Not `bundle`, which signs and notarizes: that is S7 and needs certificates
-  # this workflow deliberately does not hold. This proves the tree builds into an app on each
-  # platform, which is the thing that breaks when a dependency is not portable.
+  # The three artifacts, built by the shared workflow. A pull request build is unchanged: unpinned, no CLI, kept 7 days.
   app:
-    name: app (${{ matrix.platform.name }})
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - name: macos
-            runner: macos-latest
-          - name: windows
-            runner: windows-latest
-          - name: linux
-            runner: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.3
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: desktop/src-tauri
-          key: ${{ matrix.platform.name }}
-      - if: matrix.platform.name == 'linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - run: bun install --frozen-lockfile
-        working-directory: desktop
-      - run: bun run typecheck
-        working-directory: desktop
-      - name: Desktop version regressions
-        run: bun test scripts/desktop-version.test.ts
-        working-directory: desktop
-      - name: Prepare internal build version
-        run: bun scripts/desktop-version.ts internal
-        working-directory: desktop
-      # `tauri build`, not `cargo build --release`. tauri-build emits `cargo:rustc-cfg=dev`
-      # for anything the Tauri CLI did not build, so a plain cargo release binary still points
-      # at the dev server and shows "Could not connect to localhost" when it is run. That
-      # compiles, proves the Rust, and proves nothing about the thing people install.
-      #
-      # Bundling is included because the bundle is the product, and because the failures live
-      # there: the Windows resource step needs an .ico, and macOS wants an .icns, neither of
-      # which a compile would miss.
-      - run: bun run tauri build --config src-tauri/tauri.build-version.conf.json
-        working-directory: desktop
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ matrix.platform.name == 'macos' && '-' || '' }}
-          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
-          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
-          OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
-      - name: Verify packaged Mac version and ad-hoc signature
-        if: matrix.platform.name == 'macos'
-        run: |
-          # Tauri removes the temporary .app after producing a DMG. Check its payload.
-          images=(desktop/src-tauri/target/release/bundle/dmg/*.dmg)
-          test "${#images[@]}" -eq 1
-          mount="$RUNNER_TEMP/openbot-version-check"
-          mkdir -p "$mount"
-          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "${images[0]}"
-          trap 'hdiutil detach "$mount"' EXIT
-          export OPENBOT_VERIFY_APP="$mount/OpenBot.app"
-          python3 - <<'PY'
-          import json, os, pathlib, plistlib, subprocess
-          build = json.loads(pathlib.Path('desktop/build-version.json').read_text())
-          app = pathlib.Path(os.environ['OPENBOT_VERIFY_APP'])
-          info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
-          for key, expected in {
-              'CFBundleShortVersionString': build['releaseVersion'],
-              'CFBundleVersion': build['releaseVersion'],
-              'OpenBotBuildVersion': build['version'],
-              'OpenBotSourceRevision': build['sourceSha'],
-          }.items():
-              if info.get(key) != expected:
-                  raise SystemExit(f'{key}: expected {expected}, got {info.get(key)}')
-          subprocess.run(['codesign', '--verify', '--deep', '--strict', '--verbose=2', str(app)], check=True)
-          print(f"Verified packaged Mac version: {build['version']}")
-          PY
-      # Frontend assets and platform dependencies are ready after the packaged build.
-      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in.
-      - name: Rust regression tests
-        run: cargo test --locked --lib --bins
-        working-directory: desktop/src-tauri
-      # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
-      # the install that writes its manifests. The host name and extension id come from
-      # shared/recorder-extension.json, which the Rust reads at compile time.
-      - name: Recorder native host tests
-        run: cargo test --locked --test recorder_host
-        working-directory: desktop/src-tauri
-      # Only a release build is a GUI-subsystem executable on Windows, and only a release build proves
-      # the debug-only test seam is absent.
-      - name: Recorder native host tests (release)
-        if: matrix.platform.name == 'windows'
-        run: cargo test --locked --release --test recorder_host
-        working-directory: desktop/src-tauri
-      # Hosted Windows runners are administrators. Exercise setup again with an actual Users-only
-      # account: DISM's feature reads worked as CI's administrator but refused ordinary app users.
-      - name: Windows standard-user setup regression
-        if: matrix.platform.name == 'windows'
-        shell: pwsh
-        working-directory: desktop/src-tauri
-        run: |
-          $messages = @(cargo test --locked --lib --no-run --message-format=json)
-          if ($LASTEXITCODE -ne 0) { throw 'Could not build the native setup test.' }
-          $executables = @($messages | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object {
-            $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'openbot_desktop_lib' -and
-            $_.profile.test -and $_.executable
-          } | ForEach-Object { $_.executable } | Select-Object -Unique)
-          if ($executables.Count -ne 1) { throw 'Expected exactly one current desktop library test executable.' }
-          # Windows PowerShell's credentialed launch matches the desktop and native validation.
-          # PowerShell Core inherited the CI runner's profile directories into the temporary user.
-          $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-          & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ../scripts/test-windows-standard-user.ps1 -TestExecutable $executables[0]
-          if ($LASTEXITCODE -ne 0) { throw 'The native standard-user setup test failed.' }
-      # Keep what was built. Without this the only way to try an installer is to build one on
-      # the machine you are trying it on, which is not what anybody installs.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: openbot-desktop-${{ matrix.platform.name }}
-          path: |
-            desktop/src-tauri/target/release/bundle/**/*.dmg
-            desktop/src-tauri/target/release/bundle/**/*.exe
-            desktop/src-tauri/target/release/bundle/**/*.AppImage
-            desktop/src-tauri/target/release/bundle/**/*.deb
-            desktop/src-tauri/target/release/bundle/**/*.rpm
-            desktop/build-version.json
-          if-no-files-found: error
-          retention-days: 7
+    name: app
+    uses: $/.github/workflows/desktop-build.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      channel: internal
+      bundle_cli: false
+      manifest_artifact: ""
+      retention_days: 7
+      platforms: '["macos","windows","linux"]'
+    secrets:
+      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}

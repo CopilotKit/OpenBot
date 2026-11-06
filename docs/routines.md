@@ -12,12 +12,12 @@ here." Turning a sentence into a five-field cron expression and a channel is con
 that is what the conversation is for. The same Bot can list what is standing, change one, or delete
 one, all by being asked.
 
-**The prerequisite:** a Bot can only do this once an administrator has granted it to. Routines is a
-catalogue entry like any other — `create_routine`, `update_routine` and `delete_routine` are its write
-tools — and enabling the entry does not hand any Bot access to it. Each tool is granted per Bot at
-`/admin/plugins/routines`, exactly as a Google Drive or Notion tool would be. An administrator decides
-which Bots may schedule future work at all, before deciding what that work is; a Bot with none of the
-three tools can still be asked and will say it cannot.
+**Always on.** Every Bot can do this, in every edition. The server adds Routines at startup and gives
+every Bot all of its tools, including the write tools `create_routine`, `update_routine` and
+`delete_routine`. A Bot made later gets them the first time it runs. Routines can't be turned off, and
+its tools can't be taken from a Bot: the server answers `403`. A Bot still asks before each write
+while Ask before making changes is on, and before `delete_routine` always (see
+[Approvals](approvals.md)). See `server/src/plugins/personal-defaults.ts`.
 
 The routine belongs to whoever asked for it and runs as them. See
 [Who a routine runs as](#who-a-routine-runs-as).
@@ -88,8 +88,10 @@ Two settings carry this:
   about where the worker process runs rather than a fact about the deployment, so it is read from the
   environment directly rather than from the rest of the deployment's configuration.
 
-On Kubernetes, `routines.enabled` turns on a CronJob running `fire-routines.ts` on `routines.schedule`,
-the same way the computer culler is a CronJob rather than a timer inside the API — a timer fires in
+On Kubernetes, the chart runs a CronJob of `fire-routines.ts` on `routines.schedule`, on by default
+(`routines.enabled`), and generates the shared secret for it and the API server unless one is
+supplied (see [the chart's routines sweep](../charts/openbot/README.md#the-routines-sweep)). It is a
+CronJob the same way the computer culler is a CronJob rather than a timer inside the API: a timer fires in
 every replica, and a CronJob's single run does the whole sweep once. On a laptop, `scripts/start.sh`
 starts a worker process that runs that same sweep in a loop instead of once and exiting, so the two
 shapes are the same code doing the same thing on two different clocks, not two implementations to keep

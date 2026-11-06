@@ -30,7 +30,7 @@ import type { BotActivity, BotAttention } from "@/lib/bot-lifecycle/queries";
 import type { ChannelSummary } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import type { MemoryRecord } from "@/lib/memory";
-import { navigationFor } from "@/lib/navigation";
+import { isNavigationLink, navigationFor } from "@/lib/navigation";
 import type { PluginsPage } from "@/lib/plugins/queries";
 import type { ProactiveSetting, ProactiveSuggestion } from "@/lib/proactive";
 import type { ResponsibilityRecord } from "@/lib/responsibilities";
@@ -292,7 +292,12 @@ const routines: RoutineRecord[] = [
     schedule: "Every weekday at 9:00",
     timezone: "Europe/London",
     instruction: "Send me the headlines",
-    channel: { id: "c-muse", name: "Muse", gone: false },
+    channel: {
+      id: "c-muse",
+      name: "Muse",
+      title: "Morning headlines",
+      gone: false,
+    },
     enabled: true,
     nextRunAt: now,
     lastRun: null,
@@ -799,7 +804,7 @@ describe("every OpenBot surface stays reachable", () => {
       renderAt("/s/goals");
       const menu = within(await openMenu());
       await menu.findByRole("link", { name: /^Settings$/ });
-      for (const item of navigationFor(role)) {
+      for (const item of navigationFor(role).filter(isNavigationLink)) {
         expect(
           menu
             .getByRole("link", { name: new RegExp(`^${item.label}$`) })
@@ -863,8 +868,9 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
   test("Activity shows what the Bot waits on you for, and its work", async () => {
     serve();
     renderAt("/s/activity");
-    // OpenBot's Needs you section, with OpenBot's own approval and its details always shown.
-    expect(await page().findByText("Muse wants to open url")).toBeTruthy();
+    // OpenBot's Needs you section, under the Bot's name, with its approval's details always shown.
+    expect(await page().findByText("Open url")).toBeTruthy();
+    expect(page().getAllByText("Muse").length).toBeGreaterThan(0);
     expect(page().getByText(/"url": "https:\/\/example.com"/)).toBeTruthy();
     // OpenBot's activity sections for the Bot.
     expect(await page().findByText("Morning briefing")).toBeTruthy();
@@ -882,7 +888,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     expect(page().queryByText("Compare pricing pages")).toBeNull();
     // OpenBot's own check-ins section for the Bot sits under the suggestions.
     expect(page().getByRole("heading", { name: "Check-ins" })).toBeTruthy();
-    fireEvent.click(page().getByRole("button", { name: "Start" }));
+    fireEvent.click(page().getByRole("button", { name: "Work on it" }));
     await waitFor(() =>
       expect(
         calls.some(

@@ -1,3 +1,4 @@
+import { readToolName } from "@openbot/shared/tool-name";
 import {
   IconApps,
   IconBox,
@@ -42,13 +43,14 @@ import {
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
   agentPluginsQueryOptions,
   type GrantedPlugins,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
-import { readToolName } from "@openbot/shared/tool-name";
 import { queryClient } from "@/query-client";
 
 /**
@@ -94,9 +96,12 @@ export function connectorCount(plugins: GrantedPlugins): number {
 
 /** What this Bot may reach: your skills on it, everything granted to it, and who it may ask. */
 export function AccessSections({ agent }: { agent: AgentProfile }) {
+  // Every Bot has every connected app in the personal edition, so there is no switch per app here.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   return (
     <>
-      {agent.mine ? <YourApps agent={agent} /> : null}
+      {agent.mine && !personal ? <YourApps agent={agent} /> : null}
       {agent.mine ? <YourSkills agentId={agent.id} /> : null}
       <Granted agentId={agent.id} mine={agent.mine} />
       <HandoffPanel agentId={agent.id} />
@@ -319,6 +324,8 @@ function YourSkills({ agentId }: { agentId: string }) {
  */
 function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
   const me = useQuery(currentUserQueryOptions()).data;
+  const edition =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition ?? "team";
   const plugins = useQuery(agentPluginsQueryOptions(agentId));
   const apps = useQuery(botAppsQueryOptions(agentId));
   // Both, so no row is drawn without its state and then redrawn with one a moment later.
@@ -377,10 +384,10 @@ function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
                      */}
                     <ItemDescription className="line-clamp-none">
                       {app.state === "ready"
-                        ? [appAccessSentence(app)]
+                        ? [appAccessSentence(app, undefined, edition)]
                             .concat(labels.length > 0 ? [toolList(labels)] : [])
                             .join(" ")
-                        : appAccessSentence(app)}
+                        : appAccessSentence(app, undefined, edition)}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
@@ -477,15 +484,11 @@ function ManageLink({
   appKey: string;
   title: string;
 }) {
+  const paths = useManagePaths();
   return (
     <Button
       aria-label={`Manage ${title} on this Bot`}
-      render={
-        <Link
-          params={{ agentId, key: appKey }}
-          to="/admin/plugins/$key/bots/$agentId"
-        />
-      }
+      render={<Link {...paths.pluginBot(appKey, agentId)} />}
       size="icon-sm"
       variant="ghost"
     >

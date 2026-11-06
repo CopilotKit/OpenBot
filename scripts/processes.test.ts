@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -131,3 +138,73 @@ describe("processes.sh where the POSIX tools are the answer", () => {
     expect(result.calls).toBe("");
   });
 });
+
+describe.skipIf(process.platform === "win32")(
+  "routine worker ownership",
+  () => {
+    test("an existing worker whose cwd cannot be read refuses ownership", async () => {
+      await writeExecutable(
+        join(bin, "pgrep"),
+        '#!/bin/sh\nprintf "%s\\n" "$CHECK_PID"\n',
+      );
+      await writeExecutable(join(bin, "lsof"), "#!/bin/sh\nexit 1\n");
+      const child = Bun.spawn(
+        [
+          bash,
+          "-c",
+          '. "$1"; running_here "bun worker/src/index.ts" "$2"',
+          "test",
+          processesScript,
+          directory,
+        ],
+        {
+          env: { ...process.env, PATH: bin, CHECK_PID: String(process.pid) },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const [code, error] = await Promise.all([
+        child.exited,
+        new Response(child.stderr).text(),
+      ]);
+      expect(code).toBe(2);
+      expect(error).toContain("Could not establish host worker ownership");
+    });
+
+    test("a live worker in another installation does not count as this installation", async () => {
+      const own = await realpath(directory);
+      const other = join(own, "other");
+      await mkdir(join(other, "worker/src"), { recursive: true });
+      await writeFile(
+        join(other, "worker/src/index.ts"),
+        "setInterval(() => {}, 1000);\n",
+      );
+      const worker = Bun.spawn([process.execPath, "worker/src/index.ts"], {
+        cwd: other,
+      });
+      try {
+        await Bun.sleep(100);
+        const check = async (root: string) => {
+          const child = Bun.spawn(
+            [
+              bash,
+              "-c",
+              '. "$1"; running_here "bun worker/src/index.ts" "$2"',
+              "test",
+              processesScript,
+              root,
+            ],
+            { stdout: "pipe", stderr: "pipe" },
+          );
+          return child.exited;
+        };
+        expect(await check(own)).toBe(1);
+        expect(await check(other)).toBe(0);
+        expect(worker.exitCode).toBeNull();
+      } finally {
+        worker.kill();
+        await worker.exited;
+      }
+    });
+  },
+);

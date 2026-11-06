@@ -119,6 +119,18 @@ RUN case "${TARGETARCH}" in \
   && tar -C / -Jxpf /tmp/s6-overlay-arch.tar.xz \
   && rm /tmp/s6-overlay-*.tar.xz
 
+# WHAT THE X SERVER EXPECTS TO FIND, made by root. A Bot's computer starts Xvfb as `pwuser` (s6 drops
+# to it; a chart computer pod is 1001 from the start, `computers.podSecurityContext`). Xvfb wants
+# /tmp/.X11-unix owned by root and sticky, will not make it as anyone else, and said
+# `_XSERVTransmkdir: ERROR: euid != 0` at every start though the display worked. Made here with the
+# mode it would have made, it is simply there. /tmp is the image's own in every pod the chart runs:
+# no volume is mounted over it.
+#
+# The keysym names Ubuntu 24.04's keyboard data uses and its libX11 does not know yet, which xkbcomp
+# warned about once each at every start. See the file.
+RUN install -d -m 1777 /tmp/.X11-unix
+COPY docker/x11/XKeysymDB /usr/share/X11/XKeysymDB
+
 WORKDIR /app
 
 # BOTH HALVES OF THE TREE COME FROM /prod. A workspace install is two directories, not one: the

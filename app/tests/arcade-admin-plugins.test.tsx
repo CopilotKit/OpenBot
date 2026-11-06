@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { managePaths } from "@/lib/manage-paths";
 import {
   brokeredConnectionDescription,
   brokeredDisconnectNote,
@@ -31,7 +32,7 @@ test("an Arcade deployment names Arcade and carries nothing Composio-specific", 
   ]);
   expect(everything).not.toMatch(/composio/i);
   expect(providerVocabulary("arcade").envVar).toBe("ARCADE_API_KEY");
-  expect(providerVocabulary("arcade").directoryPath).toBe(
+  expect(managePaths("team").brokerDirectory("arcade").to).toBe(
     "/admin/plugins/arcade",
   );
   expect(brokeredProvenance("arcade")).toBe(true);
@@ -42,7 +43,6 @@ test("a Composio deployment keeps today's exact wording", () => {
     name: "Composio",
     directoryLabel: "Browse Composio",
     envVar: "COMPOSIO_API_KEY",
-    directoryPath: "/admin/plugins/composio",
     // Composio's configured-branch sentence, verbatim: it used to be a literal inside a
     // `provider === "composio"` branch in `moreAppsRow`, and moving it here is what let that
     // branch go.
@@ -104,10 +104,10 @@ test("a configured deployment links to its own directory, whichever provider it 
 });
 
 test("each provider's directory path is its own route", () => {
-  expect(providerVocabulary("composio").directoryPath).toBe(
+  expect(managePaths("team").brokerDirectory("composio").to).toBe(
     "/admin/plugins/composio",
   );
-  expect(providerVocabulary("arcade").directoryPath).toBe(
+  expect(managePaths("team").brokerDirectory("arcade").to).toBe(
     "/admin/plugins/arcade",
   );
 });

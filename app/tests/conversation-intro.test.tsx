@@ -1,7 +1,10 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -26,7 +29,7 @@ const expenseReview = {
 };
 
 test("shows the Bot's name, what it does, and that it is private", () => {
-  const view = render(<ConversationIntro agent={expenseReview} />);
+  const view = draw(<ConversationIntro agent={expenseReview} />);
   expect(view.getByRole("heading", { level: 1 }).textContent).toBe(
     "Expense Review",
   );
@@ -38,21 +41,21 @@ test("shows the Bot's name, what it does, and that it is private", () => {
 });
 
 test("a public Bot says so", () => {
-  const view = render(
+  const view = draw(
     <ConversationIntro agent={{ ...expenseReview, visibility: "public" }} />,
   );
   view.getByText("Public");
 });
 
 test("a Bot with no role shows its title alone", () => {
-  const view = render(
+  const view = draw(
     <ConversationIntro agent={{ ...expenseReview, roleDescription: null }} />,
   );
   view.getByText("Finance Operations");
 });
 
 test("the orb is the large one, named once", () => {
-  const view = render(<ConversationIntro agent={expenseReview} />);
+  const view = draw(<ConversationIntro agent={expenseReview} />);
   const orb = view.getByRole("img");
   expect(orb.getAttribute("aria-label")).toBe("Expense Review");
   expect(orb.dataset.variant).toBe("live");
@@ -63,9 +66,30 @@ test("a paragraph-long role is held to two lines, with the whole text on hover",
     "Check one expense claim at a time against the policy as it is written. "
       .repeat(6)
       .trim();
-  const view = render(
+  const view = draw(
     <ConversationIntro agent={{ ...expenseReview, roleDescription: role }} />,
   );
   const line = view.getByTitle(`Finance Operations · ${role}`);
   expect(line.className).toContain("line-clamp-2");
 });
+
+function draw(screen: ReactNode, edition: "team" | "personal" = "team") {
+  const client = new QueryClient();
+  client.setQueryData(deploymentKeys.capabilities(), { edition });
+  return render(
+    <QueryClientProvider client={client}>{screen}</QueryClientProvider>,
+  );
+}
+
+test.each(["public", "private"] as const)(
+  "personal chat hides %s visibility",
+  (visibility) => {
+    const view = draw(
+      <ConversationIntro agent={{ ...expenseReview, visibility }} />,
+      "personal",
+    );
+    expect(view.queryByText("Public")).toBeNull();
+    expect(view.queryByText("Private")).toBeNull();
+    expect(view.getByRole("heading", { name: "Expense Review" })).toBeTruthy();
+  },
+);

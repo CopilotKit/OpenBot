@@ -30,6 +30,8 @@ import {
   groupToolSteps,
   ToolActivity,
 } from "@/components/channels/tool-activity";
+import { TeamBotConsents } from "@/components/settings/team-bot-consents";
+import { deploymentKeys } from "@/lib/deployment/queries";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -138,17 +140,20 @@ afterEach(() => {
 });
 
 /** A screen in a router of one route, for the links it holds. */
-function draw(screen: ReactNode = <ApprovalSettings />) {
+function draw(
+  screen: ReactNode = <ApprovalSettings />,
+  edition: "team" | "personal" = "team",
+) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  client.setQueryData(deploymentKeys.capabilities(), { edition });
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: () => screen }),
   });
   return render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
+    <QueryClientProvider client={client}>
       <RouterProvider router={router as never} />
     </QueryClientProvider>,
   );
@@ -304,6 +309,22 @@ test("an administrator is told where team settings are", async () => {
   expect(link.getAttribute("href")).toBe("/admin/approvals");
 });
 
+test("the personal edition's one person is not pointed at an Admin it does not have", async () => {
+  role = "admin";
+  const served = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      String(path) === "/api/capabilities"
+        ? Response.json({ edition: "personal" })
+        : served(path, init),
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = draw(<ApprovalSettings />, "personal");
+  await view.findByText("Rules for every Bot");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(view.queryByRole("link", { name: "Admin → Approvals" })).toBeNull();
+});
+
 test("a member is not pointed at Admin", async () => {
   const view = draw(<ApprovalSettings />);
   await view.findByText("Rules for every Bot");
@@ -440,4 +461,31 @@ test("in the real transcript shape a waiting click is folded into browser activi
     view.getAllByRole("region", { name: "Waiting for your approval" }),
   ).toHaveLength(1);
   expect(view.getByRole("button", { name: "I did it myself" })).toBeTruthy();
+});
+
+test("personal approvals keep the person's controls without team-only explanations or shared Bots", async () => {
+  inboxOverride = {
+    teamRules: [],
+    team: { enforceAutoReview: false, customRulesEnabled: true },
+    hostCommands: "allow",
+  };
+  const view = draw(
+    <>
+      <ApprovalSettings />
+      <TeamBotConsents />
+    </>,
+    "personal",
+  );
+  await view.findByText("Rules for every Bot");
+  expect(view.queryByText(/Team rules are locked/)).toBeNull();
+  expect(view.queryByText("Shared Bots")).toBeNull();
+  expect(
+    view.getByRole("switch", { name: "Ask before making changes" }),
+  ).toBeTruthy();
+  expect(view.getByRole("switch", { name: "Auto-review" })).toBeTruthy();
+});
+test("team approvals still show the shared Bot account controls", async () => {
+  const view = draw(<TeamBotConsents />);
+  expect(await view.findByText("Shared Bots")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Reset" })).toBeTruthy();
 });

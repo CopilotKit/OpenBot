@@ -1,6 +1,7 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { agentKeys } from "@/lib/agents/queries";
 import { client } from "@/lib/client";
+import { modelKeys } from "@/lib/models/queries";
 import {
   type CapabilityKey,
   type EgressRule,
@@ -9,7 +10,7 @@ import {
   type NetworkMode,
 } from "./queries";
 
-const FALLBACK = "Could not save that enterprise control";
+const FALLBACK = "Couldn't save that setting. Try again.";
 
 function invalidateEnterprise(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: enterpriseKeys.all });
@@ -54,7 +55,15 @@ export function setEnterpriseSettingMutationOptions(queryClient: QueryClient) {
         fallback: FALLBACK,
       });
     },
-    onSuccess: () => invalidateEnterprise(queryClient),
+    /*
+     * The model switch and allowlist change what the composer's picker offers, which the server
+     * reads through them, so the picker's catalogue is asked again too.
+     */
+    onSuccess: () =>
+      Promise.all([
+        invalidateEnterprise(queryClient),
+        queryClient.invalidateQueries({ queryKey: modelKeys.all }),
+      ]),
   });
 }
 

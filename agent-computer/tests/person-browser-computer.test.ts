@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 import type {
   BrowserState,
   LauncherConnection,
@@ -35,23 +36,11 @@ const computers: Computer[] = [];
 let root = "";
 let site: ReturnType<typeof Bun.serve> | undefined;
 
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: () => new Response(),
-  });
-  const { port } = probe;
-  await probe.stop(true);
-  if (port === undefined) throw new Error("The port probe did not listen.");
-  return port;
-}
-
 async function startComputer(
   name: string,
   env: Record<string, string>,
 ): Promise<Computer> {
-  const port = await freePort();
+  const port = await reservePort();
   const base = `http://127.0.0.1:${port}`;
   const child = Bun.spawn([process.execPath, "src/index.ts"], {
     cwd: join(import.meta.dir, ".."),
@@ -402,7 +391,7 @@ describe.skipIf(!asked)("a person's browser on the computer", () => {
 describe("a person's browser on a computer whose browser is not installed", () => {
   test("is a 503 the server turns into its sentence for the person, and Playwright's text stays in the computer's log", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openbot-no-chromium-"));
-    const port = await freePort();
+    const port = await reservePort();
     const base = `http://127.0.0.1:${port}`;
     const child = Bun.spawn([process.execPath, "src/index.ts"], {
       cwd: join(import.meta.dir, ".."),

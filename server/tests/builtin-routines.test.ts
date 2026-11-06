@@ -56,7 +56,8 @@ const SUMMARY: RoutineSummary = {
   enabled: true,
   nextRunAt: new Date("2026-01-05T08:00:00.000Z"),
   channelId: "channel_1",
-  channelName: "Standup",
+  channelName: "General Assistant",
+  channelTitle: "Standup",
   channelDeleted: false,
   lastRun: {
     status: "succeeded",

@@ -157,13 +157,12 @@ mod tests {
         .unwrap()
         .is_some());
     }
-    /// The `plugins` block a shell-updater build actually ships: `tauri.conf.json`, with
-    /// `tauri.updater.conf.json` merged over it the way `tauri build --config` does.
-    #[cfg(feature = "shell-updater")]
-    fn shipped_plugins() -> tauri::utils::config::PluginConfig {
+    /// The `plugins` block of `tauri.conf.json` with each overlay merged over it the way
+    /// `tauri build --config` does.
+    fn plugins_from(files: &[&str]) -> tauri::utils::config::PluginConfig {
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut plugins = serde_json::Map::new();
-        for file in ["tauri.conf.json", "tauri.updater.conf.json"] {
+        for file in files {
             let config: Value =
                 serde_json::from_slice(&std::fs::read(directory.join(file)).unwrap()).unwrap();
             if let Some(found) = config["plugins"].as_object() {
@@ -171,6 +170,65 @@ mod tests {
             }
         }
         serde_json::from_value(Value::Object(plugins)).unwrap()
+    }
+
+    /// The `plugins` block a shell-updater build actually ships: `tauri.conf.json`, with
+    /// `tauri.updater.conf.json` merged over it.
+    #[cfg(feature = "shell-updater")]
+    fn shipped_plugins() -> tauri::utils::config::PluginConfig {
+        plugins_from(&["tauri.conf.json", "tauri.updater.conf.json"])
+    }
+
+    /// The default build has no updater, and the signed Mac build has one, decided by its
+    /// overlay alone. `main` registers the plugin from this answer and nowhere else.
+    #[test]
+    fn updater_registers_only_where_the_signed_overlay_configures_it() {
+        assert!(!plugins_from(&["tauri.conf.json"]).0.contains_key("updater"));
+        assert!(
+            plugins_from(&["tauri.conf.json", "tauri.macos-signing.conf.json"])
+                .0
+                .contains_key("updater")
+        );
+    }
+
+    /// One registration: the updater plugin is built in exactly one place in `main`, behind
+    /// its `plugins.updater` check, whichever of the signed overlay and `shell-updater` supplied
+    /// the block. A second registration would silently replace the first and hide which
+    /// configuration is in effect.
+    #[test]
+    fn updater_plugin_is_registered_in_one_place() {
+        let main = include_str!("main.rs");
+        assert_eq!(main.matches("tauri_plugin_updater::Builder").count(), 1);
+        let at = main.find("tauri_plugin_updater::Builder").unwrap();
+        assert!(main[..at]
+            .rfind("if app.config().plugins.0.contains_key(\"updater\")")
+            .is_some_and(|guard| at - guard < 200));
+    }
+
+    /// The signed overlay together with `shell-updater` compiled trust: the bundled block is
+    /// kept as written, so the one registration uses the signed build key and feed.
+    #[cfg(feature = "shell-updater")]
+    #[test]
+    fn signed_overlay_wins_over_compiled_trust_with_one_registration() {
+        let compiled = trust(
+            Some("synthetic-public-key"),
+            Some("https://updates.example/latest.json"),
+        )
+        .unwrap()
+        .unwrap();
+        let signed = plugins_from(&["tauri.conf.json", "tauri.macos-signing.conf.json"]);
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context.config_mut().plugins = signed.clone();
+        assert!(configure_plugin(
+            &mut context.config_mut().plugins,
+            Some(&compiled)
+        ));
+        assert_eq!(context.config().plugins.0["updater"], signed.0["updater"]);
+        let app = tauri::test::mock_builder().build(context).unwrap();
+        assert!(app.config().plugins.0.contains_key("updater"));
+        app.handle()
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .expect("the updater plugin initializes from the signed overlay");
     }
 
     #[test]

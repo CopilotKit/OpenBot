@@ -125,6 +125,13 @@ spec:
           imagePullSecrets:
 {{ toYaml . | indent 12 }}
           {{- end }}
+          {{- /*
+            Held until the database can serve it, like every reader; see `openbot.waitForDatabase`.
+            For three quarters of the ceiling above, so a wait that runs out says why in its own words
+            instead of being killed as DeadlineExceeded, and the sweep keeps the rest.
+          */}}
+          initContainers:
+{{ include "openbot.waitForDatabase" (dict "root" . "seconds" (max 1 (div (mul $deadlineSeconds 3) 4))) | indent 12 }}
           containers:
             - name: attachments-culler
               image: {{ include "openbot.image" . }}

@@ -7,9 +7,9 @@ import {
   truncate,
   writeFile,
 } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reservePort } from "../../tests/support/reserved-port";
 import { DEFAULT_WORKSPACE_LIMITS } from "../src/workspace";
 
 const asked = process.env.OPENBOT_FILE_DOWNLOAD_HTTP === "1";
@@ -19,21 +19,6 @@ const BOT = "file-download-http";
 let root = "";
 let base = "";
 let child: ReturnType<typeof Bun.spawn> | undefined;
-
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("The port probe did not return a TCP address."));
-        return;
-      }
-      probe.close(() => resolve(address.port));
-    });
-  });
-}
 
 function api(path: string, authenticated = true) {
   return fetch(`${base}${path}`, {
@@ -51,7 +36,7 @@ beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "file-download-http-"));
   const workspace = join(root, "workspace");
   await mkdir(join(workspace, "folder"), { recursive: true });
-  const port = await freePort();
+  const port = await reservePort();
   base = `http://127.0.0.1:${port}`;
   child = Bun.spawn([process.execPath, "src/index.ts"], {
     cwd: join(import.meta.dir, ".."),

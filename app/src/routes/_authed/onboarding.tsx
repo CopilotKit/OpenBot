@@ -121,8 +121,9 @@ function welcomeStep(computer: boolean): OnboardingStep {
             </div>
             <AskFirstSwitch />
             <p className="text-sm text-pretty text-muted-foreground">
-              Paying for things and changing account security always wait for
-              you. You can change this later in Settings.
+              Paying, deleting, sending, sharing, posting and changing account
+              security always wait for you. You can change this later in
+              Settings.
             </p>
           </section>
         }

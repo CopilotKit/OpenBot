@@ -1,6 +1,11 @@
 /** Root package.json owns release versions; generated overlays identify each build. */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import {
+  formatVersion,
+  parseVersion,
+  type Version,
+} from "../../scripts/release-version";
 
 const root = resolve(import.meta.dir, "../..");
 const native = "desktop/src-tauri/";
@@ -15,17 +20,25 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 function version(value: unknown, label: string, allowPlaceholder = false) {
+  let parsed: Version | undefined;
+  try {
+    parsed = typeof value === "string" ? parseVersion(value) : undefined;
+  } catch {
+    parsed = undefined;
+  }
   if (
-    typeof value !== "string" ||
-    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value) ||
-    value.split(".").some((part) => Number(part) > 65535) ||
-    (!allowPlaceholder && value === "0.0.0")
+    !parsed ||
+    [parsed.major, parsed.minor, parsed.patch].some((part) => part > 65535) ||
+    (!allowPlaceholder &&
+      parsed.major === 0 &&
+      parsed.minor === 0 &&
+      parsed.patch === 0)
   ) {
     throw new Error(
-      `${label}: expected a non-placeholder numeric release version (major.minor.patch)`,
+      `${label}: expected a non-placeholder release version (major.minor.patch with an optional -rc.N or -beta.N)`,
     );
   }
-  return value;
+  return formatVersion(parsed);
 }
 
 function state() {
@@ -136,9 +149,11 @@ function main(command: string | undefined) {
   };
   // Tauri copies semver into both Apple keys unchanged. Keep those numeric while
   // retaining the complete internal identity in custom plist keys and app metadata.
+  const { major, minor, patch } = parseVersion(releaseVersion);
+  const numeric = formatVersion({ major, minor, patch });
   const fields = {
-    CFBundleShortVersionString: releaseVersion,
-    CFBundleVersion: releaseVersion,
+    CFBundleShortVersionString: numeric,
+    CFBundleVersion: numeric,
     OpenBotBuildVersion: buildVersion,
     OpenBotSourceRevision: sourceSha,
   };

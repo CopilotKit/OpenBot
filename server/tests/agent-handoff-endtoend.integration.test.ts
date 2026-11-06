@@ -125,6 +125,7 @@ describe("a hop, from the tool call to the delivery", () => {
       },
       hasSomebodyToAsk: true,
       maxDepth: 2,
+      maxPerRun: 3,
     });
 
     // The asking Bot's own words, through the tool it is offered.
@@ -165,8 +166,10 @@ describe("a hop, from the tool call to the delivery", () => {
     expect(seen?.message).toContain("find the outage window");
     expect(seen?.message).toContain("yesterday only");
     expect(seen?.message).toContain("a date range");
-    // Attributed by the deployment, from the row rather than from anything a model wrote.
-    expect(seen?.message).toContain(ASKER);
+    // Attributed by the deployment, from the row rather than from anything a model wrote: the
+    // asking Bot by the name the desk resolved, and the Bot being asked told which one it is.
+    expect(seen?.message).toContain("Asker, another Bot, has asked you");
+    expect(seen?.message).toContain("You are Target.");
   });
 
   test("a delivered hop is finished, so a second sweep does not run the Bot again", async () => {
@@ -181,6 +184,7 @@ describe("a hop, from the tool call to the delivery", () => {
       },
       hasSomebodyToAsk: true,
       maxDepth: 2,
+      maxPerRun: 3,
     });
     await tool?.execute({ bot: "Target", task: "have a look" });
 
@@ -225,6 +229,7 @@ describe("a hop, from the tool call to the delivery", () => {
       },
       hasSomebodyToAsk: true,
       maxDepth: 2,
+      maxPerRun: 3,
     });
     await tool?.execute({ bot: "Target", task: "have a look" });
 
