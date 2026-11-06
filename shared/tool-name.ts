@@ -1,5 +1,7 @@
+import { OFFER_CHECK_IN_TOOL } from "./check-in-offer";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
 import { RESEARCH_ROLE_LABELS, researchRoleOfTool } from "./research";
+import { SUBAGENT_TOOL } from "./subagent";
 import { SEARCH_TOOLS } from "./tool-search";
 
 /**
@@ -146,31 +148,220 @@ export function approvalWords(action: { toolRef: string; scope: string }): {
   };
 }
 
+type OwnTool = {
+  running: string;
+  done: string;
+  /**
+   * What it was given and what it answered were both written for the model (a tool search's query
+   * and limit), so its step in a folded group says what it did and does not open.
+   */
+  answersTheModel?: true;
+};
+
 /**
- * The tools every Bot holds that this deployment wrote itself, named in words somebody chose.
+ * The tools OpenBot itself offers a Bot, named in words somebody chose.
  *
  * These are not MCP names, so nothing above rewrites them, and the bare identifier is what a line
  * would otherwise say: "show_app_access", shimmering, while the Bot works out what an app is for the
- * person. Named twice, for the moment and for afterwards, because only these lines are drawn while
- * running AND left on screen once done.
+ * person. Named twice, for the moment and for afterwards, because a line is drawn while it runs AND
+ * left on screen once done.
+ *
+ * EVERY ONE OF THEM, including those the app draws a card for. A card is the usual picture, but the
+ * same call is also a step inside a subtask, a line in a conversation opened where its card is not
+ * registered, and a line in a run with no browser at all. `server/tests/built-in-tool-labels.test.ts`
+ * reads every tool OpenBot registers and fails on one missing here.
  */
-const OWN_TOOLS: Record<string, { running: string; done: string }> = {
+const OWN_TOOLS: Record<string, OwnTool> = {
   [SHOW_APP_ACCESS_TOOL]: {
     running: "Checking app access",
     done: "Checked app access",
+    answersTheModel: true,
   },
-  // Its answer is written for the model, so the line says what happened and shows no answer.
   [SEARCH_TOOLS]: {
     running: "Looking for a tool",
     done: "Looked for a tool",
+    answersTheModel: true,
+  },
+
+  // Bringing someone else in.
+  ask_person: { running: "Asking you", done: "Asked you" },
+  message_bot: { running: "Asking another Bot", done: "Asked another Bot" },
+  [SUBAGENT_TOOL]: { running: "Working on a subtask", done: "Ran a subtask" },
+  // A voice conversation handing what was said to the Bot behind it.
+  ask_agent: { running: "Asking the Bot", done: "Asked the Bot" },
+
+  // Skills: the ones it learned, and the ones a person writes with it.
+  copilotkit_load_skill: { running: "Using a skill", done: "Used a skill" },
+  copilotkit_read_skill_file: {
+    running: "Reading a file from a skill",
+    done: "Read a file from a skill",
+  },
+  list_skills: {
+    running: "Checking existing skills",
+    done: "Checked existing skills",
+  },
+  read_skill: { running: "Reading a skill", done: "Read a skill" },
+  list_skill_tools: {
+    running: "Checking available tools",
+    done: "Checked available tools",
+  },
+  save_skill: { running: "Proposing a skill", done: "Proposed a skill" },
+
+  // Making a Bot from a conversation.
+  list_bots: {
+    running: "Checking existing Bots",
+    done: "Checked existing Bots",
+  },
+  read_bot: {
+    running: "Reading a Bot's instructions",
+    done: "Read a Bot's instructions",
+  },
+  list_bot_skills: {
+    running: "Checking available skills",
+    done: "Checked available skills",
+  },
+  save_bot: { running: "Proposing a new Bot", done: "Proposed a new Bot" },
+
+  // Its memory of you.
+  recall_personal_memory: {
+    running: "Checking its memory of you",
+    done: "Checked its memory of you",
+  },
+  remember_personal_fact: {
+    running: "Saving a memory",
+    done: "Saved a memory",
+  },
+  save_observed_memory: {
+    running: "Noting something about you",
+    done: "Noted something about you",
+  },
+  form_memory: {
+    running: "Noting something about you",
+    done: "Noted something about you",
+  },
+  forget_personal_memory: {
+    running: "Forgetting a memory",
+    done: "Forgot a memory",
+  },
+
+  // Follow-ups, check-ins and next steps.
+  schedule_follow_up: {
+    running: "Scheduling a follow-up",
+    done: "Scheduled a follow-up",
+  },
+  list_follow_ups: {
+    running: "Checking follow-ups",
+    done: "Checked follow-ups",
+  },
+  cancel_follow_up: {
+    running: "Cancelling a follow-up",
+    done: "Cancelled a follow-up",
+  },
+  [OFFER_CHECK_IN_TOOL]: {
+    running: "Offering a check-in",
+    done: "Offered a check-in",
+  },
+  suggest_next_step: {
+    running: "Suggesting a next step",
+    done: "Suggested a next step",
+  },
+  clear_next_step: {
+    running: "Clearing a next step",
+    done: "Cleared a next step",
+  },
+
+  // Responsibilities.
+  create_responsibility: {
+    running: "Creating a responsibility",
+    done: "Created a responsibility",
+  },
+  list_responsibilities: {
+    running: "Checking responsibilities",
+    done: "Checked responsibilities",
+  },
+  update_responsibility: {
+    running: "Updating a responsibility",
+    done: "Updated a responsibility",
+  },
+  report_responsibility_progress: {
+    running: "Recording progress",
+    done: "Recorded progress",
+  },
+  run_responsibility: {
+    running: "Starting a responsibility",
+    done: "Started a responsibility",
+  },
+  pause_responsibility: {
+    running: "Pausing a responsibility",
+    done: "Paused a responsibility",
+  },
+  resume_responsibility: {
+    running: "Resuming a responsibility",
+    done: "Resumed a responsibility",
+  },
+  complete_responsibility: {
+    running: "Marking a responsibility complete",
+    done: "Marked a responsibility complete",
+  },
+
+  // The browser. A folded group names these steps in the same words (`browser-activity.ts`).
+  computer_navigate: { running: "Opening page", done: "Opened page" },
+  computer_read: { running: "Reading page", done: "Read page" },
+  computer_snapshot: { running: "Inspecting page", done: "Inspected page" },
+  computer_click: { running: "Clicking on page", done: "Clicked on page" },
+  computer_type: { running: "Filling in field", done: "Filled in field" },
+  computer_key: { running: "Pressing key", done: "Pressed key" },
+  computer_scroll: { running: "Scrolling page", done: "Scrolled page" },
+  computer_screenshot: {
+    running: "Taking a screenshot",
+    done: "Took a screenshot",
+  },
+
+  // The Bot's computer, and folders on yours. The same action reads the same on either.
+  computer_list_files: { running: "Listing files", done: "Listed files" },
+  computer_read_file: { running: "Reading a file", done: "Read a file" },
+  computer_write_file: { running: "Saving a file", done: "Saved a file" },
+  computer_run_command: { running: "Running a command", done: "Ran a command" },
+  host_list_folders: {
+    running: "Checking your folders",
+    done: "Checked your folders",
+  },
+  host_list_files: { running: "Listing files", done: "Listed files" },
+  host_read_file: { running: "Reading a file", done: "Read a file" },
+  host_write_file: { running: "Saving a file", done: "Saved a file" },
+  host_run_command: { running: "Running a command", done: "Ran a command" },
+
+  // Asking the person, from the computer.
+  computer_request_help: {
+    running: "Asking you for help",
+    done: "Asked you for help",
+  },
+  computer_request_secret: {
+    running: "Waiting for you to fill in a field",
+    done: "Asked you to fill in a field",
+  },
+  computer_request_sign_in: {
+    running: "Waiting for you to sign in",
+    done: "Asked you to sign in",
+  },
+  report_refusal: {
+    running: "Noting a declined request",
+    done: "Noted a declined request",
   },
 };
 
-/** One of this deployment's own tools in words, or null for any other name. */
+/** One of OpenBot's own tools in words, or null for any other name. */
 export function ownToolLabel(name: string, running = false): string | null {
-  const own = OWN_TOOLS[name];
+  const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
   if (!own) return null;
   return running ? own.running : own.done;
+}
+
+/** Whether a step's arguments and answer were written for the model and are not shown to the person. */
+export function answersTheModel(name: string): boolean {
+  return (
+    Object.hasOwn(OWN_TOOLS, name) && OWN_TOOLS[name]?.answersTheModel === true
+  );
 }
 
 /**

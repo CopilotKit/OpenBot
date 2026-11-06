@@ -10,6 +10,7 @@ import {
   type SubagentResult,
 } from "@openbot/shared/subagent";
 import {
+  answersTheModel,
   connectorName,
   humanise,
   ownToolLabel,
@@ -380,8 +381,8 @@ export function stepDetails(step: ToolItem): StepDetails {
   const answer = step.result === undefined ? undefined : asText(step.result);
   const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
-  // This deployment's own tools answer the model, not the person; see `ServerToolLine`.
-  const own = ownToolLabel(name) !== null;
+  // A tool whose answer is for the model, not the person; see `ServerToolLine`.
+  const own = answersTheModel(name);
   const outcome = {
     id: step.id,
     pending: step.result === undefined,
