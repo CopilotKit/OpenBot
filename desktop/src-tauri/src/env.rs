@@ -280,6 +280,32 @@ pub fn container_address(address: &str) -> String {
     }
 }
 
+/**
+What the one computer relays from its own loopback (`COMPUTER_LOOPBACK_RELAYS`, read by
+agent-computer's `loopback-relay.ts`), as `<port>=<host>:<port>`, comma-separated.
+
+The Recorder in a browser there reaches OpenBot only at https or at loopback, so it is handed the
+address the person's window uses, `http://127.0.0.1:<app port>`, and a local Intelligence gateway at
+`ws://localhost:<port>`. Inside the computer's container both are the container. The app's and the
+server's ports go to the server's container on the Compose network, and a gateway on this machine's
+loopback goes to `host.docker.internal`, as the server's container reaches it. A gateway elsewhere
+is reached at its own address and is not relayed.
+*/
+fn loopback_relays(ports: &Ports, gateway_ws_url: &str) -> String {
+    let mut relays = vec![
+        format!("{}=server:3001", ports.app),
+        format!("{}=server:3001", ports.server),
+    ];
+    let gateway = reqwest::Url::parse(&container_address(gateway_ws_url))
+        .ok()
+        .and_then(|url| url.port_or_known_default());
+    if let Some(port) = gateway.filter(|port| *port != ports.app && *port != ports.server) {
+        relays.push(format!("{port}=host.docker.internal:{port}"));
+    }
+    relays.dedup();
+    relays.join(",")
+}
+
 #[cfg(test)]
 mod port_tests {
     use super::*;
@@ -857,6 +883,10 @@ pub fn compose(
     env.insert("COMPUTER_SUPERVISOR_URL".into(), String::new());
     env.insert("COMPUTER_SUPERVISOR_CONTAINER_URL".into(), String::new());
     env.insert("COMPUTER_PERSON_ID".into(), "personal".into());
+    env.insert(
+        "COMPUTER_LOOPBACK_RELAYS".into(),
+        loopback_relays(ports, &intelligence.gateway_ws_url),
+    );
 
     // The worker refuses to start without this, by design: it is a fact about where this process
     // runs, and it would rather stop than guess. `start.sh` sets it at run time, so a `.env` copied
@@ -1807,6 +1837,46 @@ HTTPS_PROXY=http://proxy:8080
         assert_eq!(
             env.get("COMPUTER_PERSON_ID").map(String::as_str),
             Some("personal")
+        );
+    }
+
+    /// The Recorder in a browser on the one computer is handed this machine's loopback addresses
+    /// for OpenBot and a local gateway, which in the computer's container are the container. Before
+    /// these relays Record there connected and reached nothing; the computer now relays each port
+    /// to where its container reaches it.
+    #[test]
+    fn the_one_computer_relays_openbot_and_a_local_gateway_from_its_loopback() {
+        let compose_with = |gateway_ws_url: &str| {
+            compose(
+                &Intelligence {
+                    api_url: "http://localhost:14400".into(),
+                    gateway_ws_url: gateway_ws_url.into(),
+                    api_key: "key".into(),
+                },
+                &Model::default(),
+                &engine_status(None),
+                &Ports {
+                    app: 3011,
+                    server: 3002,
+                    ..Ports::default()
+                },
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            )
+        };
+        assert_eq!(
+            compose_with("ws://localhost:14401")
+                .get("COMPUTER_LOOPBACK_RELAYS")
+                .map(String::as_str),
+            Some("3011=server:3001,3002=server:3001,14401=host.docker.internal:14401")
+        );
+        // A gateway elsewhere is reached at its own address: only OpenBot is relayed.
+        assert_eq!(
+            compose_with("wss://realtime.example")
+                .get("COMPUTER_LOOPBACK_RELAYS")
+                .map(String::as_str),
+            Some("3011=server:3001,3002=server:3001")
         );
     }
 
