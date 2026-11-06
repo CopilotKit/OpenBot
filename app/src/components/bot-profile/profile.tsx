@@ -89,12 +89,16 @@ export function BotProfile({
           name={agent.name}
           seed={agent.avatarSeed}
           size={40}
-          state={kiteStateOf(
-            attention.data && {
-              ...attention.data,
-              paused: lifecycle.data?.paused ?? attention.data.paused,
-            },
-          )}
+          state={
+            attention.data
+              ? kiteStateOf({
+                  ...attention.data,
+                  paused: lifecycle.data?.paused ?? attention.data.paused,
+                })
+              : lifecycle.data?.paused
+                ? "sleeping"
+                : "idle"
+          }
         />
         <div className="min-w-0">
           {agent.title && <p className="truncate font-medium">{agent.title}</p>}
