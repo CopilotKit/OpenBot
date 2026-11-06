@@ -3,7 +3,12 @@ import type { Database } from "../db/client";
 import { reasonWithoutStatement } from "../db/query-failure";
 import { enterpriseSettings } from "../db/schema/admin";
 import { agentProfiles } from "../db/schema/coworker";
-import { mcpServers, mcpTools, pluginGrants } from "../db/schema/plugins";
+import {
+  mcpServers,
+  mcpTools,
+  pluginGrants,
+  skills,
+} from "../db/schema/plugins";
 import { currentEdition } from "../edition";
 
 type ListedTool = { ref: string };
@@ -11,13 +16,14 @@ type ListedTool = { ref: string };
 type Store = {
   refreshTools(serverId: string, actorId?: string): Promise<{ tools: number }>;
   grant(
-    kind: "mcp",
+    kind: "mcp" | "skill",
     ref: string,
     agentId: string,
     by: string,
     as?: "admin" | "owner",
   ): Promise<void>;
   listForAgent(agentId: string): Promise<unknown>;
+  installSkill(input: { slug: string; by: string }): Promise<void>;
 };
 
 export type PersonalDefaultsDeps = {
@@ -29,6 +35,8 @@ export type PersonalDefaultsDeps = {
   granted(agentId: string, serverId: string): Promise<Set<string>>;
   /** Every app this deployment has added. */
   servers(): Promise<string[]>;
+  /** Whether a skill with this slug has been written already. */
+  skillExists(slug: string): Promise<boolean>;
 };
 
 /** Who the trail names for a grant nobody pressed a button for. */
@@ -270,6 +278,25 @@ export function withPersonalDefaults<S extends Store>(
     );
     return list.call(this, agentId);
   } as S["listForAgent"];
+
+  /*
+   * In the personal edition a new skill goes to every Bot, as a new app does: the person writing it
+   * is the only person there, and a skill no Bot offers does nothing until they find the switch.
+   * Only when it is new. Saving it again is an edit, and must not turn back on a Bot they switched
+   * off on the skill's page.
+   */
+  const install = store.installSkill;
+  store.installSkill = async function (
+    this: S,
+    input: Parameters<S["installSkill"]>[0],
+  ) {
+    const fresh =
+      currentEdition() === "personal" && !(await deps.skillExists(input.slug));
+    await install.call(this, input);
+    if (fresh)
+      for (const bot of await deps.bots())
+        await this.grant("skill", input.slug, bot, input.by || GRANTED_BY);
+  } as S["installSkill"];
   return store;
 }
 
@@ -308,6 +335,14 @@ export function personalDefaultsDeps(database: Database): PersonalDefaultsDeps {
         .select({ id: mcpServers.id })
         .from(mcpServers);
       return rows.map((row) => row.id);
+    },
+    async skillExists(slug) {
+      const [row] = await database
+        .select({ slug: skills.slug })
+        .from(skills)
+        .where(eq(skills.slug, slug))
+        .limit(1);
+      return row !== undefined;
     },
   };
 }

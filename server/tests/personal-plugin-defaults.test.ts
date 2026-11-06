@@ -27,13 +27,15 @@ function fakeStore(vendors: Record<string, Tool[]>) {
   /** Who the trail names for each grant, by `agent:ref`. */
   const grantedBy = new Map<string, string>();
   const added: string[] = [];
+  /** The skills written so far, by slug. */
+  const skills = new Set<string>();
   const store = {
     async refreshTools(serverId: string, _actorId = "") {
       listed.set(serverId, vendors[serverId] ?? []);
       return { tools: listed.get(serverId)?.length ?? 0 };
     },
     async grant(
-      _kind: "mcp",
+      _kind: "mcp" | "skill",
       ref: string,
       agentId: string,
       by: string,
@@ -53,6 +55,9 @@ function fakeStore(vendors: Record<string, Tool[]>) {
     async listForAgent(agentId: string) {
       return grants.filter((grant) => grant.startsWith(`${agentId}:`));
     },
+    async installSkill(input: { slug: string; by: string }) {
+      skills.add(input.slug);
+    },
   };
   const deps = {
     tools: async (serverId: string) => listed.get(serverId) ?? [],
@@ -64,6 +69,7 @@ function fakeStore(vendors: Record<string, Tool[]>) {
           .map((grant) => grant.slice(agentId.length + 1)),
       ),
     servers: async () => added,
+    skillExists: async (slug: string) => skills.has(slug),
   };
   const wrapped = withPersonalDefaults(store, deps);
   return { store: wrapped, grants, grantedBy, added, deps };
@@ -170,5 +176,31 @@ describe("Routines, in every edition", () => {
     expect(added).toEqual(["routines"]);
     expect(grants).toHaveLength(4);
     expect(await store.listForAgent("travel")).toHaveLength(2);
+  });
+});
+
+describe("a new skill in the personal edition", () => {
+  test("goes to every Bot", async () => {
+    setEdition("personal");
+    const { store, grants, grantedBy } = fakeStore({});
+    await store.installSkill({ slug: "standup", by: "me" });
+    expect(grants.sort()).toEqual(["assistant:standup", "researcher:standup"]);
+    expect(grantedBy.get("assistant:standup")).toBe("me");
+  });
+
+  test("saving it again does not turn it back on for a Bot it was taken from", async () => {
+    setEdition("personal");
+    const { store, grants } = fakeStore({});
+    await store.installSkill({ slug: "standup", by: "me" });
+    // Switched off for the researcher on the skill's page.
+    grants.splice(grants.indexOf("researcher:standup"), 1);
+    await store.installSkill({ slug: "standup", by: "me" });
+    expect(grants).toEqual(["assistant:standup"]);
+  });
+
+  test("goes to no Bot in the team edition, where an admin chooses", async () => {
+    const { store, grants } = fakeStore({});
+    await store.installSkill({ slug: "standup", by: "me" });
+    expect(grants).toEqual([]);
   });
 });
