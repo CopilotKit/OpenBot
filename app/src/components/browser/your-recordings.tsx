@@ -54,7 +54,10 @@ export function YourRecordings() {
             : "Intelligence isn't available, so your recordings can't be listed."}
         </p>
       ) : rows.length === 0 ? (
-        <PageEmpty>No recordings yet.</PageEmpty>
+        <PageEmpty>
+          No recordings yet. Record a task with the OpenBot extension to see it
+          here.
+        </PageEmpty>
       ) : (
         <>
           <PageRows>

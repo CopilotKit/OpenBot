@@ -93,14 +93,33 @@ test("recordings show title, date and how each ended", async () => {
   expect(view.queryByText("Show more")).toBeNull();
 });
 
-test("an Intelligence without recordings says so in one line", async () => {
+test("no recordings shows one empty line", async () => {
   pages[""] = { recordings: [], nextCursor: null };
   const view = render(
     <QueryClientProvider client={queryClient}>
       <YourRecordings />
     </QueryClientProvider>,
   );
-  await view.findByText("No recordings yet.");
+  await view.findByText(
+    "No recordings yet. Record a task with the OpenBot extension to see it here.",
+  );
+});
+
+test("an Intelligence without recordings says so in one line", async () => {
+  pages[""] = {
+    recordings: [],
+    nextCursor: null,
+    unavailable: "unavailable",
+  };
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <YourRecordings />
+    </QueryClientProvider>,
+  );
+  await view.findByText(
+    "Intelligence isn't available, so your recordings can't be listed.",
+  );
+  expect(view.queryByText(/No recordings yet/)).toBeNull();
 });
 
 test("an unavailable Intelligence says so instead of listing rows", async () => {
@@ -115,7 +134,7 @@ test("an unavailable Intelligence says so instead of listing rows", async () => 
     </QueryClientProvider>,
   );
   await view.findByText(/Couldn't reach Intelligence/);
-  expect(view.queryByText("No recordings yet.")).toBeNull();
+  expect(view.queryByText(/No recordings yet/)).toBeNull();
 });
 
 test("Show more loads the next page", async () => {
