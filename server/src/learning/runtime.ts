@@ -210,6 +210,17 @@ const PERSONAL_READ_MS = 5_000;
 /** A space that refused (missing, revoked, not entitled, unreadable) is not asked again by runs for this long. */
 const PERSONAL_RETRY_MS = 60_000;
 
+/** A Skill's files with SKILL.md first and the rest in their given order; a binary file has no text. */
+export function skillMdFirst(
+  files: readonly { path: string; text?: string }[],
+): { path: string; text: string | null }[] {
+  return [...files]
+    .sort(
+      (a, b) => Number(b.path === "SKILL.md") - Number(a.path === "SKILL.md"),
+    )
+    .map((file) => ({ path: file.path, text: file.text ?? null }));
+}
+
 export function createLearningRuntime(options: {
   store: LearningSettingsStore;
   client: CopilotKitIntelligence;
@@ -380,48 +391,45 @@ export function createLearningRuntime(options: {
     };
   };
 
+  /**
+   * The Skills published in any one Learning space, with their files (SKILL.md first), read the way a run reads them
+   * (the same registry and Intelligence call). `off` when Automatic Learning is off here; `unavailable` when
+   * Intelligence did not deliver them (its Learning delivery off, the space not made yet, or not reachable).
+   */
+  const containerSkills = async (
+    containerId: string,
+  ): Promise<
+    { skills: LearnedSkillContent[] } | { unavailable: "off" | "unavailable" }
+  > => {
+    if (!(await store.read()).enabled) return { unavailable: "off" };
+    try {
+      const snapshot = await waitForSnapshot(
+        registryFor({ containerId }).acquireSnapshot(),
+        AbortSignal.timeout(PERSONAL_READ_MS),
+      );
+      return {
+        skills: snapshot.skills.map(({ name, description, files }) => ({
+          name,
+          description,
+          files: skillMdFirst(files),
+        })),
+      };
+    } catch (error) {
+      // The space exists and nothing is published in it yet.
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "REVISION_NOT_FOUND"
+      )
+        return { skills: [] };
+      return { unavailable: "unavailable" };
+    }
+  };
+
   return {
     acquire,
-    /**
-     * The Skills published in any one Learning space, with their files (SKILL.md first), read the way a run reads them
-     * (the same registry and Intelligence call). `off` when Automatic Learning is off here; `unavailable` when
-     * Intelligence did not deliver them (its Learning delivery off, the space not made yet, or not reachable).
-     */
-    async containerSkills(
-      containerId: string,
-    ): Promise<
-      { skills: LearnedSkillContent[] } | { unavailable: "off" | "unavailable" }
-    > {
-      if (!(await store.read()).enabled) return { unavailable: "off" };
-      try {
-        const snapshot = await waitForSnapshot(
-          registryFor({ containerId }).acquireSnapshot(),
-          AbortSignal.timeout(PERSONAL_READ_MS),
-        );
-        return {
-          skills: snapshot.skills.map(({ name, description, files }) => ({
-            name,
-            description,
-            files: [...files]
-              .sort(
-                (a, b) =>
-                  Number(b.path === "SKILL.md") - Number(a.path === "SKILL.md"),
-              )
-              .map((file) => ({ path: file.path, text: file.text ?? null })),
-          })),
-        };
-      } catch (error) {
-        // The space exists and nothing is published in it yet.
-        if (
-          error !== null &&
-          typeof error === "object" &&
-          "code" in error &&
-          error.code === "REVISION_NOT_FOUND"
-        )
-          return { skills: [] };
-        return { unavailable: "unavailable" };
-      }
-    },
+    containerSkills,
     /** The Skills published in this person's own Learning space, for Settings, Learning. */
     async personalSkills(
       userId: string,
@@ -430,7 +438,7 @@ export function createLearningRuntime(options: {
       | { unavailable: "off" | "unavailable" }
     > {
       if (!people) return { unavailable: "unavailable" };
-      const result = await this.containerSkills(people.containerFor(userId));
+      const result = await containerSkills(people.containerFor(userId));
       if ("unavailable" in result) return result;
       return {
         skills: result.skills.map(({ name, description }) => ({

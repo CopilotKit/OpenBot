@@ -8,6 +8,7 @@ import {
   clearLearningRevisionFallback,
   createLearningRuntime,
   selectLearningTarget,
+  skillMdFirst,
 } from "../src/learning/runtime";
 import type { LearningSettingsStore } from "../src/learning/settings";
 import { skillSnapshot } from "./fixtures/learned-skills";
@@ -314,6 +315,20 @@ test("cancelling one acquisition leaves another run's shared refresh alive", asy
   snapshot.resolve(skillSnapshot());
   expect((await second)?.catalog).toContain("public-answer");
   expect(reads).toBe(1);
+});
+
+test("skillMdFirst puts SKILL.md first and gives a binary file no text", () => {
+  expect(
+    skillMdFirst([
+      { path: "reference.txt", text: "r" },
+      { path: "SKILL.md", text: "s" },
+      { path: "logo.png" },
+    ]),
+  ).toEqual([
+    { path: "SKILL.md", text: "s" },
+    { path: "reference.txt", text: "r" },
+    { path: "logo.png", text: null },
+  ]);
 });
 
 test("containerSkills reads a container's published files, SKILL.md first", async () => {
