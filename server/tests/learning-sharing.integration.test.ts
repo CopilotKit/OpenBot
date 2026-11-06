@@ -731,7 +731,7 @@ describe("Settings, Learning", () => {
       );
       expect(refused.status).toBe(404);
       expect(await refused.json()).toEqual({
-        error: "You have no Skill by that name.",
+        error: "You have no skill by that name.",
       });
     }
     expect(

@@ -88,6 +88,25 @@ const smallBody = bodyLimit({
     context.json({ error: "That request is too large." }, 413),
 });
 
+type Settled<T> =
+  | { failed: false; value: T }
+  | { failed: true; value: null; missing: boolean; off: boolean };
+
+/** Awaits a read and says whether it failed because the space is not made yet or Learning is off in Intelligence. */
+async function settle<T>(read: Promise<T>): Promise<Settled<T>> {
+  try {
+    return { failed: false, value: await read };
+  } catch (error) {
+    const { code } = requestFailure(error);
+    return {
+      failed: true,
+      value: null,
+      missing: code === "LEARNING_CONTAINER_NOT_FOUND",
+      off: code === "ROUTE_NOT_FOUND" || code === "LEARNING_NOT_ENABLED",
+    };
+  }
+}
+
 /**
  * Settings, Learning: who else's Bots use the Skills learned from a person's own recordings. Theirs alone, scoped to the
  * signed-in person and never to anything in the path, like their standing instructions: there is no route for reading
@@ -246,19 +265,39 @@ export function createPersonalLearningRoutes(
     const sources = await Promise.all(
       scopes.map(async (source) => {
         const [proposals, runs] = await Promise.all([
-          readProposals(manage, source.containerId).catch(() => null),
-          manage
-            .listLearningRuns({ containerId: source.containerId })
-            .catch(() => null),
+          settle(readProposals(manage, source.containerId)),
+          settle(manage.listLearningRuns({ containerId: source.containerId })),
         ]);
-        const latest = runs
-          ? [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+        const failure = [proposals, runs].find(
+          (outcome) => outcome.failed && !outcome.missing,
+        );
+        const off = [proposals, runs].some(
+          (outcome) => outcome.failed && outcome.off,
+        );
+        const latest = runs.value
+          ? [...runs.value].sort((a, b) =>
+              b.createdAt.localeCompare(a.createdAt),
+            )[0]
           : undefined;
+        if (off) {
+          return {
+            ...source,
+            proposals: null,
+            latestRun: null,
+            unavailable: "learning-off" as const,
+          };
+        }
+        // A person's space exists once a Recorder connects, so not being there yet means nothing to review.
+        if (proposals.failed && proposals.missing) {
+          return { ...source, proposals: [], latestRun: null };
+        }
         return {
           ...source,
-          proposals:
-            proposals?.filter((entry) => entry.status === "pending_review") ??
-            null,
+          proposals: failure
+            ? null
+            : (proposals.value?.filter(
+                (entry) => entry.status === "pending_review",
+              ) ?? null),
           latestRun: latest ? runSummary(latest) : null,
         };
       }),
@@ -337,6 +376,11 @@ export function createPersonalLearningRoutes(
         );
       }
       const containerId = source.containerId;
+      const recordWithApproval = recordApprovalBefore(
+        deps.approvals,
+        actor.id,
+        "person",
+      );
       try {
         const review = await reviewProposal({
           manage,
@@ -345,14 +389,17 @@ export function createPersonalLearningRoutes(
           action,
           ...(action === "approve" && source.kind === "recordings"
             ? {
-                before: recordApprovalBefore(
-                  deps.approvals,
-                  actor.id,
-                  "person",
-                ),
+                before: async (detail) => {
+                  const undo = await recordWithApproval(detail);
+                  // The approval row is written, so the open index must stop serving this skill before Intelligence
+                  // publishes it.
+                  deps.invalidate();
+                  return undo;
+                },
               }
             : {}),
         });
+        deps.invalidate();
         await audit({
           eventType: "configuration.changed",
           targetType: "learning_skill",
@@ -370,6 +417,8 @@ export function createPersonalLearningRoutes(
           proposal: { id: candidateId, status: review.status },
         });
       } catch (error) {
+        // A refused approval takes its row back, so the index is read again.
+        deps.invalidate();
         await audit({
           eventType: "configuration.changed",
           targetType: "learning_skill",
@@ -457,7 +506,7 @@ export function createPersonalLearningRoutes(
   routes.get("/skills/:name", async (context) => {
     const name = context.req.param("name");
     if (!isLearnedSkillName(name)) {
-      return context.json({ error: "Name a Skill to read." }, 400);
+      return context.json({ error: "Name a skill to read." }, 400);
     }
     const spaces = await skillSpaces(context.var.actor);
     const skill = spaces
@@ -467,13 +516,13 @@ export function createPersonalLearningRoutes(
       return context.json(
         {
           error:
-            "Couldn't read your Skills from Intelligence just now. Try again.",
+            "Couldn't read your skills from Intelligence just now. Try again.",
         },
         503,
       );
     }
     if (skill === null) {
-      return context.json({ error: "You have no Skill by that name." }, 404);
+      return context.json({ error: "You have no skill by that name." }, 404);
     }
     return context.json({ skill });
   });
@@ -551,7 +600,7 @@ export function createPersonalLearningRoutes(
     } | null;
     if (!isLearnedSkillName(name) || typeof body?.open !== "boolean") {
       return context.json(
-        { error: "Name a Skill and say whether it is open to everyone." },
+        { error: "Name a skill and say whether it is open to everyone." },
         400,
       );
     }
@@ -573,7 +622,7 @@ export function createPersonalLearningRoutes(
       (sharing?.openSkills.includes(name) ?? false);
     if (!theirs) {
       if ("skills" in read)
-        return context.json({ error: "You have no Skill by that name." }, 404);
+        return context.json({ error: "You have no skill by that name." }, 404);
       return read.unavailable === "off"
         ? context.json(
             {
@@ -609,7 +658,7 @@ export function createPersonalLearningRoutes(
   routes.post("/skills/:name/share-request", smallBody, async (context) => {
     const name = context.req.param("name");
     if (!isLearnedSkillName(name)) {
-      return context.json({ error: "Name a Skill to ask to share." }, 400);
+      return context.json({ error: "Name a skill to ask to share." }, 400);
     }
     const userId = context.var.actor.id;
     const row = await deps.approvals.get(userId, name);
@@ -623,7 +672,7 @@ export function createPersonalLearningRoutes(
       return context.json(
         {
           error:
-            "Only a Skill you approved yourself needs an admin to share it. Share any other Skill with its Open switch.",
+            "Only a skill you approved yourself needs an admin to share it. Share any other skill with its Open switch.",
         },
         409,
       );

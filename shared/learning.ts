@@ -265,6 +265,8 @@ export type PersonalReview = {
   sources: (LearningSource & {
     proposals: LearningProposal[] | null;
     latestRun: LearningRunSummary | null;
+    /** Set when Learning is switched off in Intelligence, so there is nothing to read. */
+    unavailable?: "learning-off";
   })[];
 };
 

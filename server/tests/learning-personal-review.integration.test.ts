@@ -88,6 +88,7 @@ function review(options: {
   defaultTarget?: string;
   autoApprover?: PersonalLearningRouteDeps["autoApprover"];
   written?: LearningSettings[];
+  invalidate?: () => void;
 }) {
   const intelligence = fakeIntelligence("current", {
     containers: options.containers ?? [personalLearningContainerId(ada)],
@@ -128,7 +129,7 @@ function review(options: {
     ...(options.containerSkills
       ? { containerSkills: options.containerSkills }
       : {}),
-    invalidate: () => {},
+    invalidate: options.invalidate ?? (() => {}),
     sharingAllowed: async () => true,
     auditStore,
     ...(options.withManage === false
@@ -219,7 +220,13 @@ describe("reviewing the skills learned from your own recordings", () => {
   });
 
   test("a space that cannot be read comes back without proposals or a run", async () => {
-    const app = review({ containers: [] });
+    const broken = () => Promise.reject(new Error("down"));
+    const app = review({
+      manage: {
+        listLearningCandidates: broken,
+        listLearningRuns: broken,
+      } as unknown as LearningManagement,
+    });
     const body = (await (
       await app.request("/review")
     ).json()) as PersonalReview;
@@ -227,6 +234,43 @@ describe("reviewing the skills learned from your own recordings", () => {
       proposals: null,
       latestRun: null,
     });
+  });
+
+  test("a space not made yet reads as nothing to review, without an error", async () => {
+    const app = review({ containers: [] });
+    const body = (await (
+      await app.request("/review")
+    ).json()) as PersonalReview;
+    expect(body.sources[0]).toMatchObject({
+      proposals: [],
+      latestRun: null,
+    });
+    expect(body.sources[0]?.unavailable).toBeUndefined();
+  });
+
+  test("Learning switched off in Intelligence reads as unavailable, not as empty", async () => {
+    const failing = (code: string) =>
+      Object.assign(new Error(code), { status: 404, code });
+    for (const code of ["ROUTE_NOT_FOUND", "LEARNING_NOT_ENABLED"]) {
+      const app = review({
+        manage: {
+          listLearningCandidates: async () => {
+            throw failing(code);
+          },
+          listLearningRuns: async () => {
+            throw failing(code);
+          },
+        } as unknown as LearningManagement,
+      });
+      const body = (await (
+        await app.request("/review")
+      ).json()) as PersonalReview;
+      expect(body.sources[0]).toMatchObject({
+        proposals: null,
+        latestRun: null,
+        unavailable: "learning-off",
+      });
+    }
   });
 
   test("with no Intelligence connection it answers 503", async () => {
@@ -303,6 +347,8 @@ describe("approving and rejecting the skills learned from your own recordings", 
       .from(learningSkillApprovals)
       .where(eq(learningSkillApprovals.userId, ada));
   const lastServed = () => served[served.length - 1] as FakeIntelligence;
+  const approveRequests = (intelligence: FakeIntelligence) =>
+    intelligence.requests.filter((entry) => /approve/.test(entry.path)).length;
 
   test("with admins approving, a person sees their pending proposals and cannot review them", async () => {
     const app = review({ personalReview: "admins" });
@@ -335,6 +381,39 @@ describe("approving and rejecting the skills learned from your own recordings", 
         payload: { change: "skill_approved", by: `${ada}@example.test` },
       },
     ]);
+  });
+
+  test("the open-skill index is refreshed after the approval is recorded and before Intelligence publishes, and again after", async () => {
+    const calls: number[] = [];
+    let intelligence: FakeIntelligence | undefined;
+    const app = review({
+      personalReview: "people",
+      invalidate: () => {
+        calls.push(intelligence ? approveRequests(intelligence) : 0);
+      },
+    });
+    intelligence = lastServed();
+    expect((await approve(app)).status).toBe(200);
+    expect((await rowsOf()).length).toBe(1);
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls[0]).toBe(0);
+    expect(calls[calls.length - 1]).toBe(1);
+  });
+
+  test("a refused approval still refreshes the index", async () => {
+    let invalidated = 0;
+    const app = review({
+      personalReview: "people",
+      invalidate: () => {
+        invalidated += 1;
+      },
+    });
+    const intelligence = lastServed();
+    const entry = intelligence.candidates.get(PROPOSAL);
+    if (!entry) throw new Error("missing candidate");
+    intelligence.candidates.set(PROPOSAL, { ...entry, status: "approved" });
+    expect((await approve(app)).status).toBe(409);
+    expect(invalidated).toBeGreaterThanOrEqual(1);
   });
 
   test("a person rejects a proposal and OpenBot records no approval", async () => {
