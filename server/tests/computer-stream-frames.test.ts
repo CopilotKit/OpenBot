@@ -177,8 +177,13 @@ describe("frames to a browser that cannot keep up", () => {
     socket.pause();
     const computerEnd = await upstream.opened;
 
+    // A few at a time: forty megabytes sent in one go would pass the fake computer's own 16 MB limit, and Bun drops
+    // whatever a socket is sent past that, so the proxy would never see most of them.
     const SENT = 40;
-    for (let i = 0; i < SENT; i += 1) computerEnd.send(frame(String(i)));
+    for (let i = 0; i < SENT; i += 1) {
+      computerEnd.send(frame(String(i)));
+      await Bun.sleep(10);
+    }
     await Bun.sleep(300);
     // The page's last change, sent while the browser is still behind.
     computerEnd.send(frame("last", 1024));
