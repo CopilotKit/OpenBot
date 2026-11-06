@@ -23,6 +23,14 @@ let found: Found | null = null;
 let checkFailure: string | null = null;
 let checks = 0;
 let relaunches = 0;
+let told: string[] = [];
+
+mock.module("@tauri-apps/api/core", () => ({
+  invoke: async (command: string) => {
+    told.push(command);
+    return null;
+  },
+}));
 
 mock.module("@tauri-apps/plugin-updater", () => ({
   check: async () => {
@@ -50,6 +58,7 @@ afterEach(() => {
   checkFailure = null;
   checks = 0;
   relaunches = 0;
+  told = [];
   cleanup();
 });
 afterAll(() => GlobalRegistrator.unregister());
@@ -162,4 +171,35 @@ test("declining removes the offer without installing", async () => {
 
   await waitFor(() => expect(view.container.textContent).toBe(""));
   expect(relaunches).toBe(0);
+});
+
+// The window leaves the setup screen for OpenBot seconds after launch, and the offer goes with it.
+// The shell then asks natively, but only if nobody answered here: told on both answers.
+test("declining tells the shell, so a running OpenBot does not ask again", async () => {
+  found = anUpdate();
+  const view = render(<UpdateOffer />);
+
+  fireEvent.click(await view.findByRole("button", { name: "Not now" }));
+
+  await waitFor(() => expect(told).toEqual(["answer_update_offer"]));
+});
+
+test("installing tells the shell before it downloads", async () => {
+  found = anUpdate();
+  const view = render(<UpdateOffer />);
+
+  fireEvent.click(
+    await view.findByRole("button", { name: "Update and restart" }),
+  );
+
+  await waitFor(() => expect(relaunches).toBe(1));
+  expect(told).toEqual(["answer_update_offer"]);
+});
+
+test("an offer nobody has answered tells the shell nothing", async () => {
+  found = anUpdate();
+  const view = render(<UpdateOffer />);
+
+  await view.findByRole("button", { name: "Not now" });
+  expect(told).toEqual([]);
 });

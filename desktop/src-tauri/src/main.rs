@@ -10,6 +10,7 @@ mod desktop_page;
 mod desktop_status;
 mod desktop_telemetry;
 mod intelligence_bridge;
+mod update_offer;
 
 #[cfg(test)]
 mod test_support;
@@ -1374,6 +1375,12 @@ async fn apply_shell_update(
             .map_err(|e| Problem::from(e.to_string()))?;
         app.restart();
     }
+}
+
+/// The setup screen's update offer was answered, so a running OpenBot does not ask it again.
+#[tauri::command]
+fn answer_update_offer(offer: tauri::State<'_, update_offer::Offer>) {
+    offer.answered();
 }
 
 #[tauri::command]
@@ -6612,6 +6619,7 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         "stop" => stop_from_menu(app.clone()),
         "status" => show_status_window(app),
         "open-intelligence" => open_intelligence_from_menu(app.clone()),
+        update_offer::MENU_ID => update_offer::check_from_menu(app),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
         "quit" => {
@@ -6763,6 +6771,8 @@ fn install_menus<R: tauri::Runtime>(
     // The menu bar menu follows the system's appearance; its icons are drawn for each.
     let dark = system_is_dark(app);
     let running = app.state::<Shell>().root.lock().unwrap().is_some();
+    // Check for Updates… only where this build can update itself: elsewhere it could only fail.
+    let updates = update_offer::configured(app);
     let dashboard = || {
         intelligence_menu_item(
             app.state::<Shell>()
@@ -6830,6 +6840,15 @@ fn install_menus<R: tauri::Runtime>(
             Some("About"),
             Some(about_openbot()),
         )?));
+        if updates {
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
+                app,
+                update_offer::MENU_ID,
+                update_offer::MENU_LABEL,
+                true,
+                None::<&str>,
+            )?));
+        }
         entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
         entries.push(MenuEntry::Icon(IconMenuItem::with_id(
             app,
@@ -6847,21 +6866,29 @@ fn install_menus<R: tauri::Runtime>(
      * app's own menu reads. The same ids, so both arrive at the same function.
      */
     let window_entries = || -> tauri::Result<Vec<MenuEntry<R>>> {
-        let mut entries = vec![
-            MenuEntry::Native(PredefinedMenuItem::about(
+        let mut entries = vec![MenuEntry::Native(PredefinedMenuItem::about(
+            app,
+            Some("About OpenBot"),
+            Some(about_openbot()),
+        )?)];
+        // Where every Mac app keeps it: under About.
+        if updates {
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
                 app,
-                Some("About OpenBot"),
-                Some(about_openbot()),
-            )?),
-            MenuEntry::Native(PredefinedMenuItem::separator(app)?),
-            MenuEntry::Plain(MenuItem::with_id(
-                app,
-                "open",
-                "Show Window",
+                update_offer::MENU_ID,
+                update_offer::MENU_LABEL,
                 true,
                 None::<&str>,
-            )?),
-        ];
+            )?));
+        }
+        entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
+        entries.push(MenuEntry::Plain(MenuItem::with_id(
+            app,
+            "open",
+            "Show Window",
+            true,
+            None::<&str>,
+        )?));
         // "Open Intelligence dashboard" is the status bar menu's alone.
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
@@ -7336,6 +7363,7 @@ fn main() {
         // Only so the window can restart into what the updater wrote.
         .plugin(tauri_plugin_process::init())
         .manage(Shell::default())
+        .manage(update_offer::Offer::default())
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
             fit_setup_window,
@@ -7350,6 +7378,7 @@ fn main() {
             check_runtime_update,
             check_shell_update,
             apply_shell_update,
+            answer_update_offer,
             stage_runtime_update,
             establish_runtime_baseline,
             apply_runtime_update,
@@ -7406,6 +7435,8 @@ fn main() {
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
                 allow_app_page(window.app_handle(), payload.url());
+                // The setup screen's update offer left with the setup screen.
+                update_offer::after_handover(window.app_handle());
                 // macOS draws the window's outline from it; Windows tints the title bar with it.
                 if cfg!(any(target_os = "macos", target_os = "windows")) {
                     let _ = window.eval(APP_THEME_PAGE);

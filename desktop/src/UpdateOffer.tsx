@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useState } from "react";
@@ -21,6 +22,10 @@ import { useCallback, useEffect, useState } from "react";
  * minisign signature published beside each artifact against the public key compiled into the app,
  * and refuses the bundle if it does not match, so a hijacked endpoint serves something that will
  * not install rather than something that will.
+ *
+ * The window leaves this screen for OpenBot itself seconds after launch, and the offer leaves with
+ * it. An answer is told to the shell, which asks natively once OpenBot is on screen only when
+ * nobody answered here (see `update_offer.rs`).
  */
 export function UpdateOffer() {
   const [update, setUpdate] = useState<Update | null>(null);
@@ -47,6 +52,7 @@ export function UpdateOffer() {
 
   const install = useCallback(async () => {
     if (!update) return;
+    answered();
     setInstalling(true);
     setFailure(null);
     setDownloaded(0);
@@ -84,7 +90,10 @@ export function UpdateOffer() {
           type="button"
           className="quiet"
           disabled={installing}
-          onClick={() => setDismissed(true)}
+          onClick={() => {
+            answered();
+            setDismissed(true);
+          }}
         >
           Not now
         </button>
@@ -96,6 +105,11 @@ export function UpdateOffer() {
       )}
     </section>
   );
+}
+
+/** Tell the shell not to ask again this launch. Outside the app (tests, a browser) nobody listens. */
+function answered() {
+  invoke("answer_update_offer").catch(() => {});
 }
 
 function progress(downloaded: number, total: number | null): string {
