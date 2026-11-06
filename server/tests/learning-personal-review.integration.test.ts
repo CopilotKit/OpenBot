@@ -521,6 +521,35 @@ describe("switching automatic approval on and off", () => {
     expect(written).toEqual([]);
   });
 
+  test("opening Learning in the personal edition approves what is pending first and says automatic approval is on", async () => {
+    let sweeps = 0;
+    const autoApprover = {
+      sweep: async () => {
+        sweeps += 1;
+        return { approved: 1 };
+      },
+    };
+    setEdition("personal");
+    try {
+      const response = await review({ autoApprover }).request("/review");
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as PersonalReview;
+      expect(body.autoApprove).toBe(true);
+      expect(sweeps).toBe(1);
+    } finally {
+      setEdition(EDITION);
+    }
+    setEdition("team");
+    try {
+      const response = await review({ autoApprover }).request("/review");
+      const body = (await response.json()) as PersonalReview;
+      expect(body.autoApprove).toBeNull();
+      expect(sweeps).toBe(1);
+    } finally {
+      setEdition(EDITION);
+    }
+  });
+
   test("turning automatic approval on approves what is pending", async () => {
     setEdition("personal");
     try {

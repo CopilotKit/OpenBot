@@ -226,6 +226,19 @@ export function createPersonalLearningRoutes(
         503,
       );
     }
+    const personal = currentEdition() === "personal";
+    if (personal) {
+      try {
+        await deps.autoApprover?.sweep();
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "learning-auto-approve-failed",
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
     const [scopes, allowed] = await Promise.all([
       deps.scopesFor(context.var.actor),
       canReview(),
@@ -252,7 +265,9 @@ export function createPersonalLearningRoutes(
     );
     const answer: PersonalReview = {
       canReview: allowed,
-      autoApprove: null,
+      autoApprove: personal
+        ? ((await deps.settings.read()).autoApprove ?? true)
+        : null,
       sources,
     };
     return context.json(answer);
