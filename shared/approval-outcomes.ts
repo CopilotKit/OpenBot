@@ -45,17 +45,25 @@ export const OUTCOME_UNKNOWN =
 /** An approved step that was turned away by the check just before it ran, with no reason of its own. */
 export const NOT_DONE = "Not done.";
 
+/** The Bot's next step that ends a "Not done:" sentence, which a person never reads. */
+const ASK_AGAIN = "Ask the person again if it is still needed.";
+const CHECK_BEFORE_ASKING =
+  "Check whether it happened before asking the person again.";
+
 /**
  * An approved step that the check just before it ran turned away. `why` is one sentence, with its
  * full stop, written for whoever reads it ("The rule that allowed this was removed before it ran.").
  */
 export function notDoneOnRecheck(why: string): string {
-  return `Not done: ${why} Ask the person again if it is still needed.`;
+  return `Not done: ${why} ${ASK_AGAIN}`;
 }
 
-/** An approved step whose work ran out of tries, with what stopped it. */
+/**
+ * An approved step whose work ran out of tries, with what stopped it. The reason is cut to 300
+ * characters, counted by code point so an emoji is never split into half a character.
+ */
 export function notCarriedOut(reason: string): string {
-  return `Not done: this action could not be carried out (${reason.slice(0, 300)}). Check whether it happened before asking the person again.`;
+  return `Not done: this action could not be carried out (${Array.from(reason).slice(0, 300).join("")}). ${CHECK_BEFORE_ASKING}`;
 }
 
 const FOR_PERSON = new Map<string, string>([
@@ -80,6 +88,11 @@ export function outcomeForPerson(text: string): string {
   const known = FOR_PERSON.get(text.trim());
   if (known) return known;
   if (!text.startsWith("Not done:")) return text;
+  // The Bot's step is known text, so it comes off by its ending first. The reason before it is an
+  // error message as thrown, and an unclosed "(" in it would hide every sentence end from the scan.
+  for (const next of [ASK_AGAIN, CHECK_BEFORE_ASKING]) {
+    if (text.endsWith(` ${next}`)) return text.slice(0, -(next.length + 1));
+  }
   const end = firstSentenceEnd(text);
   return end === -1 ? text : text.slice(0, end + 1);
 }

@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- An approved step that ran out of tries no longer shows the person "Check whether it happened
+  before asking the person again" when the error that stopped it holds an unclosed parenthesis or
+  is cut at 300 characters. That sentence is the Bot's next step. The cut also stops splitting an
+  emoji in the error into half a character.
 - OpenBot Desktop installs the personal edition: nobody signs in, one computer is shared by your
   Bots, and you start with the Personal Assistant. Before, it installed the team edition, with its
   admin screens, the fintech example's Bots and a computer for each Bot. An existing installation
