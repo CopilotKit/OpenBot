@@ -235,7 +235,10 @@ export function LearningSharing() {
           ))}
         </PageRows>
       </PageSection>
-      <PageSection title="Your skills" description={SKILLS_DESCRIPTION[mode]}>
+      <PageSection
+        title="Your skills"
+        description={SKILLS_DESCRIPTION[data.sharingAllowed ? mode : "closed"]}
+      >
         {data.skills === null || data.skills.length === 0 ? (
           <PageEmpty>{emptySentence(data, mode, false)}</PageEmpty>
         ) : (
@@ -268,12 +271,12 @@ export function LearningSharing() {
                           <ItemTitle>{skill.name}</ItemTitle>
                           <ItemDescription>
                             {[
-                              needsAdmin
+                              needsAdmin ||
+                              (mode === "choose" &&
+                                !(open && data.sharingAllowed))
                                 ? "Only your Bots use it."
                                 : mode === "choose"
-                                  ? open
-                                    ? "Every Bot may use it."
-                                    : "Only your Bots use it."
+                                  ? "Every Bot may use it."
                                   : null,
                               skill.description,
                             ]
@@ -283,39 +286,60 @@ export function LearningSharing() {
                         </ItemContent>
                       </button>
                       <ItemActions>
-                        {needsAdmin ? (
-                          skill.sharing === "requested" ? (
-                            <span className="text-muted-foreground text-sm">
-                              Asked to share
-                            </span>
-                          ) : (
-                            <Button
-                              disabled={requestShare.isPending}
-                              onClick={() => requestShare.mutate(skill.name)}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                            >
-                              Ask to share
-                            </Button>
-                          )
-                        ) : mode === "choose" ? (
-                          <Switch
-                            aria-label={`Open ${skill.name} to everyone`}
-                            checked={open}
-                            // An open Skill can always be closed; opening one waits for an admin.
-                            disabled={
-                              setOpen.isPending ||
-                              (!data.sharingAllowed && !open)
-                            }
-                            onCheckedChange={(checked) =>
-                              setOpen.mutate({
-                                name: skill.name,
-                                open: checked,
-                              })
-                            }
-                          />
-                        ) : null}
+                        {mode === "choose" ? (
+                          <>
+                            {needsAdmin && skill.sharing === "requested" ? (
+                              <span className="text-muted-foreground text-sm">
+                                Asked to share
+                              </span>
+                            ) : null}
+                            <Switch
+                              aria-label={`Open ${skill.name} to everyone`}
+                              checked={open}
+                              // An open Skill can always be closed; opening one waits for an admin.
+                              disabled={
+                                setOpen.isPending ||
+                                requestShare.isPending ||
+                                (!data.sharingAllowed && !open)
+                              }
+                              onCheckedChange={(checked) => {
+                                if (
+                                  checked &&
+                                  needsAdmin &&
+                                  skill.sharing !== "requested"
+                                ) {
+                                  // Switching on a skill an admin has yet to approve also asks for that approval.
+                                  setOpen
+                                    .mutateAsync({
+                                      name: skill.name,
+                                      open: true,
+                                    })
+                                    .then(() => requestShare.mutate(skill.name))
+                                    .catch(() => {});
+                                  return;
+                                }
+                                setOpen.mutate({
+                                  name: skill.name,
+                                  open: checked,
+                                });
+                              }}
+                            />
+                          </>
+                        ) : skill.sharing === "requested" ? (
+                          <span className="text-muted-foreground text-sm">
+                            Asked to share
+                          </span>
+                        ) : (
+                          <Button
+                            disabled={requestShare.isPending}
+                            onClick={() => requestShare.mutate(skill.name)}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            Ask to share
+                          </Button>
+                        )}
                       </ItemActions>
                     </Item>
                   ) : (

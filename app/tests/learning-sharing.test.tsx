@@ -179,7 +179,9 @@ test("Your skills shows in every sharing mode", async () => {
     expect(view.queryAllByRole("switch")).toHaveLength(
       mode === "choose" ? 2 : 0,
     );
-    expect(view.getByText("Closes a ticket.", { exact: mode !== "choose" }));
+    expect(
+      view.getByText("Closes a ticket.", { exact: mode !== "choose" }),
+    ).toBeTruthy();
     if (mode !== "choose") {
       expect(view.queryByText(/Every Bot may use it/)).toBeNull();
       expect(view.queryByText(/Only your Bots use it/)).toBeNull();
@@ -377,34 +379,8 @@ test("pressing a Your skills row opens its SKILL.md where there is no switch", a
   expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
 });
 
-test("a skill the person approved shows Ask to share instead of the Open switch", async () => {
-  answer = {
-    ...answer,
-    mode: "choose",
-    skills: [
-      {
-        name: "refund-order",
-        description: "Refunds an order.",
-        open: false,
-        approvedBy: "person",
-        sharing: "none",
-      },
-      {
-        name: "close-ticket",
-        description: "Closes a ticket.",
-        open: true,
-        approvedBy: "person",
-        sharing: "requested",
-      },
-      {
-        name: "reopen-ticket",
-        description: "Reopens a ticket.",
-        open: false,
-        approvedBy: "admin",
-        sharing: "none",
-      },
-    ],
-  };
+/** Fetch stub that records POSTs, on top of the default one. */
+function recordPosts() {
   const posts: string[] = [];
   const inner = global.fetch;
   global.fetch = Object.assign(
@@ -417,34 +393,164 @@ test("a skill the person approved shows Ask to share instead of the Open switch"
     },
     { preconnect: originalFetch.preconnect },
   );
+  return posts;
+}
+
+const approvedByPerson = (
+  name: string,
+  open: boolean,
+  sharing: "none" | "requested" | "approved" | "declined",
+) => ({
+  name,
+  description: `${name} description.`,
+  open,
+  approvedBy: "person" as const,
+  sharing,
+});
+
+test("under Everyone's Bots, a skill waiting for an admin has one control: Ask to share", async () => {
+  answer = {
+    ...answer,
+    mode: "open",
+    skills: [
+      approvedByPerson("refund-order", false, "none"),
+      approvedByPerson("close-ticket", true, "requested"),
+      {
+        name: "reopen-ticket",
+        description: "Reopens a ticket.",
+        open: false,
+        approvedBy: "admin",
+        sharing: "none",
+      },
+    ],
+  };
+  const posts = recordPosts();
   const view = draw();
   await view.findByText("refund-order");
-  // Only the admin-approved skill keeps its switch.
-  expect(view.getAllByRole("switch")).toHaveLength(1);
-  expect(view.getByLabelText("Open reopen-ticket to everyone")).toBeTruthy();
+  expect(view.queryAllByRole("switch")).toHaveLength(0);
+  expect(view.getAllByRole("button", { name: "Ask to share" })).toHaveLength(1);
   expect(view.getByText("Asked to share")).toBeTruthy();
-  // Never "Every Bot may use it." for a skill an admin hasn't approved.
-  expect(view.queryByText(/Every Bot may use it/)).toBeNull();
-  expect(view.getAllByText(/Only your Bots use it/)).toHaveLength(3);
+  const refundRow = view.getByText("refund-order").closest("button");
+  expect(refundRow?.textContent).toContain("Only your Bots use it.");
+  // Scoped to the row itself: the title div's own closest("div") would be the title.
+  const reopenRow = view
+    .getByText("reopen-ticket")
+    .closest('[data-slot="item"]') as HTMLElement;
+  expect(reopenRow.textContent).toContain("Reopens a ticket.");
+  expect(reopenRow.textContent).not.toContain("Only your Bots use it.");
   fireEvent.click(view.getByRole("button", { name: "Ask to share" }));
   await waitFor(() =>
     expect(posts).toEqual([
       "/api/settings/learning/skills/refund-order/share-request",
     ]),
   );
-  // In open mode the button replaces the row's chevron-only layout too.
-  cleanup();
-  queryClient.clear();
-  answer = { ...answer, mode: "open" };
-  const open = draw();
-  await open.findByText("refund-order");
-  expect(open.queryAllByRole("switch")).toHaveLength(0);
-  expect(open.getByRole("button", { name: "Ask to share" })).toBeTruthy();
-  // The row says so in open mode too: the skill stays with their own Bots.
-  const refundRow = open.getByText("refund-order").closest("button");
-  expect(refundRow?.textContent).toContain("Only your Bots use it.");
-  const reopenRow = open.getByText("reopen-ticket").closest("div");
-  expect(reopenRow?.textContent ?? "").not.toContain("Only your Bots use it.");
+});
+
+test("under The skills I choose, every skill keeps its switch, including ones waiting for an admin", async () => {
+  answer = {
+    ...answer,
+    mode: "choose",
+    skills: [
+      approvedByPerson("refund-order", false, "none"),
+      approvedByPerson("close-ticket", true, "requested"),
+      {
+        name: "reopen-ticket",
+        description: "Reopens a ticket.",
+        open: false,
+        approvedBy: "admin",
+        sharing: "none",
+      },
+    ],
+  };
+  const view = draw();
+  await view.findByText("refund-order");
+  expect(view.getAllByRole("switch")).toHaveLength(3);
+  expect(view.queryByRole("button", { name: "Ask to share" })).toBeNull();
+  expect(view.getByText("Asked to share")).toBeTruthy();
+  expect(view.queryByText(/Every Bot may use it/)).toBeNull();
+  expect(view.getAllByText(/Only your Bots use it/)).toHaveLength(3);
+});
+
+test("an open skill waiting for an admin can be closed", async () => {
+  answer = {
+    ...answer,
+    mode: "choose",
+    skills: [approvedByPerson("close-ticket", true, "none")],
+  };
+  const view = draw();
+  const toggle = await view.findByRole("switch", {
+    name: "Open close-ticket to everyone",
+  });
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(sent).toEqual([
+      {
+        path: "/api/settings/learning/skills/close-ticket",
+        method: "PUT",
+        body: { open: false },
+      },
+    ]),
+  );
+});
+
+test("switching on a skill waiting for an admin opens it and asks to share", async () => {
+  answer = {
+    ...answer,
+    mode: "choose",
+    skills: [approvedByPerson("refund-order", false, "none")],
+  };
+  const posts = recordPosts();
+  const view = draw();
+  fireEvent.click(
+    await view.findByRole("switch", { name: "Open refund-order to everyone" }),
+  );
+  await waitFor(() =>
+    expect(posts).toEqual([
+      "/api/settings/learning/skills/refund-order/share-request",
+    ]),
+  );
+  expect(sent).toEqual([
+    {
+      path: "/api/settings/learning/skills/refund-order",
+      method: "PUT",
+      body: { open: true },
+    },
+  ]);
+});
+
+test("a skill already asked about is switched on without a second request", async () => {
+  answer = {
+    ...answer,
+    mode: "choose",
+    skills: [approvedByPerson("refund-order", false, "requested")],
+  };
+  const posts = recordPosts();
+  const view = draw();
+  fireEvent.click(
+    await view.findByRole("switch", { name: "Open refund-order to everyone" }),
+  );
+  await waitFor(() => expect(sent).toHaveLength(1));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(posts).toEqual([]);
+});
+
+test("while an admin has sharing off, Your skills says only your Bots use them, whatever the saved mode", async () => {
+  for (const mode of ["open", "choose"] as const) {
+    queryClient.clear();
+    answer = { ...answer, mode, sharingAllowed: false };
+    const view = draw();
+    await view.findByText("Your skills");
+    expect(
+      view.getByText("Only the Bots you use draw on these skills."),
+    ).toBeTruthy();
+    expect(view.queryByText(/Every Bot on OpenBot draws on these/)).toBeNull();
+    expect(view.queryByText(/Open a skill to let every Bot/)).toBeNull();
+    expect(view.queryByText(/Every Bot may use it/)).toBeNull();
+    if (mode === "choose")
+      expect(view.getAllByText(/Only your Bots use it/)).toHaveLength(2);
+    cleanup();
+  }
 });
 
 test("the personal edition lists Your skills with no sharing choice and no switches", async () => {
