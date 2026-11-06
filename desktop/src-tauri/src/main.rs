@@ -4828,7 +4828,12 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
                     Category::ChatGptPlan,
                     openbot_env::saved_chatgpt_plan_store(&root),
                 ),
-                anthropic: hint(Category::ClaudePlan, claude_plan),
+                // Known either way, never guessed from a choice recorded before it was saved: the
+                // token is in the vault (a file, read here for its presence alone) or the `.env`.
+                anthropic: Some(
+                    claude_plan
+                        || openbot_desktop_lib::vault::stored(&root, "CLAUDE_CODE_OAUTH_TOKEN"),
+                ),
                 google: hint(Category::GoogleOauth, false),
                 xai: hint(Category::XaiOauth, false),
             },
@@ -7702,7 +7707,7 @@ mod tests {
         );
         assert_eq!(configured.saved.model_api_keys.openai, Some(true));
         assert_eq!(configured.saved.model_sessions.openai, Some(true));
-        assert_eq!(configured.saved.model_sessions.anthropic, None);
+        assert_eq!(configured.saved.model_sessions.anthropic, Some(false));
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -7803,6 +7808,43 @@ mod tests {
         server.join().unwrap();
     }
 
+    /// "Use a saved Claude sign-in" is offered only for a sign-in that is saved. A Claude plan
+    /// chosen in an installation whose Start never ran (every 0.3.1 one on Windows) left the choice
+    /// recorded and no token: the offer was made, Start answered "That Claude plan was not signed
+    /// in to.", and an upgrade went back to the old version over it.
+    #[test]
+    fn a_claude_sign_in_is_offered_as_saved_only_when_its_token_is() {
+        let root = temp_root("openbot-claude-plan-saved-only-when-stored");
+        std::fs::create_dir_all(&root).unwrap();
+        let anthropic = |root: &Path| {
+            already_configured_for_root(root.to_string_lossy().into_owned())
+                .saved
+                .model_sessions
+                .anthropic
+        };
+        assert_eq!(anthropic(&root), Some(false), "nothing saved");
+        std::fs::write(
+            root.join(openbot_desktop_lib::saved_intent::FILE),
+            r#"{"version":1,"categories":["intelligence","claude-plan"],"model":"claude-plan"}"#,
+        )
+        .unwrap();
+        assert_eq!(anthropic(&root), Some(false), "chosen, never saved");
+        let extension = if cfg!(target_os = "windows") {
+            "dpapi"
+        } else {
+            "secret"
+        };
+        std::fs::create_dir_all(root.join(".secrets")).unwrap();
+        std::fs::write(
+            root.join(".secrets")
+                .join(format!("CLAUDE_CODE_OAUTH_TOKEN.{extension}")),
+            "sealed",
+        )
+        .unwrap();
+        assert_eq!(anthropic(&root), Some(true), "saved in the vault");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn passive_metadata_and_legacy_hints_are_root_and_provider_scoped() {
         let root = temp_root("public-intent-cases");
@@ -7816,7 +7858,7 @@ mod tests {
                 std::fs::write(root.join(openbot_desktop_lib::saved_intent::FILE), input).unwrap();
             }
             let unknown = already_configured_for_root(root.to_string_lossy().into_owned());
-            assert_eq!(unknown.saved.model_sessions.anthropic, None);
+            assert_eq!(unknown.saved.model_sessions.anthropic, Some(false));
         }
         std::fs::write(
             root.join(openbot_desktop_lib::saved_intent::FILE),
@@ -7824,7 +7866,8 @@ mod tests {
         )
         .unwrap();
         let recorded = already_configured_for_root(root.to_string_lossy().into_owned());
-        assert_eq!(recorded.saved.model_sessions.anthropic, Some(true));
+        // A recorded choice is not a saved sign-in.
+        assert_eq!(recorded.saved.model_sessions.anthropic, Some(false));
         assert_eq!(recorded.saved.model_api_keys.anthropic, None);
         assert_eq!(recorded.saved.model_sessions.openai, None);
         assert!(recorded.values.is_empty());
@@ -7833,7 +7876,7 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
         );
-        assert_eq!(fresh.saved.model_sessions.anthropic, None);
+        assert_eq!(fresh.saved.model_sessions.anthropic, Some(false));
         std::fs::write(
             root.join(".env"),
             "ANTHROPIC_API_KEY=synthetic-legacy-anthropic\n",
