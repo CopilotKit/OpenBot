@@ -422,3 +422,17 @@ This template renders nothing.
 {{- if and ($learningSetup.serviceTokenSecret | default dict).name (not (regexMatch "^[1-9][0-9]{0,15}$" ($learningSetup.projectId | toString))) }}
 {{- fail "config.learning.setup.serviceTokenSecret needs config.learning.setup.projectId: the numeric ID of the Intelligence project the runtime key belongs to, where the token creates the openbot Learning container." }}
 {{- end }}
+
+{{- /*
+  A model provider the server does not know.
+
+  The server reads BOT_PROVIDER as openai or anthropic, trimmed and in any case, and anything else
+  quietly falls back to the tenant package's provider. So `claude` on a deployment with only an
+  Anthropic key installs cleanly and then fails every turn asking for OPENAI_API_KEY. Quietly wrong,
+  so refused here with the value named.
+*/}}
+{{- with ((.Values.config.model | default dict).provider | default "" | toString | trim | lower) }}
+{{- if not (has . (list "openai" "anthropic")) }}
+{{- fail (printf "config.model.provider is %q, and the server reads only openai or anthropic: anything else silently falls back to the tenant package's provider. Set openai or anthropic, or leave it empty to keep the tenant package's." .) }}
+{{- end }}
+{{- end }}

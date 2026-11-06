@@ -476,7 +476,8 @@ cloud it is on.
 A plain Kubernetes Secret is the default, because that is what a self-hosted cluster has. Setting
 `externalSecrets.enabled` turns the same keys into an ExternalSecret against whatever store the
 cluster has, so Secrets Manager, Secret Manager and Key Vault are a values block rather than three
-code paths.
+code paths. For an Anthropic key, name `anthropic-api-key` in `externalSecrets.data`, beside
+`model-api-key` for OpenAI.
 
 ### An ACM certificate for the ALB, and the CAA record it needs
 

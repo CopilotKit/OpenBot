@@ -16,7 +16,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the Personal Assistant. See [Personal edition](docs/personal-edition.md#openbot-desktop).
 - `docker-compose.yml` gives the `server` container no supervisor when
   `COMPUTER_SUPERVISOR_CONTAINER_URL` is set empty. Unset, it is the supervisor, as before.
-
+- The Helm chart takes an Anthropic key: `secrets.anthropicApiKey` (or `anthropic-api-key` in your
+  own Secret) reaches the server as `ANTHROPIC_API_KEY`, the way the OpenAI key does. A new
+  `config.model` block names the provider (`BOT_PROVIDER`) and a model router's endpoints
+  (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`), each set only when given, and a provider the server
+  would silently ignore is refused at install. Automatic Learning still runs on the OpenAI key
+  unless its agent is pointed at `anthropic-api-key`.
 - A Bot knows that an answer it got from another Bot with `message_bot` is that Bot's. Asked to
   quote what Knowledge said, General Assistant quotes it, instead of saying it never arrived or
   calling the words its own.

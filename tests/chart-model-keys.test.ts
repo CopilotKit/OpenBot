@@ -191,6 +191,20 @@ describe.skipIf(!helm)("the provider and endpoint, for a model router", () => {
     const docs = render("--set", "config.model=null");
     expect(variable(docs, "BOT_PROVIDER")).toBeUndefined();
   });
+
+  test("accept the provider in any case, as the server reads it", () => {
+    const docs = render("--set-string", "config.model.provider=Anthropic");
+    expect(variable(docs, "BOT_PROVIDER")?.value).toBe("Anthropic");
+  });
+
+  test("refuse a provider the server would silently ignore", () => {
+    // The server reads only openai or anthropic and quietly falls back to the tenant package's
+    // provider for anything else, so `claude` on an Anthropic-only install would fail every turn
+    // with "set OPENAI_API_KEY" and nothing at install time would have said why.
+    expect(() =>
+      render("--set-string", "config.model.provider=claude"),
+    ).toThrow(/config\.model\.provider/);
+  });
 });
 
 describe.skipIf(!helm)(
