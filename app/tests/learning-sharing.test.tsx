@@ -145,6 +145,11 @@ test("Your Skills shows in every sharing mode", async () => {
     expect(view.queryAllByRole("switch")).toHaveLength(
       mode === "choose" ? 2 : 0,
     );
+    expect(view.getByText("Closes a ticket.", { exact: mode !== "choose" }));
+    if (mode !== "choose") {
+      expect(view.queryByText(/Every Bot may use it/)).toBeNull();
+      expect(view.queryByText(/Only your Bots use it/)).toBeNull();
+    }
     cleanup();
   }
 });

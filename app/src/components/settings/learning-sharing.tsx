@@ -190,10 +190,16 @@ export function LearningSharing() {
                     <ItemContent>
                       <ItemTitle>{skill.name}</ItemTitle>
                       <ItemDescription>
-                        {open || mode === "open"
-                          ? "Every Bot may use it."
-                          : "Only your Bots use it."}
-                        {skill.description ? ` ${skill.description}` : ""}
+                        {[
+                          mode === "choose"
+                            ? open
+                              ? "Every Bot may use it."
+                              : "Only your Bots use it."
+                            : "",
+                          skill.description,
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
                       </ItemDescription>
                     </ItemContent>
                     {mode === "choose" ? (
