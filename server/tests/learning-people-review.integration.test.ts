@@ -29,8 +29,14 @@ const approvals = createSkillApprovalStore(database);
 const prefix = `people-review-${randomUUID()}`;
 const reviewed = `${prefix}-ana`;
 const audits: AuditEventInput[] = [];
+/** How many of the next audit writes throw, as a database that is down would. */
+let auditFailures = 0;
 const auditStore = {
   insert: async (event: AuditEventInput) => {
+    if (auditFailures > 0) {
+      auditFailures -= 1;
+      throw new Error("audit database is down");
+    }
     audits.push(event);
   },
 };
@@ -41,6 +47,7 @@ beforeAll(async () => {
 });
 afterEach(async () => {
   audits.length = 0;
+  auditFailures = 0;
   await database
     .delete(learningSkillApprovals)
     .where(eq(learningSkillApprovals.userId, reviewed));
@@ -133,6 +140,119 @@ test("an admin lists people's pending proposals, each with the person's name", a
   expect(body.people[2]?.proposals).toBeNull();
 });
 
+test("a person whose space can't be read is logged, and the others still list", async () => {
+  const logs = captureLogs();
+  try {
+    const base = admin();
+    void base;
+    const intelligence = fakeIntelligence("current", {
+      containers: [],
+      candidates: [],
+    });
+    served.push(intelligence);
+    const learning = runtimeKeyClient(
+      intelligence.url,
+      RUNTIME_KEY,
+      "ws://127.0.0.1:9",
+    ).experimental.learning;
+    const routes = admin({
+      manage: {
+        ...learning,
+        listLearningCandidates: async (input) => {
+          if (input.containerId === personalLearningContainerId("ana"))
+            throw new Error(`down, key ${RUNTIME_KEY}`);
+          return [];
+        },
+      },
+    });
+    const response = await routes.request("/people/proposals");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      people: { userId: string; proposals: unknown }[];
+    };
+    expect(body.people.map((person) => person.proposals)).toEqual([
+      null,
+      [],
+      [],
+    ]);
+    const failed = logs.lines.map(
+      (line) => JSON.parse(line) as { type: string; userId?: string },
+    );
+    expect(failed).toEqual([
+      expect.objectContaining({
+        type: "learning-people-proposals-failed",
+        userId: "ana",
+      }),
+    ]);
+    expect(logs.lines.join("\n")).not.toContain(RUNTIME_KEY);
+  } finally {
+    logs.restore();
+  }
+});
+
+test("the people list reads at most four spaces at a time", async () => {
+  let running = 0;
+  let peak = 0;
+  const base = admin();
+  void base;
+  const intelligence = fakeIntelligence("current", {
+    containers: [],
+    candidates: [],
+  });
+  served.push(intelligence);
+  const client = runtimeKeyClient(
+    intelligence.url,
+    RUNTIME_KEY,
+    "ws://127.0.0.1:9",
+  );
+  const routes = admin({
+    manage: {
+      ...client.experimental.learning,
+      listLearningCandidates: async () => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        running -= 1;
+        return [];
+      },
+    },
+    people: async () =>
+      Array.from({ length: 12 }, (_, index) => ({
+        userId: `p${index}`,
+        name: `P${index}`,
+        containerId: personalLearningContainerId(`p${index}`),
+      })),
+  });
+  const response = await routes.request("/people/proposals");
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as { people: unknown[] };
+  expect(body.people).toHaveLength(12);
+  expect(peak).toBe(4);
+});
+
+test("a people list that can't be read answers a generic 503", async () => {
+  const logs = captureLogs();
+  try {
+    const routes = admin({
+      people: async () => {
+        throw new Error("secret-database-password");
+      },
+    });
+    for (const path of [
+      "/people/proposals",
+      `/people/ana/proposals/${PROPOSAL}`,
+      "/sharing-requests",
+    ]) {
+      const response = await routes.request(path);
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toContain("secret-database-password");
+    }
+    expect(logs.lines.join("\n")).not.toContain("secret-database-password");
+  } finally {
+    logs.restore();
+  }
+});
+
 test("an admin reads one proposal from a person", async () => {
   const response = await admin().request(`/people/ana/proposals/${PROPOSAL}`);
   expect(response.status).toBe(200);
@@ -215,7 +335,76 @@ test("approving a person's proposal refreshes the open-skill index", async () =>
     },
   });
   expect((await post(routes, reviewed, PROPOSAL, "approve")).status).toBe(200);
-  expect(invalidated).toBeGreaterThanOrEqual(2);
+  // Once when the record is written before Intelligence is asked, once after the review settles.
+  expect(invalidated).toBe(2);
+});
+
+test("a refused review still refreshes the open-skill index and takes the record back", async () => {
+  let invalidated = 0;
+  const routes = admin({
+    approvals,
+    invalidate: () => {
+      invalidated += 1;
+    },
+  });
+  expect((await post(routes, reviewed, PROPOSAL, "approve")).status).toBe(200);
+  invalidated = 0;
+  const second = await post(routes, reviewed, PROPOSAL, "approve");
+  expect(second.status).toBe(409);
+  expect(invalidated).toBeGreaterThanOrEqual(1);
+});
+
+/** Captures what the routes log, as one JSON line each. */
+function captureLogs() {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  return {
+    lines,
+    restore: () => {
+      console.error = original;
+    },
+  };
+}
+
+test("an audit write that fails after Intelligence approved is logged, and the approval still answers", async () => {
+  const logs = captureLogs();
+  try {
+    const routes = admin({ approvals }, { audit: true });
+    auditFailures = 1;
+    const response = await post(routes, reviewed, PROPOSAL, "approve");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      proposal: { id: PROPOSAL, status: "approved" },
+    });
+    // The success was not turned into a failed review.
+    expect(audits).toEqual([]);
+    expect(logs.lines).toHaveLength(1);
+    expect(JSON.parse(logs.lines[0] as string)).toMatchObject({
+      type: "learning-audit-failed",
+    });
+    expect(logs.lines[0]).not.toContain("audit database is down");
+  } finally {
+    logs.restore();
+  }
+});
+
+test("a failure audit that throws does not hide the review's own failure", async () => {
+  const routes = admin({ approvals }, { audit: true });
+  expect((await post(routes, reviewed, PROPOSAL, "approve")).status).toBe(200);
+  const logs = captureLogs();
+  try {
+    auditFailures = 1;
+    const second = await post(routes, reviewed, PROPOSAL, "approve");
+    expect(second.status).toBe(409);
+    expect(
+      logs.lines.some((line) => line.includes("learning-audit-failed")),
+    ).toBe(true);
+  } finally {
+    logs.restore();
+  }
 });
 
 test("an admin reviews a person's proposal and it is recorded as admin-approved", async () => {
@@ -410,6 +599,65 @@ test("an admin approves a sharing request and the skill is no longer withheld", 
   );
   expect(again.status).toBe(404);
   expect(audits).toHaveLength(1);
+});
+
+test("a sharing decision made when the audit write fails still answers, and is logged", async () => {
+  await requestSharing("Refund triage");
+  const routes = admin({ approvals }, { audit: true });
+  const logs = captureLogs();
+  try {
+    auditFailures = 1;
+    const response = await decideCurrent(
+      routes,
+      reviewed,
+      "Refund triage",
+      "approve",
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ sharing: "approved" });
+    expect(
+      logs.lines.some((line) => line.includes("learning-audit-failed")),
+    ).toBe(true);
+  } finally {
+    logs.restore();
+  }
+});
+
+test("a requested time that is not a full timestamp is refused before the database sees it", async () => {
+  await requestSharing("Refund triage");
+  const routes = admin({ approvals });
+  for (const requestedAt of [
+    "1",
+    "2026",
+    "2026-11-06",
+    "2026-02-30T00:00:00Z",
+    "2026-13-01T00:00:00Z",
+    "2026-11-06T10:00:00",
+    "2026-11-06T10:00:00Z; drop table users",
+  ]) {
+    const refused = await decide(
+      routes,
+      reviewed,
+      "Refund triage",
+      "approve",
+      undefined,
+      { requestedAt },
+    );
+    expect(refused.status).toBe(400);
+  }
+});
+
+test("a sharing decision with an oversized body is refused", async () => {
+  await requestSharing("Refund triage");
+  const refused = await decide(
+    admin({ approvals }),
+    reviewed,
+    "Refund triage",
+    "approve",
+    { "content-type": "application/json", "content-length": "10020" },
+    { requestedAt: "x".repeat(10_000) },
+  );
+  expect(refused.status).toBe(413);
 });
 
 test("an admin declines a sharing request, and bad requests are refused", async () => {

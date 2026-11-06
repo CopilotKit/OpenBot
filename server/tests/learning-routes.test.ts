@@ -50,7 +50,19 @@ function routes(role: "admin" | "user" = "admin") {
 test("only administrators can read or write learning settings", async () => {
   const { app } = routes("user");
   expect((await app.request("/settings")).status).toBe(403);
-  expect((await app.request("/settings", { method: "PUT" })).status).toBe(403);
+  // Same-origin JSON, so the refusal is the admin guard and not the origin check.
+  const sameOrigin = await app.request("https://openbot.example.com/settings", {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      origin: "https://openbot.example.com",
+    },
+    body: JSON.stringify({ enabled: true, agents: {} }),
+  });
+  expect(sameOrigin.status).toBe(403);
+  expect(await sameOrigin.json()).toEqual({
+    error: "Only an admin can do this.",
+  });
 });
 
 test("administrators see learning enabled before selecting a container", async () => {

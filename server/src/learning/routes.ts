@@ -166,6 +166,41 @@ async function managedOverview(
   };
 }
 
+/** The `updated_at` stamp the approval store writes: a full timestamp with a zone, as Postgres prints it. */
+const STAMP =
+  /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|[+-]\d{2}(?::?\d{2})?)$/;
+
+function isStamp(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = STAMP.exec(value);
+  if (!match) return false;
+  const [year, month, day, hour, minute, second] = match
+    .slice(1)
+    .map(Number) as [number, number, number, number, number, number];
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59)
+    return false;
+  return day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/** Maps `items` with at most `limit` calls running at once, keeping the order. */
+async function mapLimited<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await work(items[index] as T);
+      }
+    }),
+  );
+  return results;
+}
+
 export function createLearningRoutes(
   dependencies: LearningAdminDependencies,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
@@ -173,6 +208,26 @@ export function createLearningRoutes(
   audit?: AuditStore,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
+  /**
+   * Records an audit event for something that already happened. A failed write is logged and never changes the
+   * answer: the review or decision it describes is done, and its error is what the admin should see.
+   */
+  const recordSettled = async (
+    event: Parameters<typeof recordAuditEvent>[1],
+  ) => {
+    if (!audit) return;
+    try {
+      await recordAuditEvent(audit, event);
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "learning-audit-failed",
+          eventType: event.eventType,
+          errorType: error instanceof Error ? error.name : "unknown",
+        }),
+      );
+    }
+  };
   routes.use("*", requireUser, async (context, next) => {
     const denied = requireAdmin(context);
     if (denied) return denied;
@@ -451,15 +506,27 @@ export function createLearningRoutes(
       );
     const listed = await people();
     const result: PeopleProposals = {
-      people: await Promise.all(
-        listed.map(async (person) => ({
-          userId: person.userId,
-          name: person.name,
-          proposals: await readProposals(manage, person.containerId)
-            .then((all) => all.filter((p) => p.status === "pending_review"))
-            .catch(() => null),
-        })),
-      ),
+      people: await mapLimited(listed, 4, async (person) => ({
+        userId: person.userId,
+        name: person.name,
+        proposals: await readProposals(manage, person.containerId)
+          .then((all) => all.filter((p) => p.status === "pending_review"))
+          .catch((error: unknown) => {
+            // A person who never recorded has no space yet: nothing is pending, and nothing is wrong.
+            const { status, code } = requestFailure(error);
+            if (code !== "LEARNING_CONTAINER_NOT_FOUND")
+              console.error(
+                JSON.stringify({
+                  type: "learning-people-proposals-failed",
+                  userId: person.userId,
+                  errorType: error instanceof Error ? error.name : "unknown",
+                  ...(status !== undefined ? { status } : {}),
+                  ...(code !== undefined ? { code } : {}),
+                }),
+              );
+            return null;
+          }),
+      })),
     };
     return context.json(result);
   });
@@ -543,6 +610,11 @@ export function createLearningRoutes(
   for (const action of ["approve", "decline"] as const) {
     routes.post(
       `/sharing-requests/:userId/:skillName/${action}`,
+      bodyLimit({
+        maxSize: 4 * 1024,
+        onError: (context) =>
+          context.json({ error: "That request is too large." }, 413),
+      }),
       async (context) => {
         if (!sameOriginJson(context))
           return context.json(
@@ -566,10 +638,7 @@ export function createLearningRoutes(
           requestedAt?: unknown;
         } | null;
         const requestedAt = body?.requestedAt;
-        if (
-          typeof requestedAt !== "string" ||
-          Number.isNaN(Date.parse(requestedAt))
-        )
+        if (!isStamp(requestedAt))
           return context.json(
             { error: "Open the request again, then decide." },
             400,
@@ -602,14 +671,13 @@ export function createLearningRoutes(
           );
         }
         dependencies.invalidate?.();
-        if (audit)
-          await recordAuditEvent(audit, {
-            eventType: "learning.sharing_decided",
-            targetType: "learned_skill",
-            targetId: skillName,
-            actorUserId: context.var.actor.id,
-            payload: { skill: skillName, userId, decision },
-          });
+        await recordSettled({
+          eventType: "learning.sharing_decided",
+          targetType: "learned_skill",
+          targetId: skillName,
+          actorUserId: context.var.actor.id,
+          payload: { skill: skillName, userId, decision },
+        });
         return context.json({ sharing: decision });
       },
     );
@@ -673,41 +741,39 @@ export function createLearningRoutes(
           } finally {
             dependencies.invalidate?.();
           }
-          if (audit)
-            await recordAuditEvent(audit, {
-              eventType: "configuration.changed",
-              targetType: "learning_skill",
-              targetId: candidateId,
-              actorUserId: actor.id,
-              payload: {
-                change:
-                  action === "approve" ? "skill_approved" : "skill_rejected",
-                userId,
-                containerId,
-                title: review.title,
-                operation: review.operation,
-                by: actor.email,
-              },
-            });
+          await recordSettled({
+            eventType: "configuration.changed",
+            targetType: "learning_skill",
+            targetId: candidateId,
+            actorUserId: actor.id,
+            payload: {
+              change:
+                action === "approve" ? "skill_approved" : "skill_rejected",
+              userId,
+              containerId,
+              title: review.title,
+              operation: review.operation,
+              by: actor.email,
+            },
+          });
           return context.json({
             proposal: { id: candidateId, status: review.status },
           });
         } catch (error) {
-          if (audit)
-            await recordAuditEvent(audit, {
-              eventType: "configuration.changed",
-              targetType: "learning_skill",
-              targetId: candidateId,
-              actorUserId: actor.id,
-              payload: {
-                change: "skill_review_failed",
-                decision: action,
-                userId,
-                containerId,
-                code: requestFailure(error).code ?? null,
-                by: actor.email,
-              },
-            });
+          await recordSettled({
+            eventType: "configuration.changed",
+            targetType: "learning_skill",
+            targetId: candidateId,
+            actorUserId: actor.id,
+            payload: {
+              change: "skill_review_failed",
+              decision: action,
+              userId,
+              containerId,
+              code: requestFailure(error).code ?? null,
+              by: actor.email,
+            },
+          });
           const failure = learningFailure(error);
           return context.json({ error: failure.error }, failure.status);
         }
@@ -753,42 +819,39 @@ export function createLearningRoutes(
           candidateId,
           action,
         });
-        if (audit)
-          await recordAuditEvent(audit, {
-            eventType: "configuration.changed",
-            targetType: "learning_skill",
-            targetId: candidateId,
-            actorUserId: actor.id,
-            payload: {
-              change:
-                action === "approve" ? "skill_approved" : "skill_rejected",
-              containerId,
-              title,
-              operation: review.operation,
-              publishedSkillId: review.publishedSkillId,
-              by: actor.email,
-            },
-          });
+        await recordSettled({
+          eventType: "configuration.changed",
+          targetType: "learning_skill",
+          targetId: candidateId,
+          actorUserId: actor.id,
+          payload: {
+            change: action === "approve" ? "skill_approved" : "skill_rejected",
+            containerId,
+            title,
+            operation: review.operation,
+            publishedSkillId: review.publishedSkillId,
+            by: actor.email,
+          },
+        });
         return context.json({
           proposal: { id: candidateId, status: review.status },
         });
       } catch (error) {
         const failure = learningFailure(error);
-        if (audit)
-          await recordAuditEvent(audit, {
-            eventType: "configuration.changed",
-            targetType: "learning_skill",
-            targetId: candidateId,
-            actorUserId: actor.id,
-            payload: {
-              change: "skill_review_failed",
-              decision: action,
-              containerId,
-              ...(title ? { title } : {}),
-              code: requestFailure(error).code ?? null,
-              by: actor.email,
-            },
-          });
+        await recordSettled({
+          eventType: "configuration.changed",
+          targetType: "learning_skill",
+          targetId: candidateId,
+          actorUserId: actor.id,
+          payload: {
+            change: "skill_review_failed",
+            decision: action,
+            containerId,
+            ...(title ? { title } : {}),
+            code: requestFailure(error).code ?? null,
+            by: actor.email,
+          },
+        });
         return context.json({ error: failure.error }, failure.status);
       }
     });
