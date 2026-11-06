@@ -56,6 +56,32 @@ describe("botLivery", () => {
     );
   });
 
+  test("every Bot the repo ships has a livery of its own", () => {
+    // The `avatar_seed`s in examples/*/agents.yaml and the fintech catalog.
+    const shipped = [
+      "expense-review",
+      "feedback-digest",
+      "general-assistant",
+      "interview-notes",
+      "knowledge",
+      "meeting-follow-ups",
+      "onboarding-buddy",
+      "oncall-handover",
+      "personal-assistant",
+      "picked-harness",
+      "release-notes",
+      "research-desk",
+      "risk-analyst",
+      "ticket-triage",
+      "vendor-review",
+    ];
+    const liveries = shipped.map((seed) => {
+      const { slot, pattern } = botLivery(seed);
+      return `${slot} ${pattern}`;
+    });
+    expect(new Set(liveries).size).toBe(shipped.length);
+  });
+
   test("no seed has no identity: the first colour and a plain sail", () => {
     expect(botLivery("")).toEqual({ slot: 0, pattern: "solid", seed: 1 });
   });
