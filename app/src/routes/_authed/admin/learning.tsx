@@ -509,6 +509,13 @@ export function LearningPage() {
             onClick={() => {
               void overview.refetch();
               if (selected) void delivery.refetch();
+              // The sections below read the same container, and a run only moves on when read again.
+              for (const key of [
+                learningKeys.proposals(selected || undefined),
+                learningKeys.runs(selected || undefined),
+                learningKeys.skills(selected || undefined),
+              ])
+                void queryClient.invalidateQueries({ queryKey: key });
             }}
           >
             Refresh status
@@ -652,6 +659,31 @@ const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
   failed: "Failed",
 };
 
+const FAILURES: Record<string, string> = {
+  LEARNING_MODEL_NOT_CONFIGURED:
+    "Intelligence has no model set up for Learning yet.",
+  LEARNING_NOT_ENABLED: "Learning isn't turned on in Intelligence.",
+  LEARNING_CONTAINER_NOT_FOUND: "Intelligence no longer has this container.",
+};
+
+/** What an admin reads for a failed run. The code itself stays in the row's title. */
+function failureSentence(code: string | null): string {
+  return (code && FAILURES[code]) || "The run failed.";
+}
+
+const RUN_POLL_MS = 10_000;
+
+/** Re-read the runs every few seconds while one is still going, so Queued does not outlive the run. */
+export function runPollInterval(
+  runs: Pick<LearningRunSummary, "status">[] | undefined,
+): number | false {
+  return runs?.some(
+    (run) => run.status !== "succeeded" && run.status !== "failed",
+  )
+    ? RUN_POLL_MS
+    : false;
+}
+
 /** One line saying how many skills and insights a run produced, for the counts it has. */
 function runCounts(run: LearningRunSummary): string | null {
   const counts = [
@@ -676,7 +708,10 @@ function runTimes(run: LearningRunSummary): string | null {
 
 /** The analysis runs of the container shown above, newest first, so no dashboard is needed to see one fail. */
 function AnalysisRuns({ agentId }: { agentId?: string }) {
-  const runs = useQuery(learningRunsQueryOptions(agentId));
+  const runs = useQuery({
+    ...learningRunsQueryOptions(agentId),
+    refetchInterval: (query) => runPollInterval(query.state.data?.runs),
+  });
   return (
     <PageSection
       title="Analysis runs"
@@ -686,6 +721,10 @@ function AnalysisRuns({ agentId }: { agentId?: string }) {
         <p role="alert" className="mt-4 text-destructive text-sm">
           {runs.error.message}
         </p>
+      ) : !runs.data.containerId ? (
+        <PageEmpty icon={IconHistory} title="No container">
+          Choose a container under Participation to see its analysis runs.
+        </PageEmpty>
       ) : runs.data.runs.length === 0 ? (
         <PageEmpty icon={IconHistory} title="No analysis runs yet">
           A run appears here once Learning has analyzed conversations.
@@ -704,15 +743,16 @@ function AnalysisRuns({ agentId }: { agentId?: string }) {
                     {RUN_STATUS[run.status]} ·{" "}
                     {run.trigger === "manual" ? "Manual" : "Automatic"}
                   </ItemTitle>
-                  {[
-                    runTimes(run),
-                    runCounts(run),
-                    run.status === "failed" ? run.failureCode : null,
-                  ]
+                  {[runTimes(run), runCounts(run)]
                     .filter((line) => line !== null)
                     .map((line) => (
                       <ItemDescription key={line}>{line}</ItemDescription>
                     ))}
+                  {run.status === "failed" ? (
+                    <ItemDescription title={run.failureCode ?? undefined}>
+                      {failureSentence(run.failureCode)}
+                    </ItemDescription>
+                  ) : null}
                 </ItemContent>
               </Item>
             </Fragment>

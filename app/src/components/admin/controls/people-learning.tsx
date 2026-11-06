@@ -39,6 +39,7 @@ import {
   savePersonalReviewMutationOptions,
 } from "@/lib/learning/mutations";
 import {
+  learnedSkillQueryOptions,
   learningSettingsQueryOptions,
   peopleProposalsQueryOptions,
   personProposalQueryOptions,
@@ -65,13 +66,28 @@ const CHOICES: {
   },
 ];
 
+/** What a section says when the settings it depends on did not load. */
+function SettingsError({ message }: { message?: string }) {
+  return (
+    <p className="mt-4 text-destructive text-sm" role="alert">
+      {message ?? "Couldn't load Learning settings. Reload the page."}
+    </p>
+  );
+}
+
 const LABEL = "Who approves skills learned from people's recordings";
 
 /** Admin, Automatic learning: who approves the skills learned from a person's own recordings. */
 export function WhoApprovesSection() {
   const [open, setOpen] = useState(false);
   const settings = useQuery(learningSettingsQueryOptions());
-  if (settings.isPending || settings.error || !settings.data) return null;
+  if (settings.isPending) return null;
+  if (settings.error || !settings.data)
+    return (
+      <PageSection title="Approval">
+        <SettingsError message={settings.error?.message} />
+      </PageSection>
+    );
   const current = settings.data.personalReview ?? "admins";
   return (
     <PageSection title="Approval">
@@ -111,7 +127,11 @@ function WhoApprovesDialog({
   const [draft, setDraft] = useState(current);
   const save = useMutation(savePersonalReviewMutationOptions(queryClient));
   return (
-    <Dialog onOpenChange={(open) => !open && onClose()} open>
+    <Dialog
+      // Closing mid-save would unmount the dialog and lose whether it worked.
+      onOpenChange={(open) => !open && !save.isPending && onClose()}
+      open
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{LABEL}</DialogTitle>
@@ -157,7 +177,12 @@ function WhoApprovesDialog({
           ) : null}
         </DialogBody>
         <DialogFooter className="mt-4">
-          <Button onClick={onClose} size="sm" variant="outline">
+          <Button
+            disabled={save.isPending}
+            onClick={onClose}
+            size="sm"
+            variant="outline"
+          >
             Cancel
           </Button>
           <Button
@@ -189,7 +214,14 @@ export function PeopleProposalsSection() {
     userId: string;
     proposalId: string;
   } | null>(null);
-  if (settings.isPending || settings.error || !admins) return null;
+  if (settings.isPending) return null;
+  if (settings.error)
+    return (
+      <PageSection title="From people's recordings">
+        <SettingsError message={settings.error.message} />
+      </PageSection>
+    );
+  if (!admins) return null;
   const rows = (people.data?.people ?? []).flatMap((person) =>
     (person.proposals ?? [])
       .filter((proposal) => proposal.status === "pending_review")
@@ -219,10 +251,12 @@ export function PeopleProposalsSection() {
             </p>
           ))}
           {rows.length === 0 ? (
-            <PageEmpty icon={IconSparkles} title="Nothing to review">
-              Skills learned from people's recordings appear here when they are
-              ready.
-            </PageEmpty>
+            unreadable.length > 0 ? null : (
+              <PageEmpty icon={IconSparkles} title="Nothing to review">
+                Skills learned from people's recordings appear here when they
+                are ready.
+              </PageEmpty>
+            )
           ) : (
             <PageRows>
               {rows.map(({ person, proposal }, index) => (
@@ -290,9 +324,28 @@ export function SharingRequestsSection() {
     skillName: string;
     requestedAt: string;
   } | null>(null);
+  const skill = useQuery({
+    ...learnedSkillQueryOptions(
+      { kind: "person", userId: open?.userId ?? "" },
+      open?.skillName ?? "",
+    ),
+    enabled: open !== null,
+  });
   const rows = requests.data ?? [];
   const people = settings.data?.personalReview === "people";
-  if (!people && rows.length === 0 && !requests.error) return null;
+  if (settings.isPending) return null;
+  if (!people && rows.length === 0 && !requests.error && !settings.error)
+    return null;
+  // After a refused decision the list is read again; its stamp, not the one from opening, is current.
+  const requestedAt =
+    rows.find(
+      (request) =>
+        request.userId === open?.userId &&
+        request.skillName === open?.skillName,
+    )?.requestedAt ?? open?.requestedAt;
+  // Deciding means having seen the skill, and on the version the request is about.
+  const cannotDecide =
+    decide.isPending || !skill.data || requests.isFetching || !requestedAt;
   const close = () => {
     setOpen(null);
     decide.reset();
@@ -302,6 +355,9 @@ export function SharingRequestsSection() {
       title="Sharing requests"
       description="Approve a request to open a skill to every Bot."
     >
+      {settings.error ? (
+        <SettingsError message={settings.error.message} />
+      ) : null}
       {requests.isPending ? null : requests.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {requests.error.message}
@@ -355,10 +411,14 @@ export function SharingRequestsSection() {
                 </p>
               ) : null}
               <Button
-                disabled={decide.isPending}
+                disabled={cannotDecide}
                 onClick={() =>
                   decide.mutate(
-                    { ...open, decision: "decline" },
+                    {
+                      ...open,
+                      requestedAt: requestedAt ?? open.requestedAt,
+                      decision: "decline",
+                    },
                     { onSuccess: close },
                   )
                 }
@@ -368,10 +428,14 @@ export function SharingRequestsSection() {
                 Decline
               </Button>
               <Button
-                disabled={decide.isPending}
+                disabled={cannotDecide}
                 onClick={() =>
                   decide.mutate(
-                    { ...open, decision: "approve" },
+                    {
+                      ...open,
+                      requestedAt: requestedAt ?? open.requestedAt,
+                      decision: "approve",
+                    },
                     { onSuccess: close },
                   )
                 }
