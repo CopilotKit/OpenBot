@@ -134,13 +134,12 @@ fn main() {
                 std::fs::write("host-token-at-up", token.len().to_string()).unwrap();
             }
         }
-        "compose run --rm --pull never migrate" => {
-            if SCENARIO == "harness" {
-                eprintln!("synthetic migration barrier");
+        value if value.starts_with("compose ps -a --format ") => match SCENARIO {
+            // The first thing Start asks after `up`: the barrier that stops it before the host.
+            "harness" => {
+                eprintln!("synthetic start barrier");
                 std::process::exit(71);
             }
-        }
-        value if value.starts_with("compose ps -a --format ") => match SCENARIO {
             "dead-service" => print!("agent-computer\tExited\nmigrate\tExited\n"),
             "anthropic" => print!(
                 "agent-computer\tUp\nmigrate\tExited\nagent-bot\tExited\nagent-langgraph\tExited\n"

@@ -25,7 +25,7 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
-import { RuntimeUpdates } from "./RuntimeUpdates";
+import { ShellUpdates } from "./ShellUpdates";
 import { Sections } from "./Sections";
 import { StartFresh } from "./StartFresh";
 import {
@@ -62,11 +62,11 @@ type AlreadyConfigured = {
   };
 };
 
-/** This installation's deployment is on an older release than this app, so Start moves it first. */
+/** This installation is not on this app's own release, so Start upgrades it first. */
 type ReleaseMove = { from: string; to: string };
 type ReleaseOutcome = ReleaseMove & {
   moved: boolean;
-  /** The move did not happen and the previous release started again. */
+  /** The upgrade did not happen and the previous version started again. */
   notice?: Problem | null;
 };
 
@@ -541,14 +541,14 @@ function Setup() {
         // the window carrying them would be a second list to keep in step with the catalogue.
         harness,
       };
-      // The deployment never runs older than this app: an older release is moved to the app's own
-      // as part of this Start. A move that fails is undone and the release it had starts instead.
-      const due = await invoke<ReleaseMove | null>("app_release_move", {
+      // The installation runs this app's own release: one that does not is upgraded as part of
+      // this Start. An upgrade that fails is undone and the version it had starts instead.
+      const due = await invoke<ReleaseMove | null>("upgrade_due", {
         root: root.trim(),
       }).catch(() => null);
       let outcome: ReleaseOutcome | null = null;
       if (due) {
-        outcome = await invoke<ReleaseOutcome>("follow_app_release", startWith);
+        outcome = await invoke<ReleaseOutcome>("upgrade_and_start", startWith);
       } else {
         await invoke("start_stack", startWith);
       }
@@ -561,7 +561,7 @@ function Setup() {
       savedLaunch.current = installationKey;
       setStep("connect");
       setRefreshIntelligence(false);
-      // A move that did not happen is said on the running screen first; Show OpenBot hands over.
+      // An upgrade that did not happen is said on the running screen first; Show OpenBot hands over.
       if (outcome?.notice) {
         // The notice says what the rows would: it is the one thing on the screen.
         setSteps([]);
@@ -585,29 +585,6 @@ function Setup() {
     }
   }
 
-  async function applyRuntimeUpdate() {
-    setBusy(true);
-    setFailure(null);
-    setSteps([]);
-    try {
-      const result = await invoke("apply_runtime_update", {
-        root: root.trim(),
-        // Intelligence's addresses are the ones this installation last started with; the native
-        // side reads them from its settings.
-        model,
-        harness,
-        backupAcknowledged: true,
-      });
-      setRunning(true);
-      setRecoveryFailure(null);
-      return result;
-    } catch (error) {
-      recoverFromStart(error);
-      throw error;
-    } finally {
-      setBusy(false);
-    }
-  }
   async function applyShellUpdate(version: string) {
     setBusy(true);
     setFailure(null);
@@ -624,23 +601,8 @@ function Setup() {
       setBusy(false);
     }
   }
-  const runtimeUpdates = (
-    <RuntimeUpdates
-      key={root}
-      root={root}
-      onApply={applyRuntimeUpdate}
-      onShellApply={applyShellUpdate}
-    />
-  );
-
-  const runtimeRecovery = (
-    <RuntimeUpdates
-      key={root}
-      root={root}
-      onApply={applyRuntimeUpdate}
-      recoveryOnly
-    />
-  );
+  // OpenBot's own updates. The installation follows the app: Start upgrades it to the app's release.
+  const appUpdates = <ShellUpdates key={root} onApply={applyShellUpdate} />;
 
   /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
   async function startFresh(volumes: string[], containers: string[]) {
@@ -813,7 +775,6 @@ function Setup() {
           }}
           failure={displayedFailure && <Failure problem={displayedFailure} />}
         />
-        {runtimeRecovery}
       </main>
     );
   }
@@ -868,7 +829,6 @@ function Setup() {
             </div>
           )}
         </div>
-        {runtimeRecovery}
       </main>
     );
   }
@@ -946,7 +906,6 @@ function Setup() {
             setRecoveryFailure(null);
           }}
         />
-        {runtimeRecovery}
       </main>
     );
   }
@@ -1000,7 +959,7 @@ function Setup() {
                   </button>
                 )}
               </div>
-              {runtimeUpdates}
+              {appUpdates}
               <details>
                 <summary>Installation options</summary>
                 <button
@@ -1077,7 +1036,7 @@ function Setup() {
   return (
     <main>
       <div className="sheet connection-sheet">
-        {returningToInstallation && runtimeUpdates}
+        {returningToInstallation && appUpdates}
         {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
@@ -1088,7 +1047,7 @@ function Setup() {
             the menu bar.
           </p>
         )}
-        {/* Start went back to the release this installation had. Said before handing over. */}
+        {/* Start went back to the version this installation had. Said before handing over. */}
         {!displayedFailure && releaseNotice && (
           <InlineFailure problem={releaseNotice} />
         )}

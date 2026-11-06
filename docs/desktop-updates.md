@@ -1,55 +1,40 @@
-# Explicit desktop runtime updates
+# Desktop updates
 
-OpenBot Desktop keeps its installed runtime pin during Repair. Runtime updates are explicit: open **Runtime updates** in the existing installation screen, enter an exact release tag, check compatibility, stage its source and images, acknowledge downtime and database recovery, then apply. The native application and runtime have separate delivery paths.
+OpenBot Desktop updates itself with its signed updater (**Check for Updates…** in the app menu, or **Desktop application updates** on the setup screen). The installation follows the app: on the next Start, an installation that is not on the app's own release is upgraded to it, and its data comes along.
 
-## The deployment follows the app
+## The upgrade
 
-The one automatic update is the app's own release. When a stable (unpinned) app at version X starts and finds the deployment it followed on an older release, Start moves the deployment to X before starting it, through the same path as an explicit update (`desktop/src-tauri/src/follow.rs`). An installation laid out by Install has no accepted release yet, so the installed release's published `release-manifest.json` is verified against every managed file first; a modified installation is refused before anything stops. Then X is staged beside the root, with exactly the images Install would pull for X (`preparation::installation_pull_set`: the services this installation runs with its Bot, the migration and the sign-in images, 8 for v0.3.0 where the release names 19), and applied with the vendor and `pg_dump` backups, the journal, release and database verification, and acceptance last.
+The app's own release is the tag it was released as, or, for an internal or candidate build, the release it was pinned to. One rule for every build: when the installed version (`.openbot-deployment`) is not that release, Start (`desktop/src-tauri/src/upgrade.rs`):
 
-A move that fails before anything stopped changes nothing; the previous release starts and the next Start tries again. A move that fails after stopping is undone completely, the database restored from the backup it took when the candidate's migration had run, because nobody asked for this update; the previous release starts, the window says so before handing over, and Start does not try that release again on its own (`.openbot-follow-failed.json`; Runtime updates can). Stop or Quit during a move outranks it, and the next Start recovers as for any interrupted update.
+1. Stops OpenBot.
+2. Takes one `pg_dump` of its database (a custom-format archive, checked with `pg_restore --list`), and sets the previous version's files aside in `.openbot-previous/`: `docker-compose.yml`, `container-images.json`, `.openbot-deployment`, the installation records, and the person's browser (`agent-computer/`, `shared/`, `extension/`).
+3. Lays the new version out exactly as Install does.
+4. Pulls its images.
+5. Starts. Migrations run once, as the `migrate` service Compose completes before it starts `server`.
 
-Pinned (internal and candidate) builds are unchanged: Install lays out the release they were made with. A deployment newer than the app is left as it is, because moving it back would run an older server against a database the newer release already migrated. Releases before v0.3.0 ran the server on the host and published no manifest; Install already lays those out again at the latest release. Explicit staging asks the same question for the Bot the installation was prepared with, so neither path pulls agents the installation does not run or the all-in-one `openbot` image, which desktop never runs and which v0.3.0 published for amd64 only.
+If any step fails, the previous files go back, the database is restored from the dump (`pg_restore --clean --if-exists --create --exit-on-error`), the previous version starts, and the window says so in one sentence before handing over. The next Start tries the upgrade again. If the app stops part way (a crash, Quit, Stop), `.openbot-previous/` is still there, and the next Start or Install puts the previous version back first; until then the tray, reopen and Recorder handoff refuse to adopt the half-upgraded installation.
 
-The updater keeps the selected root, saved Docker/Podman engine, Compose project, volume names and supervisor namespace. It replaces managed vendor source leaves in that root. It preserves `.env`, native records, credentials, keys, profiles, workspaces, override files, all of `examples`, and a configured tenant source directory. Generated dependencies/build output is excluded from source comparison, including the exact gitignored `app/src/lib/generated/application-config.ts` file that the app compiler writes from tenant configuration. Other source in that directory remains managed. Modified, added or removed managed source requires upstream integration instead of artifact replacement.
+A deployment newer than the app is never moved back: its database is already migrated past what the app's release knows. It keeps running, and the app's own update offer catches the app up. Releases before v0.3.0 ran the server on the host; Install lays those out again at the latest release.
 
-## Distribution policy and existing installations
+`.env`, keys, credentials, profiles, volumes, override files and everything else the installation keeps for itself are never touched.
 
-Configure publisher identity independently of downloaded metadata in `<installation>/.openbot-distribution.json`:
+## What is laid out
+
+Every container runs from an image the release pins by digest, the server's migrations and the tenant package included. So a deployment is the Compose file and image list, plus the one host process that runs from source: the person's own browser, `bun src/index.ts` in `agent-computer/`, with the few `shared/` files it imports (`deployment::LAYOUT`). Its packages are installed from `agent-computer`'s own lockfile, and the packages the shared files import (`zod`) are put beside them from that install. Nothing of `server/`, `app/`, `worker/`, `toolkit/`, `scripts/`, `patches/` or `examples/` is laid out, and the root workspace is never installed. An installation laid out by an earlier app keeps those folders; nothing reads them.
+
+## Distribution policy
+
+Source tarballs, image lists and the latest release come from the repository in `<installation>/.openbot-distribution.json` when there is one:
 
 ```json
 {
   "distributionId": "acme.openbot",
   "repository": "acme/openbot",
-  "channel": "stable",
-  "intelligenceCapabilities": ["conversations.v1"]
+  "channel": "stable"
 }
 ```
 
-`intelligenceCapabilities` must describe capabilities actually provisioned for this installation. It is operator configuration, not inferred from a candidate's requirements. Local manual builds default to distribution ID and repository `CopilotKit/OpenBot`, channel `stable`, and no assumed Intelligence capabilities. The distribution ID follows the compiled repository when no explicit ID is supplied, matching the publisher. Official/fork desktop CI and Windows signing builds compile `github.repository` (including its exact case), the configured distribution ID or that same repository, and the configured channel. A manual fork build must set `OPENBOT_RELEASE_REPOSITORY` and any custom ID/channel explicitly; ambient GitHub context is not runtime trust. Distributors can set compile-time `OPENBOT_DISTRIBUTION_ID`, `OPENBOT_RELEASE_REPOSITORY`, and `OPENBOT_RELEASE_CHANNEL` defaults. Discovery and source/image repair use that configured repository. Candidate manifests must match its ID, repository and channel.
-
-When a newer Desktop lays out more of the tree than the one that installed a release (the stamp records a shorter layout, as every installation from before #858 does), Install lays the same release out again. A plain installation takes that tag's tarball, as it always has. An installation with a verified baseline is laid out from its accepted release's checksum-verified source artifact instead; a managed file that matches neither the baseline nor that artifact is a fork's change, and the layout refuses rather than overwrite it. Missing vendor files are restored, new paths are added, and the baseline grows to cover them. A different version still goes through the explicit update controls.
-
-An existing `.openbot-deployment` pin alone does not prove source provenance. **Verify installed release baseline** downloads `release-manifest.json` from the independently configured repository's exact pinned release and checks its source archive SHA-256. It compares every managed source leaf against that archive, then records `.openbot-release.json` and `.openbot-vendor-baseline.json`. This explicit action never replaces source or customer files. Clean Git status cannot substitute for a published baseline. If the installed release has no publisher-supplied manifest, the publisher must supply one for those exact source bytes; the updater refuses adoption until then.
-
-Manifests come from `https://github.com/<configured-repository>/releases/download/<tag>/release-manifest.json`. HTTPS authenticates the configured host, and SHA-256 binds the source artifact to the manifest. Runtime manifests do not yet have an independent publisher signature. A checksum downloaded with an artifact is not independent publisher authentication.
-
-## Apply and recovery
-
-Staging downloads into a sibling `.NAME.openbot-update-stage` directory (replacing an earlier stage when no update is in progress), validates the shared v1 compatibility contract, checksum, package version, source migration-journal tag and safe archive contents, and pulls digest-pinned images onto the saved engine. It leaves the active source and accepted pin unchanged. Symlinks, traversal, duplicate archive paths, missing required source/images, unsupported APIs/schema and unavailable required Intelligence capabilities are refused.
-
-Apply rechecks the staged inventory and active baseline before stopping anything. It uses the existing owned Stop path; backs up replaced vendor leaves into sibling `.NAME.openbot-update-backup`; brings up only the selected project's Postgres; compares its actual migration hashes/timestamps with the accepted source journal; writes a custom-format `postgres.dump`; and validates the archive using `pg_restore --list`. It stops that temporary database service without deleting volumes, replaces vendor files, and checks Compose project/volume/namespace identity again. Persistent and bind mount service/source/target/type identities are compared from read-only staged Compose output before Stop, retaining the active project directory and customer overrides; swaps or removals refuse without lifecycle mutation. It then reuses existing installation preparation and owned startup, which performs the guarded migration and real API/app readiness checks.
-
-Acceptance additionally requires exact candidate identity from the running API's `/release`, actual candidate container image references, actual database migration hashes/timestamps and a final vendor inventory comparison. The accepted release manifest and pin are promoted only after those checks. The preparation record is rebound to the accepted pin without changing its engine or harness. Once the release is accepted, the stage and backup folders are removed, so the next update stages and applies without manual cleanup. Take your own database backup first if you want one kept past acceptance.
-
-The durable `.openbot-update-journal.json` is written immediately before the first vendor file is replaced, not before. A failed or interrupted database backup therefore leaves the installation exactly as it was: Start works, and the unreferenced backup folder is removed by the next apply. Recovery never involves editing the journal:
-
-- **Before the migration checkpoint** (files being replaced, preparation running, or a quit in between), nothing in the database changed. The next Start or Repair puts the previous release's files back from the backup and removes the journal and backup. Its dependencies were prepared for the candidate, so Start then asks for Repair; Repair carries on into the previous release's installation.
-- **After the migration checkpoint** (a port conflict at startup, a failed verification, a quit), the candidate is stopped and its database is compared with the previous release's migration journal. If it still matches, the previous files come back on their own. If it changed, Start, Repair, reopen, the tray and Recorder handoff all refuse, and Runtime updates offers **Restore previous release**. That action stops anything left running, puts the previous files back, starts only Postgres with the previous release's Compose file, and runs `pg_restore --clean --if-exists --create --exit-on-error` from `postgres.dump` only when the database differs. It then checks the migrations again, removes the journal and backup, and stops Postgres without removing volumes. Anything written after the backup is lost. A connection still open to the database makes the restore fail before anything is dropped; the journal and backup stay and the action can be run again.
-- **After every runtime check passed** (a quit while acceptance was being written), the next Start finishes acceptance.
-
-Preserve the `.env`/vault encryption keys throughout recovery.
-
-The dump is a backup primitive, not a verified restore rehearsal. PostgreSQL globals, external Intelligence migrations and external writers are not coordinated by this updater. Stop external writers during maintenance. Legacy manifests, publisher signing, a populated prior installation and configured provider/browser access are required for the corresponding end-user rollout proof; unit tests and successful native compilation do not establish that proof.
+Otherwise from the build's compiled defaults: distribution ID and repository `CopilotKit/OpenBot`, channel `stable`, which distributors set with `OPENBOT_DISTRIBUTION_ID`, `OPENBOT_RELEASE_REPOSITORY` and `OPENBOT_RELEASE_CHANNEL`. The distribution ID follows the repository when no explicit ID is supplied. The signed app updater checks its own updates against the compiled distribution only.
 
 ## Native application delivery
 
@@ -69,14 +54,14 @@ No signing key or endpoint is invented, no signed update is published by this ta
 
 ```sh
 cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check
-cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib updates
-cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib --features shell-updater shell_updates
-cargo check --manifest-path desktop/src-tauri/Cargo.toml --bin openbot-desktop
+cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked --lib upgrade
+cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked --lib --features shell-updater shell_updates
+# The upgrade against a real engine: Install's layout, a real pull from a local registry, Start, pg_dump and pg_restore.
+OPENBOT_TEST_REGISTRY=127.0.0.1:5050 cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked --lib upgrade::real_engine -- --ignored --test-threads=1
 cd desktop
 bun test ../tests/desktop-updates.test.ts
-bun test src/RuntimeUpdates.test.tsx
 bun test src/App.test.tsx
 bun run typecheck
 ```
 
-Run desktop tests from `desktop/` to use its own dependency graph instead of the root server/app preload configuration. Shared fixture conformance, staged-source preservation, checksum/core modification refusal, explicit legacy baseline verification, acceptance-last, interrupted recovery at every phase, a second update after acceptance, and same-version re-layout are tested in the native module against real archives and real files. The fake container engine resolves relative bind mounts against the project directory the way `docker compose config` does (checked against Compose v5.1.4), and holds the migrations table that its `pg_dump` archives and its `pg_restore` puts back. The restore command itself was run against a throwaway `pgvector/pgvector:pg17` container. Full Mac lifecycle acceptance still requires an authorized disposable prior installation and populated database; this work does not mutate a live customer installation as a test. Windows/Linux lifecycle behavior remains covered by the existing cross-platform CI.
+Run desktop tests from `desktop/` to use its own dependency graph instead of the root server/app preload configuration. The real-engine tests need a registry on `OPENBOT_TEST_REGISTRY` (`docker run -d -p 127.0.0.1:5050:5000 registry:2`) and `pgvector/pgvector:pg17` on the engine; each runs in its own Compose project and removes its containers, volume and image tags.

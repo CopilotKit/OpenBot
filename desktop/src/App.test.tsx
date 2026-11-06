@@ -1359,18 +1359,18 @@ test("relaunch starts a connected local stack that reports ready and valid", asy
   expect(view.getByRole("button", { name: "Start OpenBot" })).toBeTruthy();
 });
 
-/** Start finds the deployment on an older release than this app, and `follow_app_release` answers. */
+/** Start finds the installation on an older release than this app, and `upgrade_and_start` answers. */
 function withOlderDeployment(outcome: unknown) {
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
-    if (command === "app_release_move") return { from: "v0.3.0", to: "v0.3.1" };
-    if (command === "follow_app_release")
+    if (command === "upgrade_due") return { from: "v0.3.0", to: "v0.3.1" };
+    if (command === "upgrade_and_start")
       return typeof outcome === "function" ? outcome() : outcome;
     return previous(command, args);
   };
 }
 
-test("relaunch moves an older deployment to this app's release as part of Start, then opens OpenBot", async () => {
+test("relaunch upgrades an older installation to this app's release as part of Start, then opens OpenBot", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-older-release",
     localStatus("ready", "valid"),
@@ -1380,10 +1380,10 @@ test("relaunch moves an older deployment to this app's release as part of Start,
   const view = await renderApp();
   await waitFor(() =>
     expect(
-      invokeCalls.some((call) => call.command === "follow_app_release"),
+      invokeCalls.some((call) => call.command === "upgrade_and_start"),
     ).toBe(true),
   );
-  // Said while the move runs, which can take minutes.
+  // Said while the upgrade runs, which can take minutes.
   const said =
     "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.";
   await emitProgress({
@@ -1404,39 +1404,39 @@ test("relaunch moves an older deployment to this app's release as part of Start,
     .filter((command) =>
       [
         "run_local_eval",
-        "app_release_move",
-        "follow_app_release",
+        "upgrade_due",
+        "upgrade_and_start",
         "start_stack",
         "show_openbot",
       ].includes(command),
     );
-  // The move is the Start: nothing starts the older release first.
+  // The upgrade is the Start: nothing starts the older release first.
   expect(sequence).toEqual([
     "run_local_eval",
-    "app_release_move",
-    "follow_app_release",
+    "upgrade_due",
+    "upgrade_and_start",
     "show_openbot",
   ]);
   expect(
-    invokeCalls.find((call) => call.command === "follow_app_release")?.args,
+    invokeCalls.find((call) => call.command === "upgrade_and_start")?.args,
   ).toMatchObject({
     root: "/tmp/local-eval-older-release",
     ...LOCAL_ADDRESSES,
   });
 });
 
-test("a move that did not finish says so on the running screen before handing over", async () => {
+test("an upgrade that did not finish says so on the running screen before handing over", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-move-undone",
     localStatus("ready", "valid"),
   );
   const said =
-    "OpenBot couldn't update to v0.3.1, so it's still running v0.3.0. Your Bots, sign-ins and data are unchanged. To try again, open Runtime updates.";
+    "OpenBot couldn't update to v0.3.1, so it's still on v0.3.0, with your data as it was.";
   withOlderDeployment({
     from: "v0.3.0",
     to: "v0.3.1",
     moved: false,
-    notice: { said, detail: "The updated release could not be verified." },
+    notice: { said, detail: "The image for v0.3.1 could not be pulled." },
   });
   const view = await renderApp();
   await view.findByText(said);
@@ -2323,80 +2323,6 @@ function emptyConfiguration() {
   };
 }
 
-test("cold reopen exposes explicit update recovery without a prepared installation", async () => {
-  const root = "/tmp/interrupted-unprepared-runtime";
-  setupRootConfiguration(root, async () => emptyConfiguration());
-  const previous = invokeHandler;
-  invokeHandler = async (command, args) => {
-    if (command === "runtime_update_status")
-      return {
-        fromVersion: "v0.2.0",
-        toVersion: "v0.3.0",
-        databaseMayHaveChanged: true,
-      };
-    if (command === "recover_runtime_update")
-      return { version: "v0.2.0", accepted: false, databaseRestored: true };
-    return previous(command, args);
-  };
-  const view = await renderApp();
-  const restore = await view.findByRole("button", {
-    name: "Restore previous release",
-  });
-  expect(view.getByRole("button", { name: "Install" })).toBeTruthy();
-  expect(
-    view.queryByRole("button", { name: "Check runtime update" }),
-  ).toBeNull();
-  expect(installationCalls()).toHaveLength(0);
-  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
-    false,
-  );
-  expect(
-    invokeCalls.some((call) => call.command === "recover_runtime_update"),
-  ).toBe(false);
-  await userEvent.click(restore);
-  expect(
-    await view.findByText(
-      /v0.2.0 is back in place, with its database restored/,
-    ),
-  ).toBeTruthy();
-  expect(
-    invokeCalls.filter((call) => call.command === "recover_runtime_update"),
-  ).toEqual([{ command: "recover_runtime_update", args: { root } }]);
-});
-
-test("fresh unprepared installation keeps update recovery hidden", async () => {
-  setupRootConfiguration("/tmp/fresh-unprepared-runtime", async () =>
-    emptyConfiguration(),
-  );
-  const previous = invokeHandler;
-  invokeHandler = async (command, args) =>
-    command === "runtime_update_status" ? null : previous(command, args);
-  const view = await renderApp();
-  await view.findByRole("button", { name: "Install" });
-  expect(view.queryByText("Runtime updates")).toBeNull();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
-  expect(view.queryByText("Runtime updates")).toBeNull();
-});
-
-test("unprepared recovery status read failures stay visible", async () => {
-  setupRootConfiguration("/tmp/unreadable-runtime-journal", async () =>
-    emptyConfiguration(),
-  );
-  const previous = invokeHandler;
-  invokeHandler = async (command, args) => {
-    if (command === "runtime_update_status")
-      throw { said: "The update journal cannot be read." };
-    return previous(command, args);
-  };
-  const view = await renderApp();
-  expect(
-    await view.findByText("The update journal cannot be read."),
-  ).toBeTruthy();
-  expect(
-    view.queryByRole("button", { name: "Restore previous release" }),
-  ).toBeNull();
-});
-
 test("leftover database is offered as a fresh start that carries on into Start", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
@@ -2545,7 +2471,6 @@ function setupRootConfiguration(
 ) {
   invokeHandler = async (command, args) => {
     if (command === "prepare_installation") return null;
-    if (command === "runtime_update_status") return null;
     if (command === "detect_engine") {
       return {
         engine: "docker",

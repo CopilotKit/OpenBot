@@ -1039,8 +1039,8 @@ pub fn installation_images(
     installation_images_in(engine, root, root, harness, settings)
 }
 
-/// [`installation_images`] for a release laid out in `release`, a staged update beside the
-/// installation, resolved as `root`'s own project with `root`'s settings.
+/// [`installation_images`] for a release laid out in `release`, resolved as `root`'s own project
+/// with `root`'s settings.
 pub fn installation_images_in(
     engine: &Address,
     root: &Path,
@@ -1156,35 +1156,6 @@ pub fn up(
 
     if output.status.success() {
         return Ok(requested);
-    }
-    // Both registers: the sentence is chosen from what the engine said, and what it said is kept
-    // beside it rather than shown as the headline. See `problem.rs`.
-    let raw = command_said(&output.stderr);
-    Err(crate::problem::Problem::with(
-        crate::problem::said_about(&raw),
-        raw,
-    ))
-}
-
-/// Apply migrations, once, to completion.
-///
-/// A release step rather than a start step, for the reason `server/Dockerfile` gives: two replicas
-/// starting together would race, and a failed migration should stop the start rather than leave a
-/// half-migrated database serving.
-pub fn migrate(
-    engine: &Address,
-    root: &Path,
-    secrets: &Secrets,
-) -> Result<(), crate::problem::Problem> {
-    // The installation step supplies this image. `run` does not accept `--no-build`, and its
-    // explicit no-pull policy must report a missing image without starting another download.
-    let output = compose_start_command(engine, root, secrets, std::env::consts::OS)?
-        .args(["run", "--rm", "--pull", "never", "migrate"])
-        .output()
-        .map_err(|error| format!("could not run migrations: {error}"))?;
-
-    if output.status.success() {
-        return Ok(());
     }
     // Both registers: the sentence is chosen from what the engine said, and what it said is kept
     // beside it rather than shown as the headline. See `problem.rs`.
@@ -1350,13 +1321,17 @@ pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
     Err(command_said(&output.stderr))
 }
 
-/// Install the deployment's dependencies.
+/// Install the packages the person's own browser runs with (`local_browser`), the one host process
+/// that runs from source.
 ///
-/// The three host processes are `bun` processes run from the source, so the source alone is not
-/// enough: without this the server stops at `ENOENT while resolving package 'zod'` and the app at
-/// `vite: command not found`, and neither says the word `node_modules`. Always let Bun verify
-/// the frozen install: a failed download can leave the directory behind, while a complete
-/// installation can reuse Bun's cache without changing the lockfile.
+/// `agent-computer` has its own lockfile, as its image installs it. The `shared` files it imports by
+/// relative path resolve their own imports from their own folder upward, which never reaches
+/// `agent-computer/node_modules`, so the packages they use (`SHARED_PACKAGES`) are put beside them
+/// from that same install: what `agent-computer/Dockerfile` does with a link, done with a copy,
+/// which needs no permission to make on Windows. Nothing else is installed: the server, the app and
+/// the worker run from their image. Always let Bun verify the frozen install: a failed download can
+/// leave the directory behind, while a complete installation can reuse Bun's cache without changing
+/// the lockfile.
 pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
     // `--ignore-scripts`, for two reasons that point the same way.
     //
@@ -1365,34 +1340,52 @@ pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
     // ask for. And they are not all portable: `@scarf/scarf` shells out to `node`, which a machine
     // that has bun need not have, so the install fails at "node: command not found" after the
     // containers are already up. Found on a Linux machine with bun and no node.
-    for directory in dependency_directories(root) {
-        let output = command(bun)
-            .current_dir(root.join(directory))
-            .args(["install", "--frozen-lockfile", "--ignore-scripts"])
-            .output()
-            .map_err(|error| format!("could not run bun install: {error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "installing the deployment's dependencies failed: {}",
-                command_said(&output.stderr)
-            ));
+    let computer = root.join(BROWSER_PACKAGE);
+    let output = command(bun)
+        .current_dir(&computer)
+        .args(["install", "--frozen-lockfile", "--ignore-scripts"])
+        .output()
+        .map_err(|error| format!("could not run bun install: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "installing the browser's packages failed: {}",
+            command_said(&output.stderr)
+        ));
+    }
+    for package in SHARED_PACKAGES {
+        let from = computer.join("node_modules").join(package);
+        let to = root.join("shared").join("node_modules").join(package);
+        match std::fs::remove_dir_all(&to) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("could not replace {}: {error}", to.display())),
         }
+        copy_tree(&from, &to)
+            .map_err(|error| format!("could not put {package} beside the shared files: {error}"))?;
     }
     Ok(())
 }
 
-/// Where the deployment's packages are installed: the root workspace, and `agent-computer` where the
-/// release runs the person's browser from it.
-///
-/// `agent-computer` is not a workspace. It has its own lockfile, as its image installs it, so the
-/// root install leaves it without Playwright and the browser process stops at its first import.
-/// Older releases have no browser to run, so they are not made to download one's dependencies.
-pub fn dependency_directories(root: &Path) -> Vec<&'static str> {
-    let mut directories = vec![""];
-    if crate::local_browser::in_release(root) {
-        directories.push("agent-computer");
+/// The package the person's browser runs from, with its own lockfile.
+pub const BROWSER_PACKAGE: &str = "agent-computer";
+
+/// What the `shared` files the browser imports import themselves, provided beside them from the
+/// browser's own install. A test holds this to what those files actually import.
+pub const SHARED_PACKAGES: [&str; 1] = ["zod"];
+
+/// Copy a folder, following links, so the copy stands on its own.
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if std::fs::metadata(entry.path())?.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
     }
-    directories
+    Ok(())
 }
 
 /// Start one host process, with its output on disk rather than nowhere.
@@ -4006,7 +3999,9 @@ pub fn startup_problem(problem: Problem, secrets: &Secrets) -> Problem {
 ///
 /// Checked and named rather than discovered by failing: without this the first symptom is
 /// `os error 2` from writing `.env`, which says nothing about a missing deployment, and the second
-/// is Compose reporting no configuration file. Both are the same fact and neither says it.
+/// is Compose reporting no configuration file. Both are the same fact and neither says it. The
+/// containers run from their images, so the Compose file is the one part of the release on disk
+/// they need.
 pub fn deployment_problem(root: &Path) -> Option<String> {
     if !root.exists() {
         return Some(format!(
@@ -4021,60 +4016,7 @@ pub fn deployment_problem(root: &Path) -> Option<String> {
             root.display()
         ));
     }
-    for directory in ["server", "app", "worker"] {
-        if !root.join(directory).exists() {
-            return Some(format!(
-                "{} is missing its {directory} directory, so that process cannot be started.",
-                root.display()
-            ));
-        }
-    }
-    missing_script(root)
-}
-
-/// Whether the deployment on disk is one this app knows how to start.
-///
-/// The shell and the deployment are versioned apart: the app is installed once and the deployment
-/// is fetched at a tag. So an app can meet a deployment older than the scripts it calls, and the
-/// symptom is the worst kind: every step passes, the app process exits 1 on "Script not found",
-/// the supervisor restarts it five times, and the sentence a person is finally shown names a
-/// process rather than the mismatch.
-fn missing_script(root: &Path) -> Option<String> {
-    let manifest = root.join("app").join("package.json");
-    let Ok(text) = std::fs::read_to_string(&manifest) else {
-        return Some(format!("{} cannot be read.", manifest.display()));
-    };
-    /*
-     * An unreadable manifest and one without the script are different things.
-     *
-     * Read as one, a `package.json` that will not parse was reported as a deployment "older than
-     * this version of OpenBot", which sent somebody looking for a newer installer over a file with
-     * a byte-order mark in front of it. `serde_json` refuses a document that begins with one, and
-     * plenty of Windows tooling writes one: `Set-Content -Encoding UTF8` does.
-     */
-    let manifest_json =
-        match serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')) {
-            Ok(json) => json,
-            Err(error) => {
-                return Some(format!(
-                    "{} cannot be read as JSON: {error}. Something has rewritten it.",
-                    manifest.display()
-                ))
-            }
-        };
-    if manifest_json
-        .get("scripts")
-        .and_then(|scripts| scripts.get(APP_SCRIPT))
-        .is_some()
-    {
-        return None;
-    }
-    Some(format!(
-        "The deployment in {} is older than this version of OpenBot: its app has no \"{APP_SCRIPT}\" \
-         script, so there is no way to serve it. Install a newer OpenBot, or delete that directory \
-         and start again to fetch a deployment that matches.",
-        root.display()
-    ))
+    None
 }
 
 /// The package script that serves the app. Named once, because two places must agree on it.
@@ -4110,142 +4052,16 @@ fn dirs_home() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Project only persistent identity from the selected Compose configuration. Never retain its
-/// secret-bearing environment wholesale in an update journal or log.
-pub fn runtime_update_identity(
-    engine: &Address,
-    root: &Path,
-    secrets: &Secrets,
-) -> Result<serde_json::Value, String> {
-    let bytes = postgres_configuration(engine, root, secrets).map_err(|p| p.said)?;
-    let config: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    runtime_update_identity_config(&config)
-}
-
-fn runtime_update_identity_config(config: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let volumes = config["volumes"]
-        .as_object()
-        .ok_or("Compose configuration has no persistent volume identity")?;
-    let mut names = std::collections::BTreeMap::new();
-    for (key, value) in volumes {
-        names.insert(key, value["name"].clone());
-    }
-    let project = config["name"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or("Compose project identity is missing")?;
-    let services = config["services"]
-        .as_object()
-        .ok_or("Compose service configuration is missing")?;
-    let mut mounts = std::collections::BTreeMap::new();
-    for (service, value) in services {
-        let Some(volumes) = value.get("volumes") else {
-            continue;
-        };
-        let volumes = volumes
-            .as_array()
-            .ok_or("Compose service mounts are unreadable")?;
-        let mut destinations = std::collections::BTreeMap::new();
-        for mount in volumes {
-            let kind = mount["type"]
-                .as_str()
-                .ok_or("Compose mount type is missing")?;
-            if !matches!(kind, "volume" | "bind") {
-                continue;
-            }
-            let source = mount["source"]
-                .as_str()
-                .filter(|v| !v.is_empty())
-                .ok_or("Persistent mount source cannot be verified")?;
-            let target = mount["target"]
-                .as_str()
-                .filter(|v| !v.is_empty())
-                .ok_or("Persistent mount target cannot be verified")?;
-            if destinations
-                .insert(
-                    target,
-                    serde_json::json!({"type":kind,"source":source,"target":target}),
-                )
-                .is_some()
-            {
-                return Err("Compose service has duplicate persistent mount targets".into());
-            }
-        }
-        if !destinations.is_empty() {
-            mounts.insert(service, destinations);
-        }
-    }
-    Ok(
-        serde_json::json!({"project":project,"volumes":names,"namespace":config["services"]["supervisor"]["environment"]["COMPUTER_NAMESPACE"],"mounts":mounts}),
-    )
-}
-
-/// Resolve candidate Compose against the active project directory and customer-selected override
-/// files. Only the vendor base file comes from staging; config is read-only and no Stop/up occurs.
-///
-/// The project directory is `.`, which Compose resolves from the same working directory as the
-/// active configuration, by the same code. Every relative bind source in both configurations
-/// therefore starts from one spelling of the root. A canonicalized root does not: on Windows it
-/// carries the `\\?\` prefix the active configuration never sees, and on any platform it resolves
-/// links Compose keeps, so every relative mount compared unequal and every apply refused.
-pub fn verify_staged_runtime_identity(
-    engine: &Address,
-    root: &Path,
-    staged: &Path,
-    secrets: &Secrets,
-    expected: &serde_json::Value,
-) -> Result<(), String> {
-    let environment = compose_command(engine, root, secrets)
-        .args(["config", "--environment"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !environment.status.success() {
-        return Err("could not resolve active Compose file selection before update".into());
-    }
-    let environment = String::from_utf8(environment.stdout).map_err(|e| e.to_string())?;
-    let files = compose_files(root, &environment).map_err(|p| p.said)?;
-    // Canonical forms only identify which selected file is the vendor base file. What Compose is
-    // given keeps the active configuration's own spelling.
-    let active = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
-    let mut command = compose_command(engine, root, secrets);
-    command.arg("--project-directory").arg(".");
-    for file in files {
-        let original = std::fs::canonicalize(root.join(&file)).map_err(|e| e.to_string())?;
-        if original.strip_prefix(&active).ok() == Some(Path::new("docker-compose.yml")) {
-            command.arg("-f").arg(staged.join("docker-compose.yml"));
-        } else {
-            command.arg("-f").arg(&file);
-        }
-    }
-    let output = command
-        .args(["config", "--format", "json"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err(
-            "candidate Compose configuration could not be verified; no runtime was stopped".into(),
-        );
-    }
-    let config: serde_json::Value =
-        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-    if &runtime_update_identity_config(&config)? != expected {
-        return Err("The candidate changes a persistent service mount, Compose project, volume or namespace. No runtime was stopped or modified.".into());
-    }
-    Ok(())
-}
-
 /// Called after all owned application writers stop. Bring up only the existing project's
 /// Postgres service, create a custom-format dump, and validate its table of contents. The caller
-/// retains Compose ownership and stops this service before preparation/startup continues.
+/// retains Compose ownership and stops this service before the upgrade continues.
 pub fn backup_runtime_database(
     engine: &Address,
     root: &Path,
     secrets: &Secrets,
     destination: &Path,
-    expected_database: &str,
 ) -> Result<(), String> {
     start_runtime_database(engine, root, secrets)?;
-    verify_runtime_database_identity(engine, root, secrets, expected_database)?;
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -4359,140 +4175,6 @@ pub fn restore_runtime_database(
         ));
     }
     Ok(())
-}
-
-/// Check the running selected project's release-owned containers, using their actual image
-/// references rather than Compose's desired configuration. PostgreSQL is separately preserved.
-pub fn verify_runtime_update_images(
-    engine: &Address,
-    root: &Path,
-    candidate: &serde_json::Value,
-) -> Result<(), String> {
-    let listing = compose_command(engine, root, &Secrets::new())
-        .args(["ps", "-q"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !listing.status.success() {
-        return Err("could not inspect candidate Compose containers".into());
-    }
-    let ids = String::from_utf8(listing.stdout).map_err(|e| e.to_string())?;
-    let ids: Vec<_> = ids.split_whitespace().collect();
-    if ids.is_empty() {
-        return Err("no candidate containers are running".into());
-    }
-    let inspected = engine
-        .command()
-        .current_dir(root)
-        .arg("inspect")
-        .args(ids)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !inspected.status.success() {
-        return Err("candidate container inspection failed".into());
-    }
-    let containers: Vec<serde_json::Value> =
-        serde_json::from_slice(&inspected.stdout).map_err(|e| e.to_string())?;
-    let references = crate::updates::candidate_images(candidate)?;
-    let mut verified = std::collections::BTreeSet::new();
-    for container in containers {
-        let service = container["Config"]["Labels"]["com.docker.compose.service"]
-            .as_str()
-            .ok_or("container has no Compose service identity")?;
-        if service == "postgres" {
-            continue;
-        }
-        let image = container["Config"]["Image"]
-            .as_str()
-            .ok_or("container has no actual image identity")?;
-        if !references.iter().any(|reference| reference == image) {
-            return Err(format!(
-                "running service {service} is not a pinned candidate image"
-            ));
-        }
-        if container["State"]["Running"] != true {
-            return Err(format!("candidate service {service} is not running"));
-        }
-        verified.insert(service.to_string());
-    }
-    for service in ["supervisor", "agent-computer"] {
-        if !verified.contains(service) {
-            return Err(format!("candidate {service} was not verified"));
-        }
-    }
-    Ok(())
-}
-
-/// Compare the database's actual migration hashes and timestamps with the accepted release's
-/// journal. A package version or an HTTP health response cannot establish database identity.
-pub fn verify_runtime_database_identity(
-    engine: &Address,
-    root: &Path,
-    secrets: &Secrets,
-    expected_database: &str,
-) -> Result<(), String> {
-    if !runtime_database_matches(engine, root, secrets, expected_database)? {
-        return Err("actual database migration hashes/timestamps differ from the accepted release; integrate or repair the database explicitly before updating".into());
-    }
-    Ok(())
-}
-
-/// Whether the running database holds exactly the migrations of the source in `root`. An error
-/// means the comparison could not be made, which is not the same answer as "it differs".
-pub fn runtime_database_matches(
-    engine: &Address,
-    root: &Path,
-    secrets: &Secrets,
-    expected_database: &str,
-) -> Result<bool, String> {
-    let journal: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(root.join("server/drizzle/meta/_journal.json"))
-            .map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    let entries = journal["entries"]
-        .as_array()
-        .ok_or("migration journal entries are missing")?;
-    if entries.last().and_then(|entry| entry["tag"].as_str()) != Some(expected_database) {
-        return Err("release database tag differs from local migration journal".into());
-    }
-    let mut expected = std::collections::BTreeMap::new();
-    use sha2::{Digest, Sha256};
-    for entry in entries {
-        let tag = entry["tag"].as_str().ok_or("invalid migration tag")?;
-        if tag.is_empty()
-            || !tag
-                .bytes()
-                .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
-        {
-            return Err("unsafe migration tag".into());
-        }
-        let bytes = std::fs::read(root.join("server/drizzle").join(format!("{tag}.sql")))
-            .map_err(|e| e.to_string())?;
-        let when = entry["when"]
-            .as_u64()
-            .ok_or("invalid migration timestamp")?;
-        expected.insert(format!("{:x}", Sha256::digest(bytes)), when);
-    }
-    let output=compose_command(engine,root,secrets).args(["exec","-T","postgres","sh","-c","exec psql --no-psqlrc --tuples-only --no-align --set=ON_ERROR_STOP=1 --username=\"$POSTGRES_USER\" \"$POSTGRES_DB\" --command=\"select coalesce(json_agg(json_build_object('hash',hash,'createdAt',created_at)), '[]'::json)::text from drizzle.__drizzle_migrations\""])
-        .output().map_err(|e|e.to_string())?;
-    if !output.status.success() {
-        return Err(
-            "could not read the actual database migration journal; no release was accepted".into(),
-        );
-    }
-    let rows: Vec<serde_json::Value> =
-        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-    let mut actual = std::collections::BTreeMap::new();
-    for row in &rows {
-        let hash = row["hash"].as_str().ok_or("invalid migration hash")?;
-        let when = row["createdAt"]
-            .as_u64()
-            .ok_or("database migration has a missing timestamp")?;
-        if actual.insert(hash.to_string(), when).is_some() {
-            return Err("database migration journal has duplicate hashes".into());
-        }
-    }
-    Ok(actual == expected)
 }
 
 #[cfg(test)]
@@ -6667,7 +6349,7 @@ fn main() {
     #[test]
     fn dependency_install_retries_partial_directory_and_rechecks_cached_success() {
         let root = temp_root("dependency-install-retry");
-        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(root.join(BROWSER_PACKAGE)).unwrap();
         let source = root.join("fake_bun.rs");
         std::fs::write(&source, r#"
 use std::io::Write;
@@ -6683,6 +6365,9 @@ fn main() {
         std::process::exit(9);
     }
     std::fs::write("node_modules/installed-package", "cached package contents").unwrap();
+    std::fs::create_dir_all("node_modules/zod/v4").unwrap();
+    std::fs::write("node_modules/zod/package.json", "{}").unwrap();
+    std::fs::write("node_modules/zod/v4/index.js", "zod").unwrap();
 }
 "#).unwrap();
         let bun = root.join(if cfg!(windows) {
@@ -6693,13 +6378,18 @@ fn main() {
         crate::test_support::compile_fixture(&source, &bun);
         let first = install_dependencies(&root, &bun);
         assert!(
-            root.join("node_modules").is_dir(),
+            root.join(BROWSER_PACKAGE).join("node_modules").is_dir(),
             "failure must leave a partial directory"
         );
         let second = install_dependencies(&root, &bun);
         let third = install_dependencies(&root, &bun);
-        let attempts = std::fs::read_to_string(root.join("attempts.log")).unwrap();
-        let installed = std::fs::read_to_string(root.join("node_modules/installed-package"));
+        let attempts =
+            std::fs::read_to_string(root.join(BROWSER_PACKAGE).join("attempts.log")).unwrap();
+        let installed = std::fs::read_to_string(
+            root.join(BROWSER_PACKAGE)
+                .join("node_modules/installed-package"),
+        );
+        let shared_zod = std::fs::read_to_string(root.join("shared/node_modules/zod/v4/index.js"));
         eprintln!(
             "{}",
             serde_json::json!({
@@ -6720,6 +6410,39 @@ fn main() {
             "retry and cached checks must invoke Bun"
         );
         assert_eq!(installed.unwrap(), "cached package contents");
+        assert_eq!(
+            shared_zod.unwrap(),
+            "zod",
+            "the shared files get zod beside them"
+        );
+    }
+
+    /// Every package the `shared` files the browser runs import is put beside them. A new one
+    /// would otherwise resolve on a developer's checkout, from the root workspace's packages, and
+    /// fail on every installation.
+    #[test]
+    fn every_package_the_browsers_shared_files_import_is_provided_beside_them() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for entry in crate::deployment::LAYOUT
+            .iter()
+            .filter(|entry| entry.starts_with("shared/") && entry.ends_with(".ts"))
+        {
+            let source = std::fs::read_to_string(repo.join(entry)).unwrap();
+            for line in source.lines() {
+                let Some(from) = line.split(" from \"").nth(1) else {
+                    continue;
+                };
+                let specifier = from.split('"').next().unwrap();
+                if specifier.starts_with('.') {
+                    continue;
+                }
+                let package = specifier.split('/').next().unwrap();
+                assert!(
+                    SHARED_PACKAGES.contains(&package),
+                    "{entry} imports {package}, which is not put beside it"
+                );
+            }
+        }
     }
 
     fn host_command_line(name: &str) -> &'static str {
@@ -8760,38 +8483,6 @@ fn main() {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    /// A manifest with a byte-order mark in front of it is still a manifest.
-    ///
-    /// Windows tooling writes one freely (`Set-Content -Encoding UTF8` does), `serde_json` refuses
-    /// a document that begins with one, and the refusal was reported as a deployment older than
-    /// this version of OpenBot. That sent somebody looking for a newer installer over three bytes.
-    #[test]
-    fn a_byte_order_mark_does_not_make_a_deployment_look_old() {
-        let dir = temp_root("bom");
-        let app = dir.join("app");
-        std::fs::create_dir_all(&app).unwrap();
-        std::fs::write(
-            app.join("package.json"),
-            "\u{feff}{\"scripts\":{\"serve\":\"bun serve.ts\"}}",
-        )
-        .unwrap();
-        assert_eq!(missing_script(&dir), None);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// And a manifest that is genuinely broken says so, rather than blaming the version.
-    #[test]
-    fn an_unreadable_manifest_is_not_reported_as_an_old_deployment() {
-        let dir = temp_root("broken");
-        let app = dir.join("app");
-        std::fs::create_dir_all(&app).unwrap();
-        std::fs::write(app.join("package.json"), "{ this is not json").unwrap();
-        let problem = missing_script(&dir).expect("a broken manifest is a problem");
-        assert!(problem.contains("cannot be read as JSON"), "{problem}");
-        assert!(!problem.contains("older than"), "{problem}");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     #[test]
     fn a_missing_root_is_named_rather_than_left_to_errno() {
         let missing = std::env::temp_dir().join("openbot-not-here-at-all");
@@ -8809,46 +8500,12 @@ fn main() {
         assert!(problem.contains("docker-compose.yml"), "{problem}");
 
         std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
-        let problem = deployment_problem(&dir).expect("still missing the three processes");
-        assert!(problem.contains("server"), "{problem}");
+        assert_eq!(
+            deployment_problem(&dir),
+            None,
+            "the containers run from their images: no server, app or worker folder is needed"
+        );
 
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn a_deployment_older_than_this_app_is_named_as_that_rather_than_left_to_fail() {
-        let dir = temp_root("old");
-        for part in ["server", "app", "worker"] {
-            std::fs::create_dir_all(dir.join(part)).unwrap();
-        }
-        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
-        // What v0.0.7 shipped: a dev script and nothing to serve a build with.
-        std::fs::write(
-            dir.join("app").join("package.json"),
-            r#"{"scripts":{"dev":"vite","build":"vite build"}}"#,
-        )
-        .unwrap();
-
-        let problem = deployment_problem(&dir).expect("an older deployment is a problem");
-        assert!(problem.contains(APP_SCRIPT), "{problem}");
-        assert!(problem.to_lowercase().contains("older"), "{problem}");
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn a_complete_deployment_has_no_problem() {
-        let dir = temp_root("complete");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
-        for directory in ["server", "app", "worker"] {
-            std::fs::create_dir_all(dir.join(directory)).unwrap();
-        }
-        std::fs::write(
-            dir.join("app").join("package.json"),
-            r#"{"scripts":{"serve":"vite preview"}}"#,
-        )
-        .unwrap();
-        assert!(deployment_problem(&dir).is_none());
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -9298,8 +8955,12 @@ fn main() {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_podman_up_and_migrate_keep_deployment_overrides_without_duplicate_ports() {
-        if crate::test_support::isolated_process("stack::tests::macos_podman_up_and_migrate_keep_deployment_overrides_without_duplicate_ports") { return; }
+    fn macos_podman_up_keeps_deployment_overrides_without_duplicate_ports() {
+        if crate::test_support::isolated_process(
+            "stack::tests::macos_podman_up_keeps_deployment_overrides_without_duplicate_ports",
+        ) {
+            return;
+        }
         let path = PathFixture::with_fake_engine("macos-podman-start");
         let [_, podman] = computer_stop_addresses(&path);
         let (root, record) = computer_stop_root(&path, "podman-start", "{}");
@@ -9319,18 +8980,15 @@ fn main() {
                 "agent-harness"
             ]
         );
-        migrate(&podman, &root, &Secrets::new()).unwrap();
         let log = std::fs::read_to_string(&record).unwrap();
-        for action in [
-            "--profile harness up -d --no-build --pull never",
-            "run --rm --pull never migrate",
-        ] {
-            let line = log.lines().find(|line| line.contains(action)).unwrap();
-            let base = line.find("-f docker-compose.yml").unwrap();
-            let existing = line.find("-f docker-compose.override.yml").unwrap();
-            let desktop = line.find(".openbot-macos-podman.yml").unwrap();
-            assert!(base < existing && existing < desktop, "{line}");
-        }
+        let line = log
+            .lines()
+            .find(|line| line.contains("--profile harness up -d --no-build --pull never"))
+            .unwrap();
+        let base = line.find("-f docker-compose.yml").unwrap();
+        let existing = line.find("-f docker-compose.override.yml").unwrap();
+        let desktop = line.find(".openbot-macos-podman.yml").unwrap();
+        assert!(base < existing && existing < desktop, "{line}");
         assert_eq!(
             std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
             original
@@ -9347,7 +9005,7 @@ fn main() {
         )
         .unwrap();
         std::fs::remove_file(&record).unwrap();
-        migrate(&podman, &root, &Secrets::new()).unwrap();
+        up(&podman, &root, true, BundledBots::none(), &Secrets::new()).unwrap();
         let log = std::fs::read_to_string(&record).unwrap();
         assert!(
             log.contains("-f docker-compose.yml -f custom override.yml"),
@@ -10436,9 +10094,10 @@ fn main() {
     }
 
     /// The person's browser exactly as Desktop gets it there: this commit's tree as GitHub's tag
-    /// tarball carries it, laid out by `deployment::unpack`, installed by `install_dependencies`,
-    /// its Recorder built here (installation copies the release's prebuilt one out of its computer
-    /// image, `preparation::place_recorder`, and this commit has no published image), the browser decided by
+    /// tarball carries it, laid out by `deployment::unpack` (its files and nothing of the
+    /// workspace), installed by `install_dependencies`, a stand-in Recorder (installation copies
+    /// the release's prebuilt one out of its computer image, `preparation::place_recorder`, and
+    /// this commit has no published image), the browser decided by
     /// `local_browser::find` against this machine's real Chrome and Edge, spawned by
     /// `spawn_host_process`, asked for `/health` with the computer token, and stopped by
     /// `stop_host_children`. No browser is opened. Only the home folder is a scratch one, so the
@@ -10474,13 +10133,46 @@ fn main() {
             .unwrap();
         assert!(tarball.status.success());
         crate::deployment::unpack(&root, &tarball.stdout).unwrap();
+        // Only the Compose file and the browser's own files are laid out.
+        for left in [
+            "server",
+            "app",
+            "worker",
+            "toolkit",
+            "package.json",
+            "bun.lock",
+        ] {
+            assert!(!root.join(left).exists(), "{left} was laid out");
+        }
         install_dependencies(&root, &bun).unwrap();
-        let built = Command::new(&bun)
-            .current_dir(root.join("extension"))
-            .args(["run", "build"])
-            .status()
-            .unwrap();
-        assert!(built.success());
+        // Every shared file the browser imports loads from what was laid out and installed, with
+        // Bun's auto-install off: nothing is fetched behind the install's back.
+        for entry in crate::deployment::LAYOUT
+            .iter()
+            .filter(|entry| entry.starts_with("shared/") && entry.ends_with(".ts"))
+        {
+            let loaded = Command::new(&bun)
+                .current_dir(root.join(BROWSER_PACKAGE))
+                .args(["--no-install", "--no-env-file", "-e"])
+                .arg(format!("await import({:?})", format!("../{entry}")))
+                .output()
+                .unwrap();
+            assert!(
+                loaded.status.success(),
+                "{entry}: {}",
+                String::from_utf8_lossy(&loaded.stderr)
+            );
+        }
+        // Installation copies the release's prebuilt Recorder out of its computer image
+        // (`preparation::place_recorder`); this commit has no published image, and `/health` does
+        // not load it.
+        let recorder = root.join(crate::local_browser::RECORDER_DIST);
+        std::fs::create_dir_all(&recorder).unwrap();
+        std::fs::write(
+            recorder.join("manifest.json"),
+            r#"{"manifest_version":3,"name":"OpenBot Recorder","version":"0"}"#,
+        )
+        .unwrap();
         crate::env::write(
             &root.join(".env"),
             &crate::env::Ports {

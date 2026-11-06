@@ -16,32 +16,13 @@ use crate::{
 
 pub const REQUIRED: &str = "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.";
 pub const FILE: &str = ".openbot-prepared.json";
-const DEPENDENCIES: &str = ".openbot-dependencies.json";
-const LAUNCH: &str = ".openbot-launched.json";
+/// The person's browser's installed packages, recorded once they are complete.
+pub const DEPENDENCIES: &str = ".openbot-dependencies.json";
+/// The launch a Start last made from this installation.
+pub const LAUNCH: &str = ".openbot-launched.json";
 /// The engine this installation was set up on. Never invalidated with the preparation record: a
 /// new release is prepared again on the same engine, where its database already is.
 pub const ENGINE: &str = ".openbot-engine.json";
-const PACKAGES: [&str; 7] = [
-    "",
-    "server",
-    "app",
-    "worker",
-    "shared",
-    "toolkit",
-    "extension",
-];
-/// Packages a release has only since #784 (`shared` as a package, `toolkit`) and #858 (`extension`).
-/// v0.2.0, still the latest release when this desktop was built, has `shared` as plain source and no
-/// `toolkit` or `extension`; requiring their manifests failed every new install with
-/// "shared/package.json: No such file or directory".
-const LATER_PACKAGES: [&str; 3] = ["shared", "toolkit", "extension"];
-
-/// The packages this release actually has: every one in `PACKAGES`, less a later one it predates.
-fn packages(root: &Path) -> impl Iterator<Item = &'static str> + '_ {
-    PACKAGES.into_iter().filter(move |package| {
-        !LATER_PACKAGES.contains(package) || root.join(package).join("package.json").is_file()
-    })
-}
 
 #[derive(Serialize, Deserialize)]
 struct Dependencies {
@@ -179,25 +160,12 @@ fn hash_files(root: &Path, files: impl IntoIterator<Item = PathBuf>) -> Result<S
     Ok(format!("{:x}", hash.finalize()))
 }
 
-/// Packages installed apart from the root workspace, each from its own lockfile.
-fn separate_packages(root: &Path) -> Vec<&'static str> {
-    stack::dependency_directories(root)
-        .into_iter()
-        .filter(|directory| !directory.is_empty())
-        .collect()
-}
-
+/// The browser's package manifest and lockfile: what its installed packages are answerable to.
 fn dependency_fingerprint(root: &Path) -> Result<String, Problem> {
+    let package = Path::new(stack::BROWSER_PACKAGE);
     hash_files(
         root,
-        std::iter::once(PathBuf::from("bun.lock"))
-            .chain(packages(root).map(|path| Path::new(path).join("package.json")))
-            .chain(separate_packages(root).into_iter().flat_map(|package| {
-                [
-                    Path::new(package).join("bun.lock"),
-                    Path::new(package).join("package.json"),
-                ]
-            })),
+        [package.join("bun.lock"), package.join("package.json")],
     )
 }
 
@@ -245,22 +213,6 @@ pub(crate) fn write_checkpoint(
     std::fs::rename(temporary, target).map_err(|e| e.to_string())
 }
 
-/// Called only after candidate startup/readiness is verified and its pin is promoted. The stamp
-/// participates in the preparation fingerprint; rebind it without changing the selected engine,
-/// harness, credential records, or downloaded images.
-pub fn rebind_after_runtime_update(root: &Path) -> Result<(), Problem> {
-    if !root.join(FILE).exists() {
-        return Ok(());
-    }
-    let mut prepared: Prepared = serde_json::from_slice(
-        &std::fs::read(root.join(FILE)).map_err(|e| required(e.to_string()))?,
-    )
-    .map_err(|e| required(e.to_string()))?;
-    prepared.fingerprint = fingerprint(root)?;
-    write_record(root, FILE, &prepared)?;
-    record_launch(root, prepared.harness.as_ref())
-}
-
 pub fn invalidate(root: &Path) -> Result<(), Problem> {
     match std::fs::remove_file(root.join(FILE)) {
         Ok(()) => Ok(()),
@@ -269,34 +221,47 @@ pub fn invalidate(root: &Path) -> Result<(), Problem> {
     }
 }
 
-/// Record resolved package manifests, not just the existence of a partial node_modules directory.
+/// Record resolved package manifests, not just the existence of a partial node_modules directory:
+/// every package the browser names, and each one put beside the `shared` files it imports.
 fn package_files(root: &Path) -> Result<Vec<PathBuf>, Problem> {
+    let directory = root.join(stack::BROWSER_PACKAGE);
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(directory.join("package.json")).map_err(|e| required(e.to_string()))?,
+    )
+    .map_err(|e| required(e.to_string()))?;
     let mut files = BTreeSet::new();
-    for package in packages(root).chain(separate_packages(root)) {
-        let directory = root.join(package);
-        let manifest: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(directory.join("package.json")).map_err(|e| required(e.to_string()))?,
-        )
-        .map_err(|e| required(e.to_string()))?;
-        for group in ["dependencies", "devDependencies"] {
-            for name in manifest
-                .get(group)
-                .and_then(serde_json::Value::as_object)
-                .into_iter()
-                .flat_map(|entries| entries.keys())
-            {
-                let relative = Path::new("node_modules").join(name).join("package.json");
-                let file = [directory.join(&relative), root.join(&relative)]
-                    .into_iter()
-                    .find(|path| path.is_file())
-                    .ok_or_else(|| {
-                        required(format!(
-                            "The installed package {name} is missing from {package}."
-                        ))
-                    })?;
-                files.insert(std::fs::canonicalize(file).map_err(|e| required(e.to_string()))?);
+    for group in ["dependencies", "devDependencies"] {
+        for name in manifest
+            .get(group)
+            .and_then(serde_json::Value::as_object)
+            .into_iter()
+            .flat_map(|entries| entries.keys())
+        {
+            let file = directory
+                .join("node_modules")
+                .join(name)
+                .join("package.json");
+            if !file.is_file() {
+                return Err(required(format!(
+                    "The installed package {name} is missing from {}.",
+                    stack::BROWSER_PACKAGE
+                )));
             }
+            files.insert(std::fs::canonicalize(file).map_err(|e| required(e.to_string()))?);
         }
+    }
+    for name in stack::SHARED_PACKAGES {
+        let file = root
+            .join("shared")
+            .join("node_modules")
+            .join(name)
+            .join("package.json");
+        if !file.is_file() {
+            return Err(required(format!(
+                "The installed package {name} is missing from shared."
+            )));
+        }
+        files.insert(std::fs::canonicalize(file).map_err(|e| required(e.to_string()))?);
     }
     Ok(files.into_iter().collect())
 }
@@ -343,7 +308,7 @@ pub const IMAGE_RECORDER: &str = "/recorder";
 /// Copied out of a container that is created and never started (`create --pull=never`, so a
 /// missing image is an error rather than a download nobody asked for), into a folder beside the
 /// old copy, which replaces it only once the new one is whole. Every installation copies it again,
-/// since an upgrade lays new source over the old one.
+/// since an upgrade lays a new release out.
 pub fn place_recorder(root: &Path, address: &Address) -> Result<(), Problem> {
     if !local_browser::in_release(root) {
         return Ok(());
@@ -505,16 +470,14 @@ pub fn require(
     selection: Option<&Option<HarnessChoice>>,
     address: &Address,
 ) -> Result<(), Problem> {
-    require_with(root, selection, deployment::pinned().as_ref(), |images| {
-        require_images(address, images)
-    })
+    require_with(root, selection, |images| require_images(address, images))
 }
 
-/// `pin` is the release this build was pinned to, passed in so a test can be either kind of build.
+/// Whether a deployment is this app's own release is not asked here: Start upgrades one that is
+/// not before it gets this far (see `upgrade`).
 fn require_with(
     root: &Path,
     selection: Option<&Option<HarnessChoice>>,
-    pin: Option<&deployment::Pin>,
     verify: impl FnOnce(&[String]) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     let record: Prepared = serde_json::from_slice(
@@ -546,42 +509,12 @@ fn require_with(
             "The deployment was laid out by an earlier OpenBot and is missing files this version runs.",
         ));
     }
-    // Install is the only place a pin is applied, and a saved setup goes straight to Start. So
-    // Start refuses a deployment this build would not have laid out, and Install replaces it.
-    if let Some(problem) = other_release(deployment::installed(root).as_ref(), pin) {
-        return Err(required(problem));
-    }
     verify(&record.images)
 }
 
-/// Why the installed deployment is not one this build lays out, or `None` when it is.
-///
-/// A pinned build runs only the release it was pinned to, laid out as pinned. An ordinary build
-/// does not run a pinned release, which was installed by an internal or candidate build.
-pub fn other_release(
-    found: Option<&deployment::Installed>,
-    pin: Option<&deployment::Pin>,
-) -> Option<String> {
-    match pin {
-        Some(pin) if !found.is_some_and(|found| found.pinned && found.version == pin.version) => {
-            Some(format!(
-                "This OpenBot runs release {}, and the installed deployment is a different release.",
-                pin.version
-            ))
-        }
-        None if found.is_some_and(|found| found.pinned) => Some(
-            "The installed deployment is a test release, and this OpenBot runs the latest public release."
-                .into(),
-        ),
-        _ => None,
-    }
-}
-
 /// Every image Install pulls for the release laid out in `release`, run as `root`'s project: the
-/// Compose services desktop runs with the picked Bot, the migration, and the two sign-in images.
-/// Install asks with `release` = `root`; staging an update asks the same question of the staged
-/// release, so an update downloads exactly what installing that release would, and never the
-/// agents this installation does not run or the all-in-one image desktop never runs.
+/// Compose services desktop runs with the picked Bot, the migration, and the two sign-in images,
+/// and never the agents this installation does not run or the all-in-one image desktop never runs.
 pub fn installation_pull_set(
     address: &Address,
     root: &Path,
@@ -659,33 +592,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_release_from_before_the_toolkit_needs_no_shared_or_toolkit_manifest() {
-        let root = crate::test_support::temp_root("preparation-v020-layout");
-        for package in ["", "server", "app", "worker"] {
-            std::fs::create_dir_all(root.join(package)).unwrap();
-            std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
-        }
-        // v0.2.0: `shared` is source with no manifest, and there is no `toolkit` or `extension`.
-        std::fs::create_dir_all(root.join("shared")).unwrap();
-        assert_eq!(
-            packages(&root).collect::<Vec<_>>(),
-            ["", "server", "app", "worker"]
-        );
-        std::fs::write(root.join("bun.lock"), "lock").unwrap();
-        assert!(dependency_fingerprint(&root).is_ok());
-        assert!(package_files(&root).is_ok());
-        // A release that has them is held to them.
-        for package in LATER_PACKAGES {
-            std::fs::create_dir_all(root.join(package)).unwrap();
-            std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
-        }
-        assert_eq!(packages(&root).count(), PACKAGES.len());
-        // The packages every release has stay required.
-        std::fs::remove_file(root.join("server").join("package.json")).unwrap();
-        assert!(dependency_fingerprint(&root).is_err());
-    }
-
     struct Fixture {
         root: PathBuf,
         bun: PathBuf,
@@ -694,21 +600,14 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root = crate::test_support::temp_root("preparation");
-            for package in PACKAGES {
-                std::fs::create_dir_all(root.join(package)).unwrap();
-                std::fs::write(
-                    root.join(package).join("package.json"),
-                    r#"{"scripts":{"serve":"bun serve.ts"}}"#,
-                )
-                .unwrap();
-            }
+            std::fs::create_dir_all(root.join("agent-computer")).unwrap();
             let root = std::fs::canonicalize(root).unwrap();
             std::fs::write(
-                root.join("package.json"),
-                r#"{"dependencies":{"synthetic-package":"1"}}"#,
+                root.join("agent-computer/package.json"),
+                r#"{"dependencies":{"synthetic-package":"1","zod":"4"}}"#,
             )
             .unwrap();
-            std::fs::write(root.join("bun.lock"), "synthetic-lock").unwrap();
+            std::fs::write(root.join("agent-computer/bun.lock"), "synthetic-lock").unwrap();
             std::fs::write(root.join("docker-compose.yml"), COMPOSE).unwrap();
             std::fs::write(root.join("container-images.json"), "{}").unwrap();
             deployment::record(&root, "v-test", false).unwrap();
@@ -723,12 +622,14 @@ fn main() {
         return;
     }
     assert_eq!(args, ["install", "--frozen-lockfile", "--ignore-scripts"]);
+    assert!(std::env::current_dir().unwrap().ends_with("agent-computer"));
     let previous = std::fs::read_to_string("installs").unwrap_or_default();
     writeln!(std::fs::OpenOptions::new().create(true).append(true).open("installs").unwrap(), "install").unwrap();
     std::fs::create_dir_all("node_modules/synthetic-package").unwrap();
-    let separate = std::env::current_dir().unwrap().ends_with("agent-computer");
-    if previous.is_empty() && !separate { std::process::exit(71); }
+    if previous.is_empty() { std::process::exit(71); }
     std::fs::write("node_modules/synthetic-package/package.json", "{}").unwrap();
+    std::fs::create_dir_all("node_modules/zod").unwrap();
+    std::fs::write("node_modules/zod/package.json", "{}").unwrap();
 }
 "#).unwrap();
             let bun = root.join(format!("runtime{}", std::env::consts::EXE_SUFFIX));
@@ -737,13 +638,14 @@ fn main() {
         }
 
         fn dependencies(&self) {
-            std::fs::create_dir_all(self.root.join("node_modules/synthetic-package")).unwrap();
-            std::fs::write(
-                self.root
-                    .join("node_modules/synthetic-package/package.json"),
-                "{}",
-            )
-            .unwrap();
+            for package in [
+                "agent-computer/node_modules/synthetic-package",
+                "agent-computer/node_modules/zod",
+                "shared/node_modules/zod",
+            ] {
+                std::fs::create_dir_all(self.root.join(package)).unwrap();
+                std::fs::write(self.root.join(package).join("package.json"), "{}").unwrap();
+            }
             record_dependencies(&self.root, &self.bun).unwrap();
         }
 
@@ -769,21 +671,27 @@ fn main() {
         let install = || install_dependencies_if_needed(&f.root, || Ok(f.bun.clone()));
         assert!(install().is_err());
         assert!(!f.root.join(DEPENDENCIES).exists());
-        assert!(f.root.join("node_modules").is_dir());
+        assert!(f.root.join("agent-computer/node_modules").is_dir());
         install().unwrap();
         install_dependencies_if_needed(&f.root, || panic!("cached runtime must be reused"))
             .unwrap();
         f.prepared(None);
         for _ in 0..2 {
-            require_with(&f.root, None, None, |images| {
+            require_with(&f.root, None, |images| {
                 assert_eq!(images, ["synthetic-image"]);
                 Ok(())
             })
             .unwrap();
         }
         assert_eq!(
-            std::fs::read_to_string(f.root.join("installs")).unwrap(),
+            std::fs::read_to_string(f.root.join("agent-computer/installs")).unwrap(),
             "install\ninstall\n"
+        );
+        assert!(
+            f.root
+                .join("shared/node_modules/zod/package.json")
+                .is_file(),
+            "the shared files the browser imports get their package beside them"
         );
         assert_eq!(
             std::fs::read_to_string(f.root.join(".env")).unwrap(),
@@ -800,77 +708,9 @@ fn main() {
         // Exactly what an earlier app wrote, in place before it prepared the installation.
         std::fs::write(deployment::stamp_path(&f.root), r#"{"version":"v-test"}"#).unwrap();
         f.prepared(None);
-        let problem = require_with(&f.root, None, None, |_| Ok(()))
+        let problem = require_with(&f.root, None, |_| Ok(()))
             .expect_err("a deployment missing folders this app copies cannot start");
         assert!(problem.said.contains("Finish installing"));
-    }
-
-    fn pin(version: &str) -> deployment::Pin {
-        deployment::Pin {
-            version: version.into(),
-            commit: "0".repeat(40),
-            images: "{}",
-        }
-    }
-
-    /// A Fixture prepared over a deployment whose stamp says `version`, pinned or followed.
-    fn prepared_over(version: &str, pinned: bool) -> Fixture {
-        let f = Fixture::new();
-        deployment::record(&f.root, version, pinned).unwrap();
-        f.prepared(None);
-        f
-    }
-
-    /// An internal build opened over a customer's v0.2.0 must not start v0.2.0: Install lays out
-    /// the release it was pinned to.
-    #[test]
-    fn a_pinned_build_does_not_start_a_followed_deployment() {
-        let f = prepared_over("v0.2.0", false);
-        let problem = require_with(&f.root, None, Some(&pin("v0.3.0-rc.1")), |_| {
-            panic!("a deployment this build was not pinned to must stop before its images")
-        })
-        .expect_err("a pinned build starts only its own release");
-        assert!(problem.said.contains("Finish installing"), "{problem:?}");
-    }
-
-    /// A pinned build refuses another pinned release too, not just a followed one.
-    #[test]
-    fn a_pinned_build_does_not_start_a_deployment_pinned_to_another_release() {
-        let f = prepared_over("v0.3.0-rc.1", true);
-        let problem = require_with(&f.root, None, Some(&pin("v0.3.0-rc.2")), |_| Ok(()))
-            .expect_err("a pinned build starts only its own release");
-        assert!(problem.said.contains("Finish installing"), "{problem:?}");
-    }
-
-    /// Even at the same version, a followed deployment is not the one a pinned build laid out.
-    #[test]
-    fn a_pinned_build_does_not_start_a_followed_deployment_of_the_same_version() {
-        let f = prepared_over("v0.3.0", false);
-        let problem = require_with(&f.root, None, Some(&pin("v0.3.0")), |_| Ok(()))
-            .expect_err("the stamp must say this build laid it out");
-        assert!(problem.said.contains("Finish installing"), "{problem:?}");
-    }
-
-    #[test]
-    fn a_pinned_build_starts_its_own_deployment() {
-        let f = prepared_over("v0.3.0-rc.1", true);
-        require_with(&f.root, None, Some(&pin("v0.3.0-rc.1")), |_| Ok(())).unwrap();
-    }
-
-    /// A customer build opened after an internal one must not keep running the internal release:
-    /// Install moves it to the latest public one.
-    #[test]
-    fn an_ordinary_build_does_not_start_a_pinned_deployment() {
-        let f = prepared_over("v0.3.0-rc.1", true);
-        let problem = require_with(&f.root, None, None, |_| Ok(()))
-            .expect_err("an ordinary build does not run a pinned release");
-        assert!(problem.said.contains("Finish installing"), "{problem:?}");
-    }
-
-    #[test]
-    fn an_ordinary_build_starts_a_followed_deployment() {
-        let f = prepared_over("v0.2.0", false);
-        require_with(&f.root, None, None, |_| Ok(())).unwrap();
     }
 
     #[test]
@@ -894,9 +734,9 @@ fn main() {
         let f = Fixture::new();
         assert!(!f.root.join(DEPENDENCIES).exists());
         complete_with(&f.root, None, vec!["synthetic-image".into()], |_| Ok(())).unwrap();
-        require_with(&f.root, Some(&None), None, |_| Ok(())).unwrap();
+        require_with(&f.root, Some(&None), |_| Ok(())).unwrap();
         f.dependencies();
-        require_with(&f.root, Some(&None), None, |_| Ok(())).unwrap();
+        require_with(&f.root, Some(&None), |_| Ok(())).unwrap();
     }
 
     #[test]
@@ -927,7 +767,7 @@ fn main() {
         )
         .unwrap();
         f.prepared(None);
-        let problem = require_with(&f.root, Some(&None), None, |_| Ok(())).unwrap_err();
+        let problem = require_with(&f.root, Some(&None), |_| Ok(())).unwrap_err();
         assert!(
             format!("{problem:?}").contains("before OpenBot ran its server in a container"),
             "{problem:?}"
@@ -942,27 +782,28 @@ fn main() {
             agent_url: None,
         });
         f.prepared(chosen.as_ref());
-        require_with(&f.root, Some(&chosen), None, |_| Ok(())).unwrap();
-        assert!(require_with(&f.root, Some(&None), None, |_| panic!(
+        require_with(&f.root, Some(&chosen), |_| Ok(())).unwrap();
+        assert!(require_with(&f.root, Some(&None), |_| panic!(
             "wrong selection must stop first"
         ))
         .is_err());
         // Start runs containers, so the host's packages and runtime are not its business.
-        std::fs::remove_file(f.root.join("node_modules/synthetic-package/package.json")).unwrap();
+        std::fs::remove_file(
+            f.root
+                .join("agent-computer/node_modules/synthetic-package/package.json"),
+        )
+        .unwrap();
         std::fs::write(f.root.join("runtime-version"), "1.2.15").unwrap();
-        require_with(&f.root, Some(&chosen), None, |_| Ok(())).unwrap();
+        require_with(&f.root, Some(&chosen), |_| Ok(())).unwrap();
         // The images still are.
-        assert!(require_with(&f.root, Some(&chosen), None, |_| Err(required(
-            "missing image"
-        )))
-        .is_err());
+        assert!(require_with(&f.root, Some(&chosen), |_| Err(required("missing image"))).is_err());
         // And the deployment Compose runs.
         std::fs::write(
             f.root.join("docker-compose.yml"),
             format!("{COMPOSE}  x: {{}}\n"),
         )
         .unwrap();
-        let refused = require_with(&f.root, Some(&chosen), None, |_| Ok(())).unwrap_err();
+        let refused = require_with(&f.root, Some(&chosen), |_| Ok(())).unwrap_err();
         // The window goes back to Install for it rather than stopping on the sentence.
         assert_eq!(
             refused.connection,
@@ -984,7 +825,11 @@ fn main() {
         save_selected_root(&config, &f.root).unwrap();
         assert_eq!(selected_root(&config), Some(f.root.clone()));
         assert_eq!(launch(&f.root).unwrap().harness, Some(chosen));
-        std::fs::remove_file(f.root.join("node_modules/synthetic-package/package.json")).unwrap();
+        std::fs::remove_file(
+            f.root
+                .join("agent-computer/node_modules/synthetic-package/package.json"),
+        )
+        .unwrap();
         assert!(
             launch(&f.root).is_some(),
             "resume intent survives missing assets for explicit install recovery"
@@ -1006,16 +851,9 @@ fn main() {
         let f = Fixture::new();
         std::fs::create_dir_all(f.root.join("shared")).unwrap();
         std::fs::write(f.root.join(local_browser::CONTRACT), "export {};\n").unwrap();
-        std::fs::create_dir_all(f.root.join("agent-computer")).unwrap();
-        std::fs::write(
-            f.root.join("agent-computer/package.json"),
-            r#"{"dependencies":{"synthetic-package":"1"}}"#,
-        )
-        .unwrap();
-        std::fs::write(f.root.join("agent-computer/bun.lock"), "synthetic-lock").unwrap();
 
         let install = || install_dependencies_if_needed(&f.root, || Ok(f.bun.clone()));
-        assert!(install().is_err(), "the fixture's first root install fails");
+        assert!(install().is_err(), "the fixture's first install fails");
         install().unwrap();
         assert!(f
             .root
@@ -1030,15 +868,15 @@ fn main() {
         let image = ComputerImage::with_recorder();
         place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
         complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
-        require_with(&f.root, None, None, |_| Ok(())).unwrap();
+        require_with(&f.root, None, |_| Ok(())).unwrap();
 
         std::fs::remove_dir_all(f.root.join(local_browser::RECORDER_DIST)).unwrap();
-        let gone = require_with(&f.root, None, None, |_| Ok(()))
+        let gone = require_with(&f.root, None, |_| Ok(()))
             .expect_err("Start must not run a browser with no Recorder to load");
         assert!(gone.said.contains("Finish installing"), "{gone:?}");
 
-        // A changed lockfile for the computer is a changed installation, as the root's is. Start no
-        // longer refuses over it: the browser's next Start installs again rather than running the
+        // A changed lockfile for the computer is a changed installation. Start does not refuse over
+        // it: the browser's next Start installs again rather than running the
         // old packages (`install_dependencies_if_needed`).
         place_recorder_with(&f.root, COMPUTER, &mut image.engine()).unwrap();
         complete_with(&f.root, None, images(), |_| Ok(())).unwrap();
@@ -1047,15 +885,14 @@ fn main() {
         assert!(dependencies_ready(&f.root).is_err());
     }
 
-    /// Releases before the browser have no Recorder to put in place and no computer to install for.
+    /// Releases before the browser have no Recorder to put in place.
     #[test]
-    fn an_older_release_places_nothing_and_installs_only_its_workspace() {
+    fn an_older_release_places_no_recorder() {
         let f = Fixture::new();
         // `place_recorder` asks nothing of the engine or the manifest for a release without the browser.
         let address = Address::new(crate::engine::Engine::Docker, None);
         place_recorder(&f.root, &address).unwrap();
         assert!(!f.root.join(local_browser::RECORDER_DIST).exists());
-        assert_eq!(stack::dependency_directories(&f.root), [""]);
     }
 
     /// The release's computer image, digest-pinned, as the manifest names it.
@@ -1273,16 +1110,16 @@ fn main() {
         assert!(problem.detail.unwrap().contains("No such image"));
     }
 
+    /// The whole workspace is not installed any more: only the browser's packages answer for the
+    /// installation's dependencies.
     #[test]
-    fn every_root_workspace_is_fingerprinted() {
-        let manifest: serde_json::Value =
-            serde_json::from_str(include_str!("../../../package.json")).unwrap();
-        for workspace in manifest["workspaces"].as_array().unwrap() {
-            let workspace = workspace.as_str().unwrap();
-            assert!(
-                PACKAGES.contains(&workspace),
-                "{workspace} is a root workspace whose dependencies are not fingerprinted"
-            );
-        }
+    fn only_the_browsers_packages_are_fingerprinted() {
+        let f = Fixture::new();
+        let before = dependency_fingerprint(&f.root).unwrap();
+        std::fs::write(f.root.join("package.json"), "{}").unwrap();
+        std::fs::write(f.root.join("bun.lock"), "a workspace lock").unwrap();
+        assert_eq!(dependency_fingerprint(&f.root).unwrap(), before);
+        std::fs::write(f.root.join("agent-computer/bun.lock"), "changed").unwrap();
+        assert_ne!(dependency_fingerprint(&f.root).unwrap(), before);
     }
 }

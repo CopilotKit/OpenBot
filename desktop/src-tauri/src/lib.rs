@@ -6,7 +6,6 @@ pub mod deployment_release;
 pub mod docker_desktop;
 pub mod engine;
 pub mod env;
-pub mod follow;
 pub mod harness;
 pub mod host_access;
 pub mod install;
@@ -29,7 +28,7 @@ pub mod stack;
 pub mod supervise;
 pub mod telemetry;
 pub mod tray;
-pub mod updates;
+pub mod upgrade;
 pub mod vault;
 pub mod windows;
 
