@@ -94,6 +94,25 @@ describe("skill approvals", () => {
     );
   });
 
+  test("decideSharing with a stale requestedAt leaves the request waiting", async () => {
+    await store.recordApproval(grace, "edited", "person");
+    await store.requestSharing(grace, "edited");
+    const seen = (await store.requests()).find(
+      (entry) => entry.userId === grace && entry.skillName === "edited",
+    )?.updatedAt as string;
+    await store.recordApproval(grace, "edited", "person");
+    expect(await store.decideSharing(grace, "edited", "approved", seen)).toBe(
+      false,
+    );
+    expect((await store.get(grace, "edited"))?.sharing).toBe("requested");
+    const current = (await store.requests()).find(
+      (entry) => entry.userId === grace && entry.skillName === "edited",
+    )?.updatedAt as string;
+    expect(
+      await store.decideSharing(grace, "edited", "approved", current),
+    ).toBe(true);
+  });
+
   test("two first approvals at once both succeed and exactly one says it created the row", async () => {
     const results = await Promise.all([
       store.recordApproval(grace, "raced", "person"),

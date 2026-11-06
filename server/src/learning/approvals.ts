@@ -256,11 +256,16 @@ export function createSkillApprovalStore(database: Database) {
       return updated.length > 0;
     },
 
-    /** Answers a request. False when the skill is not a person's with a request waiting. */
+    /**
+     * Answers a request. False when the skill is not a person's with a request waiting. With `requestedAt` (the
+     * `updatedAt` `requests()` gave), also false once the row changed since, so an admin decides only on the
+     * version they opened.
+     */
     async decideSharing(
       userId: string,
       skillName: string,
       decision: "approved" | "declined",
+      requestedAt?: string,
     ): Promise<boolean> {
       const updated = await database
         .update(learningSkillApprovals)
@@ -270,6 +275,9 @@ export function createSkillApprovalStore(database: Database) {
             approvalKey(userId, skillName),
             eq(learningSkillApprovals.approvedBy, "person"),
             eq(learningSkillApprovals.sharing, "requested"),
+            requestedAt === undefined
+              ? undefined
+              : sql`${learningSkillApprovals.updatedAt} = ${requestedAt}::timestamptz`,
           ),
         )
         .returning({ name: learningSkillApprovals.skillName });
@@ -284,7 +292,7 @@ export function createSkillApprovalStore(database: Database) {
         .select({
           userId: learningSkillApprovals.userId,
           skillName: learningSkillApprovals.skillName,
-          updatedAt: learningSkillApprovals.updatedAt,
+          updatedAt: writtenStamp,
         })
         .from(learningSkillApprovals)
         .where(eq(learningSkillApprovals.sharing, "requested"))
@@ -292,7 +300,7 @@ export function createSkillApprovalStore(database: Database) {
       return rows.map((row) => ({
         userId: row.userId,
         skillName: row.skillName,
-        updatedAt: row.updatedAt.toISOString(),
+        updatedAt: row.updatedAt,
       }));
     },
 

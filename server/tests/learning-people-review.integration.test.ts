@@ -279,16 +279,60 @@ const decide = (
   skill: string,
   action: "approve" | "decline",
   headers: Record<string, string> = { "content-type": "application/json" },
+  body?: unknown,
 ) =>
   routes.request(`/sharing-requests/${userId}/${skill}/${action}`, {
     method: "POST",
     headers,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
 async function requestSharing(skillName: string) {
   await approvals.recordApproval(reviewed, skillName, "person");
   await approvals.requestSharing(reviewed, skillName);
 }
+
+test("a sharing request changed after the admin opened it answers 409 and stays requested", async () => {
+  await requestSharing("Edited triage");
+  const routes = admin({ approvals });
+  const listed = (await (await routes.request("/sharing-requests")).json()) as {
+    requests: { userId: string; skillName: string; requestedAt: string }[];
+  };
+  const seen = listed.requests.find(
+    (entry) => entry.userId === reviewed && entry.skillName === "Edited triage",
+  )?.requestedAt as string;
+  await approvals.recordApproval(reviewed, "Edited triage", "person");
+  const stale = await decide(
+    routes,
+    reviewed,
+    "Edited triage",
+    "approve",
+    undefined,
+    { requestedAt: seen },
+  );
+  expect(stale.status).toBe(409);
+  expect(((await stale.json()) as { error: string }).error).toContain(
+    "changed after you opened it",
+  );
+  expect((await approvals.get(reviewed, "Edited triage"))?.sharing).toBe(
+    "requested",
+  );
+  const now = (await (await routes.request("/sharing-requests")).json()) as {
+    requests: { userId: string; skillName: string; requestedAt: string }[];
+  };
+  const current = now.requests.find(
+    (entry) => entry.userId === reviewed && entry.skillName === "Edited triage",
+  )?.requestedAt as string;
+  const fresh = await decide(
+    routes,
+    reviewed,
+    "Edited triage",
+    "approve",
+    undefined,
+    { requestedAt: current },
+  );
+  expect(fresh.status).toBe(200);
+});
 
 test("an admin approves a sharing request and the skill is no longer withheld", async () => {
   await requestSharing("Refund triage");

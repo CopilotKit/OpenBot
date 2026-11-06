@@ -288,6 +288,7 @@ export function SharingRequestsSection() {
   const [open, setOpen] = useState<{
     userId: string;
     skillName: string;
+    requestedAt: string;
   } | null>(null);
   const rows = requests.data ?? [];
   const people = settings.data?.personalReview === "people";
@@ -321,6 +322,7 @@ export function SharingRequestsSection() {
                       setOpen({
                         userId: request.userId,
                         skillName: request.skillName,
+                        requestedAt: request.requestedAt,
                       })
                     }
                     type="button"

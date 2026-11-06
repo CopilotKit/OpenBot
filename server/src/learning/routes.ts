@@ -562,11 +562,39 @@ export function createLearningRoutes(
         if (!(await people()).some((entry) => entry.userId === userId))
           return context.json({ error: "This person doesn't exist." }, 404);
         const decision = action === "approve" ? "approved" : "declined";
-        if (!(await approvals.decideSharing(userId, skillName, decision)))
+        const body = (await context.req.json().catch(() => null)) as {
+          requestedAt?: unknown;
+        } | null;
+        const requestedAt =
+          typeof body?.requestedAt === "string" ? body.requestedAt : undefined;
+        if (
+          !(await approvals.decideSharing(
+            userId,
+            skillName,
+            decision,
+            requestedAt,
+          ))
+        ) {
+          // A stale `requestedAt` also fails; tell the two apart so the admin knows to open the skill again.
+          if (requestedAt !== undefined)
+            if (
+              (await approvals.requests()).some(
+                (entry) =>
+                  entry.userId === userId && entry.skillName === skillName,
+              )
+            )
+              return context.json(
+                {
+                  error:
+                    "This skill changed after you opened it. Open it again to see the new version.",
+                },
+                409,
+              );
           return context.json(
             { error: "This sharing request doesn't exist." },
             404,
           );
+        }
         dependencies.invalidate?.();
         if (audit)
           await recordAuditEvent(audit, {

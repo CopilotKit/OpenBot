@@ -342,6 +342,8 @@ describe("reviewing proposed skills", () => {
     );
   }
 
+  const sharingBodies: unknown[] = [];
+
   function intelligence(overview: LearningOverview = noDashboard) {
     let status: LearningProposal["status"] = "pending_review";
     let personStatus: LearningProposal["status"] = "pending_review";
@@ -350,7 +352,10 @@ describe("reviewing proposed skills", () => {
     global.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
-        if (init?.method === "POST") posts.push(path);
+        if (init?.method === "POST") {
+          posts.push(path);
+          sharingBodies.push(init.body);
+        }
         if (path.endsWith("/settings"))
           return Response.json({
             settings: {
@@ -534,6 +539,9 @@ describe("reviewing proposed skills", () => {
         `/api/admin/learning/sharing-requests/${PERSON}/quote-follow-up/approve`,
       ]),
     );
+    expect(JSON.parse(String(sharingBodies.at(-1)))).toEqual({
+      requestedAt: "2026-11-05T09:00:00.000Z",
+    });
     await waitFor(() =>
       expect(
         view.queryByRole("button", { name: /quote-follow-up/ }),

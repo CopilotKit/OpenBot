@@ -176,17 +176,20 @@ export function decideSharingMutationOptions(queryClient: QueryClient) {
       userId: string;
       skillName: string;
       decision: "approve" | "decline";
+      requestedAt: string;
     }): Promise<"approved" | "declined"> =>
       client(
         `/api/admin/learning/sharing-requests/${encodeURIComponent(variables.userId)}/${encodeURIComponent(variables.skillName)}/${encodeURIComponent(variables.decision)}`,
         "sharing",
         {
           method: "POST",
-          body: {},
+          body: { requestedAt: variables.requestedAt },
           fallback: "Couldn't save your decision. Try again.",
         },
       ),
     onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: learningKeys.all }),
+    onError: () =>
       queryClient.invalidateQueries({ queryKey: learningKeys.all }),
   });
 }
