@@ -877,6 +877,16 @@ intelligence:
               key: openai-api-key
               # So a deployment with no model key still installs. Learning runs fail until it has one.
               optional: true
+    # THE JOB THAT INSTALLS LEARNING'S QUEUE WAITS OUT A POSTGRESQL RESTART. Every Intelligence release
+    # moves the image of its PostgreSQL (`postgresql` below), so an upgrade that moves the bundled
+    # Intelligence replaces that pod. This Job is an ordinary one rather than a hook, so it starts
+    # beside that restart, and its wait for the database counts against this ceiling. Intelligence's
+    # own 300 seconds is less than a node can take to stop the old pod, pull the new image and start
+    # it, and an upgrade that runs out of it reports UPGRADE FAILED with nothing wrong. 900 is what
+    # OpenBot's own migrations Job gets (`migrations.activeDeadlineSeconds`), and `--timeout 15m`.
+    queue:
+      migration:
+        activeDeadlineSeconds: 900
 
   # Where Learning keeps its snapshots and proposed skills: an S3-compatible store Intelligence runs
   # in this release, which its services find by themselves. Learning does not start without one.

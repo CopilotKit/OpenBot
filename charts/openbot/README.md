@@ -930,6 +930,25 @@ upgrade run that way keeps running as root and says nothing. Pass the value, or 
 every mount, and a real Chromium profile is tens of thousands of small ones; in `sandbox` mode that
 pass would run again on every resume from idle.
 
+### Moving the bundled Intelligence restarts its database
+
+Each Intelligence release moves the image of Intelligence's own PostgreSQL, so an upgrade that moves
+the bundled Intelligence replaces that database's pod. The Job that installs Learning's queue
+(`<release>-intelligence-learning-queue-migration-<revision>`) starts beside that restart and waits
+for the database inside its own deadline, `intelligence.learning.queue.migration.activeDeadlineSeconds`,
+which this chart sets to 15 minutes. **`--reuse-values` will not pick this up:** it drops this
+chart's defaults, so a release upgraded with it keeps Intelligence's own 5 minutes. Pass the value
+(`--set intelligence.learning.queue.migration.activeDeadlineSeconds=900`), or drop the flag.
+
+If the Job runs out of time first, the upgrade stops with `UPGRADE FAILED`, the Job's status is
+`DeadlineExceeded` and its log ends `waiting for PostgreSQL to accept connections`. Nothing is wrong
+with the database or the migration. Run `helm upgrade` again once that pod is Ready: the next
+revision's Job finds the database up and completes.
+
+**After a failed revision, give your values again rather than `--reuse-values`.** Helm reuses the
+values of the last revision that succeeded, not those of the failed one, so a value you changed in
+the failed upgrade is silently undone. Pass the same `-f` files and `--set` flags you upgraded with.
+
 ### How a rollout is sequenced
 
 Migrations run as a `pre-install,pre-upgrade` Job, so no replica ever serves in front of a schema it
