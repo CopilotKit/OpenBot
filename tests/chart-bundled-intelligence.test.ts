@@ -404,13 +404,20 @@ describe.skipIf(!helm)("Automatic Learning in the bundled Intelligence", () => {
     expect(configValue(docs, appApi, "LEARNING_AUTOMATION_ENABLED")).toBe(
       "true",
     );
+    // The model reaches the agent from its Secret, below, so Intelligence's own `learning.agent.model`
+    // is empty and this reads false. Intelligence reads it only under a local evaluation licence,
+    // which starts only on the CopilotKit CLI's own k3d install and never under this chart.
     expect(configValue(docs, appApi, "APP_API_LEARNING_MODEL_CONFIGURED")).toBe(
-      "true",
+      "false",
     );
     const agent = mainContainer(
       workload(docs, "Deployment", component("learning-agent")),
     );
-    expect(configValue(docs, agent, "LEARNING_AGENT_MODEL")).toBe(
+    expect(
+      agent.env?.filter((e) => e.name === "LEARNING_AGENT_MODEL"),
+    ).toHaveLength(1);
+    const model = envSecret(agent.env ?? [], "LEARNING_AGENT_MODEL");
+    expect(secretValue(docs, model?.name ?? "", model?.key ?? "")).toBe(
       "openai/gpt-5.5",
     );
     const key = envSecret(agent.env ?? [], "OPENAI_API_KEY");
