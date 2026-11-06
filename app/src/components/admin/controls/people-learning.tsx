@@ -1,5 +1,9 @@
 import type { LearningPersonalReview } from "@openbot/shared/learning";
-import { IconChevronRight, IconUserCheck } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconChevronRight,
+  IconUserCheck,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
@@ -40,7 +44,7 @@ const CHOICES: {
     value: "people",
     title: "Each person, for their own Bots",
     description:
-      "Each person approves the skills learned from their own recordings.",
+      "Each person approves the skills learned from their own recordings. Those skills reach only that person's Bots until an admin shares them.",
   },
 ];
 
@@ -117,6 +121,14 @@ function WhoApprovesDialog({
                       {choice.description}
                     </ItemDescription>
                   </ItemContent>
+                  <ItemActions>
+                    {draft === choice.value ? (
+                      <IconCheck
+                        aria-hidden="true"
+                        className="size-4 text-foreground"
+                      />
+                    ) : null}
+                  </ItemActions>
                 </Item>
               </Fragment>
             ))}

@@ -182,6 +182,16 @@ function ContainerSetup({
   );
 }
 
+/**
+ * Who approves is saved from its own dialog. A Participation draft copied the
+ * whole object earlier, so sending those two keys back would overwrite a
+ * newer choice; PUT /settings keeps the stored value when they are omitted.
+ */
+function withoutReviewKeys(settings: LearningSettings): LearningSettings {
+  const { personalReview: _review, autoApprove: _auto, ...rest } = settings;
+  return rest;
+}
+
 export function LearningPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(learningSettingsQueryOptions());
@@ -248,7 +258,7 @@ export function LearningPage() {
             className="grid gap-5"
             onSubmit={(event) => {
               event.preventDefault();
-              save.mutate(settings);
+              save.mutate(withoutReviewKeys(settings));
             }}
           >
             <label className="flex items-center gap-2 text-sm">

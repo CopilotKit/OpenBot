@@ -465,6 +465,62 @@ describe("reviewing proposed skills", () => {
     );
   });
 
+  test("saving Participation leaves who approves alone", async () => {
+    intelligence();
+    const base = global.fetch;
+    const puts: { path: string; body: Record<string, unknown> }[] = [];
+    global.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (init?.method === "PUT") {
+          puts.push({ path, body: JSON.parse(String(init.body)) });
+          return Response.json({
+            settings: { enabled: false, agents: {}, personalReview: "people" },
+          });
+        }
+        if (path.endsWith("/settings"))
+          return Response.json({
+            settings: {
+              enabled: true,
+              defaultTarget: { containerId: "openbot" },
+              agents: {},
+              personalReview: "admins",
+            },
+            automatic: { state: "saved" },
+          });
+        return base(input, init);
+      },
+      { preconnect: originalFetch.preconnect },
+    );
+    const view = shared();
+    fireEvent.click(await view.findByLabelText(/Turn on automatic learning/));
+    fireEvent.click(
+      await view.findByRole("button", {
+        name: /Who approves skills learned from people's recordings/,
+      }),
+    );
+    fireEvent.click(
+      await view.findByRole("button", {
+        name: /Each person, for their own Bots/,
+      }),
+    );
+    fireEvent.click(view.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(puts.map((put) => put.path)).toContain(
+        "/api/admin/learning/personal-review",
+      ),
+    );
+    fireEvent.click(
+      view.getByRole("button", { name: "Save Learning settings" }),
+    );
+    await waitFor(() =>
+      expect(puts.some((put) => put.path.endsWith("/settings"))).toBe(true),
+    );
+    const settingsPut = puts.find((put) => put.path.endsWith("/settings"));
+    expect(settingsPut?.body.enabled).toBe(false);
+    expect("personalReview" in (settingsPut?.body ?? {})).toBe(false);
+  });
+
   test("Published skills lists the container's skills and opens one", async () => {
     intelligence();
     const view = shared();
