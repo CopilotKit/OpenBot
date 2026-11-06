@@ -16,6 +16,7 @@ next phrase's request takes the microphone from then on. Each request is one phr
 the Web Speech API numbers its results.
 */
 
+use super::diagnostics::{dbfs, note};
 use super::{Availability, Control, Emitter, Pause, Problem, FLUSH};
 use block2::RcBlock;
 use objc2::rc::{autoreleasepool, Retained};
@@ -30,7 +31,7 @@ use objc2_speech::{
 };
 use std::collections::BTreeMap;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -153,7 +154,15 @@ const TICK: Duration = Duration::from_millis(100);
 /// A phrase that fails sooner than this, with nothing heard, counts towards `FAILURES_MAX`.
 const QUICK_FAILURE: Duration = Duration::from_secs(2);
 
+/// How often the diagnostics say how loud the microphone was.
+const LEVEL_EVERY: Duration = Duration::from_secs(5);
+
 pub fn listen(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
+    note(format_args!(
+        "permissions: speech recognition {:?}, microphone {:?}",
+        speech_permission(),
+        microphone_permission()
+    ));
     // Narration only listens after asking `available`, but the answers may still be coming.
     if permission() == Permission::Unasked {
         ask();
@@ -165,6 +174,11 @@ pub fn listen(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Contro
         }
     }
     if permission() != Permission::Granted {
+        note(format_args!(
+            "not allowed: speech recognition {:?}, microphone {:?}",
+            speech_permission(),
+            microphone_permission()
+        ));
         out.fail(Problem::NotAllowed);
         return;
     }
@@ -173,6 +187,7 @@ pub fn listen(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Contro
 
 fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
     let Some(recognizer) = on_device_recognizer(language) else {
+        note(format_args!("no on-device recognizer for {language}"));
         out.fail(Problem::LanguageNotSupported);
         return;
     };
@@ -185,13 +200,35 @@ fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
     let engine = unsafe { AVAudioEngine::new() };
     let input = unsafe { engine.inputNode() };
     let format = unsafe { input.outputFormatForBus(0) };
+    note(format_args!(
+        "microphone: {} Hz, {} channels",
+        unsafe { format.sampleRate() },
+        unsafe { format.channelCount() }
+    ));
     if unsafe { format.sampleRate() } <= 0.0 || unsafe { format.channelCount() } == 0 {
         out.fail(Problem::AudioCapture);
         return;
     }
+    // How loud the microphone was, and how much of it came, for the diagnostics: never the audio.
+    let level = Arc::new((AtomicU32::new(0), AtomicU64::new(0)));
+    let tap_level = level.clone();
     let tap_feed = feed.clone();
     let tap = RcBlock::new(
         move |buffer: NonNull<AVAudioPCMBuffer>, _when: NonNull<AVAudioTime>| {
+            let pcm = unsafe { buffer.as_ref() };
+            let samples = unsafe { pcm.floatChannelData() };
+            if !samples.is_null() {
+                let first = unsafe { (*samples).as_ptr() };
+                let frames = unsafe { pcm.frameLength() } as usize;
+                let stride = unsafe { pcm.stride() }.max(1);
+                let mut peak = 0f32;
+                for frame in 0..frames {
+                    peak = peak.max(unsafe { *first.add(frame * stride) }.abs());
+                }
+                let (loudest, buffers) = &*tap_level;
+                loudest.fetch_max(peak.to_bits(), Ordering::Relaxed);
+                buffers.fetch_add(1, Ordering::Relaxed);
+            }
             if let Ok(feed) = tap_feed.lock() {
                 if let Some(request) = feed.0.as_ref() {
                     unsafe { request.appendAudioPCMBuffer(buffer.as_ref()) };
@@ -212,7 +249,12 @@ fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
         }
     };
     unsafe { engine.prepare() };
-    if unsafe { engine.startAndReturnError() }.is_err() {
+    if let Err(error) = unsafe { engine.startAndReturnError() } {
+        note(format_args!(
+            "the microphone would not start: {} {}",
+            error.domain(),
+            error.code()
+        ));
         teardown();
         out.fail(Problem::AudioCapture);
         return;
@@ -250,6 +292,7 @@ fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
         );
         let task =
             unsafe { recognizer.recognitionTaskWithRequest_resultHandler(&request, &handler) };
+        note(format_args!("phrase {index}: listening"));
         feed.lock().unwrap().0 = Some(request.clone());
         Phrase {
             request,
@@ -267,6 +310,7 @@ fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
     let mut failures = 0u32;
     let mut stopping: Option<Instant> = None;
     let mut resume_at: Option<Instant> = None;
+    let mut level_at = Instant::now();
 
     loop {
         autoreleasepool(|_| {
@@ -278,6 +322,7 @@ fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
                 Ok(Control::Stop) if stopping.is_none() => {
                     // The phrase in progress is handed over: its audio ends, and the recognizer finishes it.
                     stopping = Some(now);
+                    note(format_args!("stop: handing over phrase {current}"));
                     feed.lock().unwrap().0 = None;
                     teardown();
                     if let Some(phrase) = phrases.get_mut(&current) {
@@ -306,13 +351,15 @@ fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
                 if let Some((domain, code)) = message.failed.as_ref() {
                     // Silence ends a phrase in an error too ("no speech detected"), seconds in. One
                     // that fails at once, with nothing heard, is the recognizer refusing.
-                    let quick = phrases
-                        .get(&index)
-                        .is_some_and(|phrase| now - phrase.began < QUICK_FAILURE);
+                    let lasted = phrases.get(&index).map(|phrase| now - phrase.began);
+                    let quick = lasted.is_some_and(|lasted| lasted < QUICK_FAILURE);
+                    note(format_args!(
+                        "phrase {index}: recognizer error {domain} {code} after {} ms",
+                        lasted.unwrap_or_default().as_millis()
+                    ));
                     if index == current {
                         if quick && out.heard(index).trim().is_empty() {
                             failures += 1;
-                            eprintln!("[speech] the recognizer refused a phrase: {domain} {code}");
                         } else {
                             failures = 0;
                         }
@@ -325,7 +372,11 @@ fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
                     if index == current && stopping.is_none() {
                         current += 1;
                         pause.reset();
+                        note(format_args!(
+                            "phrase {index}: the recognizer ended it by itself"
+                        ));
                         if failures >= FAILURES_MAX {
+                            note("the recognizer refused every phrase: listening ends");
                             out.fail(Problem::ServiceNotAllowed);
                             stopping = Some(now - FLUSH);
                         } else if failures > 0 {
@@ -348,6 +399,7 @@ fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
                 }
                 // The person paused: this phrase is said, and the next one has the microphone.
                 if pause.over(now) && phrases.contains_key(&current) {
+                    note(format_args!("phrase {current}: a pause ends it"));
                     if let Some(phrase) = phrases.get_mut(&current) {
                         unsafe { phrase.request.endAudio() };
                         phrase.ending = Some(now);
@@ -363,10 +415,23 @@ fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
                     .map(|(index, _)| *index)
                     .collect();
                 for index in late {
+                    note(format_args!(
+                        "phrase {index}: the recognizer never finished it, final with its words"
+                    ));
                     if let Some(phrase) = phrases.remove(&index) {
                         unsafe { phrase.task.cancel() };
                     }
                     out.finish(index, None);
+                }
+                if level_at.elapsed() >= LEVEL_EVERY {
+                    level_at = Instant::now();
+                    let (loudest, buffers) = &*level;
+                    let peak = f32::from_bits(loudest.swap(0, Ordering::Relaxed));
+                    note(format_args!(
+                        "microphone: {} buffers, loudest {} dBFS",
+                        buffers.swap(0, Ordering::Relaxed),
+                        dbfs(peak)
+                    ));
                 }
             }
         });
@@ -379,6 +444,12 @@ fn run(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
 
     feed.lock().unwrap().0 = None;
     teardown();
+    if !phrases.is_empty() {
+        note(format_args!(
+            "{} phrases unfinished at the end, final with their words",
+            phrases.len()
+        ));
+    }
     for (index, phrase) in std::mem::take(&mut phrases) {
         unsafe { phrase.task.cancel() };
         out.finish(index, None);

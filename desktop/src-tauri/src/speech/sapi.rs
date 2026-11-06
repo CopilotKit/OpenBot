@@ -15,6 +15,7 @@ SAPI splits phrases itself: a hypothesis while a phrase is said, then its recogn
 recognition is one phrase, numbered as the Web Speech API numbers its results.
 */
 
+use super::diagnostics::note;
 use super::{Availability, Control, Emitter, Problem, FLUSH};
 use std::ffi::c_void;
 use std::sync::mpsc;
@@ -133,6 +134,7 @@ fn take(event: &SPEVENT) -> Option<String> {
 pub fn listen(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Control>) {
     let _com = Com::new();
     let Some(token) = recognizer_for(language) else {
+        note(format_args!("no SAPI recognizer installed for {language}"));
         out.fail(Problem::LanguageNotSupported);
         return;
     };
@@ -145,9 +147,16 @@ pub fn listen(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Contro
         unsafe { context.SetInterest(interest(), interest()) }?;
         Ok((recognizer, context))
     })();
-    let Ok((recognizer, context)) = opened else {
-        out.fail(Problem::ServiceNotAllowed);
-        return;
+    let (recognizer, context) = match opened {
+        Ok(opened) => opened,
+        Err(error) => {
+            note(format_args!(
+                "the recognizer would not open: {:?}",
+                error.code()
+            ));
+            out.fail(Problem::ServiceNotAllowed);
+            return;
+        }
     };
     // The default microphone.
     let microphone = (|| -> windows::core::Result<()> {
@@ -155,6 +164,10 @@ pub fn listen(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Contro
         unsafe { recognizer.SetInput(&audio, true) }
     })();
     if let Err(error) = microphone {
+        note(format_args!(
+            "the microphone would not open: {:?}",
+            error.code()
+        ));
         out.fail(audio_problem(&error));
         return;
     }
@@ -164,11 +177,17 @@ pub fn listen(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Contro
         unsafe { grammar.SetDictationState(SPRS_ACTIVE) }?;
         Ok(grammar)
     })();
-    let Ok(grammar) = grammar else {
+    let Ok(grammar) = grammar.inspect_err(|error| {
+        note(format_args!("dictation would not load: {:?}", error.code()));
+    }) else {
         out.fail(Problem::LanguageNotSupported);
         return;
     };
     if let Err(error) = unsafe { recognizer.SetRecoState(SPRST_ACTIVE) } {
+        note(format_args!(
+            "listening would not start: {:?}",
+            error.code()
+        ));
         out.fail(audio_problem(&error));
         return;
     }
@@ -185,6 +204,7 @@ pub fn listen(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Contro
             Ok(Control::Stop) if stopping.is_none() => {
                 // The microphone closes; the recognizer finishes the audio it already has.
                 stopping = Some(Instant::now());
+                note(format_args!("stop: handing over phrase {current}"));
                 let _ = unsafe { recognizer.SetRecoState(SPRST_INACTIVE) };
             }
             _ => {}

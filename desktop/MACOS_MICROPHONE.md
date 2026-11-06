@@ -53,6 +53,14 @@ providers:
    every request requires on-device recognition, so none of it uses the network.
    If the Mac has no on-device model for the language (System Settings →
    Keyboard → Dictation shows the languages), narration is off.
+7. Read `~/Library/Logs/OpenBot/speech.log` (`src-tauri/src/speech/diagnostics.rs`):
+   one line per thing narration did, never a word said. Expect the permission
+   states, the microphone's format, its loudness every 5 s (speech near the
+   microphone is louder than about -35 dBFS), each phrase's first words and its
+   final character count, any recognizer error code, and the end. A phrase that
+   reached the page and went on to the Recorder shows as a `POST` to
+   `/api/browser/narration` answered 200 in the web view's network log:
+   `/usr/bin/log show --predicate 'process == "com.apple.WebKit.Networking" AND eventMessage CONTAINS "transaction summary"'`.
 
 Record the tested app build, macOS version, prompt result, and results for all
 four capture paths. An ad-hoc build does not verify Developer ID signing or

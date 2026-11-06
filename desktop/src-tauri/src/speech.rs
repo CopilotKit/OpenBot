@@ -28,8 +28,11 @@ use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+pub mod diagnostics;
 #[cfg(target_os = "macos")]
 mod macos;
+
+use diagnostics::note;
 #[cfg(windows)]
 mod sapi;
 
@@ -140,12 +143,16 @@ impl Emitter {
         }
     }
 
-    fn emit(&mut self, event: Event) {
+    /// Sends `event`, and notes `line` in the diagnostics once the page took it.
+    fn emit(&mut self, event: Event, line: Option<String>) {
         if self.gone || self.ended {
             return;
         }
         if !(self.send)(event) {
             self.gone = true;
+            note("the page stopped hearing: its channel is gone");
+        } else if let Some(line) = line {
+            note(line);
         }
     }
 
@@ -160,7 +167,7 @@ impl Emitter {
             return;
         }
         self.started = true;
-        self.emit(Event::Start);
+        self.emit(Event::Start, Some("listening".into()));
     }
 
     /// The words of phrase `index` so far. Repeats and words for a finished phrase are dropped.
@@ -172,12 +179,16 @@ impl Emitter {
         if self.words.get(&index) == Some(&text) {
             return;
         }
+        let first = self.words.get(&index).is_none_or(String::is_empty) && !text.is_empty();
         self.words.insert(index, text.clone());
-        self.emit(Event::Result {
-            index,
-            text,
-            is_final: false,
-        });
+        self.emit(
+            Event::Result {
+                index,
+                text,
+                is_final: false,
+            },
+            first.then(|| format!("phrase {index}: first words")),
+        );
     }
 
     /// The words phrase `index` had so far, or nothing.
@@ -195,11 +206,15 @@ impl Emitter {
             None => self.words.get(&index).cloned().unwrap_or_default(),
         };
         self.words.remove(&index);
-        self.emit(Event::Result {
-            index,
-            text,
-            is_final: true,
-        });
+        let line = format!("phrase {index}: final, {} characters", text.chars().count());
+        self.emit(
+            Event::Result {
+                index,
+                text,
+                is_final: true,
+            },
+            Some(line),
+        );
     }
 
     /// Every phrase still open is final with the words it had.
@@ -212,7 +227,10 @@ impl Emitter {
 
     /// Listening failed for `problem`. The end follows.
     pub fn fail(&mut self, problem: Problem) {
-        self.emit(Event::Error { error: problem });
+        self.emit(
+            Event::Error { error: problem },
+            Some(format!("failed: {problem:?}")),
+        );
     }
 
     /// Listening is over. Said once; nothing after it.
@@ -220,7 +238,7 @@ impl Emitter {
         if self.ended {
             return;
         }
-        self.emit(Event::End);
+        self.emit(Event::End, Some("end".into()));
         self.ended = true;
     }
 }
@@ -290,6 +308,21 @@ static CURRENT: Mutex<Option<(u64, mpsc::Sender<Control>)>> = Mutex::new(None);
 /// Whether `language` can be recognised here. May ask the person for the microphone and speech
 /// recognition, which the page waits out ("downloading").
 pub fn available(language: &str) -> Availability {
+    let answer = availability(language);
+    // Asked every few seconds while the person answers the system: noted when the answer changes.
+    static LAST: Mutex<Option<(String, Availability)>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap();
+    let now = (language.to_owned(), answer);
+    if last.as_ref() != Some(&now) {
+        diagnostics::for_session(0);
+        let tag = language_tag(language).unwrap_or_else(|| "(not a language tag)".into());
+        note(format_args!("available({tag}) = {answer:?}"));
+        *last = Some(now);
+    }
+    answer
+}
+
+fn availability(language: &str) -> Availability {
     let Some(language) = language_tag(language) else {
         return Availability::Unavailable;
     };
@@ -317,6 +350,11 @@ pub fn start(language: &str, send: impl Fn(Event) -> bool + Send + 'static) -> u
     let spawned = std::thread::Builder::new()
         .name("openbot-speech".into())
         .spawn(move || {
+            diagnostics::for_session(id);
+            note(format_args!(
+                "start, language {}",
+                language.as_deref().unwrap_or("(not a language tag)")
+            ));
             match language {
                 Some(language) => listen(&language, &mut emitter, &rx),
                 None => emitter.fail(Problem::LanguageNotSupported),
@@ -338,6 +376,8 @@ pub fn control(id: u64, what: Control) {
     let current = CURRENT.lock().unwrap();
     if let Some((session, tx)) = current.as_ref() {
         if *session == id {
+            diagnostics::for_session(id);
+            note(format_args!("the page asked to {what:?}"));
             let _ = tx.send(what);
         }
     }
@@ -532,6 +572,62 @@ mod tests {
         assert!(!pause.over(at + PAUSE * 10));
         pause.heard("   ", at);
         assert!(!pause.over(at + PAUSE * 10), "silence is not a phrase");
+    }
+
+    /// The first live test on a packaged Mac could not be read: its stderr goes nowhere, so whether
+    /// the microphone heard anything, the recognizer answered or the page took the phrases was a
+    /// guess. Each session now leaves lines in a file, and never a word of what was said.
+    #[test]
+    fn a_session_leaves_diagnostics_and_never_the_words() {
+        let path = diagnostics::path().unwrap();
+        let (mut out, _) = recorder();
+        diagnostics::for_session(4242);
+        out.start();
+        out.words(0, "my secret passphrase");
+        out.words(0, "my secret passphrase is");
+        out.finish(0, Some("my secret passphrase is swordfish"));
+        out.fail(Problem::AudioCapture);
+        out.end();
+        let log = std::fs::read_to_string(&path).unwrap();
+        let mine: Vec<&str> = log
+            .lines()
+            .filter(|line| line.contains(" session=4242 "))
+            .map(|line| line.split(" session=4242 ").nth(1).unwrap_or_default())
+            .collect();
+        assert_eq!(
+            mine,
+            [
+                "listening",
+                "phrase 0: first words",
+                "phrase 0: final, 33 characters",
+                "failed: AudioCapture",
+                "end"
+            ]
+        );
+        assert!(!log.contains("secret") && !log.contains("swordfish"));
+
+        // A page that stopped hearing says so, once.
+        let mut gone = Emitter::new(|_| false);
+        diagnostics::for_session(4343);
+        gone.start();
+        gone.words(0, "anything");
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            log.lines()
+                .filter(|line| line.contains(" session=4343 "))
+                .count(),
+            1
+        );
+        assert!(log.contains("session=4343 the page stopped hearing"));
+    }
+
+    #[test]
+    fn loudness_reads_in_dbfs() {
+        assert_eq!(diagnostics::dbfs(1.0), 0);
+        assert_eq!(diagnostics::dbfs(0.1), -20);
+        assert_eq!(diagnostics::dbfs(0.001), -60);
+        assert_eq!(diagnostics::dbfs(0.0), -120);
+        assert_eq!(diagnostics::dbfs(f32::NAN), -120);
     }
 
     /// A language the system is never asked about ends at once, as the page expects: an error,
