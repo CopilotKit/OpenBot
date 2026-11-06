@@ -10,6 +10,7 @@ import type {
   PeopleProposals,
   PersonalLearningSharing,
   PersonalReview,
+  SharingRequest,
 } from "@openbot/shared/learning";
 import { queryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
@@ -21,6 +22,7 @@ export const learningKeys = {
   personal: ["learning", "personal"] as const,
   review: ["learning", "review"] as const,
   peopleProposals: ["learning", "people-proposals"] as const,
+  sharingRequests: ["learning", "sharing-requests"] as const,
   personProposal: (userId: string, proposalId: string) =>
     ["learning", "person-proposal", { userId, proposalId }] as const,
   personalProposal: (container: string, proposalId: string) =>
@@ -281,5 +283,17 @@ export function personProposalQueryOptions(userId: string, proposalId: string) {
         "proposal",
         { fallback: "Couldn't load this skill. Try again." },
       ),
+  });
+}
+
+/** Admin → Learning: people's requests to open a learned skill to every Bot, waiting for an admin. */
+export function sharingRequestsQueryOptions() {
+  return queryOptions({
+    queryKey: learningKeys.sharingRequests,
+    retry: false,
+    queryFn: (): Promise<SharingRequest[]> =>
+      client("/api/admin/learning/sharing-requests", "requests", {
+        fallback: "Couldn't load sharing requests. Try again.",
+      }),
   });
 }

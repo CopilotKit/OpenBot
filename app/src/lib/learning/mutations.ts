@@ -1,4 +1,9 @@
-import type { LearningSharingMode } from "@openbot/shared/learning";
+import type {
+  LearningPersonalReview,
+  LearningSettings,
+  LearningSharingMode,
+  SharingRequest,
+} from "@openbot/shared/learning";
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 import { learningKeys } from "./queries";
@@ -142,6 +147,62 @@ export function reviewPersonProposalMutationOptions(queryClient: QueryClient) {
           fallback: "Couldn't save your decision. Try again.",
         },
       ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: learningKeys.all }),
+  });
+}
+
+/** Ask an admin to open one of your skills to every Bot. */
+export function requestSkillSharingMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (name: string): Promise<void> => {
+      await client(
+        `/api/settings/learning/skills/${encodeURIComponent(name)}/share-request`,
+        {
+          method: "POST",
+          body: {},
+          fallback: "Couldn't send your request. Try again.",
+        },
+      );
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: learningKeys.all }),
+  });
+}
+
+/** Approve or decline a person's request to open a skill to every Bot. */
+export function decideSharingMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (variables: {
+      userId: string;
+      skillName: string;
+      decision: "approve" | "decline";
+    }): Promise<SharingRequest> =>
+      client(
+        `/api/admin/learning/sharing-requests/${encodeURIComponent(variables.userId)}/${encodeURIComponent(variables.skillName)}/${encodeURIComponent(variables.decision)}`,
+        "sharing",
+        {
+          method: "POST",
+          body: {},
+          fallback: "Couldn't save your decision. Try again.",
+        },
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: learningKeys.all }),
+  });
+}
+
+/** Choose who reviews the skills proposed from people's own recordings. */
+export function savePersonalReviewMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (
+      personalReview: LearningPersonalReview,
+    ): Promise<LearningSettings> =>
+      client("/api/admin/learning/personal-review", "settings", {
+        method: "PUT",
+        body: { personalReview },
+        fallback: "Couldn't save who reviews. Try again.",
+      }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: learningKeys.all }),
   });
