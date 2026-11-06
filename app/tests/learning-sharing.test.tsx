@@ -292,6 +292,16 @@ test("Automatic Learning off says no Skills are learned", async () => {
   );
 });
 
+test("the personal edition says Automatic Learning is off instead of blaming Intelligence", async () => {
+  edition = "personal";
+  answer = { ...answer, skills: null, unavailable: "off" };
+  const view = draw();
+  await view.findByText(
+    "Automatic Learning is turned off, so no Skills are learned yet. Turn it on in Admin.",
+  );
+  expect(view.queryByText(/Couldn't read/)).toBeNull();
+});
+
 test("until an admin turns on Skill sharing, it says so plainly and only Only my Bots can be chosen", async () => {
   answer = { ...answer, sharingAllowed: false };
   const view = draw();
