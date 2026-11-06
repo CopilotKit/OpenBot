@@ -208,7 +208,6 @@ import { createLearningPeople } from "./learning/people";
 import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
-  personalLearningContainerId,
 } from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { learningScopes } from "./learning/scopes";
@@ -1536,7 +1535,8 @@ const recorderExpirySweep = repeatAfterEach(async () => {
 }, 60_000);
 /*
  * The personal edition has one reviewer, who is DEV_ACTOR (it requires single-user mode, which admits every request as
- * DEV_ACTOR), so what its Bots learn is approved for them every 15 minutes while automatic approval is on.
+ * DEV_ACTOR), so what its Bots learn is approved for them while automatic approval is on: once shortly after boot, so
+ * what waited while the app was closed doesn't wait another 15 minutes, then every 15 minutes.
  */
 const autoApprover = createAutoApprover({
   manage: learningProbeIntelligence.experimental.learning,
@@ -1553,21 +1553,24 @@ const autoApprover = createAutoApprover({
   userId: DEV_ACTOR.id,
   audit: bootAuditStore,
 });
+const sweepAutoApprovals = () =>
+  void autoApprover.sweep().catch((error) =>
+    console.error(
+      JSON.stringify({
+        type: "learning-auto-approve-sweep-error",
+        error: error instanceof Error ? error.name : "UnknownError",
+        timestamp: new Date().toISOString(),
+      }),
+    ),
+  );
+const firstAutoApproveSweep =
+  currentEdition() === "personal"
+    ? setTimeout(sweepAutoApprovals, 10_000)
+    : undefined;
+firstAutoApproveSweep?.unref();
 const autoApproveTimer =
   currentEdition() === "personal"
-    ? setInterval(
-        () =>
-          void autoApprover.sweep().catch((error) =>
-            console.error(
-              JSON.stringify({
-                type: "learning-auto-approve-sweep-error",
-                error: error instanceof Error ? error.name : "UnknownError",
-                timestamp: new Date().toISOString(),
-              }),
-            ),
-          ),
-        15 * 60_000,
-      )
+    ? setInterval(sweepAutoApprovals, 15 * 60_000)
     : undefined;
 autoApproveTimer?.unref();
 const memoryIngestion = createMemoryIngestion({
@@ -2981,7 +2984,7 @@ const app = createApp(
     approvals: skillApprovalStore,
     people: createLearningPeople(database),
     personSkill: (userId, name) =>
-      skillIn(personalLearningContainerId(userId), name),
+      skillIn(personalLearningSpaces.containerFor(userId), name),
     invalidate: () => openSkillIndex.invalidate(),
     recordingTitles: recorderExtension.recordingTitles,
   },
@@ -3200,6 +3203,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     personResponseSweep.stop();
     groupSweep.stop();
     recorderExpirySweep.stop();
+    if (firstAutoApproveSweep) clearTimeout(firstAutoApproveSweep);
     if (autoApproveTimer) clearInterval(autoApproveTimer);
     for (const sweep of deliverySweeps) sweep.stop();
     void Promise.allSettled([
