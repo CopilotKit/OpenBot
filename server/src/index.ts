@@ -171,7 +171,7 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
-import { setEdition } from "./edition";
+import { currentEdition, setEdition } from "./edition";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -208,6 +208,7 @@ import {
   createPersonSpaceStore,
 } from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
+import { learningScopes } from "./learning/scopes";
 import { createLearningSettingsStore } from "./learning/settings";
 import {
   createLearningSharingStore,
@@ -3016,6 +3017,14 @@ const app = createApp(
       },
       invalidate: () => openSkillIndex.invalidate(),
       sharingAllowed: skillSharingAllowed,
+      manage: learningProbeIntelligence.experimental.learning,
+      settings: learningSettings,
+      scopesFor: async (actor) =>
+        learningScopes({
+          edition: currentEdition(),
+          userId: actor.id,
+          settings: await learningSettings.read(),
+        }),
     },
     delivery: {
       authenticated: {

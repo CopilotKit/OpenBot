@@ -133,6 +133,8 @@ args[34] = {
     skillsOf: async () => ({ skills: [] }),
     invalidate: () => {},
     sharingAllowed: async () => true,
+    settings: learningSettings,
+    scopesFor: async () => [],
   },
   approvals: {} as never,
 };

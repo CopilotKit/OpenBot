@@ -2,13 +2,18 @@ import {
   isLearnedSkillName,
   isLearningSharingMode,
   type LearnedSkillContent,
+  type LearningSource,
   type PersonalLearningSharing,
+  type PersonalReview,
 } from "@openbot/shared/learning";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type AuditStore, recordAuditEvent } from "../audit";
-import type { AppVariables } from "../auth/guards";
+import type { AppVariables, AuthenticatedActor } from "../auth/guards";
+import { currentEdition } from "../edition";
 import type { SkillApprovalStore } from "./approvals";
+import { type LearningManagement, readProposals, runSummary } from "./review";
+import type { LearningSettingsStore } from "./settings";
 import type { LearningSharingStore } from "./sharing";
 
 export type PersonalLearningRouteDeps = {
@@ -36,6 +41,12 @@ export type PersonalLearningRouteDeps = {
    */
   sharingAllowed: () => Promise<boolean>;
   auditStore?: AuditStore;
+  /** The runtime key's Learning routes, for reading the proposals and runs of the spaces a person reviews. */
+  manage?: LearningManagement;
+  /** Learning settings, read fresh to see who reviews what people's recordings propose. */
+  settings: LearningSettingsStore;
+  /** The Learning spaces this person reviews (learning/scopes.ts). */
+  scopesFor: (actor: AuthenticatedActor) => Promise<LearningSource[]>;
 };
 
 /** What a person reads when they try to open their Skills while an administrator has not allowed it. */
@@ -96,6 +107,51 @@ export function createPersonalLearningRoutes(
             skills: null,
             unavailable: read.unavailable,
           };
+    return context.json(answer);
+  });
+
+  /** Whether the person decides on proposals themselves: always in the personal edition, otherwise when an admin chose people. */
+  const canReview = async () =>
+    currentEdition() === "personal" ||
+    (await deps.settings.read()).personalReview === "people";
+
+  routes.get("/review", async (context) => {
+    const manage = deps.manage;
+    if (!manage) {
+      return context.json(
+        { error: "Couldn't reach Intelligence just now. Try again." },
+        503,
+      );
+    }
+    const [scopes, allowed] = await Promise.all([
+      deps.scopesFor(context.var.actor),
+      canReview(),
+    ]);
+    const sources = await Promise.all(
+      scopes.map(async (source) => {
+        const [proposals, runs] = await Promise.all([
+          readProposals(manage, source.containerId).catch(() => null),
+          manage
+            .listLearningRuns({ containerId: source.containerId })
+            .catch(() => null),
+        ]);
+        const latest = runs
+          ? [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+          : undefined;
+        return {
+          ...source,
+          proposals:
+            proposals?.filter((entry) => entry.status === "pending_review") ??
+            null,
+          latestRun: latest ? runSummary(latest) : null,
+        };
+      }),
+    );
+    const answer: PersonalReview = {
+      canReview: allowed,
+      autoApprove: null,
+      sources,
+    };
     return context.json(answer);
   });
 

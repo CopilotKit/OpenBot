@@ -165,6 +165,10 @@ args[34] = {
       thisReplica.invalidate();
     },
     sharingAllowed,
+    settings: {
+      read: async () => settings,
+    } as unknown as LearningSettingsStore,
+    scopesFor: async () => [],
   },
 };
 const app = createApp(...args);
