@@ -30,8 +30,9 @@ export function useSkillCommands(agentId: string): CommandOption[] {
     () =>
       (data?.skills ?? []).map((skill) => ({
         id: skill.slug,
-        name: skill.slug,
-        description: skill.summary || skill.title,
+        // Its name, not its command: the menu and the chip read as what the skill is called.
+        name: skill.title || skill.slug,
+        ...(skill.summary ? { description: skill.summary } : {}),
         /*
          * A CHIP, NOT AN EXPANSION. `prompt` used to paste the skill's whole instruction into the
          * box, which meant a person watched a paragraph they did not write appear over the message
