@@ -703,16 +703,21 @@ async fn stage_runtime_update(
     require_update_root(&app.state::<Shell>(), &root)?;
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        stage_with_images(&handle, &root, |root| updates::stage(root, &version))
+        // The Bot this installation was prepared with, whose images it runs.
+        let harness = preparation::installation(&root).and_then(|found| found.harness);
+        stage_with_images(&handle, &root, harness.as_ref(), |root| {
+            updates::stage(root, &version)
+        })
     })
     .await
     .map_err(|e| Problem::from(e.to_string()))?
 }
-/// Stage a release beside the installation, then pull its images onto the installation's saved
-/// engine. Nothing that runs is stopped or changed.
+/// Stage a release beside the installation, then pull what installing it would pull onto the
+/// installation's saved engine (`updates::stage_images`). Nothing that runs is stopped or changed.
 fn stage_with_images(
     handle: &tauri::AppHandle,
     root: &Path,
+    harness: Option<&harness::HarnessChoice>,
     stage: impl FnOnce(&Path) -> Result<serde_json::Value, String>,
 ) -> Result<serde_json::Value, Problem> {
     let saved=preparation::saved_engine(root).ok_or("This installation has no saved engine. Complete its original installation before updating.")?;
@@ -723,19 +728,16 @@ fn stage_with_images(
         .ok_or("Start the installation's saved container engine before staging an update.")?
         .pin()?;
     let staged = stage(root)?;
-    let candidate = updates::staged_manifest(root)?;
-    let images = updates::candidate_images(&candidate)?;
-    for (index, image) in images.iter().enumerate() {
-        let detail = format!("Staging update software ({}/{}).", index + 1, images.len());
+    updates::stage_images(&address, root, harness, |index, total, image| {
+        let detail = format!("Staging update software ({}/{total}).", index + 1);
         report_running(handle, "update-images", &detail, None);
         pull_metrics::pull_image(
             &address,
             image,
             |bytes| report_running(handle, "update-images", &detail, Some(bytes.bytes)),
             |metrics| desktop_telemetry::pull_completed(handle, metrics),
-        )?;
-    }
-    updates::mark_images_staged(root, saved)?;
+        )
+    })?;
     Ok(staged)
 }
 #[tauri::command]
@@ -779,14 +781,14 @@ async fn apply_staged_update(
             let journal = updates::prepare_apply(&target)?;
             let saved = preparation::saved_engine(&target)
                 .ok_or("This installation has no saved engine.")?;
-            updates::require_staged_images(&target, saved)?;
+            let staged = updates::require_staged_images(&target, saved)?;
             let found = engine::detect_saved(Some(saved));
             let address = found
                 .address
                 .filter(|_| found.responding)
                 .ok_or("The saved container engine is not answering.")?
                 .pin()?;
-            preparation::require_images(&address, &updates::candidate_images(&journal.candidate)?)?;
+            preparation::require_images(&address, &staged)?;
             let secrets = openbot_desktop_lib::vault::already_given_no_ui(
                 &target,
                 &target.join(".env"),
@@ -1093,10 +1095,11 @@ async fn follow_app_release(
         let handle = app.clone();
         let target = selected.clone();
         let wanted = planned.clone();
+        let chosen = harness.clone();
         let staged = match require_update_root(&app.state::<Shell>(), &selected) {
             Err(problem) => Err(problem),
             Ok(()) => tauri::async_runtime::spawn_blocking(move || {
-                stage_with_images(&handle, &target, |root| {
+                stage_with_images(&handle, &target, chosen.as_ref(), |root| {
                     follow::stage(root, &wanted, &deployment::get)
                 })
             })
@@ -1438,7 +1441,7 @@ async fn prepare_installation_inner(
         // And the Compose project it runs as, decided once on that engine and recorded beside it,
         // before anything is created under it. See `stack::project`.
         stack::project(&address, &root)?;
-        let picked = harness::picked(harness.as_ref(), &root).map_err(Problem::from)?;
+        harness::picked(harness.as_ref(), &root).map_err(Problem::from)?;
         let handle = app.clone();
         let _startup = attempt.lock_current()?;
         if preparation::require(&root, Some(&harness), &address).is_ok() {
@@ -1476,20 +1479,8 @@ async fn prepare_installation_inner(
             "Checking which local software to download.",
             None,
         );
-        let settings = preparation::image_settings(&root, picked.as_ref())?;
-        let installed = picked
-            .as_ref()
-            .and_then(|picked| picked.installed_port())
-            .is_some();
-        let mut images = stack::installation_images(&address, &root, installed, &settings)?;
-        for published in [
-            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
-            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
-        ] {
-            images.push(deployment::reference(&root, published)?);
-        }
-        images.sort();
-        images.dedup();
+        // The same question a staged update asks of its release: see `installation_pull_set`.
+        let images = preparation::installation_pull_set(&address, &root, &root, harness.as_ref())?;
         // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.
         let pacer = Mutex::new(pull_metrics::Pacer::default());
         pull_metrics::pull_images_limited(

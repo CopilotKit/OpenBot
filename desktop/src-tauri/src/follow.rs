@@ -415,6 +415,19 @@ mod tests {
         next["compatibility"]["database"]["from"] = serde_json::json!(["0077_channel_opening"]);
         next["compatibility"]["database"]["to"] = serde_json::json!("0078_follow_check");
         next["upgrade"]["fromVersions"] = serde_json::json!(["v0.3.0"]);
+        // The next release's own images: v0.3.0's repositories at new digests.
+        for image in next["artifacts"]["images"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            let reference = image["reference"].as_str().unwrap().to_string();
+            let (repository, digest) = reference.split_once("@sha256:").unwrap();
+            image["reference"] = serde_json::json!(format!(
+                "{repository}@sha256:{}",
+                sha256(format!("{digest}{NEXT}"))
+            ));
+        }
         let (installed, next) = (
             serde_json::to_vec(&installed).unwrap(),
             serde_json::to_vec(&next).unwrap(),
@@ -576,6 +589,7 @@ mod tests {
             }
         );
         stage(&root, &planned, &published).expect("v0.3.0 is adopted and the app's release staged");
+        updates::stage_images(&address, &root, None, |_, _, _| Ok(())).unwrap();
         let mut journal = apply_until_migration(&root, &address, &secrets);
         candidate_migrated(&root);
         crate::stack::verify_runtime_database_identity(
@@ -679,27 +693,67 @@ mod tests {
         cleanup(&root);
     }
 
-    /// v0.3.0's all-in-one image has no linux/arm64 manifest, so pulling every image the release
-    /// names failed on an Apple silicon Mac before anything was staged. Desktop never runs it.
+    /// Staging pulls what installing the staged release would pull, and nothing else. Every image
+    /// the release names was 19 for v0.3.0 where an installation pulls 8: several GB over a slow
+    /// registry on every app update, and the all-in-one image among them had no arm64 build.
     #[test]
-    fn staging_the_real_v0_3_0_release_leaves_out_the_all_in_one_image_desktop_never_runs() {
-        let manifest =
-            updates::parse_manifest(&release_asset("v0.3.0", "release-manifest.json")).unwrap();
+    fn staging_asks_for_exactly_what_installing_the_release_would() {
+        if crate::test_support::isolated_process(
+            "follow::tests::staging_asks_for_exactly_what_installing_the_release_would",
+        ) {
+            return;
+        }
+        let published = published();
+        let root = installed_v0_3_0(&published);
+        let address = fake_engine(&root);
+        let planned = due(&root, None, &updated_app()).unwrap();
+        stage(&root, &planned, &published).unwrap();
+        let mut asked = Vec::new();
+        let staged = updates::stage_images(&address, &root, None, |_, _, image| {
+            asked.push(image.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(asked, staged);
+        assert_eq!(
+            updates::require_staged_images(&root, crate::engine::Engine::Docker).unwrap(),
+            staged
+        );
+
+        // The services this installation runs, its migration and the two sign-in images, each at
+        // the release being staged.
+        let manifest = updates::staged_manifest(&root).unwrap();
         let named = |name: &str| {
             manifest["artifacts"]["images"][name]["reference"]
                 .as_str()
                 .unwrap()
                 .to_string()
         };
-        let staged = updates::candidate_images(&manifest).unwrap();
+        let mut expected = vec![
+            "pgvector/pgvector:pg17".to_string(),
+            named("server"),
+            named("supervisor"),
+            named("agent-computer"),
+            named("agent-bot"),
+            named("agent-langgraph"),
+            named(crate::plan::SIGN_IN_IMAGE),
+            named(crate::plan::CHATGPT_SIGN_IN_IMAGE),
+        ];
+        expected.sort();
+        assert_eq!(staged, expected);
+        assert_eq!(staged.len(), 8);
         assert!(!staged.contains(&named("openbot")));
-        for (published, _) in deployment::IMAGE_VARIABLES {
-            assert!(staged.contains(&named(published)), "{published}");
-        }
+        assert_eq!(updates::candidate_images(&manifest).unwrap().len(), 19);
+
+        // One question, asked of the staged release: once that release is in place, what Install
+        // pulls for it is the same set.
+        let mut journal = updates::prepare_apply(&root).unwrap();
+        updates::install_candidate(&root, &mut journal).unwrap();
         assert_eq!(
-            staged.len(),
-            manifest["artifacts"]["images"].as_object().unwrap().len() - 1
+            crate::preparation::installation_pull_set(&address, &root, &root, None).unwrap(),
+            staged
         );
+        cleanup(&root);
     }
 
     #[test]
@@ -950,16 +1004,23 @@ mod live {
         );
         live.say("v0.3.0 adopted against its published manifest and source; next release staged");
         let candidate = updates::staged_manifest(&live.root).unwrap();
-        let images = updates::candidate_images(&candidate).unwrap();
-        for image in &images {
+        let pulling = std::time::Instant::now();
+        let images = updates::stage_images(&live.engine, &live.root, None, |_, _, image| {
             crate::pull_metrics::pull_image(&live.engine, image, |_| {}, |_| {})
-                .unwrap_or_else(|problem| panic!("{image}: {problem:?}"));
-        }
-        updates::mark_images_staged(&live.root, Engine::Docker).unwrap();
-        live.say(&format!("{} candidate images on the engine", images.len()));
+        })
+        .unwrap();
+        live.say(&format!(
+            "staged {} images (the release names {}) in {:?}: {images:?}",
+            images.len(),
+            updates::candidate_images(&candidate).unwrap().len(),
+            pulling.elapsed()
+        ));
 
         let mut journal = updates::prepare_apply(&live.root).unwrap();
-        updates::require_staged_images(&live.root, Engine::Docker).unwrap();
+        assert_eq!(
+            updates::require_staged_images(&live.root, Engine::Docker).unwrap(),
+            images
+        );
         crate::preparation::require_images(&live.engine, &images).unwrap();
         let secrets = live.secrets();
         let identity =
@@ -987,6 +1048,12 @@ mod live {
         .expect("pg_dump of the v0.3.0 database");
         live.stop();
         updates::install_candidate(&live.root, &mut journal).unwrap();
+        // Real Compose gives the same answer for the release in place as it gave for the stage.
+        assert_eq!(
+            crate::preparation::installation_pull_set(&live.engine, &live.root, &live.root, None)
+                .unwrap(),
+            images
+        );
         assert_eq!(
             crate::stack::runtime_update_identity(&live.engine, &live.root, &live.secrets())
                 .unwrap(),
