@@ -140,9 +140,8 @@ function review(options: {
     ...(options.autoApprover ? { autoApprover: options.autoApprover } : {}),
     settings: {
       read: async () => settings,
-      write: async (next: LearningSettings) => {
-        options.written?.push(next);
-        return next;
+      setAutoApprove: async (autoApprove: boolean) => {
+        options.written?.push({ ...settings, autoApprove });
       },
     } as unknown as LearningSettingsStore,
     scopesFor: async (actor) =>

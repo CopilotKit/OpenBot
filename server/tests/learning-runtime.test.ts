@@ -26,6 +26,9 @@ function fixture() {
       settings = next;
       return settings;
     },
+    setAutoApprove: async (autoApprove) => {
+      settings = { ...settings, autoApprove };
+    },
     saved: async () => true,
     adoptDefault: async () => false,
     bindThread: async ({ userId, threadId, containerId }) => {

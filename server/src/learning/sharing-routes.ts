@@ -507,10 +507,7 @@ export function createPersonalLearningRoutes(
     }
     const autoApprove = body.autoApprove;
     const userId = context.var.actor.id;
-    await deps.settings.write({
-      ...(await deps.settings.read()),
-      autoApprove,
-    });
+    await deps.settings.setAutoApprove(autoApprove);
     await audit({
       eventType: "configuration.changed",
       targetType: "learning",
