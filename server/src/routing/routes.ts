@@ -25,6 +25,7 @@ export function createRoutingRoutes(
     const body = (await context.req.json().catch(() => null)) as {
       text?: unknown;
       agentId?: unknown;
+      skillSlugs?: unknown;
     } | null;
     const text = typeof body?.text === "string" ? body.text.trim() : "";
     if (!text) return context.json({ error: "A message is required." }, 400);
@@ -41,10 +42,25 @@ export function createRoutingRoutes(
         ? body.agentId.trim()
         : null;
 
+    if (
+      body?.skillSlugs !== undefined &&
+      (!Array.isArray(body.skillSlugs) ||
+        !body.skillSlugs.every(
+          (slug) =>
+            typeof slug === "string" && /^[a-z0-9][a-z0-9-]*$/.test(slug),
+        ))
+    )
+      return context.json(
+        { error: "Skills must be an array of commands." },
+        400,
+      );
+    const skillSlugs = body?.skillSlugs as string[] | undefined;
+
     const detail = await routing.routeDetailed({
       actor: context.var.actor,
       text,
       agentId,
+      skillSlugs,
     });
     const { result } = detail;
     if (result.kind === "none") {
@@ -52,7 +68,9 @@ export function createRoutingRoutes(
         {
           error: agentId
             ? "That Bot isn't one you can use."
-            : "No Bot is available.",
+            : skillSlugs?.length
+              ? "No Bot offers all the selected skills. Choose different skills or a Bot with @."
+              : "No Bot is available.",
         },
         agentId ? 404 : 409,
       );

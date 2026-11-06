@@ -1601,6 +1601,12 @@ export function createApp(
             store: agentProfileStore,
             router: intentRouter,
             auditStore,
+            skillsFor: pluginStore
+              ? async (agentId) =>
+                  (await pluginStore.listForAgent(agentId)).skills.map(
+                    (skill) => skill.slug,
+                  )
+              : undefined,
             /*
              * Which vendors each coworker holds tools for, so the router weighs what a coworker can
              * reach and not only what somebody wrote it was for. Only when there is a plugin store to

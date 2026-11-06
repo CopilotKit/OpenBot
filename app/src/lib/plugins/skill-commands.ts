@@ -102,21 +102,3 @@ export function useAnyBotSkillCommands(agentIds: readonly string[]): {
     combine,
   });
 }
-
-/**
- * The Bot a message that runs a `/` skill goes to, when no Bot was chosen with `@`.
- *
- * The routed Bot when it offers the skill, so routing still picks among the ones that do; otherwise
- * the first that does, rather than a Bot that would be handed instructions it was never given the
- * skill for. With no skill, or a skill no Bot here offers, the routed Bot as it was.
- */
-export function botForSkill(
-  routed: string | undefined,
-  skill: string | undefined,
-  botsFor: (slug: string) => readonly string[],
-): string | undefined {
-  if (!skill) return routed;
-  const offering = botsFor(skill);
-  if (offering.length === 0) return routed;
-  return routed && offering.includes(routed) ? routed : offering[0];
-}

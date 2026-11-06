@@ -4,10 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { pluginKeys } from "@/lib/plugins/queries";
-import {
-  botForSkill,
-  useAnyBotSkillCommands,
-} from "@/lib/plugins/skill-commands";
+import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 
 /**
  * The home page's `/` menu: every skill any of the person's Bots offers, by name, and a message that
@@ -57,24 +54,5 @@ describe("useAnyBotSkillCommands", () => {
     ]);
     expect(result.current.botsFor("standup")).toEqual(["ada", "linus"]);
     expect(result.current.botsFor("gone")).toEqual([]);
-  });
-});
-
-describe("botForSkill", () => {
-  const botsFor = (slug: string) =>
-    slug === "standup" ? ["ada", "linus"] : [];
-
-  test("keeps the routed Bot when it offers the skill", () => {
-    expect(botForSkill("linus", "standup", botsFor)).toBe("linus");
-  });
-
-  test("moves to a Bot that offers the skill when the routed one does not", () => {
-    expect(botForSkill("grace", "standup", botsFor)).toBe("ada");
-    expect(botForSkill(undefined, "standup", botsFor)).toBe("ada");
-  });
-
-  test("leaves routing alone with no skill, or one no Bot offers", () => {
-    expect(botForSkill("grace", undefined, botsFor)).toBe("grace");
-    expect(botForSkill("grace", "gone", botsFor)).toBe("grace");
   });
 });

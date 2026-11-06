@@ -15,7 +15,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - The `/` menu, the chip it puts in the message box and the badge on a sent message show a skill's
   name instead of its command. The message still carries the command, so a renamed skill keeps its
   badge. On the home page, `/` offers the skills of all your Bots, and a message that uses one goes
-  to a Bot that offers it, with the skill's instructions. The placeholder `summarize` command is gone.
+  to a Bot that offers every selected skill, with the skills' instructions. Incompatible selections
+  are refused, and the routing audit records the Bot that receives the message. The placeholder
+  `summarize` command is gone.
 - In the personal edition every Bot offers every skill: the skills there are, each new skill, and
   every skill for a Bot made later. Each Bot is given them once, so a skill switched off for one Bot
   stays off.

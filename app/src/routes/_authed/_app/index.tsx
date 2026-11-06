@@ -36,7 +36,6 @@ import {
 import { useStartChannel } from "@/lib/channels/start";
 import { newId } from "@/lib/new-id";
 import {
-  botForSkill,
   skillInstructionsFor,
   useAnyBotSkillCommands,
 } from "@/lib/plugins/skill-commands";
@@ -134,13 +133,16 @@ function RouteComponent() {
       }
       let agentId: string | undefined;
       try {
-        agentId = (await routeMessage(draft.text)).agentId;
+        agentId = (await routeMessage(draft.text, undefined, draft.commandIds))
+          .agentId;
       } catch (caught) {
-        if (caught instanceof CoworkerRoutingRefusedError) throw caught;
+        if (
+          draft.commandIds.length ||
+          caught instanceof CoworkerRoutingRefusedError
+        )
+          throw caught;
         agentId = fallback?.id;
       }
-      // A message that runs a skill goes to a Bot that offers it.
-      agentId = botForSkill(agentId, draft.commandIds[0], botsFor);
       if (!agentId)
         throw new Error("There's no Bot to send this to. Reload the page.");
       await start(agentId, draft.text, skills, undefined, pendingId);
