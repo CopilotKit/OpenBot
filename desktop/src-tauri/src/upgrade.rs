@@ -1066,10 +1066,11 @@ volumes:
                 "{registry}/openbot-upgrade-fixture/server:{version}-{}",
                 self.project.rsplit('-').next().unwrap()
             );
+            // Recorded first, so a push that fails still leaves no tag behind.
+            self.tags.push(tag.clone());
             self.ok(&["tag", POSTGRES, &tag]);
             self.ok(&["push", "--quiet", &tag]);
             self.ok(&["image", "rm", &tag]);
-            self.tags.push(tag.clone());
             tag
         }
 
