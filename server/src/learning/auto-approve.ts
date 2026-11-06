@@ -1,5 +1,9 @@
 import type { LearningSource } from "@openbot/shared/learning";
-import { type AuditStore, recordAuditEvent } from "../audit";
+import {
+  type AuditStore,
+  DEPLOYMENT_INITIATOR,
+  recordAuditEvent,
+} from "../audit";
 import { recordApprovalBefore, type SkillApprovalStore } from "./approvals";
 import {
   type LearningManagement,
@@ -71,6 +75,8 @@ export function createAutoApprover(deps: {
           targetType: "learning_skill",
           targetId: candidateId,
           actorUserId: deps.userId,
+          // Not the person approving: Activity shows the deployment, and `by` says it was automatic.
+          initiator: DEPLOYMENT_INITIATOR,
           payload: {
             change: "skill_approved",
             containerId: source.containerId,
@@ -102,7 +108,9 @@ export function createAutoApprover(deps: {
           .filter((proposal) => proposal.status === "pending_review")
           .map((proposal) => proposal.id);
       } catch (error) {
-        logFailure(error, { containerId: source.containerId });
+        // A person who never recorded has no space yet: nothing is pending, and nothing is wrong.
+        if (requestFailure(error).code !== "LEARNING_CONTAINER_NOT_FOUND")
+          logFailure(error, { containerId: source.containerId });
         continue;
       }
       for (const candidateId of pending)

@@ -310,4 +310,57 @@ describe("createAutoApprover", () => {
     }
     expect(approved).toHaveLength(0);
   });
+
+  test("an approval is recorded as the deployment's, not the person's", async () => {
+    const { manage } = stubManage({ [CONVERSATIONS]: [candidate("c1")] });
+    const { approvals } = stubApprovals();
+    const { audit, rows } = stubAudit();
+    const approver = createAutoApprover({
+      manage,
+      enabled: async () => true,
+      sources,
+      approvals,
+      userId: "user-1",
+      audit,
+    });
+    await approver.sweep();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.initiator).toEqual({ kind: "deployment" });
+    expect(rows[0]?.payload).toMatchObject({ by: "automatic" });
+  });
+
+  test("a source whose space isn't made yet is skipped without a log", async () => {
+    const { manage, approved } = stubManage({
+      [CONVERSATIONS]: [candidate("c1")],
+    });
+    const missing = {
+      ...manage,
+      listLearningCandidates: async (input: { containerId: string }) => {
+        if (input.containerId === RECORDINGS)
+          throw Object.assign(new Error("not found"), {
+            status: 404,
+            code: "LEARNING_CONTAINER_NOT_FOUND",
+          });
+        return manage.listLearningCandidates(input);
+      },
+    } as LearningManagement;
+    const { approvals } = stubApprovals();
+    const errors: unknown[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => errors.push(args);
+    try {
+      const approver = createAutoApprover({
+        manage: missing,
+        enabled: async () => true,
+        sources,
+        approvals,
+        userId: "user-1",
+      });
+      expect(await approver.sweep()).toEqual({ approved: 1 });
+      expect(approved.map((entry) => entry.candidateId)).toEqual(["c1"]);
+      expect(errors).toHaveLength(0);
+    } finally {
+      console.error = originalError;
+    }
+  });
 });
