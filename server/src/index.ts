@@ -203,9 +203,11 @@ import {
   learningSetupInstructions,
 } from "./learning/ensure-container";
 import { createInspectorLearningReader } from "./learning/inspector";
+import { createLearningPeople } from "./learning/people";
 import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
+  personalLearningContainerId,
 } from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { learningScopes } from "./learning/scopes";
@@ -2931,6 +2933,18 @@ const app = createApp(
       : undefined,
     manage: learningProbeIntelligence.experimental.learning,
     skills: copilotRuntime.learning?.containerSkills,
+    approvals: skillApprovalStore,
+    people: createLearningPeople(database),
+    personSkill: async (userId, name) => {
+      const read = await copilotRuntime.learning?.containerSkills(
+        personalLearningContainerId(userId),
+      );
+      if (!read || "unavailable" in read) {
+        throw new Error("Skills are unavailable.");
+      }
+      return read.skills.find((skill) => skill.name === name) ?? null;
+    },
+    invalidate: () => openSkillIndex.invalidate(),
     recordingTitles: recorderExtension.recordingTitles,
   },
   {
