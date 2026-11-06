@@ -15,6 +15,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   a mounted file before every run, so a new `secrets.modelApiKey` reaches it on its next run after
   `helm upgrade`, without a restart. The skills Learning proposes have descriptions that read
   correctly. Nothing in this chart's values changes.
+- OpenBot Desktop's local Intelligence is 0.16.0-rc.8, the same release the Helm chart installs.
+  The app carries the Intelligence CLI built from the rc.8 commit to install exactly that release
+  (`copilotkit` 4.33.1-pre.90163f5, from 4.33.1-pre.256cc68), where the stable CLI would install
+  the newest stable Intelligence, 0.15.1.
 - Skills (Admin → Skills, and Settings → Skills in the personal edition) lists each skill as one
   row with its name, what it does and how many Bots offer it, and the row opens the skill's own
   page. There, each Bot has a switch, the skill's words can be edited, and deleting asks first.
