@@ -19,10 +19,15 @@ import { testEnvironment } from "./support/environment";
  * browser 409, and the browser gave up (AgentThreadLockedError). The base client never waited on it
  * either; the run before just usually let go in time.
  *
+ * The runtime now holds a run's lock until the run's last events and lets go of it itself when the
+ * run ends (CopilotKit #8236), so the follow-up finds the conversation free. What must hold either
+ * way: every follow-up runs, and no run leaves the conversation locked behind it.
+ *
  * Real: the runtime as copilot.ts mounts it, twice, its run route, the built-in Bot, the runner
  * streaming over the platform's Phoenix socket. Faked: the model (`@copilotkit/aimock`), and the
  * platform, whose lock is held by one run at a time and let go `RELEASE_LAG_MS` after that run's
- * RUN_FINISHED reaches it, answering with its own THREAD_LOCK_FAILED envelope meanwhile.
+ * RUN_FINISHED reaches it, answering with its own THREAD_LOCK_FAILED envelope meanwhile, and let go
+ * at once when the run releases it itself.
  */
 
 const RELEASE_LAG_MS = 400;
@@ -41,9 +46,9 @@ let environmentBefore: Record<string, string | undefined> = {};
 
 /** Every event the runner published, as the platform received it. */
 const delivered: Record<string, unknown>[] = [];
-/** The run holding each thread's lock, and every lock the platform refused. */
+/** The run holding each thread's lock, and every run that let go of its own while it held it. */
 const holders = new Map<string, string>();
-const refused: string[] = [];
+const released: string[] = [];
 const created = new Set<string>();
 
 const shell = {
@@ -171,7 +176,6 @@ beforeAll(async () => {
       if (rest === "lock" && request.method === "POST") {
         const holder = holders.get(threadId as string);
         if (holder && holder !== body.runId) {
-          refused.push(String(body.runId));
           return Response.json(
             {
               error: {
@@ -195,8 +199,10 @@ beforeAll(async () => {
       if (rest === "lock" && request.method === "PATCH")
         return Response.json({ ttlSeconds: 20 });
       if (rest === "lock" && request.method === "DELETE") {
-        if (holders.get(threadId as string) === body.runId)
+        if (holders.get(threadId as string) === body.runId) {
           holders.delete(threadId as string);
+          released.push(String(body.runId));
+        }
         return new Response(null, { status: 204 });
       }
       return Response.json({ error: "not found" }, { status: 404 });
@@ -284,9 +290,11 @@ test("three commands in a row, each a follow-up run on the other replica, all ru
     },
   ];
   const ran: string[] = [];
+  const runs: string[] = [];
   let answer = "";
   for (let turn = 0; turn < COMMANDS.length + 1; turn++) {
     const runId = randomUUID();
+    runs.push(runId);
     const from = delivered.length;
     // The browser, which runs the computer tool and starts the next run with its result at once.
     const response = await replicas[turn % 2]?.handler.fetch(
@@ -359,6 +367,12 @@ test("three commands in a row, each a follow-up run on the other replica, all ru
   }
   expect(ran).toEqual(COMMANDS);
   expect(answer).toBe(FINAL);
-  // It did meet the run before still holding the conversation, and waited for it.
-  expect(refused.length).toBeGreaterThan(0);
+  // Every run let go of the conversation itself when it ended, while it still held it, and nothing
+  // holds it now.
+  await until(
+    () => runs.every((runId) => released.includes(runId)),
+    "every run to release its own lock",
+  );
+  expect(released).toEqual(runs);
+  expect(holders.has(threadId)).toBe(false);
 }, 30_000);

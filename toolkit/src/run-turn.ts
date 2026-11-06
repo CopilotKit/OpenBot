@@ -154,7 +154,8 @@ export type IntelligenceLike = {
     learningContainerId?: string;
     /**
      * The run's analytics context, which the platform records with the run. Sent on the wire only
-     * by a runtime that knows the field; `@copilotkit/runtime` 1.83.0 drops it and locks as before.
+     * by a runtime that knows the field, as the one OpenBot installs does; `@copilotkit/runtime`
+     * 1.83.0 dropped it and locked as before.
      */
     analyticsContext?: Record<string, unknown>;
   }): Promise<unknown>;
