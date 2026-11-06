@@ -2667,6 +2667,18 @@
           "markdownDescription": "Enables the appearance command without any pre-configured scope."
         },
         {
+          "description": "Enables the dismiss_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-dismiss-update",
+          "markdownDescription": "Enables the dismiss_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the install_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-install-update",
+          "markdownDescription": "Enables the install_update command without any pre-configured scope."
+        },
+        {
           "description": "Enables the intelligence command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-intelligence",
@@ -2691,10 +2703,28 @@
           "markdownDescription": "Enables the stop command without any pre-configured scope."
         },
         {
+          "description": "Enables the update_offer command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-update-offer",
+          "markdownDescription": "Enables the update_offer command without any pre-configured scope."
+        },
+        {
           "description": "Denies the appearance command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-appearance",
           "markdownDescription": "Denies the appearance command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the dismiss_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-dismiss-update",
+          "markdownDescription": "Denies the dismiss_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the install_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-install-update",
+          "markdownDescription": "Denies the install_update command without any pre-configured scope."
         },
         {
           "description": "Denies the intelligence command without any pre-configured scope.",
@@ -2719,6 +2749,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-stop",
           "markdownDescription": "Denies the stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_offer command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-update-offer",
+          "markdownDescription": "Denies the update_offer command without any pre-configured scope."
         },
         {
           "description": "Enables the open command without any pre-configured scope.",
@@ -2791,36 +2827,6 @@
           "type": "string",
           "const": "opener:deny-reveal-item-in-dir",
           "markdownDescription": "Denies the reveal_item_in_dir command without any pre-configured scope."
-        },
-        {
-          "description": "This permission set configures which\nprocess features are by default exposed.\n\n#### Granted Permissions\n\nThis enables to quit via `allow-exit` and restart via `allow-restart`\nthe application.\n\n#### This default permission set includes:\n\n- `allow-exit`\n- `allow-restart`",
-          "type": "string",
-          "const": "process:default",
-          "markdownDescription": "This permission set configures which\nprocess features are by default exposed.\n\n#### Granted Permissions\n\nThis enables to quit via `allow-exit` and restart via `allow-restart`\nthe application.\n\n#### This default permission set includes:\n\n- `allow-exit`\n- `allow-restart`"
-        },
-        {
-          "description": "Enables the exit command without any pre-configured scope.",
-          "type": "string",
-          "const": "process:allow-exit",
-          "markdownDescription": "Enables the exit command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the restart command without any pre-configured scope.",
-          "type": "string",
-          "const": "process:allow-restart",
-          "markdownDescription": "Enables the restart command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the exit command without any pre-configured scope.",
-          "type": "string",
-          "const": "process:deny-exit",
-          "markdownDescription": "Denies the exit command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the restart command without any pre-configured scope.",
-          "type": "string",
-          "const": "process:deny-restart",
-          "markdownDescription": "Denies the restart command without any pre-configured scope."
         },
         {
           "description": "This permission set configures which\nshell functionality is exposed by default.\n\n#### Granted Permissions\n\nIt allows to use the `open` functionality with a reasonable\nscope pre-configured. It will allow opening `http(s)://`,\n`tel:` and `mailto:` links.\n\n#### This default permission set includes:\n\n- `allow-open`",

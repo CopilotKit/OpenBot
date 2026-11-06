@@ -1,5 +1,6 @@
 //! The parts of the shell that are worth testing without a window around them.
 pub mod acquire;
+pub mod app_update;
 pub mod composio;
 pub mod deployment;
 pub mod deployment_release;

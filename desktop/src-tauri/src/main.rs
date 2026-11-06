@@ -15,8 +15,8 @@ mod intelligence_bridge;
 mod test_support;
 
 use openbot_desktop_lib::{
-    acquire, deployment, deployment_release, engine, env as openbot_env, follow, harness,
-    host_access, install, local_browser, local_eval, local_eval_state, preparation,
+    acquire, app_update, deployment, deployment_release, engine, env as openbot_env, follow,
+    harness, host_access, install, local_browser, local_eval, local_eval_state, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install,
     shell_updates, stack, supervise, telemetry, tray, updates, windows as win,
@@ -107,6 +107,8 @@ struct Shell {
     owned_app_origins: Mutex<Vec<String>>,
     /// The origins already given the window's controls (`allow_app_page`).
     app_page_grants: Mutex<Vec<String>>,
+    /// A newer OpenBot Desktop, as the feed last said, and an install of it under way.
+    app_update: app_update::Known,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -1374,6 +1376,176 @@ async fn apply_shell_update(
             .map_err(|e| Problem::from(e.to_string()))?;
         app.restart();
     }
+}
+
+/// Read the update feed at launch and every six hours, on a thread of its own, when this build is
+/// offered updates at all: a stable, unpinned build with the updater (see `app_update`). Any other
+/// build never reads the feed.
+fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let version = &app.package_info().version;
+    let Some(current) = app_update::offered_against(version, deployment::pinned().is_some()) else {
+        eprintln!("[app update] {version} is a pinned build; no update check");
+        return;
+    };
+    let (Some(endpoints), Some(platform)) = (
+        app_update::endpoints(app.config().plugins.0.get("updater")),
+        app_update::platform(),
+    ) else {
+        return;
+    };
+    let handle = app.clone();
+    let watching = std::thread::Builder::new()
+        .name("openbot-app-update".into())
+        .spawn(move || {
+            app_update::watch(
+                app_update::Schedule::new(app_update::EVERY),
+                std::time::SystemTime::now,
+                |tick| {
+                    std::thread::sleep(tick);
+                    true
+                },
+                || {
+                    let answer = app_update::check(&current, &endpoints, &platform);
+                    if let Err(error) = &answer {
+                        eprintln!("[app update] could not read the update feed: {error}");
+                    }
+                    handle.state::<Shell>().app_update.record(&answer);
+                },
+            )
+        });
+    if let Err(error) = watching {
+        eprintln!("[app update] could not start checking for updates: {error}");
+    }
+}
+
+/// What the banner and the setup window offer: the newer version, unless this person closed it.
+fn app_update_status<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> app_update::Status {
+    let config = app.path().app_config_dir().ok();
+    app_update::status(
+        &app.state::<Shell>().app_update,
+        &app.package_info().version,
+        config.as_deref(),
+    )
+}
+
+/// Close the offer on `version` until a newer one comes out.
+fn dismiss_app_update_for<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    version: &str,
+) -> Result<(), Problem> {
+    let version = semver::Version::parse(version)
+        .map_err(|_| Problem::plain("That isn't a version of OpenBot."))?;
+    let config = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| Problem::from(e.to_string()))?;
+    app_update::dismiss(&config, &version)
+        .map_err(|e| Problem::from(format!("OpenBot couldn't remember that: {e}")))
+}
+
+/**
+Install the newer OpenBot that the banner or the setup window offered, then restart into it.
+
+The archive is downloaded, and its signature verified by the updater, while OpenBot keeps running,
+then installed over this app. Only then is OpenBot stopped, as for a runtime update (the local
+Intelligence keeps running), so a download or install that fails leaves everything as it was. The
+restart starts OpenBot again, and that Start moves the installation to the new app's release
+(`follow`).
+
+Nothing here decides whether the download is genuine: the updater refuses an archive whose
+minisign signature does not match the public key compiled into this build.
+*/
+async fn install_app_update_now<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<(), Problem> {
+    use tauri_plugin_updater::UpdaterExt;
+    // The one condition the updater plugin is registered on (see `setup`).
+    if !app.config().plugins.0.contains_key("updater") {
+        return Err(Problem::plain("This build of OpenBot can't update itself."));
+    }
+    let _update = RuntimeUpdateGuard::begin(&app)?;
+    let update = app
+        .updater()
+        .map_err(|e| Problem::from(e.to_string()))?
+        .check()
+        .await
+        .map_err(|e| Problem::from(e.to_string()))?
+        .ok_or_else(|| Problem::plain("OpenBot is already up to date."))?;
+    app.state::<Shell>().app_update.begin_install();
+    let installed = async {
+        let bytes = update
+            .download(
+                |chunk, total| app.state::<Shell>().app_update.downloaded(chunk, total),
+                || {},
+            )
+            .await
+            .map_err(|e| Problem::from(e.to_string()))?;
+        if app
+            .state::<Shell>()
+            .update_cancelled
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(Problem::plain(
+                "OpenBot was stopped before the update was installed.",
+            ));
+        }
+        app.state::<Shell>().app_update.restarting();
+        tauri::async_runtime::spawn_blocking(move || update.install(bytes))
+            .await
+            .map_err(|e| Problem::from(e.to_string()))?
+            .map_err(|e| Problem::from(e.to_string()))
+    }
+    .await;
+    if let Err(problem) = installed {
+        app.state::<Shell>().app_update.end_install();
+        return Err(problem);
+    }
+    let handle = app.clone();
+    match tauri::async_runtime::spawn_blocking(move || {
+        stop_for_update(&handle, &stack::default_root())
+    })
+    .await
+    {
+        Ok(Ok(())) => {}
+        // The new version is already installed, and restarting into it is still right: its Start
+        // finds whatever is left running.
+        Ok(Err(error)) => eprintln!("[app update] stopping OpenBot before the restart: {error}"),
+        Err(error) => eprintln!("[app update] stopping OpenBot before the restart: {error}"),
+    }
+    restart_into_update(&app)
+}
+
+/**
+Restart into the version just installed, without Quit's cleanup.
+
+OpenBot was already stopped for the update, and the local Intelligence is meant to keep running
+(`stop_for_update`). Tauri ignores `prevent_exit` for a restart, so a cleanup started by the exit it
+sends would be cut off halfway, possibly in the middle of stopping Intelligence. Marking Quit done
+for the restart's exit code makes the exit handler let it through untouched.
+*/
+fn restart_into_update<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> ! {
+    quit_done_for_restart(&app.state::<Shell>().quit);
+    app.restart()
+}
+
+fn quit_done_for_restart(quit: &QuitState) {
+    *quit.phase.lock().unwrap() = QuitPhase::Complete(tauri::RESTART_EXIT_CODE);
+}
+
+/// The setup window's update offer: the same answer the banner in OpenBot's page reads.
+#[tauri::command]
+async fn app_update_offer(app: tauri::AppHandle) -> app_update::Status {
+    app_update_status(&app)
+}
+
+#[tauri::command]
+async fn dismiss_app_update(app: tauri::AppHandle, version: String) -> Result<(), Problem> {
+    dismiss_app_update_for(&app, &version)
+}
+
+#[tauri::command]
+async fn install_app_update(app: tauri::AppHandle) -> Result<(), Problem> {
+    install_app_update_now(app).await
 }
 
 #[tauri::command]
@@ -4579,6 +4751,39 @@ mod app_page_tests {
             assert!(ask(&window, other.as_str(), STOP).is_err(), "{other}");
         }
     }
+
+    /// Every command OpenBot's page may ask, the update banner's among them (installing an update
+    /// stops OpenBot and restarts the app), answers only the OpenBot this shell owns.
+    #[test]
+    fn every_page_command_answers_only_the_owned_app_origin() {
+        let (app, window) = app();
+        let commands: Vec<String> = desktop_page::PERMISSIONS
+            .iter()
+            .map(|permission| {
+                let name = permission
+                    .strip_prefix("openbot-desktop:allow-")
+                    .unwrap()
+                    .replace('-', "_");
+                format!("plugin:openbot-desktop|{name}")
+            })
+            .collect();
+        for update in ["update_offer", "dismiss_update", "install_update"] {
+            assert!(commands.contains(&format!("plugin:openbot-desktop|{update}")));
+        }
+        let foreign = "http://127.0.0.1:3011/";
+        allow_app_page(app.handle(), &foreign.parse().unwrap());
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        let owned = "http://127.0.0.1:3010/";
+        allow_app_page(app.handle(), &owned.parse().unwrap());
+        for command in &commands {
+            assert!(ask(&window, foreign, command).is_err(), "{command}");
+            assert_eq!(
+                ask(&window, owned, command),
+                Ok(serde_json::Value::Null),
+                "{command}"
+            );
+        }
+    }
 }
 
 /// Where the Status window's page is: the setup page, at `#status`.
@@ -4931,6 +5136,35 @@ fn recorder_host_test_app_url() -> Option<String> {
 #[cfg(not(debug_assertions))]
 fn recorder_host_test_app_url() -> Option<String> {
     None
+}
+
+/// An OpenBot this window shows as its own at launch, so a test can drive OpenBot's page inside the
+/// real Desktop window, with the shell's plugin granted to it, against an OpenBot it started itself
+/// and no installation. Debug builds only: a release binary never reads the variable.
+#[cfg(debug_assertions)]
+fn desktop_test_app_url() -> Option<String> {
+    std::env::var("OPENBOT_DESKTOP_TEST_APP_URL")
+        .ok()
+        .filter(|url| !url.is_empty())
+}
+
+#[cfg(not(debug_assertions))]
+fn desktop_test_app_url() -> Option<String> {
+    None
+}
+
+/// Trust `address` as this shell's OpenBot and show it, the way `show_openbot` shows a verified one.
+fn show_test_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
+    let (Some(window), Ok(url)) = (
+        app.get_webview_window("main"),
+        address.parse::<tauri::Url>(),
+    ) else {
+        return;
+    };
+    trust_owned_app(app, address);
+    if let Err(error) = window.navigate(url) {
+        eprintln!("[window] could not show the test OpenBot: {error}");
+    }
 }
 
 /// The ping's one question to the app: does `/api/capabilities` answer through the app's port, on either loopback.
@@ -7178,8 +7412,6 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(intelligence_bridge::plugin())
         .plugin(desktop_page::plugin())
-        // Only so the window can restart into what the updater wrote.
-        .plugin(tauri_plugin_process::init())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
@@ -7195,6 +7427,9 @@ fn main() {
             check_runtime_update,
             check_shell_update,
             apply_shell_update,
+            app_update_offer,
+            dismiss_app_update,
+            install_app_update,
             stage_runtime_update,
             establish_runtime_baseline,
             apply_runtime_update,
@@ -7302,6 +7537,8 @@ fn main() {
             } else {
                 eprintln!("[updater] not configured in this build; no update check");
             }
+            // The banner and the setup window's offer both read this, never the network.
+            watch_for_app_updates(app.handle());
             desktop_telemetry::initialize(app.handle());
             if let Some(root) = app
                 .path()
@@ -7338,6 +7575,9 @@ fn main() {
             app.on_menu_event(|app, event| chose(app, event.id().as_ref()));
             #[cfg(target_os = "macos")]
             macos_quit::install(app.handle());
+            if let Some(address) = desktop_test_app_url() {
+                show_test_app(app.handle(), &address);
+            }
             Ok(())
         })
         .build(context)
@@ -7637,6 +7877,28 @@ mod tests {
             },
             |_| panic!("final exit must not request another exit"),
             |_| panic!("final exit must not launch another worker"),
+        )
+        .unwrap();
+    }
+
+    /// An update restarts the app after stopping OpenBot itself. Tauri sends that restart through the
+    /// exit handler and ignores `prevent_exit` for it, so a Quit cleanup started there would be cut
+    /// off halfway, possibly while stopping the local Intelligence the update meant to keep.
+    #[test]
+    fn an_update_restart_passes_the_exit_handler_without_quits_cleanup() {
+        let state = std::sync::Arc::new(QuitState::default());
+        quit_done_for_restart(&state);
+        request_quit_with(
+            state,
+            Some(tauri::RESTART_EXIT_CODE),
+            || panic!("an update restart must not be held"),
+            || panic!("an update restart must not run Quit's cleanup"),
+            QuitDiagnostics {
+                sink: |_: Vec<String>| panic!("an update restart reports no cleanup"),
+                failed: |_: String| panic!("an update restart reports no cleanup"),
+            },
+            |_| panic!("an update restart is already exiting"),
+            |_| panic!("an update restart starts no cleanup worker"),
         )
         .unwrap();
     }

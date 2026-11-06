@@ -1,90 +1,123 @@
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
+import { asProblem } from "./Problem";
+
+/**
+ * What the shell offers. The same answer OpenBot's own page reads for its update banner, so the
+ * setup window and the app never offer two different things, and closing one closes both.
+ */
+export type AppUpdate = {
+  /** The version to offer; null when there is none, or the person closed the offer on it. */
+  version: string | null;
+  /** This app's own version. */
+  current: string;
+  installing: {
+    downloaded: number;
+    total: number | null;
+    restarting: boolean;
+  } | null;
+};
+
+/**
+ * How often the window asks the shell again. The shell reads the update feed itself, at launch and
+ * every six hours (`app_update.rs`), so asking it is a read of memory, not of the network.
+ */
+const ASK_EVERY_MS = 5_000;
+const ASK_WHILE_INSTALLING_MS = 500;
 
 /**
  * The one screen that is not part of setup: a newer OpenBot exists, install it.
  *
- * Asked once, at launch, and never again in that run. An app that installs itself without saying
- * so restarts in the middle of somebody's sentence, and an app that asks on a timer is a dialogue
- * box that keeps coming back; so the offer appears once and stays until it is answered or the
- * window is closed.
+ * Nothing installs without the click. An app that installs itself without saying so restarts in
+ * the middle of somebody's sentence. "Not now" closes the offer until a newer version comes out,
+ * here and in OpenBot's own banner alike.
  *
- * A failed check is silent. The endpoint can be unreachable because the machine is on a plane, on
- * a captive portal, or behind a proxy that does not like it, and none of those are things the
- * person opening the setup window can do anything about. A build that is not signed has no updater
- * registered at all, and its check is refused the same way and just as quietly. A failed *install*
- * is not silent: by then
- * they asked for something and it did not happen.
+ * A failed check is silent: the shell keeps its last good answer, and a laptop on a plane has
+ * nothing to fix. A build without the updater (internal, candidate, unsigned) is never offered
+ * anything. A failed *install* is not silent: by then they asked for something and it did not
+ * happen.
  *
- * Nothing here decides whether the download is genuine. `tauri-plugin-updater` verifies the
- * minisign signature published beside each artifact against the public key compiled into the app,
- * and refuses the bundle if it does not match, so a hijacked endpoint serves something that will
- * not install rather than something that will.
+ * Nothing here decides whether the download is genuine. The updater verifies the minisign signature
+ * published beside each archive against the public key compiled into the app, and refuses the
+ * archive if it does not match.
  */
 export function UpdateOffer() {
-  const [update, setUpdate] = useState<Update | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [offer, setOffer] = useState<AppUpdate | null>(null);
+  const [declined, setDeclined] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
-  const [downloaded, setDownloaded] = useState(0);
-  const [total, setTotal] = useState<number | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
     let current = true;
-    void (async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ask = async () => {
       try {
-        const found = await check();
-        if (current && found) setUpdate(found);
+        const found = await invoke<AppUpdate>("app_update_offer");
+        if (current) setOffer(found);
       } catch {
-        // See above: a check that could not run is not news.
+        // A shell with nothing to say is not news.
       }
-    })();
+      if (current)
+        timer = setTimeout(
+          ask,
+          installing ? ASK_WHILE_INSTALLING_MS : ASK_EVERY_MS,
+        );
+    };
+    void ask();
     return () => {
       current = false;
+      clearTimeout(timer);
     };
-  }, []);
+  }, [installing]);
 
   const install = useCallback(async () => {
-    if (!update) return;
     setInstalling(true);
     setFailure(null);
-    setDownloaded(0);
-    setTotal(null);
     try {
-      await update.downloadAndInstall((event) => {
-        if (event.event === "Started")
-          setTotal(event.data.contentLength ?? null);
-        else if (event.event === "Progress")
-          setDownloaded((soFar) => soFar + event.data.chunkLength);
-      });
-      // The update is written but the running process is still the old one. Restarting is the
-      // second half of installing, so it is not offered as a separate button to forget to press.
-      await relaunch();
+      // Returns only when it failed: on success the app restarts into the new version.
+      await invoke("install_app_update");
     } catch (error) {
       setInstalling(false);
-      setFailure(error instanceof Error ? error.message : String(error));
+      setFailure(asProblem(error).said);
     }
-  }, [update]);
+  }, []);
 
-  if (!update || dismissed) return null;
+  const decline = useCallback(async (version: string) => {
+    // Gone at once, and for the rest of this run even if it could not be remembered.
+    setDeclined(version);
+    try {
+      await invoke("dismiss_app_update", { version });
+    } catch {
+      // Remembering it is a courtesy. The offer still went away when asked.
+    }
+  }, []);
+
+  const version = offer?.version;
+  if (!offer || !version || version === declined) return null;
+  const progress = offer.installing;
 
   return (
     <section className="update-offer" aria-labelledby="update-offer-title">
-      <h2 id="update-offer-title">OpenBot {update.version} is available</h2>
+      <h2 id="update-offer-title">OpenBot {version} is available</h2>
       <p>
-        You are running {update.currentVersion}. Updating downloads the new
-        version and restarts OpenBot.
+        You are running {offer.current}. Updating downloads the new version and
+        restarts OpenBot.
       </p>
       <div className="row">
-        <button type="button" disabled={installing} onClick={install}>
-          {installing ? progress(downloaded, total) : "Update and restart"}
+        <button
+          type="button"
+          disabled={installing || progress !== null}
+          onClick={install}
+        >
+          {installing || progress !== null
+            ? describe(progress)
+            : "Update and restart"}
         </button>
         <button
           type="button"
           className="quiet"
-          disabled={installing}
-          onClick={() => setDismissed(true)}
+          disabled={installing || progress !== null}
+          onClick={() => void decline(version)}
         >
           Not now
         </button>
@@ -98,7 +131,9 @@ export function UpdateOffer() {
   );
 }
 
-function progress(downloaded: number, total: number | null): string {
-  if (!total) return "Downloading…";
-  return `Downloading… ${Math.min(100, Math.round((downloaded / total) * 100))}%`;
+/** "Downloading… 25%", then "Restarting…" once it is installed. */
+export function describe(progress: AppUpdate["installing"]): string {
+  if (progress?.restarting) return "Restarting…";
+  if (!progress?.total) return "Downloading…";
+  return `Downloading… ${Math.min(100, Math.round((progress.downloaded / progress.total) * 100))}%`;
 }
