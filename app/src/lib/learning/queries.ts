@@ -172,13 +172,15 @@ export function learnedSkillsQueryOptions(agentId?: string) {
   return queryOptions({
     queryKey: learningKeys.skills(agentId),
     retry: false,
-    queryFn: (): Promise<{
+    queryFn: async (): Promise<{
       containerId: string | null;
       skills: { name: string; description: string }[];
     }> =>
-      client(`/api/admin/learning/skills${forBot(agentId)}`, "skills", {
-        fallback: "Couldn't load published skills. Try again.",
-      }),
+      (
+        await client(`/api/admin/learning/skills${forBot(agentId)}`, {
+          fallback: "Couldn't load published skills. Try again.",
+        })
+      ).json(),
   });
 }
 
