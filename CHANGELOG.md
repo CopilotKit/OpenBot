@@ -11,7 +11,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - OpenBot Desktop's menu bar and tray no longer have an item that opens the back end's own
   dashboard, which is branded as another product. The Status window and Settings, This computer
   list each part by what it does: "Front end and Bots", "Background jobs", "Database" and "Bot
-  computer" under "Your Bots", and "Conversations, memory and learning" under "Back end". Docker's
+  computer" under "App", and "Conversations, memory and learning" under "Back end". Docker's
   names stay in Copy diagnostics. The OpenBot Recorder's statuses and errors say "OpenBot's back
   end" where they said Intelligence.
 - No screen says "Intelligence" any more; it is all OpenBot. OpenBot Desktop's setup window names
