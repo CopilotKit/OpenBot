@@ -10,17 +10,6 @@ beforeAll(() => GlobalRegistrator.register());
 afterEach(() => cleanup());
 afterAll(() => GlobalRegistrator.unregister());
 
-const downloads = {
-  done: 3,
-  total: 9,
-  bytes: 1_234_000_000,
-  bytesPerSecond: 24_500_000,
-  pulling: [
-    { name: "OpenBot server", bytes: 412_300_000, size: 980_000_000 },
-    { name: "agent-bot", bytes: 3_100_000 },
-  ],
-};
-
 test("item progress advances as pulls finish and disappears after the download", () => {
   function steps(done: number, total: number, running = true) {
     return plainInstallSteps(
@@ -30,7 +19,7 @@ test("item progress advances as pulls finish and disappears after the download",
           ok: true,
           running,
           detail: "Downloading local software.",
-          downloads: { ...downloads, done, total },
+          downloads: { done, total },
         },
       ],
       running,
@@ -53,7 +42,9 @@ test("item progress advances as pulls finish and disappears after the download",
     });
     expect(bar.getAttribute("value")).toBe(String(done));
     expect(bar.getAttribute("max")).toBe("8");
-    expect(row.getByText(`${8 - done} of 8 items remaining`)).toBeTruthy();
+    const remaining = `${8 - done} of 8 items remaining`;
+    expect(bar.getAttribute("aria-valuetext")).toBe(remaining);
+    expect(row.getByText(remaining).getAttribute("aria-hidden")).toBe("true");
     expect(
       row.queryByText(
         /elapsed|Downloading local software|OpenBot server|agent-bot/,

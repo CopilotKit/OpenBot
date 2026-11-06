@@ -4,19 +4,8 @@ import { type ReactNode, useEffect, useState } from "react";
 export const INSTALL_BLURB =
   "This installs the full OpenBot platform on this computer: the app, the server, your Bots, and the computers they work on. It's a large download the first time, so you might want to grab a coffee or tea.";
 
-/** One image downloading now. `size` is there once the image has said how big it is. */
-export type ImagePull = { name: string; bytes: number; size?: number };
-
-/** Install's image downloads, as the native side reports them: see `pull_metrics::Downloads`. */
-export type Downloads = {
-  /** Images finished, of `total`. */
-  done: number;
-  total: number;
-  /** Downloaded so far, over every image. */
-  bytes: number;
-  bytesPerSecond?: number;
-  pulling: ImagePull[];
-};
+/** Counts used by the installer from the native `pull_metrics::Downloads` event. */
+type Downloads = { done: number; total: number };
 
 /** One setup step, as the native side reports it or the window runs it. */
 export type Progress = {
@@ -143,13 +132,17 @@ export function plainInstallSteps(
     const restNow = installingNow
       ? [...rest].reverse().find((step) => step.running)
       : undefined;
+    // The initial check has a useful status sentence. Once transfers report counts
+    // (or only bytes), the install row no longer needs their technical detail.
+    const pulling =
+      restNow?.downloads != null ||
+      (restNow?.step === "images" && restNow.downloadBytes != null);
     rows.push({
       step: "Installing OpenBot",
       ok: !installingFailed,
       running: installingNow,
-      detail: restNow?.step === "images" ? "" : (restNow?.detail ?? ""),
-      downloadBytes:
-        restNow?.step === "images" ? undefined : restNow?.downloadBytes,
+      detail: pulling ? "" : (restNow?.detail ?? ""),
+      downloadBytes: pulling ? undefined : restNow?.downloadBytes,
       downloads: restNow?.downloads,
     });
   }
@@ -214,7 +207,7 @@ function ItemProgress({
         value={done}
         max={total}
       />
-      <span>{summary}</span>
+      <span aria-hidden="true">{summary}</span>
     </div>
   );
 }

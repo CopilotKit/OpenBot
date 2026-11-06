@@ -508,6 +508,17 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     step: "images",
     ok: true,
     running: true,
+    detail: "Checking which local software to download.",
+  });
+  const checking = rowStatus(view, "Installing OpenBot");
+  expect(
+    checking.getByText("Checking which local software to download."),
+  ).toBeTruthy();
+  expect(checking.queryByRole("progressbar")).toBeNull();
+  await emitProgress({
+    step: "images",
+    ok: true,
+    running: true,
     detail: "Downloading local software (2/4).",
     downloadBytes: 2_400_000,
   });
@@ -536,6 +547,9 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
       pulling: [{ name: "agent-bot", bytes: 12_000_000, size: 40_000_000 }],
     },
   });
+  expect(
+    installing.queryByText("Checking which local software to download."),
+  ).toBeNull();
   expect(installing.getByText("5 of 7 items remaining")).toBeTruthy();
   expect(installing.getByRole("progressbar").getAttribute("value")).toBe("2");
   expect(installing.queryByText("agent-bot")).toBeNull();
