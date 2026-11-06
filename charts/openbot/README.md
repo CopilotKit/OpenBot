@@ -25,6 +25,11 @@ secrets:
 EOF
 ```
 
+With an Anthropic key instead, write `anthropicApiKey: "<your Anthropic API key>"` in place of
+`modelApiKey` and add `config.model.provider: anthropic`; behind a model router, set
+`config.model.openaiBaseUrl` or `config.model.anthropicBaseUrl` to it as well. Learning stays on the
+OpenAI key, though (see below).
+
 Nothing else is yours to make. On the first install the chart generates the key the credential vault
 is encrypted with and the computer token into the Secret `openbot-secrets`, and the database password
 into `openbot-postgresql`. Each is read back on every upgrade and kept on uninstall, beside the
@@ -86,13 +91,16 @@ nothing to add to your file for it. See [The routines sweep](#the-routines-sweep
 
 **Automatic Learning spends your model key.** Learning is on in OpenBot and in the bundled
 Intelligence, whose Learning agent reads finished conversations and proposes skills with
-`openai/gpt-5.5` on the key in `secrets.modelApiKey`. See [Automatic Learning](#automatic-learning).
+`openai/gpt-5.5` on the key in `secrets.modelApiKey`. With an Anthropic key alone, Learning runs fail
+until it has an OpenAI key or is pointed at the Anthropic one. See [Automatic Learning](#automatic-learning).
 
 The secrets can also live in a Secret of your own instead of a file: set `secrets.existingSecret` to
-it, with the keys `license-token`, `model-api-key`, `key-encryption-key` and `computer-token`; put the
+it, with the keys `license-token`, `model-api-key` (or `anthropic-api-key`, or both),
+`key-encryption-key` and `computer-token`; put the
 database password under `postgres-password` and set `postgresql.auth.existingSecret` to the same
 Secret; and set `intelligence.appApi.licenseSecret.existingSecret` to it too, so Intelligence reads the
-same licence. Intelligence's Learning agent reads `model-api-key` from that Secret as well: the chart
+same licence. Intelligence's Learning agent reads `model-api-key` from that Secret as well (and
+`anthropic-api-key`, once it is pointed at it): the chart
 copies it at install and on every upgrade, so a new key there reaches Learning on the next
 `helm upgrade`. `worker-shared-secret` is optional in it: put one there only if something outside this
 chart fires routines too, and otherwise the chart generates one. `values.yaml` under `intelligence`
@@ -576,7 +584,15 @@ nobody can talk to.
 Intelligence too (`intelligence.learning`), Intelligence creates the project's `openbot` container at
 install, the server assigns it as the default, and it creates each person's own Learning space with
 its runtime key. Intelligence's Learning agent runs on `secrets.modelApiKey` with `openai/gpt-5.5`
-(`intelligence.learning.agent`), so Learning spends the same key your Bots do. It runs by itself after
+(`intelligence.learning.agent`), so Learning spends the same key your Bots do.
+
+**Learning is not on your Anthropic key unless you put it there.** With `secrets.anthropicApiKey` and
+no `secrets.modelApiKey`, the Bots run (with `config.model.provider: anthropic`) and every Learning
+run fails for want of an OpenAI key; the chart never hands the Anthropic key to an agent expecting
+OpenAI's. Either add an OpenAI key for Learning alone, or point the agent at Anthropic: set
+`intelligence.learning.agent.model` to an Anthropic model Intelligence's Learning agent accepts, and
+its `env` to `ANTHROPIC_API_KEY` from the key `anthropic-api-key` in `openbot-intel-learning`, which
+the chart then fills from `secrets.anthropicApiKey` exactly as it fills `openai-api-key`. It runs by itself after
 15 finished conversations and after every 15 more, and keeps what it learns in an object store the
 release runs (`intelligence.localObjectStorage`). Trajectories, the sessions the Recorder captures, are
 on as well, which needs the licence's `trajectories` feature.
