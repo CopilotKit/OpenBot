@@ -11,6 +11,7 @@ import type {
   LearningOverview,
   LearningProposal,
   LearningProposalDetail,
+  LearningRunSummary,
   LearningSettings,
 } from "@openbot/shared/learning";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -363,6 +364,8 @@ describe("reviewing proposed skills", () => {
             containerId: "openbot",
             proposals: [{ ...pending, status }],
           });
+        if (path === "/api/admin/learning/runs" && init?.method !== "POST")
+          return Response.json({ containerId: "openbot", runs: [] });
         if (path === "/api/admin/learning/runs")
           return Response.json({
             run: {
@@ -407,6 +410,60 @@ describe("reviewing proposed skills", () => {
     fireEvent.click(view.getByRole("button", { name: "Learn now" }));
     await view.findByText("Learning started.", { exact: false });
     expect(posts).toEqual(["/api/admin/learning/runs"]);
+  });
+
+  test("lists analysis runs and drops the link out to them", async () => {
+    const runsLink = "https://app.intelligence.example/o/acme/support/runs";
+    const runs: LearningRunSummary[] = [
+      {
+        id: "0198a012-a20f-77c0-9e33-8992f18e74c2",
+        status: "succeeded",
+        trigger: "manual",
+        proposals: 2,
+        insights: 5,
+        failureCode: null,
+        createdAt: "2026-11-05T10:00:00.000Z",
+        startedAt: "2026-11-05T10:00:01.000Z",
+        completedAt: "2026-11-05T10:03:00.000Z",
+      },
+      {
+        id: "0198a012-a20f-77c0-9e33-8992f18e74c3",
+        status: "failed",
+        trigger: "automatic",
+        proposals: null,
+        insights: null,
+        failureCode: "LEARNING_MODEL_NOT_CONFIGURED",
+        createdAt: "2026-11-04T10:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+      },
+    ];
+    intelligence({
+      ...noDashboard,
+      links: {
+        learning: "https://app.intelligence.example/o/acme/support/learning",
+        candidates: null,
+        runs: runsLink,
+      },
+    });
+    const fallback = global.fetch;
+    global.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input) === "/api/admin/learning/runs" && !init?.method
+          ? Response.json({ containerId: "openbot", runs })
+          : fallback(input, init),
+      { preconnect: originalFetch.preconnect },
+    );
+    const view = shared();
+    await view.findByText("Analysis runs");
+    await view.findByText("LEARNING_MODEL_NOT_CONFIGURED");
+    expect(view.getByText("Finished · Manual")).not.toBeNull();
+    expect(view.getByText("Failed · Automatic")).not.toBeNull();
+    await view.findByText("Manage Learning in Intelligence");
+    const anchors = Array.from(view.container.querySelectorAll("a"));
+    expect(anchors.some((a) => a.getAttribute("href") === runsLink)).toBe(
+      false,
+    );
   });
 
   test("with no dashboard there is no link into one, and with one the links stay", async () => {

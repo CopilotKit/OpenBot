@@ -2,10 +2,15 @@ import type {
   LearningAutoAssignState,
   LearningEvidence,
   LearningProposal,
+  LearningRunSummary,
   LearningSettings,
   LearningTarget,
 } from "@openbot/shared/learning";
-import { IconChevronRight, IconSparkles } from "@tabler/icons-react";
+import {
+  IconChevronRight,
+  IconHistory,
+  IconSparkles,
+} from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
@@ -50,6 +55,7 @@ import {
   learningOverviewQueryOptions,
   learningProposalQueryOptions,
   learningProposalsQueryOptions,
+  learningRunsQueryOptions,
   learningSettingsQueryOptions,
   saveLearningSettings,
 } from "@/lib/learning/queries";
@@ -430,9 +436,7 @@ export function LearningPage() {
                     : "No analysis has run yet."}
               </p>
               {/* Links into Intelligence's dashboard, where there is one to link to. */}
-              {(snapshot.links.learning ||
-                snapshot.links.candidates ||
-                snapshot.links.runs) && (
+              {(snapshot.links.learning || snapshot.links.candidates) && (
                 <div className="flex flex-wrap gap-4 text-sm underline">
                   {snapshot.links.learning && (
                     <a
@@ -450,15 +454,6 @@ export function LearningPage() {
                       rel="noreferrer"
                     >
                       Review skill candidates
-                    </a>
-                  )}
-                  {snapshot.links.runs && (
-                    <a
-                      href={snapshot.links.runs}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      View analysis runs
                     </a>
                   )}
                 </div>
@@ -520,6 +515,7 @@ export function LearningPage() {
         </div>
       </PageSection>
       <ProposedSkills agentId={selected || undefined} />
+      <AnalysisRuns agentId={selected || undefined} />
       <SkillSharingSection />
     </PageShell>
   );
@@ -616,6 +612,87 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
           onClose={() => setOpen(null)}
           proposalId={open}
         />
+      )}
+    </PageSection>
+  );
+}
+
+const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
+  queued: "Queued",
+  freezing: "Starting",
+  batching: "Analyzing",
+  reducing: "Analyzing",
+  finalizing: "Finishing",
+  succeeded: "Finished",
+  failed: "Failed",
+};
+
+/** One line saying how many skills and insights a run produced, for the counts it has. */
+function runCounts(run: LearningRunSummary): string | null {
+  const counts = [
+    run.proposals !== null ? `${run.proposals} proposed` : null,
+    run.insights !== null ? `${run.insights} insights` : null,
+  ].filter((count) => count !== null);
+  return counts.length > 0 ? counts.join(", ") : null;
+}
+
+/** The times a run started and finished, as the reader's local time. */
+function runTimes(run: LearningRunSummary): string | null {
+  const times = [
+    run.startedAt
+      ? `Started ${new Date(run.startedAt).toLocaleString()}`
+      : null,
+    run.completedAt
+      ? `Finished ${new Date(run.completedAt).toLocaleString()}`
+      : null,
+  ].filter((time) => time !== null);
+  return times.length > 0 ? times.join(". ") : null;
+}
+
+/** The analysis runs of the container shown above, newest first, so no dashboard is needed to see one fail. */
+function AnalysisRuns({ agentId }: { agentId?: string }) {
+  const runs = useQuery(learningRunsQueryOptions(agentId));
+  return (
+    <PageSection
+      title="Analysis runs"
+      description="Each run looks at finished conversations and proposes skills."
+    >
+      {runs.isPending ? null : runs.error ? (
+        <p role="alert" className="mt-4 text-destructive text-sm">
+          {runs.error.message}
+        </p>
+      ) : runs.data.runs.length === 0 ? (
+        <PageEmpty icon={IconHistory} title="No analysis runs yet">
+          A run appears here once Learning has analyzed conversations.
+        </PageEmpty>
+      ) : (
+        <PageRows>
+          {runs.data.runs.map((run, index) => (
+            <Fragment key={run.id}>
+              {index > 0 ? <Separator /> : null}
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconHistory />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>
+                    {RUN_STATUS[run.status]} ·{" "}
+                    {run.trigger === "manual" ? "Manual" : "Automatic"}
+                  </ItemTitle>
+                  {[
+                    runTimes(run),
+                    runCounts(run),
+                    run.status === "failed" ? run.failureCode : null,
+                  ]
+                    .filter((line) => line !== null)
+                    .map((line) => (
+                      <ItemDescription key={line}>{line}</ItemDescription>
+                    ))}
+                </ItemContent>
+              </Item>
+            </Fragment>
+          ))}
+        </PageRows>
       )}
     </PageSection>
   );
