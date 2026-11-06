@@ -1256,9 +1256,9 @@ test("the menu's dashboard opening shows on a setup screen with a spinner, then 
 
   await emitOpening({
     state: "opening",
-    said: "Opening the Intelligence dashboard…",
+    said: "Opening the back end dashboard…",
   });
-  expectWorking(view, "Opening the Intelligence dashboard…");
+  expectWorking(view, "Opening the back end dashboard…");
   // The screen under it is unchanged.
   expect(
     view.getByRole("heading", { name: "OpenBot is running" }),
@@ -1976,7 +1976,7 @@ test("a local Intelligence stack left running at Quit is shown without holding a
   useInterruptedShutdownSetup();
   const notice = {
     said: "When OpenBot last quit, it could not stop its back end.",
-    detail: "Intelligence stop failed: the CLI timed out",
+    detail: "Back end stop failed: the CLI timed out",
   };
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
@@ -1999,7 +1999,7 @@ test("Stop that fails only for the local Intelligence stack still stops OpenBot"
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Intelligence stop failed: the CLI timed out";
+      throw "Back end stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();
@@ -2020,7 +2020,7 @@ test("Stop that fails for OpenBot itself keeps OpenBot running", async () => {
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Compose down failed: busy\nIntelligence stop failed: the CLI timed out";
+      throw "Compose down failed: busy\nBack end stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();

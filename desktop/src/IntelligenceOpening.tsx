@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { StatusLine } from "./SetupProgress";
 
-/** What the menu's "Open Intelligence dashboard" says, in fixed native words. */
+/** What the menu's "Open back end dashboard" says, in fixed native words. */
 type Opening = { state: "opening" | "opened" | "failed"; said: string };
 
 /** How long how it went stays on screen. */

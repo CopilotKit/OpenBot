@@ -37,8 +37,8 @@ export function intelligenceMutationOptions(queryClient: QueryClient) {
       if (report.outcome !== "completed")
         throw new Error(
           action === "start"
-            ? "Intelligence did not start."
-            : "Intelligence did not stop.",
+            ? "The back end did not start."
+            : "The back end did not stop.",
         );
     },
     onSettled: () => invalidateDesktop(queryClient),

@@ -119,7 +119,7 @@ export async function createWithRuntimeKey(input: {
   } catch (error) {
     throw Object.assign(
       new Error(
-        `Intelligence did not answer the runtime key's request to create the ${container.id} Learning container (${error instanceof Error ? error.message : String(error)}).`,
+        `The back end did not answer the runtime key's request to create the ${container.id} Learning container (${error instanceof Error ? error.message : String(error)}).`,
       ),
       { retryable: true },
     );
@@ -137,7 +137,7 @@ export async function createWithRuntimeKey(input: {
     )
       return response.status === 201 ? "created" : "present";
     throw new Error(
-      `Intelligence answered the runtime key's container request with something other than the ${container.id} container. Nothing was assigned.`,
+      `The back end answered the runtime key's container request with something other than the ${container.id} container. Nothing was assigned.`,
     );
   }
   if (response.status === 409 && code === "LEARNING_CONTAINER_ALREADY_EXISTS")
@@ -145,11 +145,11 @@ export async function createWithRuntimeKey(input: {
   if (response.status === 404) return "unsupported";
   if (code === "LEARNING_NOT_ENABLED")
     throw new Error(
-      "This Intelligence's licence does not include Learning, so no container was created.",
+      "The back end's licence does not include Learning, so no container was created.",
     );
   throw Object.assign(
     new Error(
-      `Intelligence could not create the ${container.id} Learning container with the runtime key (HTTP ${response.status}${code ? `, ${code}` : ""}). OpenBot tries again.`,
+      `The back end could not create the ${container.id} Learning container with the runtime key (HTTP ${response.status}${code ? `, ${code}` : ""}). OpenBot tries again.`,
     ),
     { retryable: transientStatus(response.status) },
   );
@@ -178,7 +178,7 @@ export function intelligenceApiOrigin(value: string): string {
   try {
     url = new URL(value);
   } catch {
-    throw new Error("Enter the Intelligence API origin as a complete URL.");
+    throw new Error("Enter the back end's API origin as a complete URL.");
   }
   if (
     url.username ||
@@ -193,7 +193,7 @@ export function intelligenceApiOrigin(value: string): string {
       ))
   ) {
     throw new Error(
-      "Use an HTTPS Intelligence API origin, or HTTP on localhost for local development. Paths and embedded credentials are not supported.",
+      "Use an HTTPS back end API origin, or HTTP on localhost for local development. Paths and embedded credentials are not supported.",
     );
   }
   return url.origin;
@@ -351,7 +351,7 @@ export function verifiedContainer(
     String(value.container.projectId) !== projectId
   ) {
     throw new Error(
-      `The ${containerId} container could not be verified in the selected project. Check Learning access in Intelligence, then run this helper again.`,
+      `The ${containerId} container could not be verified in the selected project. Check Learning access in the back end dashboard, then run this helper again.`,
     );
   }
 }
@@ -368,7 +368,7 @@ export function containerMissing(found: Record<string, unknown>) {
 }
 
 export const CREATE_IN_INTELLIGENCE =
-  'or create a Learning container with ID "openbot" in that project in Intelligence. OpenBot assigns it as the default on its next start.';
+  'or create a Learning container with ID "openbot" in that project in the back end dashboard. OpenBot assigns it as the default on its next start.';
 
 /**
  * Exactly what an operator runs when nothing here could create the container. One sentence set,
@@ -376,10 +376,10 @@ export const CREATE_IN_INTELLIGENCE =
  */
 export function learningSetupInstructions(apiUrl: string): string {
   const create =
-    'Or create a Learning container with ID "openbot" in this project in Intelligence. OpenBot assigns it within ten minutes either way.';
+    'Or create a Learning container with ID "openbot" in this project in the back end dashboard. OpenBot assigns it within ten minutes either way.';
   return apiUrl === MANAGED_API
     ? `Sign in once with npx --yes copilotkit@latest login, then run bun scripts/setup-learning.ts from the OpenBot checkout (bun run start does this too). On Kubernetes, put that login in a Secret and name it in config.learning.setup.cliLoginSecret; the chart's setup Job creates the container. ${create}`
-    : `Run bun scripts/setup-learning.ts from the OpenBot checkout and sign in to Intelligence in the browser it opens. On a CopilotKit local evaluation install, set INTELLIGENCE_SERVICE_TOKEN and INTELLIGENCE_PROJECT_ID instead and OpenBot creates it by itself. ${create}`;
+    : `Run bun scripts/setup-learning.ts from the OpenBot checkout and sign in to CopilotKit in the browser it opens. On a CopilotKit local evaluation install, set INTELLIGENCE_SERVICE_TOKEN and INTELLIGENCE_PROJECT_ID instead and OpenBot creates it by itself. ${create}`;
 }
 
 /**
@@ -417,7 +417,7 @@ async function createWithServiceToken(input: {
     )
       return "created";
     throw new Error(
-      `Intelligence answered the service token's container request with something other than the ${container.id} container. Nothing was assigned.`,
+      `The back end answered the service token's container request with something other than the ${container.id} container. Nothing was assigned.`,
     );
   }
   if (
@@ -429,10 +429,10 @@ async function createWithServiceToken(input: {
     return "present";
   if (response.status === 401 || response.status === 403)
     throw new Error(
-      "Intelligence refused the service token for Learning. Service tokens create Learning containers only on a CopilotKit local evaluation install; anywhere else, sign in instead (bun scripts/setup-learning.ts).",
+      "The back end refused the service token for Learning. Service tokens create Learning containers only on a CopilotKit local evaluation install; anywhere else, sign in instead (bun scripts/setup-learning.ts).",
     );
   throw new Error(
-    `Intelligence could not create the ${container.id} Learning container with the service token (HTTP ${response.status}). Nothing was assigned.`,
+    `The back end could not create the ${container.id} Learning container with the service token (HTTP ${response.status}). Nothing was assigned.`,
   );
 }
 
@@ -596,7 +596,7 @@ export async function createLearningContainer(
   const orCreateIt =
     container.id === OPENBOT_CONTAINER.id
       ? CREATE_IN_INTELLIGENCE
-      : `or create a Learning container with ID "${container.id}" in that project in Intelligence.`;
+      : `or create a Learning container with ID "${container.id}" in that project in the back end dashboard.`;
   if (input.key.create) {
     const created = await input.key.create(container);
     if (created !== "unsupported") return created;
@@ -665,7 +665,7 @@ export async function createLearningContainer(
     if (!listing) {
       if (input.nonInteractive) return "skipped";
       throw new Error(
-        `This runtime key's Intelligence project has no ${container.id} Learning container, and no CopilotKit CLI login is here to create one with. Sign in with npx --yes copilotkit@latest login and run this helper again, ${orCreateIt}`,
+        `This runtime key's project has no ${container.id} Learning container, and no CopilotKit CLI login is here to create one with. Sign in with npx --yes copilotkit@latest login and run this helper again, ${orCreateIt}`,
       );
     }
     const project = owner
@@ -705,19 +705,19 @@ export async function ensureLearningContainer(
   if (found === "present") return "present";
   if (found === "not_entitled") {
     throw new Error(
-      "This Intelligence project's plan does not include Learning. Nothing was created.",
+      "This project's plan does not include Learning. Nothing was created.",
     );
   }
   if (found === "learning_off") {
     throw new Error(
-      "Learning is switched off in this Intelligence (learning.enabled in its Helm chart). Turn it on there, then run this again. Nothing was created.",
+      "Learning is switched off in the back end (learning.enabled in its Helm chart). Turn it on there, then run this again. Nothing was created.",
     );
   }
   if (found === "unavailable") {
     // Retryable: the server gets here only after its own probe answered, so Intelligence is starting or flapping.
     throw Object.assign(
       new Error(
-        "Intelligence could not be asked about the openbot Learning container with the configured runtime key. Check INTELLIGENCE_API_URL and INTELLIGENCE_API_KEY, then run this helper again.",
+        "The back end could not be asked about the openbot Learning container with the configured runtime key. Check INTELLIGENCE_API_URL and INTELLIGENCE_API_KEY, then run this helper again.",
       ),
       { retryable: true },
     );
@@ -730,7 +730,7 @@ export async function ensureLearningContainer(
     throw new Error(
       reused
         ? "The openbot container exists in the project that was used, but this runtime key cannot see it, so the key belongs to another project. Nothing was assigned."
-        : "Created an openbot container, but this runtime key still cannot see it, so it is in another project. Nothing was assigned; remove that container in Intelligence if it is not wanted.",
+        : "Created an openbot container, but this runtime key still cannot see it, so it is in another project. Nothing was assigned; remove that container in the back end dashboard if it is not wanted.",
     );
   }
   return created;

@@ -285,6 +285,20 @@ test("the Stop failure prefix is the one the native side writes", async () => {
   expect(native).toContain(
     `const INTELLIGENCE_STOP_FAILED: &str = "${intelligenceStopFailed}";`,
   );
+  // The line a person can open under Technical details names the part, not the product.
+  expect(intelligenceStopFailed).toBe("Back end stop failed: ");
+  // A real native line, as Stop returns it after OpenBot's own, is still the back end's part.
+  const said = native.match(
+    /Err\(local_eval::Failure::Unavailable\) => \{?\s*Err\(\s*"([^"]+)"/,
+  )?.[1];
+  expect(said).toBe(
+    "this build has no command-line tool to stop the back end OpenBot created",
+  );
+  const line = `${intelligenceStopFailed}${said}`;
+  expect(splitStopFailure(`Compose down failed: busy\n${line}`)).toEqual({
+    openBot: "Compose down failed: busy",
+    intelligence: line,
+  });
 });
 
 test("a Stop failure is split into OpenBot's part and Intelligence's part", () => {

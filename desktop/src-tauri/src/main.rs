@@ -26,7 +26,7 @@ const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
 /// Kept apart from the quit cleanup notice, whose presence alone means OpenBot needs recovery.
 const LOCAL_EVAL_STOP_NOTICE_FILE: &str = ".openbot-local-eval-stop-notice";
 /// How an Intelligence failure starts, so Stop and Quit can tell it from OpenBot's own.
-const INTELLIGENCE_STOP_FAILED: &str = "Intelligence stop failed: ";
+const INTELLIGENCE_STOP_FAILED: &str = "Back end stop failed: ";
 const QUIT_MENU_ACCELERATOR: &str = "CmdOrCtrl+KeyQ";
 const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
 use serde::{Deserialize, Serialize};
@@ -95,7 +95,7 @@ struct Shell {
     /// The installation whose Intelligence dashboard the menus open, while the window is in local
     /// mode with a recorded stack. None hides the item.
     intelligence_menu: Mutex<Option<PathBuf>>,
-    /// The menu's "Open Intelligence dashboard" is running; its item is disabled until it ends.
+    /// The menu's "Open back end dashboard" is running; its item is disabled until it ends.
     intelligence_opening: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Dashboard addresses and this session's sign-ins, so a later opening needs no CLI call.
     dashboards: Dashboards,
@@ -3330,9 +3330,8 @@ where
     else {
         return Ok(());
     };
-    let not_stopped = |why: String| {
-        format!("the Intelligence CLI did not stop the local Intelligence stack ({why})")
-    };
+    let not_stopped =
+        |why: String| format!("the back end's command-line tool did not stop the back end ({why})");
     match stop(&state.stack_id()) {
         Ok(report) => match report.outcome {
             local_eval::Outcome::Completed => Ok(()),
@@ -3341,10 +3340,9 @@ where
                 None => wire_name(outcome),
             })),
         },
-        Err(local_eval::Failure::Unavailable) => Err(
-            "this build has no Intelligence CLI to stop the local Intelligence stack OpenBot created"
-                .into(),
-        ),
+        Err(local_eval::Failure::Unavailable) => {
+            Err("this build has no command-line tool to stop the back end OpenBot created".into())
+        }
         Err(failure) => Err(not_stopped(wire_name(failure))),
     }
 }
@@ -3626,7 +3624,7 @@ fn write_quit_cleanup_notice(root: &Path, lines: &[String]) -> Result<(), String
         .and_then(|()| std::fs::write(&path, br#"{"version":1}"#))
         .map_err(|error| {
             format!(
-                "{}: could not write the Intelligence shutdown notice: {error}",
+                "{}: could not write the back end shutdown notice: {error}",
                 path.display()
             )
         })
@@ -5707,23 +5705,23 @@ enum DashboardFailure {
 impl DashboardFailure {
     fn said(self) -> &'static str {
         match self {
-            DashboardFailure::NotSetUp => "Set up local Intelligence before opening its dashboard.",
+            DashboardFailure::NotSetUp => "Set up the back end before opening its dashboard.",
             DashboardFailure::NotResponding => {
-                "The Intelligence dashboard is not responding yet. Try again when Intelligence is ready."
+                "The back end dashboard is not responding yet. Try again when the back end is ready."
             }
             DashboardFailure::BrowserFailed => "Your browser did not open. Try again.",
             DashboardFailure::Busy => {
-                "Another Intelligence command is still running. Try again when it finishes."
+                "The back end is still running another command. Try again when it finishes."
             }
-            DashboardFailure::EngineStopped => "The software Intelligence runs on is not running.",
+            DashboardFailure::EngineStopped => "The software the back end runs on is not running.",
             DashboardFailure::Unsupported => {
-                "This version of OpenBot cannot open the Intelligence dashboard."
+                "This version of OpenBot cannot open the back end dashboard."
             }
             DashboardFailure::TimedOut => {
-                "The Intelligence dashboard took too long to open. Try again."
+                "The back end dashboard took too long to open. Try again."
             }
-            DashboardFailure::Stopped => "Opening the Intelligence dashboard was stopped.",
-            DashboardFailure::Failed => "OpenBot could not open the Intelligence dashboard. Try again.",
+            DashboardFailure::Stopped => "Opening the back end dashboard was stopped.",
+            DashboardFailure::Failed => "OpenBot could not open the back end dashboard. Try again.",
         }
     }
 }
@@ -5758,7 +5756,7 @@ signed in since OpenBot started.
 `local login` costs a CLI call: about 0.3 s to check the pinned CLI's digests and 0.25 s for it to
 start, before it waits for the dashboard, mints a single-use link and hands that to the browser.
 The browser keeps the session it was given, so once a stack has been signed in during this session,
-"Open Intelligence dashboard" opens its address directly and at once. OpenBot does not read the
+"Open back end dashboard" opens its address directly and at once. OpenBot does not read the
 CLI's credential files or the browser to decide; the first opening in each session signs in again,
 and a dashboard whose session ended shows its own Sign In.
 
@@ -5891,7 +5889,7 @@ fn offer_local_intelligence(app: tauri::AppHandle, root: String, offered: bool) 
     intelligence_bridge::tell(&app, intelligence_bridge::current(&app));
 }
 
-/// The menu's "Open Intelligence dashboard". The CLI can take many seconds the first time, so the
+/// The menu's "Open back end dashboard". The CLI can take many seconds the first time, so the
 /// window comes forward without leaving what it shows, where the setup page or the app's sidebar
 /// says the dashboard is opening.
 fn open_intelligence_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
@@ -5965,7 +5963,7 @@ impl Serialize for IntelligenceOpening {
 impl IntelligenceOpening {
     fn said(&self) -> &str {
         match self {
-            IntelligenceOpening::Opening => "Opening the Intelligence dashboard…",
+            IntelligenceOpening::Opening => "Opening the back end dashboard…",
             IntelligenceOpening::Opened => "Opened in your browser.",
             IntelligenceOpening::Failed(failure) => failure.said(),
         }
@@ -6012,14 +6010,14 @@ fn open_intelligence_reporting<S, O, W>(
     }
 }
 
-const OPENING_INTELLIGENCE_ITEM: &str = "Opening Intelligence dashboard…";
+const OPENING_INTELLIGENCE_ITEM: &str = "Opening back end dashboard…";
 
-/// The menu's "Open Intelligence dashboard" item: its words, and whether it can be chosen.
+/// The menu's "Open back end dashboard" item: its words, and whether it can be chosen.
 fn intelligence_menu_item(opening: bool) -> (&'static str, bool) {
     if opening {
         (OPENING_INTELLIGENCE_ITEM, false)
     } else {
-        ("Open Intelligence dashboard", true)
+        ("Open back end dashboard", true)
     }
 }
 
@@ -6038,7 +6036,7 @@ fn show_intelligence_opening<R: tauri::Runtime>(
             use tauri_plugin_dialog::DialogExt;
             app.dialog()
                 .message(failure.said())
-                .title("Open Intelligence dashboard")
+                .title("Open back end dashboard")
                 .show(|_| {});
         }
     }
@@ -6740,7 +6738,7 @@ fn utc_minute(seconds: u64) -> String {
 }
 
 /**
-The tray menu and the window's menu bar. The tray's has "Open Intelligence dashboard" when
+The tray menu and the window's menu bar. The tray's has "Open back end dashboard" when
 `intelligence`.
 
 Built again whenever that changes, because a menu item cannot be hidden, only removed.
@@ -6853,7 +6851,7 @@ fn install_menus<R: tauri::Runtime>(
                 None::<&str>,
             )?),
         ];
-        // "Open Intelligence dashboard" is the status bar menu's alone.
+        // "Open back end dashboard" is the status bar menu's alone.
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "status",
@@ -10248,7 +10246,7 @@ mod tests {
         assert_eq!(failure, DashboardFailure::NotSetUp);
         assert_eq!(
             failure.said(),
-            "Set up local Intelligence before opening its dashboard."
+            "Set up the back end before opening its dashboard."
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -10276,11 +10274,11 @@ mod tests {
             "openbot-open-intelligence-failures",
             Some(local_eval_state::Ownership::Created),
         );
-        let retry = "OpenBot could not open the Intelligence dashboard. Try again.";
+        let retry = "OpenBot could not open the back end dashboard. Try again.";
         for (result, said) in [
             (
                 signed_in(Outcome::Blocked, Some(Reason::DashboardUnavailable)),
-                "The Intelligence dashboard is not responding yet. Try again when Intelligence is ready.",
+                "The back end dashboard is not responding yet. Try again when the back end is ready.",
             ),
             (
                 signed_in(Outcome::Blocked, Some(Reason::BrowserOpenFailed)),
@@ -10288,26 +10286,26 @@ mod tests {
             ),
             (
                 signed_in(Outcome::Blocked, Some(Reason::LocalCommandBusy)),
-                "Another Intelligence command is still running. Try again when it finishes.",
+                "The back end is still running another command. Try again when it finishes.",
             ),
             (
                 signed_in(Outcome::Blocked, Some(Reason::DockerUnavailable)),
-                "The software Intelligence runs on is not running.",
+                "The software the back end runs on is not running.",
             ),
             (signed_in(Outcome::Blocked, Some(Reason::Unrecognized)), retry),
             (signed_in(Outcome::Blocked, None), retry),
             (signed_in(Outcome::Failed, Some(Reason::LocalCommandFailed)), retry),
             (
                 Err(Failure::Unavailable),
-                "This version of OpenBot cannot open the Intelligence dashboard.",
+                "This version of OpenBot cannot open the back end dashboard.",
             ),
             (
                 Err(Failure::Timeout),
-                "The Intelligence dashboard took too long to open. Try again.",
+                "The back end dashboard took too long to open. Try again.",
             ),
             (
                 Err(Failure::Cancelled),
-                "Opening the Intelligence dashboard was stopped.",
+                "Opening the back end dashboard was stopped.",
             ),
             (Err(Failure::InvalidJson), retry),
             (Err(Failure::Unverified), retry),
@@ -10340,11 +10338,11 @@ mod tests {
     fn the_intelligence_menu_item_says_it_is_opening_and_cannot_be_chosen_twice() {
         assert_eq!(
             intelligence_menu_item(false),
-            ("Open Intelligence dashboard", true)
+            ("Open back end dashboard", true)
         );
         assert_eq!(
             intelligence_menu_item(true),
-            ("Opening Intelligence dashboard…", false)
+            ("Opening back end dashboard…", false)
         );
     }
 
@@ -10399,7 +10397,7 @@ mod tests {
         }
         assert_eq!(
             serde_json::to_value(IntelligenceOpening::Opening).unwrap(),
-            serde_json::json!({"state": "opening", "said": "Opening the Intelligence dashboard…"})
+            serde_json::json!({"state": "opening", "said": "Opening the back end dashboard…"})
         );
         assert_eq!(
             serde_json::to_value(IntelligenceOpening::Opened).unwrap(),
@@ -10687,13 +10685,13 @@ mod tests {
             stopped,
             Stopped {
                 openbot: vec!["Compose down failed: compose refused".into()],
-                intelligence: Some("Intelligence stop failed: the CLI timed out".into()),
+                intelligence: Some("Back end stop failed: the CLI timed out".into()),
             }
         );
         assert_eq!(
             stopped.into_result(),
             Err("Compose down failed: compose refused\n\
-                 Intelligence stop failed: the CLI timed out"
+                 Back end stop failed: the CLI timed out"
                 .into())
         );
         let _ = std::fs::remove_dir_all(active);
@@ -10741,7 +10739,7 @@ mod tests {
             failures,
             Stopped {
                 openbot: vec!["Compose down failed: compose down refused".into()],
-                intelligence: Some("Intelligence stop failed: the CLI timed out".into()),
+                intelligence: Some("Back end stop failed: the CLI timed out".into()),
             }
         );
         let _ = std::fs::remove_dir_all(active);
@@ -10837,7 +10835,7 @@ mod tests {
             stopped,
             Stopped {
                 openbot: vec!["Compose down failed: compose down refused".into()],
-                intelligence: Some("Intelligence stop failed: the CLI timed out".into()),
+                intelligence: Some("Back end stop failed: the CLI timed out".into()),
             }
         );
         report_exit_cleanup_failures(stopped.lines(), |lines| {
@@ -11047,7 +11045,7 @@ mod tests {
         assert!(stopped.openbot.is_empty(), "{stopped:?}");
         assert_eq!(
             stopped.into_result(),
-            Err("Intelligence stop failed: the CLI timed out".into()),
+            Err("Back end stop failed: the CLI timed out".into()),
             "an Intelligence failure is not a silent success"
         );
         assert!(!recovery_required(&shell, &active));
@@ -11067,7 +11065,7 @@ mod tests {
         );
         assert_eq!(
             failures.lines(),
-            ["Intelligence stop failed: the CLI timed out"]
+            ["Back end stop failed: the CLI timed out"]
         );
         assert!(!recovery_required(&shell, &active));
         let _ = std::fs::remove_dir_all(active);
@@ -11136,22 +11134,22 @@ mod tests {
 
         assert_eq!(
             failed(Err(local_eval::Failure::Unavailable)),
-            "this build has no Intelligence CLI to stop the local Intelligence stack OpenBot created"
+            "this build has no command-line tool to stop the back end OpenBot created"
         );
         assert_eq!(
             failed(Err(local_eval::Failure::Timeout)),
-            "the Intelligence CLI did not stop the local Intelligence stack (timeout)"
+            "the back end's command-line tool did not stop the back end (timeout)"
         );
         assert_eq!(
             failed(Ok(local_eval_report(
                 local_eval::Outcome::Blocked,
                 Some(local_eval::Reason::LocalCommandBusy)
             ))),
-            "the Intelligence CLI did not stop the local Intelligence stack (blocked: local-command-busy)"
+            "the back end's command-line tool did not stop the back end (blocked: local-command-busy)"
         );
         assert_eq!(
             failed(Ok(local_eval_report(local_eval::Outcome::Failed, None))),
-            "the Intelligence CLI did not stop the local Intelligence stack (failed)"
+            "the back end's command-line tool did not stop the back end (failed)"
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -11177,15 +11175,15 @@ mod tests {
             failures.lines(),
             [
                 "Compose down failed: compose down refused",
-                "Intelligence stop failed: this build has no Intelligence CLI to stop the local \
-                 Intelligence stack OpenBot created"
+                "Back end stop failed: this build has no command-line tool to stop the back end \
+                 OpenBot created"
             ]
         );
         let _ = std::fs::remove_dir_all(root);
     }
 
-    const NO_CLI_LINE: &str = "Intelligence stop failed: this build has no Intelligence CLI to \
-                               stop the local Intelligence stack OpenBot created";
+    const NO_CLI_LINE: &str =
+        "Back end stop failed: this build has no command-line tool to stop the back end OpenBot created";
 
     #[test]
     fn an_intelligence_failure_on_quit_is_shown_next_launch_without_recovery() {

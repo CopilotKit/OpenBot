@@ -205,7 +205,7 @@ export function createPersonalLearningSpaces(deps: {
         // A key that can answer and still cannot see it means the credential made it in another project.
         if ((await probe(containerId, undefined, false)) === "missing") {
           throw new Error(
-            "The credential created the space, but this runtime key cannot see it, so it is in another Intelligence project.",
+            "The credential created the space, but this runtime key cannot see it, so it is in another project.",
           );
         }
         await deps.store.confirm(userId, containerId);

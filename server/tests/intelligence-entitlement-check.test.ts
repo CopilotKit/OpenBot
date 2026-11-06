@@ -363,7 +363,7 @@ describe("the boot check on a first install, while Intelligence is still startin
     expect(found.lines).toEqual([
       expect.objectContaining({
         type: "intelligence-entitlement-unreadable",
-        reason: expect.stringContaining("Intelligence did not answer"),
+        reason: expect.stringContaining("The back end did not answer"),
         waitedMinutes: 1,
       }),
     ]);
