@@ -436,3 +436,42 @@ This template renders nothing.
 {{- fail (printf "config.model.provider is %q, and the server reads only openai or anthropic: anything else silently falls back to the tenant package's provider. Set openai or anthropic, or leave it empty to keep the tenant package's." .) }}
 {{- end }}
 {{- end }}
+
+{{- /*
+  A Learning model the bundled Intelligence's agent cannot look up.
+
+  The agent hands the name to its model catalogue as `provider/model`, so `claude-sonnet-5-5` alone
+  installs cleanly and then fails every Learning run.
+*/}}
+{{- with ((.Values.config.learning | default dict).model | default "" | toString | trim) }}
+{{- if not (regexMatch "^[^/[:space:]]+/[^[:space:]]+$" .) }}
+{{- fail (printf "config.learning.model is %q, and Intelligence's Learning agent reads a model as provider/model, such as anthropic/claude-sonnet-5-5 or openai/gpt-5.5." .) }}
+{{- end }}
+{{- end }}
+
+{{- /*
+  The Learning model named twice, or named where the agent never reads it.
+
+  This chart sets LEARNING_AGENT_MODEL from its own Secret (`intelligence.learning.agent.env`), and the
+  Intelligence chart sets it too whenever `intelligence.learning.agent.model` is not empty. The agent
+  would get the variable twice: Kubernetes takes the last, and an apply may keep either or refuse the
+  object. A release upgraded with `--reuse-values` from before keeps its own model and environment,
+  which does not name the variable, so it is not refused for that.
+
+  The other way round, `config.learning.model` with an environment that does not read the variable
+  (that same release, or an `env` written by hand) installs cleanly and runs some other model.
+*/}}
+{{- $intelligenceLearning := ((.Values.intelligence | default dict).learning | default dict) }}
+{{- if and (include "openbot.intelligenceBundled" .) $intelligenceLearning.enabled }}
+{{- $agent := $intelligenceLearning.agent | default dict }}
+{{- $readsModel := false }}
+{{- range ($agent.env | default list) }}
+{{- if eq (.name | default "") "LEARNING_AGENT_MODEL" }}{{- $readsModel = true }}{{- end }}
+{{- end }}
+{{- if and $readsModel ((($agent.model | default "") | toString | trim)) }}
+{{- fail (printf "intelligence.learning.agent.model is %q, and this chart already sets the Learning model through intelligence.learning.agent.env, so the agent would get LEARNING_AGENT_MODEL twice. Leave intelligence.learning.agent.model empty and set config.learning.model to the model instead." ($agent.model | toString)) }}
+{{- end }}
+{{- if and (not $readsModel) (((.Values.config.learning | default dict).model | default "") | toString | trim) }}
+{{- fail "config.learning.model is set, but intelligence.learning.agent.env does not set LEARNING_AGENT_MODEL, so the Learning agent would never see it. Keep the LEARNING_AGENT_MODEL entry from this chart's values.yaml in that env (a release upgraded with --reuse-values keeps its old env: upgrade with --reset-then-reuse-values)." }}
+{{- end }}
+{{- end }}

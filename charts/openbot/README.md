@@ -26,9 +26,12 @@ EOF
 ```
 
 With an Anthropic key instead, write `anthropicApiKey: "<your Anthropic API key>"` in place of
-`modelApiKey` and add `config.model.provider: anthropic`; behind a model router, set
-`config.model.openaiBaseUrl` or `config.model.anthropicBaseUrl` to it as well. Learning stays on the
-OpenAI key, though (see below).
+`modelApiKey` and add `config.model.provider: anthropic`. Learning follows the key by itself (see
+below). Behind a model router, set `config.model.openaiBaseUrl` or `config.model.anthropicBaseUrl` to
+it as well, and `config.model.name` to the model the Bots should answer on, as the router names it
+(`BOT_MODEL`): while the router lists that model it is the deployment's default, and people can still
+pick another under the message box. Left empty, the default is the middle of the provider's current
+line (see [the model list](../../docs/configuration.md#the-model-list)).
 
 Nothing else is yours to make. On the first install the chart generates the key the credential vault
 is encrypted with and the computer token into the Secret `openbot-secrets`, and the database password
@@ -91,18 +94,19 @@ nothing to add to your file for it. See [The routines sweep](#the-routines-sweep
 
 **Automatic Learning spends your model key.** Learning is on in OpenBot and in the bundled
 Intelligence, whose Learning agent reads finished conversations and proposes skills with
-`openai/gpt-5.5` on the key in `secrets.modelApiKey`. With an Anthropic key alone, Learning runs fail
-until it has an OpenAI key or is pointed at the Anthropic one. See [Automatic Learning](#automatic-learning).
+`openai/gpt-5.5` on the key in `secrets.modelApiKey`, or with `anthropic/claude-sonnet-5-5` on
+`secrets.anthropicApiKey` when that is the only key. See [Automatic Learning](#automatic-learning).
 
 The secrets can also live in a Secret of your own instead of a file: set `secrets.existingSecret` to
 it, with the keys `license-token`, `model-api-key` (or `anthropic-api-key`, or both),
 `key-encryption-key` and `computer-token`; put the
 database password under `postgres-password` and set `postgresql.auth.existingSecret` to the same
 Secret; and set `intelligence.appApi.licenseSecret.existingSecret` to it too, so Intelligence reads the
-same licence. Intelligence's Learning agent reads `model-api-key` from that Secret as well (and
-`anthropic-api-key`, once it is pointed at it): the chart
-copies it at install and on every upgrade, so a new key there reaches Learning on the next
-`helm upgrade`. `worker-shared-secret` is optional in it: put one there only if something outside this
+same licence. Intelligence's Learning agent reads `model-api-key` and `anthropic-api-key` from that
+Secret as well: the chart copies them at install and on every upgrade, so a new key there reaches
+Learning on its next run after `helm upgrade`, and picks Learning's model from which of them is there
+(adding or removing one wants a restart, see [Automatic Learning](#automatic-learning)).
+`worker-shared-secret` is optional in it: put one there only if something outside this
 chart fires routines too, and otherwise the chart generates one. `values.yaml` under `intelligence`
 explains every value the bundle sets.
 
@@ -553,7 +557,11 @@ one API replica; `networkPolicy.enabled` is set with an external database and no
 `networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks, or
 `computers.egressProxy` is turned on with policies and no `networkPolicy.computerExtraEgress`, or with
 no `secrets.egressProxyUrl` where this chart writes the Secret; a tag annotation gives CopilotKit's
-AWS tag key a different value (see [AWS usage attribution](#aws-usage-attribution)). Not on this list, because the chart
+AWS tag key a different value (see [AWS usage attribution](#aws-usage-attribution));
+`config.model.provider` is anything but `openai` or `anthropic`; `config.learning.model` is not
+`provider/model` or the Learning agent's `env` would never read it, or
+`intelligence.learning.agent.model` names a model beside the one the chart sets (see
+[Automatic Learning](#automatic-learning)). Not on this list, because the chart
 generates them wherever nobody else holds one: the routines worker's secret (see
 [The routines sweep](#the-routines-sweep)), and, with the bundled database, the key encryption key,
 the computer token and the database password.
@@ -584,16 +592,32 @@ nobody can talk to.
 **With the bundled Intelligence** (the default) there is nothing to set up. Learning is on in
 Intelligence too (`intelligence.learning`), Intelligence creates the project's `openbot` container at
 install, the server assigns it as the default, and it creates each person's own Learning space with
-its runtime key. Intelligence's Learning agent runs on `secrets.modelApiKey` with `openai/gpt-5.5`
-(`intelligence.learning.agent`), so Learning spends the same key your Bots do.
+its runtime key. Intelligence's Learning agent spends the same key your Bots do, on a model that
+follows the keys you give:
 
-**Learning is not on your Anthropic key unless you put it there.** With `secrets.anthropicApiKey` and
-no `secrets.modelApiKey`, the Bots run (with `config.model.provider: anthropic`) and every Learning
-run fails for want of an OpenAI key; the chart never hands the Anthropic key to an agent expecting
-OpenAI's. Either add an OpenAI key for Learning alone, or point the agent at Anthropic: set
-`intelligence.learning.agent.model` to an Anthropic model Intelligence's Learning agent accepts, and
-its `env` to `ANTHROPIC_API_KEY` from the key `anthropic-api-key` in `openbot-intel-learning`, which
-the chart then fills from `secrets.anthropicApiKey` exactly as it fills `openai-api-key`. It runs by itself after
+| Keys | Learning's model | Key it spends |
+| --- | --- | --- |
+| `secrets.modelApiKey` | `openai/gpt-5.5` | the OpenAI key |
+| `secrets.anthropicApiKey` alone | `anthropic/claude-sonnet-5-5` | the Anthropic key |
+| both | `openai/gpt-5.5` | the OpenAI key |
+
+`config.learning.model` names another, as `provider/model` (`anthropic/claude-opus-4-8`, say). The
+chart writes the model and each key, under its own name, into `openbot-intel-learning`, and the agent
+reads them from there as `LEARNING_AGENT_MODEL`, `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`
+(`intelligence.learning.agent`), so the Anthropic key never reaches it under the OpenAI name. Leave
+`intelligence.learning.agent.model` empty: it would set the model a second time, and the chart refuses
+it. With the keys in a store, the chart cannot see which is there and picks `openai/gpt-5.5`; set
+`config.learning.model` for a store with an Anthropic key alone.
+
+The agent re-reads its keys before every run, so a new key reaches it on its next run after
+`helm upgrade`. It reads its model only when it starts, so after changing `config.learning.model`, or
+adding or removing a key (which can change the model), restart it once `helm upgrade` is done:
+
+```sh
+kubectl -n openbot rollout restart deployment/openbot-intelligence-learning-agent
+```
+
+It runs by itself after
 15 finished conversations and after every 15 more, and keeps what it learns in an object store the
 release runs (`intelligence.localObjectStorage`). Trajectories, the sessions the Recorder captures, are
 on as well, which needs the licence's `trajectories` feature.

@@ -173,13 +173,20 @@ config:
       clientId: ""
       issuer: ""
   tenantPackageDir: /app/examples/fintech
-  # The provider the Bots run on, and the endpoint each provider is called at, for a deployment that
-  # brings an Anthropic key or a model router rather than an OpenAI key. Each empty is unset, which
-  # is not the same as blank: the tenant package's own provider (`model.yaml`) stands, and each
-  # provider is called at its own API.
+  # The provider the Bots run on, the model they answer on, and the endpoint each provider is called
+  # at, for a deployment that brings an Anthropic key or a model router rather than an OpenAI key.
+  # Each empty is unset, which is not the same as blank: the tenant package's own provider
+  # (`model.yaml`) stands, the model list picks the default model, and each provider is called at its
+  # own API.
   model:
     # `openai` or `anthropic` (BOT_PROVIDER). Overrides the tenant package's provider.
     provider: ""
+    # The model the Bots answer on when nobody has picked one (BOT_MODEL), as the provider or router
+    # names it: `claude-sonnet-5-5`, or a router's `openai/gpt-5.5`. While the credential's model list
+    # has it, it is the deployment's default; one the list lacks gives way to the middle of the
+    # provider's current line, which is also what empty gives. People still pick another under the
+    # message box. See docs/configuration.md, "The model list".
+    name: ""
     # Any endpoint speaking the OpenAI API, such as a router or gateway in front of it
     # (OPENAI_BASE_URL). The key in `secrets.modelApiKey` is the one sent to it.
     openaiBaseUrl: ""
@@ -210,6 +217,14 @@ config:
     revision: ""
     # false stops the automatic assignment (OPENBOT_LEARNING_AUTO_ASSIGN=false).
     autoAssign: true
+    # The model the bundled Intelligence's Learning agent runs on, as `provider/model`, such as
+    # `anthropic/claude-opus-4-8`. Not a starting value like the three above: Admin does not change
+    # it. Empty follows the keys: `anthropic/claude-sonnet-5-5` when `secrets.anthropicApiKey` is the
+    # only key, and `openai/gpt-5.5` otherwise, including when this chart cannot read the keys (a
+    # store). The agent reads it when it starts, so a change reaches it on its next restart (see
+    # `intelligence.learning.agent`). Unused with `intelligence.enabled: false`, whose Intelligence
+    # has its own.
+    model: ""
     # Creating the container. Name either Secret and a Job runs on every install and upgrade that
     # creates it in the runtime key's project, proves it with that key, and exits; the server then
     # assigns it. Both Secrets are yours: create them before installing.
@@ -687,10 +702,10 @@ secrets:
   # ANTHROPIC_API_KEY (`anthropic-api-key`). Which one a Bot spends is the tenant package's provider,
   # or `config.model.provider` above: with an Anthropic key alone, set that to `anthropic`.
   #
-  # LEARNING SPENDS THE OPENAI KEY. The bundled Intelligence's Learning agent runs `openai/gpt-5.5`
-  # on `modelApiKey` and is never handed the Anthropic key under the OpenAI name, so an install with
-  # an Anthropic key alone has Learning runs that fail until it has one. To run Learning on Anthropic
-  # instead, see `intelligence.learning.agent` below.
+  # LEARNING SPENDS THEM TOO. The bundled Intelligence's Learning agent runs `openai/gpt-5.5` on
+  # `modelApiKey`, or `anthropic/claude-sonnet-5-5` on `anthropicApiKey` when that is the only key,
+  # and is never handed the Anthropic key under the OpenAI name. See `config.learning.model` above
+  # and `intelligence.learning.agent` below.
   modelApiKey: ""
   anthropicApiKey: ""
   # What the API presents to a Bot's computer (`computers.mode` shared or sandbox). With the bundled
@@ -883,26 +898,50 @@ intelligence:
       enabled: true
     agent:
       # SPENDS YOUR MODEL KEY. The Learning agent reads finished conversations and writes proposed
-      # skills with this model, on `secrets.modelApiKey`: this chart copies that key (or `model-api-key`
-      # from `secrets.existingSecret`, read at install and upgrade) into the Secret below. With the key
-      # in a store instead (`externalSecrets`), point `env` at a Secret that holds it.
+      # skills on the key your Bots spend: `openai/gpt-5.5` on `secrets.modelApiKey`, or
+      # `anthropic/claude-sonnet-5-5` on `secrets.anthropicApiKey` when that is the only key
+      # (`config.learning.model` names another). This chart writes the model and copies each key (or
+      # `model-api-key` and `anthropic-api-key` from `secrets.existingSecret`, read at install and
+      # upgrade) into the Secret below, each key under its own name. With the keys in a store instead
+      # (`externalSecrets`), point `env` at a Secret that holds them, and keep its LEARNING_AGENT_MODEL
+      # entry: without it the agent picks for itself (`openai/gpt-5.5` on an OpenAI key,
+      # `anthropic/claude-haiku-4-5` on an Anthropic one).
       #
-      # AN ANTHROPIC KEY ALONE DOES NOT RUN IT. To run Learning on `secrets.anthropicApiKey`, set
-      # `model` to an Anthropic model Intelligence's Learning agent accepts and point `env` at the key
-      # `anthropic-api-key` in the Secret below, as ANTHROPIC_API_KEY: the chart copies that key (or
-      # `anthropic-api-key` from `secrets.existingSecret`) into it exactly as it copies the OpenAI one.
-      model: openai/gpt-5.5
-      # Generated by this chart: `learning-agent-token`, and `openai-api-key` from your model key.
+      # `helm upgrade` rewrites the Secret. The agent re-reads its keys from it before every run, so a
+      # new key needs nothing more, but reads its model only when it starts: after changing
+      # `config.learning.model`, or adding or removing a key (which can change the model), restart it:
+      #   kubectl -n openbot rollout restart deployment/openbot-intelligence-learning-agent
+      #
+      # EMPTY ON PURPOSE. A model here is the same for every install, and the model follows the keys,
+      # so it reaches the agent as LEARNING_AGENT_MODEL from the Secret instead (`env` below). A model
+      # here as well would set that variable twice, which the chart refuses: use
+      # `config.learning.model`. Empty also makes Intelligence's `APP_API_LEARNING_MODEL_CONFIGURED`
+      # false, which Intelligence reads only under a local evaluation licence, and that licence starts
+      # only on the CopilotKit CLI's own local install, never under this chart.
+      model: ""
+      # Generated by this chart: `learning-agent-token`, `learning-agent-model`, and `openai-api-key`
+      # and `anthropic-api-key` from your model keys.
       tokenSecret:
         existingSecret: openbot-intel-learning
         key: learning-agent-token
       env:
+        - name: LEARNING_AGENT_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: openbot-intel-learning
+              key: learning-agent-model
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
               name: openbot-intel-learning
               key: openai-api-key
               # So a deployment with no model key still installs. Learning runs fail until it has one.
+              optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openbot-intel-learning
+              key: anthropic-api-key
               optional: true
     # THE JOB THAT INSTALLS LEARNING'S QUEUE WAITS OUT A POSTGRESQL RESTART. Every Intelligence release
     # moves the image of its PostgreSQL (`postgresql` below), so an upgrade that moves the bundled
