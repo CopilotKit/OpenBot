@@ -7,6 +7,7 @@ import {
   type LearningOverview,
   type LearningTarget,
   type PeopleProposals,
+  type SharingRequest,
 } from "@openbot/shared/learning";
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -46,6 +47,8 @@ export type LearningAdminDependencies = {
   people?: () => Promise<
     { userId: string; name: string; containerId: string }[]
   >;
+  /** Called when a decision changes which skills are open, so the open-skill index reads again. */
+  invalidate?: () => void;
   /** The titles of a person's recordings, by recording id. */
   recordingTitles?: (
     userId: string,
@@ -516,6 +519,67 @@ export function createLearningRoutes(
       return context.json({ error: "This skill doesn't exist." }, 404);
     return context.json({ skill });
   });
+  routes.get("/sharing-requests", async (context) => {
+    const { approvals, people } = dependencies;
+    if (!approvals || !people)
+      return context.json(
+        { error: "Reviewing sharing requests is unavailable." },
+        503,
+      );
+    const names = new Map(
+      (await people()).map((entry) => [entry.userId, entry.name]),
+    );
+    const requests: SharingRequest[] = (await approvals.requests()).map(
+      (entry) => ({
+        userId: entry.userId,
+        name: names.get(entry.userId) ?? entry.userId,
+        skillName: entry.skillName,
+        requestedAt: entry.updatedAt,
+      }),
+    );
+    return context.json({ requests });
+  });
+  /** Answer a person's request to open a skill they approved to every Bot. */
+  for (const action of ["approve", "decline"] as const) {
+    routes.post(
+      `/sharing-requests/:userId/:skillName/${action}`,
+      async (context) => {
+        if (!sameOriginJson(context))
+          return context.json(
+            { error: "Use a same-origin JSON request to decide sharing." },
+            403,
+          );
+        const { approvals, people } = dependencies;
+        if (!approvals || !people)
+          return context.json(
+            { error: "Reviewing sharing requests is unavailable." },
+            503,
+          );
+        const skillName = context.req.param("skillName");
+        if (!isLearnedSkillName(skillName))
+          return context.json({ error: "Invalid skill name." }, 400);
+        const userId = context.req.param("userId");
+        if (!(await people()).some((entry) => entry.userId === userId))
+          return context.json({ error: "This person doesn't exist." }, 404);
+        const decision = action === "approve" ? "approved" : "declined";
+        if (!(await approvals.decideSharing(userId, skillName, decision)))
+          return context.json(
+            { error: "This sharing request doesn't exist." },
+            404,
+          );
+        dependencies.invalidate?.();
+        if (audit)
+          await recordAuditEvent(audit, {
+            eventType: "learning.sharing_decided",
+            targetType: "learned_skill",
+            targetId: skillName,
+            actorUserId: context.var.actor.id,
+            payload: { skill: skillName, userId, decision },
+          });
+        return context.json({ sharing: decision });
+      },
+    );
+  }
   /**
    * Approve or reject a proposal learned from a person's recordings. On approve, OpenBot records the skill as
    * admin-approved before Intelligence is asked, and takes that record back if Intelligence refuses.

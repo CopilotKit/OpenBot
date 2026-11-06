@@ -257,3 +257,125 @@ test("an admin rejects a person's proposal, and bad requests are refused", async
       .status,
   ).toBe(503);
 });
+
+const decide = (
+  routes: ReturnType<typeof admin>,
+  userId: string,
+  skill: string,
+  action: "approve" | "decline",
+  headers: Record<string, string> = { "content-type": "application/json" },
+) =>
+  routes.request(`/sharing-requests/${userId}/${skill}/${action}`, {
+    method: "POST",
+    headers,
+  });
+
+async function requestSharing(skillName: string) {
+  await approvals.recordApproval(reviewed, skillName, "person");
+  await approvals.requestSharing(reviewed, skillName);
+}
+
+test("an admin approves a sharing request and the skill is no longer withheld", async () => {
+  await requestSharing("Refund triage");
+  let invalidated = 0;
+  const routes = admin(
+    {
+      approvals,
+      invalidate: () => {
+        invalidated += 1;
+      },
+    },
+    { audit: true },
+  );
+  const listed = await routes.request("/sharing-requests");
+  expect(listed.status).toBe(200);
+  const body = (await listed.json()) as {
+    requests: { userId: string; name: string; skillName: string }[];
+  };
+  expect(body.requests.filter((entry) => entry.userId === reviewed)).toEqual([
+    expect.objectContaining({ name: "Reviewed", skillName: "Refund triage" }),
+  ]);
+  expect(
+    (await approvals.withheld([reviewed])).get(reviewed)?.has("Refund triage"),
+  ).toBe(true);
+  const response = await decide(routes, reviewed, "Refund triage", "approve");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ sharing: "approved" });
+  expect(
+    (await approvals.withheld([reviewed]))
+      .get(reviewed)
+      ?.has("Refund triage") ?? false,
+  ).toBe(false);
+  expect(invalidated).toBe(1);
+  expect(audits).toMatchObject([
+    {
+      eventType: "learning.sharing_decided",
+      targetType: "learned_skill",
+      targetId: "Refund triage",
+      actorUserId: "admin-ada",
+      payload: {
+        skill: "Refund triage",
+        userId: reviewed,
+        decision: "approved",
+      },
+    },
+  ]);
+  const again = await decide(routes, reviewed, "Refund triage", "approve");
+  expect(again.status).toBe(404);
+  expect(audits).toHaveLength(1);
+});
+
+test("an admin declines a sharing request, and bad requests are refused", async () => {
+  await requestSharing("Refund triage");
+  const routes = admin({ approvals }, { audit: true });
+  expect(
+    (await decide(routes, reviewed, "Refund triage", "approve", {})).status,
+  ).toBe(403);
+  expect((await decide(routes, reviewed, "%20padded", "approve")).status).toBe(
+    400,
+  );
+  expect(
+    (await decide(routes, "nobody", "Refund triage", "approve")).status,
+  ).toBe(404);
+  const declined = await decide(routes, reviewed, "Refund triage", "decline");
+  expect(await declined.json()).toEqual({ sharing: "declined" });
+  expect(
+    (await admin({ approvals: undefined }).request("/sharing-requests")).status,
+  ).toBe(503);
+});
+
+test("a user who is not an admin gets 403 on every people route", async () => {
+  const userRoutes = createLearningRoutes(
+    {
+      store: createLearningSettingsStore(),
+      approvals,
+      people: async () => [],
+    },
+    (async (context, next) => {
+      context.set("actor", {
+        id: "person",
+        email: "person@example.com",
+        name: "Person",
+        role: "user",
+      });
+      await next();
+    }) as MiddlewareHandler<{ Variables: AppVariables }>,
+  );
+  const json = { "content-type": "application/json" };
+  for (const [method, path] of [
+    ["GET", "/people/proposals"],
+    ["GET", `/people/ana/proposals/${PROPOSAL}`],
+    ["GET", "/people/ana/skills/Refund triage"],
+    ["POST", `/people/ana/proposals/${PROPOSAL}/approve`],
+    ["POST", `/people/ana/proposals/${PROPOSAL}/reject`],
+    ["GET", "/sharing-requests"],
+    ["POST", "/sharing-requests/ana/Refund triage/approve"],
+    ["POST", "/sharing-requests/ana/Refund triage/decline"],
+  ] as const) {
+    const response = await userRoutes.request(path, {
+      method,
+      headers: json,
+    });
+    expect(response.status).toBe(403);
+  }
+});
