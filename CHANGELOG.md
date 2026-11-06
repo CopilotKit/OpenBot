@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot knows that an answer it got from another Bot with `message_bot` is that Bot's. Asked to
+  quote what Knowledge said, General Assistant quotes it, instead of saying it never arrived or
+  calling the words its own.
+- Every Bot knows its own name. "Ask the Knowledge Bot for one sentence on Helm", sent to
+  Knowledge, is answered by Knowledge, instead of Knowledge saying it can't reach the Knowledge Bot.
 - Skills (Admin → Skills, and Settings → Skills in the personal edition) lists each skill as one
   row with its name, what it does and how many Bots offer it, and the row opens the skill's own
   page. There, each Bot has a switch, the skill's words can be edited, and deleting asks first.

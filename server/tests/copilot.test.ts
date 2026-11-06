@@ -31,12 +31,17 @@ import {
   registeredAgentFromRow,
   resolveRuntimeAgents,
   runtimeModelForEnvironment,
+  selfAddressGuidance,
   standingRoleMessage,
 } from "../src/copilot";
 import { grantedToolGuidance } from "../src/plugins/tools";
 import { loadTenantPackage } from "../src/tenant-package";
 import { UNTRUSTED_GUIDANCE } from "../src/untrusted-content";
 import { testEnvironment } from "./support/environment";
+
+/** What every built-in Bot reads first: its name, and that a request for it is for it. */
+const identity = (name: string) =>
+  `You are ${name}, a Bot in OpenBot. ${selfAddressGuidance(name)}`;
 
 /**
  * The Bot under test, or a failure that says it was never built.
@@ -343,7 +348,7 @@ describe("registered Copilot agents", () => {
       model: "openai/gpt-5.6-terra",
       // The provenance rule is unconditional, so even a Bot with no tools and no computer carries
       // it. That Bot needs it most: nothing it says was read anywhere. The date is unconditional too.
-      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${APPROVAL_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}\n\n${todayGuidance(new Date("2026-11-05T15:44:00Z"))}`,
+      prompt: `${identity("General Assistant")}\n\nBe helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${APPROVAL_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}\n\n${todayGuidance(new Date("2026-11-05T15:44:00Z"))}`,
       apiKey: "openai-secret",
     });
   });
@@ -662,7 +667,7 @@ describe("standing agent roles", () => {
       id: "standing-role:agent_expense",
       role: "system",
       content: [
-        "You are Expense Manager, Finance Operations.",
+        `You are Expense Manager, Finance Operations. ${selfAddressGuidance("Expense Manager")}`,
         "Review receipts, categorize expenses, and prepare reimbursement reports.",
         "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
         // For a remote Bot this message is the whole instruction, so the provenance rule has to
@@ -926,7 +931,7 @@ describe("standing agent roles", () => {
       | undefined;
     expect(sent?.messages?.[0]?.content).toBe(
       [
-        "You are Expense Manager, Finance Operations.",
+        `You are Expense Manager, Finance Operations. ${selfAddressGuidance("Expense Manager")}`,
         "Reconcile corporate card statements.",
         "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
         PROVENANCE_GUIDANCE,
@@ -1702,9 +1707,9 @@ describe("a person's standing instructions", () => {
 
       expect(prompt).not.toContain("standing instructions");
       // Byte for byte what a deployment had before any of this existed, which is what most people
-      // on most days get.
+      // on most days get: the Bot's name, its role, and the guidance every Bot is given.
       expect(prompt).toBe(
-        `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${APPROVAL_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}\n\n${todayGuidance(NOW)}`,
+        `${identity("General Assistant")}\n\nBe helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${APPROVAL_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}\n\n${todayGuidance(NOW)}`,
       );
     },
   );

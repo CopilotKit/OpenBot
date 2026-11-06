@@ -141,7 +141,28 @@ export type HandoffDesk = {
     target: string;
     envelope: HandoffEnvelope;
   }) => Promise<HandoffOutcome>;
+  /**
+   * What the tool answers when the Bot it names is the one asking, or null for any other Bot.
+   *
+   * Asked before anything else the tool does, so a Bot that names itself is told it is the one
+   * being asked before a person is asked to approve a hop or to share anything, and nothing is sent.
+   * Resolved the way `send` resolves a name, so "the Knowledge Bot" is Knowledge here too.
+   */
+  addressesSelf?: (
+    from: RunAssertion,
+    target: string,
+  ) => Promise<string | null>;
 };
+
+/**
+ * What a Bot is told when it tries to hand work to itself.
+ *
+ * It is the one being asked: the person said "ask the Knowledge Bot" to Knowledge. So it is told
+ * that, and to answer, rather than only that a hop to itself is not allowed.
+ */
+export function selfRefusal(name: string): string {
+  return `Nothing was sent: you are ${name}, so a request for ${name} is a request to you. Do the work yourself and answer the person.`;
+}
 
 export function createHandoffDesk(options: {
   queue: WorkQueue;
@@ -247,6 +268,27 @@ export function createHandoffDesk(options: {
   }
 
   return {
+    async addressesSelf(from, target) {
+      /*
+       * The roster the person sees, as `send` reads it, so a loose name lands where it would there.
+       * A read that fails says nothing here: `send` reads it again and answers for itself.
+       */
+      try {
+        const actor = await actorFor(from.actorId);
+        if (!actor) return null;
+        const resolved = resolveAddressedBot(
+          await profiles.list(actor),
+          target,
+        );
+        if (resolved.kind !== "found" || resolved.bot.id !== from.botId)
+          return null;
+        const refusal = selfRefusal(resolved.bot.name);
+        await refuse(from, target, "self", refusal);
+        return refusal;
+      } catch {
+        return null;
+      }
+    },
     async send({ from, target, envelope }) {
       const task = envelope.task?.trim() ?? "";
       if (!task) {
@@ -361,12 +403,7 @@ export function createHandoffDesk(options: {
       }
 
       if (found.id === from.botId) {
-        return refuse(
-          from,
-          target,
-          "self",
-          "A Bot cannot hand work to itself. Do it, or ask the person.",
-        );
+        return refuse(from, target, "self", selfRefusal(found.name));
       }
 
       // Read per hop and never held, so revoking a grant applies to the next hop rather than after a

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { IntelligenceAgentRunner } from "@copilotkit/runtime/v2";
 import { workOwner } from "@openbot/shared/work-owner";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { type AuditStore, handoffInitiator } from "../audit";
 import type { GroupConversations } from "../channels/group";
 import type { ChannelStore } from "../channels/routes";
@@ -11,6 +11,7 @@ import type { mountCopilotRuntime } from "../copilot";
 import type { Database } from "../db/client";
 import {
   agentProfiles,
+  agents,
   channels,
   groupBotThreads,
   intelligenceChannelMappings,
@@ -72,6 +73,24 @@ export function answerGoneFrom(database: Database) {
       return "the conversation it was going to was deleted";
     return null;
   };
+}
+
+/**
+ * The display names of these Bots, by id, read from this deployment's own rows. A Bot that is gone
+ * is left out, and the caller says "another Bot" for it.
+ */
+export function botNamesFrom(database: Database) {
+  return async (
+    botIds: readonly string[],
+  ): Promise<ReadonlyMap<string, string>> =>
+    new Map(
+      (
+        await database
+          .select({ id: agents.id, name: agents.name })
+          .from(agents)
+          .where(inArray(agents.id, [...botIds]))
+      ).map((row) => [row.id, row.name]),
+    );
 }
 
 /**
@@ -201,6 +220,8 @@ export async function startHandoffDelivery(deps: {
       // The asking conversation shown as working while a hop runs in it. Keyed by thread, resolved
       // to its channel by the store; a scratch thread maps to none and signals nowhere.
       setBusy: (input) => channelStore.signalBusy(input.threadId, input.busy),
+      // Who answered, for another Bot's answer in the conversation a forward hop quotes.
+      botNames: botNamesFrom(database),
       newRunId: () => randomUUID(),
       // The same address and the same token the runtime uses. Assembling either from configuration
       // produced a runner every join was refused for, because the thread's active run is a lock the
