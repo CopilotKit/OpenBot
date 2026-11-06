@@ -445,12 +445,19 @@ export function AllowedModelsDialog({
   );
 }
 
-/** Admin, Providers: which models Bots ran on in the last 30 days. */
-export function ModelUsageSection() {
+/**
+ * Admin, Providers: which models Bots ran on in the last 30 days. Only a team has an allowlist, so
+ * only a team is told that refused runs are counted.
+ */
+export function ModelUsageSection({ team }: { team: boolean }) {
   const usage = useQuery(modelUsageQueryOptions(30));
   return (
     <ControlsSection
-      description="Runs on each model in the last 30 days, including runs the allowlist refused."
+      description={
+        team
+          ? "Runs on each model in the last 30 days, including runs the allowlist refused."
+          : "Runs on each model in the last 30 days."
+      }
       title="Usage"
     >
       {() =>

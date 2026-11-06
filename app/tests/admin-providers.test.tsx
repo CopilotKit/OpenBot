@@ -170,6 +170,11 @@ test("a team's admin allows the models people pick, with no separate switch", as
     view.queryByRole("switch", { name: "Let people choose a model" }),
   ).toBeNull();
   expect(view.getByRole("button", { name: /Allowed models/ })).toBeTruthy();
+  expect(
+    await view.findByText(
+      "Runs on each model in the last 30 days, including runs the allowlist refused.",
+    ),
+  ).toBeTruthy();
 });
 
 test("a team with nothing allowed is told people see no picker until it allows one", async () => {
@@ -198,6 +203,11 @@ test("one person on their own machine is offered every model, and nothing can na
   expect(
     view.queryByRole("switch", { name: "Let people choose a model" }),
   ).toBeNull();
+  // Usage doesn't mention an allowlist one person doesn't have.
+  expect(
+    await view.findByText("Runs on each model in the last 30 days."),
+  ).toBeTruthy();
+  expect(view.queryByText(/allowlist refused/)).toBeNull();
 });
 
 test("Providers names what actually serves the models, with a vendor's mark only where one is vendored", async () => {

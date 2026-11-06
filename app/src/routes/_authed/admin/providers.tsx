@@ -36,7 +36,7 @@ export function ProvidersPage() {
       <ProviderSection />
       <ModelChoiceSection />
       {team ? <ModelAllowlistSection /> : null}
-      <ModelUsageSection />
+      <ModelUsageSection team={team} />
     </PageShell>
   );
 }
