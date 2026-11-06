@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- The Helm chart installs Intelligence 0.16.0-rc.6 instead of rc.5. A run that fails shows its own
+- The Helm chart installs Intelligence 0.16.0-rc.7 instead of rc.5. A run that fails shows its own
   error in the chat instead of "Runner connection dropped". A first install logs no PostgreSQL
   errors. Intelligence's services, Learning and its jobs stay up while PostgreSQL restarts, as the
   bundled one does on an upgrade that changes its image. The Learning agent reads its model key from
