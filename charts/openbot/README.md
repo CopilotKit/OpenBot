@@ -589,29 +589,10 @@ Intelligence that has a dashboard (managed Intelligence), the page links to it a
 
 **With an Intelligence of your own** (`intelligence.enabled: false`), Learning needs a container in its
 project before it collects or delivers anything. With nothing saved in Admin and no
-`config.learning.containerId`, the server assigns the project's `openbot` container as the default by
-itself once it exists. A current Intelligence lets the runtime key create it, and the server does. On
-one that does not, give the chart a credential that can and a setup Job creates it on install and
-every upgrade:
-
-- Managed Intelligence: a CopilotKit CLI login. Sign in into an empty folder and store the file it
-  writes, then set `config.learning.setup.cliLoginSecret.name: openbot-copilotkit-cli`:
-
-  ```sh
-  COPILOTKIT_CONFIG_DIR="$(mktemp -d)"; export COPILOTKIT_CONFIG_DIR
-  npx --yes copilotkit@latest login
-  kubectl create secret generic openbot-copilotkit-cli \
-    --from-file=config.json="$COPILOTKIT_CONFIG_DIR/auth/config.json"
-  ```
-
-  It is a person's 30-day session; only the Job reads it, never the server.
-- A CopilotKit local evaluation install: a service token Secret in
-  `config.learning.setup.serviceTokenSecret` with the project's numeric ID in
-  `config.learning.setup.projectId`. The server gets it too, so Admin can create the container again.
-
-Without either, create it once with `bun scripts/setup-learning.ts` from a computer that can sign in
-to Intelligence, or in Intelligence itself; the server log and Admin → Automatic Learning say exactly
-that. `config.learning.autoAssign: false` turns the automatic assignment off.
+`config.learning.containerId`, the server creates the project's `openbot` container with its runtime
+key and assigns it as the default. That needs Intelligence 0.16.0 or later; on an older one, create a
+container with ID `openbot` in Intelligence itself, and the server log and Admin → Automatic Learning
+say so. `config.learning.autoAssign: false` turns the automatic assignment off.
 `config.learning.containerId` sets the initial default container
 (`CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`) and `config.learning.revision` the skills revision
 (`CPK_INTELLIGENCE_SKILLS_REVISION`). Both are only starting values: settings saved in Admin →

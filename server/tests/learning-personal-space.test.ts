@@ -8,7 +8,10 @@ import {
   type LearningSettings,
 } from "@openbot/shared/learning";
 import type { LearningSpaceState } from "@openbot/shared/recorder-api";
-import type { LearningContainerSpec } from "../src/learning/ensure-container";
+import type {
+  ContainerCreation,
+  LearningContainerSpec,
+} from "../src/learning/ensure-container";
 import {
   classifyLearningSpaceProbe,
   createPersonalLearningSpaces,
@@ -53,9 +56,7 @@ function harness(
   options: {
     settings?: LearningSettings | (() => Promise<LearningSettings>);
     probe?: (call: Call) => Promise<unknown>;
-    create?: (
-      container: LearningContainerSpec,
-    ) => Promise<"created" | "present" | "skipped">;
+    create?: (container: LearningContainerSpec) => Promise<ContainerCreation>;
     probeTimeoutMs?: number;
   } = {},
 ) {
@@ -252,18 +253,6 @@ describe("the person's Learning space", () => {
       containerId: ADA_SPACE,
     });
     expect(h.creates).toHaveLength(1);
-  });
-
-  test("a space made in another project is a failure, not a space", async () => {
-    const h = harness({
-      probe: failWith("CONTAINER_NOT_FOUND"),
-      create: async () => "created",
-    });
-    expect((await h.spaces.state(ADA)).state).toBe("missing");
-    expect(h.store.rows.has(ADA)).toBe(false);
-    expect(h.logs).toContainEqual(
-      expect.objectContaining({ outcome: "create_failed" }),
-    );
   });
 
   test.each(["UNSUPPORTED_SERVER", "TIMEOUT"] as const)(

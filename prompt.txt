@@ -82,8 +82,8 @@ localhost) and run only
 bun scripts/setup-learning.ts after bun install; skip the managed npx commands. Chrome or Edge
 must be installed. Sign in through the isolated browser window and choose an accessible project;
 the helper creates or reuses openbot and writes that project's new runtime key and assignment.
-Existing key-only setups use authenticated Intelligence administration to create a container and
-assign it in OpenBot Admin. Automatic Learning defaults on;
+Existing key-only setups need nothing more: the server creates and assigns openbot with its key
+(Intelligence 0.16.0 and later). Automatic Learning defaults on;
 collection and delivery require an assigned container. OpenBot starts and chats without one. Administrators
 can assign a default container, override or exclude individual Bots, or pause Learning at
 Admin → Automatic Learning. Open Intelligence to review and publish proposed skills. Containers

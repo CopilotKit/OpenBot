@@ -1184,30 +1184,6 @@ describe("automatic Learning container assignment", () => {
     expect(config.learning).toEqual({ containerId: "support" });
     expect(config.learningAutoAssign).toBe(false);
   });
-
-  test("a service token and its project create the container; one without the other is refused", () => {
-    expect(loadConfig(baseEnvironment).learningSetup).toBeUndefined();
-    expect(
-      loadConfig({
-        ...baseEnvironment,
-        INTELLIGENCE_SERVICE_TOKEN: "synthetic-token",
-        INTELLIGENCE_PROJECT_ID: "7",
-      }).learningSetup,
-    ).toEqual({ serviceToken: "synthetic-token", projectId: "7" });
-    expect(() =>
-      loadConfig({
-        ...baseEnvironment,
-        INTELLIGENCE_SERVICE_TOKEN: "synthetic-token",
-      }),
-    ).toThrow("go together");
-    expect(() =>
-      loadConfig({
-        ...baseEnvironment,
-        INTELLIGENCE_SERVICE_TOKEN: "synthetic-token",
-        INTELLIGENCE_PROJECT_ID: "my-project",
-      }),
-    ).toThrow("numeric ID");
-  });
 });
 
 describe("memory sources and background research", () => {

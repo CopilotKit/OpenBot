@@ -553,44 +553,15 @@ describe("start.sh one computer each", () => {
   });
 });
 
-describe("start.sh Learning container check", () => {
+describe("start.sh and the Learning container", () => {
   /**
-   * The server assigns `openbot` once it exists, but its runtime key cannot create it. start.sh asks
-   * the setup helper, without a browser or a prompt, to make sure it exists, and relays its last line.
+   * The server creates and assigns `openbot` itself with its runtime key (Intelligence 0.16.0 and
+   * later), so start.sh no longer runs the setup helper before it.
    */
-  test.each(["INTELLIGENCE_API_KEY", "CPK_INTELLIGENCE_API_KEY"])(
-    "runs the non-interactive check when %s is set",
-    async (keyName) => {
-      const result = await runStartWithStaleServerProbe(401, {
-        settings: { [keyName]: "cpk-synthetic" },
-      });
-
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain(
-        "LEARNING-CHECK scripts/setup-learning.ts --non-interactive",
-      );
-      expect(result.stdout).not.toContain("noise");
-    },
-  );
-
-  test.each([
-    [
-      "a container is named",
-      { CPK_INTELLIGENCE_LEARNING_CONTAINER_ID: "mine" },
-    ],
-    ["it is switched off", { OPENBOT_LEARNING_AUTO_ASSIGN: "false" }],
-    ["it is switched off with 0", { OPENBOT_LEARNING_AUTO_ASSIGN: "0" }],
-  ])("is skipped when %s", async (_, settings) => {
+  test("leaves the container to the server", async () => {
     const result = await runStartWithStaleServerProbe(401, {
-      settings: { INTELLIGENCE_API_KEY: "cpk-synthetic", ...settings },
+      settings: { INTELLIGENCE_API_KEY: "cpk-synthetic" },
     });
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).not.toContain("LEARNING-CHECK");
-  });
-
-  test("is skipped without a runtime key", async () => {
-    const result = await runStartWithStaleServerProbe(401);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).not.toContain("LEARNING-CHECK");

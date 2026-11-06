@@ -149,7 +149,6 @@ server/tests/identity-provider-audit.test.ts: error TS2322: Type 'Promise<string
 server/tests/identity-provider-audit.test.ts: error TS7006: Parameter 'event' implicitly has an 'any' type.
 server/tests/intelligence-authentication.test.ts: error TS2769: No overload matches this call.
 server/tests/intelligence-authentication.test.ts: error TS2769: No overload matches this call.
-server/tests/learning-ensure-container.test.ts: error TS2322: Type '{ probes: number; probe: () => Promise<ContainerProbe>; project: () => Promise<{ organizationSlug: string; projectSlug: string; }>; }' is not assignable to type 'KeyIntelligence & { probes: number; }'.
 server/tests/learning-routes.test.ts: error TS2322: Type '{ "content-type": string; origin: string; } | { "content-type": string; origin?: undefined; }' is not assignable to type 'HeadersInit | undefined'.
 server/tests/mcp-grant-removal.integration.test.ts: error TS2322: Type 'Promise<undefined>' is not assignable to type 'Promise<AuthConfigOutcome>'.
 server/tests/mcp-grant-removal.integration.test.ts: error TS2322: Type '{ readSecret: () => Promise<null>; create: () => Promise<never>; updateSecret: () => Promise<never>; revoke: () => Promise<never>; }' is not assignable to type 'CredentialSecretReader & CredentialStore'.

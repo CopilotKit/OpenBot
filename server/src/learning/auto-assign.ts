@@ -12,6 +12,7 @@ import {
   askWhileIntelligenceStarts,
   type StartupClock,
 } from "../intelligence-startup";
+import type { ContainerCreation } from "./ensure-container";
 import type { LearningSettingsStore } from "./settings";
 
 /**
@@ -24,31 +25,6 @@ export type ContainerProbe =
   | "not_entitled"
   | "learning_off"
   | "unavailable";
-
-/**
- * Read a learned-skills error into whether the container is there.
- *
- * The runtime key cannot list or create Learning containers: Intelligence serves those routes only
- * to a person's session or CLI login. What it can do is read a container's published Skills, and
- * that read is scoped to the key's own project, so it answers the one question this needs without
- * a side effect. A container nobody has published to yet still exists: Intelligence says the
- * revision is missing or delivery is off, not that the container is.
- */
-export function classifyProbeError(error: unknown): ContainerProbe {
-  const code =
-    error !== null && typeof error === "object" && "code" in error
-      ? (error as { code: unknown }).code
-      : undefined;
-  if (code === "CONTAINER_NOT_FOUND") return "absent";
-  if (
-    code === "REVISION_NOT_FOUND" ||
-    code === "DELIVERY_DISABLED" ||
-    code === "REVISION_REVOKED"
-  )
-    return "present";
-  if (code === "ENTITLEMENT_REQUIRED") return "not_entitled";
-  return "unavailable";
-}
 
 /** The HTTP status and Intelligence error code a project-key Learning request failed with. */
 function requestFailure(error: unknown): { status?: number; code?: string } {
@@ -75,23 +51,15 @@ export function classifyLearningRouteError(error: unknown): ContainerProbe {
   return "unavailable";
 }
 
-/** The runtime client's catch-alls: a refusal it has no code for, which the read below can name. */
-const UNNAMED_REFUSALS = new Set([
-  "UNSUPPORTED_SERVER",
-  "AUTHORIZATION_FAILED",
-]);
-
 /**
- * Ask whether `containerId` exists in the project the runtime key belongs to.
- *
- * The published-Skills read answers it on every Intelligence. When that read fails with a code the
- * runtime client does not know (it reports any such refusal as `UNSUPPORTED_SERVER`, or a 403 as
- * `AUTHORIZATION_FAILED`), the container itself is read on the same key, whose refusal carries
- * Intelligence's own code: Learning switched off, a missing container, or Learning not licensed.
+ * Ask whether `containerId` exists in the project the runtime key belongs to, by reading it on that
+ * key (`GET /api/v1/learning/containers/:id`). The read is scoped to the key's own project and has no
+ * side effect, and its refusal carries Intelligence's own code: Learning switched off, a missing
+ * container, or Learning not licensed.
  */
 export async function probeLearningContainer(
-  client: Pick<CopilotKitIntelligence, "getLearnedSkillsSnapshot"> & {
-    experimental?: {
+  client: {
+    experimental: {
       learning: Pick<
         CopilotKitIntelligence["experimental"]["learning"],
         "getLearningContainer"
@@ -102,125 +70,13 @@ export async function probeLearningContainer(
   timeoutMs = 5_000,
 ): Promise<ContainerProbe> {
   try {
-    await client.getLearnedSkillsSnapshot({
+    await client.experimental.learning.getLearningContainer({
       containerId,
       signal: AbortSignal.timeout(timeoutMs),
     });
     return "present";
   } catch (error) {
-    const found = classifyProbeError(error);
-    const { code } = requestFailure(error);
-    if (
-      found !== "unavailable" ||
-      !client.experimental ||
-      !code ||
-      !UNNAMED_REFUSALS.has(code)
-    )
-      return found;
-    try {
-      await client.experimental.learning.getLearningContainer({
-        containerId,
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      return "present";
-    } catch (named) {
-      return classifyLearningRouteError(named);
-    }
-  }
-}
-
-/** The organization and project a runtime key belongs to, by slug. */
-export type KeyProject = { organizationSlug: string; projectSlug: string };
-
-/**
- * Which project a runtime key belongs to, read from the Learning link Intelligence returns for it.
- *
- * The key cannot name its own project directly. The Inspector projection it can read carries a link
- * to the project's Learning page, `/o/<organization>/<project>/learning`, and that is enough for a
- * helper holding a person's login to refuse to create a container in some other project. Anything
- * unreadable is `undefined`, and callers treat that as "cannot prove it".
- */
-export async function keyProject(
-  client: Pick<CopilotKitIntelligence, "getInspectorLearning">,
-  timeoutMs = 10_000,
-): Promise<KeyProject | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    // The Inspector read takes no signal, so the deadline races it.
-    const snapshot = await Promise.race([
-      client.getInspectorLearning({}),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("Inspector read timed out")),
-          timeoutMs,
-        );
-      }),
-    ]);
-    const [o, organizationSlug, projectSlug, learning] = new URL(
-      snapshot.links.learning,
-    ).pathname
-      .split("/")
-      .filter(Boolean)
-      .map(decodeURIComponent);
-    if (
-      o !== "o" ||
-      learning !== "learning" ||
-      !organizationSlug ||
-      !projectSlug
-    )
-      return undefined;
-    return { organizationSlug, projectSlug };
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** A runtime key's project by slug and by name: everything the key can say about where it lives. */
-export type KeyIdentity = KeyProject & {
-  organizationName: string;
-  projectName: string;
-};
-
-/**
- * The key's project slugs (see `keyProject`) and the organization and project names its Inspector
- * metadata carries. The names are what a CopilotKit CLI login can be compared on: the CLI reports
- * its organization by name and Clerk ID, never by slug. Anything unreadable is `undefined`.
- */
-export async function keyIdentity(
-  client: Pick<
-    CopilotKitIntelligence,
-    "getInspectorLearning" | "getInspectorMetadata"
-  >,
-  timeoutMs = 10_000,
-): Promise<KeyIdentity | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const [slugs, metadata] = await Promise.all([
-      keyProject(client, timeoutMs),
-      Promise.race([
-        client.getInspectorMetadata(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error("Inspector metadata timed out")),
-            timeoutMs,
-          );
-        }),
-      ]),
-    ]);
-    const identity = metadata?.identity;
-    if (!slugs || !identity?.organizationName || !identity.projectName)
-      return undefined;
-    return {
-      ...slugs,
-      organizationName: identity.organizationName,
-      projectName: identity.projectName,
-    };
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(timer);
+    return classifyLearningRouteError(error);
   }
 }
 
@@ -237,15 +93,11 @@ export function runtimeKeyClient(
   });
 }
 
-/** What creating the container with a credential that can did. `skipped`: nothing here could. */
-export type ContainerCreation = "present" | "created" | "skipped";
-
 export type LearningAutoAssign = {
   /** Check now, unless a check is already running, and return what it found. Never throws. */
   check(): Promise<LearningAutoAssignState>;
   /**
-   * Admin's "Create it now": try the configured credential again, whatever earlier attempts found,
-   * then check. Never throws; a failure comes back as the state's `createError`.
+   * Admin's "Create it now": try creating it again, whatever earlier attempts found, then check. Never throws; a failure comes back as the state's `createError`.
    */
   createNow(): Promise<LearningAutoAssignState>;
   /** Start a check in the background if none ran within the last `minIntervalMs`. */
@@ -274,10 +126,9 @@ const MIN_INTERVAL_MS = 60_000;
  *
  * - It never overrides a choice. A saved Admin setting of any kind, including a saved off, and a
  *   container named in the environment both mean there is nothing to do.
- * - It creates the container only through `create`, with a credential that can (the runtime key on
- *   an Intelligence that allows it, a service token on a local evaluation install, or a CopilotKit
- *   CLI login on this machine; see learning/ensure-container.ts), once per process unless Admin asks
- *   again. With none of them it says exactly what to run, once, in the log and on the Admin page.
+ * - It creates a missing container through `create`, with the runtime key (learning/ensure-container.ts),
+ *   once per process unless Admin asks again. When that fails it says what to do instead, once, in
+ *   the log and on the Admin page.
  * - It is safe on many replicas: the write is a conditional insert, so the first one wins and the
  *   rest see a saved setting. Only the winner writes the audit row.
  * - It never blocks startup or a turn. Every failure is logged once per kind and tried again later.
@@ -290,9 +141,9 @@ export function createLearningAutoAssign(options: {
   enabled: boolean;
   store: Pick<LearningSettingsStore, "saved" | "adoptDefault">;
   probe: (containerId: string) => Promise<ContainerProbe>;
-  /** Create the container with a credential that can. Absent when this deployment holds none. */
+  /** Create the missing container with the runtime key. Absent in tests that only probe. */
   create?: () => Promise<ContainerCreation>;
-  /** Exactly what an operator runs when the container is absent and nothing here created it. */
+  /** What an operator does when the container is absent and could not be created here. */
   instructions?: string;
   audit?: AuditStore;
   containerId?: string;
@@ -332,20 +183,15 @@ export function createLearningAutoAssign(options: {
 
   const instructions =
     options.instructions ??
-    `Run bun scripts/setup-learning.ts, or create a container with ID "${containerId}" in Intelligence; OpenBot assigns it within ${Math.round((options.retryMs ?? RETRY_MS) / 60_000)} minutes.`;
+    `Create a container with ID "${containerId}" in Intelligence; OpenBot assigns it within ${Math.round((options.retryMs ?? RETRY_MS) / 60_000)} minutes.`;
   /** Whether this process already tried `create`: once at boot, again only when Admin asks. */
   let createTried = false;
   let createError: string | undefined;
-  /**
-   * Whether the last attempt found nothing here that could create it (an Intelligence that does not
-   * let the runtime key, and no other credential). Admin then shows the steps, not a button.
-   */
-  let createSkipped = false;
 
   /**
-   * Create it with the configured credential, once. True when it is there now. `unavailable` when
-   * Intelligence could not answer just then (a 5xx, nothing answering), which is not this
-   * credential's one try: the next check tries again.
+   * Create it with the runtime key, once. True when it is there now. `unavailable` when Intelligence
+   * could not answer just then (a 5xx, nothing answering), which is not this process's one try: the
+   * next check tries again.
    */
   const tryCreate = async (): Promise<boolean | "unavailable"> => {
     if (!options.create || createTried) return false;
@@ -353,15 +199,13 @@ export function createLearningAutoAssign(options: {
     try {
       const result = await options.create();
       createError = undefined;
-      createSkipped = result === "skipped";
-      if (createSkipped) return false;
       log({
         type: "learning-auto-assign",
         outcome: result === "created" ? "container_created" : "container_found",
         containerId,
         message:
           result === "created"
-            ? `Created the "${containerId}" Learning container with the configured credential.`
+            ? `Created the "${containerId}" Learning container with the runtime key.`
             : `The "${containerId}" Learning container is there now.`,
       });
       return true;
@@ -394,7 +238,7 @@ export function createLearningAutoAssign(options: {
     state: "absent",
     containerId,
     instructions,
-    canCreate: Boolean(options.create) && !createSkipped,
+    canCreate: Boolean(options.create),
     ...(createError ? { createError } : {}),
   });
 

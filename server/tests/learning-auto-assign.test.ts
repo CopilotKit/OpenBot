@@ -1,26 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  type CopilotKitIntelligence,
-  LearnedSkillsError,
-} from "@copilotkit/runtime/v2";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import {
-  type ContainerCreation,
   type ContainerProbe,
-  classifyProbeError,
+  classifyLearningRouteError,
   createLearningAutoAssign,
-  keyProject,
   type LearningAutoAssign,
   probeLearningContainer,
   runtimeKeyClient,
   withLearningAutoAssign,
 } from "../src/learning/auto-assign";
 import {
+  type ContainerCreation,
   ensureLearningContainer,
   keyIntelligence,
 } from "../src/learning/ensure-container";
 import { createLearningSettingsStore } from "../src/learning/settings";
-import { skillSnapshot } from "./fixtures/learned-skills";
 import {
   type FakeIntelligence,
   fakeIntelligence,
@@ -64,37 +58,49 @@ function harness(
   return { store, events, logs, probes, autoAssign };
 }
 
+/** A refusal shaped like the runtime client's: Intelligence's HTTP status and error code. */
+function refusal(status: number, code: string) {
+  return Object.assign(new Error(code), { status, code });
+}
+
 describe("probing a Learning container with the runtime key", () => {
   test.each([
-    ["CONTAINER_NOT_FOUND", "absent"],
-    ["REVISION_NOT_FOUND", "present"],
-    ["DELIVERY_DISABLED", "present"],
-    ["REVISION_REVOKED", "present"],
-    ["ENTITLEMENT_REQUIRED", "not_entitled"],
-    ["AUTHENTICATION_FAILED", "unavailable"],
-    ["AUTHORIZATION_FAILED", "unavailable"],
-    ["UNSUPPORTED_SERVER", "unavailable"],
-  ] as const)("%s means %s", (code, expected) => {
-    expect(classifyProbeError(new LearnedSkillsError(code, false))).toBe(
-      expected,
-    );
+    [404, "LEARNING_CONTAINER_NOT_FOUND", "absent"],
+    [404, "ROUTE_NOT_FOUND", "learning_off"],
+    [403, "LEARNING_NOT_ENABLED", "not_entitled"],
+    [401, "AUTH_UNAUTHENTICATED", "unavailable"],
+    [500, "INTERNAL_SERVER_ERROR", "unavailable"],
+  ] as const)("%i %s means %s", (status, code, expected) => {
+    expect(classifyLearningRouteError(refusal(status, code))).toBe(expected);
   });
 
   test("errors without a code, and non-errors, are unavailable", () => {
-    expect(classifyProbeError(new Error("network down"))).toBe("unavailable");
-    expect(classifyProbeError(null)).toBe("unavailable");
-    expect(classifyProbeError("CONTAINER_NOT_FOUND")).toBe("unavailable");
+    expect(classifyLearningRouteError(new Error("network down"))).toBe(
+      "unavailable",
+    );
+    expect(classifyLearningRouteError(null)).toBe("unavailable");
   });
 
-  test("a published snapshot means the container is there", async () => {
+  test("reading the container means it is there", async () => {
     const asked: string[] = [];
     expect(
       await probeLearningContainer(
         {
-          getLearnedSkillsSnapshot: async (request) => {
-            asked.push(request.containerId);
-            expect(request.signal).toBeInstanceOf(AbortSignal);
-            return skillSnapshot();
+          experimental: {
+            learning: {
+              getLearningContainer: async (request) => {
+                asked.push(request.containerId);
+                expect(request.signal).toBeInstanceOf(AbortSignal);
+                return {
+                  id: request.containerId,
+                  name: "OpenBot",
+                  projectId: 1,
+                  promptContext: null,
+                  createdAt: "2026-11-05T00:00:00.000Z",
+                  updatedAt: "2026-11-05T00:00:00.000Z",
+                };
+              },
+            },
           },
         },
         "openbot",
@@ -107,8 +113,12 @@ describe("probing a Learning container with the runtime key", () => {
     expect(
       await probeLearningContainer(
         {
-          getLearnedSkillsSnapshot: async () => {
-            throw new LearnedSkillsError("CONTAINER_NOT_FOUND", false);
+          experimental: {
+            learning: {
+              getLearningContainer: async () => {
+                throw refusal(404, "LEARNING_CONTAINER_NOT_FOUND");
+              },
+            },
           },
         },
         "openbot",
@@ -117,54 +127,21 @@ describe("probing a Learning container with the runtime key", () => {
     expect(
       await probeLearningContainer(
         {
-          getLearnedSkillsSnapshot: ({ signal }) =>
-            new Promise((_, reject) =>
-              signal?.addEventListener("abort", () => reject(signal.reason)),
-            ),
+          experimental: {
+            learning: {
+              getLearningContainer: ({ signal }) =>
+                new Promise((_, reject) =>
+                  signal?.addEventListener("abort", () =>
+                    reject(signal.reason),
+                  ),
+                ),
+            },
+          },
         },
         "openbot",
         5,
       ),
     ).toBe("unavailable");
-  });
-});
-
-describe("which project a runtime key belongs to", () => {
-  const snapshot = (learning: string) =>
-    ({ links: { learning, candidates: null, runs: null } }) as Awaited<
-      ReturnType<CopilotKitIntelligence["getInspectorLearning"]>
-    >;
-
-  test("is read from the project's Learning link", async () => {
-    for (const link of [
-      "https://intelligence.copilotkit.ai/o/acme/support%20bots/learning",
-      "https://intelligence.copilotkit.ai/o/acme/support%20bots/learning/openbot",
-    ])
-      expect(
-        await keyProject({ getInspectorLearning: async () => snapshot(link) }),
-      ).toEqual({ organizationSlug: "acme", projectSlug: "support bots" });
-  });
-
-  test("anything unreadable, failing or slow cannot prove a project", async () => {
-    expect(
-      await keyProject({
-        getInspectorLearning: async () =>
-          snapshot("https://intelligence.copilotkit.ai/settings"),
-      }),
-    ).toBeUndefined();
-    expect(
-      await keyProject({
-        getInspectorLearning: async () => {
-          throw new Error("403");
-        },
-      }),
-    ).toBeUndefined();
-    expect(
-      await keyProject(
-        { getInspectorLearning: () => new Promise(() => {}) },
-        5,
-      ),
-    ).toBeUndefined();
   });
 });
 
@@ -246,7 +223,7 @@ describe("automatic Learning container assignment", () => {
         state: "absent",
         containerId: "openbot",
         canCreate: false,
-        instructions: expect.stringContaining("bun scripts/setup-learning.ts"),
+        instructions: expect.stringContaining('ID "openbot"'),
       },
     ],
     ["not_entitled", { state: "not_entitled" }],
@@ -271,12 +248,10 @@ describe("automatic Learning container assignment", () => {
   test("the absent message tells the operator how to create the container", async () => {
     const h = harness({ probe: "absent" });
     await h.autoAssign.check();
-    expect(String(h.logs[0]?.message)).toContain(
-      "bun scripts/setup-learning.ts",
-    );
+    expect(String(h.logs[0]?.message)).toContain('ID "openbot"');
   });
 
-  test("with a credential that can, a fresh deployment creates the container and assigns it", async () => {
+  test("a fresh deployment creates the container with the runtime key and assigns it", async () => {
     let probe: ContainerProbe = "absent";
     let creates = 0;
     const h = harness({
@@ -302,24 +277,28 @@ describe("automatic Learning container assignment", () => {
     ]);
   });
 
-  test("without one, it says exactly what to run, once, and offers no button", async () => {
-    const instructions = "Run exactly this.";
+  test("when creating fails, it says what to do instead, once, and still offers to try again", async () => {
+    const instructions = "Do exactly this.";
     const h = harness({
       probe: "absent",
       instructions,
-      create: async () => "skipped",
+      create: async () => {
+        throw new Error("This Intelligence is older than 0.16.0.");
+      },
     });
-    const state = await h.autoAssign.check();
-    // Nothing here could create it, so a button would do nothing: Admin shows the steps alone.
-    expect(state).toEqual({
+    expect(await h.autoAssign.check()).toEqual({
       state: "absent",
       containerId: "openbot",
       instructions,
-      canCreate: false,
+      canCreate: true,
+      createError: "This Intelligence is older than 0.16.0.",
     });
     await h.autoAssign.check();
-    expect(h.logs).toHaveLength(1);
-    expect(String(h.logs[0]?.message)).toEndWith(instructions);
+    expect(h.logs.map((entry) => entry.outcome)).toEqual([
+      "create_failed",
+      "absent",
+    ]);
+    expect(String(h.logs[1]?.message)).toEndWith(instructions);
   });
 
   test("a failed creation is reported, tried once per process, and again only when Admin asks", async () => {
@@ -329,14 +308,14 @@ describe("automatic Learning container assignment", () => {
       probe: async () => probe,
       create: async () => {
         creates++;
-        if (creates === 1) throw new Error("Intelligence refused the token.");
+        if (creates === 1) throw new Error("Intelligence refused the key.");
         probe = "present";
         return "created";
       },
     });
     expect(await h.autoAssign.check()).toMatchObject({
       state: "absent",
-      createError: "Intelligence refused the token.",
+      createError: "Intelligence refused the key.",
     });
     await h.autoAssign.check();
     expect(creates).toBe(1);
@@ -600,13 +579,7 @@ describe("the boot check on a first install, while Intelligence is still startin
       "ws://127.0.0.1:9",
     );
     const { autoAssign, logs } = boot(intelligence, () =>
-      ensureLearningContainer({
-        directory: process.cwd(),
-        apiUrl: intelligence.url,
-        nonInteractive: true,
-        cliLogin: false,
-        key,
-      }),
+      ensureLearningContainer({ key }),
     );
     expect(await settled(autoAssign)).toEqual({
       state: "assigned",

@@ -26,8 +26,8 @@ keys and custom targets are preserved. For fresh self-hosted setup, set `INTELLI
 to the deployment's HTTPS API origin and run only `bun scripts/setup-learning.ts`. Install
 Chrome or Edge first: the helper opens an isolated browser window for the deployment's usual
 sign-in, lets you choose an accessible project, and creates or reuses `openbot` before minting
-its runtime key. Local development may use a loopback HTTP origin. Existing key-only setups
-use authenticated Intelligence administration to create a container and assign it in OpenBot Admin.
+its runtime key. Local development may use a loopback HTTP origin. With a key already set, the
+server creates and assigns `openbot` itself (Intelligence 0.16.0 and later).
 There is no managed licence step. Then add `OPENAI_API_KEY`.
 
 The same CLI sign-in also prepares Composio on the first `bash scripts/start.sh`;

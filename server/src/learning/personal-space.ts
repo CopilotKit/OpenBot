@@ -5,7 +5,10 @@ import type { LearningSpaceState } from "@openbot/shared/recorder-api";
 import { eq } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { learningPersonSpaces } from "../db/schema/learning";
-import type { LearningContainerSpec } from "./ensure-container";
+import type {
+  ContainerCreation,
+  LearningContainerSpec,
+} from "./ensure-container";
 
 /**
  * A person's own Learning space: one Intelligence Learning container per OpenBot person, which every recording they make
@@ -121,11 +124,9 @@ function until<T>(promise: Promise<T>, signal?: AbortSignal) {
 /**
  * Each person's own Learning space, created on first need.
  *
- * THE RUNTIME KEY CANNOT CREATE A CONTAINER (learning/ensure-container.ts): only a service token on a local evaluation
- * install, or a CopilotKit CLI login against managed Intelligence, can. `create` is whichever of those this deployment
- * holds, and absent when it holds neither; then a space that does not exist cannot be made here, and the person is told
- * so. A service token creates in one request, well inside the capture pass's deadline; the CLI takes longer than that,
- * which is why the space is also made when the browser connects (`kick`), so it is there before the first recording.
+ * `create` makes it with the runtime key (learning/ensure-container.ts) in one request, well inside the capture pass's
+ * deadline. It is also made when the browser connects (`kick`), so it is there before the first recording. Absent in
+ * tests that only read; then a space that does not exist cannot be made here, and the person is told so.
  *
  * Safe on many replicas without a lock: Intelligence's container id is unique per project, so a second creation of the
  * same space answers "already exists", which counts as present, and the row that remembers it is a conditional insert.
@@ -136,10 +137,8 @@ export function createPersonalLearningSpaces(deps: {
   /** The runtime key's client, for the skills read that proves a container exists. */
   snapshots: Pick<CopilotKitIntelligence, "getLearnedSkillsSnapshot">;
   store: PersonSpaceStore;
-  /** Creates a container with a credential that can; absent when this deployment holds none. */
-  create?: (
-    container: LearningContainerSpec,
-  ) => Promise<"created" | "present" | "skipped">;
+  /** Creates a container in the runtime key's project. */
+  create?: (container: LearningContainerSpec) => Promise<ContainerCreation>;
   /** The person's display name, for the container's name in Intelligence. */
   nameFor?: (userId: string) => Promise<string | null>;
   /** Default 3_000, so a check fits inside the runtime's 5 s selector deadline. */
@@ -201,13 +200,6 @@ export function createPersonalLearningSpaces(deps: {
           id: containerId,
           name: `OpenBot: ${name || containerId}`.slice(0, 255),
         });
-        if (result === "skipped") return false;
-        // A key that can answer and still cannot see it means the credential made it in another project.
-        if ((await probe(containerId, undefined, false)) === "missing") {
-          throw new Error(
-            "The credential created the space, but this runtime key cannot see it, so it is in another Intelligence project.",
-          );
-        }
         await deps.store.confirm(userId, containerId);
         probes.set(containerId, {
           expiresAt: now() + CACHE_MS,
@@ -226,7 +218,7 @@ export function createPersonalLearningSpaces(deps: {
           type: "learning-personal-space",
           outcome: "create_failed",
           containerId,
-          // A credential's error can name an account; only its own sentence is kept, and briefly.
+          // Only the error's own sentence is kept, and briefly.
           message:
             error instanceof Error
               ? error.message.slice(0, 300)
