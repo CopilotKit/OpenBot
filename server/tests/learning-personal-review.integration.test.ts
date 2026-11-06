@@ -381,3 +381,46 @@ describe("approving and rejecting the skills learned from your own recordings", 
     ).toBe(404);
   });
 });
+
+describe("Learn now on your own space", () => {
+  const own = personalLearningContainerId(ada);
+  const learn = (app: ReturnType<typeof review>, container = own) =>
+    app.request(`/runs?container=${container}`, { method: "POST" });
+
+  test("Learn now starts a run on the person's own space only while people approve", async () => {
+    const admins = review({ personalReview: "admins" });
+    expect((await learn(admins)).status).toBe(403);
+    expect(
+      (served[served.length - 1] as FakeIntelligence).requests.filter(
+        (entry) => entry.method === "POST" && /runs/.test(entry.path),
+      ),
+    ).toEqual([]);
+
+    const people = review({ personalReview: "people" });
+    expect((await learn(people, "elsewhere")).status).toBe(404);
+    const response = await learn(people);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      run: { id: string; status: string };
+    };
+    expect(body.run.id).toBeTruthy();
+    expect(audits).toMatchObject([
+      {
+        eventType: "configuration.changed",
+        targetType: "learning",
+        actorUserId: ada,
+        payload: {
+          change: "learning_run_started",
+          containerId: own,
+          runId: body.run.id,
+          by: `${ada}@example.test`,
+        },
+      },
+    ]);
+
+    expect(
+      (await learn(review({ personalReview: "people", withManage: false })))
+        .status,
+    ).toBe(503);
+  });
+});

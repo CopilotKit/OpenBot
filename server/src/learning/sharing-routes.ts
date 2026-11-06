@@ -308,6 +308,47 @@ export function createPersonalLearningRoutes(
     });
   }
 
+  /** Learn now on the person's own space, only while people approve their own skills. */
+  routes.post("/runs", async (context) => {
+    const actor = context.var.actor;
+    const source = await sourceFor(actor, context.req.query("container"));
+    if (!source) {
+      return context.json({ error: "You have no space like that." }, 404);
+    }
+    if (!(await canReview())) {
+      return context.json(
+        { error: "An admin decides when Learning runs. You can't start it." },
+        403,
+      );
+    }
+    const manage = deps.manage;
+    if (!manage) {
+      return context.json(
+        { error: "Couldn't reach Intelligence just now. Try again." },
+        503,
+      );
+    }
+    const containerId = source.containerId;
+    try {
+      const run = await manage.startLearningRun({ containerId });
+      await audit({
+        eventType: "configuration.changed",
+        targetType: "learning",
+        actorUserId: actor.id,
+        payload: {
+          change: "learning_run_started",
+          containerId,
+          runId: run.id,
+          by: actor.email,
+        },
+      });
+      return context.json({ run: { id: run.id, status: run.status } });
+    } catch (error) {
+      const failure = learningFailure(error);
+      return context.json({ error: failure.error }, failure.status);
+    }
+  });
+
   routes.get("/skills/:name", async (context) => {
     const name = context.req.param("name");
     if (!isLearnedSkillName(name)) {
