@@ -27,7 +27,7 @@ import { learningSentence } from "../popup/record-form";
 
 const LEADING_STATUS = /^Learning capture is (?:paused|off):\s*/;
 const HELD_LINE =
-  "Your events are kept in this browser and sent when Intelligence accepts them; it tries again every 5 minutes.";
+  "Your events are kept in this browser and sent when OpenBot's back end accepts them; it tries again every 5 minutes.";
 const PARKED_LINE =
   "Your events are kept in this browser. The Recorder tries again when the browser next starts.";
 
@@ -45,8 +45,8 @@ const NOT_IN_A_SPACE = new Set<LearningSpaceState["state"]>([
 
 const INTELLIGENCE_STATUS: Record<CaptureStatus["intelligence"], string> = {
   off: "Off",
-  connecting: "Connecting to Intelligence",
-  streaming: "Streaming to Intelligence",
+  connecting: "Connecting to OpenBot's back end",
+  streaming: "Streaming to OpenBot's back end",
   retrying: "Retrying",
   held: "Paused",
   parked: "Off",
@@ -120,7 +120,7 @@ function captureText(
       ...spaceLines(learning),
       ...(rejected > 0
         ? [
-            `${plural(rejected, "event was", "events were")} refused by Intelligence`,
+            `${plural(rejected, "event was", "events were")} refused by OpenBot's back end`,
           ]
         : []),
       ...(dropped > 0
@@ -175,7 +175,7 @@ export function SendingLearningRow({
     ? keptText(kept.parked, kept.reason)
     : {
         title: "Learning capture",
-        lines: ["Sending the rest of this recording to Intelligence"],
+        lines: ["Sending the rest of this recording to OpenBot's back end"],
       };
   return (
     <LearningRow
