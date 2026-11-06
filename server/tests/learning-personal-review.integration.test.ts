@@ -9,7 +9,6 @@ import {
 import { randomUUID } from "node:crypto";
 import type {
   LearningSettings,
-  LearningSource,
   PersonalReview,
 } from "@openbot/shared/learning";
 import { inArray } from "drizzle-orm";
@@ -21,6 +20,7 @@ import { currentEdition, setEdition } from "../src/edition";
 import { createSkillApprovalStore } from "../src/learning/approvals";
 import { runtimeKeyClient } from "../src/learning/auto-assign";
 import { personalLearningContainerId } from "../src/learning/personal-space";
+import type { LearningManagement } from "../src/learning/review";
 import { learningScopes } from "../src/learning/scopes";
 import type { LearningSettingsStore } from "../src/learning/settings";
 import { createLearningSharingStore } from "../src/learning/sharing";
@@ -69,7 +69,7 @@ function review(options: {
   containers?: string[];
   personalReview?: LearningSettings["personalReview"];
   withManage?: boolean;
-  scopes?: (userId: string) => LearningSource[];
+  manage?: LearningManagement;
 }) {
   const intelligence = fakeIntelligence("current", {
     containers: options.containers ?? [personalLearningContainerId(ada)],
@@ -93,8 +93,11 @@ function review(options: {
     context,
     next,
   ) => {
-    const id = context.req.header("x-person") ?? ada;
-    context.set("actor", { id, email: `${id}@example.test`, role: "user" });
+    context.set("actor", {
+      id: ada,
+      email: `${ada}@example.test`,
+      role: "user",
+    });
     await next();
   };
   const deps: PersonalLearningRouteDeps = {
@@ -105,12 +108,11 @@ function review(options: {
     sharingAllowed: async () => true,
     ...(options.withManage === false
       ? {}
-      : { manage: client.experimental.learning }),
+      : { manage: options.manage ?? client.experimental.learning }),
     settings: {
       read: async () => settings,
     } as unknown as LearningSettingsStore,
     scopesFor: async (actor) =>
-      options.scopes?.(actor.id) ??
       learningScopes({ edition: currentEdition(), userId: actor.id, settings }),
   };
   return createPersonalLearningRoutes(deps, requireUser);
@@ -131,6 +133,47 @@ describe("reviewing the skills learned from your own recordings", () => {
       proposals: [{ id: PROPOSAL, status: "pending_review" }],
       latestRun: { status: "succeeded", trigger: "manual" },
     });
+  });
+
+  test("the review lists only pending proposals and the newest run", async () => {
+    const candidate = (id: string, status: string) => ({
+      id,
+      title: id,
+      description: "",
+      reason: "",
+      operation: "create",
+      status,
+      createdAt: "2026-11-01T00:00:00.000Z",
+      reviewedAt: null,
+    });
+    const run = (id: string, createdAt: string, status: string) => ({
+      id,
+      status,
+      triggerSource: "manual",
+      candidateCount: 0,
+      insightCount: 0,
+      failureCode: null,
+      createdAt,
+      startedAt: createdAt,
+      completedAt: createdAt,
+    });
+    const manage = {
+      listLearningCandidates: async () => [
+        candidate("pending-one", "pending_review"),
+        candidate("approved-one", "approved"),
+      ],
+      listLearningRuns: async () => [
+        run("old", "2026-11-01T00:00:00.000Z", "failed"),
+        run("new", "2026-11-03T00:00:00.000Z", "succeeded"),
+      ],
+    } as unknown as LearningManagement;
+    const body = (await (
+      await review({ manage }).request("/review")
+    ).json()) as PersonalReview;
+    expect(body.sources[0]?.proposals?.map((entry) => entry.id)).toEqual([
+      "pending-one",
+    ]);
+    expect(body.sources[0]?.latestRun?.status).toBe("succeeded");
   });
 
   test("whether a person can review follows who an admin chose, and the personal edition", async () => {
