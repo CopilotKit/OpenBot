@@ -1,4 +1,9 @@
-import { IconBolt, IconFileOff } from "@tabler/icons-react";
+import {
+  IconBolt,
+  IconChevronRight,
+  IconFileOff,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -23,6 +28,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
@@ -203,17 +209,28 @@ export function SkillPage({ slug }: { slug: string }) {
         submitLabel="Save changes"
       />
 
-      <PageSection
-        description="People can't run it any more, and no Bot offers it."
-        title="Delete"
-      >
-        <Button
-          className="mt-4"
-          onClick={() => setRemoving(true)}
-          variant="destructive"
-        >
-          Delete skill
-        </Button>
+      {/* A row that opens the confirmation, as deleting a Bot is on its own page. */}
+      <PageSection title="Manage">
+        <PageRows>
+          <Item
+            render={<button onClick={() => setRemoving(true)} type="button" />}
+            size="sm"
+          >
+            <ItemMedia variant="icon">
+              <IconTrash />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Delete</ItemTitle>
+              <ItemDescription>
+                People can't run it any more, and no Bot offers it. You can't
+                undo this.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <IconChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          </Item>
+        </PageRows>
       </PageSection>
 
       <Dialog onOpenChange={setRemoving} open={removing}>

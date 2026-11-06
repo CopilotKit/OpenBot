@@ -306,7 +306,9 @@ describe("a skill's page", () => {
   test("deleting asks first, then goes back to the list", async () => {
     const { view, router } = renderAt("/admin/skills/triage");
     const user = userEvent.setup({ document });
-    await user.click(await view.findByRole("button", { name: "Delete skill" }));
+    await user.click(
+      await view.findByRole("button", { name: /^Delete People can.t run it/ }),
+    );
     expect(writes).toEqual([]);
     const dialog = await view.findByRole("dialog");
     expect(within(dialog).getByText("Delete Triage the inbox?")).toBeTruthy();

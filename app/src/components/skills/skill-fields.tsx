@@ -11,8 +11,8 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 import { type SkillFormValues, skillFormSchema } from "@/lib/skills/form";
+import { cn } from "@/lib/utils";
 
 const TOOLS_HINT =
   "Using this skill loads these tools for that reply. It doesn't give access. A Bot only uses tools it already has.";
@@ -22,8 +22,8 @@ const TOOLS_HINT =
  * what the Bot is told, and which tools it needs.
  *
  * Two layouts of the same form. In the Capabilities panel it is one stacked column. On a page of its
- * own (`sections`) it is three sections, Name, Instructions and Tools, each in its own card or
- * rows, as Add rule is, with Cancel and the submit button below them.
+ * own (`sections`) it is three sections, Name, Instructions and Tools: the name's fields in a card,
+ * the instructions as one text box, and the tools as rows, with Cancel and the submit button below.
  */
 export function SkillFields({
   defaultValues,
@@ -257,7 +257,8 @@ export function SkillFields({
             description="What the Bot is told when someone uses this skill. Write it as instructions to the Bot."
             title="Instructions"
           >
-            <PageCard className="mt-4">{instructionsField}</PageCard>
+            {/* The box alone: a card around one text box is a frame around a frame. */}
+            <div className="mt-4">{instructionsField}</div>
           </PageSection>
 
           <PageSection description={TOOLS_HINT} title="Tools">
