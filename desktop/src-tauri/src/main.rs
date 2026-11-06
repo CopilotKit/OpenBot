@@ -2782,22 +2782,13 @@ async fn start_stack_inner<R: tauri::Runtime>(
             .as_ref()
             .and_then(|picked| picked.installed_port())
             .is_some();
-        /*
-         * The bundled Bots only when there is a key for them.
-         *
-         * A plan is not a key, and both of them refuse to start without one, so a person signing in
-         * with the subscription they already pay for was handed two dead containers and two red lines
-         * about Bots they never chose. See `BOTS_NEEDING_A_KEY`.
-         */
-        let bundled_bots = stack::BundledBots::for_credential(&credential);
         attempt.require_current()?;
         // Even a failed up can have started some services. Keep their root until down succeeds.
         *shell.containers.lock().unwrap() = Some(ContainerDeployment {
             root: root.clone(),
             address: found.clone(),
         });
-        let requested_services =
-            stack::up(&found, &root, installed_harness, bundled_bots, &secrets)?;
+        let requested_services = stack::up(&found, &root, installed_harness, &secrets)?;
         report(&app, "services", true, "containers up");
 
         report_running(&app, "migrate", "applying migrations", None);
@@ -8172,7 +8163,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let address = engine::Address::new(engine::Engine::Docker, None);
         let secrets = stack::Secrets::new();
-        let up = stack::up(&address, &root, false, stack::BundledBots::none(), &secrets);
+        let up = stack::up(&address, &root, false, &secrets);
         let migrate = stack::migrate(&address, &root, &secrets);
         std::fs::remove_dir_all(root).unwrap();
         assert!(up.is_ok(), "{up:?}");
@@ -13065,33 +13056,39 @@ fn main() {
         let mut choice = serde_json::json!({"id":"byo-url", "agentUrl":remote});
         let (expected_up, expected_image) = match case {
             "remote" | "remote-stale-image" => (
-                "compose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot agent-langgraph",
+                "compose up -d --no-build --pull never postgres agent-computer server worker",
                 None,
             ),
             "anthropic-api" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"api-key", "apiKey":"synthetic-anthropic-key"});
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer server worker agent-langgraph agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
             }
             "compatible" => {
                 model = serde_json::json!({"provider":"openai-compatible", "login":"endpoint", "baseUrl":"http://127.0.0.1:11434/v1", "model":"synthetic-model", "apiKey":""});
-                ("compose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot agent-langgraph", None)
+                (
+                    "compose up -d --no-build --pull never postgres agent-computer server worker",
+                    None,
+                )
             }
             "installed" => {
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot agent-langgraph agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
             }
             "none" => {
                 choice = serde_json::Value::Null;
-                ("compose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot agent-langgraph", None)
+                (
+                    "compose up -d --no-build --pull never postgres agent-computer server worker",
+                    None,
+                )
             }
             "chatgpt-plan" => {
                 model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
             }
             "claude-plan" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
-                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer server worker agent-harness", Some("agent-claude-sdk"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-claude-sdk"))
             }
             _ => panic!("unknown test case"),
         };
@@ -13205,17 +13202,15 @@ fn main() {
         .unwrap();
         assert_eq!(
             settings.get("TENANT_PACKAGE_DIR").map(String::as_str),
-            Some("../examples/fintech")
+            Some("../examples/personal")
         );
-        let bundled_url = settings
-            .get("MANAGED_AGENT_AG_UI_URL")
-            .map(String::as_str)
-            .unwrap_or("");
+        // The personal edition raises no bundled Bot, so none is advertised, whatever the model.
         assert_eq!(
-            bundled_url.is_empty(),
-            !expected_up
-                .split_whitespace()
-                .any(|service| service == "agent-langgraph"),
+            settings
+                .get("MANAGED_AGENT_AG_UI_URL")
+                .map(String::as_str)
+                .unwrap_or(""),
+            "",
             "case={case}, persisted advertisement must match actual Start services"
         );
         if case.starts_with("remote") || case == "compatible" {
@@ -13377,7 +13372,12 @@ fn main() {
             "{commands}"
         );
         assert!(commands.contains("\tcompose version\n"), "{commands}");
-        assert!(commands.contains("\tcompose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot agent-langgraph\n"), "{commands}");
+        assert!(
+            commands.contains(
+                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
+            ),
+            "{commands}"
+        );
         assert!(
             commands.contains("\tcompose run --rm --pull never migrate\n"),
             "{commands}"
@@ -13402,10 +13402,12 @@ fn main() {
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
     }
 
+    /// The personal edition raises no bundled Bot, so one an earlier Start left exited is neither
+    /// raised nor blamed: Start fails for the service it did raise, and only for that one.
     #[test]
-    fn anthropic_start_does_not_raise_openai_only_agent_bot_or_fail_on_its_stale_exit() {
+    fn start_raises_no_bundled_bot_and_is_not_failed_by_a_stale_ones_exit() {
         if crate::test_support::isolated_process(
-            "tests::anthropic_start_does_not_raise_openai_only_agent_bot_or_fail_on_its_stale_exit",
+            "tests::start_raises_no_bundled_bot_and_is_not_failed_by_a_stale_ones_exit",
         ) {
             return;
         }
@@ -13438,38 +13440,31 @@ fn main() {
             },
             None,
         ))
-        .expect_err("dead selected LangGraph service must fail Start");
+        .expect_err("a dead agent-computer must fail Start");
 
         let commands = std::fs::read_to_string(&record).expect("command record");
         assert!(
             commands.contains(
-                "\tcompose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-langgraph\n"
+                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
             ),
             "{commands}"
-        );
-        assert!(
-            !commands
-                .contains("compose up -d --no-build --pull never postgres supervisor agent-computer server worker agent-bot"),
-            "Anthropic Start must not target the OpenAI-only agent-bot: {commands}"
         );
         assert_eq!(problem.said, "Part of OpenBot stopped during startup.");
         let detail = problem.detail.as_deref().unwrap_or_default();
         assert!(
-            detail.contains("agent-langgraph stopped: langgraph died after boot"),
+            detail.contains("agent-computer stopped: agent-computer died after boot"),
             "{detail}"
         );
-        assert!(
-            !detail.contains("agent-bot"),
-            "stale, unrequested agent-bot exit must not fail this Anthropic Start: {detail}"
-        );
-        assert!(
-            !commands.contains("\tcompose logs --tail 3 agent-bot\n"),
-            "stale unrequested agent-bot should not get reported: {commands}"
-        );
-        assert!(
-            commands.contains("\tcompose logs --tail 3 agent-langgraph\n"),
-            "selected dead LangGraph service should get reported: {commands}"
-        );
+        for bot in ["agent-bot", "agent-langgraph"] {
+            assert!(
+                !detail.contains(bot),
+                "a stale, unrequested {bot} exit must not fail Start: {detail}"
+            );
+            assert!(
+                !commands.contains(&format!("\tcompose logs --tail 3 {bot}\n")),
+                "a stale, unrequested {bot} should not get reported: {commands}"
+            );
+        }
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
     }

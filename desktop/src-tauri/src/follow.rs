@@ -694,7 +694,7 @@ mod tests {
     }
 
     /// Staging pulls what installing the staged release would pull, and nothing else. Every image
-    /// the release names was 19 for v0.3.0 where an installation pulls 8: several GB over a slow
+    /// the release names was 19 for v0.3.0 where an installation pulls 5: several GB over a slow
     /// registry on every app update, and the all-in-one image among them had no arm64 build.
     #[test]
     fn staging_asks_for_exactly_what_installing_the_release_would() {
@@ -721,7 +721,8 @@ mod tests {
         );
 
         // The services this installation runs, its migration and the two sign-in images, each at
-        // the release being staged.
+        // the release being staged. No supervisor and no bundled Bot: the personal edition runs
+        // neither (see `stack::SERVICES`).
         let manifest = updates::staged_manifest(&root).unwrap();
         let named = |name: &str| {
             manifest["artifacts"]["images"][name]["reference"]
@@ -732,16 +733,13 @@ mod tests {
         let mut expected = vec![
             "pgvector/pgvector:pg17".to_string(),
             named("server"),
-            named("supervisor"),
             named("agent-computer"),
-            named("agent-bot"),
-            named("agent-langgraph"),
             named(crate::plan::SIGN_IN_IMAGE),
             named(crate::plan::CHATGPT_SIGN_IN_IMAGE),
         ];
         expected.sort();
         assert_eq!(staged, expected);
-        assert_eq!(staged.len(), 8);
+        assert_eq!(staged.len(), 5);
         assert!(!staged.contains(&named("openbot")));
         assert_eq!(updates::candidate_images(&manifest).unwrap().len(), 19);
 

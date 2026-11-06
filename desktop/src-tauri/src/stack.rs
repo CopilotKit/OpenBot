@@ -30,84 +30,20 @@ use crate::problem::Problem;
 /// downloading Bun and running `bun install`, which on a fresh Windows machine took longer than
 /// everything else in the install put together. Now they are containers like the rest, and the
 /// restart policy that keeps them up is Docker's.
-const SERVICES: [&str; 5] = [
-    "postgres",
-    "supervisor",
-    "agent-computer",
-    "server",
-    "worker",
-];
+///
+/// No `supervisor`, and none of the bundled Bots. This app runs the personal edition (see
+/// `env::compose`): every Bot shares the one `agent-computer`, and its Personal Assistant runs inside
+/// the server. The supervisor is still stopped on Stop (`stop_computers`), for the
+/// computers an installation that predates this made for each Bot.
+const SERVICES: [&str; 4] = ["postgres", "agent-computer", "server", "worker"];
 
 /// The Compose profile `server` and `worker` sit behind, so `scripts/start.sh`, whose server is a
 /// host process, never starts a second one. Named on every command rather than only on `up`, so
 /// `down` stops them and `config` describes them.
 const OPENBOT_PROFILE: &str = "openbot";
 
-/**
-The Bots that ship with OpenBot, which only run on an API key.
-
-BOTH REFUSE TO START WITHOUT ONE, saying so themselves: "OPENAI_API_KEY is not set. This Bot cannot
-answer without a model." That is correct of them and wrong of us to ignore. Somebody who signs in
-with the ChatGPT or Claude subscription they already pay for has no key by design, so raising these
-gave them two containers that died on startup and two red lines on the setup screen, about Bots they
-never chose.
-
-Started when a key exists and left alone when it does not. The Bot the person actually picked speaks
-its plan and answers either way.
-*/
-const AGENT_BOT: &str = "agent-bot";
-const AGENT_LANGGRAPH: &str = "agent-langgraph";
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct BundledBots {
-    pub agent_bot: bool,
-    pub agent_langgraph: bool,
-}
-
-impl BundledBots {
-    /// One provider decision for both service selection and the advertised package endpoint.
-    pub fn for_credential(credential: &crate::env::ModelCredential) -> Self {
-        use crate::env::ModelCredential;
-        match credential {
-            ModelCredential::OpenAi { .. }
-            | ModelCredential::Compatible { .. }
-            | ModelCredential::ProviderOAuth { .. } => Self::openai_compatible(),
-            ModelCredential::Anthropic { .. } => Self::anthropic(),
-            ModelCredential::None
-            | ModelCredential::ClaudePlan { .. }
-            | ModelCredential::ChatGptPlan { .. } => Self::none(),
-        }
-    }
-
-    pub const fn none() -> Self {
-        Self {
-            agent_bot: false,
-            agent_langgraph: false,
-        }
-    }
-
-    pub const fn openai_compatible() -> Self {
-        Self {
-            agent_bot: true,
-            agent_langgraph: true,
-        }
-    }
-
-    pub const fn anthropic() -> Self {
-        Self {
-            agent_bot: false,
-            agent_langgraph: true,
-        }
-    }
-}
-
-pub fn selected_services(harness: bool, bots: BundledBots) -> Vec<&'static str> {
+pub fn selected_services(harness: bool) -> Vec<&'static str> {
     let mut services = SERVICES.to_vec();
-    if bots.agent_bot {
-        services.push(AGENT_BOT);
-    }
-    if bots.agent_langgraph {
-        services.push(AGENT_LANGGRAPH);
-    }
     if harness {
         services.push("agent-harness");
     }
@@ -1048,7 +984,7 @@ pub fn installation_images_in(
     harness: bool,
     settings: &Secrets,
 ) -> Result<Vec<String>, Problem> {
-    let mut requested = selected_services(harness, BundledBots::openai_compatible());
+    let mut requested = selected_services(harness);
     requested.push("migrate");
     let mut command = compose_command(engine, root, settings);
     if release != root {
@@ -1100,14 +1036,13 @@ pub fn pull(
     engine: &Address,
     root: &Path,
     harness: bool,
-    bots: BundledBots,
     secrets: &Secrets,
     on_complete: impl FnOnce(crate::pull_metrics::PullMetrics),
 ) -> Result<(), Problem> {
     let Some(json_progress) = crate::pull_metrics::compose_pull_progress(engine) else {
         return Ok(());
     };
-    let mut requested = selected_services(harness, bots);
+    let mut requested = selected_services(harness);
     requested.push("migrate");
     let mut command = compose_command(engine, root, secrets);
     if json_progress {
@@ -1131,8 +1066,6 @@ pub fn up(
     engine: &Address,
     root: &Path,
     harness: bool,
-    // Which bundled Bots can read the provider the model screen selected.
-    bots: BundledBots,
     secrets: &Secrets,
 ) -> Result<Vec<&'static str>, crate::problem::Problem> {
     /*
@@ -1143,7 +1076,7 @@ pub fn up(
      * fails the whole `up` rather than the one service nobody asked for. The flag comes before
      * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
      */
-    let requested = selected_services(harness, bots);
+    let requested = selected_services(harness);
     let mut command = compose_start_command(engine, root, secrets, std::env::consts::OS)?;
     if harness {
         command.args(["--profile", "harness"]);
@@ -4414,10 +4347,10 @@ pub fn verify_runtime_update_images(
         }
         verified.insert(service.to_string());
     }
-    for service in ["supervisor", "agent-computer"] {
-        if !verified.contains(service) {
-            return Err(format!("candidate {service} was not verified"));
-        }
+    // Not the supervisor: the personal edition runs none. One still running from before is checked
+    // above like any other container.
+    if !verified.contains("agent-computer") {
+        return Err("candidate agent-computer was not verified".into());
     }
     Ok(())
 }
@@ -8903,33 +8836,19 @@ fn main() {
     }
 
     /// The published side of a mapping, which is the only side anything on this machine binds.
-    /// A plan is not a key, and provider-specific Bots are not raised to fail.
+    /// The personal edition: one computer, no supervisor, and no bundled Bot, whatever the model.
     #[test]
-    fn bundled_bot_service_selection_follows_the_selected_provider() {
-        for bot in [AGENT_BOT, AGENT_LANGGRAPH] {
+    fn the_personal_edition_raises_one_computer_and_no_bundled_bot() {
+        for service in ["supervisor", "agent-bot", "agent-langgraph"] {
+            assert!(!SERVICES.contains(&service), "{service} is started");
             assert!(
-                !SERVICES.contains(&bot),
-                "{bot} is started unconditionally as well"
+                !selected_services(true).contains(&service),
+                "{service} is started"
             );
         }
-
-        let no_key = selected_services(false, BundledBots::none());
-        assert!(!no_key.contains(&AGENT_BOT));
-        assert!(!no_key.contains(&AGENT_LANGGRAPH));
-
-        let openai = selected_services(false, BundledBots::openai_compatible());
-        assert!(openai.contains(&AGENT_BOT));
-        assert!(openai.contains(&AGENT_LANGGRAPH));
-
-        let anthropic = selected_services(false, BundledBots::anthropic());
-        assert!(
-            !anthropic.contains(&AGENT_BOT),
-            "Anthropic credentials must not start the OpenAI-only managed Bot"
-        );
-        assert!(anthropic.contains(&AGENT_LANGGRAPH));
-
-        let picked = selected_services(true, BundledBots::none());
-        assert!(picked.contains(&"agent-harness"));
+        assert!(SERVICES.contains(&"agent-computer"));
+        assert!(!selected_services(false).contains(&"agent-harness"));
+        assert!(selected_services(true).contains(&"agent-harness"));
     }
 
     /// Stop has to name both profiles, or what sits behind them keeps running: the one Bot the
@@ -9307,12 +9226,11 @@ fn main() {
         let settings = "POSTGRES_PORT=5544\nPICKED_HARNESS_PORT=4206\n";
         std::fs::write(root.join(".env"), settings).unwrap();
         std::fs::write(root.join("docker-compose.override.yml"), "services: {}\n").unwrap();
-        let services = up(&podman, &root, true, BundledBots::none(), &Secrets::new()).unwrap();
+        let services = up(&podman, &root, true, &Secrets::new()).unwrap();
         assert_eq!(
             services,
             [
                 "postgres",
-                "supervisor",
                 "agent-computer",
                 "server",
                 "worker",
@@ -9357,13 +9275,11 @@ fn main() {
 
         std::fs::write(root.join(".fixture-config-failure"), "").unwrap();
         std::fs::remove_file(&record).unwrap();
-        assert!(
-            up(&podman, &root, true, BundledBots::none(), &Secrets::new())
-                .unwrap_err()
-                .detail
-                .unwrap()
-                .contains("synthetic invalid deployment override")
-        );
+        assert!(up(&podman, &root, true, &Secrets::new())
+            .unwrap_err()
+            .detail
+            .unwrap()
+            .contains("synthetic invalid deployment override"));
         assert!(!std::fs::read_to_string(record).unwrap().contains(" up "));
     }
 

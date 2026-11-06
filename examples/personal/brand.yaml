@@ -1,3 +1,4 @@
 tenant:
-  id: personal
+  # Keep package ownership stable when Desktop switches from the team edition.
+  id: openbot
   product_name: OpenBot
