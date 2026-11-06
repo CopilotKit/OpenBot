@@ -27,13 +27,13 @@ export function matchesToken(expected: string, offered: string): boolean {
 /**
  * The secret a caller offered, however it could carry it.
  *
- * WebSocket clients cannot set upgrade headers, so the stream also accepts the token as a query
- * parameter.
+ * WebSocket clients cannot set upgrade headers, so the stream and the terminal also accept the
+ * token as a query parameter.
  */
 export function offeredToken(headers: Headers, url: URL): string {
   // The header path trims; the query path must too, or `?token=%20SECRET` 401s while the same
   // value in a header succeeds and the failure looks stream-specific.
-  if (url.pathname === "/stream")
+  if (url.pathname === "/stream" || url.pathname === "/terminal")
     return url.searchParams.get("token")?.trim() ?? "";
   const header = headers.get("x-openbot-computer-token")?.trim();
   if (header) return header;

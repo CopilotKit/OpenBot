@@ -89,7 +89,13 @@ type Recorded = {
   payload: Record<string, unknown>;
 };
 
-function app(options: { routed?: string; undecided?: RoutingUndecided } = {}) {
+function app(
+  options: {
+    routed?: string;
+    undecided?: RoutingUndecided;
+    skillsFor?: (id: string) => Promise<readonly string[]>;
+  } = {},
+) {
   const written: Recorded[] = [];
   /** Every call the router was asked to make, so "never asked" is an assertion and not a hope. */
   const asked: string[] = [];
@@ -132,7 +138,12 @@ function app(options: { routed?: string; undecided?: RoutingUndecided } = {}) {
   server.route(
     "/api/route",
     createRoutingRoutes(
-      createCoworkerRoutingService({ store, router, auditStore }),
+      createCoworkerRoutingService({
+        store,
+        router,
+        auditStore,
+        skillsFor: options.skillsFor,
+      }),
       asActor,
     ),
   );
@@ -335,4 +346,48 @@ test("the HTTP adapter refuses oversized routing input with 400", async () => {
   });
   expect(asked).toEqual([]);
   expect(written).toEqual([]);
+});
+
+test("the HTTP route filters by all skill commands before recording the recipient", async () => {
+  const { server, written } = app({
+    skillsFor: async (id) =>
+      id === "knowledge" ? ["first", "second"] : ["first"],
+  });
+  const response = await post(server, {
+    text: "Help me",
+    skillSlugs: ["first", "second"],
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ agentId: "knowledge" });
+  expect(written).toHaveLength(1);
+  expect(written[0]).toMatchObject({
+    targetId: "knowledge",
+    payload: { candidates: ["knowledge"] },
+  });
+});
+
+test("the HTTP route refuses skills no Bot offers together", async () => {
+  const { server, written, asked } = app({ skillsFor: async () => [] });
+  const response = await post(server, {
+    text: "Help me",
+    skillSlugs: ["first", "second"],
+  });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    error:
+      "No Bot offers all the selected skills. Choose different skills or a Bot with @.",
+  });
+  expect(written).toHaveLength(0);
+  expect(asked).toHaveLength(0);
+});
+
+test("the HTTP route rejects malformed skill constraints", async () => {
+  const { server, written, asked } = app();
+  for (const skillSlugs of ["first", [null], ["bad command"]]) {
+    expect((await post(server, { text: "Help me", skillSlugs })).status).toBe(
+      400,
+    );
+  }
+  expect(written).toHaveLength(0);
+  expect(asked).toHaveLength(0);
 });

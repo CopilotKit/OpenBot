@@ -21,7 +21,10 @@ export type InputMessage =
       event: "pressed" | "released" | "moved";
       x: number;
       y: number;
-      button?: "left" | "right" | "middle";
+      /** The button this event is about. `none` for a move with nothing held. */
+      button?: "none" | "left" | "right" | "middle";
+      /** Every button held during the event, as `MouseEvent.buttons` counts them: left 1, right 2, middle 4. */
+      buttons?: number;
       clickCount?: number;
       modifiers?: number;
     }
@@ -154,9 +157,20 @@ export async function startScreencast(
 
   client.on("Page.screencastFrame", (event: ScreencastFrame) => {
     const { data, sessionId, metadata } = event;
-    // Acknowledge every frame. Chrome will not send the next one until the current is acked, which is
-    // the backpressure that stops a slow client drowning in frames. Forgetting this is why a naive
-    // implementation delivers one frame and then appears to hang.
+    /*
+     * Acknowledge every frame, the moment it arrives.
+     *
+     * Chrome will not send the next frame until this one is acked. Forgetting the ack is why a naive
+     * implementation delivers one frame and then appears to hang.
+     *
+     * Not held back to pace a slow viewer, though that looks like the backpressure it is for. Chrome
+     * keeps two frames unacked at most, and a change it makes while two are out is never sent, then
+     * or later: a page that has gone still has nothing new to send. Holding the ack until the
+     * viewer's connection had taken the frame left the screen on the page as it was a moment before
+     * it stopped, measured on Chromium 151 as the last of five quick changes never arriving
+     * (screencast-pacing-browser.test.ts). The viewer is paced where the frames leave instead, by
+     * holding only the newest one while its connection is busy (index.ts).
+     */
     void client
       .send("Page.screencastFrameAck", { sessionId })
       .catch(() => undefined);
@@ -199,6 +213,11 @@ export async function startScreencast(
           x: message.x,
           y: message.y,
           button: message.button ?? "left",
+          // Without it a page reads `MouseEvent.buttons` from `button`, so a hover sent as "left" was
+          // a drag with the left button held. Sent only when the surface said, as older ones do not.
+          ...(message.buttons !== undefined
+            ? { buttons: message.buttons }
+            : {}),
           // Chrome needs a non-zero clickCount on press/release or the page sees a move that happens
           // to have a button set, and no click ever fires.
           clickCount: message.event === "moved" ? 0 : (message.clickCount ?? 1),

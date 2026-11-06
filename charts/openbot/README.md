@@ -113,6 +113,19 @@ architecture you have and push it somewhere the cluster can reach. Check before 
 docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.9 | grep architecture
 ```
 
+**On kind, on an Apple Silicon Mac**, the node is arm64 and the vanilla install has two amd64-only
+images: OpenBot's and `ghcr.io/huggingface/text-embeddings-inference:cpu-*`; everything else it
+renders is multi-arch. `kind load docker-image` prints `loading...` for them and the node then
+silently drops the amd64 image, so the pod still cannot pull it. Import each one into the node's
+containerd by platform instead, and Docker Desktop's Rosetta emulation runs it, slowly on the first
+start, which the server's startup probe tolerates:
+
+```sh
+docker pull --platform linux/amd64 "$IMAGE"
+docker save --platform linux/amd64 "$IMAGE" \
+  | docker exec -i kind-control-plane ctr -n k8s.io images import --all-platforms --platform linux/amd64 -
+```
+
 **Intelligence credentials, unless the chart installs Intelligence.** With the bundled Intelligence
 (the default) there are none to fetch: the chart makes OpenBot's key itself and needs only the
 licence. With `intelligence.enabled: false`, OpenBot requires an Intelligence you name and the chart
@@ -181,8 +194,9 @@ managedNodeGroups:
   - name: workers
     # amd64: the published image has no arm64 variant. See the image note above.
     instanceType: t3.large
-    desiredCapacity: 2
-    minSize: 2
+    # Three, not two: the vanilla install requests more CPU than two t3.large have. See below.
+    desiredCapacity: 3
+    minSize: 3
     maxSize: 4
     volumeSize: 60
     volumeType: gp3
@@ -191,6 +205,22 @@ managedNodeGroups:
     disableIMDSv1: true
     disablePodIMDS: true
 ```
+
+**Why three nodes.** The scheduler places a pod by what it requests, not by what it uses, and the
+vanilla install requests about 3.25 vCPU for as long as it runs: summing `resources.requests.cpu`
+over the Deployments and StatefulSets in
+`helm template openbot charts/openbot -f charts/openbot/ci/vanilla-values.yaml`, times their
+replicas, gives 2200m for the Deployments (OpenBot's two servers and Intelligence's API, gateway,
+embeddings and Learning) and 1050m for the StatefulSets (both databases, Redis, object storage and
+the shared computer, which alone asks for 500m). The install Jobs add about 400m while they run. A
+t3.large leaves about 1.93 vCPU allocatable, and EKS's own pods (the VPC CNI, kube-proxy, CoreDNS,
+metrics-server and the EBS CSI driver) take several hundred millicores of that, so two nodes come
+out a few hundred millicores short. Nothing errors: both nodes fill to 90% or more of their
+allocatable CPU in requests, and the last pod to be scheduled, usually `openbot-computer-0`, stays
+`Pending` with `0/2 nodes are available: 2 Insufficient cpu` in `kubectl -n openbot describe pod`.
+`maxSize` does not rescue it, because this recipe installs no cluster autoscaler, so nothing ever
+adds the third node by itself. A smaller cluster that shows that event needs another node,
+`eksctl scale nodegroup --cluster openbot --name workers --nodes 3`, or a larger instance type.
 
 **Why the two IMDS lines.** A node's instance metadata service, at 169.254.169.254, hands out that
 node's IAM role to anything that asks from the node. A Bot's computer is a pod on that node running
@@ -440,6 +470,33 @@ A plain Kubernetes Secret is the default, because that is what a self-hosted clu
 cluster has, so Secrets Manager, Secret Manager and Key Vault are a values block rather than three
 code paths.
 
+### An ACM certificate for the ALB, and the CAA record it needs
+
+`eks-values.yaml` serves the Ingress through the AWS Load Balancer Controller, and HTTPS on that ALB
+means a certificate from ACM. If your domain has CAA records and none of them lists `amazon.com`,
+ACM is not allowed to issue one, and the failure surfaces two steps later as the wrong problem. A
+domain on Cloudflare is the usual way to have such records without having written them: once a zone
+has any CAA record, Universal SSL adds records for its own authorities (DigiCert, Let's Encrypt,
+Sectigo, Google Trust Services, SSL.com, Comodo) beside it, and not for Amazon.
+
+The certificate fails with `FailureReason` `CAA_ERROR`, yet `aws acm wait certificate-validated`
+still returns success, because it waits on the DNS validation of the domain and that part passed.
+The controller then tries to put the certificate on a listener and reports `UnsupportedCertificate:
+The certificate ... must have a fully-qualified domain name, a supported signature, and a supported
+key size`, which sends you looking at the key and the name rather than at DNS. Check the status, not
+the waiter, and check what CAA says:
+
+```sh
+aws acm describe-certificate --certificate-arn "$CERT_ARN" --query Certificate.Status  # ISSUED
+dig +short CAA example.com
+```
+
+The fix is a CAA record `0 issue "amazon.com"`, then a new certificate request. Put it on the apex,
+where it covers every name below it and stays for renewals. Putting it only on the host works for
+the first issuance, but a CNAME cannot share its name with any other record, so the host's CAA has
+to be removed before the host's CNAME to the ALB is created, and ACM's automatic renewal then meets
+the apex's records again and fails the same way.
+
 ### Check for a default StorageClass first
 
 A fresh EKS cluster very often has none. `eksctl` creates `gp2`, which is not marked default and uses
@@ -486,7 +543,8 @@ one API replica; `networkPolicy.enabled` is set with an external database and no
 `networkPolicy.extraEgress`, or with `computers.mode: sandbox` and no
 `networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks, or
 `computers.egressProxy` is turned on with policies and no `networkPolicy.computerExtraEgress`, or with
-no `secrets.egressProxyUrl` where this chart writes the Secret. Not on this list, because the chart
+no `secrets.egressProxyUrl` where this chart writes the Secret; a tag annotation gives CopilotKit's
+AWS tag key a different value (see [AWS usage attribution](#aws-usage-attribution)). Not on this list, because the chart
 generates them wherever nobody else holds one: the routines worker's secret (see
 [The routines sweep](#the-routines-sweep)), and, with the bundled database, the key encryption key,
 the computer token and the database password.
@@ -793,6 +851,39 @@ It reaches every computer as `EGRESS_PROXY_DEFAULT`, behind the egress filter, s
 policy still decides what a Bot may reach. Turning it on with `networkPolicy.enabled` and no
 `computerExtraEgress`, or with no URL where this chart holds the Secret, is refused at install.
 
+## AWS usage attribution
+
+The load balancers this chart has AWS create carry a tag that credits CopilotKit, through AWS Partner
+Revenue Measurement, for the AWS usage OpenBot drives. It is on for every install and has no
+setting. It is the same tag the bundled Intelligence puts on its own Ingress:
+
+```text
+aws-apn-id-058264219587 = pc:avjdxr516uh0mgsqob730tzgy
+```
+
+The key is CopilotKit's Partner Central account and the value is its product code, both constants in
+the chart rather than values. The tag adds no permission, request or resource, and asks nothing of
+you at install or upgrade.
+
+- **The Ingress**, in `alb.ingress.kubernetes.io/tags`. The AWS Load Balancer Controller applies it
+  to the load balancer it creates, with the role it already has. It is rendered for every
+  `ingress.className`, because other controllers ignore it, and a load balancer shared through
+  `alb.ingress.kubernetes.io/group.name` is tagged too.
+- **The server's Service, when `server.service.type` is `LoadBalancer`**, in
+  `service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags`, which both the AWS Load
+  Balancer Controller and the in-tree AWS provider read. Any other type creates nothing in AWS, so it
+  carries no tag.
+
+Your own tags in that annotation are kept, in order, with ours appended. Another partner's
+`aws-apn-id-<account>` tag is kept, and so is a legacy `aws-apn-id` carrying another partner's value:
+up to ten partners can each tag one resource. A legacy `aws-apn-id=pc:avjdxr516uh0mgsqob730tzgy` is
+ours from before the suffixed key, and is replaced by it so the load balancer is not counted twice.
+The install is refused only when your annotation gives `aws-apn-id-058264219587` a different value.
+Remove that entry.
+
+Not tagged: with `httpRoute`, the load balancer belongs to your Gateway rather than to this chart, so
+tag it there; and the EBS volumes behind the chart's PersistentVolumeClaims.
+
 ## Upgrades
 
 ### Coming from a release before 0.0.14: a computer now runs as uid 1001
@@ -819,6 +910,25 @@ upgrade run that way keeps running as root and says nothing. Pass the value, or 
 `fsGroupChangePolicy: OnRootMismatch` is deliberate. Unset means `Always`, which walks every file on
 every mount, and a real Chromium profile is tens of thousands of small ones; in `sandbox` mode that
 pass would run again on every resume from idle.
+
+### Moving the bundled Intelligence restarts its database
+
+Each Intelligence release moves the image of Intelligence's own PostgreSQL, so an upgrade that moves
+the bundled Intelligence replaces that database's pod. The Job that installs Learning's queue
+(`<release>-intelligence-learning-queue-migration-<revision>`) starts beside that restart and waits
+for the database inside its own deadline, `intelligence.learning.queue.migration.activeDeadlineSeconds`,
+which this chart sets to 15 minutes. **`--reuse-values` will not pick this up:** it drops this
+chart's defaults, so a release upgraded with it keeps Intelligence's own 5 minutes. Pass the value
+(`--set intelligence.learning.queue.migration.activeDeadlineSeconds=900`), or drop the flag.
+
+If the Job runs out of time first, the upgrade stops with `UPGRADE FAILED`, the Job's status is
+`DeadlineExceeded` and its log ends `waiting for PostgreSQL to accept connections`. Nothing is wrong
+with the database or the migration. Run `helm upgrade` again once that pod is Ready: the next
+revision's Job finds the database up and completes.
+
+**After a failed revision, give your values again rather than `--reuse-values`.** Helm reuses the
+values of the last revision that succeeded, not those of the failed one, so a value you changed in
+the failed upgrade is silently undone. Pass the same `-f` files and `--set` flags you upgraded with.
 
 ### How a rollout is sequenced
 

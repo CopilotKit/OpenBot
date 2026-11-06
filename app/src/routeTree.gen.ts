@@ -50,6 +50,7 @@ import { Route as AuthedSettingsMemoryRouteImport } from './routes/_authed/setti
 import { Route as AuthedSettingsNotificationsRouteImport } from './routes/_authed/settings/notifications'
 import { Route as AuthedSettingsPasswordsRouteImport } from './routes/_authed/settings/passwords'
 import { Route as AuthedSettingsSetupRouteImport } from './routes/_authed/settings/setup'
+import { Route as AuthedSettingsThisComputerRouteImport } from './routes/_authed/settings/this-computer'
 import { Route as AuthedSignInRequestIdRouteImport } from './routes/_authed/sign-in/$requestId'
 import { Route as AuthedAppAgentsIndexRouteImport } from './routes/_authed/_app/agents/index'
 import { Route as AuthedAppBotsIndexRouteImport } from './routes/_authed/_app/bots.index'
@@ -73,6 +74,8 @@ import { Route as AuthedAdminPluginsIndexRouteImport } from './routes/_authed/ad
 import { Route as AuthedAdminPluginsKeyRouteImport } from './routes/_authed/admin/plugins/$key'
 import { Route as AuthedAdminPluginsArcadeRouteImport } from './routes/_authed/admin/plugins/arcade'
 import { Route as AuthedAdminPluginsComposioRouteImport } from './routes/_authed/admin/plugins/composio'
+import { Route as AuthedAdminSkillsSlugRouteImport } from './routes/_authed/admin/skills_.$slug'
+import { Route as AuthedAdminSkillsNewRouteImport } from './routes/_authed/admin/skills_.new'
 import { Route as AuthedSettingsPersonalActivityRouteImport } from './routes/_authed/settings/_personal/activity'
 import { Route as AuthedSettingsPersonalComputerRouteImport } from './routes/_authed/settings/_personal/computer'
 import { Route as AuthedSettingsPersonalCredentialsRouteImport } from './routes/_authed/settings/_personal/credentials'
@@ -95,6 +98,8 @@ import { Route as AuthedAppConnectionsBrowseArcadeRouteImport } from './routes/_
 import { Route as AuthedAppConnectionsBrowseComposioRouteImport } from './routes/_authed/_app/connections.browse.composio'
 import { Route as AuthedSettingsPersonalCredentialsNewRouteImport } from './routes/_authed/settings/_personal/credentials_.new'
 import { Route as AuthedSettingsPersonalPluginsSplatRouteImport } from './routes/_authed/settings/_personal/plugins.$'
+import { Route as AuthedSettingsPersonalSkillsSlugRouteImport } from './routes/_authed/settings/_personal/skills_.$slug'
+import { Route as AuthedSettingsPersonalSkillsNewRouteImport } from './routes/_authed/settings/_personal/skills_.new'
 import { Route as AuthedAppConnectionsKeyBotsAgentIdRouteImport } from './routes/_authed/_app/connections.$key_.bots.$agentId'
 import { Route as AuthedAppConnectionsKeyToolsToolRouteImport } from './routes/_authed/_app/connections.$key_.tools.$tool'
 import { Route as AuthedAdminPluginsKeyBotsAgentIdRouteImport } from './routes/_authed/admin/plugins/$key_.bots.$agentId'
@@ -305,6 +310,12 @@ const AuthedSettingsSetupRoute = AuthedSettingsSetupRouteImport.update({
   path: '/setup',
   getParentRoute: () => AuthedSettingsRouteRoute,
 } as any)
+const AuthedSettingsThisComputerRoute =
+  AuthedSettingsThisComputerRouteImport.update({
+    id: '/this-computer',
+    path: '/this-computer',
+    getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
 const AuthedSignInRequestIdRoute = AuthedSignInRequestIdRouteImport.update({
   id: '/sign-in/$requestId',
   path: '/sign-in/$requestId',
@@ -432,6 +443,16 @@ const AuthedAdminPluginsComposioRoute =
     path: '/plugins/composio',
     getParentRoute: () => AuthedAdminRouteRoute,
   } as any)
+const AuthedAdminSkillsSlugRoute = AuthedAdminSkillsSlugRouteImport.update({
+  id: '/skills_/$slug',
+  path: '/skills/$slug',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminSkillsNewRoute = AuthedAdminSkillsNewRouteImport.update({
+  id: '/skills_/new',
+  path: '/skills/new',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
 const AuthedSettingsPersonalActivityRoute =
   AuthedSettingsPersonalActivityRouteImport.update({
     id: '/activity',
@@ -564,6 +585,18 @@ const AuthedSettingsPersonalPluginsSplatRoute =
     path: '/plugins/$',
     getParentRoute: () => AuthedSettingsPersonalRoute,
   } as any)
+const AuthedSettingsPersonalSkillsSlugRoute =
+  AuthedSettingsPersonalSkillsSlugRouteImport.update({
+    id: '/skills_/$slug',
+    path: '/skills/$slug',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
+const AuthedSettingsPersonalSkillsNewRoute =
+  AuthedSettingsPersonalSkillsNewRouteImport.update({
+    id: '/skills_/new',
+    path: '/skills/new',
+    getParentRoute: () => AuthedSettingsPersonalRoute,
+  } as any)
 const AuthedAppConnectionsKeyBotsAgentIdRoute =
   AuthedAppConnectionsKeyBotsAgentIdRouteImport.update({
     id: '/connections/$key_/bots/$agentId',
@@ -626,6 +659,7 @@ export interface FileRoutesByFullPath {
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/settings/setup': typeof AuthedSettingsSetupRoute
+  '/settings/this-computer': typeof AuthedSettingsThisComputerRoute
   '/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
   '/admin/': typeof AuthedAdminIndexRoute
   '/settings/': typeof AuthedSettingsIndexRoute
@@ -645,6 +679,8 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
+  '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
   '/settings/computer': typeof AuthedSettingsPersonalComputerRoute
   '/settings/credentials': typeof AuthedSettingsPersonalCredentialsRoute
@@ -672,6 +708,8 @@ export interface FileRoutesByFullPath {
   '/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
   '/settings/credentials/new': typeof AuthedSettingsPersonalCredentialsNewRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
+  '/settings/skills/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
+  '/settings/skills/new': typeof AuthedSettingsPersonalSkillsNewRoute
   '/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
   '/connections/$key/bots/$agentId': typeof AuthedAppConnectionsKeyBotsAgentIdRoute
   '/connections/$key/tools/$tool': typeof AuthedAppConnectionsKeyToolsToolRoute
@@ -713,6 +751,7 @@ export interface FileRoutesByTo {
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/settings/setup': typeof AuthedSettingsSetupRoute
+  '/settings/this-computer': typeof AuthedSettingsThisComputerRoute
   '/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
   '/admin': typeof AuthedAdminIndexRoute
   '/capabilities/memory': typeof AuthedAppCapabilitiesMemoryRoute
@@ -731,6 +770,8 @@ export interface FileRoutesByTo {
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
+  '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
   '/settings/computer': typeof AuthedSettingsPersonalComputerRoute
   '/settings/credentials': typeof AuthedSettingsPersonalCredentialsRoute
@@ -758,6 +799,8 @@ export interface FileRoutesByTo {
   '/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
   '/settings/credentials/new': typeof AuthedSettingsPersonalCredentialsNewRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
+  '/settings/skills/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
+  '/settings/skills/new': typeof AuthedSettingsPersonalSkillsNewRoute
   '/bots/$agentId': typeof AuthedAppBotsAgentIdIndexRoute
   '/connections/$key/bots/$agentId': typeof AuthedAppConnectionsKeyBotsAgentIdRoute
   '/connections/$key/tools/$tool': typeof AuthedAppConnectionsKeyToolsToolRoute
@@ -804,6 +847,7 @@ export interface FileRoutesById {
   '/_authed/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/_authed/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/_authed/settings/setup': typeof AuthedSettingsSetupRoute
+  '/_authed/settings/this-computer': typeof AuthedSettingsThisComputerRoute
   '/_authed/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
   '/_authed/_app/': typeof AuthedAppIndexRoute
   '/_authed/admin/': typeof AuthedAdminIndexRoute
@@ -824,6 +868,8 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/_authed/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/_authed/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/_authed/admin/skills_/$slug': typeof AuthedAdminSkillsSlugRoute
+  '/_authed/admin/skills_/new': typeof AuthedAdminSkillsNewRoute
   '/_authed/settings/_personal/activity': typeof AuthedSettingsPersonalActivityRoute
   '/_authed/settings/_personal/computer': typeof AuthedSettingsPersonalComputerRoute
   '/_authed/settings/_personal/credentials': typeof AuthedSettingsPersonalCredentialsRoute
@@ -851,6 +897,8 @@ export interface FileRoutesById {
   '/_authed/_app/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
   '/_authed/settings/_personal/credentials_/new': typeof AuthedSettingsPersonalCredentialsNewRoute
   '/_authed/settings/_personal/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
+  '/_authed/settings/_personal/skills_/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
+  '/_authed/settings/_personal/skills_/new': typeof AuthedSettingsPersonalSkillsNewRoute
   '/_authed/_app/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
   '/_authed/_app/connections/$key_/bots/$agentId': typeof AuthedAppConnectionsKeyBotsAgentIdRoute
   '/_authed/_app/connections/$key_/tools/$tool': typeof AuthedAppConnectionsKeyToolsToolRoute
@@ -896,6 +944,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/passwords'
     | '/settings/setup'
+    | '/settings/this-computer'
     | '/sign-in/$requestId'
     | '/admin/'
     | '/settings/'
@@ -915,6 +964,8 @@ export interface FileRouteTypes {
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
+    | '/admin/skills/$slug'
+    | '/admin/skills/new'
     | '/settings/activity'
     | '/settings/computer'
     | '/settings/credentials'
@@ -942,6 +993,8 @@ export interface FileRouteTypes {
     | '/connections/browse/composio'
     | '/settings/credentials/new'
     | '/settings/plugins/$'
+    | '/settings/skills/$slug'
+    | '/settings/skills/new'
     | '/bots/$agentId/'
     | '/connections/$key/bots/$agentId'
     | '/connections/$key/tools/$tool'
@@ -983,6 +1036,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/passwords'
     | '/settings/setup'
+    | '/settings/this-computer'
     | '/sign-in/$requestId'
     | '/admin'
     | '/capabilities/memory'
@@ -1001,6 +1055,8 @@ export interface FileRouteTypes {
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
+    | '/admin/skills/$slug'
+    | '/admin/skills/new'
     | '/settings/activity'
     | '/settings/computer'
     | '/settings/credentials'
@@ -1028,6 +1084,8 @@ export interface FileRouteTypes {
     | '/connections/browse/composio'
     | '/settings/credentials/new'
     | '/settings/plugins/$'
+    | '/settings/skills/$slug'
+    | '/settings/skills/new'
     | '/bots/$agentId'
     | '/connections/$key/bots/$agentId'
     | '/connections/$key/tools/$tool'
@@ -1073,6 +1131,7 @@ export interface FileRouteTypes {
     | '/_authed/settings/notifications'
     | '/_authed/settings/passwords'
     | '/_authed/settings/setup'
+    | '/_authed/settings/this-computer'
     | '/_authed/sign-in/$requestId'
     | '/_authed/_app/'
     | '/_authed/admin/'
@@ -1093,6 +1152,8 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/$key'
     | '/_authed/admin/plugins/arcade'
     | '/_authed/admin/plugins/composio'
+    | '/_authed/admin/skills_/$slug'
+    | '/_authed/admin/skills_/new'
     | '/_authed/settings/_personal/activity'
     | '/_authed/settings/_personal/computer'
     | '/_authed/settings/_personal/credentials'
@@ -1120,6 +1181,8 @@ export interface FileRouteTypes {
     | '/_authed/_app/connections/browse/composio'
     | '/_authed/settings/_personal/credentials_/new'
     | '/_authed/settings/_personal/plugins/$'
+    | '/_authed/settings/_personal/skills_/$slug'
+    | '/_authed/settings/_personal/skills_/new'
     | '/_authed/_app/bots/$agentId/'
     | '/_authed/_app/connections/$key_/bots/$agentId'
     | '/_authed/_app/connections/$key_/tools/$tool'
@@ -1421,6 +1484,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsSetupRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
+    '/_authed/settings/this-computer': {
+      id: '/_authed/settings/this-computer'
+      path: '/this-computer'
+      fullPath: '/settings/this-computer'
+      preLoaderRoute: typeof AuthedSettingsThisComputerRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
     '/_authed/sign-in/$requestId': {
       id: '/_authed/sign-in/$requestId'
       path: '/sign-in/$requestId'
@@ -1582,6 +1652,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminPluginsComposioRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/skills_/$slug': {
+      id: '/_authed/admin/skills_/$slug'
+      path: '/skills/$slug'
+      fullPath: '/admin/skills/$slug'
+      preLoaderRoute: typeof AuthedAdminSkillsSlugRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/skills_/new': {
+      id: '/_authed/admin/skills_/new'
+      path: '/skills/new'
+      fullPath: '/admin/skills/new'
+      preLoaderRoute: typeof AuthedAdminSkillsNewRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/settings/_personal/activity': {
       id: '/_authed/settings/_personal/activity'
       path: '/activity'
@@ -1736,6 +1820,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsPersonalPluginsSplatRouteImport
       parentRoute: typeof AuthedSettingsPersonalRoute
     }
+    '/_authed/settings/_personal/skills_/$slug': {
+      id: '/_authed/settings/_personal/skills_/$slug'
+      path: '/skills/$slug'
+      fullPath: '/settings/skills/$slug'
+      preLoaderRoute: typeof AuthedSettingsPersonalSkillsSlugRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
+    '/_authed/settings/_personal/skills_/new': {
+      id: '/_authed/settings/_personal/skills_/new'
+      path: '/skills/new'
+      fullPath: '/settings/skills/new'
+      preLoaderRoute: typeof AuthedSettingsPersonalSkillsNewRouteImport
+      parentRoute: typeof AuthedSettingsPersonalRoute
+    }
     '/_authed/_app/connections/$key_/bots/$agentId': {
       id: '/_authed/_app/connections/$key_/bots/$agentId'
       path: '/connections/$key/bots/$agentId'
@@ -1790,6 +1888,8 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
   AuthedAdminPluginsArcadeRoute: typeof AuthedAdminPluginsArcadeRoute
   AuthedAdminPluginsComposioRoute: typeof AuthedAdminPluginsComposioRoute
+  AuthedAdminSkillsSlugRoute: typeof AuthedAdminSkillsSlugRoute
+  AuthedAdminSkillsNewRoute: typeof AuthedAdminSkillsNewRoute
   AuthedAdminComponentsIndexRoute: typeof AuthedAdminComponentsIndexRoute
   AuthedAdminPluginsIndexRoute: typeof AuthedAdminPluginsIndexRoute
   AuthedAdminPluginsKeyBotsAgentIdRoute: typeof AuthedAdminPluginsKeyBotsAgentIdRoute
@@ -1819,6 +1919,8 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,
   AuthedAdminPluginsArcadeRoute: AuthedAdminPluginsArcadeRoute,
   AuthedAdminPluginsComposioRoute: AuthedAdminPluginsComposioRoute,
+  AuthedAdminSkillsSlugRoute: AuthedAdminSkillsSlugRoute,
+  AuthedAdminSkillsNewRoute: AuthedAdminSkillsNewRoute,
   AuthedAdminComponentsIndexRoute: AuthedAdminComponentsIndexRoute,
   AuthedAdminPluginsIndexRoute: AuthedAdminPluginsIndexRoute,
   AuthedAdminPluginsKeyBotsAgentIdRoute: AuthedAdminPluginsKeyBotsAgentIdRoute,
@@ -1835,6 +1937,8 @@ interface AuthedSettingsPersonalRouteChildren {
   AuthedSettingsPersonalSkillsRoute: typeof AuthedSettingsPersonalSkillsRoute
   AuthedSettingsPersonalCredentialsNewRoute: typeof AuthedSettingsPersonalCredentialsNewRoute
   AuthedSettingsPersonalPluginsSplatRoute: typeof AuthedSettingsPersonalPluginsSplatRoute
+  AuthedSettingsPersonalSkillsSlugRoute: typeof AuthedSettingsPersonalSkillsSlugRoute
+  AuthedSettingsPersonalSkillsNewRoute: typeof AuthedSettingsPersonalSkillsNewRoute
 }
 
 const AuthedSettingsPersonalRouteChildren: AuthedSettingsPersonalRouteChildren =
@@ -1848,6 +1952,9 @@ const AuthedSettingsPersonalRouteChildren: AuthedSettingsPersonalRouteChildren =
       AuthedSettingsPersonalCredentialsNewRoute,
     AuthedSettingsPersonalPluginsSplatRoute:
       AuthedSettingsPersonalPluginsSplatRoute,
+    AuthedSettingsPersonalSkillsSlugRoute:
+      AuthedSettingsPersonalSkillsSlugRoute,
+    AuthedSettingsPersonalSkillsNewRoute: AuthedSettingsPersonalSkillsNewRoute,
   }
 
 const AuthedSettingsPersonalRouteWithChildren =
@@ -1864,6 +1971,7 @@ interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsNotificationsRoute: typeof AuthedSettingsNotificationsRoute
   AuthedSettingsPasswordsRoute: typeof AuthedSettingsPasswordsRoute
   AuthedSettingsSetupRoute: typeof AuthedSettingsSetupRoute
+  AuthedSettingsThisComputerRoute: typeof AuthedSettingsThisComputerRoute
   AuthedSettingsIndexRoute: typeof AuthedSettingsIndexRoute
   AuthedSettingsComponentsGalleryNameRoute: typeof AuthedSettingsComponentsGalleryNameRoute
   AuthedSettingsConnectedAccountsKeyRoute: typeof AuthedSettingsConnectedAccountsKeyRoute
@@ -1880,6 +1988,7 @@ const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsNotificationsRoute: AuthedSettingsNotificationsRoute,
   AuthedSettingsPasswordsRoute: AuthedSettingsPasswordsRoute,
   AuthedSettingsSetupRoute: AuthedSettingsSetupRoute,
+  AuthedSettingsThisComputerRoute: AuthedSettingsThisComputerRoute,
   AuthedSettingsIndexRoute: AuthedSettingsIndexRoute,
   AuthedSettingsComponentsGalleryNameRoute:
     AuthedSettingsComponentsGalleryNameRoute,

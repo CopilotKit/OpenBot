@@ -37,6 +37,7 @@ import {
   type FakePort,
   installChromeFake,
 } from "./support/chrome-fake";
+import { type ContextTimers, contextTimers } from "./support/context-timers";
 import { type FakeGateway, startFakeGateway } from "./support/fake-gateway";
 import { fakeMicrophone, fakeSpeech } from "./support/fake-speech";
 
@@ -172,23 +173,18 @@ async function advanceTo(to: number) {
 let fake: ChromeFake;
 let databaseName = "";
 let databaseCounter = 0;
-let documentTimers: ReturnType<typeof setTimeout>[] = [];
+/** Each offscreen document this test opened, by its timers: ending them is closing it (support/context-timers.ts). */
+let documents: ContextTimers[] = [];
 
 function runDocument(): void {
+  const timers = contextTimers();
+  documents.push(timers);
   fake.runAs("offscreen-document", () =>
     createOffscreenController({
       openOutbox: () => openOutbox(databaseName),
       connectPort: () => chrome.runtime.connect({ name: PORT_OFFSCREEN }),
       now: () => clock,
-      timers: {
-        set: (fn, ms) => {
-          const handle = setTimeout(fn, ms);
-          documentTimers.push(handle);
-          return handle;
-        },
-        clear: (handle) =>
-          clearTimeout(handle as ReturnType<typeof setTimeout>),
-      },
+      timers,
       voice: {
         Recognition: fakeSpeech().Recognition,
         getUserMedia: fakeMicrophone().getUserMedia,
@@ -297,7 +293,7 @@ beforeEach(async () => {
   globals.IDBKeyRange = FakeIDBKeyRange;
   databaseName = `activity-${Date.now()}-${databaseCounter++}`;
   due = [];
-  documentTimers = [];
+  documents = [];
   liveTokens = new Set([LAUNCHER_TOKEN]);
   reports = [];
   activityAnswer = "ok";
@@ -316,7 +312,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await settle();
-  for (const handle of documentTimers) clearTimeout(handle);
+  // Closed before the gateway stops: a streaming document reads the gateway going as a dropped socket and schedules a
+  // reconnect, which a document still open would then retry for the rest of the suite.
+  for (const document of documents) document.end();
   await gateway.stop();
   fake.uninstall();
   Reflect.deleteProperty(globalThis, LAUNCHER_GLOBAL);
@@ -374,6 +372,41 @@ test("a recording made from the popup tells OpenBot what it records: each phase,
   await advanceTo(clock + 3 * ACTIVITY_REPORT_MS);
   expect(reports).toHaveLength(after);
 }, 20_000);
+
+/*
+ * A DOCUMENT THIS FILE HAS CLOSED ASKS NOBODY FOR ANYTHING AGAIN, and the rest of the suite depends on it.
+ *
+ * `bun test` runs every file in one process, and the document used to be handed plain `setTimeout`, cleared before the
+ * gateway stopped. Stopping it drops the stream's socket, so the streamer scheduled a reconnect after the clearing, and
+ * that reconnect then backed off and retried, `POST .../trajectory/<id>/connect`, for the rest of the run. A later file
+ * that replaced the global `fetch` to watch its own requests (server/tests/composio-adapter.test.ts) recorded those as
+ * its own and failed. Closing the document is now what afterEach does first; this test closes it the same way and
+ * watches past the streamer's first two backoffs (1 s, then 2 s).
+ */
+test("once the test closes its document, a stream it had open never asks for a pass again", async () => {
+  connectedThroughDesktop();
+  await recordFromPopup("Archive order 1043");
+  await until(() => gateway.joins.some((join) => join.ok), "the stream");
+
+  const asked: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((input: Parameters<typeof fetch>[0], init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    // This test's own OpenBot only: another file's leftovers are not this file's to answer for.
+    if (url.startsWith(gateway.httpUrl)) asked.push(url);
+    return realFetch(input, init);
+  }) as typeof fetch;
+  try {
+    for (const document of documents) document.end();
+    await gateway.stop();
+    await sleep(3_500);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  // At most the one attempt the dropped socket makes at once, which is a direct call and not a timer: anything after
+  // it is a retry, and a closed document has nothing left to retry with.
+  expect(asked.length).toBeLessThanOrEqual(1);
+}, 15_000);
 
 test("an OpenBot browser's connection reports too, with the bearer its launcher handed in, and Start over reports the new recording", async () => {
   expect(

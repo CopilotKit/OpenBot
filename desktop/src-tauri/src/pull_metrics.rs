@@ -1,12 +1,12 @@
 //! Metrics for an explicit image pull, before containers or provider sign-in start.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{sync_channel, SyncSender};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::engine::Address;
 use crate::problem::Problem;
@@ -75,33 +75,104 @@ struct Progress {
     parent_id: Option<String>,
     text: String,
     current: Option<u64>,
+    total: Option<u64>,
+}
+
+/// One pull's download so far: the bytes counted, and the image's size once every layer still to
+/// download has said how big it is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ImageBytes {
+    pub bytes: u64,
+    pub size: Option<u64>,
 }
 
 #[derive(Default)]
-struct DownloadBytes(HashMap<String, u64>);
+struct DownloadBytes {
+    /// Each layer's highest download counter.
+    current: HashMap<String, u64>,
+    /// Each layer's advertised size, from its download lines.
+    sizes: HashMap<String, u64>,
+    /// Layers this pull downloads, and those that finished downloading.
+    layers: HashSet<String>,
+    finished: HashSet<String>,
+}
 
 impl DownloadBytes {
     fn observe(&mut self, progress: Progress) {
-        if progress.text == "Downloading"
-            && !progress.id.is_empty()
-            && !progress.parent_id.as_deref().unwrap_or_default().is_empty()
-        {
-            if let Some(current) = progress.current {
-                self.0
-                    .entry(progress.id)
-                    .and_modify(|maximum| *maximum = (*maximum).max(current))
-                    .or_insert(current);
-            }
+        if progress.id.is_empty() || progress.parent_id.as_deref().unwrap_or_default().is_empty() {
+            return;
         }
+        match progress.text.as_str() {
+            // Already on this computer: nothing to download.
+            "Already exists" => {
+                self.layers.remove(&progress.id);
+                return;
+            }
+            "Download complete" | "Verifying Checksum" | "Extracting" | "Pull complete" => {
+                self.finished.insert(progress.id.clone());
+            }
+            "Downloading" => {
+                if let Some(current) = progress.current {
+                    self.current
+                        .entry(progress.id.clone())
+                        .and_modify(|maximum| *maximum = (*maximum).max(current))
+                        .or_insert(current);
+                }
+                if let Some(total) = progress.total.filter(|total| *total > 0) {
+                    self.sizes.insert(progress.id.clone(), total);
+                }
+            }
+            _ => {}
+        }
+        self.layers.insert(progress.id);
     }
 
     fn total(&self) -> Option<u64> {
-        if self.0.is_empty() {
+        if self.current.is_empty() {
             return None;
         }
-        self.0
+        self.current
             .values()
             .try_fold(0_u64, |sum, current| sum.checked_add(*current))
+    }
+
+    /// The size is the sum of the layers' sizes, known only when every layer that is still
+    /// downloading has advertised one. A layer that finished without ever saying is counted at
+    /// what was seen of it, so a tiny layer does not leave the size unknown for good.
+    fn size(&self) -> Option<u64> {
+        if self.layers.is_empty() {
+            return None;
+        }
+        self.layers.iter().try_fold(0_u64, |sum, layer| {
+            let size = match self.sizes.get(layer) {
+                Some(size) => *size,
+                None if self.finished.contains(layer) => {
+                    self.current.get(layer).copied().unwrap_or(0)
+                }
+                None => return None,
+            };
+            sum.checked_add(size)
+        })
+    }
+
+    fn image_bytes(&self) -> ImageBytes {
+        ImageBytes {
+            bytes: self.total().unwrap_or(0),
+            size: self.size(),
+        }
+    }
+}
+
+/// A short name a person can read for an image reference: its repository's last part, without
+/// registry, tag, digest or the `openbot-` prefix. The server image is "OpenBot server".
+pub fn display_name(image: &str) -> String {
+    let without_digest = image.split('@').next().unwrap_or_default();
+    let last = without_digest.rsplit('/').next().unwrap_or_default();
+    let repository = last.split(':').next().unwrap_or_default();
+    let name = repository.strip_prefix("openbot-").unwrap_or(repository);
+    match name {
+        "openbot" | "server" => "OpenBot server".to_string(),
+        name => name.to_string(),
     }
 }
 
@@ -128,7 +199,7 @@ fn download_bytes(stdout: &[u8], stderr: &[u8]) -> Option<u64> {
 pub fn pull_image(
     engine: &Address,
     image: &str,
-    on_progress: impl FnMut(u64),
+    on_progress: impl FnMut(ImageBytes),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
     if crate::preparation::image_present(engine, image)? {
@@ -163,6 +234,248 @@ pub fn pull_image(
     )
 }
 
+/// How many images Install pulls at once.
+pub const IMAGE_PULLS_AT_ONCE: usize = 4;
+
+/// How often Install's download report is refreshed while no pull says anything, so the speed
+/// falls when a download stalls.
+pub const PROGRESS_TICK: Duration = Duration::from_millis(500);
+
+/// Install's download, as the window shows it under "Installing OpenBot".
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Downloads {
+    /// Pulls FINISHED, of `total`.
+    pub done: usize,
+    pub total: usize,
+    /// Bytes downloaded by every pull so far, running and finished.
+    pub bytes: u64,
+    /// Recent download speed, once there is enough of a window to say. Filled in by `Pacer`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes_per_second: Option<u64>,
+    /// The pulls running now, in list order.
+    pub pulling: Vec<ImagePull>,
+}
+
+/// One running pull.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ImagePull {
+    /// See `display_name`.
+    pub name: String,
+    pub bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+}
+
+/// Pull `images` with at most `limit` pulls in flight, starting them in list order.
+///
+/// `pull(index, image, on_bytes)` is one blocking pull; it calls `on_bytes` with what that pull
+/// has downloaded so far. `keep_going` is asked before each pull starts; an `Err` (Stop) starts no
+/// further pull. On the first failure no further pull starts, the pulls already running finish,
+/// and that first error is returned.
+///
+/// `on_progress` gets every change, and a repeat every `PROGRESS_TICK` while nothing changes.
+/// `done` counts FINISHED pulls (not started ones), and `bytes` is the sum over every pull so
+/// far, running and finished. Neither goes down, nor does a running pull's own `bytes`, and after
+/// the last pull succeeds it is called with `done == total`. Pace it with `Pacer`.
+pub fn pull_images_limited<P, K, O>(
+    images: &[String],
+    limit: usize,
+    pull: P,
+    keep_going: K,
+    on_progress: O,
+) -> Result<(), Problem>
+where
+    P: Fn(usize, &str, &dyn Fn(ImageBytes)) -> Result<(), Problem> + Sync,
+    K: Fn() -> Result<(), Problem> + Sync,
+    O: Fn(&Downloads) + Sync,
+{
+    #[derive(Clone, Copy, PartialEq)]
+    enum Pull {
+        Queued,
+        Running,
+        Finished,
+    }
+    struct Shared {
+        next: usize,
+        done: usize,
+        state: Vec<Pull>,
+        bytes: Vec<ImageBytes>,
+        error: Option<Problem>,
+    }
+    let total = images.len();
+    let names: Vec<String> = images.iter().map(|image| display_name(image)).collect();
+    let shared = std::sync::Mutex::new(Shared {
+        next: 0,
+        done: 0,
+        state: vec![Pull::Queued; total],
+        bytes: vec![ImageBytes::default(); total],
+        error: None,
+    });
+    // Reported under the lock, so the person sees `done` and `bytes` only ever go up.
+    let report = |state: &Shared| {
+        on_progress(&Downloads {
+            done: state.done,
+            total,
+            bytes: state.bytes.iter().map(|bytes| bytes.bytes).sum(),
+            bytes_per_second: None,
+            pulling: (0..total)
+                .filter(|index| state.state[*index] == Pull::Running)
+                .map(|index| ImagePull {
+                    name: names[index].clone(),
+                    bytes: state.bytes[index].bytes,
+                    size: state.bytes[index].size,
+                })
+                .collect(),
+        })
+    };
+    report(&shared.lock().unwrap());
+    let worker = || loop {
+        let index = {
+            let mut state = shared.lock().unwrap();
+            if state.error.is_some() || state.next >= total {
+                return;
+            }
+            if let Err(problem) = keep_going() {
+                state.error = Some(problem);
+                return;
+            }
+            state.next += 1;
+            let index = state.next - 1;
+            state.state[index] = Pull::Running;
+            index
+        };
+        let on_bytes = |bytes: ImageBytes| {
+            let mut state = shared.lock().unwrap();
+            let seen = state.bytes[index];
+            // One pull's own figure is cumulative; keep its highest so the sum never drops.
+            let next = ImageBytes {
+                bytes: seen.bytes.max(bytes.bytes),
+                size: bytes.size.or(seen.size),
+            };
+            if next != seen {
+                state.bytes[index] = next;
+                report(&state);
+            }
+        };
+        let outcome = pull(index, &images[index], &on_bytes);
+        let mut state = shared.lock().unwrap();
+        state.state[index] = Pull::Finished;
+        match outcome {
+            Ok(()) => {
+                state.done += 1;
+                report(&state);
+            }
+            Err(problem) => {
+                state.error.get_or_insert(problem);
+                return;
+            }
+        }
+    };
+    std::thread::scope(|scope| {
+        let (stop, stopped) = std::sync::mpsc::channel::<()>();
+        let (shared, report) = (&shared, &report);
+        scope.spawn(move || {
+            // Wakes every tick until every worker has returned and `stop` is dropped.
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                stopped.recv_timeout(PROGRESS_TICK)
+            {
+                let state = shared.lock().unwrap();
+                if state.error.is_none() && state.done < total {
+                    report(&state);
+                }
+            }
+        });
+        let workers: Vec<_> = (0..limit.max(1).min(total))
+            .map(|_| scope.spawn(worker))
+            .collect();
+        for worker in workers {
+            if let Err(panic) = worker.join() {
+                std::panic::resume_unwind(panic);
+            }
+        }
+        drop(stop);
+    });
+    match shared.into_inner().unwrap().error {
+        Some(problem) => Err(problem),
+        None => Ok(()),
+    }
+}
+
+/// Download speed over the last few seconds.
+pub struct Speed {
+    window: Duration,
+    samples: VecDeque<(Instant, u64)>,
+}
+
+impl Default for Speed {
+    fn default() -> Self {
+        Self {
+            window: Duration::from_secs(5),
+            samples: VecDeque::new(),
+        }
+    }
+}
+
+impl Speed {
+    /// Record `bytes` downloaded in all at `now`, and say the bytes per second over the window.
+    /// None until the window spans at least half a second.
+    pub fn observe(&mut self, now: Instant, bytes: u64) -> Option<u64> {
+        self.samples.push_back((now, bytes));
+        while let Some((at, _)) = self.samples.front() {
+            if now.saturating_duration_since(*at) > self.window {
+                self.samples.pop_front();
+            } else {
+                break;
+            }
+        }
+        let (since, from) = *self.samples.front()?;
+        let span = now.saturating_duration_since(since);
+        if span < Duration::from_millis(500) {
+            return None;
+        }
+        Some((bytes.saturating_sub(from) as f64 / span.as_secs_f64()).round() as u64)
+    }
+}
+
+/// Paces `Downloads` reports for the window: at most one per `interval`, except that a pull
+/// finishing is always shown at once. Measures the speed from every report it is offered.
+pub struct Pacer {
+    interval: Duration,
+    last: Option<(Instant, usize)>,
+    speed: Speed,
+}
+
+impl Default for Pacer {
+    fn default() -> Self {
+        Self {
+            interval: Duration::from_millis(250),
+            last: None,
+            speed: Speed::default(),
+        }
+    }
+}
+
+impl Pacer {
+    pub fn offer(&mut self, now: Instant, downloads: &Downloads) -> Option<Downloads> {
+        let bytes_per_second = self.speed.observe(now, downloads.bytes);
+        let due = match self.last {
+            None => true,
+            Some((at, done)) => {
+                done != downloads.done || now.saturating_duration_since(at) >= self.interval
+            }
+        };
+        if !due {
+            return None;
+        }
+        self.last = Some((now, downloads.done));
+        Some(Downloads {
+            bytes_per_second,
+            ..downloads.clone()
+        })
+    }
+}
+
 /// Complete one explicit pull and report its outcome before the caller can start containers.
 /// A failed pull is returned as the same two-part Problem used by the existing startup path.
 pub(crate) fn run(
@@ -178,7 +491,7 @@ fn run_with_progress(
     mut command: Command,
     input: Option<&[u8]>,
     json_progress: bool,
-    mut on_progress: impl FnMut(u64),
+    mut on_progress: impl FnMut(ImageBytes),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
     command
@@ -214,15 +527,13 @@ fn run_with_progress(
             let out = scope.spawn(move || read_output(stdout, json_progress, stdout_sender));
             let err = scope.spawn(move || read_output(stderr, json_progress, sender));
             let mut layers = DownloadBytes::default();
-            let mut last = None;
+            let mut last = ImageBytes::default();
             for progress in receiver {
                 layers.observe(progress);
-                let total = layers.total();
-                if total != last {
-                    if let Some(bytes) = total {
-                        on_progress(bytes);
-                    }
-                    last = total;
+                let now = layers.image_bytes();
+                if now != last {
+                    on_progress(now);
+                    last = now;
                 }
             }
             let stdout = out
@@ -300,6 +611,170 @@ fn read_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    /// Wait, at most two seconds, until `count` reaches `want`. A bounded wait, so a sequential
+    /// implementation fails the test instead of hanging it.
+    fn wait_for(count: &AtomicUsize, want: usize) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while count.load(SeqCst) < want && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn names(count: usize) -> Vec<String> {
+        (0..count).map(|index| format!("image-{index}")).collect()
+    }
+
+    #[test]
+    fn pulls_several_images_at_once_but_never_more_than_the_limit() {
+        let images = names(10);
+        let running = AtomicUsize::new(0);
+        let most = AtomicUsize::new(0);
+        let arrived = AtomicUsize::new(0);
+        pull_images_limited(
+            &images,
+            IMAGE_PULLS_AT_ONCE,
+            |index, _, _| {
+                let now = running.fetch_add(1, SeqCst) + 1;
+                most.fetch_max(now, SeqCst);
+                // The first four pulls wait to be running together.
+                if index < IMAGE_PULLS_AT_ONCE {
+                    arrived.fetch_add(1, SeqCst);
+                    wait_for(&arrived, IMAGE_PULLS_AT_ONCE);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+                running.fetch_sub(1, SeqCst);
+                Ok(())
+            },
+            || Ok(()),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(most.load(SeqCst), IMAGE_PULLS_AT_ONCE);
+    }
+
+    #[test]
+    fn first_failure_starts_no_new_pull_lets_running_ones_finish_and_is_returned() {
+        let images = names(10);
+        let started = Mutex::new(Vec::new());
+        let finished = Mutex::new(Vec::new());
+        let failed = std::sync::atomic::AtomicBool::new(false);
+        let started_after_failure = AtomicUsize::new(0);
+        let arrived = AtomicUsize::new(0);
+        let error = pull_images_limited(
+            &images,
+            3,
+            |index, _, _| {
+                if failed.load(SeqCst) {
+                    started_after_failure.fetch_add(1, SeqCst);
+                }
+                started.lock().unwrap().push(index);
+                if index < 3 {
+                    arrived.fetch_add(1, SeqCst);
+                    wait_for(&arrived, 3);
+                }
+                if index == 0 {
+                    failed.store(true, SeqCst);
+                    return Err(Problem::plain("pull 0 failed"));
+                }
+                if index == 1 {
+                    // Fails later than pull 0; its error is not the one returned.
+                    std::thread::sleep(Duration::from_millis(40));
+                    return Err(Problem::plain("pull 1 failed"));
+                }
+                std::thread::sleep(Duration::from_millis(40));
+                finished.lock().unwrap().push(index);
+                Ok(())
+            },
+            || Ok(()),
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(error, Problem::plain("pull 0 failed"));
+        assert_eq!(started_after_failure.load(SeqCst), 0);
+        let mut started = started.lock().unwrap().clone();
+        started.sort();
+        assert_eq!(started, vec![0, 1, 2]);
+        assert_eq!(*finished.lock().unwrap(), vec![2]);
+    }
+
+    #[test]
+    fn cancellation_starts_no_new_pull() {
+        let images = names(10);
+        let started = AtomicUsize::new(0);
+        let cancelled = std::sync::atomic::AtomicBool::new(false);
+        let error = pull_images_limited(
+            &images,
+            2,
+            |_, _, _| {
+                if started.fetch_add(1, SeqCst) + 1 == 3 {
+                    cancelled.store(true, SeqCst);
+                }
+                Ok(())
+            },
+            || {
+                if cancelled.load(SeqCst) {
+                    Err(Problem::plain("cancelled"))
+                } else {
+                    Ok(())
+                }
+            },
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(error, Problem::plain("cancelled"));
+        assert!(started.load(SeqCst) <= 4, "{}", started.load(SeqCst));
+    }
+
+    #[test]
+    fn progress_counts_finished_pulls_and_sums_bytes_across_pulls() {
+        let images = names(6);
+        let calls = Mutex::new(Vec::new());
+        pull_images_limited(
+            &images,
+            3,
+            |index, _, on_bytes| {
+                let base = (index as u64 + 1) * 100;
+                on_bytes(ImageBytes {
+                    bytes: base,
+                    size: None,
+                });
+                std::thread::sleep(Duration::from_millis(2));
+                on_bytes(ImageBytes {
+                    bytes: base * 2,
+                    size: None,
+                });
+                Ok(())
+            },
+            || Ok(()),
+            |downloads| {
+                calls
+                    .lock()
+                    .unwrap()
+                    .push((downloads.done, downloads.total, downloads.bytes))
+            },
+        )
+        .unwrap();
+        let calls = calls.lock().unwrap();
+        // Each image ends at 200 * (index + 1) bytes: 200 * (1 + ... + 6) in all.
+        let expected: u64 = (1..=6).map(|n| n * 200).sum();
+        assert_eq!(*calls.last().unwrap(), (6, 6, expected));
+        assert!(calls.iter().all(|(_, total, _)| *total == 6));
+        assert!(calls
+            .windows(2)
+            .all(|w| w[0].0 <= w[1].0 && w[0].2 <= w[1].2));
+        // Done counts finishes: it goes up by one per pull, from 0 to 6.
+        let mut seen: Vec<usize> = calls.iter().map(|(done, _, _)| *done).collect();
+        seen.dedup();
+        assert_eq!(seen, (0..=6).collect::<Vec<_>>());
+        // Bytes from running pulls are summed, not only the last pull's own figure.
+        assert!(calls
+            .iter()
+            .any(|(done, _, bytes)| *done < 6 && *bytes > 1200));
+    }
 
     #[test]
     fn streams_download_bytes_before_the_child_exits() {
@@ -336,9 +811,9 @@ fn main() {
             command,
             None,
             true,
-            |bytes| {
-                updates.push(bytes);
-                if bytes == 12 {
+            |bytes: ImageBytes| {
+                updates.push(bytes.bytes);
+                if bytes.bytes == 12 {
                     std::fs::write(&acknowledgement, "received").unwrap();
                 }
             },
@@ -520,5 +995,259 @@ Executing external compose provider
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].outcome, crate::telemetry::Outcome::Failure);
         assert_eq!(reports[0].bytes, None);
+    }
+    #[test]
+    fn names_an_image_by_its_repository_without_registry_tag_or_digest() {
+        assert_eq!(
+            display_name("ghcr.io/copilotkit/openbot-agent-bot@sha256:0123"),
+            "agent-bot"
+        );
+        assert_eq!(
+            display_name("ghcr.io/copilotkit/openbot-server@sha256:0123"),
+            "OpenBot server"
+        );
+        assert_eq!(display_name("openbot-server:latest"), "OpenBot server");
+        assert_eq!(display_name("openbot"), "OpenBot server");
+        assert_eq!(display_name("pgvector/pgvector:pg17"), "pgvector");
+        assert_eq!(display_name("busybox:1.37"), "busybox");
+        assert_eq!(
+            display_name("ghcr.io/spiffe/spire-agent:1.15.1"),
+            "spire-agent"
+        );
+        // A registry with a port is not a tag.
+        assert_eq!(
+            display_name("localhost:5000/openbot-supervisor"),
+            "supervisor"
+        );
+        assert_eq!(display_name(""), "");
+    }
+
+    #[test]
+    fn an_image_size_is_known_once_every_unfinished_layer_has_one() {
+        let mut layers = DownloadBytes::default();
+        let line = |text: &str| serde_json::from_str::<Progress>(text).unwrap();
+        layers.observe(line(
+            r#"{"id":"a","parent_id":"image","text":"Pulling fs layer"}"#,
+        ));
+        layers.observe(line(
+            r#"{"id":"b","parent_id":"image","text":"Pulling fs layer"}"#,
+        ));
+        layers.observe(line(
+            r#"{"id":"c","parent_id":"image","text":"Already exists"}"#,
+        ));
+        layers.observe(line(
+            r#"{"id":"a","parent_id":"image","text":"Downloading","current":10,"total":100}"#,
+        ));
+        // Layer b has not said how big it is yet.
+        assert_eq!(
+            layers.image_bytes(),
+            ImageBytes {
+                bytes: 10,
+                size: None
+            }
+        );
+        layers.observe(line(
+            r#"{"id":"b","parent_id":"image","text":"Downloading","current":5,"total":50}"#,
+        ));
+        assert_eq!(
+            layers.image_bytes(),
+            ImageBytes {
+                bytes: 15,
+                size: Some(150)
+            }
+        );
+        // A tiny layer that finishes without ever reporting a size counts as done, not unknown.
+        layers.observe(line(
+            r#"{"id":"d","parent_id":"image","text":"Pulling fs layer"}"#,
+        ));
+        layers.observe(line(
+            r#"{"id":"d","parent_id":"image","text":"Download complete"}"#,
+        ));
+        assert_eq!(layers.image_bytes().size, Some(150));
+        // The image's own line is not a layer.
+        layers.observe(line(r#"{"id":"image","text":"Pulling"}"#));
+        assert_eq!(layers.image_bytes().size, Some(150));
+    }
+
+    #[test]
+    fn streams_each_change_of_bytes_or_size_for_one_pull() {
+        let mut command = crate::quiet::command("sh");
+        command.args([
+            "-c",
+            r#"printf '%s\n' '{"id":"a","parent_id":"image","text":"Pulling fs layer"}' '{"id":"a","parent_id":"image","text":"Downloading","current":4,"total":40}' '{"id":"a","parent_id":"image","text":"Downloading","current":4,"total":40}' '{"id":"a","parent_id":"image","text":"Downloading","current":40,"total":40}'"#,
+        ]);
+        let mut updates = Vec::new();
+        run_with_progress(command, None, true, |bytes| updates.push(bytes), |_| {}).unwrap();
+        assert_eq!(
+            updates,
+            vec![
+                ImageBytes {
+                    bytes: 4,
+                    size: Some(40)
+                },
+                ImageBytes {
+                    bytes: 40,
+                    size: Some(40)
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn progress_lists_the_running_pulls_with_their_own_bytes() {
+        let images = vec![
+            "ghcr.io/copilotkit/openbot-server@sha256:1".to_string(),
+            "ghcr.io/copilotkit/openbot-agent-bot@sha256:2".to_string(),
+            "busybox:1.37".to_string(),
+        ];
+        let arrived = AtomicUsize::new(0);
+        let reported = AtomicUsize::new(0);
+        let calls = Mutex::new(Vec::<Downloads>::new());
+        pull_images_limited(
+            &images,
+            2,
+            |index, _, on_bytes| {
+                if index < 2 {
+                    on_bytes(ImageBytes {
+                        bytes: (index as u64 + 1) * 100,
+                        size: (index == 0).then_some(1000),
+                    });
+                    arrived.fetch_add(1, SeqCst);
+                    // Both running pulls have reported before either finishes.
+                    wait_for(&arrived, 2);
+                    reported.fetch_add(1, SeqCst);
+                    wait_for(&reported, 2);
+                }
+                Ok(())
+            },
+            || Ok(()),
+            |downloads| calls.lock().unwrap().push(downloads.clone()),
+        )
+        .unwrap();
+        let calls = calls.lock().unwrap();
+        let both = calls
+            .iter()
+            .find(|downloads| downloads.bytes == 300 && downloads.done == 0)
+            .expect("a report while both pulls ran");
+        assert_eq!(
+            both.pulling,
+            vec![
+                ImagePull {
+                    name: "OpenBot server".into(),
+                    bytes: 100,
+                    size: Some(1000)
+                },
+                ImagePull {
+                    name: "agent-bot".into(),
+                    bytes: 200,
+                    size: None
+                },
+            ]
+        );
+        assert_eq!(both.total, 3);
+        let last = calls.last().unwrap();
+        assert_eq!((last.done, last.total, last.bytes), (3, 3, 300));
+        assert!(last.pulling.is_empty());
+        // A running pull's own figure never goes down.
+        let server: Vec<u64> = calls
+            .iter()
+            .flat_map(|downloads| &downloads.pulling)
+            .filter(|pull| pull.name == "OpenBot server")
+            .map(|pull| pull.bytes)
+            .collect();
+        assert!(server.windows(2).all(|w| w[0] <= w[1]), "{server:?}");
+    }
+
+    #[test]
+    fn keeps_reporting_while_a_pull_is_quiet() {
+        let images = names(1);
+        let calls = AtomicUsize::new(0);
+        pull_images_limited(
+            &images,
+            1,
+            |_, _, _| {
+                std::thread::sleep(PROGRESS_TICK * 3);
+                Ok(())
+            },
+            || Ok(()),
+            |_| {
+                calls.fetch_add(1, SeqCst);
+            },
+        )
+        .unwrap();
+        // Start, at least two ticks, and the finish: the speed can fall while nothing arrives.
+        assert!(calls.load(SeqCst) >= 4, "{}", calls.load(SeqCst));
+    }
+
+    #[test]
+    fn speed_is_averaged_over_the_recent_window_and_falls_to_zero_when_stalled() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut speed = Speed::default();
+        assert_eq!(speed.observe(at(0), 0), None);
+        // Too short a span to say anything yet.
+        assert_eq!(speed.observe(at(200), 2_000_000), None);
+        assert_eq!(speed.observe(at(1_000), 10_000_000), Some(10_000_000));
+        assert_eq!(speed.observe(at(2_000), 30_000_000), Some(15_000_000));
+        // Samples older than the window are dropped: 20 MB over the last 5 s.
+        assert_eq!(speed.observe(at(6_000), 30_000_000), Some(4_000_000));
+        assert_eq!(speed.observe(at(7_500), 30_000_000), Some(0));
+    }
+
+    fn downloads(done: usize, bytes: u64) -> Downloads {
+        Downloads {
+            done,
+            total: 3,
+            bytes,
+            bytes_per_second: None,
+            pulling: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn pacer_sends_at_most_four_reports_a_second_but_never_drops_a_finish() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut pacer = Pacer::default();
+        assert!(pacer.offer(at(0), &downloads(0, 0)).is_some());
+        assert!(pacer.offer(at(100), &downloads(0, 10)).is_none());
+        assert!(pacer.offer(at(200), &downloads(0, 20)).is_none());
+        let paced = pacer.offer(at(260), &downloads(0, 30)).unwrap();
+        assert_eq!(paced.bytes, 30);
+        // A pull finishing is shown at once.
+        assert_eq!(pacer.offer(at(300), &downloads(1, 40)).unwrap().done, 1);
+        assert!(pacer.offer(at(400), &downloads(1, 50)).is_none());
+        let speed = pacer.offer(at(1_300), &downloads(1, 1_300)).unwrap();
+        assert_eq!(speed.bytes_per_second, Some(1_000));
+        assert_eq!(
+            pacer.offer(at(1_310), &downloads(3, 1_300)).unwrap().done,
+            3
+        );
+    }
+
+    #[test]
+    fn downloads_serialize_for_the_window() {
+        let value = serde_json::to_value(Downloads {
+            done: 1,
+            total: 9,
+            bytes: 5,
+            bytes_per_second: Some(2),
+            pulling: vec![ImagePull {
+                name: "agent-bot".into(),
+                bytes: 5,
+                size: None,
+            }],
+        })
+        .unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "done": 1,
+                "total": 9,
+                "bytes": 5,
+                "bytesPerSecond": 2,
+                "pulling": [{"name": "agent-bot", "bytes": 5}],
+            })
+        );
     }
 }

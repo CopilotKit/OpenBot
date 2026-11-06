@@ -44,17 +44,19 @@ import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { sanitizeSeededHistory } from "@openbot/toolkit/history-sanitize";
 import { executeNativeApprovalTool } from "@openbot/toolkit/native-approval";
 import { historyOrEmpty } from "@openbot/toolkit/thread-history";
-import { defer, from, switchMap } from "rxjs";
+import { catchError, defer, from, switchMap, throwError } from "rxjs";
 import { z } from "zod";
 import {
   type ActorAgentResolver,
   CoworkerUnavailableError,
 } from "./agents/agent-resolver";
+import { attributeBotAnswers } from "./agents/bot-answers";
 import {
   PlanModel,
   type PlanModelConfig,
   planModelForEnvironment,
 } from "./agents/plan-model";
+import { takesModelChoice } from "./agents/harness-model";
 import type { AgentActor } from "./agents/profile-types";
 import {
   OPENBOT_TOOL_LIMIT,
@@ -106,6 +108,8 @@ import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
 import type { ProductTelemetry } from "./telemetry/product";
 import { productRuntimeHook } from "./telemetry/product-boundaries";
+import { billingRefusal, providerName } from "./model-billing";
+import { modelSourceFor, type RunChoice } from "./model-catalogue";
 import { inlineToolImages } from "./tool-images";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
@@ -211,6 +215,28 @@ function claimsServerInstructionId(message: Message): boolean {
 }
 
 /**
+ * How a Bot knows a request is for it.
+ *
+ * People address a Bot as "Knowledge" or "the Knowledge Bot", and the router sends "ask the
+ * Knowledge Bot for one sentence on Helm" to Knowledge, rightly. A Bot that was never told its own
+ * name read that as a request to reach somebody else: Knowledge went looking for a way to ask the
+ * Knowledge Bot, found none, and told the person it could not. So every Bot is told the names it
+ * answers to, and that a request to ask one of them is a request to answer.
+ */
+export function selfAddressGuidance(name: string): string {
+  const named = /\bbot$/i.test(name.trim()) ? `the ${name}` : `the ${name} Bot`;
+  return `People call you "${name}" or "${named}". A request to ask, message or hand work to ${name} is a request to you, so answer it yourself.`;
+}
+
+/**
+ * The first thing a built-in Bot reads: its name. A Bot's prompt is whatever somebody wrote about
+ * its job, and the package's own Knowledge prompt never says what it is called.
+ */
+function identityGuidance(name: string): string {
+  return `You are ${name}, a Bot in OpenBot. ${selfAddressGuidance(name)}`;
+}
+
+/**
  * The coworker's job, as one system message.
  *
  * It is an ordinary AG-UI system message rather than `forwardedProps` or framework-specific state
@@ -225,7 +251,7 @@ export function standingRoleMessage(
     id: `${STANDING_ROLE_ID_PREFIX}${profile.id}`,
     role: "system",
     content: [
-      `You are ${profile.name}, ${profile.title}.`,
+      `You are ${profile.name}, ${profile.title}. ${selfAddressGuidance(profile.name)}`,
       profile.roleDescription,
       "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
       /*
@@ -287,6 +313,15 @@ export type RuntimeModel = {
   provider: "openai" | "anthropic";
   defaultModel: string;
   plan?: PlanModelConfig;
+  /** How hard this run thinks, only ever one the model takes. Absent: the model's own default. */
+  effort?: string;
+  /** Whether `defaultModel` came from the provider's listing rather than configuration. */
+  listed?: boolean;
+  /**
+   * Whether an operator named `defaultModel` (`BOT_MODEL`, the Desktop setup screen). Named, it is
+   * the default while the credential lists it; otherwise the middle of the provider's line is.
+   */
+  pinned?: boolean;
 };
 
 /** Optional desktop environment values may be present but blank; SDKs treat them as URLs. */
@@ -339,16 +374,16 @@ export function runtimeModelForEnvironment(
       : provider === "anthropic"
         ? defaultModelFor("anthropic")
         : BUILT_IN_OPENAI_FALLBACK_MODEL;
-  const selectedModelApplies =
-    provider === "anthropic" ||
-    ((!selectedProvider || selectedProvider === "openai") &&
-      !!environment.OPENAI_BASE_URL?.trim());
-  return {
-    provider,
-    plan: planModelForEnvironment(environment),
-    defaultModel:
-      selectedModelApplies && selectedModel ? selectedModel : defaultModel,
-  };
+  /*
+   * A model an operator named is the deployment's, on every provider. Nothing injects one any more
+   * (compose leaves `BOT_MODEL` empty when unset, and the Desktop writes it only for a model the
+   * person chose), so set means chosen, and the model list keeps it as the default while the
+   * credential lists it (`model-catalogue.ts`).
+   */
+  const plan = planModelForEnvironment(environment);
+  if (selectedModel)
+    return { provider, plan, defaultModel: selectedModel, pinned: true };
+  return { provider, plan, defaultModel };
 }
 
 /**
@@ -597,6 +632,13 @@ export function builtInAgentConfiguration(
      * their precedence sentence only means anything next to the role it defers to.
      */
     prompt: [
+      /*
+       * Who it is, first. Left off only where the prompt already says it: a remote Bot run here for
+       * a check-in (`onOpenBotRunner`) carries its standing role, which names it the same way.
+       */
+      ...(agent.systemPrompt.includes(selfAddressGuidance(agent.name))
+        ? []
+        : [identityGuidance(agent.name)]),
       agent.systemPrompt,
       ...(standing ? [standing] : []),
       /*
@@ -626,6 +668,11 @@ export function builtInAgentConfiguration(
       todayGuidance(now),
     ].join("\n\n"),
     ...(planModel ? {} : { apiKey: apiKey ?? undefined }),
+    // The run's thinking effort, when the person picked one the model takes. A plan's harness is
+    // told through its own run instead (`planChoice`).
+    ...(!planModel && effortProviderOptions(model)
+      ? { providerOptions: effortProviderOptions(model) }
+      : {}),
     /*
      * A run stops after one step unless told otherwise, which for a Bot with tools means it calls
      * one and never speaks: the tool executes, the result arrives, and the run ends before the model
@@ -746,6 +793,14 @@ export async function buildAgents(
    * positional reason `loadInstructions` gives. Absent, every run uses the deployment's model.
    */
   pickedModel?: PickedModel,
+  /**
+   * The display name of every Bot whose answer may be in a conversation, by id, so the model is
+   * told which Bot answered (`bot-answers.ts`). After `pickedModel`, for the positional reason
+   * `loadInstructions` gives. Absent, the Bots being built are the ones named.
+   */
+  botNames: ReadonlyMap<string, string> = new Map(
+    agents.map((agent) => [agent.id, agent.name]),
+  ),
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -805,6 +860,7 @@ export async function buildAgents(
           recordToolLimitRefusal,
           holdsTools,
           pickedModel,
+          botNames,
         );
         if (loadPersonalMemory)
           built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
@@ -1073,6 +1129,8 @@ async function buildAgent(
   holdsTools?: HoldsTools,
   /** The model the person picked for this conversation. See {@link buildAgents}. */
   pickedModel?: PickedModel,
+  /** Who answered, by Bot id, for another Bot's answer in this one's thread. See {@link buildAgents}. */
+  botNames: ReadonlyMap<string, string> = new Map(),
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -1187,6 +1245,28 @@ async function buildAgent(
       handoff,
       initiator,
       holdsTools,
+      /*
+       * The person's model and effort, for the harness this deployment installed when it takes them.
+       * Only a model that came from a listing: otherwise the harness keeps its own configuration.
+       */
+      pickedModel &&
+        takesModelChoice(agent.endpoint) &&
+        process.env.MANAGED_AGENT_TOKEN &&
+        agent.headers?.["x-openbot-agent-token"] ===
+          process.env.MANAGED_AGENT_TOKEN
+        ? async (input) => {
+            const choice = await pickedModel(input);
+            if (!choice?.listed) return undefined;
+            logRunModel(agent.id, input, choice.model, choice.effort, {
+              harness: true,
+            });
+            return {
+              model: choice.model,
+              ...(choice.effort ? { reasoningEffort: choice.effort } : {}),
+            };
+          }
+        : undefined,
+      botNames,
     );
   }
 
@@ -1283,6 +1363,7 @@ async function buildAgent(
             input,
             new Set(input.tools.map((tool) => tool.name)),
             signal,
+            planChoice(runModel),
           )
         : undefined,
       learnedSkills,
@@ -1296,7 +1377,22 @@ async function buildAgent(
       : new Set<string>();
     const admit = admitTools(held, runModel);
     return new BuiltInAgentWithSaneHistory(configuration, {
-      observe: observeModelConnection,
+      /*
+       * A provider out of credit or at its spending limit is told as that, with its name and its
+       * own words, rather than as "Forbidden" or a retry count. See `model-billing.ts`.
+       */
+      observe: (stream) =>
+        observeModelConnection(stream).pipe(
+          catchError((error: unknown) =>
+            throwError(
+              () =>
+                billingRefusal(
+                  error,
+                  providerName(modelSourceFor(runModel, process.env)),
+                ) ?? error,
+            ),
+          ),
+        ),
       ...(admit ? { admitTools: admit } : {}),
       ...(held.size > 0 ? { waiting: held } : {}),
       /*
@@ -1304,6 +1400,8 @@ async function buildAgent(
        * or not there is anything to load, because a tool's picture is not a stored attachment;
        * see `tool-images.ts`.
        */
+      // Another Bot's answer, as that Bot's words rather than this one's. See `bot-answers.ts`.
+      attribute: (messages) => attributeBotAnswers(messages, botNames),
       inline: async (messages: AgentRunInput["messages"], threadId: string) =>
         inlineToolImages(
           loadAttachment
@@ -1337,6 +1435,9 @@ async function buildAgent(
     async (input, signal) => {
       const runModel = await modelForRun(model, input, pickedModel);
       signal.throwIfAborted();
+      logRunModel(agent.id, input, runModel.defaultModel, runModel.effort, {
+        plan: runModel.plan?.provider,
+      });
       /*
        * A run the runtime makes for itself holds nothing of the Bot's: no grant, no subagent, no
        * handoff, no learned Skill. Built again with none, rather than told not to call them, so a
@@ -1657,6 +1758,16 @@ function remoteAgentWithStandingRole(
   initiator?: AuditInitiator,
   /** Which runs may hold the Bot's tools. See {@link buildAgents}. */
   holdsTools?: HoldsTools,
+  /**
+   * The model and effort this run answers on, for a harness this deployment runs that takes them
+   * (`takesModelChoice`). Sent as `forwardedProps.openbotModel`. Absent for every other remote Bot,
+   * which picks its own model.
+   */
+  chooseModel?: (
+    input: RunAgentInput,
+  ) => Promise<{ model: string; reasoningEffort?: string } | undefined>,
+  /** Who answered, by Bot id, for another Bot's answer in this one's thread. See {@link buildAgents}. */
+  botNames: ReadonlyMap<string, string> = new Map(),
 ) {
   const holds = (input: RunAgentInput) => !holdsTools || holdsTools(input);
   /*
@@ -1750,6 +1861,8 @@ function remoteAgentWithStandingRole(
     };
     // Nor one it carried in: a statement copied from another run would still be accepted.
     if (!held) delete forwardedProps.openbotRun;
+    // The model is this deployment's decision, never the request's. Set below when it applies.
+    delete (forwardedProps as Record<string, unknown>).openbotModel;
     /*
      * The same guard a built-in Bot gets in `BuiltInAgentWithSaneHistory`, applied here because a
      * remote Bot never passes through it: this middleware is the last thing between the browser's
@@ -1785,24 +1898,31 @@ function remoteAgentWithStandingRole(
      * either; see `tool-images.ts`.
      */
     return from(
-      (loadAttachment
-        ? inlineAttachments(
-            history,
-            loadAttachment,
-            // The conversation this run is in, which is what decides whose files it may reach.
-            input.threadId,
-            markAttachmentsSent,
-          )
-        : Promise.resolve(history)
-      ).then((inlined) => inlineToolImages(inlined)),
+      Promise.all([
+        (loadAttachment
+          ? inlineAttachments(
+              history,
+              loadAttachment,
+              // The conversation this run is in, which is what decides whose files it may reach.
+              input.threadId,
+              markAttachmentsSent,
+            )
+          : Promise.resolve(history)
+        ).then((inlined) => inlineToolImages(inlined)),
+        chooseModel?.(input),
+      ]),
     ).pipe(
-      switchMap((messages) => {
+      switchMap(([messages, chosenModel]) => {
         const prepared: RunAgentInput = {
           ...input,
           messages: [
             agent.standingMessage,
             ...(holdingsMessage ? [holdingsMessage] : []),
-            ...messages,
+            /*
+             * Another Bot's answer as that Bot's words, after the sanitiser and the attachments as
+             * on the built-in path. See `bot-answers.ts`.
+             */
+            ...attributeBotAnswers(messages, botNames),
           ],
           /*
            * The Bot's own grants, added to whatever the surface offered.
@@ -1836,7 +1956,9 @@ function remoteAgentWithStandingRole(
                 ]
               : input.context,
           // Who the Bot is calling back as, so the audit row names it rather than "an agent".
-          forwardedProps,
+          forwardedProps: chosenModel
+            ? { ...forwardedProps, openbotModel: chosenModel }
+            : forwardedProps,
         };
         if (clientTools.length === 0) return next.run(prepared);
         return new HeadlessToolsMiddleware(
@@ -2060,6 +2182,9 @@ export async function resolveRuntimeAgents(
     recordToolLimitRefusal,
     holdsTools,
     pickedModel,
+    // Every Bot this person has, not only the one being built: an answer in its thread can be any
+    // of theirs.
+    new Map(all.map((agent) => [agent.id, agent.name])),
   );
 }
 
@@ -2068,28 +2193,91 @@ export async function resolveRuntimeAgents(
  * what the deployment offers, or undefined for the configured one. Read by the server from its own
  * record of the pick (`channels/model-choice.ts`), never from anything the request carries.
  */
-export type PickedModel = (input: RunAgentInput) => Promise<string | undefined>;
+export type PickedModel = (
+  input: RunAgentInput,
+) => Promise<RunChoice | undefined>;
 
 /**
- * The model one run of a built-in Bot uses: the person's pick for this conversation, or the
- * deployment's own.
+ * The model and effort one run of a Bot uses: the person's pick for this conversation, or the
+ * default, which is the middle of the provider's current line (`model-catalogue.ts`).
  *
  * Decided here, on the server, and never by the runtime's own `forwardedProps.model` override. That
  * one takes any `provider/model` string from the browser and sends it with this deployment's key,
  * past the allowlist and past the tool-search wrapper this file puts around the model. Here the pick
  * comes from the server's own record and goes through the same configuration as the default.
  *
- * A plan's harness picks its own model and is sent none, so a plan ignores the pick.
+ * A plan's harness is sent the model only when it came from the plan's own listing, so a plan is
+ * never handed the deployment's configured model name on a guess. See {@link planChoice}.
  */
 export async function modelForRun(
   model: RuntimeModel,
   input: RunAgentInput,
   pickedModel: PickedModel | undefined,
 ): Promise<RuntimeModel> {
-  if (!pickedModel || model.plan) return model;
-  const picked = await pickedModel(input);
-  if (!picked || picked === model.defaultModel) return model;
-  return { ...model, defaultModel: picked };
+  if (!pickedModel) return model;
+  const choice = await pickedModel(input);
+  if (!choice) return model;
+  if (model.plan && !choice.listed) return model;
+  if (choice.model === model.defaultModel && !choice.effort && !model.plan)
+    return model;
+  return {
+    ...model,
+    defaultModel: choice.model,
+    listed: choice.listed,
+    ...(choice.effort ? { effort: choice.effort } : {}),
+  };
+}
+
+/**
+ * One line per run naming the model and effort it was sent, so an operator can see what a
+ * conversation actually ran on. Ids only: never the prompt, the person, or a credential.
+ */
+function logRunModel(
+  agentId: string,
+  input: RunAgentInput,
+  model: string,
+  effort: string | undefined,
+  via: { plan?: string; harness?: boolean },
+): void {
+  console.info(
+    JSON.stringify({
+      type: "run-model",
+      agentId,
+      runId: input.runId,
+      model,
+      effort: effort ?? null,
+      ...(via.plan ? { plan: via.plan } : {}),
+      ...(via.harness ? { harness: true } : {}),
+    }),
+  );
+}
+
+/**
+ * What a harness is told to run on: the model and effort, as `forwardedProps.openbotModel`. Only
+ * for a model that came from a listing, so the harness's own fallback applies otherwise.
+ */
+export function planChoice(
+  model: RuntimeModel,
+): { model: string; reasoningEffort?: string } | undefined {
+  if (!model.listed) return undefined;
+  return {
+    model: model.defaultModel,
+    ...(model.effort ? { reasoningEffort: model.effort } : {}),
+  };
+}
+
+/**
+ * How a built-in Bot's effort reaches the model: the AI SDK's own provider option, which the
+ * Responses API sends as `reasoning.effort`, Chat Completions (any OpenAI-compatible endpoint,
+ * Google's and xAI's included) as `reasoning_effort`, and Anthropic as `output_config.effort`.
+ */
+export function effortProviderOptions(
+  model: RuntimeModel,
+): Record<string, Record<string, string>> | undefined {
+  if (!model.effort) return undefined;
+  return model.provider === "anthropic"
+    ? { anthropic: { effort: model.effort } }
+    : { openai: { reasoningEffort: model.effort } };
 }
 
 /** What one Bot may call, for the person whose request this is. */

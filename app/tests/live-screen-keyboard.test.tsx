@@ -10,7 +10,7 @@ class SocketDouble {
 
   readyState = SocketDouble.OPEN;
   onopen: (() => void) | null = null;
-  onmessage: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   onclose: (() => void) | null = null;
   readonly sent: Record<string, unknown>[] = [];
@@ -437,4 +437,51 @@ test("a key still down when control is handed back, or the screen closes, is rel
   cleanup();
   expect(again.sent).toEqual([shift, released]);
   expect(again.readyState).toBe(SocketDouble.CLOSED);
+});
+
+test("Command coming up lets go of a key held with it, whose own release a Mac never reports", async () => {
+  const socket = await liveSocket();
+  const key = (type: string, init: KeyboardEventInit) =>
+    screen.dispatchEvent(
+      new KeyboardEvent(type, { bubbles: true, cancelable: true, ...init }),
+    );
+  key("keydown", { key: "Meta", code: "MetaLeft", metaKey: true });
+  key("keydown", { key: "a", code: "KeyA", metaKey: true });
+  // No keyup for A: macOS does not send one while Command is down.
+  key("keyup", { key: "Meta", code: "MetaLeft" });
+
+  expect(
+    socket.sent.map((message) => `${message.event} ${message.code}`),
+  ).toEqual(["down ControlLeft", "down KeyA", "up ControlLeft", "up KeyA"]);
+});
+
+test("an emoji typed from the keyboard carries its text", async () => {
+  const socket = await liveSocket();
+  screen.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "😀",
+      code: "",
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  expect(socket.sent).toMatchObject([{ event: "down", text: "😀" }]);
+});
+
+test("one refused input is said in a corner, and the screen stays", async () => {
+  const socket = await liveSocket();
+  socket.onmessage?.({
+    data: JSON.stringify({
+      type: "input-error",
+      error: "Take control first.",
+    }),
+  });
+  const status = await waitFor(() => {
+    const found = document.querySelector('[role="status"]');
+    expect(found?.textContent).toBe("Take control first.");
+    return found;
+  });
+  expect(status).toBeTruthy();
+  expect(socket.readyState).toBe(1);
+  expect(document.querySelector("canvas")).toBe(screen);
 });

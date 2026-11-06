@@ -124,3 +124,57 @@ describe("a key a person presses while they hold the wheel", () => {
     }
   });
 });
+
+describe("frame pacing", () => {
+  /** A CDP session that lets the test fire a screencast frame and see when it was acked. */
+  function casting() {
+    const acks: number[] = [];
+    let onFrame: ((event: unknown) => void) | undefined;
+    const client = {
+      on(event: string, handler: (event: unknown) => void) {
+        if (event === "Page.screencastFrame") onFrame = handler;
+      },
+      async send(method: string, params: Record<string, unknown> = {}) {
+        if (method === "Page.screencastFrameAck")
+          acks.push(params.sessionId as number);
+      },
+      async detach() {},
+    };
+    const page = {
+      context: () => ({ newCDPSession: async () => client }),
+    } as unknown as Page;
+    const frame = (sessionId: number) =>
+      onFrame?.({
+        data: "",
+        sessionId,
+        metadata: { deviceWidth: 1280, deviceHeight: 800 },
+      });
+    return { page, acks, frame };
+  }
+
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  test("a frame the viewer has taken is acked straight away", async () => {
+    const { page, acks, frame } = casting();
+    const sent: string[] = [];
+    await startScreencast(page, (taken) => {
+      sent.push(JSON.stringify(taken));
+    });
+    frame(1);
+    await tick();
+    expect(acks).toEqual([1]);
+    // The server's proxy tells a frame from an error by this prefix, to hold back only frames when behind.
+    expect(sent[0]?.startsWith('{"type":"frame"')).toBe(true);
+  });
+
+  test("a frame is acked as it arrives, however long the viewer takes over it", async () => {
+    // Held until the viewer had it, Chrome dropped what the page did meanwhile and never sent it:
+    // see screencast-pacing-browser.test.ts, which measures that against Chromium itself.
+    const { page, acks, frame } = casting();
+    await startScreencast(page, () => new Promise<void>(() => {}));
+    frame(7);
+    frame(8);
+    await tick();
+    expect(acks).toEqual([7, 8]);
+  });
+});

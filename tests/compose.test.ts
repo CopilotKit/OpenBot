@@ -103,6 +103,10 @@ function runLangGraphAguiModelProbe(
         "tools = ModuleType('src.tool_runtime')",
         "tools.ToolAwareAgent = LangGraphAgent",
         "tools.bind_tools = tools.execute_tools = tools.next_step = lambda *args: None",
+        "tools.billing_refusal = tools.provider_message = tools.provider_refusal = lambda *args, **kwargs: None",
+        "from types import SimpleNamespace",
+        // No run chose a model or effort, so the deployment's own configuration applies.
+        "tools.current_tools = lambda: SimpleNamespace(model='', effort='')",
         "tools.model_messages = lambda messages: messages",
         "sys.modules['src.tool_runtime'] = tools",
         "from src import main",
@@ -176,6 +180,17 @@ function runLangGraphAguiModelProbe(
     writeFileSync(
       join(dir, "langgraph", "checkpoint", "memory.py"),
       ["class MemorySaver:", "    pass", ""].join("\n"),
+    );
+    // The ChatGPT plan's model list (`chatgpt_models`) imports httpx at module level. The probe
+    // only builds a model, so a stand-in is enough, like the packages above.
+    writeFileSync(
+      join(dir, "httpx.py"),
+      [
+        "class AsyncClient:",
+        "    def __init__(self, *_args, **_kwargs):",
+        "        pass",
+        "",
+      ].join("\n"),
     );
 
     const env: NodeJS.ProcessEnv = {
@@ -446,7 +461,8 @@ test("passes the selected Anthropic provider and model into the picked harness",
     OPENAI_API_KEY: "sk-openai-synthetic",
     OPENAI_BASE_URL: "https://openai-compatible.example/v1",
     BOT_PROVIDER: "openai",
-    BOT_MODEL: "gpt-5.5",
+    // Unset arrives as unset: the server, not a stand-in here, decides the model.
+    BOT_MODEL: "",
     ANTHROPIC_API_KEY: "",
     ANTHROPIC_BASE_URL: "",
   });
@@ -614,6 +630,25 @@ test("gives the selected harness the same governed callback as the framework Bot
     });
     expect(config.services[service].extra_hosts).toContain(
       "host.docker.internal=host-gateway",
+    );
+  }
+});
+
+/**
+ * Rootless Podman on Linux gives `host-gateway` an address that is not this machine's loopback, where
+ * the person's browser and a local Intelligence listen. OpenBot Desktop sets `OPENBOT_HOST_GATEWAY`
+ * there, to the address its Podman configuration maps to loopback, and every service that calls the
+ * host by name takes it.
+ */
+test("sends host.docker.internal where OPENBOT_HOST_GATEWAY says", () => {
+  const config = runComposeConfig({ OPENBOT_HOST_GATEWAY: "10.0.2.2" });
+  for (const service of [
+    "server",
+    "agent-harness",
+    "agent-langgraph",
+  ] as const) {
+    expect(config.services[service].extra_hosts).toContain(
+      "host.docker.internal=10.0.2.2",
     );
   }
 });

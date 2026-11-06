@@ -27,6 +27,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { desktopShell } from "@/lib/desktop/shell";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
@@ -41,6 +42,8 @@ type SettingsSidebarItem = {
    * everywhere else, so an entry stays lit on the pages beneath it.
    */
   exact?: boolean;
+  /** Shown only inside OpenBot Desktop, which is what the page reads from. */
+  desktopOnly?: boolean;
   icon: React.ComponentType<{ className?: string }>;
   linkOptions: LinkOptions;
   title: string;
@@ -93,6 +96,13 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     linkOptions: { to: "/settings/passwords" },
   },
   {
+    /* What OpenBot runs here and the memory it takes, with Restart and Stop. */
+    title: "This computer",
+    icon: IconDeviceDesktop,
+    desktopOnly: true,
+    linkOptions: { to: "/settings/this-computer" },
+  },
+  {
     /* The same mark Admin gives UI Components. It is the same subject seen from the other side. */
     title: "Components gallery",
     icon: IconLayoutGrid,
@@ -102,7 +112,7 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
 
 /**
  * What the personal edition keeps of Admin. There is no Admin there, and the one person still stores
- * keys, writes skills for every Bot, resets the computer and reads the trail. Apps are not here:
+ * keys, writes skills, resets the computer and reads the trail. Apps are not here:
  * adding one and connecting it are the same step, on Connections, which also links here for keys and
  * saved logins.
  */
@@ -113,7 +123,7 @@ const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     linkOptions: { to: "/settings/credentials" },
   },
   {
-    title: "Skills for every Bot",
+    title: "Skills",
     icon: IconBook,
     linkOptions: { to: "/settings/skills" },
   },
@@ -195,7 +205,11 @@ export function SettingsSidebar({
         <SidebarGroup>
           <SidebarMenu className="gap-px">
             {items
-              .filter((option) => !option.setup || canSetUp)
+              .filter(
+                (option) =>
+                  (!option.setup || canSetUp) &&
+                  (!option.desktopOnly || desktopShell() !== null),
+              )
               .map((option) => (
                 <SidebarMenuItem key={option.title}>
                   <SidebarMenuButton

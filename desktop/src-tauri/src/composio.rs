@@ -1,4 +1,4 @@
-//! Preparing this installation's app broker with the existing native CopilotKit sign-in.
+//! Preparing this installation's app broker with the CopilotKit sign-in the Intelligence CLI holds.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -6,15 +6,14 @@ use std::path::Path;
 
 use rand::RngCore;
 
+use crate::local_eval::AppsProvisioned;
 use crate::problem::Problem;
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// What came back for this installation: the CLI's report, and the key from the file it wrote.
 struct ProjectConnection {
     installation_id: String,
     project_id: String,
     api_key: String,
-    #[serde(rename = "reused")]
     _reused: bool,
 }
 
@@ -156,17 +155,48 @@ pub enum Provisioned {
     New(ProvisionedKey),
 }
 
-/// Ask Ops for this installation's project key. Only the installation identity is written.
-pub fn provision(
+/// Where the CLI writes the key it brings back. OpenBot's own folder, owner-only, removed with
+/// what is in it as soon as the key is read, whatever the CLI did.
+const HANDOFF: &str = ".openbot-apps";
+const HANDOFF_FILE: &str = "composio.env";
+
+/// One connection at a time, so a retry and a Start never both ask for the same installation.
+static CONNECTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/**
+Connect this installation's apps, once a CopilotKit sign-in is in place.
+
+`cli` runs `copilotkit integrations composio provision` for the installation id, writing into the
+file it is given (`local_eval::provision_apps_installed`). The CLI is the one that talks to
+CopilotKit Ops, with the session its own `login` saved: OpenBot never reads that session. Ops
+makes one Composio project per installation, owned by the signed-in account and organization, and
+replays the same key for it later.
+
+Only adds a key. A key the person supplied, an Arcade choice, or a key kept from an earlier
+connection means nothing is asked for. A new key goes to the protected store, never to `.env`.
+Callers treat a failure as apps unavailable: OpenBot still starts.
+*/
+pub fn connect(
     root: &Path,
-    session: &crate::intelligence::OpsSession,
-) -> Result<Provisioned, Problem> {
-    provision_at(root, session.bearer(), crate::intelligence::OPS_API)
+    cli: impl FnOnce(&str, &Path) -> Result<AppsProvisioned, Problem>,
+) -> Result<(), Problem> {
+    let _one = CONNECTING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match provision(root, cli)? {
+        Provisioned::Preserved => Ok(()),
+        Provisioned::New(key) => save(root, key),
+    }
 }
 
-fn provision_at(root: &Path, session: &str, origin: &str) -> Result<Provisioned, Problem> {
+/// Ask for this installation's project key through the CLI. Only the installation identity and
+/// the short-lived handoff folder are written.
+pub fn provision(
+    root: &Path,
+    cli: impl FnOnce(&str, &Path) -> Result<AppsProvisioned, Problem>,
+) -> Result<Provisioned, Problem> {
     let brokers = resolve(root)?;
-    provision_with(root, &brokers.values, |id| request_at(origin, session, id))
+    provision_with(root, &brokers.values, |id| request_with_cli(root, id, cli))
 }
 
 /// Keep a provisioned key in the protected store. Never in `.env`, and never under the name of a
@@ -179,25 +209,48 @@ pub fn save(root: &Path, key: ProvisionedKey) -> Result<(), Problem> {
     })
 }
 
-fn request_at(origin: &str, session: &str, id: &str) -> Result<ProjectConnection, Problem> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| setup_problem())?;
-    let response = client
-        .post(format!("{origin}/api/cli/integrations/composio/project"))
-        .bearer_auth(session)
-        .json(&serde_json::json!({ "installationId": id }))
-        .send()
-        .map_err(|_| setup_problem())?;
-    if !response.status().is_success() {
-        return Err(setup_problem());
+fn request_with_cli(
+    root: &Path,
+    id: &str,
+    cli: impl FnOnce(&str, &Path) -> Result<AppsProvisioned, Problem>,
+) -> Result<ProjectConnection, Problem> {
+    let folder = root.join(HANDOFF);
+    // A handoff an interrupted attempt left behind. It may hold a key; it never outlives a retry.
+    match std::fs::remove_dir_all(&folder) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(setup_problem()),
     }
-    response.json().map_err(|_| setup_problem())
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        // The CLI refuses a folder another account can write to.
+        builder.mode(0o700);
+    }
+    builder.create(&folder).map_err(|_| setup_problem())?;
+    let env_file = folder.join(HANDOFF_FILE);
+    let received = cli(id, &env_file).and_then(|reported| {
+        let key = file_settings(&env_file)?
+            .remove("COMPOSIO_API_KEY")
+            .ok_or_else(setup_problem)?;
+        Ok(ProjectConnection {
+            installation_id: reported.installation_id,
+            project_id: reported.project_id,
+            api_key: key,
+            _reused: reported.reused,
+        })
+    });
+    let removed = std::fs::remove_dir_all(&folder);
+    let connection = received.map_err(|_| setup_problem())?;
+    // A key that could not be cleared from the handoff is not taken up. The next attempt clears
+    // it first, and Ops replays the same key then.
+    removed.map_err(|_| setup_problem())?;
+    Ok(connection)
 }
 
-fn setup_problem() -> Problem {
+/// What the person reads when apps could not be connected. Nothing the CLI or Ops said is in it.
+pub fn setup_problem() -> Problem {
     Problem::plain("OpenBot couldn't connect your apps. Check your connection, then choose Connect apps. If it keeps happening, ask an admin.")
 }
 
@@ -393,7 +446,7 @@ mod tests {
         );
         // A supplied key is never replaced, so nothing is asked for.
         assert!(matches!(
-            provision_at(&root, "synthetic-ops-session", "http://127.0.0.1:1").unwrap(),
+            provision(&root, |_, _| panic!("a supplied key is never replaced")).unwrap(),
             Provisioned::Preserved
         ));
 
@@ -511,32 +564,84 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[test]
-    fn ops_request_uses_only_the_cli_session_and_rejects_errors_without_body_details() {
-        let id = "e1503aba-d1ba-4d21-ab5e-7b6cb109bfb6";
-        let (url, requests) = crate::http_test_support::response_server(vec![
-            (
-                "200 OK",
-                r#"{"installationId":"e1503aba-d1ba-4d21-ab5e-7b6cb109bfb6","projectId":"pr_fixture","apiKey":"synthetic-key","reused":true}"#,
-            ),
-            ("503 Unavailable", "synthetic-private-error-body"),
-        ]);
-        let result = request_at(&url, "synthetic-ops-session", id).unwrap();
-        assert_eq!(result.api_key, "synthetic-key");
-        let error = request_at(&url, "synthetic-ops-session", id).err().unwrap();
-        let rendered = serde_json::to_string(&error).unwrap();
-        assert!(!rendered.contains("synthetic-"));
-        let requests = requests.join().unwrap();
-        for (headers, body) in requests {
-            assert!(headers.starts_with("POST /api/cli/integrations/composio/project HTTP/1.1"));
-            assert!(headers
-                .to_ascii_lowercase()
-                .contains("authorization: bearer synthetic-ops-session\r\n"));
-            assert_eq!(
-                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
-                serde_json::json!({"installationId": id})
-            );
+    /// The CLI as `integrations composio provision` behaves on success: the key in the file it
+    /// was given, and metadata in its report.
+    fn cli_writes(
+        key: &'static str,
+        reused: bool,
+    ) -> impl FnOnce(&str, &Path) -> Result<AppsProvisioned, Problem> {
+        move |id, env_file| {
+            assert!(env_file.is_absolute());
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let folder = std::fs::metadata(env_file.parent().unwrap()).unwrap();
+                assert_eq!(folder.permissions().mode() & 0o777, 0o700);
+            }
+            assert!(!env_file.exists(), "the CLI gets an empty file to write");
+            std::fs::write(env_file, format!("COMPOSIO_API_KEY={key}\n")).unwrap();
+            Ok(AppsProvisioned {
+                installation_id: id.into(),
+                project_id: "pr_fixture".into(),
+                reused,
+            })
         }
+    }
+
+    /// A failed CLI leaves nothing behind and says nothing it was told; a report for another
+    /// installation, or no key in the file, is not taken up either.
+    #[test]
+    fn a_failed_or_mismatched_cli_answer_keeps_no_key_and_no_handoff() {
+        let root = crate::test_support::temp_root("composio-cli-failures");
+        std::fs::create_dir_all(&root).unwrap();
+        let failed = provision_with(&root, &BTreeMap::new(), |id| {
+            request_with_cli(&root, id, |_, env_file| {
+                // Even a file the CLI left half-written goes with the handoff.
+                std::fs::write(env_file, "COMPOSIO_API_KEY=synthetic-partial\n").unwrap();
+                Err(Problem::plain("synthetic-private-cli-error"))
+            })
+        });
+        let rendered = serde_json::to_string(&failed.err().unwrap()).unwrap();
+        assert!(rendered.contains("OpenBot couldn't connect your apps."));
+        assert!(!rendered.contains("synthetic-"));
+        assert!(!root.join(HANDOFF).exists());
+
+        assert!(provision_with(&root, &BTreeMap::new(), |id| {
+            request_with_cli(&root, id, |_, env_file| {
+                std::fs::write(env_file, "COMPOSIO_API_KEY=synthetic-key\n").unwrap();
+                Ok(AppsProvisioned {
+                    installation_id: "a1503aba-d1ba-4d21-ab5e-7b6cb109bfb6".into(),
+                    project_id: "pr_fixture".into(),
+                    reused: false,
+                })
+            })
+        })
+        .is_err());
+        assert!(provision_with(&root, &BTreeMap::new(), |id| {
+            request_with_cli(&root, id, |id, _| {
+                Ok(AppsProvisioned {
+                    installation_id: id.into(),
+                    project_id: "pr_fixture".into(),
+                    reused: false,
+                })
+            })
+        })
+        .is_err());
+        assert!(!root.join(HANDOFF).exists());
+
+        // A handoff an interrupted attempt left behind is cleared before the CLI runs again.
+        std::fs::create_dir_all(root.join(HANDOFF)).unwrap();
+        std::fs::write(
+            root.join(HANDOFF).join(HANDOFF_FILE),
+            "COMPOSIO_API_KEY=stale\n",
+        )
+        .unwrap();
+        let key = new_key(provision_with(&root, &BTreeMap::new(), |id| {
+            request_with_cli(&root, id, cli_writes("synthetic-fresh-key", false))
+        }));
+        assert_eq!(key, "synthetic-fresh-key");
+        assert!(!root.join(HANDOFF).exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -576,28 +681,30 @@ mod tests {
     }
 
     #[test]
-    fn native_http_retry_stores_project_key_privately_and_next_sign_in_skips_remote() {
-        if crate::test_support::isolated_process("composio::tests::native_http_retry_stores_project_key_privately_and_next_sign_in_skips_remote") { return; }
+    fn a_retry_through_the_cli_keeps_the_key_privately_and_the_next_connect_asks_nobody() {
+        if crate::test_support::isolated_process("composio::tests::a_retry_through_the_cli_keeps_the_key_privately_and_the_next_connect_asks_nobody") { return; }
         clear_broker_environment();
-        let root = crate::test_support::temp_root("composio-native-roundtrip");
+        let root = crate::test_support::temp_root("composio-cli-roundtrip");
         std::fs::create_dir_all(&root).unwrap();
         let id = "e1503aba-d1ba-4d21-ab5e-7b6cb109bfb6";
         let env = format!("OPENBOT_INSTALLATION_ID={id}\nCOMPOSIO_API_KEY=   \n");
         std::fs::write(root.join(".env"), &env).unwrap();
-        let (url, requests) = crate::http_test_support::response_server(vec![
-            ("503 Unavailable", "synthetic-private-error"),
-            (
-                "200 OK",
-                r#"{"installationId":"e1503aba-d1ba-4d21-ab5e-7b6cb109bfb6","projectId":"pr_fixture","apiKey":"synthetic-native-key","reused":true}"#,
-            ),
-        ]);
-        assert!(provision_at(&root, "synthetic-ops-session", &url).is_err());
-        let key = new_key(provision_at(&root, "synthetic-ops-session", &url));
-        save(&root, ProvisionedKey::new(key)).unwrap();
-        assert!(matches!(
-            provision_at(&root, "synthetic-ops-session", "http://127.0.0.1:1").unwrap(),
-            Provisioned::Preserved
-        ));
+        let mut asked = Vec::new();
+        assert!(connect(&root, |id, _| {
+            asked.push(id.to_owned());
+            Err(Problem::plain("synthetic-expired-session"))
+        })
+        .is_err());
+        assert!(crate::vault::recall(&root, PROVISIONED_KEY)
+            .unwrap()
+            .is_none());
+        // Ops replays the key it made for this installation: `reused` is still a key to keep.
+        connect(&root, |id, env_file| {
+            asked.push(id.to_owned());
+            cli_writes("synthetic-native-key", true)(id, env_file)
+        })
+        .unwrap();
+        connect(&root, |_, _| panic!("a kept key is never asked for again")).unwrap();
         let brokers = resolve(&root).unwrap();
         assert_eq!(brokers.composio_source(), Some(KeySource::Provisioned));
         assert_eq!(
@@ -606,8 +713,8 @@ mod tests {
         );
         assert!(!brokers.runtime().contains_key("OPENBOT_INSTALLATION_ID"));
         assert_eq!(std::fs::read_to_string(root.join(".env")).unwrap(), env);
-        let requests = requests.join().unwrap();
-        assert_eq!(requests[0].1, requests[1].1);
+        assert!(!root.join(HANDOFF).exists());
+        assert_eq!(asked, [id, id]);
         std::fs::remove_dir_all(root).unwrap();
     }
 

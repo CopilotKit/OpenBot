@@ -94,6 +94,10 @@ export function agentTrigger(agents: readonly AgentOption[]): TriggerConfig {
  * `/` is restricted to the start of a line, so a URL or a date in the middle of a sentence never
  * opens the dropdown. Selection resolves to a chip; `applyCommandChips` then rewrites the ones that
  * are really prompts or client actions.
+ *
+ * Listed and chipped by name ("Standup notes"), and found by name, command or description, so
+ * typing the command still works for somebody who knows it. The command itself is not shown: it is
+ * the skill's key, not something a person needs to read.
  */
 export function slashCommandTrigger(
   commands: readonly CommandOption[],
@@ -105,7 +109,9 @@ export function slashCommandTrigger(
     emptyMessage: "No matching skills",
     onSearch: (query): TriggerSuggestion[] =>
       commands
-        .filter((command) => matches(query, command.name, command.description))
+        .filter((command) =>
+          matches(query, command.name, command.id, command.description),
+        )
         .map((command) => ({
           value: command.id,
           label: command.name,

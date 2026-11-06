@@ -12,19 +12,51 @@ It also keeps a failed tool call failed in the history that ends the turn; see
 """
 
 import asyncio
+import logging
 from contextlib import suppress
 from dataclasses import dataclass, field
+from typing import get_args
 
 from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, RunStartedEvent
 from ag_ui_claude_sdk import ClaudeAgentAdapter
-from claude_agent_sdk import AssistantMessage, HookMatcher, ToolResultBlock, UserMessage
+from claude_agent_sdk import (
+    AssistantMessage,
+    EffortLevel,
+    HookMatcher,
+    ToolResultBlock,
+    UserMessage,
+)
 from claude_agent_sdk.types import StreamEvent
 
 from .replay import run_replayed_query, system_instructions
 
+logger = logging.getLogger(__name__)
+
+# The efforts `ClaudeAgentOptions.effort` takes (the CLI's `--effort`), read from the SDK itself.
+SDK_EFFORTS = frozenset(get_args(EffortLevel))
+
 
 class ModelAuthenticationError(Exception):
     pass
+
+
+def run_model(forwarded_props):
+    """The `(model, effort)` the server chose for this run, or `None` when it chose none.
+
+    The server sends `openbotModel: {"model": ..., "reasoningEffort": ...}` on both of this
+    harness's paths and strips any a browser supplied, so it is the deployment's decision. A value
+    of another shape is ignored. An effort the SDK does not take is not sent, and no effort means
+    the model's own default.
+    """
+    props = forwarded_props if isinstance(forwarded_props, dict) else {}
+    choice = props.get("openbotModel")
+    if not isinstance(choice, dict):
+        return None
+    model = choice.get("model")
+    if not isinstance(model, str) or not model.strip():
+        return None
+    effort = choice.get("reasoningEffort")
+    return model.strip(), effort if effort in SDK_EFFORTS else None
 
 
 @dataclass
@@ -47,6 +79,8 @@ class _Turn:
     # Tool calls Claude Code reported as failed, and the result the turn streamed for each.
     failed: set[str] = field(default_factory=set)
     failed_results: dict[str, str] = field(default_factory=dict)
+    # The model the server chose when this query started, or that it was switched to since.
+    model: str | None = None
 
     def result(self, tool_id):
         if tool_id not in self.results:
@@ -73,6 +107,10 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         self._segment_locks: dict[str, asyncio.Lock] = {}
 
     def build_options(self, input_data=None, thread_id=None):
+        # Read before the model endpoint drops its forwarded props: the server's choice of model
+        # is the one prop it honours. Every query is built here, so a choice changed between runs
+        # starts the next query on it.
+        chosen = run_model(input_data.forwarded_props) if input_data else None
         if self._model_only and input_data:
             # The model endpoint accepts prompts and caller-owned tools, never SDK
             # configuration or an ungoverned state-management tool.
@@ -80,6 +118,9 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 update={"state": None, "forwarded_props": {}}
             )
         options = super().build_options(input_data, thread_id)
+        if chosen:
+            # After the upstream merge, so the server's choice wins over a forwarded `model`.
+            options.model, options.effort = chosen
         if not self._model_only and input_data:
             # The model endpoint gets its instructions in context. A full Bot gets its standing
             # role only as a system message, which a user prompt cannot carry.
@@ -313,6 +354,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                         message="This Claude query is waiting for its client tool result; no matching tool-use ID was supplied."
                     )
                     return
+                await self._follow_model_choice(thread_id, turn, input_data)
                 for tool_id, content in incoming.items():
                     turn.result(tool_id).set_result(content)
                 # Parallel client tools may return in separate HTTP requests.
@@ -329,7 +371,11 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                         message="The Claude query for this tool result is no longer running. Start a new message."
                     )
                     return
-                turn = _Turn(tool_names={tool.name for tool in input_data.tools})
+                chosen = run_model(input_data.forwarded_props)
+                turn = _Turn(
+                    tool_names={tool.name for tool in input_data.tools},
+                    model=chosen[0] if chosen else None,
+                )
                 self._turns[thread_id] = turn
                 turn.task = asyncio.create_task(self._pump(input_data, turn))
 
@@ -360,6 +406,29 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             finally:
                 if not released:
                     await self.interrupt(thread_id)
+
+    async def _follow_model_choice(self, thread_id, turn, input_data):
+        """Move a running query to the model a tool result's run was sent with.
+
+        A tool result continues the SDK query that asked for it, so its options are the ones that
+        query started with. A person can pick another model while a call waits on them, and the
+        rest of that turn should answer on it: the SDK changes a running query's model
+        (`ClaudeSDKClient.set_model`). It has no such call for effort, so a changed effort applies
+        from the next query, which `build_options` starts on it.
+        """
+        chosen = run_model(input_data.forwarded_props)
+        if not chosen or chosen[0] == turn.model:
+            return
+        worker = (self._workers.get(thread_id) or {}).get("worker")
+        client = getattr(worker, "_client", None)
+        if client is None:
+            return
+        try:
+            await client.set_model(chosen[0])
+        except Exception as error:  # The turn finishes on the model it has rather than failing.
+            logger.warning("The running Claude query kept its model: %s", type(error).__name__)
+            return
+        turn.model = chosen[0]
 
     async def interrupt(self, thread_id=None):
         threads = [thread_id] if thread_id else list(self._turns)

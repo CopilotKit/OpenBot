@@ -175,6 +175,50 @@ name it. Nothing else in the chart consults it.
 {{- $cidr -}}
 {{- end -}}
 
+{{/*
+AWS Partner Revenue Measurement: the tag that credits CopilotKit for the AWS resources this chart
+has a controller create, folded into the operator's own tag annotation. Called with the annotations
+map the operator gave, the annotation that carries tags, and the values path it came from.
+
+The key is CopilotKit's Partner Central account and the value its product code, the same pair the
+bundled Intelligence puts on its own Ingress. Constants rather than values, so every install carries
+them and nothing turns them off. The account-suffixed key lets up to ten partners tag one resource
+independently.
+
+Only our own key can conflict. The operator's tags are kept in order with ours appended. Another
+partner's `aws-apn-id-<account>` key is kept, and so is a legacy `aws-apn-id` carrying another
+partner's value. A legacy `aws-apn-id` carrying our value is ours from before the suffixed key, and
+is dropped so the load balancer is not attributed twice. Our key with any other value is refused.
+*/}}
+{{- define "openbot.awsAttributionTags" -}}
+{{- $key := "aws-apn-id-058264219587" -}}
+{{- $value := "pc:avjdxr516uh0mgsqob730tzgy" -}}
+{{- $existing := index (.annotations | default dict) .annotation | default "" | toString -}}
+{{- $found := false -}}
+{{- $kept := list -}}
+{{- range $entry := splitList "," $existing -}}
+  {{- $parts := splitList "=" $entry -}}
+  {{- $entryKey := trim (first $parts) -}}
+  {{- $entryValue := ternary (trim (last $parts)) "" (eq (len $parts) 2) -}}
+  {{- if eq $entryKey $key -}}
+    {{- if ne $entryValue $value -}}
+      {{- fail (printf "%s %s sets %s to a value other than %s; remove that entry" $.path $.annotation $key $value) -}}
+    {{- end -}}
+    {{- if not $found -}}
+      {{- $kept = append $kept $entry -}}
+    {{- end -}}
+    {{- $found = true -}}
+  {{- else if and (eq $entryKey "aws-apn-id") (eq $entryValue $value) -}}
+  {{- else if ne (trim $entry) "" -}}
+    {{- $kept = append $kept $entry -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $found -}}
+  {{- $kept = append $kept (printf "%s=%s" $key $value) -}}
+{{- end -}}
+{{- join "," $kept -}}
+{{- end -}}
+
 {{- define "openbot.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "openbot.fullname" .) .Values.serviceAccount.name -}}

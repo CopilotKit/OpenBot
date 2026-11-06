@@ -38,7 +38,7 @@ export function QuoteCard({ quote, attribution, context }: Partial<QuoteArgs>) {
         <p className="text-sm leading-relaxed">{quote}</p>
         {attribution ? (
           <footer className="mt-2 text-xs text-muted-foreground">
-            , {attribution}
+            {attribution}
           </footer>
         ) : null}
       </blockquote>

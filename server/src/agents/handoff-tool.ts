@@ -172,6 +172,9 @@ export function handoffTool(options: {
       if (!parsed.success) {
         return "That handoff was not sent: name the Bot and say what you are asking it to do.";
       }
+      // A Bot naming itself is the one being asked. Told so before anybody is asked to approve it.
+      const self = await desk.addressesSelf?.(from, parsed.data.bot);
+      if (self) return self;
       if (approvalGate) {
         try {
           const approval = await approvalGate({

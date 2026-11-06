@@ -10,6 +10,7 @@ import {
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
 import { saveConversationModel } from "@/lib/models/mutations";
+import type { ConversationModel } from "@/lib/models/queries";
 import { newId } from "@/lib/new-id";
 import {
   createChannelMutationOptions,
@@ -80,24 +81,28 @@ export async function startGroupWith(input: {
 }
 
 /**
- * Create a conversation, save the model picked for it, then open it with its first message.
+ * Create a conversation, save the model and thinking effort picked for it, then open it with its
+ * first message.
  *
  * The pick is saved before the conversation opens, because opening it is what sends the first
- * message, and that message must not run on a model other than the one picked. A pick that cannot
- * be saved discards the conversation, which exists only to hold that message, and the save's own
- * error is what the caller sees, so the composer keeps the draft. Pure so the order can be tested.
+ * message, and that message must not run on a model or effort other than the one picked. A pick
+ * that cannot be saved discards the conversation, which exists only to hold that message, and the
+ * save's own error is what the caller sees, so the composer keeps the draft. Pure so the order can
+ * be tested.
  */
 export async function startWithModel(input: {
-  model: string | null;
+  /** Null, or both halves null, when everything is the default and nothing needs saving. */
+  pick: ConversationModel | null;
   create: () => Promise<{ id: string }>;
-  save: (channelId: string, model: string) => Promise<unknown>;
+  save: (channelId: string, pick: ConversationModel) => Promise<unknown>;
   discard: (channelId: string) => Promise<void>;
   open: (channelId: string) => Promise<void>;
 }): Promise<void> {
   const channel = await input.create();
-  if (input.model) {
+  const { pick } = input;
+  if (pick && (pick.model !== null || pick.effort !== null)) {
     try {
-      await input.save(channel.id, input.model);
+      await input.save(channel.id, pick);
     } catch (error) {
       await input.discard(channel.id).catch(() => undefined);
       throw error;
@@ -131,13 +136,13 @@ export function useStartChannel() {
     text: string,
     /** The first message's `/` skills; see `FirstMessage`. */
     skillInstructions: readonly string[] = [],
-    /** A model picked before the conversation existed, saved before its first message runs. */
-    model?: string | null,
+    /** A model and effort picked before the conversation existed, saved before its first message runs. */
+    pick?: ConversationModel | null,
     /** The placeholder this was started behind, if any; see the hook's own comment. */
     pendingId?: string,
   ) =>
     startWithModel({
-      model: model ?? null,
+      pick: pick ?? null,
       create: async () => {
         const channel = await createChannel.mutateAsync([agentId]);
         queryClient.setQueryData(channelKeys.detail(channel.id), channel);
@@ -200,7 +205,7 @@ export function useStartChannel() {
       agentId: string,
       text: string,
       skillInstructions: readonly string[] = [],
-      model?: string | null,
+      pick?: ConversationModel | null,
       pendingId?: string,
     ) =>
       startWithChosen({
@@ -209,7 +214,7 @@ export function useStartChannel() {
         skillInstructions,
         record: routeMessage,
         start: (id, message, skills) =>
-          start(id, message, skills, model, pendingId),
+          start(id, message, skills, pick, pendingId),
       }),
   };
 }

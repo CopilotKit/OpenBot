@@ -46,7 +46,13 @@ export function NotifyPrompt() {
   if (permission !== "default" || dismissed) return null;
 
   return (
-    <Item className="mb-2" data-notify-prompt="" size="sm" variant="outline">
+    <Item
+      // The composer's own surface, so the card reads as part of it rather than see-through.
+      className="mb-2 bg-card"
+      data-notify-prompt=""
+      size="sm"
+      variant="outline"
+    >
       <ItemMedia variant="icon">
         <IconBell />
       </ItemMedia>

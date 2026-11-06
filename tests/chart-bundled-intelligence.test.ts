@@ -13,12 +13,19 @@
  *    operator named, and no gateway proxy;
  *  - Automatic Learning is on in the bundled Intelligence, as it is in OpenBot: its agent, scheduler
  *    and object store render, every Secret they read is one the chart writes with the key they ask
- *    for, and every client of the store reaches the store's pod, whatever the release is called.
+ *    for, and every client of the store reaches the store's pod, whatever the release is called;
+ *  - the Job that installs Learning's queue waits out the restart of Intelligence's database an
+ *    upgrade causes for as long as OpenBot's own migrations wait.
  */
 import { describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { parseAllDocuments } from "yaml";
+import { parse, parseAllDocuments } from "yaml";
+import {
+  dependencyKeys,
+  underDependency,
+  withoutChartDefault,
+} from "../scripts/chart-reuse-values";
 
 const helm = Bun.which("helm") !== null;
 const chart = join(import.meta.dir, "../charts/openbot");
@@ -49,12 +56,16 @@ type EnvVar = {
 };
 
 function render(...args: string[]): Doc[] {
+  return renderChart(chart, ...args);
+}
+
+function renderChart(from: string, ...args: string[]): Doc[] {
   const result = Bun.spawnSync(
     [
       "helm",
       "template",
       "openbot",
-      chart,
+      from,
       "--namespace",
       "openbot",
       "--set-string",
@@ -544,6 +555,86 @@ describe.skipIf(!helm)("Automatic Learning in the bundled Intelligence", () => {
     expect(
       secretValue(docs, token?.name ?? "", token?.key ?? "")?.length,
     ).toBeGreaterThanOrEqual(32);
+  });
+
+  /*
+   * An upgrade that moves the bundled Intelligence moves its PostgreSQL's image too, so the database
+   * pod is replaced while the upgrade applies. The Job that installs Learning's queue is applied in
+   * the same step, not as a hook before it, and waits for that database inside its own deadline.
+   * On Intelligence's 300 seconds, an in-place upgrade from 0.16.0-rc.5 failed with the Job's
+   * DeadlineExceeded while the new database pod came up, and reported UPGRADE FAILED.
+   */
+  test("gives the Job that installs Learning's queue as long to wait out a database restart as OpenBot's own migrations", () => {
+    const docs = render(...learningVanilla);
+    const queue = workload(
+      docs,
+      "Job",
+      component("learning-queue-migration"),
+    ) as Doc & {
+      metadata: { annotations?: Record<string, string> };
+      spec: { activeDeadlineSeconds?: number };
+    };
+    const migrations = docs.find(
+      (d) =>
+        d.kind === "Job" &&
+        d.metadata.labels?.["app.kubernetes.io/name"] === "openbot" &&
+        component("migrations")(d),
+    ) as (Doc & { spec: { activeDeadlineSeconds?: number } }) | undefined;
+
+    // Not a hook: it runs beside the database's restart, not before it.
+    expect(queue.metadata.annotations?.["helm.sh/hook"]).toBeUndefined();
+    expect(
+      (queue as Workload).spec?.template?.spec.initContainers?.map(
+        (c) => c.name,
+      ),
+    ).toContain("wait-for-database");
+    expect(migrations?.spec.activeDeadlineSeconds).toBe(900);
+    expect(queue.spec.activeDeadlineSeconds).toBe(
+      migrations?.spec.activeDeadlineSeconds,
+    );
+  });
+
+  /*
+   * A release from before that key, upgraded with --reuse-values, has no `intelligence.learning.queue`
+   * of this chart's, and still has the Intelligence chart's own beneath it. The new-values-key check
+   * once nulled the key to stand for that, which deleted Intelligence's default too, failed the
+   * render, and refused a change that upgrades cleanly.
+   */
+  test("a release from before the queue Job's ceiling, upgraded with --reuse-values, renders it on Intelligence's own", async () => {
+    const dependencies = dependencyKeys(
+      await Bun.file(join(chart, "Chart.yaml")).text(),
+    );
+    expect(underDependency("intelligence.learning.queue", dependencies)).toBe(
+      true,
+    );
+    expect(underDependency("intelligence", dependencies)).toBe(false);
+    expect(underDependency("config.handoff", dependencies)).toBe(false);
+
+    const [packaged] = Array.from(
+      new Bun.Glob("intelligence-*.tgz").scanSync(join(chart, "charts")),
+    );
+    const shown = Bun.spawnSync(
+      ["helm", "show", "values", join(chart, "charts", packaged ?? "")],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const own = (
+      parse(new TextDecoder().decode(shown.stdout)) as {
+        learning: { queue: { migration: { activeDeadlineSeconds: number } } };
+      }
+    ).learning.queue.migration.activeDeadlineSeconds;
+    expect(own).toBeGreaterThan(0);
+
+    const docs = await withoutChartDefault(
+      chart,
+      "intelligence.learning.queue",
+      (copy) => renderChart(copy, ...learningVanilla),
+    );
+    const queue = workload(
+      docs,
+      "Job",
+      component("learning-queue-migration"),
+    ) as Doc & { spec: { activeDeadlineSeconds?: number } };
+    expect(queue.spec.activeDeadlineSeconds).toBe(own);
   });
 
   test("with no model key the install still renders, and Learning's agent finds none rather than a placeholder", () => {

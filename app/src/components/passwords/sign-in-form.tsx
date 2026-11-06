@@ -141,10 +141,15 @@ export function SignInForm({ requestId }: { requestId: string }) {
               {failure?.message ?? data.outcome}
             </p>
           ) : null}
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" type="submit" disabled={busy || !code.trim()}>
-              <IconShieldCheck />
-              {submitCode.isPending ? "Checking…" : "Finish signing in"}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => cancel.mutate(requestId)}
+            >
+              Cancel
             </Button>
             <Button
               size="sm"
@@ -156,14 +161,9 @@ export function SignInForm({ requestId }: { requestId: string }) {
               <IconPointer />
               Take over to finish
             </Button>
-            <Button
-              size="sm"
-              type="button"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => cancel.mutate(requestId)}
-            >
-              Cancel
+            <Button size="sm" type="submit" disabled={busy || !code.trim()}>
+              <IconShieldCheck />
+              {submitCode.isPending ? "Checking…" : "Finish signing in"}
             </Button>
           </div>
         </form>
@@ -176,7 +176,15 @@ export function SignInForm({ requestId }: { requestId: string }) {
         title="Sign in by hand"
         description="Open the Bot's browser and sign in yourself. Then choose I've signed in and the Bot carries on."
       >
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => cancel.mutate(requestId)}
+          >
+            Cancel
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -192,14 +200,6 @@ export function SignInForm({ requestId }: { requestId: string }) {
             onClick={() => finish.mutate(requestId)}
           >
             {finish.isPending ? "Finishing…" : "I've signed in"}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={() => cancel.mutate(requestId)}
-          >
-            Cancel
           </Button>
         </div>
         {failure ? (
@@ -326,10 +326,15 @@ export function SignInForm({ requestId }: { requestId: string }) {
               {failure.message}
             </p>
           ) : null}
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" type="submit" disabled={busy || !password}>
-              <IconLock />
-              {submit.isPending ? "Signing in…" : "Sign in"}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => cancel.mutate(requestId)}
+            >
+              Decline
             </Button>
             <Button
               size="sm"
@@ -341,14 +346,9 @@ export function SignInForm({ requestId }: { requestId: string }) {
               <IconPointer />
               Take over to sign in
             </Button>
-            <Button
-              size="sm"
-              type="button"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => cancel.mutate(requestId)}
-            >
-              Decline
+            <Button size="sm" type="submit" disabled={busy || !password}>
+              <IconLock />
+              {submit.isPending ? "Signing in…" : "Sign in"}
             </Button>
           </div>
         </form>

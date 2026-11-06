@@ -39,6 +39,17 @@ function source(
   return { ...secrets, ...allowed, HOME: "/root", ...extra };
 }
 
+/** Every shell a test starts, ended after it: each is a live bash now, not a process per command. */
+const started: Array<ReturnType<typeof createShell>> = [];
+function newShell(...args: Parameters<typeof createShell>) {
+  const made = createShell(...args);
+  started.push(made);
+  return made;
+}
+afterEach(() => {
+  for (const made of started.splice(0)) made.dispose();
+});
+
 describe("what a command inherits", () => {
   test("PATH, locale, terminal and proxy variables pass", () => {
     const env = environmentForCommand(source(), workspaceHome);
@@ -188,7 +199,7 @@ describe("the command that actually runs", () => {
   });
 
   test("env in the child does not list a secret from the parent", async () => {
-    const result = await createShell(root, source()).run({
+    const result = await newShell(root, source()).run({
       command: "printenv",
     });
     expect(result.timedOut).toBe(false);
@@ -201,7 +212,7 @@ describe("the command that actually runs", () => {
   });
 
   test("a name in COMPUTER_SHELL_ENV is in the child", async () => {
-    const result = await createShell(
+    const result = await newShell(
       root,
       source({ COMPUTER_SHELL_ENV: "JAVA_HOME", JAVA_HOME: "/opt/java" }),
     ).run({ command: "printenv JAVA_HOME" });
@@ -211,7 +222,7 @@ describe("the command that actually runs", () => {
   test("a package install is not left waiting for a prompt", async () => {
     // apt-get reads DEBIAN_FRONTEND. Interactive, it stops for an answer nobody is there to give,
     // and the command reaches its timeout looking like a broken package rather than a question.
-    const result = await createShell(root, source()).run({
+    const result = await newShell(root, source()).run({
       command: "printenv DEBIAN_FRONTEND",
     });
     expect(result.exitCode).toBe(0);
@@ -219,7 +230,7 @@ describe("the command that actually runs", () => {
   });
 
   test("env in the child does not list a proxy password", async () => {
-    const result = await createShell(
+    const result = await newShell(
       root,
       source({ HTTP_PROXY: "http://bot:s3cret@proxy.internal:8080" }),
     ).run({ command: "printenv HTTP_PROXY" });
@@ -229,7 +240,7 @@ describe("the command that actually runs", () => {
   });
 
   test("an operator can still choose the frontend themselves", async () => {
-    const result = await createShell(
+    const result = await newShell(
       root,
       source({
         COMPUTER_SHELL_ENV: "DEBIAN_FRONTEND",
@@ -239,6 +250,25 @@ describe("the command that actually runs", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("teletype");
   });
+  test("a startup file the Bot left in its workspace does not run in its live shell", async () => {
+    // The shell is interactive now, and interactive bash reads ~/.bashrc and readline reads
+    // ~/.inputrc, which can rebind Enter. HOME is the workspace, so both are files a Bot can write.
+    await Bun.write(
+      join(root, ".bashrc"),
+      'echo "bashrc ran"\nexport MARKER=hijacked\n',
+    );
+    await Bun.write(join(root, ".inputrc"), '"\\C-m": "echo inputrc ran\\n"\n');
+
+    const result = await newShell(root, source()).run({
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
+      command: 'echo "[${MARKER:-clean}]"',
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain("ran");
+    expect(result.stdout.trim()).toBe("[clean]");
+  });
+
   test("a file the Bot left behind does not run before its command", async () => {
     // computer_write_file lets a Bot write anywhere in its workspace, and HOME is the workspace. A
     // login shell would source this first, so a later command would run Bot-authored code while the
@@ -248,7 +278,7 @@ describe("the command that actually runs", () => {
       'echo "profile ran"\nexport MARKER=hijacked\n',
     );
 
-    const result = await createShell(root, source()).run({
+    const result = await newShell(root, source()).run({
       // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture — this asserts on unexpanded placeholder text, so a real template would break the test.
       command: 'echo "[${MARKER:-clean}]"',
     });
@@ -329,7 +359,7 @@ describe("what a command cannot do to the computer", () => {
      * and the caller waits for something else to give up. Killing the process group ends all of it.
      */
     const started = Date.now();
-    const result = await createShell(root, source()).run({
+    const result = await newShell(root, source()).run({
       command: "sleep 30 | cat",
       timeoutMs: 1_500,
     });
@@ -341,7 +371,7 @@ describe("what a command cannot do to the computer", () => {
 
   test("a noisy command does not grow without limit", async () => {
     // The clamp ran only after close, so this allocated until the process that owns the browser died.
-    const result = await createShell(root, source()).run({
+    const result = await newShell(root, source()).run({
       command: "head -c 3000000 /dev/zero | tr '\\0' 'a'",
       timeoutMs: 20_000,
     });
@@ -354,7 +384,7 @@ describe("what a command cannot do to the computer", () => {
   test("a timeout of zero is not a command killed before it runs", async () => {
     // Only Math.min was applied, so this fired setTimeout immediately and reported a timeout for a
     // command that never had a chance to start.
-    const result = await createShell(root, source()).run({
+    const result = await newShell(root, source()).run({
       command: 'echo "ran"',
       timeoutMs: 0,
     });
@@ -372,7 +402,7 @@ describe("what a command cannot do to the computer", () => {
      * stopped, and the person was told nothing until it finished.
      */
     const started = Date.now();
-    const result = await createShell(root, source()).run({
+    const result = await newShell(root, source()).run({
       command: "sleep 30",
       timeoutMs: 20_000,
       signal: AbortSignal.abort(),
@@ -390,7 +420,7 @@ describe("what a command cannot do to the computer", () => {
     const started = Date.now();
 
     try {
-      const result = await createShell(root, source()).run({
+      const result = await newShell(root, source()).run({
         command: "sleep 30",
         timeoutMs: 20_000,
         signal: controller.signal,
@@ -412,7 +442,7 @@ describe("what a command cannot do to the computer", () => {
       // Math.max(NaN, 1000) is NaN, and setTimeout(NaN) fires immediately: the command was reported
       // as timed out before it did anything. The HTTP layer rejects these with a 400; the shell
       // itself falls back to the default so a direct caller gets a run, not a lie.
-      const result = await createShell(root, source()).run({
+      const result = await newShell(root, source()).run({
         command: 'echo "ran"',
         timeoutMs,
       });

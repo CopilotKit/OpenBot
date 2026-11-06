@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Message } from "@ag-ui/core";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import {
@@ -98,11 +99,11 @@ function Committed({ surfaceId, drawn }: { surfaceId: string; drawn: Drawn }) {
       rejected: [],
       operations: [
         {
-          version: "v1.0",
+          version: "1.0",
           createSurface: { surfaceId, catalogId: OPENBOT_UI.id },
         },
         {
-          version: "v1.0",
+          version: "1.0",
           updateComponents: {
             surfaceId,
             components: [
@@ -354,21 +355,22 @@ test("no run of backticks in the code, and nothing in the language, can close th
  * that is not exempted for markdown would restyle the reply's markup inside an interface, so
  * styles.css must hand each one back to the layers.
  *
- * Read from the SDK's own module, where the stylesheet is the list of rules it joins and injects: it
- * picks its injection hook while the module loads, before a test has a DOM, so it injects nothing
- * here. Interpolated values are blanked, since only selectors and property names matter.
+ * Read as the SDK injects it: the react-core module the app imports puts `STANDARD_CSS` in the page,
+ * and takes it from `@copilotkit/shared`, resolved here from that module so it is the same copy. The
+ * module picks its injection hook while it loads, before a test has a DOM, so it injects nothing here.
  */
-test("everything the SDK's stylesheet sets on headings and buttons is handed back inside interface markdown", () => {
-  const module = readFileSync(
-    Bun.resolveSync("@copilotkit/react-core/v2/generative-ui", import.meta.dir),
-    "utf8",
+test("everything the SDK's stylesheet sets on headings and buttons is handed back inside interface markdown", async () => {
+  const module = Bun.resolveSync(
+    "@copilotkit/react-core/v2/generative-ui",
+    import.meta.dir,
   );
-  const list = module.match(/const STANDARD_CSS = \[([\s\S]*?)\]\.join\(/)?.[1];
-  expect(list).toBeTruthy();
-  const sdk = Array.from(
-    (list as string).matchAll(/^\s*(["`])(.*)\1,?$/gm),
-    ([, , rule]) => rule.replace(/\$\{[^}]*\}/g, "x").replace(/\\"/g, '"'),
-  ).join("\n");
+  expect(readFileSync(module, "utf8")).toContain(
+    "style.textContent = STANDARD_CSS;",
+  );
+  const { STANDARD_CSS: sdk } = (await import(
+    Bun.resolveSync("@copilotkit/shared/generative-ui", dirname(module))
+  )) as { STANDARD_CSS: string };
+  expect(sdk).toContain(".a2ui-surface");
 
   const rules = (css: string) =>
     Array.from(

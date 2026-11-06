@@ -147,3 +147,44 @@ describe("a live-screen input message", () => {
     expect((parsed as { error: string }).error).toBeString();
   });
 });
+
+describe("the buttons a mouse message names", () => {
+  test("a move with nothing held says none, and what is held", () => {
+    const message = {
+      type: "mouse",
+      event: "moved",
+      x: 1,
+      y: 2,
+      button: "none",
+      buttons: 0,
+    };
+    expect(parseInputMessage(message)).toEqual({ ok: true, message });
+  });
+
+  test("a press or a release must name a button", () => {
+    expect(
+      parseInputMessage({
+        type: "mouse",
+        event: "pressed",
+        x: 1,
+        y: 2,
+        button: "none",
+      }).ok,
+    ).toBe(false);
+  });
+
+  test.each([[-1], [32], [1.5], ["1"]])(
+    "refuses %p buttons held",
+    (buttons) => {
+      expect(
+        parseInputMessage({
+          type: "mouse",
+          event: "moved",
+          x: 1,
+          y: 2,
+          buttons,
+        }).ok,
+      ).toBe(false);
+    },
+  );
+});

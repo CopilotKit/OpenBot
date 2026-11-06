@@ -106,7 +106,7 @@ import {
   createGroupStore,
   groupSourceForRun,
 } from "./channels/group";
-import { createModelChoices, modelSelectionOn } from "./channels/model-choice";
+import { createModelChoices } from "./channels/model-choice";
 import { type ChannelStore, createChannelStore } from "./channels/routes";
 import { createStallGuard } from "./channels/stall-guard";
 import {
@@ -171,6 +171,7 @@ import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
 import { setEdition } from "./edition";
+import { fixSettings } from "./admin/settings-store";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -197,11 +198,11 @@ import {
   keyIntelligence,
   learningSetupInstructions,
 } from "./learning/ensure-container";
+import { createInspectorLearningReader } from "./learning/inspector";
 import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
 } from "./learning/personal-space";
-import { createInspectorLearningReader } from "./learning/inspector";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
 import {
@@ -234,6 +235,7 @@ import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import {
   ensureAlwaysOnApp,
+  ensurePersonalSkills,
   personalDefaultAppsMemory,
   personalDefaultsDeps,
   startPersonalDefaultApps,
@@ -324,6 +326,9 @@ import { createWorkQueue, type WorkOfferedListener } from "./work/queue";
 const config = loadConfig();
 // Before anything resolves a capability or reads an enterprise setting. See edition.ts.
 setEdition(config.edition);
+// One person on their own machine is shown every model their credential lists; nothing narrows it.
+if (config.singleUser)
+  fixSettings({ modelAllowlist: { enabled: false, models: [] } });
 // The environment seeds local policy once. The SDK fallback must not reapply an old revision
 // after an administrator clears a pin to follow the latest published Skills.
 clearLearningRevisionFallback();
@@ -1122,6 +1127,18 @@ useRoutineTools(routineStore);
 // Routines is on from the start in every edition, for every Bot. See personal-defaults.ts.
 await ensureAlwaysOnApp(pluginStore, personalDefaultsDeps(database));
 /*
+ * The personal edition gives each Bot every skill once, so the skills there are reach every Bot and
+ * one switched off for a Bot stays off. A failure is a warning: a Bot is given them again the first
+ * time it is listed or runs. Does nothing in the team edition.
+ */
+await ensurePersonalSkills(pluginStore, personalDefaultsDeps(database)).catch(
+  (error: unknown) => {
+    console.warn(
+      `Couldn't give every Bot its skills at startup; each Bot gets them the first time it runs. ${error instanceof Error ? error.message : String(error)}`,
+    );
+  },
+);
+/*
  * The personal edition turns Parallel's keyless web search on once, on its first start. Not awaited:
  * adding it asks search.parallel.ai for its tools, and an offline start must still start. It keeps
  * retrying until the tools arrive. Does nothing in the team edition.
@@ -1408,15 +1425,23 @@ const resolveRuntimeModelApiKey = () =>
   });
 
 /**
- * The models a person may pick for a built-in Bot's run, asked of whatever serves the model: the
- * provider, or the gateway in OPENAI_BASE_URL. Narrowed by the admin's allowlist when it is on.
+ * The models a person may pick for a Bot's run, and how hard each can think, asked of whatever
+ * serves the model: the provider, the gateway in OPENAI_BASE_URL, or a signed-in plan's own listing.
+ * One person on their own machine picks from all of them; in a team, people pick among the models an
+ * admin allowed (Admin, Providers), and get the default until there are any. Read now and then every
+ * few hours in the background, and early when a provider refuses a model; never per message.
  */
 const modelCatalogue = createModelCatalogue({
   model: runtimeModel,
   apiKey: resolveRuntimeModelApiKey,
-  allowlist: () => enterpriseControls()?.snapshot()?.settings.modelAllowlist,
-  enabled: modelSelectionOn,
+  ...(config.singleUser
+    ? {}
+    : {
+        allowlist: () =>
+          enterpriseControls()?.snapshot()?.settings.modelAllowlist,
+      }),
 });
+modelCatalogue.start();
 
 /** Each person's pick per conversation, saved through `/api/channels/:id/model` and read per run. */
 const modelChoices = createModelChoices({
@@ -2637,7 +2662,10 @@ repeatAfterEach(
 const channelSummaries = {
   database,
   queue: createWorkQueue(database),
-  transcript: routineIntelligence,
+  // Not `routineIntelligence`: this sweep runs on every replica and often asks about a conversation
+  // before its first run has created the thread, and the base client printed that ordinary 404 as
+  // `Intelligence platform request failed` on whichever replica claimed it.
+  transcript: createIntelligenceClient(config.runtime.intelligence),
   title: createChannelTitler({
     provider: runtimeModel.provider,
     model: runtimeModel.defaultModel,
@@ -2687,8 +2715,10 @@ await installEnterpriseControls({
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
   ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
   builtInModel: `${runtimeModel.provider}/${runtimeModel.defaultModel}`,
-  // The run gate records and judges the model a built-in run will use: the person's pick, if any.
-  pickedModel: (actorId, threadId) => modelChoices.forRun(actorId, threadId),
+  // The run gate records and judges the model a built-in run will use: the person's pick, or the
+  // default the catalogue chose.
+  pickedModel: async (actorId, threadId) =>
+    (await modelChoices.forRun(actorId, threadId)).model,
   people: peopleStore,
   initialAdminEmails: config.auth?.initialAdminEmails ?? [],
   recorders: {

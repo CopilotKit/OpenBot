@@ -1,0 +1,7 @@
+{
+  "status": 403,
+  "body": {
+    "code": "permission-denied",
+    "error": "Your team 00000000-0000-0000-0000-000000000000 has either used all available credits or reached its monthly spending limit. To continue making API requests, please purchase more credits or raise your spending limit."
+  }
+}

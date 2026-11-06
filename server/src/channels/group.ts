@@ -437,17 +437,31 @@ export async function groupSourceForRun(
 export function groupTurnMessage(
   id: string,
   text: string,
-  transcript: ReadonlyArray<Pick<GroupMessage, "id" | "agentId" | "text">>,
+  transcript: ReadonlyArray<
+    Pick<GroupMessage, "id" | "agentId" | "text"> &
+      Partial<Pick<GroupMessage, "details">>
+  >,
   names: ReadonlyMap<string, string> = new Map(),
   exclude: ReadonlySet<string> = new Set(),
 ): Message {
   const prior = transcript
     .filter((row) => row.id !== id && !exclude.has(row.id) && row.text)
     .slice(-40)
-    .map((row) => ({
-      speaker: row.agentId ? (names.get(row.agentId) ?? row.agentId) : "person",
-      text: row.text.slice(0, 6000),
-    }));
+    .map((row) => {
+      /*
+       * A `message_bot` answer is written in the asking Bot's row, because that is the voice its
+       * thread admits, and `details.answeredBy` names the Bot whose words they are (`announceHandoff`).
+       * Quoted as the asking Bot's, the answer read to every Bot here as that Bot's own.
+       */
+      const answeredBy = (row.details as { answeredBy?: unknown } | undefined)
+        ?.answeredBy;
+      const speakerId =
+        typeof answeredBy === "string" ? answeredBy : row.agentId;
+      return {
+        speaker: speakerId ? (names.get(speakerId) ?? speakerId) : "person",
+        text: row.text.slice(0, 6000),
+      };
+    });
   return {
     id,
     role: "user",

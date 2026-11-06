@@ -4,6 +4,9 @@ langchain
 langchain-openai
 langchain-anthropic
 langchain-google-genai
+# google-genai 3.0.0 (2026-11-06) moved generateContent from /v1beta to /v1, which the Gemini
+# boundary tests catch. Held on 2.x until the move is checked against the models Bots use.
+google-genai>=2.34,<3
 fastapi
 python-multipart
 uvicorn[standard]

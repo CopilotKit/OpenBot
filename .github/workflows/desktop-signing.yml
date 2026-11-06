@@ -181,6 +181,15 @@ jobs:
           if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer.' }
           & 7z e $installers[0].FullName '-odesktop/signed-app' '-r' '-y' 'openbot-desktop.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Could not extract signed app from NSIS installer.' }
+      # The CLI is in what people install, not only in the build folder.
+      - name: Verify the installer carries the Intelligence CLI
+        run: |
+          $installers = @(Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' -File)
+          $listing = & 7z l $installers[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list the NSIS installer.' }
+          foreach ($file in @('cli-bundle\runtime\node.exe', 'cli-bundle\cli\index.js')) {
+            if (-not ($listing | Select-String -SimpleMatch $file)) { throw "The installer has no $file." }
+          }
       - name: Verify publisher, trust, and timestamp on both executables
         run: |
           $build = Get-Content desktop/build-version.json -Raw | ConvertFrom-Json

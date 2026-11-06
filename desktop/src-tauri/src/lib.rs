@@ -1,18 +1,18 @@
 //! The parts of the shell that are worth testing without a window around them.
 pub mod acquire;
-pub mod ask;
 pub mod composio;
 pub mod deployment;
 pub mod deployment_release;
 pub mod docker_desktop;
 pub mod engine;
 pub mod env;
+pub mod follow;
 pub mod harness;
 pub mod host_access;
 pub mod install;
-pub mod intelligence;
 pub mod local_browser;
-pub mod organization_auth;
+pub mod local_eval;
+pub mod local_eval_state;
 pub mod plan;
 pub mod preparation;
 pub mod problem;
@@ -24,7 +24,6 @@ pub mod recorder_external;
 pub mod recorder_host;
 pub mod recorder_install;
 pub mod saved_intent;
-pub mod self_hosted_intelligence;
 pub mod shell_updates;
 pub mod stack;
 pub mod supervise;
@@ -36,6 +35,3 @@ pub mod windows;
 
 #[cfg(test)]
 pub(crate) mod test_support;
-
-#[cfg(test)]
-mod http_test_support;

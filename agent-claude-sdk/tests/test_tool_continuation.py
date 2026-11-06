@@ -73,6 +73,7 @@ def sdk(monkeypatch, tool_name):
             self.queries = []
             self.results = {}
             self.interrupted = False
+            self.models_set = []
             self.disconnected = False
             self.disconnected_event = asyncio.Event()
             self.hooks_entered = asyncio.Event()
@@ -87,6 +88,10 @@ def sdk(monkeypatch, tool_name):
 
         async def interrupt(self):
             self.interrupted = True
+
+        async def set_model(self, model=None):
+            # `ClaudeSDKClient.set_model`: the running query's next request uses `model`.
+            self.models_set.append(model)
 
         async def query(self, prompt, session_id):
             if not isinstance(prompt, str):

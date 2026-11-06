@@ -13,10 +13,40 @@ export type ModelOption = {
   label: string;
   /** Who makes it, as a brand id for its mark. Absent for a gateway alias that names no vendor. */
   vendor?: string;
+  /**
+   * The thinking efforts this model accepts, weakest first, from `none`, `minimal`, `low`, `medium`,
+   * `high`, `xhigh` and `max`. Absent or empty for a model that takes no effort, which then shows
+   * no thinking control.
+   */
+  efforts?: string[];
+  /** The effort the model uses when none is sent, when its provider says. Absent when unknown. */
+  defaultEffort?: string;
 };
 
+/**
+ * Who actually serves the models: a provider's own API, an OpenAI-compatible endpoint in front of
+ * one, or a ChatGPT or Claude plan. What the Providers page names.
+ */
+export type ModelSource =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "xai"
+  | "gateway"
+  | "chatgpt"
+  | "claude";
+
+/**
+ * Who decides which models people may pick. `all`: one person on their own machine, offered every
+ * model the credential lists. `allowed`: a team, where an admin allows models in Admin, Providers.
+ */
+export type ModelExposure = "all" | "allowed";
+
 export type ModelCatalogue = {
+  /** The allowlist's `provider/model` prefix. Not who serves the models; that is `source`. */
   provider: "openai" | "anthropic";
+  source: ModelSource;
+  exposure: ModelExposure;
   /** What a run uses when nobody picked anything. Always one of `models`. */
   default: string;
   /** Newest first. */
@@ -31,10 +61,21 @@ export type ModelCatalogue = {
  */
 export type AvailableModels = {
   provider: "openai" | "anthropic";
+  source: ModelSource;
+  exposure: ModelExposure;
   default: string;
   /** Newest first. Always holds the default. */
   models: ModelOption[];
   listed: boolean;
+};
+
+/**
+ * One person's pick for one conversation, as the server holds it. A null model is the default
+ * model; a null effort is the model's own default, so none is sent.
+ */
+export type ConversationModel = {
+  model: string | null;
+  effort: string | null;
 };
 
 export const modelKeys = {
@@ -72,16 +113,18 @@ export function availableModelsQueryOptions() {
 }
 
 /**
- * The model the signed-in person picked for one conversation, or null for OpenBot's own. Null too
- * while an admin has picking off, or when the saved pick is no longer offered: the server answers
- * with what a run there would use.
+ * The model and effort the signed-in person picked for one conversation, each null for the
+ * default. Null too while an admin has picking off, or when the saved pick is no longer offered:
+ * the server answers with what a run there would use.
  */
 export function conversationModelQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: modelKeys.conversation(channelId),
-    queryFn: (): Promise<string | null> =>
-      client(`/api/channels/${encodeURIComponent(channelId)}/model`, "model", {
-        fallback: "Couldn't load this conversation's model",
-      }),
+    queryFn: async (): Promise<ConversationModel> =>
+      (
+        await client(`/api/channels/${encodeURIComponent(channelId)}/model`, {
+          fallback: "Couldn't load this conversation's model",
+        })
+      ).json(),
   });
 }

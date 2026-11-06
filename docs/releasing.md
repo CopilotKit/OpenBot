@@ -5,17 +5,18 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 
 ## Cutting one
 
-1. Check `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) reads the way you want it to. It is the
+1. Before cutting, [rebuild the changelog from the code](#rebuild-the-changelog-from-the-code).
+2. Check `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) reads the way you want it to. It is the
    release notes. Nothing is generated from commit subjects, because a commit subject is written for
    the person reading the diff and these notes are for the person deciding whether to upgrade.
-2. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Leave
+3. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Leave
    `kind` as `stable`. Use `dry_run` first if you want to see the version and the notes without
    opening anything.
-3. Review the pull request it opens. It updates `package.json`, promotes the changelog's
+4. Review the pull request it opens. It updates `package.json`, promotes the changelog's
    `## Unreleased` heading to `## X.Y.Z`, and moves the Helm chart's `appVersion` and the desktop
    Cargo package/lockfile to the same version. Tauri reads its version directly from the root
    `package.json`.
-4. Merge it. That is the publish.
+5. Merge it. That is the publish.
 
 Merging is the trigger, so a release is always a reviewed commit: on `main` for a stable release,
 and on `release/X.Y` for a candidate, beta or final.
@@ -29,6 +30,16 @@ which then fails to attach anything because the tag has no release.
 other three are for a release candidate or beta, and are described under
 [Release candidates and betas](#release-candidates-and-betas) and
 [Finishing a candidate](#finishing-a-candidate).
+
+### Rebuild the changelog from the code
+
+Entries added to `## Unreleased` since the last release are claims, not evidence, so none is
+trusted as written. Before cutting a release, and before the first candidate or beta of one, go
+through every change since the last release tag (`git log vX.Y.Z..origin/main` and each one's diff),
+check it in the code, and write `## Unreleased` from what the code shows: keep an entry only where
+the code proves it, rewrite one that overstates, understates or misdescribes the change, drop one
+the code does not do, and add one for any change no entry mentions. Land it on `main` as a pull
+request like any other.
 
 ## Desktop build versions
 
@@ -350,7 +361,9 @@ one, pinned the same way. Until then the first open needs the exceptions describ
 under [Download links](#download-links).
 
 A candidate does not promote the changelog. Its notes are what is under `## Unreleased` at that
-moment, and the final promotes them. A candidate also fixes the CLI choice, as described under
+moment, and the final promotes them, so
+[rebuild the changelog from the code](#rebuild-the-changelog-from-the-code) on `main` before the
+first candidate is cut. A candidate also fixes the CLI choice, as described under
 [Which Intelligence CLI an installer carries](#which-intelligence-cli-an-installer-carries).
 
 `release-policy.json` describes one release: the versions it upgrades from, its database transition,

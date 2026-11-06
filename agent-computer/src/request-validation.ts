@@ -148,11 +148,27 @@ export function parseInputMessage(input: unknown): InputMessageParseResult {
     }
     if (
       body.button !== undefined &&
+      body.button !== "none" &&
       body.button !== "left" &&
       body.button !== "right" &&
       body.button !== "middle"
     ) {
       return { ok: false, error: "A mouse button must be named." };
+    }
+    if (body.button === "none" && body.event !== "moved") {
+      return { ok: false, error: "A press or a release needs a button." };
+    }
+    if (
+      body.buttons !== undefined &&
+      (typeof body.buttons !== "number" ||
+        !Number.isInteger(body.buttons) ||
+        body.buttons < 0 ||
+        body.buttons > 31)
+    ) {
+      return {
+        ok: false,
+        error: "The buttons held must be a whole number from 0 to 31.",
+      };
     }
     return { ok: true, message: body as unknown as InputMessage };
   }

@@ -1,8 +1,8 @@
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
+import { researchRoleOf } from "@openbot/shared/research";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../../audit";
 import { DEV_ACTOR } from "../../auth/dev-actor";
-import type { Database } from "../../db/client";
 import {
   type EntraRefusal,
   EntraTokenRefusedError,
@@ -14,6 +14,7 @@ import {
   decryptSecret,
   encryptSecret,
 } from "../../credentials";
+import type { Database } from "../../db/client";
 import {
   brokeredConnections,
   credentials as credentialRows,
@@ -202,6 +203,13 @@ export function createStoreContext(options: PluginStoreOptions) {
    */
   async function knownToolRefs(refs: string[]) {
     if (refs.length === 0) return new Set<string>();
+    /*
+     * A research role (`@research/search`, `@research/fetch`) names no server's tool: it stands for
+     * whichever research app a Bot has (see `shared/research.ts`), and the skill editor offers it as
+     * a choice. So it is known by its shape. Without this, every skill that asks for web research,
+     * including ones the Bot proposes, was refused on save.
+     */
+    const roles = refs.filter((ref) => researchRoleOf(ref) !== null);
     // Narrowed in the query to the servers actually named, rather than reading the whole catalogue
     // and filtering here. A deployment aiming at a thousand tools should not scan all of them to
     // check three.
@@ -211,7 +219,7 @@ export function createStoreContext(options: PluginStoreOptions) {
       .from(mcpTools)
       .where(inArray(mcpTools.serverId, servers));
     const known = new Set(rows.map((row) => `${row.serverId}/${row.name}`));
-    return new Set(refs.filter((ref) => known.has(ref)));
+    return new Set([...roles, ...refs.filter((ref) => known.has(ref))]);
   }
 
   /**

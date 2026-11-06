@@ -57,9 +57,11 @@ import {
 } from "./draft";
 import { screenPickedFiles } from "./picked-files";
 import { type RejectedFile, RejectedFiles } from "./rejected-files";
-import { PLACEHOLDER_COMMANDS } from "./sources";
 import { type AgentOption, buildTriggers } from "./triggers";
 import { useDictation } from "./use-dictation";
+
+/** One shared empty list, so a box with no commands does not rebuild its triggers per render. */
+const NO_COMMANDS: readonly CommandOption[] = [];
 
 /**
  * The SDK's upload failure, derived rather than imported for the reason `attachments.ts` records
@@ -84,6 +86,7 @@ type UploadFailure = Parameters<
  * the files. It is read off the queue ACTION instead, by `conversation-view.tsx`, which is the one
  * place that has both halves in hand.
  */
+
 export type DroppedAttachmentCause =
   /** Several parked messages became one turn, and the joined message overran the per-message cap. */
   | "merged-over-cap"
@@ -139,6 +142,7 @@ export type ComposerProps = {
   modelPicker?: ReactNode;
   /** Agents that `@` can address. Empty means the mention menu reports an empty channel. */
   agents?: readonly AgentOption[];
+  /** What `/` offers: the skills of the Bot this box sends to. Empty offers nothing. */
   commands?: readonly CommandOption[];
   /**
    * Receives the whole draft rather than a string, so a mention or a command reaches the caller as
@@ -323,7 +327,7 @@ export function Composer({
   voiceCall,
   modelPicker,
   agents = [],
-  commands = PLACEHOLDER_COMMANDS,
+  commands = NO_COMMANDS,
   onSubmit,
   onQueue,
   onStop,

@@ -94,7 +94,7 @@ fn main() {
     if SCENARIO == "stop-ipc" && (joined.starts_with("ps ") || joined.contains("stop supervisor")) {
         return;
     }
-    if SCENARIO == "stop-ipc" && joined == "compose -f docker-compose.yml --profile harness down" {
+    if SCENARIO == "stop-ipc" && joined == "compose -f docker-compose.yml --profile harness --profile openbot down" {
         let mut barrier = std::net::TcpStream::connect(
             std::fs::read_to_string("stop-barrier-address")
                 .unwrap()
@@ -116,17 +116,6 @@ fn main() {
         println!("1.44");
         return;
     }
-    if SCENARIO == "empty-answer" {
-        if args.get(1).map(String::as_str) == Some("logs") {
-            if let Some(service) = args
-                .last()
-                .filter(|s| ["agent-langgraph", "agent-harness"].contains(&s.as_str()))
-            {
-                println!("OpenAIAuthenticationError: 401 {service} refused the key");
-            }
-        }
-        return;
-    }
     match joined.as_str() {
         "compose version" => println!("Docker Compose synthetic"),
         "compose ps --format {{.Ports}}" => {
@@ -137,7 +126,14 @@ fn main() {
         value
             if value.starts_with("compose up -d --no-build --pull never ")
                 || value
-                    .starts_with("compose --profile harness up -d --no-build --pull never ") => {}
+                    .starts_with("compose --profile harness up -d --no-build --pull never ") =>
+        {
+            // Whether Compose was handed the desktop's host token, by its length only: the
+            // token itself is never written anywhere.
+            if let Some(token) = std::env::var_os("OPENBOT_DESKTOP_HOST_TOKEN") {
+                std::fs::write("host-token-at-up", token.len().to_string()).unwrap();
+            }
+        }
         "compose run --rm --pull never migrate" => {
             if SCENARIO == "harness" {
                 eprintln!("synthetic migration barrier");

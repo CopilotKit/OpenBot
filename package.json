@@ -1,6 +1,6 @@
 {
   "name": "openbot",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "license": "MIT",
   "private": true,
   "packageManager": "bun@1.4.3",
@@ -28,6 +28,7 @@
     "pretest": "bun run generate:app-config",
     "test:smoke": "OPENBOT_SMOKE=1 bun test tests/smoke",
     "test:live-screen": "OPENBOT_LIVE_SCREEN=1 bun test agent-computer/tests/live-screen.test.ts agent-computer/tests/browser-close-announcement.test.ts agent-computer/tests/reset-run.test.ts",
+    "test:live-screen-pacing": "OPENBOT_LIVE_SCREEN=1 bun test agent-computer/tests/live-screen-pacing.test.ts",
     "test:live-composio": "bun -e \"if (!process.env.COMPOSIO_API_KEY?.trim()) { console.error('COMPOSIO_API_KEY is empty or unset, so every case in this suite would skip and this command would still exit 0. Run it as COMPOSIO_API_KEY=... bun run test:live-composio.'); process.exit(1) }\" && OPENBOT_LIVE_COMPOSIO=1 bun test server/tests/composio-live.test.ts",
     "test:live-arcade": "bun -e \"if (!process.env.ARCADE_API_KEY?.trim()) { console.error('ARCADE_API_KEY is empty or unset, so every case in this suite would skip and this command would still exit 0. Run it as ARCADE_API_KEY=... bun run test:live-arcade.'); process.exit(1) }\" && OPENBOT_LIVE_ARCADE=1 bun test server/tests/arcade-live.test.ts",
     "diagram": "bun scripts/architecture-diagram.ts",
@@ -48,8 +49,5 @@
   },
   "overrides": {
     "lodash-es": "4.18.0"
-  },
-  "patchedDependencies": {
-    "@copilotkit/learning@0.0.1": "patches/@copilotkit%2Flearning@0.0.1.patch"
   }
 }

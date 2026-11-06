@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "distribution": {
+    "id": "CopilotKit/OpenBot",
+    "repository": "CopilotKit/OpenBot",
+    "channel": "stable"
+  },
+  "version": "v0.3.0",
+  "source": {
+    "commit": "a03111e2872458f50a8e5a9c549d5afd09da8ee2",
+    "upstreamRepository": "CopilotKit/openbot",
+    "upstreamCommit": "a03111e2872458f50a8e5a9c549d5afd09da8ee2",
+    "modified": false
+  },
+  "artifacts": {
+    "source": {
+      "url": "https://github.com/CopilotKit/OpenBot/releases/download/v0.3.0/openbot-source.tar.gz",
+      "sha256": "988d7ce24ddaa55476df644482135a2e6bcdfb0c6b4a86bd7d5aae857b09ef14"
+    },
+    "images": {
+      "openbot": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:3d874e4a58e60b0c816e3742c96ba70ddcc268c1ef1107ed1c832db27ba6adba"
+      },
+      "agent-adk": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-adk@sha256:a5957dcaf80ab5ddf5a7e309bbc82cd9e1398c37affbe5527ddd52f2bae643f5"
+      },
+      "agent-ag2": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-ag2@sha256:eee72696a98cd652fa09463a28704bdc383cc4e994d72f1c61357030d394ff85"
+      },
+      "agent-agno": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-agno@sha256:4f9f547976f0a8809539e11c530353e1a7ac3c6f6f4bec5d9c7ea91f796a04ea"
+      },
+      "agent-antigravity": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-antigravity@sha256:b4778a1195111b93f814c72b49732da2aec6e9e2dbbc20510f41a210d21d2c27"
+      },
+      "agent-bot": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-bot@sha256:6b06846e181b0de314b8dbe2788b524cf3bfb83238099614d77ad0628cc5a6ad"
+      },
+      "agent-claude-sdk": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:1254c514625c8288118e4ab9986c8926363c08602cf22e487a9f273795de18e9"
+      },
+      "agent-computer": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-computer@sha256:9e320650a6dc03a8c4bdb0b4308f687f41dc08ab0683772717c7425b460ff62f"
+      },
+      "agent-crewai": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-crewai@sha256:b617fa0f77563f9236d4c8d09b6295f0c4bcdbf90c3a9a5627c6baabeaa429cb"
+      },
+      "agent-langgraph-agui": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:dfb8d5deebeabb9846910b2202362568cb0b3ae97eb33b214a7d9ca18d1cbb61"
+      },
+      "agent-langgraph": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-langgraph@sha256:6c4e66f1c629588a867d87d17f9e5ffc301c19bfa30784a56a41662bb3b529bb"
+      },
+      "agent-langroid": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-langroid@sha256:e1111b2502ea8acddefc231977e8d0610c45c8611eabf79d30beebc4c2d334af"
+      },
+      "agent-llamaindex": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-llamaindex@sha256:14a9f57dc41a75e9e956e99f5a69a25adbbb5bacf1d2498b5248714c87562704"
+      },
+      "agent-mastra": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-mastra@sha256:493321730f305f00a89a199040477018558244a168bf02de6771118a4020fe0b"
+      },
+      "agent-microsoft": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-microsoft@sha256:0d18065fd03ce25f9fe5aaad8fb78839318c9f1965f3076b21dac16193349399"
+      },
+      "agent-pydantic-ai": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-pydantic-ai@sha256:9ac06cb8328fec47292936081fd1cadb99f2406fada42a5694b89a7390ad0668"
+      },
+      "agent-strands": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-strands@sha256:95d2e25bcbc1adc698e3c1da065c84bbb910c73d67c5dd2214d8b600c45182ca"
+      },
+      "server": {
+        "reference": "ghcr.io/copilotkit/openbot-server@sha256:06065c4999e38305c0b53c4da8ec979d130613b388efd184971bd9b304a6692e"
+      },
+      "supervisor": {
+        "reference": "ghcr.io/copilotkit/openbot-supervisor@sha256:4a273d6548c1a099b9ef02c2792ebcc8947e243bcc2c42dd855bf06750a2799c"
+      }
+    },
+    "chart": {
+      "version": "0.2.0",
+      "url": "https://github.com/CopilotKit/OpenBot/releases/download/v0.3.0/openbot-0.2.0.tgz",
+      "sha256": "e06ce220279be24d42f13f03bdf123fde5e7b5b5291d50a61cec3be043367c39"
+    }
+  },
+  "compatibility": {
+    "launcherApi": 1,
+    "configSchema": 1,
+    "extensionApi": 1,
+    "database": {
+      "from": ["0053_identity_links"],
+      "to": "0077_channel_opening",
+      "rollbackCompatible": false
+    },
+    "intelligenceCapabilities": []
+  },
+  "upgrade": {
+    "fromVersions": ["v0.2.0"],
+    "requiresDowntime": true,
+    "recovery": "restore-backup"
+  }
+}

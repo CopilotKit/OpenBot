@@ -31,7 +31,8 @@ describe("joinWithin", () => {
     });
 
     connect.resolve();
-    await joined;
+    // Finished on its own, so what it replayed is the whole history.
+    expect(await joined).toBe("connected");
 
     expect(detached).toBe(0);
   });
@@ -51,7 +52,8 @@ describe("joinWithin", () => {
     });
 
     deadline.resolve();
-    await joined;
+    // Ended part way, so what it replayed may stop short of the last run.
+    expect(await joined).toBe("deadline");
 
     expect(detached).toBe(1);
   });

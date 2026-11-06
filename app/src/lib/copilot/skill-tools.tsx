@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ProposedSkillCard } from "@/components/skills/proposed-skill";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { type OfferRule, useOfferedTo } from "@/lib/copilot/bot-offer";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
 import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 import type { SkillFormValues } from "@/lib/skills/form";
@@ -141,6 +142,8 @@ function ProposedSkillRender(props: {
 }) {
   const { data: page } = useQuery(pluginsPageQueryOptions());
   const { data: me } = useQuery(currentUserQueryOptions());
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
   const slug = props.args.slug;
   const existing = slug
@@ -157,6 +160,7 @@ function ProposedSkillRender(props: {
             }
           : undefined
       }
+      personal={personal}
       respond={props.respond}
       result={props.result}
       save={async (values: SkillFormValues) => {

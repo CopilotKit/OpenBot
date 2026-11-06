@@ -7,17 +7,22 @@ Getting traffic in, one of two ways.
 `className` has no default because the controller differs on every cluster and always will, and the
 annotations that configure it differ with it. Naming one here would be a chart that installs on the
 cluster it was written on.
+
+The AWS usage tag (`openbot.awsAttributionTags`) goes on for every class, because a controller other
+than the AWS Load Balancer Controller ignores the annotation. In an Ingress group that controller
+merges every member's tags onto the shared load balancer, so a shared one is tagged too.
 */}}
+{{- $annotations := deepCopy (.Values.ingress.annotations | default dict) -}}
+{{- $tags := "alb.ingress.kubernetes.io/tags" -}}
+{{- $_ := set $annotations $tags (include "openbot.awsAttributionTags" (dict "annotations" .Values.ingress.annotations "annotation" $tags "path" "ingress.annotations")) }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ $fullname }}
   labels:
 {{ include "openbot.labels" . | indent 4 }}
-  {{- with .Values.ingress.annotations }}
   annotations:
-{{ toYaml . | indent 4 }}
-  {{- end }}
+{{ toYaml $annotations | indent 4 }}
 spec:
   {{- with .Values.ingress.className }}
   ingressClassName: {{ . }}
