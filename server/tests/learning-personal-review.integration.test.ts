@@ -11,11 +11,13 @@ import type {
   LearningSettings,
   PersonalReview,
 } from "@openbot/shared/learning";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
+import type { AuditEventInput } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
+import { learningSkillApprovals } from "../src/db/schema/learning";
 import { currentEdition, setEdition } from "../src/edition";
 import { createSkillApprovalStore } from "../src/learning/approvals";
 import { runtimeKeyClient } from "../src/learning/auto-assign";
@@ -49,6 +51,12 @@ const EDITION = currentEdition();
 const approvals = createSkillApprovalStore(database);
 const store = createLearningSharingStore(database, approvals);
 const served: FakeIntelligence[] = [];
+const audits: AuditEventInput[] = [];
+const auditStore = {
+  insert: async (event: AuditEventInput) => {
+    audits.push(event);
+  },
+};
 
 beforeAll(async () => {
   await database
@@ -56,8 +64,12 @@ beforeAll(async () => {
     .values([{ id: ada, email: `${ada}@example.test` }]);
 });
 
-afterEach(() => {
+afterEach(async () => {
   setEdition(EDITION);
+  audits.length = 0;
+  await database
+    .delete(learningSkillApprovals)
+    .where(eq(learningSkillApprovals.userId, ada));
   for (const intelligence of served.splice(0)) intelligence.stop();
 });
 
@@ -71,10 +83,12 @@ function review(options: {
   withManage?: boolean;
   manage?: LearningManagement;
   recordingTitles?: PersonalLearningRouteDeps["recordingTitles"];
+  bundles?: Record<string, { path: string; content: string }[]>;
 }) {
   const intelligence = fakeIntelligence("current", {
     containers: options.containers ?? [personalLearningContainerId(ada)],
     candidates: [PROPOSAL],
+    ...(options.bundles ? { bundles: options.bundles } : {}),
   });
   served.push(intelligence);
   const client = runtimeKeyClient(
@@ -107,6 +121,7 @@ function review(options: {
     skillsOf: async () => ({ skills: [] }),
     invalidate: () => {},
     sharingAllowed: async () => true,
+    auditStore,
     ...(options.withManage === false
       ? {}
       : { manage: options.manage ?? client.experimental.learning }),
@@ -260,5 +275,104 @@ describe("reviewing the skills learned from your own recordings", () => {
       (await review({ withManage: false }).request(`/proposals/${PROPOSAL}`))
         .status,
     ).toBe(503);
+  });
+});
+
+describe("approving and rejecting the skills learned from your own recordings", () => {
+  const approve = (app: ReturnType<typeof review>, action = "approve") =>
+    app.request(
+      `/proposals/${PROPOSAL}/${action}?container=${personalLearningContainerId(ada)}`,
+      { method: "POST" },
+    );
+  const rowsOf = () =>
+    database
+      .select()
+      .from(learningSkillApprovals)
+      .where(eq(learningSkillApprovals.userId, ada));
+  const lastServed = () => served[served.length - 1] as FakeIntelligence;
+
+  test("with admins approving, a person sees their pending proposals and cannot review them", async () => {
+    const app = review({ personalReview: "admins" });
+    for (const action of ["approve", "reject"]) {
+      expect((await approve(app, action)).status).toBe(403);
+    }
+    expect(
+      lastServed().requests.filter((entry) =>
+        /approve|reject/.test(entry.path),
+      ),
+    ).toEqual([]);
+    expect(await rowsOf()).toEqual([]);
+  });
+
+  test("with people approving, a person approves their own proposal and OpenBot records it as theirs", async () => {
+    const app = review({ personalReview: "people" });
+    const response = await approve(app);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      proposal: { id: PROPOSAL, status: "approved" },
+    });
+    expect(await rowsOf()).toMatchObject([
+      { skillName: "Refund triage", approvedBy: "person" },
+    ]);
+    expect(audits).toMatchObject([
+      {
+        eventType: "configuration.changed",
+        targetType: "learning_skill",
+        actorUserId: ada,
+        payload: { change: "skill_approved", by: `${ada}@example.test` },
+      },
+    ]);
+  });
+
+  test("a person rejects a proposal and OpenBot records no approval", async () => {
+    const app = review({ personalReview: "people" });
+    const response = await approve(app, "reject");
+    expect(response.status).toBe(200);
+    expect(await rowsOf()).toEqual([]);
+    expect(audits[0]?.payload).toMatchObject({ change: "skill_rejected" });
+  });
+
+  test("a refused approval leaves no record behind", async () => {
+    const app = review({ personalReview: "people" });
+    const intelligence = lastServed();
+    const entry = intelligence.candidates.get(PROPOSAL);
+    if (!entry) throw new Error("missing candidate");
+    intelligence.candidates.set(PROPOSAL, { ...entry, status: "approved" });
+    const response = await approve(app);
+    expect(response.status).toBe(409);
+    expect(await rowsOf()).toEqual([]);
+    expect(audits[0]?.payload).toMatchObject({ change: "skill_review_failed" });
+  });
+
+  test("a skill without a name is not approved", async () => {
+    const app = review({
+      personalReview: "people",
+      bundles: {
+        [PROPOSAL]: [{ path: "SKILL.md", content: "# No front matter" }],
+      },
+    });
+    const response = await approve(app);
+    expect(response.status).toBe(422);
+    expect(
+      lastServed().requests.filter((entry) => entry.path.endsWith("/approve")),
+    ).toEqual([]);
+    expect(await rowsOf()).toEqual([]);
+  });
+
+  test("a bad id answers 400 and another container answers 404", async () => {
+    const app = review({ personalReview: "people" });
+    expect(
+      (await app.request("/proposals/nope/approve", { method: "POST" })).status,
+    ).toBe(400);
+    expect(
+      (
+        await app.request(
+          `/proposals/${PROPOSAL}/approve?container=elsewhere`,
+          {
+            method: "POST",
+          },
+        )
+      ).status,
+    ).toBe(404);
   });
 });

@@ -149,19 +149,24 @@ export function candidate(
 export const INSIGHT_ID = "0198a012-a20f-77c0-9e33-8992f18e74a9";
 
 /** The same, as `getLearningSkillCandidate` returns it: the bundle and the Insights behind it. */
-export function candidateDetail(id: string) {
+export function candidateDetail(
+  id: string,
+  files?: { path: string; content: string }[],
+) {
   return {
     ...candidate(id),
     bundle: {
       schemaVersion: 1,
-      files: [
-        {
-          path: "references/policy.md",
-          content: "Refunds inside 30 days.",
-          sha256: sha256("Refunds inside 30 days."),
-        },
-        { path: "SKILL.md", content: SKILL_MD, sha256: sha256(SKILL_MD) },
-      ],
+      files: files
+        ? files.map((file) => ({ ...file, sha256: sha256(file.content) }))
+        : [
+            {
+              path: "references/policy.md",
+              content: "Refunds inside 30 days.",
+              sha256: sha256("Refunds inside 30 days."),
+            },
+            { path: "SKILL.md", content: SKILL_MD, sha256: sha256(SKILL_MD) },
+          ],
     },
     supportingInsights: [
       {
@@ -339,6 +344,8 @@ export function fakeIntelligence(
     starting?: { migrating?: number; keyless?: number };
     failCreates?: number;
     inspector?: "no-dashboard" | "dashboard" | "dashboard-before-opt-in";
+    /** Files that replace a candidate's bundle, by candidate id. */
+    bundles?: Record<string, { path: string; content: string }[]>;
   } = {},
 ): FakeIntelligence {
   const migrating = options.starting?.migrating ?? 0;
@@ -442,7 +449,10 @@ export function fakeIntelligence(
         return Response.json({ candidates: [...candidates.values()] });
       const proposal = candidates.get(itemId);
       if (!proposal) return intelligenceError("LEARNING_CANDIDATE_NOT_FOUND");
-      if (!action) return Response.json({ candidate: candidateDetail(itemId) });
+      if (!action)
+        return Response.json({
+          candidate: candidateDetail(itemId, options.bundles?.[itemId]),
+        });
       if (proposal.status !== "pending_review")
         return intelligenceError("LEARNING_CANDIDATE_CONFLICT");
       const status = action === "approve" ? "approved" : "rejected";

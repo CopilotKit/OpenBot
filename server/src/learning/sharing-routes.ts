@@ -11,13 +11,19 @@ import { bodyLimit } from "hono/body-limit";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
 import { currentEdition } from "../edition";
-import type { SkillApprovalStore } from "./approvals";
+import {
+  recordApprovalBefore,
+  type SkillApprovalStore,
+  UnnamedSkillError,
+} from "./approvals";
 import {
   CANDIDATE_ID,
   type LearningManagement,
   learningFailure,
   readProposal,
   readProposals,
+  requestFailure,
+  reviewProposal,
   runSummary,
 } from "./review";
 import type { LearningSettingsStore } from "./settings";
@@ -127,6 +133,19 @@ export function createPersonalLearningRoutes(
     currentEdition() === "personal" ||
     (await deps.settings.read()).personalReview === "people";
 
+  /** Which of the person's sources a request is about: the one asked for, or the first. Null when it isn't theirs. */
+  const sourceFor = async (
+    actor: AuthenticatedActor,
+    wanted: string | undefined,
+  ): Promise<LearningSource | null> => {
+    const scopes = await deps.scopesFor(actor);
+    return (
+      (wanted
+        ? scopes.find((scope) => scope.containerId === wanted)
+        : scopes[0]) ?? null
+    );
+  };
+
   routes.get("/review", async (context) => {
     const manage = deps.manage;
     if (!manage) {
@@ -180,11 +199,7 @@ export function createPersonalLearningRoutes(
       );
     }
     const actor = context.var.actor;
-    const scopes = await deps.scopesFor(actor);
-    const wanted = context.req.query("container");
-    const source = wanted
-      ? scopes.find((scope) => scope.containerId === wanted)
-      : scopes[0];
+    const source = await sourceFor(actor, context.req.query("container"));
     if (!source) {
       return context.json({ error: "You have no skill like that." }, 404);
     }
@@ -205,6 +220,90 @@ export function createPersonalLearningRoutes(
       return context.json({ error: failure.error }, failure.status);
     }
   });
+
+  /**
+   * Approve or reject a proposal from the person's own space. On approve, OpenBot writes its own record of who approved
+   * the skill before Intelligence is asked, and takes it back if Intelligence refuses.
+   */
+  for (const action of ["approve", "reject"] as const) {
+    routes.post(`/proposals/:candidateId/${action}`, async (context) => {
+      const candidateId = context.req.param("candidateId");
+      if (!CANDIDATE_ID.test(candidateId)) {
+        return context.json({ error: "Name a skill to review." }, 400);
+      }
+      const actor = context.var.actor;
+      const source = await sourceFor(actor, context.req.query("container"));
+      if (!source) {
+        return context.json({ error: "You have no skill like that." }, 404);
+      }
+      if (!(await canReview())) {
+        return context.json(
+          { error: "An admin reviews these skills. You can't approve them." },
+          403,
+        );
+      }
+      const manage = deps.manage;
+      if (!manage) {
+        return context.json(
+          { error: "Couldn't reach Intelligence just now. Try again." },
+          503,
+        );
+      }
+      const containerId = source.containerId;
+      try {
+        const review = await reviewProposal({
+          manage,
+          containerId,
+          candidateId,
+          action,
+          ...(action === "approve" && source.kind === "recordings"
+            ? {
+                before: recordApprovalBefore(
+                  deps.approvals,
+                  actor.id,
+                  "person",
+                ),
+              }
+            : {}),
+        });
+        await audit({
+          eventType: "configuration.changed",
+          targetType: "learning_skill",
+          targetId: candidateId,
+          actorUserId: actor.id,
+          payload: {
+            change: action === "approve" ? "skill_approved" : "skill_rejected",
+            containerId,
+            title: review.title,
+            operation: review.operation,
+            by: actor.email,
+          },
+        });
+        return context.json({
+          proposal: { id: candidateId, status: review.status },
+        });
+      } catch (error) {
+        if (error instanceof UnnamedSkillError) {
+          return context.json({ error: error.message }, 422);
+        }
+        const failure = learningFailure(error);
+        await audit({
+          eventType: "configuration.changed",
+          targetType: "learning_skill",
+          targetId: candidateId,
+          actorUserId: actor.id,
+          payload: {
+            change: "skill_review_failed",
+            decision: action,
+            containerId,
+            code: requestFailure(error).code ?? null,
+            by: actor.email,
+          },
+        });
+        return context.json({ error: failure.error }, failure.status);
+      }
+    });
+  }
 
   routes.get("/skills/:name", async (context) => {
     const name = context.req.param("name");
