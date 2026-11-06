@@ -262,8 +262,7 @@ function heldIn(stopped: Stopped): string {
  * saw a recording an Intelligence with Trajectories turned off refused said to be saved to the Learning space.
  */
 const NOT_SAVED: Record<NonNullable<Stopped["kept"]>, string> = {
-  refused:
-    "It's kept in this browser and sent again later.",
+  refused: "It's kept in this browser and sent again later.",
   "signed-out":
     "It's kept in this browser until you connect it to OpenBot again.",
 };
