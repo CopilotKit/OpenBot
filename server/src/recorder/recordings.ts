@@ -62,6 +62,8 @@ export async function fetchTrajectorySummaries(input: {
   return { items: items as TrajectorySummary[] };
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** How long after its last event a recording that has not ended still counts as being sent. */
 const SENDING_WINDOW_MS = 10 * 60_000;
 
@@ -140,6 +142,30 @@ export function createRecordings(deps: {
         return row ? [row] : [];
       });
       return { recordings, nextCursor };
+    },
+
+    /**
+     * The titles of recordings a person made, by id. Ids that are not theirs are dropped before
+     * Intelligence is asked, so nobody else's recording is read. An owned id maps to its title, or
+     * to null when Intelligence has none or cannot be reached.
+     */
+    async recordingTitles(
+      userId: string,
+      ids: string[],
+    ): Promise<Map<string, string | null>> {
+      const owned: string[] = [];
+      for (const id of new Set(ids)) {
+        if (UUID.test(id) && (await deps.isBoundTo(id, userId))) owned.push(id);
+      }
+      const titles = new Map<string, string | null>();
+      if (owned.length === 0) return titles;
+      const result = await deps.summaries(owned);
+      const byId =
+        "items" in result
+          ? new Map(result.items.map((item) => [item.trajectoryId, item]))
+          : new Map<string, TrajectorySummary>();
+      for (const id of owned) titles.set(id, byId.get(id)?.workflow ?? null);
+      return titles;
     },
   };
 }

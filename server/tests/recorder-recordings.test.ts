@@ -248,4 +248,55 @@ describe("createRecordings", () => {
     });
     expect((await recordings.list("u-1", null)).recordings).toEqual([]);
   });
+
+  describe("recordingTitles", () => {
+    const own = "11111111-1111-4111-8111-111111111111";
+    const other = "22222222-2222-4222-8222-222222222222";
+    function titles(result: Awaited<ReturnType<Summaries>>) {
+      const asked: string[][] = [];
+      const recordings = createRecordings({
+        pageForUser: async () => ({ ids: [], nextCursor: null }),
+        isBoundTo: async (id) => id === own,
+        summaries: async (requested) => {
+          asked.push(requested);
+          return result;
+        },
+        now: () => now,
+      });
+      return { recordings, asked };
+    }
+
+    test("recordingTitles never sends another person's ids", async () => {
+      const { recordings, asked } = titles({
+        items: [{ ...summary, trajectoryId: own }],
+      });
+      const found = await recordings.recordingTitles("u-1", [
+        own,
+        other,
+        own,
+        "not-a-uuid",
+      ]);
+      expect(asked).toEqual([[own]]);
+      expect(found).toEqual(new Map([[own, "Refund an order"]]));
+    });
+
+    test("none owned means an empty map and no call", async () => {
+      const { recordings, asked } = titles({ items: [] });
+      expect(await recordings.recordingTitles("u-1", [other])).toEqual(
+        new Map(),
+      );
+      expect(asked).toHaveLength(0);
+    });
+
+    test("an owned id Intelligence does not return, or cannot be read, has no title", async () => {
+      const missing = titles({ items: [] });
+      expect(await missing.recordings.recordingTitles("u-1", [own])).toEqual(
+        new Map([[own, null]]),
+      );
+      const down = titles({ unavailable: "unreachable" });
+      expect(await down.recordings.recordingTitles("u-1", [own])).toEqual(
+        new Map([[own, null]]),
+      );
+    });
+  });
 });
