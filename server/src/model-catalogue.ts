@@ -223,7 +223,8 @@ const VENDOR_ALIASES: Record<string, string> = {
 export function modelVendor(id: string): string | undefined {
   const slash = id.indexOf("/");
   if (slash > 0) {
-    const prefix = id.slice(0, slash).toLowerCase();
+    // OpenRouter marks a moving alias with a tilde: `~openai/gpt-sol-latest` is still OpenAI.
+    const prefix = id.slice(0, slash).toLowerCase().replace(/^~/, "");
     return VENDOR_ALIASES[prefix] ?? prefix;
   }
   return VENDOR_FAMILIES.find(([family]) => family.test(id))?.[1];
@@ -713,8 +714,11 @@ export function createModelCatalogue(options: {
    */
   async function current(): Promise<Snapshot | undefined> {
     if (!snapshot) {
+      // The first read is under way (the one `start` begins at boot): wait for it rather than
+      // answer with nothing, which hid the picker and ran the configured model.
+      if (inFlight) await inFlight;
       // Never read, or every read so far failed: ask again, but not on every message.
-      if (attemptedAt === undefined || now() - attemptedAt >= RETRY_MS)
+      else if (attemptedAt === undefined || now() - attemptedAt >= RETRY_MS)
         await refresh();
       return snapshot;
     }
@@ -736,9 +740,13 @@ export function createModelCatalogue(options: {
     const known = namedVendor
       ? capabilities?.data.get(`${namedVendor}/${bare}`)
       : undefined;
+    // A gateway's names are its operator's, shown as they are; a provider named directly is named
+    // as the catalogue names it where the provider's own listing does not.
     const label =
       entry.label ??
-      (/^gpt-/i.test(bare) ? modelLabel(entry.id) : (known?.name ?? undefined));
+      (source === "gateway" || /^gpt-/i.test(bare)
+        ? modelLabel(entry.id)
+        : (known?.name ?? undefined));
     const efforts = entry.efforts ?? known?.efforts;
     const created = entry.created || known?.released || 0;
     const chat =
@@ -809,13 +817,18 @@ export function createModelCatalogue(options: {
     const narrowed = usable.filter(
       (entry) => entry.id === defaultModel || allowed(entry.id),
     );
-    const middle = middleModel(narrowed.filter((entry) => allowed(entry.id)));
     const models = narrowed.map(option);
-    const chosen =
-      middle ??
-      (models.some((model) => model.id === defaultModel)
-        ? defaultModel
-        : undefined);
+    const listed = models.some((model) => model.id === defaultModel);
+    /*
+     * A gateway's operator named its model on purpose, and its list mixes every vendor it routes,
+     * where one vendor's middle means nothing. So a gateway keeps the model it names while it lists
+     * it; every provider named directly takes the middle of its current line.
+     */
+    const middle =
+      source === "gateway" && listed
+        ? undefined
+        : middleModel(narrowed.filter((entry) => allowed(entry.id)));
+    const chosen = middle ?? (listed ? defaultModel : undefined);
     if (!chosen) {
       // Nothing says where the middle is and the configured model is not listed. For a plan or a
       // provider named directly, the configured model is the stale one this exists to replace, so

@@ -145,6 +145,8 @@ describe("who makes a model, for the mark beside it", () => {
     expect(modelVendor("anthropic/claude-opus-5-5")).toBe("anthropic");
     expect(modelVendor("x-ai/grok-4")).toBe("xai");
     expect(modelVendor("meta-llama/llama-4")).toBe("meta");
+    // OpenRouter's moving aliases carry a tilde before the vendor.
+    expect(modelVendor("~openai/gpt-sol-latest")).toBe("openai");
   });
 
   test("an alias that names no family has no vendor", () => {
@@ -926,6 +928,78 @@ describe("the catalogue a deployment offers", () => {
     const read = await catalogue.read();
     expect(read.models.map((model) => model.id)).toEqual(["smart", "fast"]);
     expect(read.default).toBe("smart");
+  });
+
+  test("a read while the first listing is still on its way waits for it, rather than answering empty", async () => {
+    // A router's list and models.dev take seconds; the picker can open in that window after boot.
+    let release: () => void = () => undefined;
+    const arrived = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetcher = (async (url: string | URL | Request) => {
+      if (String(url) === "https://models.dev/api.json")
+        return new Response("unavailable", { status: 503 });
+      await arrived;
+      return Response.json(openAIListing(["fast", "smart"]));
+    }) as typeof fetch;
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "smart" },
+      apiKey: async () => null,
+      environment: { OPENAI_BASE_URL: "http://127.0.0.1:4011/v1" },
+      fetch: fetcher,
+      log: () => undefined,
+    });
+    const stop = catalogue.start();
+    try {
+      const reading = catalogue.read();
+      release();
+      const read = await reading;
+      expect(read.choosable).toBe(true);
+      expect(read.models.map((model) => model.id)).toEqual(["smart", "fast"]);
+    } finally {
+      stop();
+    }
+  });
+
+  test("a gateway routing every vendor keeps the model its operator named, not one vendor's middle", async () => {
+    // A router such as OpenRouter lists every vendor's models under their namespaced names, and
+    // models.dev knows each one's line and price, so a middle could be computed across all of them.
+    // Listed together, as a router does: one release date, so only the line and the price differ.
+    const listing = {
+      object: "list",
+      data: [
+        "openai/gpt-6-luna",
+        "openai/gpt-6.1-terra",
+        "openai/gpt-6.1-sol",
+        "anthropic/claude-sonnet-5-5",
+        "x-ai/grok-4.7",
+      ].map((id) => ({ id, object: "model", created: 1_790_000_000 })),
+    };
+    const modelsDev = await Bun.file(
+      `${import.meta.dir}/fixtures/model-listings/models-dev-api.json`,
+    ).json();
+    const fetcher = (async (url: string | URL | Request) =>
+      Response.json(
+        String(url) === "https://models.dev/api.json" ? modelsDev : listing,
+      )) as typeof fetch;
+    const catalogue = createModelCatalogue({
+      model: { provider: "openai", defaultModel: "x-ai/grok-4.7" },
+      apiKey: async () => null,
+      environment: { OPENAI_BASE_URL: "https://openrouter.ai/api/v1" },
+      fetch: fetcher,
+    });
+    const read = await catalogue.read();
+    expect(read.source).toBe("gateway");
+    expect(read.default).toBe("x-ai/grok-4.7");
+    // Under the names the gateway gives them, every one alike, with its maker's mark.
+    expect(
+      read.models.find((model) => model.id === "x-ai/grok-4.7"),
+    ).toMatchObject({ label: "x-ai/grok-4.7", vendor: "xai" });
+    // Each still says how it thinks, read from models.dev by its vendor's name.
+    expect(
+      read.models.find((model) => model.id === "anthropic/claude-sonnet-5-5")
+        ?.efforts,
+    ).toEqual(["low", "medium", "high", "xhigh", "max"]);
   });
 
   test("a provider that cannot be read leaves only the deployment's model, and nothing to choose", async () => {
