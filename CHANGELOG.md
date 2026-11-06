@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop's setup screens name the parts of OpenBot they install and start (the front end,
+  the back end, the database, your Bots and the computers they work on) and no longer say
+  "Intelligence". Progress rows, stops, errors and the license agreement step say "the back end"
+  instead, for example "Waiting for the back end" and "Stopping the back end".
 - OpenBot Desktop installs the personal edition: nobody signs in, one computer is shared by your
   Bots, and you start with the Personal Assistant. Before, it installed the team edition, with its
   admin screens, the fintech example's Bots and a computer for each Bot. An existing installation

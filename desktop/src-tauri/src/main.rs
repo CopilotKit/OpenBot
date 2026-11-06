@@ -2075,7 +2075,7 @@ fn intelligence_key_for_start(
     })?;
     if key.trim().is_empty() {
         return Err(Problem::plain(
-            "OpenBot's connection to Intelligence on this computer is no longer available. Set up Intelligence again.",
+            "OpenBot's connection to its back end on this computer is no longer available. Set up the back end again.",
         )
         .connection(openbot_desktop_lib::problem::Connection::Intelligence));
     }
@@ -3642,7 +3642,7 @@ notice records only that it happened.
 fn take_local_eval_stop_notice(root: &Path) -> Option<Problem> {
     std::fs::remove_file(root.join(LOCAL_EVAL_STOP_NOTICE_FILE)).ok()?;
     Some(Problem::with(
-        "When OpenBot last quit, it could not stop the local Intelligence stack it started.",
+        "When OpenBot last quit, it could not stop its back end.",
         "It may still be running. Stopping OpenBot again asks it to stop.",
     ))
 }
@@ -5593,7 +5593,7 @@ where
 {
     let unconnected = |said: &str| ConnectError::Unconnected(Problem::plain(said));
     let recorded = local_eval_state::read(root, None)
-        .ok_or_else(|| unconnected("Set up local Intelligence before connecting OpenBot to it."))?;
+        .ok_or_else(|| unconnected("Set up the back end before connecting OpenBot to it."))?;
     let connection = connect(root).map_err(ConnectError::Failure)?;
     if connection.outcome != local_eval::Outcome::Completed || connection.conflicted {
         return Ok(connection);
@@ -5604,7 +5604,7 @@ where
         .filter(|stack| stack.id == recorded.stack)
     else {
         return Err(unconnected(
-            "The Intelligence CLI connected a different stack. OpenBot did not use it.",
+            "A different back end was connected. OpenBot did not use it.",
         ));
     };
     let env_file = root.join(".env");
@@ -5618,7 +5618,7 @@ where
     )
     .map_err(|error| {
         ConnectError::Unconnected(Problem::with(
-            "OpenBot could not read the connection the Intelligence CLI wrote.",
+            "OpenBot could not read the connection settings for its back end.",
             format!("{}: {}", env_file.display(), error.kind()),
         ))
     })?;
@@ -5631,7 +5631,7 @@ where
         .any(|(name, reported)| written.get(*name) != Some(*reported))
     {
         return Err(unconnected(
-            "The Intelligence CLI's connection settings do not match its stack. OpenBot did not use them.",
+            "The connection settings do not match the back end that was set up. OpenBot did not use them.",
         ));
     }
     match written
@@ -5648,7 +5648,7 @@ where
             let purge = [(LOCAL_EVAL_CONNECTED_KEY.to_owned(), String::new())].into();
             openbot_env::write(&env_file, &settings, &purge).map_err(|error| {
                 ConnectError::Unconnected(Problem::with(
-                    "OpenBot kept the local Intelligence key but could not remove it from its settings file.",
+                    "OpenBot kept the back end's key but could not remove it from its settings file.",
                     format!("{}: {}", env_file.display(), error.kind()),
                 ))
             })?;
@@ -5660,7 +5660,7 @@ where
                     .is_some_and(|key| !key.trim().is_empty());
             if !kept {
                 return Err(unconnected(
-                    "The Intelligence CLI connected, but OpenBot has no key for this stack.",
+                    "The back end connected, but OpenBot has no key for it.",
                 ));
             }
         }
@@ -6577,7 +6577,7 @@ fn settle_menu_stop(shell: &Shell, fallback_root: &Path, stopped: Stopped) -> Op
         )
     } else {
         Problem::with(
-            "OpenBot stopped, but could not stop the local Intelligence stack it started.",
+            "OpenBot stopped, but could not stop its back end.",
             stopped.intelligence?,
         )
     };
@@ -11213,7 +11213,11 @@ mod tests {
         assert_eq!(read_quit_cleanup_notice(&root).unwrap(), None);
         let problem =
             take_local_eval_stop_notice(&root).expect("the Intelligence failure is still shown");
-        assert!(problem.said.contains("Intelligence"), "{problem:?}");
+        // Said in the window's words: the part of OpenBot that did not stop, not its product name.
+        assert_eq!(
+            problem.said,
+            "When OpenBot last quit, it could not stop its back end."
+        );
         assert!(!problem.said.contains("app processes"), "{problem:?}");
         assert_eq!(take_local_eval_stop_notice(&root), None, "shown once");
         let _ = std::fs::remove_dir_all(root);
@@ -11253,7 +11257,10 @@ mod tests {
         };
         let problem = settle_menu_stop(&shell, &root, intelligence_only)
             .expect("an Intelligence failure is still said");
-        assert!(problem.said.contains("Intelligence"), "{problem:?}");
+        assert_eq!(
+            problem.said,
+            "OpenBot stopped, but could not stop its back end."
+        );
         assert_eq!(problem.detail.as_deref(), Some(NO_CLI_LINE));
         assert!(!recovery_required(&shell, &root));
         assert_eq!(shell.last_failure.lock().unwrap().as_ref(), Some(&problem));

@@ -372,7 +372,7 @@ export function splitStopFailure(thrown: unknown): {
 
 export function intelligenceStopProblem(line: string): Problem {
   return {
-    said: "OpenBot stopped, but could not stop the local Intelligence stack it started.",
+    said: "OpenBot stopped, but could not stop its back end.",
     detail: line,
   };
 }

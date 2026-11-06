@@ -167,7 +167,7 @@ export function CopilotKitAccount({
       </h1>
       <p className="lede">
         {agreement
-          ? `To run OpenBot on this computer, accept the CopilotKit Intelligence license agreement for ${agreement.organizationName}.`
+          ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
           : appsFailed
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
             : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
