@@ -211,12 +211,22 @@ test("says some were unreadable when another source was read", async () => {
 });
 
 test("says what to expect when nothing is waiting", async () => {
-  review = { canReview: true, autoApprove: false, sources: [] };
+  review = { canReview: true, autoApprove: null, sources: [] };
   const view = draw();
   expect(await view.findByText("Nothing to review")).toBeTruthy();
   expect(
     await view.findByText(
       "New proposals show up here after Learning analyses your recordings.",
+    ),
+  ).toBeTruthy();
+});
+
+test("in the personal edition the empty state mentions conversations", async () => {
+  review = { canReview: true, autoApprove: false, sources: [] };
+  const view = draw();
+  expect(
+    await view.findByText(
+      "New proposals show up here after Learning analyses your recordings and conversations.",
     ),
   ).toBeTruthy();
 });
@@ -332,6 +342,43 @@ test("sources with the same label make one group with one Learn now", async () =
   );
 });
 
+test("Learn now starts every source in the group even when one fails", async () => {
+  review = {
+    canReview: true,
+    autoApprove: false,
+    sources: ["a", "b"].map((id) => ({
+      containerId: `bot-${id}`,
+      kind: "conversations" as const,
+      label: "From your conversations",
+      latestRun: null,
+      proposals: [],
+    })),
+  };
+  const ok = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      if (
+        String(path) === "/api/settings/learning/runs?container=bot-a" &&
+        init?.method === "POST"
+      ) {
+        posts.push(String(path));
+        return Response.json({ error: "Nope" }, { status: 500 });
+      }
+      return ok(path, init);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = draw();
+  fireEvent.click(await view.findByRole("button", { name: "Learn now" }));
+  await waitFor(() =>
+    expect(posts).toEqual([
+      "/api/settings/learning/runs?container=bot-a",
+      "/api/settings/learning/runs?container=bot-b",
+    ]),
+  );
+  expect((await view.findByRole("alert")).textContent).toBeTruthy();
+});
+
 test("with admins approving, there is no Learn now", async () => {
   const view = draw();
   await view.findByText("Waiting for an admin");
@@ -364,7 +411,12 @@ test("evidence names the recording by its title", async () => {
 });
 
 test("the personal edition shows Learning with automatic approval on and no sharing", async () => {
-  review = { ...body(true), autoApprove: true };
+  const base = body(true);
+  review = {
+    ...base,
+    autoApprove: true,
+    sources: base.sources.map((source) => ({ ...source, proposals: [] })),
+  };
   const view = render(
     <QueryClientProvider client={queryClient}>
       <LearningSettingsPage />
@@ -375,6 +427,8 @@ test("the personal edition shows Learning with automatic approval on and no shar
   });
   expect(approve.getAttribute("aria-checked")).toBe("true");
   expect(view.queryByText("Who else's Bots use your Skills")).toBeNull();
+  expect(view.getByRole("button", { name: "Learn now" })).toBeTruthy();
+  expect(view.queryByText("Nothing to review")).toBeNull();
   fireEvent.click(approve);
   await waitFor(() =>
     expect(puts).toEqual([
