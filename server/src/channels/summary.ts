@@ -305,10 +305,19 @@ async function openingOf(
   transcript: ThreadTranscript,
   owner: { threadId: string; userId: string },
 ): Promise<string | null> {
-  const history = await transcript.getThreadMessages({
-    threadId: owner.threadId,
-    userId: owner.userId,
-  });
+  let history: Awaited<ReturnType<ThreadTranscript["getThreadMessages"]>>;
+  try {
+    history = await transcript.getThreadMessages({
+      threadId: owner.threadId,
+      userId: owner.userId,
+    });
+  } catch (error) {
+    // A channel holds its thread id from the moment it is created; Intelligence creates the thread
+    // only when the first run starts. A sweep on any replica can get there first and be told 404,
+    // which is the same "not yet" as an empty history. Duck-typed as in thread-status.ts.
+    if ((error as { status?: unknown } | null)?.status === 404) return null;
+    throw error;
+  }
   const question = history.messages.find((message) => message.role === "user");
   if (!question) return null;
   const answer = history.messages.find(

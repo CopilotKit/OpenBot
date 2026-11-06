@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A new conversation's sidebar name no longer waits a minute when another server replica tries to
+  name it before Intelligence has its thread. That miss is now "not readable yet", retried in 15
+  seconds without using up a real failure's backoff, and it no longer logs
+  `Intelligence platform request failed` with `THREAD_NOT_FOUND`.
 - Skills (Admin → Skills, and Settings → Skills in the personal edition) lists each skill as one
   row with its name, what it does and how many Bots offer it, and the row opens the skill's own
   page. There, each Bot has a switch, the skill's words can be edited, and deleting asks first.
