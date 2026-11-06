@@ -160,17 +160,17 @@ function learningFailure(error: unknown): {
     return {
       status: 409,
       error:
-        "Learning is switched off in Intelligence. Turn it on there (learning.enabled in its Helm chart).",
+        "Learning is switched off in the back end. Turn it on there (learning.enabled in its Helm chart).",
     };
   if (code === "LEARNING_CONTAINER_NOT_FOUND")
     return {
       status: 404,
-      error: "This Learning container doesn't exist in Intelligence yet.",
+      error: "This Learning container doesn't exist in the back end yet.",
     };
   if (code === "LEARNING_CANDIDATE_NOT_FOUND")
     return {
       status: 404,
-      error: "Intelligence no longer has this skill. Refresh the list.",
+      error: "The back end no longer has this skill. Refresh the list.",
     };
   if (code === "LEARNING_CANDIDATE_CONFLICT")
     return {
@@ -180,22 +180,22 @@ function learningFailure(error: unknown): {
   if (code === "LEARNING_NOT_ENABLED")
     return {
       status: 403,
-      error: "This Intelligence licence doesn't include Learning.",
+      error: "The back end's licence doesn't include Learning.",
     };
   if (code === "LEARNING_MODEL_NOT_CONFIGURED")
     return {
       status: 409,
       error:
-        "Intelligence has no Learning model yet. Give its Learning agent a model and key, then try again.",
+        "The back end has no Learning model yet. Give its Learning agent a model and key, then try again.",
     };
   if (status === 429 || code === "RATE_LIMIT_EXCEEDED")
     return {
       status: 429,
-      error: "Intelligence is busy. Try again in a minute.",
+      error: "The back end is busy. Try again in a minute.",
     };
   return {
     status: 502,
-    error: "Couldn't reach Intelligence Learning. Try again.",
+    error: "Couldn't reach Learning in the back end. Try again.",
   };
 }
 
@@ -436,7 +436,7 @@ export function createLearningRoutes(
         {
           error:
             failure.status === 502
-              ? "Intelligence Learning is unavailable. Check the project permissions and endpoint, then retry."
+              ? "Learning in the back end is unavailable. Check the project permissions and endpoint, then retry."
               : failure.error,
         },
         failure.status,

@@ -80,7 +80,7 @@ function emptySentence(data: PersonalLearningSharing): string {
   if (data.unavailable === "off")
     return "An admin has turned off Automatic Learning, so no Skills are learned from your recordings.";
   if (data.skills === null)
-    return "Couldn't read your Skills from Intelligence just now. Your choice above still applies to them.";
+    return "Couldn't read your Skills from the back end just now. Your choice above still applies to them.";
   return "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot.";
 }
 

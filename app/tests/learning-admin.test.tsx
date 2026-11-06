@@ -67,7 +67,7 @@ test("an administrator excludes a Bot and saves without losing the default or pa
       }
       if (path.includes("/api/agents")) return Response.json({ agents: [] });
       return Response.json(
-        { error: "Intelligence Learning is unavailable." },
+        { error: "Learning in the back end is unavailable." },
         { status: 502 },
       );
     },
@@ -160,12 +160,12 @@ test.each([
   [
     { enabled: true, defaultTarget: null, agents: {} },
     { state: "absent", containerId: "openbot" },
-    'This Intelligence project has no "openbot" Learning container yet',
+    'This project has no "openbot" Learning container yet',
   ],
   [
     { enabled: true, defaultTarget: { containerId: "openbot" }, agents: {} },
     { state: "assigned", containerId: "openbot" },
-    'OpenBot assigned this Intelligence project\'s "openbot" container automatically',
+    'OpenBot assigned this project\'s "openbot" container automatically',
   ],
   [
     { enabled: true, defaultTarget: null, agents: {} },
@@ -413,7 +413,9 @@ describe("reviewing proposed skills", () => {
     intelligence();
     const without = shared();
     await without.findByText("OpenBot (openbot)");
-    expect(without.queryByText("Manage Learning in Intelligence")).toBeNull();
+    expect(
+      without.queryByText("Manage Learning in the back end dashboard"),
+    ).toBeNull();
     expect(without.queryByText("Threads ready")).toBeNull();
     expect(without.getByText("Candidates to review")).not.toBeNull();
     cleanup();
@@ -432,7 +434,7 @@ describe("reviewing proposed skills", () => {
     const managed = shared();
     expect(
       (
-        await managed.findByText("Manage Learning in Intelligence")
+        await managed.findByText("Manage Learning in the back end dashboard")
       ).getAttribute("href"),
     ).toBe("https://app.intelligence.example/o/acme/support/learning");
     expect(managed.getByText("Threads ready")).not.toBeNull();
@@ -445,10 +447,10 @@ test("an Intelligence with Learning switched off says so, not that it can't be r
     automatic: { state: "learning_off" },
   });
   const view = page();
-  await view.findByText("Learning is switched off in Intelligence", {
+  await view.findByText("Learning is switched off in the back end", {
     exact: false,
   });
   expect(
-    view.queryByText("Couldn't reach Intelligence", { exact: false }),
+    view.queryByText("Couldn't reach the back end", { exact: false }),
   ).toBeNull();
 });

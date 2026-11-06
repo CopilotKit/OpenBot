@@ -99,7 +99,7 @@ export function createInspectorLearningReader(
       });
     if (!response.ok)
       throw new InspectorLearningError(
-        `Intelligence Inspector Learning answered ${response.status}`,
+        `The back end's Learning inspector answered ${response.status}`,
         response.status,
       );
     clearDesktopConnectionFailure("intelligence");

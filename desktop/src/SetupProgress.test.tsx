@@ -59,11 +59,11 @@ test("item progress advances as pulls finish and disappears after the download",
   expect(row.queryByRole("progressbar")).toBeNull();
 });
 
-test("the install blurb says the full platform is installed, in two sentences at most", () => {
-  expect(INSTALL_BLURB).toContain("full OpenBot platform");
+test("the install blurb names the parts of OpenBot it installs, in two sentences at most", () => {
   expect(INSTALL_BLURB).toContain(
-    "the app, the server, your Bots, and the computers they work on.",
+    "This installs OpenBot on this computer: the front end, the back end, the database, your Bots, and the computers they work on.",
   );
   expect(INSTALL_BLURB.split(/(?<=\.)\s/).length).toBeLessThanOrEqual(2);
-  expect(INSTALL_BLURB).not.toMatch(/—|agent/);
+  // A person installing OpenBot knows its parts, not the product names behind them.
+  expect(INSTALL_BLURB).not.toMatch(/—|agent|Intelligence/);
 });

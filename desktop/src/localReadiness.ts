@@ -57,26 +57,26 @@ function blocked(said: string, action?: ReadinessAction): ReadinessRow {
 }
 
 const unavailableHere =
-  "Intelligence is not available on this computer or release.";
-const contract = "OpenBot did not understand Intelligence's reply.";
+  "The back end is not available on this computer or release.";
+const contract = "OpenBot did not understand its back end's reply.";
 const couldNotStart = blocked(
-  "Intelligence could not start.",
+  "The back end could not start.",
   "restart-intelligence",
 );
-const busy = blocked("Another Intelligence command is still running.", "retry");
+const busy = blocked("The back end is still running another command.", "retry");
 
 // Compiler-enforced: a new upstream reason or failure breaks the build here.
 const reasonRows: Record<LocalReason, ReadinessRow> = {
   "authentication-required": blocked("Sign in to CopilotKit.", "sign-in"),
   // Acceptance is an explicit step of its own; retrying start cannot satisfy it.
   "eula-acceptance-required": blocked(
-    "The Intelligence terms have not been accepted.",
+    "The license agreement has not been accepted.",
   ),
   "eula-unavailable": blocked(
-    "The Intelligence terms could not be shown.",
+    "The license agreement could not be shown.",
     "retry",
   ),
-  "eula-declined": blocked("The Intelligence terms were declined."),
+  "eula-declined": blocked("The license agreement was declined."),
   "release-unavailable": blocked(unavailableHere),
   "feature-disabled": blocked(unavailableHere),
   "unsupported-platform": blocked(unavailableHere),
@@ -84,22 +84,22 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   "update-recovery-required": blocked(unavailableHere),
   // The runtime row carries the Docker detail. Here Intelligence is simply blocked behind it.
   "unsupported-engine": blocked(
-    "Intelligence cannot run on this computer's current setup.",
+    "The back end cannot run on this computer's current setup.",
   ),
   "docker-unavailable": blocked(
-    "Intelligence cannot start until the software it runs on is running.",
+    "The back end cannot start until the software it runs on is running.",
     "retry",
   ),
-  "port-unavailable": blocked("A port Intelligence needs is in use.", "retry"),
+  "port-unavailable": blocked("A port the back end needs is in use.", "retry"),
   "local-command-busy": busy,
   "local-command-failed": couldNotStart,
   // OpenBot always approves the connection it asks for, so this is the CLI asking for more.
   "confirmation-required": blocked(
-    "Intelligence asked for a confirmation OpenBot cannot give.",
+    "The back end asked for a confirmation OpenBot cannot give.",
   ),
   // Reasons only `local login` gives; a status that gave one is still blocked, never ready.
   "dashboard-unavailable": blocked(
-    "The Intelligence dashboard is not responding yet.",
+    "The back end is not responding yet.",
     "retry",
   ),
   "browser-open-failed": blocked("Your browser did not open.", "retry"),
@@ -111,20 +111,20 @@ const licenceRows: Record<
   Exclude<LocalLicence, "valid" | "unknown">,
   ReadinessRow
 > = {
-  expired: blocked("The Intelligence evaluation licence has expired."),
-  missing: blocked("Intelligence has no evaluation licence."),
-  invalid: blocked("The Intelligence evaluation licence is not valid."),
+  expired: blocked("The evaluation licence has expired."),
+  missing: blocked("The back end has no evaluation licence."),
+  invalid: blocked("The evaluation licence is not valid."),
   "organization-mismatch": blocked(
-    "The Intelligence licence belongs to a different organization.",
+    "The licence belongs to a different organization.",
   ),
 };
 
 const failureRows: Record<LocalFailure, ReadinessRow> = {
   unavailable: blocked(
-    "This version of OpenBot cannot set up Intelligence on this computer.",
+    "This version of OpenBot cannot set up its back end on this computer.",
   ),
   unverified: blocked(
-    "The Intelligence software failed its integrity check.",
+    "The back end's software failed its integrity check.",
     "repair",
   ),
   // Cancelled is the person's own call stopping, not another command holding the stack.
@@ -134,7 +134,7 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
   // the images it fetched are still there for the retry. Seen at exactly 30 minutes on a Windows VM
   // that was installing OpenBot's packages at the same time.
   timeout: blocked(
-    "Intelligence took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
+    "The back end took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
     "restart-intelligence",
   ),
   "unexpected-exit": couldNotStart,
@@ -155,7 +155,7 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
   // the person's call. OpenBot stays in the storage its database is in, and Intelligence runs on
   // the machine's rootful engine.
   "rootless-podman": blocked(
-    "Intelligence needs Podman in rootful mode. Stop your Podman machine, run podman machine set --rootful, then start it again.",
+    "The back end needs Podman in rootful mode. Stop your Podman machine, run podman machine set --rootful, then start it again.",
     "retry",
   ),
 };
@@ -167,7 +167,7 @@ function intelligenceRow(
   if (intelligence === null) {
     return {
       state: "unknown",
-      said: "Intelligence has not been checked yet.",
+      said: "The back end has not been checked yet.",
     };
   }
   if (typeof intelligence === "string") return failureRows[intelligence];
@@ -181,8 +181,8 @@ function intelligenceRow(
     return {
       state: "ready",
       said: licenceExpiresSoon(intelligence, now)
-        ? "Intelligence is ready. Its evaluation licence expires within 5 days."
-        : "Intelligence is ready.",
+        ? "The back end is ready. Its evaluation licence expires within 5 days."
+        : "The back end is ready.",
     };
   }
   if (intelligence.reason !== null) return reasonRows[intelligence.reason];
@@ -190,20 +190,20 @@ function intelligenceRow(
   const licence = intelligence.licence;
   if (licence !== "valid" && licence !== "unknown") return licenceRows[licence];
   if (intelligence.readiness === "starting") {
-    return { state: "unknown", said: "Intelligence is starting." };
+    return { state: "unknown", said: "The back end is starting." };
   }
   if (intelligence.readiness === "stopped") {
-    return blocked("Intelligence is stopped.", "start-intelligence");
+    return blocked("The back end is stopped.", "start-intelligence");
   }
   if (intelligence.readiness === "degraded") {
     return blocked(
-      "Intelligence is running but not healthy.",
+      "The back end is running but not healthy.",
       "restart-intelligence",
     );
   }
   return {
     state: "unknown",
-    said: "Intelligence started. Its licence and readiness are not reported yet.",
+    said: "The back end started. Its licence and readiness are not reported yet.",
   };
 }
 
@@ -240,10 +240,10 @@ export function localReadiness(input: ReadinessInput): Readiness {
     intelligence: intelligenceRow(input.intelligence, input.now ?? Date.now()),
     openBot:
       input.openBot === "connected"
-        ? { state: "ready", said: "OpenBot is connected to Intelligence." }
+        ? { state: "ready", said: "OpenBot is connected to its back end." }
         : input.openBot === "not-connected"
           ? blocked(
-              "OpenBot is not connected to Intelligence.",
+              "OpenBot is not connected to its back end.",
               "restart-openbot",
             )
           : {

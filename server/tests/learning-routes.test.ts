@@ -478,7 +478,7 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
       const response = await app.request(path);
       expect(response.status).toBe(409);
       expect(((await response.json()) as { error: string }).error).toContain(
-        "Learning is switched off in Intelligence",
+        "Learning is switched off in the back end",
       );
     }
   });

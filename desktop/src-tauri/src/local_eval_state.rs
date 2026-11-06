@@ -177,7 +177,7 @@ pub fn advance(root: &Path, cli_sha256: &str, to: Phase) -> Result<State, Proble
 pub fn mark_connected(root: &Path, stack: &StackId) -> Result<State, Problem> {
     let mut record = load(root)
         .filter(|record| record.stack == stack.as_str())
-        .ok_or_else(|| Problem::plain("OpenBot has no record of that local Intelligence stack."))?;
+        .ok_or_else(|| Problem::plain("OpenBot has no record of that back end."))?;
     record.connected = true;
     write(root, &record)?;
     Ok(read(root, None).expect("the record just written reads back"))

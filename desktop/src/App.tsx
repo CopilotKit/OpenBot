@@ -933,7 +933,7 @@ function Setup() {
           <h1>{localStarting ? "Starting OpenBot" : "OpenBot is stopped"}</h1>
           <p className="lede">
             {localStarting
-              ? "Starting Intelligence and OpenBot on this computer."
+              ? "Starting the back end first, then the rest of OpenBot."
               : "Your installation and saved connections are ready to reopen."}
           </p>
           <LocalIntelligence sequence={local} offerStart />

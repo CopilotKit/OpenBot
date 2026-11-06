@@ -205,7 +205,7 @@ export function setupRows(
   return [
     deployment({
       id: "intelligence",
-      title: "CopilotKit Intelligence",
+      title: "Back end",
       required: true,
       ...intelligenceRow(facts.intelligence, product),
     }),
@@ -280,7 +280,7 @@ function intelligenceRow(fact: IntelligenceFact, product: string) {
   return {
     status: "needs_setup" as const,
     readyDetail,
-    gapDetail: `${product} couldn't reach Intelligence. Check its address and key.`,
+    gapDetail: `${product} couldn't reach its back end. Check its address and key.`,
     fix: {
       kind: "env" as const,
       names: INTELLIGENCE_VARIABLES,
@@ -398,15 +398,15 @@ export function entitlementAdvice(warning: {
 }): string {
   switch (warning.code) {
     case "RUNTIME_ENTITLEMENTS_SELF_HOSTED_MISCONFIGURED":
-      return "Intelligence has no valid licence. Set COPILOTKIT_LICENSE_TOKEN on Intelligence's own deployment.";
+      return "The back end has no valid licence. Set COPILOTKIT_LICENSE_TOKEN on the back end's own deployment.";
     case "RUNTIME_ENTITLEMENTS_SELF_HOSTED_EXPIRED":
-      return "Intelligence's licence has expired. Renew it and replace COPILOTKIT_LICENSE_TOKEN on Intelligence's deployment.";
+      return "The back end's licence has expired. Renew it and replace COPILOTKIT_LICENSE_TOKEN on the back end's deployment.";
     case "RUNTIME_ENTITLEMENTS_MANAGED_UNAVAILABLE":
-      return "Intelligence couldn't confirm this project's licence. Check again in a few minutes.";
+      return "The back end couldn't confirm this project's licence. Check again in a few minutes.";
   }
   if (warning.status === "inactive")
-    return "Intelligence says this deployment's licence isn't active. Memory stays off until it is.";
-  return "Intelligence didn't confirm this deployment's licence. Check again in a few minutes.";
+    return "The back end says this deployment's licence isn't active. Memory stays off until it is.";
+  return "The back end didn't confirm this deployment's licence. Check again in a few minutes.";
 }
 
 /**
@@ -488,7 +488,7 @@ function withinTime<T>(promise: Promise<T>, ms: number): Promise<T | Error> {
     ),
     new Promise<Error>((resolve) => {
       const timer = setTimeout(
-        () => resolve(new Error("Intelligence did not answer.")),
+        () => resolve(new Error("No answer in time.")),
         ms,
       );
       timer.unref?.();

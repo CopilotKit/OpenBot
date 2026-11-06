@@ -40,7 +40,7 @@ export type StartOutcome = "started" | "failed" | "deferred";
 const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
 
 const unreadable: Problem = {
-  said: "OpenBot did not understand Intelligence's answer.",
+  said: "OpenBot did not understand its back end's answer.",
 };
 
 type Phase = "setup" | "connect" | "wait" | "start";
@@ -48,7 +48,7 @@ type Phase = "setup" | "connect" | "wait" | "start";
 const PHASES: [Phase, string][] = [
   ["setup", "Setting up OpenBot"],
   ["connect", "Connecting OpenBot"],
-  ["wait", "Waiting for Intelligence"],
+  ["wait", "Waiting for the back end"],
   ["start", "Starting OpenBot"],
 ];
 
@@ -65,7 +65,7 @@ function said(intelligence: LocalReport | LocalFailure): string {
 function connectionSaid(answered: LocalConnection): string {
   // A conflict has no reason of its own, so it is said in this window's words.
   if (answered.conflicted) {
-    return "Settings Intelligence wrote for OpenBot were changed since. OpenBot did not connect.";
+    return "Settings the back end wrote for OpenBot were changed since. OpenBot did not connect.";
   }
   return said({
     outcome: answered.outcome,
@@ -277,7 +277,7 @@ export function useLocalSequence({
       if (tries >= pollDelays.length) {
         update({
           blocked: {
-            said: "Intelligence did not report ready in time.",
+            said: "The back end did not report ready in time.",
             reason: null,
           },
         });
@@ -471,7 +471,7 @@ export function LocalIntelligence({
   const { at, running, stopped, problem } = sequence;
 
   return (
-    <section aria-label="Intelligence on this computer">
+    <section aria-label="Back end on this computer">
       <SetupProgress steps={sequence.steps} />
       <LocalNeeds sequence={sequence} />
       {stopped && problem && <Failure problem={problem} />}
@@ -512,14 +512,14 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
     <section
       className={`local-alert${needs ? " needs" : ""}`}
       role="alert"
-      aria-label={openBot ? "OpenBot" : "Intelligence"}
+      aria-label={openBot ? "OpenBot" : "Back end"}
     >
       <h2>
         {needs
-          ? "Intelligence needs you"
+          ? "Setup needs you"
           : openBot
             ? "OpenBot did not start"
-            : "Intelligence stopped"}
+            : "Back end setup stopped"}
       </h2>
       {needs ? (
         <LocalNeeds sequence={sequence} />
@@ -527,7 +527,7 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
         <>
           <p>
             {openBot
-              ? "Intelligence is ready. Retry starts OpenBot again."
+              ? "The back end is ready. Retry starts OpenBot again."
               : (sequence.blocked?.said ?? sequence.problem?.said)}
           </p>
           <div className="row">
@@ -607,7 +607,7 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <div className="local-needs">
-      <p>Intelligence on this computer needs your CopilotKit account.</p>
+      <p>OpenBot's back end needs your CopilotKit account.</p>
       {waiting ? (
         <StatusLine>Finish signing in in your browser…</StatusLine>
       ) : (
@@ -666,7 +666,7 @@ function AcceptTerms({
     return (
       <div className="local-needs">
         <p className="footnote">
-          Intelligence did not take the acceptance from OpenBot. If a coding
+          The back end did not take the acceptance from OpenBot. If a coding
           agent or a script opened OpenBot, quit it, open it yourself, and
           accept again.
         </p>
@@ -680,8 +680,8 @@ function AcceptTerms({
   return (
     <div className="local-needs">
       <p>
-        To run Intelligence on this computer, accept the CopilotKit Intelligence
-        license agreement for {terms.organizationName}.
+        To run OpenBot on this computer, accept the CopilotKit license agreement
+        for {terms.organizationName}.
       </p>
       <p className="footnote">
         <ExternalLink href={terms.url}>Read the agreement</ExternalLink> (

@@ -57,7 +57,7 @@ function hasText(said: string, slug: string): boolean {
   return said.toLowerCase().includes(slug);
 }
 
-test("every reason gives a plain, non-empty sentence without its own name", () => {
+test("every reason gives a plain, non-empty sentence without its own name or Intelligence's", () => {
   for (const reason of reasons) {
     const rows = localReadiness({
       ...base,
@@ -66,17 +66,19 @@ test("every reason gives a plain, non-empty sentence without its own name", () =
     for (const row of Object.values(rows)) {
       expect(row.said.length).toBeGreaterThan(0);
       expect(row.said).not.toContain("!");
+      expect(row.said).not.toContain("Intelligence");
       expect(hasText(row.said, reason)).toBe(false);
     }
     expect(rows.intelligence.state).toBe("blocked");
   }
 });
 
-test("every failure gives a plain, non-empty sentence without its own name", () => {
+test("every failure gives a plain, non-empty sentence without its own name or Intelligence's", () => {
   for (const failure of localFailures) {
     const rows = localReadiness({ ...base, intelligence: failure });
     expect(rows.intelligence.said.length).toBeGreaterThan(0);
     expect(rows.intelligence.said).not.toContain("!");
+    expect(rows.intelligence.said).not.toContain("Intelligence");
     expect(hasText(rows.intelligence.said, failure)).toBe(false);
     expect(rows.intelligence.state).toBe("blocked");
   }
@@ -139,7 +141,7 @@ test("specific wording and actions", () => {
     said(report({ outcome: "blocked", reason: "port-unavailable" })),
   ).toEqual({
     state: "blocked",
-    said: "A port Intelligence needs is in use.",
+    said: "A port the back end needs is in use.",
     action: "retry",
   });
   expect(
@@ -155,18 +157,18 @@ test("specific wording and actions", () => {
   );
   expect(
     said(report({ outcome: "blocked", reason: "local-command-busy" })).said,
-  ).toBe("Another Intelligence command is still running.");
+  ).toBe("The back end is still running another command.");
   expect(said("timeout")).toEqual({
     state: "blocked",
-    said: "Intelligence took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
+    said: "The back end took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
     action: "restart-intelligence",
   });
-  expect(said("unexpected-exit").said).toBe("Intelligence could not start.");
+  expect(said("unexpected-exit").said).toBe("The back end could not start.");
   expect(said("unavailable").action).toBeUndefined();
   expect(said("unverified").action).toBe("repair");
   expect(said("invalid-json")).toEqual({
     state: "blocked",
-    said: "OpenBot did not understand Intelligence's reply.",
+    said: "OpenBot did not understand its back end's reply.",
   });
 });
 
@@ -185,7 +187,7 @@ test("a v1 report is unknown, never ready", () => {
   const row = localReadiness(base).intelligence;
   expect(row).toEqual({
     state: "unknown",
-    said: "Intelligence started. Its licence and readiness are not reported yet.",
+    said: "The back end started. Its licence and readiness are not reported yet.",
   });
   expect(
     localReadiness({ ...base, intelligence: null }).intelligence.state,
@@ -337,7 +339,7 @@ test("types: the failure and reason inputs are the upstream ones", () => {
   const failure: LocalFailure = "spawn";
   expect(
     localReadiness({ ...base, intelligence: failure }).intelligence.said,
-  ).toBe("Intelligence could not start.");
+  ).toBe("The back end could not start.");
 });
 
 test("each readiness state of a valid licence has its own row", () => {
@@ -348,25 +350,25 @@ test("each readiness state of a valid licence has its own row", () => {
     }).intelligence;
   expect(row("ready")).toEqual({
     state: "ready",
-    said: "Intelligence is ready.",
+    said: "The back end is ready.",
   });
   expect(row("starting")).toEqual({
     state: "unknown",
-    said: "Intelligence is starting.",
+    said: "The back end is starting.",
   });
   expect(row("stopped")).toEqual({
     state: "blocked",
-    said: "Intelligence is stopped.",
+    said: "The back end is stopped.",
     action: "start-intelligence",
   });
   expect(row("degraded")).toEqual({
     state: "blocked",
-    said: "Intelligence is running but not healthy.",
+    said: "The back end is running but not healthy.",
     action: "restart-intelligence",
   });
   expect(row("unknown")).toEqual({
     state: "unknown",
-    said: "Intelligence started. Its licence and readiness are not reported yet.",
+    said: "The back end started. Its licence and readiness are not reported yet.",
   });
 });
 
@@ -378,19 +380,19 @@ test("a licence that is not valid blocks a ready Intelligence", () => {
     }).intelligence;
   expect(row("expired")).toEqual({
     state: "blocked",
-    said: "The Intelligence evaluation licence has expired.",
+    said: "The evaluation licence has expired.",
   });
   expect(row("missing")).toEqual({
     state: "blocked",
-    said: "Intelligence has no evaluation licence.",
+    said: "The back end has no evaluation licence.",
   });
   expect(row("invalid")).toEqual({
     state: "blocked",
-    said: "The Intelligence evaluation licence is not valid.",
+    said: "The evaluation licence is not valid.",
   });
   expect(row("organization-mismatch")).toEqual({
     state: "blocked",
-    said: "The Intelligence licence belongs to a different organization.",
+    said: "The licence belongs to a different organization.",
   });
   expect(row("unknown").state).toBe("unknown");
 });
@@ -409,10 +411,10 @@ test("a licence expiring in four days is ready with a warning", () => {
     }).intelligence;
   expect(expiring("2026-10-25T18:00:00.000Z")).toEqual({
     state: "ready",
-    said: "Intelligence is ready. Its evaluation licence expires within 5 days.",
+    said: "The back end is ready. Its evaluation licence expires within 5 days.",
   });
   expect(expiring("2026-10-27T18:00:00.000Z")).toEqual({
     state: "ready",
-    said: "Intelligence is ready.",
+    said: "The back end is ready.",
   });
 });

@@ -393,8 +393,14 @@ async function installLocal(view: Awaited<ReturnType<typeof renderApp>>) {
 /** Words about the software underneath, which no local screen says. */
 // Docker and Podman are not here: they are the engine a person may already know, and their prompts
 // and agreements show windows of their own, so a screen names them when it waits on one. See
-// `plainInstallSteps`.
-const JARGON = [/\bCLI\b/, /Container engine/i, /Engine machine/i, /k3d/i];
+// `plainInstallSteps`. Intelligence is: a screen names the part of OpenBot, the back end, instead.
+const JARGON = [
+  /\bCLI\b/,
+  /Container engine/i,
+  /Engine machine/i,
+  /k3d/i,
+  /Intelligence/,
+];
 
 function expectPlain(view: Awaited<ReturnType<typeof renderApp>>) {
   const text = view.container.textContent ?? "";
@@ -456,8 +462,12 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     view.getByRole("heading", { name: "Installing OpenBot" }),
   ).toBeTruthy();
   expect(stepLabel(view)).toBe("Install");
-  // Says this is the whole platform, so a large download is expected.
-  expect(view.getByText(/installs the full OpenBot platform/)).toBeTruthy();
+  // Names every part it installs, so a large download is expected.
+  expect(
+    view.getByText(
+      /installs OpenBot on this computer: the front end, the back end, the database/,
+    ),
+  ).toBeTruthy();
   expect(view.queryByLabelText("Where OpenBot lives")).toBeNull();
   expect(view.queryByText(/Pick a Bot|Which Bot/i)).toBeNull();
   expect(invokeCalls.some((call) => call.command === "harnesses")).toBe(false);
@@ -613,7 +623,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await view.findByRole("heading", { name: "Accept the license agreement" });
   expect(
     view.getByText(
-      "To run OpenBot on this computer, accept the CopilotKit Intelligence license agreement for Acme.",
+      "To run OpenBot on this computer, accept the CopilotKit license agreement for Acme.",
     ),
   ).toBeTruthy();
   expect(view.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
@@ -751,7 +761,7 @@ test("the local sequence starts when installation completes and survives the pro
   ).toMatchObject({ root: "/tmp/local-eval-overlap" });
   // Working behind this screen says nothing on it: its progress has its own step.
   expect(view.queryByText(/Setting up OpenBot/)).toBeNull();
-  expect(view.queryByRole("alert", { name: "Intelligence" })).toBeNull();
+  expect(view.queryByRole("alert", { name: "Back end" })).toBeNull();
   // A local first run has nothing behind this screen to go back to.
   expect(view.queryByRole("button", { name: "Back" })).toBeNull();
   await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
@@ -959,7 +969,7 @@ test("Continue after Intelligence is ready starts OpenBot with the chosen model"
   await installLocal(view);
   await view.findByRole("heading", { name: "Connect your AI" });
   await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
-  expect(view.queryByRole("alert", { name: "Intelligence" })).toBeNull();
+  expect(view.queryByRole("alert", { name: "Back end" })).toBeNull();
   expect(localSequence()).not.toContain("start_stack");
   await chooseOpenAi(view);
   await expectHandover();
@@ -1032,10 +1042,10 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   await installLocal(view);
   await view.findByRole("heading", { name: "Connect your AI" });
   // A stop interrupts the screen in front at once, in a card with its reason and Retry.
-  const alert = await view.findByRole("alert", { name: "Intelligence" });
-  expect(alert.textContent).toContain("Intelligence stopped");
+  const alert = await view.findByRole("alert", { name: "Back end" });
+  expect(alert.textContent).toContain("Back end setup stopped");
   expect(alert.textContent).toContain(
-    "Intelligence cannot start until the software it runs on is running.",
+    "The back end cannot start until the software it runs on is running.",
   );
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Getting ready" });
@@ -1043,7 +1053,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   expect(setups).toBe(1);
   const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
   expect(row.textContent).toContain(
-    "Intelligence cannot start until the software it runs on is running.",
+    "The back end cannot start until the software it runs on is running.",
   );
   expectPlain(view);
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
@@ -1124,7 +1134,7 @@ test("Quit shows Shutting down with each part's row as it starts and ends", asyn
     rowStatus(view, "Stopping OpenBot").getByText("In progress"),
   ).toBeTruthy();
   expect(
-    view.queryByRole("listitem", { name: "Stopping Intelligence" }),
+    view.queryByRole("listitem", { name: "Stopping the back end" }),
   ).toBeNull();
   // Nothing to press: the app exits by itself.
   expect(view.queryAllByRole("button")).toHaveLength(0);
@@ -1137,12 +1147,12 @@ test("Quit shows Shutting down with each part's row as it starts and ends", asyn
     rowStatus(view, "Stopping OpenBot").getByText("Complete"),
   ).toBeTruthy();
   expect(
-    rowStatus(view, "Stopping Intelligence").getByText("In progress"),
+    rowStatus(view, "Stopping the back end").getByText("In progress"),
   ).toBeTruthy();
   // An older copy arriving late never undoes a newer one.
   await emitQuit({ seq: 3, steps: [complete("stop-openbot")] });
   expect(
-    rowStatus(view, "Stopping Intelligence").getByText("In progress"),
+    rowStatus(view, "Stopping the back end").getByText("In progress"),
   ).toBeTruthy();
 
   await emitQuit({
@@ -1150,7 +1160,7 @@ test("Quit shows Shutting down with each part's row as it starts and ends", asyn
     steps: [complete("stop-openbot"), failed("stop-intelligence")],
   });
   expect(
-    rowStatus(view, "Stopping Intelligence").getByText("Failed"),
+    rowStatus(view, "Stopping the back end").getByText("Failed"),
   ).toBeTruthy();
   expect(view.getByRole("status").textContent).toBe(
     "Part of it could not be stopped. OpenBot says what happened the next time it opens.",
@@ -1191,7 +1201,7 @@ test("a window sent to the Shutting down page catches up, then follows the rows"
     steps: [complete("stop-openbot"), complete("stop-intelligence")],
   });
   expect(
-    rowStatus(view, "Stopping Intelligence").getByText("Complete"),
+    rowStatus(view, "Stopping the back end").getByText("Complete"),
   ).toBeTruthy();
   // Only the catch-up call; nothing that starts or stops anything.
   expect(invokeCalls.map((call) => call.command)).toEqual(["quit_status"]);
@@ -1246,9 +1256,9 @@ test("the menu's dashboard opening shows on a setup screen with a spinner, then 
 
   await emitOpening({
     state: "opening",
-    said: "Opening the Intelligence dashboard…",
+    said: "Opening the back end dashboard…",
   });
-  expectWorking(view, "Opening the Intelligence dashboard…");
+  expectWorking(view, "Opening the back end dashboard…");
   // The screen under it is unchanged.
   expect(
     view.getByRole("heading", { name: "OpenBot is running" }),
@@ -1514,10 +1524,10 @@ test("relaunch never starts a local stack that is not exactly ready and valid", 
     [
       "unknown",
       "unknown",
-      "Intelligence started. Its licence and readiness are not reported yet.",
+      "The back end started. Its licence and readiness are not reported yet.",
     ],
-    ["ready", "expired", "The Intelligence evaluation licence has expired."],
-    ["degraded", "valid", "Intelligence is running but not healthy."],
+    ["ready", "expired", "The evaluation licence has expired."],
+    ["degraded", "valid", "The back end is running but not healthy."],
   ]) {
     setupConnectedLocalStack(
       `/tmp/local-eval-${readiness}-${licence}`,
@@ -1842,7 +1852,7 @@ test.each(["model", "intelligence"])(
           said:
             connection === "model"
               ? "That saved OpenAI API key is no longer available."
-              : "OpenBot's connection to Intelligence on this computer is no longer available. Set up Intelligence again.",
+              : "OpenBot's connection to its back end on this computer is no longer available. Set up the back end again.",
           connection,
         };
       return previous(command, args);
@@ -2083,8 +2093,8 @@ function useInterruptedShutdownSetup() {
 test("a local Intelligence stack left running at Quit is shown without holding auto-start", async () => {
   useInterruptedShutdownSetup();
   const notice = {
-    said: "OpenBot could not stop the local Intelligence stack it started when it last quit.",
-    detail: "Intelligence stop failed: the CLI timed out",
+    said: "When OpenBot last quit, it could not stop its back end.",
+    detail: "Back end stop failed: the CLI timed out",
   };
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
@@ -2107,7 +2117,7 @@ test("Stop that fails only for the local Intelligence stack still stops OpenBot"
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Intelligence stop failed: the CLI timed out";
+      throw "Back end stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();
@@ -2118,7 +2128,7 @@ test("Stop that fails only for the local Intelligence stack still stops OpenBot"
     expect(view.queryByRole("button", { name: "Stop OpenBot" })).toBeNull(),
   );
   expect(view.getByRole("alert").textContent).toContain(
-    "OpenBot stopped, but could not stop the local Intelligence stack it started.",
+    "OpenBot stopped, but could not stop its back end.",
   );
 });
 
@@ -2128,7 +2138,7 @@ test("Stop that fails for OpenBot itself keeps OpenBot running", async () => {
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Compose down failed: busy\nIntelligence stop failed: the CLI timed out";
+      throw "Compose down failed: busy\nBack end stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();

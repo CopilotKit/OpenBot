@@ -186,7 +186,7 @@ export function openGatewaySocket(ws: Outward): void {
   };
   inward.onclose = (event) => closeWith(ws, event.code, event.reason);
   inward.onerror = () =>
-    closeWith(ws, 1011, "The Intelligence gateway could not be reached.");
+    closeWith(ws, 1011, "The back end could not be reached.");
 }
 
 /** A frame from the browser: on to the gateway, or held until the gateway's side is open. */
