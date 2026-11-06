@@ -3000,6 +3000,7 @@ const app = createApp(
       : {}),
     personalLearning: {
       store: learningSharingStore,
+      approvals: skillApprovalStore,
       skillsOf: (userId) =>
         copilotRuntime.learning?.personalSkills(userId) ??
         Promise.resolve({ unavailable: "unavailable" as const }),

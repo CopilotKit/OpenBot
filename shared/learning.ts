@@ -202,6 +202,10 @@ export type PersonalLearnedSkill = {
   name: string;
   description: string;
   open: boolean;
+  /** Who approved it into the space; null when no approval is on record, which counts as an administrator's. */
+  approvedBy: "person" | "admin" | null;
+  /** Where the person's request to share it with every Bot stands; "none" when there is no record. */
+  sharing: "none" | "requested" | "approved" | "declined";
 };
 
 /** Settings, Learning: the person's sharing choice and the Skills in their own space. */

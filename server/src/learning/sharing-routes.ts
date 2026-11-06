@@ -8,10 +8,13 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
+import type { SkillApprovalStore } from "./approvals";
 import type { LearningSharingStore } from "./sharing";
 
 export type PersonalLearningRouteDeps = {
   store: LearningSharingStore;
+  /** Who approved each skill in the person's space and where a request to share it stands. */
+  approvals: SkillApprovalStore;
   /** The Skills in this person's own space, read the way a run reads them (learning/runtime.ts `personalSkills`). */
   skillsOf: (
     userId: string,
@@ -75,10 +78,17 @@ export function createPersonalLearningRoutes(
         ? {
             mode: sharing.mode,
             sharingAllowed,
-            skills: read.skills.map((skill) => ({
-              ...skill,
-              open: opened.has(skill.name),
-            })),
+            skills: await Promise.all(
+              read.skills.map(async (skill) => {
+                const approval = await deps.approvals.get(userId, skill.name);
+                return {
+                  ...skill,
+                  open: opened.has(skill.name),
+                  approvedBy: approval?.approvedBy ?? null,
+                  sharing: approval?.sharing ?? "none",
+                };
+              }),
+            ),
           }
         : {
             mode: sharing.mode,

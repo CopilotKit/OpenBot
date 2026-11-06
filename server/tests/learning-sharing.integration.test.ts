@@ -25,6 +25,7 @@ import {
 import { createDatabase } from "../src/db/client";
 import { enterpriseSettings } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
+import { learningSkillApprovals } from "../src/db/schema/learning";
 import { createSkillApprovalStore } from "../src/learning/approvals";
 import { personalLearningContainerId } from "../src/learning/personal-space";
 import { createLearningRuntime } from "../src/learning/runtime";
@@ -59,6 +60,7 @@ const auditStore = {
 };
 const approvals = createSkillApprovalStore(database);
 const store = createLearningSharingStore(database, approvals);
+const unrecorded = { approvedBy: null, sharing: "none" } as const;
 let invalidations = 0;
 let clock = 1_000_000;
 /** Two replicas' indexes over one database; only the first is told about changes made through its routes. */
@@ -157,6 +159,7 @@ args[34] = {
         : null;
     },
     skillsOf: (userId: string) => learning.personalSkills(userId),
+    approvals,
     invalidate: () => {
       invalidations++;
       thisReplica.invalidate();
@@ -385,10 +388,42 @@ describe("Settings, Learning", () => {
       mode: "closed",
       sharingAllowed: true,
       skills: [
-        { name: "grace-picked", description: "Picked by Grace.", open: false },
-        { name: "grace-private", description: "Kept by Grace.", open: false },
+        {
+          name: "grace-picked",
+          description: "Picked by Grace.",
+          open: false,
+          ...unrecorded,
+        },
+        {
+          name: "grace-private",
+          description: "Kept by Grace.",
+          open: false,
+          ...unrecorded,
+        },
       ],
     });
+  });
+
+  test("a skill the person approved themselves says so, and one with no record counts as an admin's", async () => {
+    await approvals.recordApproval(grace, "grace-picked", "person");
+    await approvals.requestSharing(grace, "grace-picked");
+    try {
+      const { skills } = (await read("grace")) as {
+        skills: Record<string, unknown>[];
+      };
+      expect(skills.find((s) => s.name === "grace-picked")).toMatchObject({
+        approvedBy: "person",
+        sharing: "requested",
+      });
+      expect(skills.find((s) => s.name === "grace-private")).toMatchObject({
+        approvedBy: null,
+        sharing: "none",
+      });
+    } finally {
+      await database
+        .delete(learningSkillApprovals)
+        .where(eq(learningSkillApprovals.userId, grace));
+    }
   });
 
   test("closed: only the person's own runs use their Skills", async () => {
@@ -456,8 +491,18 @@ describe("Settings, Learning", () => {
       "grace-picked",
     ]);
     expect((await read("grace")).skills).toEqual([
-      { name: "grace-picked", description: "Picked by Grace.", open: true },
-      { name: "grace-private", description: "Kept by Grace.", open: false },
+      {
+        name: "grace-picked",
+        description: "Picked by Grace.",
+        open: true,
+        ...unrecorded,
+      },
+      {
+        name: "grace-private",
+        description: "Kept by Grace.",
+        open: false,
+        ...unrecorded,
+      },
     ]);
     // Grace's own runs still have both.
     expect(await offered(learning, "grace")).toEqual([
@@ -689,8 +734,18 @@ describe("Settings, Learning", () => {
       mode: "choose",
       sharingAllowed: false,
       skills: [
-        { name: "grace-picked", description: "Picked by Grace.", open: true },
-        { name: "grace-private", description: "Kept by Grace.", open: false },
+        {
+          name: "grace-picked",
+          description: "Picked by Grace.",
+          open: true,
+          ...unrecorded,
+        },
+        {
+          name: "grace-private",
+          description: "Kept by Grace.",
+          open: false,
+          ...unrecorded,
+        },
       ],
     });
     const closed = await call(

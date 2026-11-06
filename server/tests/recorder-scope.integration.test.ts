@@ -124,13 +124,12 @@ args[2] = roleRepository;
 args[6] = runtime.handler;
 args[9] = agentProfileStore;
 args[12] = auditStore;
+const skillApprovals = createSkillApprovalStore(database);
 args[34] = {
   recorder,
   personalLearning: {
-    store: createLearningSharingStore(
-      database,
-      createSkillApprovalStore(database),
-    ),
+    store: createLearningSharingStore(database, skillApprovals),
+    approvals: skillApprovals,
     skillsOf: async () => ({ skills: [] }),
     invalidate: () => {},
     sharingAllowed: async () => true,

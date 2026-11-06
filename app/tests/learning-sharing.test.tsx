@@ -42,8 +42,20 @@ beforeEach(() => {
     mode: "closed",
     sharingAllowed: true,
     skills: [
-      { name: "refund-order", description: "Refunds an order.", open: false },
-      { name: "close-ticket", description: "Closes a ticket.", open: true },
+      {
+        name: "refund-order",
+        description: "Refunds an order.",
+        open: false,
+        approvedBy: null,
+        sharing: "none",
+      },
+      {
+        name: "close-ticket",
+        description: "Closes a ticket.",
+        open: true,
+        approvedBy: null,
+        sharing: "none",
+      },
     ],
   };
   global.fetch = Object.assign(
