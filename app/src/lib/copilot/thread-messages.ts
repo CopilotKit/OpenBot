@@ -80,8 +80,8 @@ export function readableTurns(stored: readonly unknown[]): StoredThread {
   let unreadable = 0;
 
   for (const turn of stored) {
-    const candidate = withNormalisedToolCalls(
-      withoutNullAssistantContent(turn),
+    const candidate = withCurrentA2uiVersion(
+      withNormalisedToolCalls(withoutNullAssistantContent(turn)),
     );
     if (MessageSchema.safeParse(candidate).success) {
       messages.push(candidate as Message);
@@ -111,6 +111,74 @@ function withoutNullAssistantContent(turn: unknown): unknown {
   if (record.role !== "assistant" || record.content !== null) return turn;
   const { content: _dropped, ...rest } = record;
   return rest;
+}
+
+/**
+ * The A2UI version CopilotKit reads, and the spelling of the same version that CopilotKit 1.83 wrote.
+ *
+ * 1.84 spells A2UI 1.0 `"1.0"`, as Google's A2UI SDKs do, and refuses an operation that says
+ * `"v1.0"` (CopilotKit #8155, which migrates nothing). Every interface a Bot drew on 1.83 is stored
+ * with `"v1.0"`, so a conversation from before the upgrade drew none of them when it was reopened.
+ */
+const A2UI_VERSION = "1.0";
+const STORED_A2UI_VERSION = "v1.0";
+
+/**
+ * A generated interface written in 1.83's spelling, in the one CopilotKit reads now.
+ *
+ * Only a surface activity's operations that say `"v1.0"` change, and only their `version`: both
+ * spellings name the same version, so nothing else about the interface does. Any other turn, and a
+ * surface already in `"1.0"`, is returned as it came.
+ */
+function withCurrentA2uiVersion(turn: unknown): unknown {
+  if (typeof turn !== "object" || turn === null) return turn;
+  const record = turn as Record<string, unknown>;
+  if (
+    record.role !== "activity" ||
+    record.activityType !== "generative-ui-surface" ||
+    typeof record.content !== "object" ||
+    record.content === null
+  )
+    return turn;
+  const content = record.content as Record<string, unknown>;
+  const operations = content.operations;
+  if (!Array.isArray(operations) || !operations.some(isStoredA2uiVersion))
+    return turn;
+  return {
+    ...record,
+    content: {
+      ...content,
+      operations: operations.map((operation) =>
+        isStoredA2uiVersion(operation)
+          ? { ...operation, version: A2UI_VERSION }
+          : operation,
+      ),
+    },
+  };
+}
+
+function isStoredA2uiVersion(
+  operation: unknown,
+): operation is Record<string, unknown> {
+  return (
+    typeof operation === "object" &&
+    operation !== null &&
+    (operation as { version?: unknown }).version === STORED_A2UI_VERSION
+  );
+}
+
+/**
+ * {@link withCurrentA2uiVersion} over a transcript that reached the browser some other way than this
+ * reader: the gateway's snapshot when a conversation is joined. The same array when nothing changed.
+ */
+export function withCurrentA2uiVersions(messages: Message[]): Message[] {
+  let changed = false;
+  const current = messages.map((message) => {
+    const translated = withCurrentA2uiVersion(message) as Message;
+    if (translated !== message) changed = true;
+    return translated;
+  });
+  return changed ? current : messages;
 }
 
 /** A tool call as the history store writes one. */

@@ -1,10 +1,11 @@
-// The Recorder's clicks and typing come from CopilotKit main's own capture code. npm's @copilotkit/learning 0.0.1
-// predates main, so a Bun patch (patches/@copilotkit%2Flearning@0.0.1.patch, named in the root package.json's
-// patchedDependencies) swaps main's build in. That build carries masking the Recorder relies on: the name it gives a
-// clicked control (`target.label`) has every URL, email address, token and typed password taken out before it leaves
-// the page. Bun applies a patch only to the exact version it names, and a bump to any other version installs that
-// version unpatched without a word. These tests break CI when that happens: the patch must name the version installed,
-// and the installed collector must mask a control's name as main's does, whatever version that is.
+// The Recorder's clicks and typing come from CopilotKit's own capture code, @copilotkit/learning. Its 0.0.1 on npm
+// predated the masking the Recorder relies on, so a Bun patch named in the root package.json's patchedDependencies
+// swapped CopilotKit main's build in. The release OpenBot installs now carries that build as published, and the patch
+// is gone. The masking: the name the collector gives a clicked control (`target.label`) has every URL, email address,
+// token and typed password taken out before it leaves the page. Bun applies a patch only to the exact version it names,
+// and a bump to any other version installs that version unpatched without a word. These tests break CI when that
+// happens: a patch must name the version installed, and the installed collector must mask a control's name as main's
+// does, whatever version that is.
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";

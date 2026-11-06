@@ -38,10 +38,10 @@ import contract from "./fixtures/app-analytics-context-v1.json";
  * code: the request hook, the routine runner, a subagent, a task's retry, a hop. The Intelligence
  * platform is the only fake, on 127.0.0.1, and what the real client sends it is captured.
  *
- * `@copilotkit/runtime` 1.83.0 drops `analyticsContext` from the lock request; the release that
- * sends it is not out yet. So every case asserts what OpenBot handed the lock call, and the wire
- * body is asserted against what the installed runtime is measured to forward. When the dependency
- * moves, the wire assertions start requiring the context without a change here.
+ * `@copilotkit/runtime` 1.83.0 dropped `analyticsContext` from the lock request, and the runtime
+ * OpenBot installs now sends it. So every case asserts what OpenBot handed the lock call, and the
+ * wire body is asserted against what the installed runtime is measured to forward, which is the
+ * context itself on that runtime and nothing on 1.83.0.
  */
 
 const KEY = "synthetic-privacy-key";
