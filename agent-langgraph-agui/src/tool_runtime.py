@@ -8,6 +8,7 @@ checkpoint, model message, or AG-UI state snapshot.
 
 import asyncio
 import json
+import logging
 import os
 from contextlib import aclosing
 from contextvars import ContextVar
@@ -25,6 +26,8 @@ from langgraph.graph import END
 
 from .whole_thread import WholeThreadAgent, is_server_instruction
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class RunTools:
@@ -33,6 +36,108 @@ class RunTools:
     deployment: frozenset[str] = frozenset()
     assertion: str = field(default="", repr=False)
     connection: dict = field(default_factory=dict, compare=False, repr=False)
+    # The model and reasoning effort the server chose for this run (`openbotModel`); empty when it
+    # chose none, and the deployment's own configuration applies.
+    model: str = ""
+    effort: str = ""
+
+
+# The reasoning efforts the server sends, in its own spelling. Anything else is not an effort.
+RUN_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
+
+# Server-only props, read here and never passed to the integration, so none of them can reach
+# graph state, a checkpoint or a snapshot.
+OPENBOT_PROPS = {
+    "openbotRun",
+    "openbotDeploymentTools",
+    "openbotModel",
+    "openbot_run",
+    "openbot_deployment_tools",
+    "openbot_model",
+}
+
+
+def run_model(props) -> tuple[str, str]:
+    """The `(model, effort)` the server chose for this run, or empty strings.
+
+    The server sends `openbotModel: {"model": ..., "reasoningEffort": ...}` and strips any a
+    browser supplied, so it is the deployment's decision. A value of another shape is ignored, as
+    is an effort outside the server's spelling: no effort means the model's own default.
+    """
+    choice = props.get("openbotModel")
+    if not isinstance(choice, dict):
+        return "", ""
+    model = choice.get("model")
+    if not isinstance(model, str) or not model.strip():
+        return "", ""
+    effort = choice.get("reasoningEffort")
+    return model.strip(), effort if isinstance(effort, str) and effort in RUN_EFFORTS else ""
+
+
+def provider_refusal(error: BaseException) -> bool:
+    """Whether a model provider answered this run with an error status of its own.
+
+    Its message is the provider's account of why, and the run ends with it as a RUN_ERROR: the
+    person reads it, and the server reads it to notice a model that is no longer offered.
+    """
+    refusals = []
+    try:
+        from openai import APIStatusError as OpenAIRefusal
+
+        refusals.append(OpenAIRefusal)
+    except ImportError:
+        pass
+    try:
+        from anthropic import APIStatusError as AnthropicRefusal
+
+        refusals.append(AnthropicRefusal)
+    except ImportError:
+        pass
+    try:
+        from google.genai.errors import APIError as GoogleRefusal
+
+        refusals.append(GoogleRefusal)
+    except ImportError:
+        pass
+    # `langchain-google-genai` raises its own error from Google's, with Google's text in it.
+    seen = set()
+    while error is not None and id(error) not in seen:
+        if isinstance(error, tuple(refusals)):
+            return True
+        seen.add(id(error))
+        error = error.__cause__
+    return False
+
+
+def provider_message(error: BaseException) -> str:
+    """A provider refusal in the provider's own words.
+
+    The OpenAI SDK puts only an `error.message` or `message` field in the exception's text, so a
+    body of another shape is left out of it: the Codex backend's own refusal,
+    `{"detail": "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account."}`,
+    reads "Error code: 400" and nothing else. The body's message is added when the text lacks it.
+    """
+    message = str(error) or type(error).__name__
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        nested = body.get("error")
+        detail = next(
+            (
+                value
+                for value in (
+                    nested.get("message") if isinstance(nested, dict) else nested,
+                    body.get("message"),
+                    body.get("detail"),
+                )
+                if isinstance(value, str) and value.strip()
+            ),
+            None,
+        )
+    else:
+        detail = body if isinstance(body, str) and body.strip() else None
+    if detail and detail.strip() not in message:
+        message = f"{message} - {detail.strip()}"
+    return message
 
 
 _current: ContextVar[RunTools | None] = ContextVar("openbot_run_tools", default=None)
@@ -51,6 +156,7 @@ class ToolAwareAgent(WholeThreadAgent):
         props = input.forwarded_props if isinstance(input.forwarded_props, dict) else {}
         names = props.get("openbotDeploymentTools", [])
         assertion = props.get("openbotRun", "")
+        model, effort = run_model(props)
         context = RunTools(
             tools=tuple(input.tools or []),
             context=tuple(input.context or []),
@@ -58,6 +164,8 @@ class ToolAwareAgent(WholeThreadAgent):
             if isinstance(names, list)
             else frozenset(),
             assertion=assertion if isinstance(assertion, str) else "",
+            model=model,
+            effort=effort,
         )
         # The maintained endpoint clones this subclass per request. ContextVar
         # also isolates graph tasks across concurrent requests and resets on
@@ -66,15 +174,7 @@ class ToolAwareAgent(WholeThreadAgent):
         token = _current.set(context)
         try:
             clean_props = {
-                key: value
-                for key, value in props.items()
-                if key
-                not in {
-                    "openbotRun",
-                    "openbotDeploymentTools",
-                    "openbot_run",
-                    "openbot_deployment_tools",
-                }
+                key: value for key, value in props.items() if key not in OPENBOT_PROPS
             }
             async with aclosing(
                 super().run(input.model_copy(update={"forwarded_props": clean_props}))
@@ -92,14 +192,21 @@ class ToolAwareAgent(WholeThreadAgent):
                 type=EventType.RUN_ERROR,
                 message="The model requested a tool that was not offered for this run.",
             )
-        except Exception:
-            if not context.connection.get("authentication_failed"):
+        except Exception as error:
+            if context.connection.get("authentication_failed"):
+                yield RunErrorEvent(
+                    type=EventType.RUN_ERROR,
+                    message="Sign in to your model provider again.",
+                    code="OPENBOT_MODEL_AUTH_REQUIRED",
+                )
+            elif provider_refusal(error):
+                # Raised, it ended the response stream after RUN_STARTED with no terminal event,
+                # and the provider's reason never reached anyone.
+                message = provider_message(error)
+                logger.warning("The model provider refused the run: %s", message)
+                yield RunErrorEvent(type=EventType.RUN_ERROR, message=message)
+            else:
                 raise
-            yield RunErrorEvent(
-                type=EventType.RUN_ERROR,
-                message="Sign in to your model provider again.",
-                code="OPENBOT_MODEL_AUTH_REQUIRED",
-            )
         finally:
             _current.reset(token)
 

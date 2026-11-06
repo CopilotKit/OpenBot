@@ -250,16 +250,14 @@ async def test_only_provider_auth_status_emits_model_refresh_code(
     boundary, status, expected
 ):
     boundary["model_status"] = status
-    if not expected:
-        from openai import BadRequestError
-
-        with pytest.raises(BadRequestError):
-            await run_protocol(run_input([]), allow_error=True)
-        return
     events = await run_protocol(run_input([]), allow_error=True)
     errors = [event for event in events if event["type"] == "RUN_ERROR"]
     assert errors
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
     assert (errors[-1].get("code") == "OPENBOT_MODEL_AUTH_REQUIRED") is expected
+    if not expected:
+        # Any other refusal ends the run in the provider's own words.
+        assert "controlled provider refusal" in errors[-1]["message"]
 
 
 def snapshot(events):

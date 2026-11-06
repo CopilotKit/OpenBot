@@ -7,6 +7,7 @@ package the AG-UI project maintains, so the protocol stops being ours to keep wo
 
 import hmac
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -22,12 +23,16 @@ from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
 
+from . import chatgpt_models
 from .tool_runtime import (
     ToolAwareAgent,
     bind_tools,
+    current_tools,
     execute_tools,
     model_messages,
     next_step,
+    provider_message,
+    provider_refusal,
 )
 
 TOKEN_HEADER = "x-openbot-agent-token"
@@ -94,6 +99,57 @@ def _resolve_provider(provider: str):
     return OPENBOT_PROVIDER_ALIASES.get(provider, provider)
 
 
+# `requiresResponsesApi` in shared/model-providers.ts, the rule every Bot in the box decides by:
+# `gpt-5.6-*` and every `gpt-6*` take function tools only on the Responses API, and the `-pro` and
+# `-codex` models are not served on Chat Completions at all. OpenAI's own words: "GPT-6 Astra,
+# GPT-6.1 Sol, and GPT-6.1 Terra support Chat Completions, but tool calling requires Responses."
+_RESPONSES_API_MODEL = re.compile(
+    r"^gpt-5\.[6-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b"
+)
+
+# The efforts each integration takes, as its own field declares them: `reasoning_effort` (alias
+# `effort`) in langchain-anthropic, `reasoning_effort` (alias `thinking_level`) in
+# langchain-google-genai.
+ANTHROPIC_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
+GOOGLE_EFFORTS = frozenset({"minimal", "low", "medium", "high"})
+
+
+def requires_responses_api(model: str) -> bool:
+    """Whether this OpenAI model has to be driven through the Responses API.
+
+    A gateway's namespaced name (`openai/gpt-5.6-terra`) is the model it names.
+    """
+    return bool(_RESPONSES_API_MODEL.search(model.strip().split("/")[-1]))
+
+
+def _provider_kwargs(provider: str, model: str, effort: str):
+    """What this provider's integration is given beyond the model: its API, and the run's effort.
+
+    An effort is sent only when the run carries one, under the field that provider reads, so a run
+    without one gets the model's own default.
+
+    - OpenAI itself (no `OPENAI_BASE_URL`): the Responses API for a model that takes tools only
+      there, with `reasoning.effort`; Chat Completions otherwise, with `reasoning_effort`.
+    - Any other OpenAI-compatible endpoint: `reasoning_effort`, on whichever API the integration
+      picks. Most serve only Chat Completions (Gemini's and xAI's compatible endpoints), and the
+      integration moves `reasoning_effort` to `reasoning.effort` itself when it picks Responses.
+    - Anthropic: `output_config.effort`, through langchain-anthropic's `effort`.
+    - Google: `thinkingConfig.thinkingLevel`, through langchain-google-genai's `thinking_level`.
+    """
+    if provider == "openai":
+        if not os.environ.get("OPENAI_BASE_URL") and requires_responses_api(model):
+            return {
+                "use_responses_api": True,
+                **({"reasoning": {"effort": effort}} if effort else {}),
+            }
+        return {"reasoning_effort": effort} if effort else {}
+    if provider == "anthropic" and effort in ANTHROPIC_EFFORTS:
+        return {"effort": effort}
+    if provider == "google_genai" and effort in GOOGLE_EFFORTS:
+        return {"thinking_level": effort}
+    return {}
+
+
 def _chatgpt_auth_file(store: str) -> Path:
     path = Path(store)
     if not path.exists():
@@ -109,8 +165,13 @@ def _chatgpt_auth_file(store: str) -> Path:
     return path
 
 
-def _model():
+def _model(plan_models=None):
     """The model this Bot thinks with, chosen by which credential the deployment gave it.
+
+    THE SERVER CHOOSES FIRST. A run that carries `openbotModel` (`current_tools().model` and
+    `.effort`) answers on that model, at that effort, on whichever credential the deployment has;
+    the server only sends a model that credential offers. A run without one answers on the
+    deployment's configuration below, as every run did before the server chose.
 
     A SIGNED-IN CHATGPT PLAN IS NOT AN API KEY, and this is the only place that difference shows up.
     A plan token is a bearer for `chatgpt.com/backend-api/codex`, and `langchain-openai` pins that
@@ -119,16 +180,23 @@ def _model():
     supported way in, and it is selected by the presence of the token rather than by another
     setting, so nothing can say "plan" while holding a key.
 
+    A PLAN ANSWERS ONLY ON A MODEL IT OFFERS. The configured model is used on a plan only when the
+    plan's own listing (`plan_models`, see `chatgpt_models`) has it; otherwise the plan's default,
+    the first model it lists. `BOT_MODEL` defaults to `gpt-5.5` in Compose, and a plan that did not
+    offer it refused every message. With no listing to go by, the configured model, as before.
+
     A recognized `provider:model` choice keeps its provider. Otherwise the model is an opaque ID
     and the selected provider is passed separately, including when that ID contains a colon.
     """
+    run = current_tools()
     configured_model = os.environ.get("BOT_MODEL")
     store = (os.environ.get("CHATGPT_AUTH_FILE") or "").strip()
     if store:
         # A signed-in ChatGPT plan ignores BOT_PROVIDER, retaining this Bot's file model unless
         # BOT_MODEL overrides it. Other providers use the fully resolved settings below.
         file_row = bot_settings("agent-langgraph-agui", {})
-        model = (configured_model or "").strip() or file_row.model
+        configured = (configured_model or "").strip() or file_row.model
+        model = run.model or chatgpt_models.plan_model(configured, plan_models)
         store_path = _chatgpt_auth_file(store)
         # Private and experimental, both deliberately. `langchain-openai` exports no public Codex
         # model and warns in the module that this one is unofficial. That is a maintenance cost we
@@ -145,6 +213,9 @@ def _model():
         return _ChatOpenAICodex(
             model=model,
             token_provider=ChatGptTokenStore(path=store_path),
+            # The Codex backend is the Responses API, so `reasoning.effort`; `_ChatOpenAICodex`
+            # inherits `ChatOpenAI.reasoning` and sends it as it is.
+            **({"reasoning": {"effort": run.effort}} if run.effort else {}),
         )
 
     _normalize_openai_base_url()
@@ -156,15 +227,33 @@ def _model():
             "agent-langgraph-agui", {**os.environ, "BOT_PROVIDER": "google"}
         )
     provider = _resolve_provider(settings.provider)
-    model = settings.model
-    prefix, separator, _ = model.partition(":")
+    model = run.model or settings.model
+    prefix, separator, named = model.partition(":")
     if separator and prefix in MODEL_PROVIDERS:
-        return init_chat_model(model, **_google_genai_kwargs(prefix))
+        return init_chat_model(
+            model,
+            **_google_genai_kwargs(prefix),
+            **_provider_kwargs(prefix, named, run.effort),
+        )
     return init_chat_model(
         model,
         model_provider=provider,
         **_google_genai_kwargs(provider),
+        **_provider_kwargs(provider, model, run.effort),
     )
+
+
+async def _plan_model():
+    """`_model`, given the plan's listing when it has to choose a plan's model by itself."""
+    store = (os.environ.get("CHATGPT_AUTH_FILE") or "").strip()
+    if not store or current_tools().model:
+        return _model()
+    from .chatgpt_store import ChatGptTokenStore
+
+    offered = await chatgpt_models.PLAN_MODELS.models(
+        ChatGptTokenStore(path=_chatgpt_auth_file(store))
+    )
+    return _model(plan_models=offered)
 
 
 def _system_turns_first(messages):
@@ -210,10 +299,9 @@ def _wants_system_turns_first(model) -> bool:
 async def answer(state: MessagesState):
     from openai import AuthenticationError, PermissionDeniedError
     from langchain_openai.chatgpt_oauth import _ChatGPTOAuthRefreshError
-    from .tool_runtime import current_tools
 
     try:
-        model = _model()
+        model = await _plan_model()
         messages = model_messages(state["messages"])
         if _wants_system_turns_first(model):
             messages = _system_turns_first(messages)
@@ -221,6 +309,12 @@ async def answer(state: MessagesState):
     except (AuthenticationError, PermissionDeniedError, _ChatGPTOAuthRefreshError):
         # Typed provider boundary only. A callback or harness 401 is a different credential.
         current_tools().connection["authentication_failed"] = True
+        raise
+    except Exception as error:
+        if provider_refusal(error) and chatgpt_models.is_model_refusal(provider_message(error)):
+            # The plan no longer offers a model it listed: read the listing again before the
+            # next answer instead of trusting this one for the rest of its six hours.
+            chatgpt_models.PLAN_MODELS.invalidate()
         raise
 
 
@@ -252,6 +346,35 @@ async def refuse_without_the_server_token(request: Request, call_next):
 @app.get("/health")
 async def health():
     return {"ok": True, "harness": "langgraph"}
+
+
+@app.get("/models")
+async def plan_models():
+    """The models the signed-in ChatGPT plan offers, for the server's model picker.
+
+    `{"object": "list", "data": [{"id", "label", "efforts", "default_effort", "priority"}]}`, in
+    the plan's own order, the first being its default; a key the listing had no value for is left
+    out. Only a Bot signed in to a plan has one: any other Bot's models are its provider's to list.
+    """
+    store = (os.environ.get("CHATGPT_AUTH_FILE") or "").strip()
+    if not store:
+        return JSONResponse(
+            {"error": "This Bot is not signed in to a ChatGPT plan."}, status_code=404
+        )
+    from .chatgpt_store import ChatGptTokenStore
+
+    try:
+        token_provider = ChatGptTokenStore(path=_chatgpt_auth_file(store))
+    except OSError:
+        return JSONResponse(
+            {"error": "This Bot's ChatGPT sign-in could not be read."}, status_code=502
+        )
+    models = await chatgpt_models.PLAN_MODELS.models(token_provider)
+    if models is None:
+        return JSONResponse(
+            {"error": "The ChatGPT plan's model list could not be read."}, status_code=502
+        )
+    return {"object": "list", "data": [model.as_entry() for model in models]}
 
 
 add_langgraph_fastapi_endpoint(
