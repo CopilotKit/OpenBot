@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type {
+  LearnedSkillContent,
   LearningOverview,
   LearningProposalDetail,
 } from "@openbot/shared/learning";
@@ -298,6 +299,50 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
       trigger: expect.any(String),
     });
     expect((await admin("current", "user").app.request("/runs")).status).toBe(
+      403,
+    );
+  });
+
+  test("an admin reads a published skill's files", async () => {
+    const store = createLearningSettingsStore();
+    await useDefault(store);
+    const skill: LearnedSkillContent = {
+      name: "weekly-report",
+      description: "Write the weekly report.",
+      files: [{ path: "SKILL.md", text: "# Weekly report" }],
+    };
+    const build = (role: "admin" | "user") =>
+      createLearningRoutes(
+        {
+          store,
+          skills: async (containerId) =>
+            containerId === "openbot" ? { skills: [skill] } : { skills: [] },
+        },
+        async (context, next) => {
+          context.set("actor", {
+            id: "admin-ada",
+            email: "ada@example.com",
+            name: "Ada",
+            role,
+          });
+          await next();
+        },
+      );
+    const app = build("admin");
+    const list = await app.request("/skills");
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({
+      containerId: "openbot",
+      skills: [
+        { name: "weekly-report", description: "Write the weekly report." },
+      ],
+    });
+    const found = await app.request("/skills/weekly-report");
+    expect(found.status).toBe(200);
+    expect(await found.json()).toEqual({ skill });
+    expect((await app.request("/skills/unknown")).status).toBe(404);
+    expect((await app.request("/skills/a%2Fb")).status).toBe(400);
+    expect((await build("user").request("/skills/weekly-report")).status).toBe(
       403,
     );
   });

@@ -1,13 +1,15 @@
 import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
-import type {
-  LearningAutoAssignState,
-  LearningDeliveryStatus,
-  LearningEvidence,
-  LearningOverview,
-  LearningProposal,
-  LearningProposalDetail,
-  LearningRunSummary,
-  LearningTarget,
+import {
+  isLearnedSkillName,
+  type LearnedSkillContent,
+  type LearningAutoAssignState,
+  type LearningDeliveryStatus,
+  type LearningEvidence,
+  type LearningOverview,
+  type LearningProposal,
+  type LearningProposalDetail,
+  type LearningRunSummary,
+  type LearningTarget,
 } from "@openbot/shared/learning";
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -40,6 +42,12 @@ export type LearningAdminDependencies = {
   inspect?: (input: InspectorLearningRequest) => Promise<InspectorLearning>;
   /** Review and publish here, which an Intelligence with no dashboard of its own needs. */
   manage?: LearningManagement;
+  /** The Skills published to a container, with their files. */
+  skills?: (
+    containerId: string,
+  ) => Promise<
+    { skills: LearnedSkillContent[] } | { unavailable: "off" | "unavailable" }
+  >;
 };
 
 /** An Inspector link, when it is one a browser can open on the dashboard's own origin. */
@@ -660,6 +668,62 @@ export function createLearningRoutes(
       const failure = learningFailure(error);
       return context.json({ error: failure.error }, failure.status);
     }
+  });
+  const skillsUnavailable = (kind: "off" | "unavailable") =>
+    kind === "off"
+      ? "Learning is switched off in Intelligence. Turn it on there to see published skills."
+      : "Published skills can't be read right now. Try again.";
+  /** The Skills published to the container, by name and description. */
+  routes.get("/skills", async (context) => {
+    const skills = dependencies.skills;
+    if (!skills)
+      return context.json(
+        { error: "Reading published skills here is unavailable." },
+        503,
+      );
+    const scope = await targetFor(context);
+    if (!scope.ok) return context.json({ error: "Invalid Bot ID." }, 400);
+    if (!scope.target) return context.json({ containerId: null, skills: [] });
+    const containerId = scope.target.containerId;
+    const result = await skills(containerId);
+    if ("unavailable" in result)
+      return context.json(
+        { error: skillsUnavailable(result.unavailable) },
+        503,
+      );
+    return context.json({
+      containerId,
+      skills: result.skills.map(({ name, description }) => ({
+        name,
+        description,
+      })),
+    });
+  });
+  /** One published Skill with its files. */
+  routes.get("/skills/:name", async (context) => {
+    const skills = dependencies.skills;
+    if (!skills)
+      return context.json(
+        { error: "Reading published skills here is unavailable." },
+        503,
+      );
+    const name = context.req.param("name");
+    if (!isLearnedSkillName(name))
+      return context.json({ error: "Invalid skill name." }, 400);
+    const scope = await targetFor(context);
+    if (!scope.ok) return context.json({ error: "Invalid Bot ID." }, 400);
+    if (!scope.target)
+      return context.json({ error: "No Learning container is assigned." }, 404);
+    const result = await skills(scope.target.containerId);
+    if ("unavailable" in result)
+      return context.json(
+        { error: skillsUnavailable(result.unavailable) },
+        503,
+      );
+    const skill = result.skills.find((entry) => entry.name === name);
+    if (!skill)
+      return context.json({ error: "This skill doesn't exist." }, 404);
+    return context.json({ skill });
   });
   routes.get("/status/:agentId", async (context) => {
     if (!dependencies.status)
