@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The Helm chart installs Intelligence 0.16.0-rc.8 instead of rc.5. A run that fails shows its own
+  error in the chat instead of "Runner connection dropped". A first install logs no PostgreSQL
+  errors. Intelligence's services, Learning and its jobs stay up while PostgreSQL restarts, as the
+  bundled one does on an upgrade that changes its image. The Learning agent reads its model key from
+  a mounted file before every run, so a new `secrets.modelApiKey` reaches it on its next run after
+  `helm upgrade`, without a restart. The skills Learning proposes have descriptions that read
+  correctly. Nothing in this chart's values changes.
 - Skills (Admin → Skills, and Settings → Skills in the personal edition) lists each skill as one
   row with its name, what it does and how many Bots offer it, and the row opens the skill's own
   page. There, each Bot has a switch, the skill's words can be edited, and deleting asks first.
