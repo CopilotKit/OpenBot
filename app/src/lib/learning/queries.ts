@@ -18,6 +18,9 @@ export const learningKeys = {
   settings: ["learning", "settings"] as const,
   automatic: ["learning", "automatic"] as const,
   personal: ["learning", "personal"] as const,
+  review: ["learning", "review"] as const,
+  personalProposal: (container: string, proposalId: string) =>
+    ["learning", "personal-proposal", { container, proposalId }] as const,
   proposals: (agentId?: string) =>
     ["learning", "proposals", { agentId: agentId ?? null }] as const,
   proposal: (proposalId: string, agentId?: string) =>
@@ -221,7 +224,7 @@ export function learnedSkillQueryOptions(
 /** Settings, Learning: the skills proposed from your own recordings that wait for your decision. */
 export function personalReviewQueryOptions() {
   return queryOptions({
-    queryKey: ["learning", "review"] as const,
+    queryKey: learningKeys.review,
     retry: false,
     queryFn: async (): Promise<PersonalReview> =>
       (
@@ -238,11 +241,7 @@ export function personalProposalQueryOptions(
   proposalId: string,
 ) {
   return queryOptions({
-    queryKey: [
-      "learning",
-      "personal-proposal",
-      { container, proposalId },
-    ] as const,
+    queryKey: learningKeys.personalProposal(container, proposalId),
     retry: false,
     queryFn: (): Promise<LearningProposalDetail> =>
       client(
