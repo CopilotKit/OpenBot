@@ -1,6 +1,6 @@
 # Desktop updates
 
-OpenBot Desktop updates itself with its signed updater (**Check for Updates…** in the app menu, or **Desktop application updates** on the setup screen). The installation follows the app: on the next Start, an installation that is not on the app's own release is upgraded to it, and its data comes along.
+OpenBot Desktop updates itself with its signed updater: OpenBot's own window shows a bar when a newer version is out, with **Update and restart**, and the setup window offers it too (`app_update`, read at launch and every six hours). The installation follows the app: on the next Start, an installation that is not on the app's own release is upgraded to it, and its data comes along.
 
 ## The upgrade
 

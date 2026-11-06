@@ -132,7 +132,7 @@ Set `OPENBOT_LOCAL_IMAGES` to build other images (`OPENBOT_LOCAL_IMAGES="server"
 string to take every image from the release. The other settings are at the top of the script.
 
 A local build is for Docker only. Podman cannot pull from a registry on the Mac's own `127.0.0.1`.
-Like any build without the update key, it has no **Check for Updates…** menu item.
+Like any build without the update key, it never checks for a newer version, so it shows no update bar.
 
 ## 2. Make a release candidate, then the final release
 

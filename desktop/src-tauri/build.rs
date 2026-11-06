@@ -42,7 +42,8 @@ fn main() {
                 "openbot-intelligence",
                 tauri_build::InlinedPlugin::new().commands(&["watch", "open"]),
             )
-            // Settings → This computer: the Status window's facts and actions, from the app.
+            // Settings → This computer: the Status window's facts and actions, from the app. And
+            // the update banner, which reads what the shell found in its update feed.
             .plugin(
                 "openbot-desktop",
                 tauri_build::InlinedPlugin::new().commands(&[
@@ -51,6 +52,9 @@ fn main() {
                     "restart",
                     "stop",
                     "intelligence",
+                    "update_offer",
+                    "dismiss_update",
+                    "install_update",
                 ]),
             ),
     )

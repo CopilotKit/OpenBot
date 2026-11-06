@@ -149,13 +149,25 @@ body {
 }
 
 /*
+ * The window's column: the update offer, when there is one, then the step. The step fills whatever
+ * the offer leaves rather than a whole window of its own, so the two together are never taller than
+ * the window. Were they, fitWindow.ts would grow the window, the step would grow with it, and the
+ * window would keep growing to the edge of the screen.
+ */
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/*
  * The window opens at 1000x800 and grows to fit a taller step (see fitWindow.ts): one centred card,
  * vertically settled, with the same optical centre on every step.
  */
 main {
   position: relative;
   z-index: 1;
-  min-height: 100vh;
+  flex: 1 0 auto;
   display: grid;
   place-items: center;
   padding: 32px 24px;
@@ -913,14 +925,18 @@ a:hover {
 }
 
 /* A newer OpenBot exists. Shares the blocker's box because it is the same shape of interruption,
-   without its red heading: this is good news, not something in the way. */
+   without its red heading: this is good news, not something in the way. Above the backdrop, as
+   `main` is: the backdrop is fixed, and painted over anything in the page's flow that is not. */
 .update-offer {
+  position: relative;
+  z-index: 1;
+  flex: none;
   border: 1px solid var(--hair);
   border-radius: var(--r-row);
   background: var(--raised);
   padding: 0.9rem 1rem;
-  margin: 1rem auto 0;
-  max-width: 34rem;
+  margin: 24px auto 0;
+  width: min(36rem, calc(100% - 48px));
 }
 
 .update-offer p {

@@ -11,7 +11,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - OpenBot Desktop's menu bar and tray no longer have an item that opens the back end's own
   dashboard, which is branded as another product. The Status window and Settings, This computer
   list each part by what it does: "Front end and Bots", "Background jobs", "Database" and "Bot
-  computer" under "Your Bots", and "Conversations, memory and learning" under "Back end". Docker's
+  computer" under "App", and "Conversations, memory and learning" under "Back end". Docker's
   names stay in Copy diagnostics. The OpenBot Recorder's statuses and errors say "OpenBot's back
   end" where they said Intelligence.
 - No screen says "Intelligence" any more; it is all OpenBot. OpenBot Desktop's setup window names
@@ -28,6 +28,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   it. A recording the back end refused, such as one sent to a back end with Trajectories turned
   off, is said not to be saved and to be kept in the browser; one still on its way says Saving.
   Before, both were called saved. This needs the Recorder from this release.
+- OpenBot Desktop on a Mac tells you when a newer version is out, in OpenBot's own window. It
+  checks at launch and every six hours while it runs, and shows a bar, "OpenBot 0.3.2 is
+  available.", with **Update and restart** and a close button. Closing it, or **Not now** in the
+  setup window, hides the offer until a newer version comes out, across reloads and restarts.
+  **Update and restart** downloads and checks the update while OpenBot keeps running, then stops
+  OpenBot and restarts the app, and that Start moves your OpenBot to the new release. It replaces
+  the Check for Updates… menu item and the dialog the app showed once after handing over to
+  OpenBot. The app now reads its updates from `downloads.copilotkit.ai`, and from GitHub only when
+  that does not answer. Windows, internal and
+  candidate builds have no updater and show nothing, and a self-hosted OpenBot (Helm or Compose)
+  never checks.
 - OpenBot Desktop installs the personal edition: nobody signs in, one computer is shared by your
   Bots, and you start with the Personal Assistant. Before, it installed the team edition, with its
   admin screens, the fintech example's Bots and a computer for each Bot. An existing installation

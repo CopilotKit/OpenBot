@@ -46,11 +46,9 @@ tauri-plugin-opener = "2.5.5"
 tauri-plugin-dialog = "2"
 # Updating a signed Mac build in place. The plugin verifies the minisign signature beside
 # each artifact against the public key in `tauri.conf.json`, so an endpoint that is taken
-# over still cannot hand this app something to install. See `docs/releasing.md`.
+# over still cannot hand this app something to install. See `docs/releasing.md`. The shell
+# drives it (`install_app_update_now`), and restarts into what it wrote with `app.restart`.
 tauri-plugin-updater = "2"
-# Restarting into the version the updater just wrote. The updater can replace the bundle
-# but cannot relaunch it, and an update nobody is running is not an update.
-tauri-plugin-process = "2"
 # Probing a local port without SO_REUSEADDR, which std sets on Unix. See `env::bind_loopbacks`.
 socket2 = "0.6"
 

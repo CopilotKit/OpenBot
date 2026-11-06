@@ -27,6 +27,29 @@ export function stopOpenBotMutationOptions() {
   });
 }
 
+/** Close the update banner on `version`, until a newer version comes out. */
+export function dismissAppUpdateMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (version: string): Promise<void> =>
+      invokeDesktop("dismiss_update", { version }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate }),
+  });
+}
+
+/**
+ * Update and restart. The desktop app downloads the update and checks its signature while OpenBot
+ * keeps running, installs it, stops OpenBot and restarts. It answers only when that failed: on
+ * success this page goes away with the app, and the next Start moves OpenBot to the new release.
+ */
+export function installAppUpdateMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("install_update"),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate }),
+  });
+}
+
 /** Start or stop the local Intelligence stack. */
 export function intelligenceMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
