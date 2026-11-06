@@ -165,7 +165,7 @@ function row(screen: ReturnType<typeof view>, name: string) {
 
 const SETUP = "Setting up OpenBot";
 const CONNECT = "Connecting OpenBot";
-const WAIT = "Waiting for Intelligence";
+const WAIT = "Waiting for the back end";
 const START = "Starting OpenBot";
 
 test("the whole sequence runs by itself: set up, connect, wait for ready and valid, start", async () => {
@@ -281,7 +281,7 @@ test("setup that needs the agreement shows it, and only Accept sets up again wit
   });
   const screen = view();
   await screen.findByText(
-    "To run Intelligence on this computer, accept the CopilotKit Intelligence license agreement for Acme.",
+    "To run OpenBot on this computer, accept the CopilotKit license agreement for Acme.",
   );
   expect(screen.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
   // Nothing is accepted until the person clicks Accept.
@@ -317,7 +317,7 @@ test("an acceptance setup does not take is said once, not offered again", async 
   });
   const screen = view();
   await userEvent.click(await screen.findByRole("button", { name: "Accept" }));
-  await screen.findByText(/Intelligence did not take the acceptance/);
+  await screen.findByText(/The back end did not take the acceptance/);
   expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
   expect(
     invokeCalls.filter((call) => call.command === "set_up_local_eval"),
@@ -348,11 +348,11 @@ test("a blocked or conflicted connection stops at its row, and Retry resumes at 
   for (const [answer, said] of [
     [
       connection({ outcome: "blocked", reason: "confirmation-required" }),
-      "Intelligence asked for a confirmation OpenBot cannot give.",
+      "The back end asked for a confirmation OpenBot cannot give.",
     ],
     [
       connection({ outcome: "blocked", conflicted: true }),
-      "Settings Intelligence wrote for OpenBot were changed since. OpenBot did not connect.",
+      "Settings the back end wrote for OpenBot were changed since. OpenBot did not connect.",
     ],
   ] as const) {
     invokeHandler = answers({
@@ -386,15 +386,15 @@ test("readiness or a licence that is not exactly ready and valid never starts", 
   for (const [answer, said] of [
     [
       report(),
-      "Intelligence started. Its licence and readiness are not reported yet.",
+      "The back end started. Its licence and readiness are not reported yet.",
     ],
     [
       report({ readiness: "ready", licence: "expired" }),
-      "The Intelligence evaluation licence has expired.",
+      "The evaluation licence has expired.",
     ],
     [
       report({ readiness: "degraded", licence: "valid" }),
-      "Intelligence is running but not healthy.",
+      "The back end is running but not healthy.",
     ],
   ] as const) {
     invokeHandler = answers({ run_local_eval: [answer] });
@@ -431,7 +431,7 @@ test("polling is bounded, and says so when Intelligence never became ready", asy
     connected: true,
     pollDelays: [0, 0],
   });
-  await screen.findByText("Intelligence did not report ready in time.");
+  await screen.findByText("The back end did not report ready in time.");
   expect(statusCalls()).toHaveLength(3);
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });
@@ -546,8 +546,8 @@ test("a start that fails says OpenBot did not start, not that Intelligence stopp
   });
   const card = await screen.findByRole("alert", { name: "OpenBot" });
   expect(card.textContent).toContain("OpenBot did not start");
-  expect(card.textContent).toContain("Intelligence is ready");
-  expect(card.textContent).not.toContain("Intelligence stopped");
+  expect(card.textContent).toContain("The back end is ready");
+  expect(card.textContent).not.toContain("Back end setup stopped");
   expect(within(card).getByRole("button", { name: "Retry" })).toBeTruthy();
 });
 
@@ -586,7 +586,7 @@ test("prepare runs to ready and waits for the go-ahead, which starts at once", a
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain("Complete"),
   );
-  expect(screen.queryByRole("alert", { name: "Intelligence" })).toBeNull();
+  expect(screen.queryByRole("alert", { name: "Back end" })).toBeNull();
   expect(screen.queryByRole("listitem", { name: START })).toBeNull();
   expect(started).toEqual([]);
   // No Start OpenBot once it has run: the go-ahead comes from the screen in front.
@@ -604,7 +604,7 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
   await waitFor(() =>
     expect(row(working, SETUP).textContent).toContain("In progress"),
   );
-  expect(working.queryByRole("alert", { name: "Intelligence" })).toBeNull();
+  expect(working.queryByRole("alert", { name: "Back end" })).toBeNull();
   cleanup();
   invokeCalls = [];
 
@@ -615,9 +615,9 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
     cancel_local_eval: [null],
   });
   const failed = view({ prepare: true });
-  const stopped = await failed.findByRole("alert", { name: "Intelligence" });
-  expect(stopped.textContent).toContain("Intelligence stopped");
-  expect(stopped.textContent).toContain("A port Intelligence needs is in use.");
+  const stopped = await failed.findByRole("alert", { name: "Back end" });
+  expect(stopped.textContent).toContain("Back end setup stopped");
+  expect(stopped.textContent).toContain("A port the back end needs is in use.");
   expect(within(stopped).getByRole("button", { name: "Retry" })).toBeTruthy();
   cleanup();
   invokeCalls = [];
@@ -628,8 +628,8 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
     cancel_local_eval: [null],
   });
   const waiting = view({ prepare: true });
-  const needs = await waiting.findByRole("alert", { name: "Intelligence" });
-  expect(needs.textContent).toContain("Intelligence needs you");
+  const needs = await waiting.findByRole("alert", { name: "Back end" });
+  expect(needs.textContent).toContain("Setup needs you");
   expect(
     await within(needs).findByRole("button", { name: "Accept" }),
   ).toBeTruthy();
@@ -649,7 +649,7 @@ test("failures arrive as categories, and a stack that could not be recorded as a
   const screen = view();
   await waitFor(() =>
     expect(row(screen, SETUP).textContent).toContain(
-      "Intelligence took too long to start",
+      "The back end took too long to start",
     ),
   );
   invokeHandler = async () => {

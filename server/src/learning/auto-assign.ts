@@ -332,7 +332,7 @@ export function createLearningAutoAssign(options: {
 
   const instructions =
     options.instructions ??
-    `Run bun scripts/setup-learning.ts, or create a container with ID "${containerId}" in Intelligence; OpenBot assigns it within ${Math.round((options.retryMs ?? RETRY_MS) / 60_000)} minutes.`;
+    `Run bun scripts/setup-learning.ts, or create a container with ID "${containerId}" in the back end dashboard; OpenBot assigns it within ${Math.round((options.retryMs ?? RETRY_MS) / 60_000)} minutes.`;
   /** Whether this process already tried `create`: once at boot, again only when Admin asks. */
   let createTried = false;
   let createError: string | undefined;

@@ -79,7 +79,7 @@ test("each part shows its state and memory, and Intelligence its CLI readiness",
   const openbot = await view.findByRole("region", { name: "OpenBot" });
   expect(openbot.textContent).toContain("Running · 400 MB");
   expect(openbot.textContent).toContain("openbot-postgres-1");
-  const intelligence = view.getByRole("region", { name: "Intelligence" });
+  const intelligence = view.getByRole("region", { name: "Back end" });
   await waitFor(() =>
     expect(intelligence.textContent).toContain("Ready · 2.4 GB"),
   );
@@ -92,7 +92,7 @@ test("Restart OpenBot restarts its processes; Stop Intelligence stops only the s
   invokeHandler = answers();
   const view = render(<StatusWindow readEveryMs={60_000} />);
   const intelligence = await view.findByRole("region", {
-    name: "Intelligence",
+    name: "Back end",
   });
   await userEvent.click(
     within(intelligence).getByRole("button", { name: "Stop" }),
@@ -117,7 +117,7 @@ test("diagnostics carry versions, places and memory, and nothing secret", () => 
   expect(text).toContain(
     "Installed in /Users/someone/OpenBot, app on port 3010",
   );
-  expect(text).toContain("Intelligence: local-abc, ready");
+  expect(text).toContain("Back end: local-abc, ready");
   expect(text).toContain("k3d-local-abc-server-0 2.4 GB");
   expect(text).not.toMatch(/key|token|secret/i);
 });

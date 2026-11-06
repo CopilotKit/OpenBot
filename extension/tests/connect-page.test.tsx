@@ -103,12 +103,12 @@ test("a connect that replaces nothing says nothing about replacing", async () =>
   expect(container.textContent).not.toContain("replaces");
 });
 
-test("the page says OpenBot signs the browser in, and that recordings go straight to the organization's own Intelligence with OpenBot's pass, as the disclosure says", async () => {
+test("the page says OpenBot signs the browser in, and that recordings go straight to the learning part of OpenBot's back end with a pass, as the disclosure says", async () => {
   const { findByText, container } = render(<ConnectPage />);
   await findByText(ORIGIN);
   expect(
     await findByText(
-      "Confirm this is your OpenBot. It signs this browser in. What you record goes straight from your browser to your organization's own Intelligence, with a pass from your organization's OpenBot. OpenBot is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.",
+      "Confirm this is your OpenBot. It signs this browser in. What you record goes straight from your browser to the learning part of your organization's OpenBot back end, with a pass from the part of OpenBot that runs your Bots. That part is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.",
     ),
   ).toBeTruthy();
   expect(container.ownerDocument.body.textContent).toContain(

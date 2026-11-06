@@ -209,7 +209,7 @@ function IntelligenceSection({
   return (
     <PageSection
       description="Keeps your Bots' conversations, memory and skills. OpenBot uses it while it runs."
-      title="Intelligence"
+      title="Back end"
     >
       <PageRows>
         <Item size="sm">

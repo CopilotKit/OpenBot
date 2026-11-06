@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useState } from "react";
 
 /** What the Install step says while it downloads OpenBot's software. */
 export const INSTALL_BLURB =
-  "This installs the full OpenBot platform on this computer: the app, the server, your Bots, and the computers they work on. It's a large download the first time, so you might want to grab a coffee or tea.";
+  "This installs OpenBot on this computer: the front end, the back end, the database, your Bots, and the computers they work on. It's a large download the first time, so you might want to grab a coffee or tea.";
 
 /** Counts used by the installer from the native `pull_metrics::Downloads` event. */
 type Downloads = { done: number; total: number };
@@ -259,7 +259,7 @@ function label(step: string): string {
     case "stop-openbot":
       return "Stopping OpenBot";
     case "stop-intelligence":
-      return "Stopping Intelligence";
+      return "Stopping the back end";
     default:
       return step;
   }

@@ -194,7 +194,7 @@ function MemoryRow({
   // forgotten here but not paused or reviewed.
   const heldByIntelligence = memory.formedBy === "intelligence";
   const status = heldByIntelligence
-    ? "Kept in Intelligence"
+    ? "Kept in the back end"
     : !memory.enabled
       ? "Turned off"
       : memory.formedBy === "bot"

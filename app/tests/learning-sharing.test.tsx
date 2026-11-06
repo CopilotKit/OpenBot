@@ -212,7 +212,7 @@ test("Skills Intelligence did not deliver show a plain unavailable line, and the
   };
   const view = draw();
   await view.findByText(
-    "Couldn't read your Skills from Intelligence just now. Your choice above still applies to them.",
+    "Couldn't read your Skills from the back end just now. Your choice above still applies to them.",
   );
   fireEvent.click(choice(view, "Only my Bots"));
   await waitFor(() =>

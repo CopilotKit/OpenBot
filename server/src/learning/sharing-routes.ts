@@ -153,7 +153,7 @@ export function createPersonalLearningRoutes(
         : context.json(
             {
               error:
-                "Couldn't check your Skills with Intelligence just now, so nothing changed. Try again.",
+                "Couldn't check your Skills with the back end just now, so nothing changed. Try again.",
             },
             503,
           );
