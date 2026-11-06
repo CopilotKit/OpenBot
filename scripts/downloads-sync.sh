@@ -21,12 +21,20 @@
 #                                   latest/ alone (default: the Latest release, both)
 #   DOWNLOADS_PREFIX                put every key under this prefix, such as `smoketest/`, to try
 #                                   the sync against the real bucket without changing what it serves
-#   and AWS credentials that may read and write the bucket and invalidate the distribution.
+#   and AWS credentials that may read and write the bucket, delete objects under latest/, and
+#   invalidate the distribution.
 #
 # Running it again changes nothing. Each object's SHA-256, as S3 computed it on upload, is compared
 # with the digest GitHub reports for the asset, and only an object that is missing, differs, or has
-# other caching headers is uploaded. /latest/* is invalidated only when something under latest/ was.
-# Nothing is ever deleted.
+# other caching headers is uploaded. /latest/* is invalidated only when something under latest/
+# changed.
+#
+# The one thing ever deleted is latest/<retired name> (release-download-names.sh --retired): an
+# installer no release publishes any more, such as the Intel Mac one, removed once the Latest
+# release does not carry it either. That is the moment GitHub's releases/latest/download stops
+# serving it too, so this address follows instead of serving the last build forever. Its
+# releases/<tag>/ copies stay. A removal that fails is reported and fails the run, after everything
+# else is mirrored.
 #
 # A Latest release with no signed installers at all, published before signing attached any, has
 # nothing to sync, and the run succeeds without touching AWS. Otherwise it changes nothing and fails
@@ -165,7 +173,27 @@ while IFS=$'\t' read -r key asset sha cache type; do
   uploads+=("$key")
 done < "$plan"
 
-if [ "${#uploads[@]}" -eq 0 ]; then
+# A retired name's latest/ copy, once the Latest release no longer carries that name. A Latest
+# release that still does, as v0.3.0 carries OpenBot-mac-x64.dmg, keeps it, as GitHub's own
+# releases/latest/download address does. A release asked for by tag leaves latest/ alone.
+removals=()
+if [ "$mode" = latest ]; then
+  while IFS= read -r retired; do
+    if grep -qxF "$retired" <<<"$names"; then
+      continue
+    fi
+    key="${prefix}latest/$retired"
+    if aws s3api head-object --bucket "$bucket" --key "$key" --output json > /dev/null \
+      2> "$work/head-error"; then
+      removals+=("$key")
+    elif ! grep -q '(404)' "$work/head-error"; then
+      echo "::error::Could not read s3://$bucket/$key: $(cat "$work/head-error")"
+      exit 1
+    fi
+  done < <("$root/scripts/release-download-names.sh" --retired)
+fi
+
+if [ "${#uploads[@]}" -eq 0 ] && [ "${#removals[@]}" -eq 0 ]; then
   echo "downloads.copilotkit.ai already serves $tag. Nothing to upload."
   exit 0
 fi
@@ -173,7 +201,7 @@ fi
 # Every file is downloaded and checked against GitHub's digest before the first upload, so a bad
 # download changes nothing.
 mkdir "$work/assets"
-for key in "${uploads[@]}"; do
+for key in ${uploads[@]+"${uploads[@]}"}; do
   asset="$(awk -F '\t' -v key="$key" '$1 == key { print $2 }' "$plan")"
   sha="$(awk -F '\t' -v key="$key" '$1 == key { print $3 }' "$plan")"
   if [ ! -f "$work/assets/$asset" ]; then
@@ -187,7 +215,7 @@ for key in "${uploads[@]}"; do
 done
 
 changed_latest=false
-for key in "${uploads[@]}"; do
+for key in ${uploads[@]+"${uploads[@]}"}; do
   IFS=$'\t' read -r _ asset _ cache type < <(awk -F '\t' -v key="$key" '$1 == key' "$plan")
   # S3 refuses the upload unless the bytes it received hash to this checksum.
   aws s3api put-object --bucket "$bucket" --key "$key" --body "$work/assets/$asset" \
@@ -197,6 +225,21 @@ for key in "${uploads[@]}"; do
   echo "Uploaded $asset to s3://$bucket/$key."
   if [[ "$key" == "${prefix}latest/"* ]]; then
     changed_latest=true
+  fi
+done
+
+# After the uploads, so a removal that fails never holds back the installers the Latest release
+# does have. The bucket is versioned: a removal leaves a delete marker, and the object's versions
+# remain.
+removed=()
+for key in ${removals[@]+"${removals[@]}"}; do
+  if aws s3api delete-object --bucket "$bucket" --key "$key" --output json > /dev/null \
+    2> "$work/delete-error"; then
+    echo "Removed s3://$bucket/$key: no release publishes it any more, and $tag does not have it."
+    removed+=("$key")
+    changed_latest=true
+  else
+    echo "::error::Could not remove s3://$bucket/$key, which still serves an installer $tag does not have: $(cat "$work/delete-error")"
   fi
 done
 
@@ -210,8 +253,15 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
     echo "### downloads.copilotkit.ai now serves $tag"
     echo ""
-    for key in "${uploads[@]}"; do
+    for key in ${uploads[@]+"${uploads[@]}"}; do
       echo "- uploaded \`$key\`"
     done
+    for key in ${removed[@]+"${removed[@]}"}; do
+      echo "- removed \`$key\`"
+    done
   } >> "$GITHUB_STEP_SUMMARY"
+fi
+
+if [ "${#removed[@]}" -ne "${#removals[@]}" ]; then
+  exit 1
 fi

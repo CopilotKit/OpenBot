@@ -75,8 +75,9 @@ ones people install, and [Windows signing](windows-signing.md) for signed NSIS b
 
 [Desktop macOS signing](../.github/workflows/desktop-macos-signing.yml) builds OpenBot with the
 Developer ID certificate, notarizes and staples both the `.app` and the `.dmg`, and produces the
-archive the in-app updater installs. It runs one native runner per architecture (`macos-15` for
-Apple silicon, `macos-15-intel` for Intel) and fails unless each build passes all three of:
+archive the in-app updater installs. OpenBot ships the Mac app for Apple silicon only, so it runs
+one native Apple silicon runner (`macos-15`). There is no Intel Mac build: v0.3.0 was the last
+release with one. It fails unless the build passes all three of:
 
 ```sh
 codesign --verify --deep --strict --verbose=2 OpenBot.app
@@ -97,8 +98,8 @@ When it runs:
   required reviewer of the `macos-signing` environment to approve it.
 - **Actions → Desktop macOS signing → Run workflow** with `signing-mode: developer-id` signs any
   ref and keeps the results as Actions artifacts for 14 days. Set `release-tag` to an existing
-  release, e.g. `v0.2.1`, to also attach the `.dmg` files, the updater archives and their `.sig`
-  files, and `latest.json` to it. Run it on the release tag (**Use workflow from** → the tag) so
+  release, e.g. `v0.2.1`, to also attach the `.dmg`, the updater archive and its `.sig` file, and
+  `latest.json` to it. Run it on the release tag (**Use workflow from** → the tag) so
   the build carries the release version. A build of any other version fails before it attaches
   anything. This is how to re-sign a release by hand. It leaves Latest where it is unless
   `make-latest` is set; see [Which release is Latest](#which-release-is-latest).
@@ -156,8 +157,7 @@ finishes second marks it ([`scripts/release-make-latest.sh`](../scripts/release-
 The two attach jobs share the concurrency group `release-attach-<tag>`, so they run one after the
 other and the second always sees what the first attached.
 Until then the previous release stays Latest, with its signed installers, so `releases/latest` never
-serves an unsigned Windows installer, or an ad-hoc installer that
-macOS refuses, or a release with no Intel installer.
+serves an unsigned Windows installer, or an ad-hoc installer that macOS refuses.
 
 Whether a release becomes Latest is decided once, in `verify`, by
 [`scripts/release-becomes-latest.sh`](../scripts/release-becomes-latest.sh): never for a candidate or
@@ -177,8 +177,10 @@ have `actions: write` for that.
 If either signing run is never approved, or fails, the release stays not Latest. Sign it again from
 its tag with `make-latest` set, or mark it Latest by hand on its release page.
 
-`latest.json` names a version and, for `darwin-aarch64` and `darwin-x86_64`, an archive URL and
-that archive's minisign signature. The app verifies the signature against the public key in
+`latest.json` names a version and, for `darwin-aarch64`, an archive URL and that archive's
+minisign signature. It has no `darwin-x86_64` entry, so an Intel Mac still on v0.3.0 finds no
+update for itself and stays on that version; the check fails without a word, as any failed check
+does. The app verifies the signature against the public key in
 `plugins.updater.pubkey` in `tauri.macos-signing.conf.json` and refuses any archive that does not
 match. That key pair is the Tauri updater key. It is not the Developer ID certificate, and it is
 not the Windows Key Vault certificate. Losing the private key means installed apps can never update
@@ -354,8 +356,7 @@ check for the latest release do not see it. Its images are tagged with the versi
 `sha-<commit>`, and never `latest`. A Mac (Apple Silicon) and a Windows (x64) installer are attached
 to it, pinned to that version and to those images, the same as an internal build is. The Mac one is
 ad-hoc signed until [Mac signing](#signed-mac-builds-and-the-updater) is approved and replaces it
-with a signed one, pinned the same way. Mac signing also adds the Intel installer. The Windows one
-is unsigned until [Windows signing](windows-signing.md) is approved and replaces it with a signed
+with a signed one, pinned the same way. The Windows one is unsigned until [Windows signing](windows-signing.md) is approved and replaces it with a signed
 one, pinned the same way. Until then the first open needs the exceptions described under
 [Internal builds](#internal-builds). Link a candidate's installers by its version, as described
 under [Download links](#download-links).
@@ -429,12 +430,17 @@ from the signed installers:
 | Platform | Address |
 |---|---|
 | Mac, Apple silicon | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-mac-arm64.dmg` |
-| Mac, Intel | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-mac-x64.dmg` |
 | Windows, x64 | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-windows-x64-setup.exe` |
 
 These names are a public address. Do not change them: every page that links to one breaks.
 [`scripts/release-download-names.sh`](../scripts/release-download-names.sh) maps the Tauri names to
 them, and the publish and signing workflows fail on an installer it does not know.
+
+A name whose platform stops shipping is retired, not reused: `release-download-names.sh --retired`
+lists it. `OpenBot-mac-x64.dmg`, the Intel Mac installer, is retired; v0.3.0 was the last release
+with it. Its `releases/latest/download` address stops working once a release without it is Latest,
+and [Downloads sync](#downloadscopilotkitai) removes its `latest/` copy at the same point. Link
+v0.3.0's Intel installer by its version if it is needed.
 
 `releases/latest/download` goes to the release marked Latest. A candidate or beta is never Latest,
 so these addresses never give one. Link a prerelease by its version instead, for example
@@ -442,7 +448,7 @@ so these addresses never give one. Link a prerelease by its version instead, for
 
 A stable release becomes Latest only once both signing runs have attached their signed installers
 under both names (see [Which release is Latest](#which-release-is-latest)), so these addresses
-always give signed builds, and the Intel one always exists. Until then they give the previous
+always give signed builds. Until then they give the previous
 release's. Each signing run replaces its installers under both names, and running it again replaces
 them again.
 
@@ -462,7 +468,6 @@ signed installers:
 | Platform | Address |
 |---|---|
 | Mac, Apple silicon | `https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg` |
-| Mac, Intel | `https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg` |
 | Windows, x64 | `https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe` |
 | Update feed | `https://downloads.copilotkit.ai/latest/latest.json` |
 
@@ -481,13 +486,18 @@ by hand. Each run:
 - checks it carries `latest.json` and every installer under its fixed download name, and that each
   versioned installer is the same file as its fixed-name copy, so both are the signed build;
 - compares each file's SHA-256 with what the bucket holds, uploads only what differs, and
-  invalidates `/latest/*` only when something under `latest/` changed.
+  invalidates `/latest/*` only when something under `latest/` changed;
+- removes `latest/<name>` for each [retired name](#download-links) the Latest release does not
+  carry, such as `latest/OpenBot-mac-x64.dmg` once a release without an Intel installer is Latest,
+  so that address stops serving v0.3.0's Intel build instead of serving it forever.
 
 When the Latest release lacks some of those files, the run fails and changes nothing, so the
 addresses keep serving the previous signed installers. A Latest release with none of them was
 published before signing attached any, as v0.2.0 was: that is not drift, so the run succeeds with
 "no signed installers yet; nothing to sync" and does not touch AWS. A release asked for by tag must
-have them all. Nothing is ever deleted.
+have them all, and leaves `latest/` alone. A retired name's `latest/` copy is the only thing ever
+deleted, after every upload; its `releases/<tag>/` copies stay. A removal that fails fails the run
+and names the object, after the rest is mirrored and invalidated.
 
 To run it by hand, from `main`:
 
@@ -501,8 +511,10 @@ Behind the address, in AWS account `604598162673`: a private, versioned S3 bucke
 through an origin access control, with an ACM certificate for `downloads.copilotkit.ai` and alias
 records in the `copilotkit.ai` zone. The workflow signs in as the role `openbot-release-downloads`
 with GitHub's OIDC token, so there is no stored key. The role trusts only `downloads-sync.yml` on
-`main`, and may only read and write the bucket's objects and invalidate that distribution. The role
-ARN, bucket and distribution are written in the workflow; none is a secret.
+`main`. Its inline policy `openbot-downloads-sync` needs `s3:ListBucket` on the bucket (so a missing
+object reads as 404), `s3:GetObject` and `s3:PutObject` on its objects, `s3:DeleteObject` on
+`latest/*` only (to remove a retired name), and `cloudfront:CreateInvalidation` on that
+distribution. The role ARN, bucket and distribution are written in the workflow; none is a secret.
 
 ## What merging does
 

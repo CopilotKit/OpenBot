@@ -2,7 +2,7 @@
 # Staple a notarization ticket to a file, retrying when the connection to Apple drops.
 #
 # Stapling fetches the ticket Apple has already issued from Apple's CloudKit. The first real signing
-# run had Apple accept the Intel disk image and then lost the stapler's connection ("The network
+# run had Apple accept a disk image and then lost the stapler's connection ("The network
 # connection was lost", NSURLErrorDomain -1005), which failed the job with a good, notarized build in
 # hand. Stapling is idempotent, so it is tried again after a pause; a ticket that truly does not
 # exist still fails, after the last attempt, with the stapler's own error.

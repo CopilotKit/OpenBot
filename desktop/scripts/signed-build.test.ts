@@ -255,7 +255,7 @@ test("the CLI is bundled whenever the tree has the overlay for it, pinned or not
     const result = planSignedBuild({
       desktop: dir,
       platform: "darwin",
-      arch: "x64",
+      arch: "arm64",
       overlay: "src-tauri/tauri.macos-signing.conf.json",
       repository: "CopilotKit/OpenBot",
       workDir: join(dir, "work"),
@@ -266,7 +266,7 @@ test("the CLI is bundled whenever the tree has the overlay for it, pinned or not
       "bun",
       join(dir, "scripts", "cli-bundle.ts"),
       "darwin",
-      "x64",
+      "arm64",
     ]);
     expect(result.configs.at(-1)).toBe(CLI_OVERLAY);
     expect(result.env.OPENBOT_BUNDLED_CLI).toBe("1");
@@ -313,6 +313,53 @@ test("Desktop macOS signing builds through signed-build.ts", () => {
   );
   const others = workflow.jobs.sign.steps.filter((step) => step !== build);
   expect(others.some((step) => /tauri build/.test(step.run ?? ""))).toBe(false);
+});
+
+// The Mac app ships for Apple silicon only: one native arm64 runner, and no Intel one.
+test("Desktop macOS signing builds the Apple silicon app only", () => {
+  const workflow = Bun.YAML.parse(
+    readFileSync(
+      join(
+        import.meta.dir,
+        "../../.github/workflows/desktop-macos-signing.yml",
+      ),
+      "utf8",
+    ),
+  ) as {
+    jobs: {
+      sign: { strategy: { matrix: { platform: Record<string, string>[] } } };
+    };
+  };
+  expect(workflow.jobs.sign.strategy.matrix.platform).toEqual([
+    { runner: "macos-15", target: "darwin-aarch64", arch: "arm64" },
+  ]);
+});
+
+test("an Intel Mac build is refused before anything runs", () => {
+  for (const record of [stable, candidate]) {
+    const dir = desktop(record, true);
+    const { run, calls } = fakeRun({
+      version: "v0.3.0-rc.1",
+      commit: SHA,
+      images: {},
+    });
+    expect(() =>
+      planSignedBuild({
+        desktop: dir,
+        platform: "darwin",
+        arch: "x64",
+        overlay: "src-tauri/tauri.macos-signing.conf.json",
+        repository: "CopilotKit/OpenBot",
+        workDir: join(dir, "work"),
+        bun: "bun",
+        run,
+      }),
+    ).toThrow(
+      "OpenBot ships the Mac app for Apple silicon only, so there is no signed darwin x64 build.",
+    );
+    expect(calls).toEqual([]);
+    expect(existsSync(join(dir, PINNED_OVERLAY))).toBe(false);
+  }
 });
 
 // A release's installers are attached to it, so they are built from the tree and the lockfiles

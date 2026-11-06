@@ -56,8 +56,10 @@ addresses always give the installers of the release marked Latest:
 | Platform | Address |
 |---|---|
 | Mac, Apple silicon | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-mac-arm64.dmg` |
-| Mac, Intel | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-mac-x64.dmg` |
 | Windows, x64 | `https://github.com/CopilotKit/OpenBot/releases/latest/download/OpenBot-windows-x64-setup.exe` |
+
+There is no Intel Mac installer: the Mac app ships for Apple silicon only, and v0.3.0 was the last
+release with an Intel one.
 
 A candidate or beta is never Latest. Link to its installers by version:
 `https://github.com/CopilotKit/OpenBot/releases/download/<tag>/OpenBot-mac-arm64.dmg`. See
@@ -128,10 +130,9 @@ Use a candidate to test what will become a release. The details are in
    archive, the chart, the release manifest, and the Mac and Windows installers.
 5. Approve **Desktop macOS signing** and **Desktop Windows signing** when they ask. These need a
    `macos-signing` and a `windows-signing` approver.
-   **Expected:** the signed Apple silicon `.dmg` replaces the ad-hoc one on the release, a signed
-   Intel `.dmg` is added, and the signed `-setup.exe` replaces the unsigned one. Each is attached
-   under its versioned name and its fixed name. For a candidate all three are pinned to the
-   candidate's images, like the unsigned ones. A stable release also gets `latest.json`, and becomes
+   **Expected:** the signed Apple silicon `.dmg` replaces the ad-hoc one on the release, and the
+   signed `-setup.exe` replaces the unsigned one. Each is attached under its versioned name and its
+   fixed name. For a candidate both are pinned to the candidate's images, like the unsigned ones. A stable release also gets `latest.json`, and becomes
    Latest when the second of the two signing runs finishes. Until then the fixed addresses keep
    giving the previous release's signed installers.
 6. Test the candidate with [Install and test](#3-install-and-test) and

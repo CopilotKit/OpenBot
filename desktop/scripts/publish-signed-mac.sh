@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Attaches a signed Mac build to its release, and makes a stable release Latest once it is there.
 #
-# Run from the repository root by the `publish` job of desktop-macos-signing.yml, with both
-# architectures' signed artifacts merged into $ARTIFACTS.
+# Run from the repository root by the `publish` job of desktop-macos-signing.yml, with the signed
+# artifacts merged into $ARTIFACTS. OpenBot ships the Mac app for Apple silicon only, so there is
+# one build: darwin-aarch64.
 #
 # Env:
 #   RELEASE_TAG        the release to attach to, such as v0.3.0
@@ -18,8 +19,8 @@
 # A stable release is published not Latest. It becomes Latest once both signing runs have
 # attached their installers, here or in Desktop Windows signing, whichever finishes second
 # (scripts/release-make-latest.sh). So `releases/latest` never serves an ad-hoc build that macOS
-# refuses, an unsigned Windows installer, or a release with no Intel installer. Only when
-# publish-release.yml said it should, and only when no newer release has become Latest since.
+# refuses or an unsigned Windows installer. Only when publish-release.yml said it should, and only
+# when no newer release has become Latest since.
 #
 # Every .dmg is attached twice, in one upload: under the name Tauri gave it, replacing the ad-hoc
 # one, and under its fixed download name (scripts/release-download-names.sh), so the address a web
@@ -72,21 +73,21 @@ if [ -n "$pinned" ]; then
   exit 0
 fi
 
-# latest.json names a version, and for each architecture the archive URL and the minisign
-# signature of the archive at that URL. It is written from both architectures' real `.sig` files.
+# latest.json names a version, and for each platform the archive URL and the minisign signature of
+# the archive at that URL, written from the build's real `.sig` file. darwin-aarch64 is the only
+# platform: an Intel Mac finds no entry for itself, so it is offered no update.
 base="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
-platforms='{}'
-for target in darwin-aarch64 darwin-x86_64; do
-  archive="$artifacts/OpenBot-$target.app.tar.gz"
-  test -f "$archive"
-  test -f "$archive.sig"
-  platforms="$(jq -n \
-    --argjson platforms "$platforms" \
-    --arg target "$target" \
-    --arg signature "$(cat "$archive.sig")" \
-    --arg url "$base/OpenBot-$target.app.tar.gz" \
-    '$platforms + { ($target): { signature: $signature, url: $url } }')"
-done
+target=darwin-aarch64
+archive="$artifacts/OpenBot-$target.app.tar.gz"
+test -f "$archive"
+test -f "$archive.sig"
+# Assigned first: a failure inside a command's argument would not stop the script.
+signature="$(cat "$archive.sig")"
+platforms="$(jq -n \
+  --arg target "$target" \
+  --arg signature "$signature" \
+  --arg url "$base/OpenBot-$target.app.tar.gz" \
+  '{ ($target): { signature: $signature, url: $url } }')"
 # The notes are the changelog section a person wrote, the same ones the release carries.
 notes="$(awk -v v="## ${version%%-*}" '$0==v{f=1;next} /^## /{if(f)exit} f' "$root/CHANGELOG.md")"
 jq -n \
@@ -100,11 +101,7 @@ cat latest.json
 
 gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" latest.json --clobber
 gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" "${uploads[@]}" --clobber
-gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" \
-  "$artifacts/OpenBot-darwin-aarch64.app.tar.gz" \
-  "$artifacts/OpenBot-darwin-aarch64.app.tar.gz.sig" \
-  "$artifacts/OpenBot-darwin-x86_64.app.tar.gz" \
-  "$artifacts/OpenBot-darwin-x86_64.app.tar.gz.sig" --clobber
+gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" "$archive" "$archive.sig" --clobber
 
 # Latest once Windows signing has attached its installer too, and the feed check when it is.
 MAKE_LATEST="$make_latest" FEED_RETRY_DELAY="$delay" "$root/scripts/release-make-latest.sh"

@@ -16,7 +16,8 @@
 # A stable release is signed when it carries every fixed download name and latest.json. On a
 # stable release only the signing runs attach those: publish-release.yml attaches the unsigned
 # installers under their versioned names alone (scripts/release-attach-installers.sh). Mac signing
-# attaches latest.json and both Mac names, and Windows signing the Windows one.
+# attaches latest.json and the Apple silicon name, and Windows signing the Windows one. There is no
+# Intel Mac installer to wait for: the Mac app ships for Apple silicon only.
 #
 # Only when publish-release.yml said the release becomes Latest, and only when no newer release has
 # become Latest since (scripts/release-becomes-latest.sh). Making it Latest also starts Downloads

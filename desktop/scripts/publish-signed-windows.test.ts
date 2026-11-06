@@ -119,9 +119,7 @@ test("Windows signing that finishes after Mac signing makes the release Latest, 
   fake.attach(
     "latest.json",
     "OpenBot_0.3.0_aarch64.dmg",
-    "OpenBot_0.3.0_x64.dmg",
     "OpenBot-mac-arm64.dmg",
-    "OpenBot-mac-x64.dmg",
   );
   fake.feed("v0.3.0", {
     version: "0.3.0",
@@ -150,7 +148,7 @@ test("Windows signing that finishes before Mac signing leaves the release not La
   const result = publish(fake, dir, "v0.3.0", "true");
   expect(result.code).toBe(0);
   expect(result.out).toContain(
-    "v0.3.0 is not Latest yet: it still needs the signed latest.json OpenBot-mac-arm64.dmg OpenBot-mac-x64.dmg.",
+    "v0.3.0 is not Latest yet: it still needs the signed latest.json OpenBot-mac-arm64.dmg.",
   );
   expect(fake.calls().some((call) => call.startsWith("gh release edit"))).toBe(
     false,

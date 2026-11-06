@@ -139,16 +139,25 @@ test("intelligence-cli.json pins the hashes nodejs.org lists", () => {
     readFileSync(join(import.meta.dir, "..", "intelligence-cli.json"), "utf8"),
   );
   expect(choice.node.version).toBe("26.13.0");
-  // Every installer that bundles the CLI: desktop-build.yml's Apple silicon and Windows ones, and
-  // the signed Intel Mac one Desktop macOS signing builds.
-  for (const [platform, arch] of [
+  // Every installer that bundles the CLI, and no other: the Apple silicon Mac one and the Windows
+  // one, unsigned and signed. The Mac app ships for Apple silicon only, so nothing pins an Intel
+  // Mac runtime.
+  const installers = [
     ["darwin", "arm64"],
-    ["darwin", "x64"],
     ["win32", "x64"],
-  ] as const) {
+  ] as const;
+  for (const [platform, arch] of installers) {
     const asset = nodeAsset(platform, arch, choice.node.version);
     expect(choice.node.sha256[asset.key]).toBe(shasumFor(realSums, asset.file));
   }
+  expect(Object.keys(choice.node.sha256).sort()).toEqual(
+    installers
+      .map(
+        ([platform, arch]) =>
+          nodeAsset(platform, arch, choice.node.version).key,
+      )
+      .sort(),
+  );
 });
 
 /** A Node choice whose pinned hash for `key` is `hash`. */

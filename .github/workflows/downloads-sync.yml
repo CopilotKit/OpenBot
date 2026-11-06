@@ -6,10 +6,13 @@ name: Downloads sync
 #
 # Started by the signing run that makes a stable release Latest (scripts/release-make-latest.sh),
 # every six hours in case anything drifted or that start failed, and by hand. Each run compares
-# checksums and uploads only what differs, so a run with nothing new changes nothing.
+# checksums and uploads only what differs, so a run with nothing new changes nothing. It also
+# removes latest/<name> for a download name no release publishes any more, such as the Intel Mac
+# installer, once the Latest release does not have it either.
 #
 # It signs in to AWS as `openbot-release-downloads`, which trusts this workflow on main and nothing
-# else, and may only write the bucket and invalidate the distribution named below.
+# else. It needs to write the bucket, delete under latest/ (s3:DeleteObject on latest/* only), and
+# invalidate the distribution named below.
 on:
   workflow_dispatch:
     inputs:

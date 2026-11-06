@@ -11,6 +11,8 @@
  * - `aws s3api head-object` fails with exit 254 and `(404)` for a missing key, and reports
  *   ChecksumSHA256 only with `--checksum-mode ENABLED` and only for an object uploaded with one.
  * - `aws s3api put-object --checksum-sha256` refuses a body that does not hash to it (BadDigest).
+ * - `aws s3api delete-object` on the versioned bucket answers with the delete marker it left, and
+ *   fails with exit 254 and `(AccessDenied)` for credentials without `s3:DeleteObject`.
  * - `aws cloudfront create-invalidation` answers with the new invalidation's Id.
  */
 import {
@@ -184,6 +186,14 @@ case "$service $command" in
     jq -n --arg checksum "$checksum" '{ETag: "\\"etag\\"", ServerSideEncryption: "AES256", VersionId: "v1"}
       + (if $checksum != "" then {ChecksumSHA256: $checksum, ChecksumType: "FULL_OBJECT"} else {} end)'
     ;;
+  "s3api delete-object")
+    if [ -f "$FAKE_STATE/delete-denied" ]; then
+      printf '\\naws: [ERROR]: An error occurred (AccessDenied) when calling the DeleteObject operation: User: arn:aws:sts::604598162673:assumed-role/openbot-release-downloads/openbot-downloads-sync is not authorized to perform: s3:DeleteObject on resource: "arn:aws:s3:::%s/%s" because no identity-based policy allows the s3:DeleteObject action\\n' "$bucket" "$key" >&2
+      exit 254
+    fi
+    rm -f "$object" "$meta"
+    jq -n '{DeleteMarker: true, VersionId: "dm1"}'
+    ;;
   "cloudfront create-invalidation")
     n=$(( $(wc -l < "$FAKE_STATE/invalidations" | tr -d ' ') + 1 ))
     printf '%s %s\\n' "$distribution" "\${paths[*]}" >> "$FAKE_STATE/invalidations"
@@ -225,6 +235,8 @@ export type FakeDownloads = {
   remove(key: string): void;
   /** From now on every read of the bucket is refused, as it is for credentials without access. */
   deny(): void;
+  /** From now on every delete is refused, as it is for a role without `s3:DeleteObject`. */
+  denyDelete(): void;
   /** Each invalidation, as "<distribution> <paths>". */
   invalidations(): string[];
   cleanup(): void;
@@ -322,6 +334,7 @@ export function fakeDownloads(): FakeDownloads {
       rmSync(join(metas, `${key}.json`));
     },
     deny: () => writeFileSync(join(state, "denied"), ""),
+    denyDelete: () => writeFileSync(join(state, "delete-denied"), ""),
     invalidations: () =>
       readFileSync(join(state, "invalidations"), "utf8")
         .split("\n")

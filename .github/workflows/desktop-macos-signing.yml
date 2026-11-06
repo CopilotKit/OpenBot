@@ -118,7 +118,7 @@ jobs:
           desktop/scripts/import-developer-id-intermediate.sh "$keychain"
           security find-certificate -c "Developer ID Certification Authority" "$keychain" > /dev/null
       - name: Stapling retries a dropped connection and still fails a missing ticket
-        # The first real signing run had Apple accept the Intel image, then lost the connection
+        # The first real signing run had Apple accept a disk image, then lost the connection
         # while stapling and failed the job. A stand-in for xcrun fails twice, then succeeds.
         run: |
           set -euo pipefail
@@ -166,10 +166,10 @@ jobs:
             desktop/src-tauri/capabilities/default.json > /dev/null
           echo 'Updater wiring is consistent across Cargo.toml, main.rs, the capability and the config.'
 
-  # One native runner per architecture, for the same reason `publish-release.yml` builds its images
-  # that way: the machines installing this are laptops of both kinds, and a cross build is a thing
-  # nobody has run. Each produces its own signed, notarized, stapled .app and .dmg, and, for a build
-  # that is not pinned, the updater archive.
+  # One native Apple silicon runner. OpenBot ships the Mac app for Apple silicon only, so there is
+  # no Intel build to sign (scripts/release-download-names.sh refuses an Intel .dmg). It produces a
+  # signed, notarized, stapled .app and .dmg, and, for a build that is not pinned, the updater
+  # archive.
   sign:
     name: Sign and notarize (${{ matrix.platform.target }})
     needs: checks
@@ -186,9 +186,6 @@ jobs:
           - runner: macos-15
             target: darwin-aarch64
             arch: arm64
-          - runner: macos-15-intel
-            target: darwin-x86_64
-            arch: x64
     env:
       SIGNING_SOURCE_SHA: ${{ github.sha }}
     steps:
@@ -356,8 +353,8 @@ jobs:
 
           # The CLI is in the app, and every Mach-O in it is ours, hardened and timestamped.
           desktop/scripts/verify-cli-bundle.sh "$app" developer-id
-      # Named by architecture because both runners produce `OpenBot.app.tar.gz`, and latest.json
-      # points at one URL per platform. A pinned build made no updater archive.
+      # Named by target, the platform latest.json lists it under, since Tauri names every archive
+      # `OpenBot.app.tar.gz`. A pinned build made no updater archive.
       - name: Collect the artifacts
         env:
           TARGET: ${{ matrix.platform.target }}
@@ -395,8 +392,8 @@ jobs:
 
   # latest.json is the whole updater. It names a version, a URL per platform, and the minisign
   # signature of the archive at that URL; the app refuses anything whose signature does not verify
-  # against the public key it was built with. It is written here, from both architectures' real
-  # `.sig` files, rather than by hand.
+  # against the public key it was built with. It is written here, from the build's real `.sig`
+  # file, rather than by hand.
   #
   # This job, or Desktop Windows signing's, is also where a stable release becomes Latest:
   # publish-release.yml publishes it not Latest, so `releases/latest` keeps serving the previous

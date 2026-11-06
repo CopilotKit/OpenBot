@@ -17,6 +17,8 @@
  *
  *   bun desktop/scripts/signed-build.ts <darwin|win32> <arm64|x64> <overlay> [tauri build args...]
  *
+ * The Mac app ships for Apple silicon only, so `darwin` takes `arm64` and nothing else.
+ *
  * `overlay` is the signing overlay, relative to desktop/. Writes `pinned` (the release tag, or
  * empty) and `updater` (`true` or `false`) to $GITHUB_OUTPUT when it is set.
  */
@@ -109,6 +111,13 @@ export function planSignedBuild(options: {
 }): Plan {
   const { desktop, platform, arch, overlay, repository, workDir, run } =
     options;
+  // An Intel Mac build would have no fixed download name, no entry in latest.json and no Node
+  // runtime pinned in intelligence-cli.json, so it is refused before anything is built.
+  if (platform === "darwin" && arch !== "arm64") {
+    throw new Error(
+      `OpenBot ships the Mac app for Apple silicon only, so there is no signed darwin ${arch} build.`,
+    );
+  }
   const recordPath = join(desktop, "build-version.json");
   const record = readJson(recordPath);
   const version = String(record.version ?? "");

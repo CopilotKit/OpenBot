@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -40,16 +41,17 @@ function job(version: string, pinned?: string) {
       ...(pinned ? { pinned } : {}),
     }),
   );
+  // The Mac app ships for Apple silicon only, so the signing run leaves one build.
   writeFileSync(join(artifacts, `OpenBot_${version}_aarch64.dmg`), "signed");
-  writeFileSync(join(artifacts, `OpenBot_${version}_x64.dmg`), "signed");
   if (!pinned) {
-    for (const target of ["darwin-aarch64", "darwin-x86_64"]) {
-      writeFileSync(join(artifacts, `OpenBot-${target}.app.tar.gz`), "archive");
-      writeFileSync(
-        join(artifacts, `OpenBot-${target}.app.tar.gz.sig`),
-        `sig-${target}`,
-      );
-    }
+    writeFileSync(
+      join(artifacts, "OpenBot-darwin-aarch64.app.tar.gz"),
+      "archive",
+    );
+    writeFileSync(
+      join(artifacts, "OpenBot-darwin-aarch64.app.tar.gz.sig"),
+      "sig-darwin-aarch64",
+    );
   }
   return dir;
 }
@@ -102,14 +104,12 @@ test("a candidate attaches its pinned .dmg files only, and is not checked agains
   expect(calls).toHaveLength(2);
   expect(calls[0]).toBe("gh release view v0.3.0-rc.1 -R CopilotKit/OpenBot");
   expect(calls[1]).toStartWith(
-    "gh release upload v0.3.0-rc.1 -R CopilotKit/OpenBot artifacts/OpenBot_0.3.0-rc.1_aarch64.dmg artifacts/OpenBot_0.3.0-rc.1_x64.dmg ",
+    "gh release upload v0.3.0-rc.1 -R CopilotKit/OpenBot artifacts/OpenBot_0.3.0-rc.1_aarch64.dmg ",
   );
-  // The fixed download names, in the same upload, so the stable links serve the signed build.
+  // The fixed download name, in the same upload, so the stable link serves the signed build.
   expect(names(calls[1] as string)).toEqual([
     "OpenBot_0.3.0-rc.1_aarch64.dmg",
-    "OpenBot_0.3.0-rc.1_x64.dmg",
     "OpenBot-mac-arm64.dmg",
-    "OpenBot-mac-x64.dmg",
   ]);
   expect(existsSync(join(dir, "latest.json"))).toBe(false);
   expect(fake.latest()).toBe("v0.2.0");
@@ -167,11 +167,12 @@ test("a stable release becomes Latest only after its signed installers are attac
   expect(uploads[0]).toContain("latest.json");
   expect(names(uploads[1] as string)).toEqual([
     "OpenBot_0.3.0_aarch64.dmg",
-    "OpenBot_0.3.0_x64.dmg",
     "OpenBot-mac-arm64.dmg",
-    "OpenBot-mac-x64.dmg",
   ]);
-  expect(uploads[2]).toContain("OpenBot-darwin-x86_64.app.tar.gz.sig");
+  expect(names(uploads[2] as string)).toEqual([
+    "OpenBot-darwin-aarch64.app.tar.gz",
+    "OpenBot-darwin-aarch64.app.tar.gz.sig",
+  ]);
   const promote = calls.indexOf(
     "gh release edit v0.3.0 -R CopilotKit/OpenBot --latest",
   );
@@ -180,6 +181,41 @@ test("a stable release becomes Latest only after its signed installers are attac
   expect(calls.at(-1)).toContain(
     "curl -fsSL --retry 3 https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json",
   );
+});
+
+// The Mac app ships for Apple silicon only. The feed lists that one platform, so an installed Intel
+// Mac app finds no entry for itself and is offered no update it could not run.
+test("latest.json lists darwin-aarch64 only, signed with that build's .sig", () => {
+  const fake = repo("v0.2.0");
+  const dir = job("1.0.0");
+  const result = publish(fake, dir, "v1.0.0", "false");
+  expect(result.code).toBe(0);
+  const feed = JSON.parse(readFileSync(join(dir, "latest.json"), "utf8"));
+  expect(feed.version).toBe("1.0.0");
+  expect(feed.platforms).toEqual({
+    "darwin-aarch64": {
+      signature: "sig-darwin-aarch64",
+      url: "https://github.com/CopilotKit/OpenBot/releases/download/v1.0.0/OpenBot-darwin-aarch64.app.tar.gz",
+    },
+  });
+  const uploaded = fake
+    .calls()
+    .filter((call) => call.startsWith("gh release upload"))
+    .flatMap((call) => names(call));
+  expect(uploaded.filter((name) => /x64|x86_64/.test(name))).toEqual([]);
+});
+
+test("an Intel .dmg left in the artifacts is refused, and nothing is attached", () => {
+  const fake = repo("v0.2.0");
+  const dir = job("1.0.0");
+  writeFileSync(join(dir, "artifacts/OpenBot_1.0.0_x64.dmg"), "signed");
+  const result = publish(fake, dir, "v1.0.0", "true");
+  expect(result.code).toBe(1);
+  expect(result.out).toContain(
+    "OpenBot_1.0.0_x64.dmg is not an installer with a fixed download name",
+  );
+  expect(fake.calls().some((call) => call.includes("upload"))).toBe(false);
+  expect(fake.latest()).toBe("v0.2.0");
 });
 
 test("a stable release does not take Latest from a newer one that became Latest meanwhile", () => {
