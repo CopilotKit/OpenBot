@@ -1209,12 +1209,14 @@ async function buildAgent(
           process.env.MANAGED_AGENT_TOKEN
         ? async (input) => {
             const choice = await pickedModel(input);
-            return choice?.listed
-              ? {
-                  model: choice.model,
-                  ...(choice.effort ? { reasoningEffort: choice.effort } : {}),
-                }
-              : undefined;
+            if (!choice?.listed) return undefined;
+            logRunModel(agent.id, input, choice.model, choice.effort, {
+              harness: true,
+            });
+            return {
+              model: choice.model,
+              ...(choice.effort ? { reasoningEffort: choice.effort } : {}),
+            };
           }
         : undefined,
     );
@@ -1368,6 +1370,9 @@ async function buildAgent(
     async (input, signal) => {
       const runModel = await modelForRun(model, input, pickedModel);
       signal.throwIfAborted();
+      logRunModel(agent.id, input, runModel.defaultModel, runModel.effort, {
+        plan: runModel.plan?.provider,
+      });
       /*
        * A run the runtime makes for itself holds nothing of the Bot's: no grant, no subagent, no
        * handoff, no learned Skill. Built again with none, rather than told not to call them, so a
@@ -2147,6 +2152,30 @@ export async function modelForRun(
     listed: choice.listed,
     ...(choice.effort ? { effort: choice.effort } : {}),
   };
+}
+
+/**
+ * One line per run naming the model and effort it was sent, so an operator can see what a
+ * conversation actually ran on. Ids only: never the prompt, the person, or a credential.
+ */
+function logRunModel(
+  agentId: string,
+  input: RunAgentInput,
+  model: string,
+  effort: string | undefined,
+  via: { plan?: string; harness?: boolean },
+): void {
+  console.info(
+    JSON.stringify({
+      type: "run-model",
+      agentId,
+      runId: input.runId,
+      model,
+      effort: effort ?? null,
+      ...(via.plan ? { plan: via.plan } : {}),
+      ...(via.harness ? { harness: true } : {}),
+    }),
+  );
 }
 
 /**
