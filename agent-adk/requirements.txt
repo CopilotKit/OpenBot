@@ -1,5 +1,8 @@
 ag-ui-adk
 google-adk
+# Held on google-genai 2.x with the LangGraph harness: 3.0.0 (2026-11-06) moved generateContent
+# from /v1beta to /v1.
+google-genai>=2.34,<3
 # litellm 1.106.0 fails every model call in this harness: it reaches for `mcp` and reports
 # whatever it finds as an OpenAIException, so the error arrives as a connection fault rather
 # than the missing import it is. Seen two ways — `cannot import name 'CacheableResult' from

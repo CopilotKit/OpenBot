@@ -4,11 +4,9 @@ langchain
 langchain-openai
 langchain-anthropic
 langchain-google-genai
-# google-genai 3.0.0 (2026-11-06) moves the Gemini Developer API from v1beta to v1 and swaps its
-# HTTP client from httpx to httpx2. A fresh install picks it up through langchain-google-genai, which asks
-# only for google-genai>=2.x. Google's own google-adk still caps it below 3.
-# Lift this once langchain-google-genai supports google-genai 3 and the Google provider-boundary tests pass on it.
-google-genai<3
+# google-genai 3.0.0 (2026-11-06) moved generateContent from /v1beta to /v1, which the Gemini
+# boundary tests catch. Held on 2.x until the move is checked against the models Bots use.
+google-genai>=2.34,<3
 fastapi
 python-multipart
 uvicorn[standard]
