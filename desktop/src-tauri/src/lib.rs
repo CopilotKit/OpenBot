@@ -24,6 +24,7 @@ pub mod recorder_host;
 pub mod recorder_install;
 pub mod saved_intent;
 pub mod shell_updates;
+pub mod speech;
 pub mod stack;
 pub mod telemetry;
 pub mod tray;

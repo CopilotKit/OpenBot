@@ -2691,6 +2691,30 @@
           "markdownDescription": "Enables the restart command without any pre-configured scope."
         },
         {
+          "description": "Enables the speech_abort command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-speech-abort",
+          "markdownDescription": "Enables the speech_abort command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the speech_available command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-speech-available",
+          "markdownDescription": "Enables the speech_available command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the speech_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-speech-start",
+          "markdownDescription": "Enables the speech_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the speech_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-speech-stop",
+          "markdownDescription": "Enables the speech_stop command without any pre-configured scope."
+        },
+        {
           "description": "Enables the status command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-status",
@@ -2737,6 +2761,30 @@
           "type": "string",
           "const": "openbot-desktop:deny-restart",
           "markdownDescription": "Denies the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the speech_abort command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-speech-abort",
+          "markdownDescription": "Denies the speech_abort command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the speech_available command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-speech-available",
+          "markdownDescription": "Denies the speech_available command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the speech_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-speech-start",
+          "markdownDescription": "Denies the speech_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the speech_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-speech-stop",
+          "markdownDescription": "Denies the speech_stop command without any pre-configured scope."
         },
         {
           "description": "Denies the status command without any pre-configured scope.",

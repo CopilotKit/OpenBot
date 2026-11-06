@@ -4,14 +4,17 @@
 //! how much memory each part takes, Restart and Stop for OpenBot, and Start, Stop and status for
 //! the local Intelligence stack. Also the update banner's offer, close and install. An inline plugin, so each command carries a permission of its own,
 //! granted at runtime to the exact origin of the OpenBot this app started and to nothing else.
+//!
+//! And narration's speech recognition, on this computer (`speech`): the window's web view has none
+//! that stays on the device, so the page's narration listens through these instead.
 
-use openbot_desktop_lib::{app_update, local_eval, local_eval_state, stack};
+use openbot_desktop_lib::{app_update, local_eval, local_eval_state, speech, stack};
 use tauri::Manager;
 
 pub const PLUGIN: &str = "openbot-desktop";
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 8] = [
+pub const PERMISSIONS: [&str; 12] = [
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
@@ -20,6 +23,10 @@ pub const PERMISSIONS: [&str; 8] = [
     "openbot-desktop:allow-update-offer",
     "openbot-desktop:allow-dismiss-update",
     "openbot-desktop:allow-install-update",
+    "openbot-desktop:allow-speech-available",
+    "openbot-desktop:allow-speech-start",
+    "openbot-desktop:allow-speech-stop",
+    "openbot-desktop:allow-speech-abort",
 ];
 
 /**
@@ -106,6 +113,35 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|problem| problem.said)
 }
 
+/// Whether `language` can be recognised on this computer, as `SpeechRecognition.available()`
+/// answers. The first time, the system asks the person for the microphone and speech recognition,
+/// and this says `downloading` until they have answered.
+#[tauri::command]
+async fn speech_available(language: String) -> speech::Availability {
+    tauri::async_runtime::spawn_blocking(move || speech::available(&language))
+        .await
+        .unwrap_or(speech::Availability::Unavailable)
+}
+
+/// Start listening in `language`; what is heard arrives through `on_event`. Returns the session's
+/// number, for `speech_stop` and `speech_abort`. A session already listening ends.
+#[tauri::command]
+async fn speech_start(language: String, on_event: tauri::ipc::Channel<speech::Event>) -> u64 {
+    speech::start(&language, move |event| on_event.send(event).is_ok())
+}
+
+/// Hand over the phrase in progress, then end.
+#[tauri::command]
+async fn speech_stop(session: u64) {
+    speech::control(session, speech::Control::Stop);
+}
+
+/// End now.
+#[tauri::command]
+async fn speech_abort(session: u64) {
+    speech::control(session, speech::Control::Abort);
+}
+
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new(PLUGIN)
         .invoke_handler(tauri::generate_handler![
@@ -116,7 +152,11 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             intelligence,
             update_offer,
             dismiss_update,
-            install_update
+            install_update,
+            speech_available,
+            speech_start,
+            speech_stop,
+            speech_abort
         ])
         .build()
 }

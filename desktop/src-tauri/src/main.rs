@@ -4452,6 +4452,35 @@ mod app_page_tests {
             );
         }
     }
+
+    /// Narration listens through the shell's speech recognition from OpenBot's own page, and from
+    /// no other: a page that could start it could listen to the person.
+    #[test]
+    fn only_the_owned_app_origin_can_listen_through_the_shell() {
+        let (app, window) = app();
+        let foreign: tauri::Url = "http://127.0.0.1:3011/".parse().unwrap();
+        let owned: tauri::Url = "http://127.0.0.1:3010/browser".parse().unwrap();
+        allow_app_page(app.handle(), &foreign);
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        allow_app_page(app.handle(), &owned);
+        for command in [
+            "speech_available",
+            "speech_start",
+            "speech_stop",
+            "speech_abort",
+        ] {
+            let command = format!("plugin:openbot-desktop|{command}");
+            assert!(
+                ask(&window, foreign.as_str(), &command).is_err(),
+                "{command} from another page"
+            );
+            assert_eq!(
+                ask(&window, owned.as_str(), &command),
+                Ok(serde_json::Value::Null),
+                "{command} from OpenBot"
+            );
+        }
+    }
 }
 
 /// Where the Status window's page is: the setup page, at `#status`.

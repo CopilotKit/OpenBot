@@ -85,6 +85,17 @@ test("macOS microphone capture has a nonempty system permission description", ()
   );
 });
 
+test("macOS speech recognition for narration has a nonempty system permission description", () => {
+  // Without it, asking for speech recognition ends the app (SFSpeechRecognizer.requestAuthorization).
+  const plist = readFileSync(
+    resolve(import.meta.dir, "../src-tauri/Info.plist"),
+    "utf8",
+  );
+  expect(plist).toMatch(
+    /<key>NSSpeechRecognitionUsageDescription<\/key>\s*<string>\s*[^<\s][^<]*<\/string>/,
+  );
+});
+
 test("macOS signing uses the audio-input entitlement for microphone capture", () => {
   const native = resolve(import.meta.dir, "../src-tauri");
   const config = JSON.parse(

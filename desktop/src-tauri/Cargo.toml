@@ -59,6 +59,17 @@ libc = "0.2"
 # The version Tauri already uses. See `macos_quit` in main.rs.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+# Narration on the Mac: on-device speech recognition from the microphone. See `speech/macos.rs`.
+# The same objc2 generation Tauri and wry already use.
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSLocale", "NSOperation", "NSString"] }
+objc2-speech = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-avf-audio", "SFSpeechRecognizer", "SFSpeechRecognitionRequest", "SFSpeechRecognitionResult", "SFSpeechRecognitionTask", "SFTranscription"] }
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioNode", "AVAudioIONode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTime", "AVAudioTypes"] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
+
+# Narration on Windows: the SAPI in-process recognizer. See `speech/sapi.rs`. The version Tauri uses.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
