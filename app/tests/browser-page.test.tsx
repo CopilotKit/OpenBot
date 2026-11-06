@@ -425,6 +425,16 @@ test("your recordings show even when OpenBot can't run a browser", async () => {
   expect(await view.findByText("Your recordings")).toBeTruthy();
 });
 
+test("your recordings show under a browser shown in the page", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  expect(await view.findByRole("heading", { name: "Browser" })).toBeTruthy();
+  const recordings = await view.findByText("Your recordings");
+  // Its own scrolling strip, capped so many rows can't squeeze the browser, rather than bare in the pane.
+  expect(recordings.closest(".overflow-y-auto")).not.toBeNull();
+});
+
 test("on OpenBot Desktop arriving opens nothing: the page offers the task's name and narration", async () => {
   state = { ...nativeState(), open: false, recorder: undefined };
   delete state.browser;

@@ -111,7 +111,12 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
           reopen={() => reopen.mutate()}
           reopening={reopen.isPending}
         />
-        <YourRecordings />
+        {/* Capped and scrolling on its own, in the page column's width and padding, so many rows cannot squeeze the browser. */}
+        <div className="max-h-[40%] shrink-0 overflow-y-auto border-t border-border">
+          <div className="mx-auto w-full max-w-3xl px-4 pb-8 [&>section]:mt-6">
+            <YourRecordings />
+          </div>
+        </div>
       </>
     );
   }
