@@ -50,6 +50,11 @@ export type LearningAdminDependencies = {
     userId: string,
     ids: string[],
   ) => Promise<Map<string, string | null>>;
+  /** One Skill a person published, with its files; null when they have none by that name. */
+  personSkill?: (
+    userId: string,
+    name: string,
+  ) => Promise<LearnedSkillContent | null>;
   /** The Skills published to a container, with their files. */
   skills?: (
     containerId: string,
@@ -482,6 +487,25 @@ export function createLearningRoutes(
       const failure = learningFailure(error);
       return context.json({ error: failure.error }, failure.status);
     }
+  });
+  /** One Skill a person published, with its files. */
+  routes.get("/people/:userId/skills/:name", async (context) => {
+    const { people, personSkill } = dependencies;
+    if (!people || !personSkill)
+      return context.json(
+        { error: "Reading skills from people is unavailable." },
+        503,
+      );
+    const name = context.req.param("name");
+    if (!isLearnedSkillName(name))
+      return context.json({ error: "Invalid skill name." }, 400);
+    const userId = context.req.param("userId");
+    if (!(await people()).some((entry) => entry.userId === userId))
+      return context.json({ error: "This person doesn't exist." }, 404);
+    const skill = await personSkill(userId, name);
+    if (!skill)
+      return context.json({ error: "This skill doesn't exist." }, 404);
+    return context.json({ skill });
   });
   /**
    * Approve (which publishes it to every Bot on the container) or reject a proposal. Intelligence

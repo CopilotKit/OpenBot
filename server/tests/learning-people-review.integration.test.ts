@@ -3,7 +3,10 @@ import type { MiddlewareHandler } from "hono";
 import type { AppVariables } from "../src/auth/guards";
 import { runtimeKeyClient } from "../src/learning/auto-assign";
 import { personalLearningContainerId } from "../src/learning/personal-space";
-import { createLearningRoutes } from "../src/learning/routes";
+import {
+  createLearningRoutes,
+  type LearningAdminDependencies,
+} from "../src/learning/routes";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import {
   type FakeIntelligence,
@@ -17,7 +20,7 @@ afterEach(() => {
   for (const intelligence of served.splice(0)) intelligence.stop();
 });
 
-function admin() {
+function admin(extra: Partial<LearningAdminDependencies> = {}) {
   const intelligence = fakeIntelligence("current", {
     containers: [personalLearningContainerId("ana")],
     candidates: [PROPOSAL],
@@ -57,6 +60,7 @@ function admin() {
         },
       ],
       recordingTitles: async () => new Map(),
+      ...extra,
     },
     requireUser,
   );
@@ -93,4 +97,39 @@ test("an unknown person is not found", async () => {
   expect(
     (await admin().request(`/people/nobody/proposals/${PROPOSAL}`)).status,
   ).toBe(404);
+});
+
+test("an admin reads a person's published skill", async () => {
+  const asked: [string, string][] = [];
+  const routes = admin({
+    personSkill: async (userId, name) => {
+      asked.push([userId, name]);
+      return name === "send-invoice"
+        ? {
+            name,
+            description: "Send an invoice.",
+            files: [{ path: "SKILL.md", text: "# Send an invoice" }],
+          }
+        : null;
+    },
+  });
+  const known = await routes.request("/people/ana/skills/send-invoice");
+  expect(known.status).toBe(200);
+  const body = (await known.json()) as {
+    skill: { files: { path: string; text: string }[] };
+  };
+  expect(body.skill.files[0]?.path).toBe("SKILL.md");
+  expect(asked).toEqual([["ana", "send-invoice"]]);
+  expect((await routes.request("/people/ana/skills/other-skill")).status).toBe(
+    404,
+  );
+  expect(
+    (await routes.request("/people/nobody/skills/send-invoice")).status,
+  ).toBe(404);
+  expect(
+    (await routes.request(`/people/ana/skills/${"a".repeat(201)}`)).status,
+  ).toBe(400);
+  expect(
+    (await admin().request("/people/ana/skills/send-invoice")).status,
+  ).toBe(503);
 });
