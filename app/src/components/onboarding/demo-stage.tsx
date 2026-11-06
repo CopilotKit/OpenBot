@@ -55,7 +55,7 @@ function useOnScreen() {
  *
  * ONE CLOCK PER DEMO, AND ONLY WHILE SOMEBODY CAN SEE IT. The beat advances every `beatMs` while
  * the demo is on screen in a shown tab. Scrolled away, in a background tab, or with the reader's
- * reduced-motion setting on, it stops, and `playing` tells the orbs and loops inside to stop too.
+ * reduced-motion setting on, it stops, and `playing` tells the kites and loops inside to stop too.
  * With reduced motion it holds `rest`, the beat that says the most as a still.
  */
 export function DemoStage({

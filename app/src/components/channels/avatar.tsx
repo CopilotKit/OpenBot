@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import Avatar from "boring-avatars";
 import { memo, type ReactNode } from "react";
 import { useBotLook } from "@/components/agents/bot-look";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotKite } from "@/components/agents/kite/kite";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { cn } from "@/lib/utils";
 
@@ -13,13 +13,14 @@ import { cn } from "@/lib/utils";
  * `size-full` opts the generated SVG out of ancestor icon selectors such as
  * `[&_svg:not([class*='size-'])]:size-4`.
  *
- * `typing` overlays a working indicator at the bottom-right — three bouncing dots, so a channel
- * whose agent is mid-turn reads as busy from the roster without moving the row's layout.
+ * `typing` marks a channel whose agent is mid-turn as busy from the roster, without moving the
+ * row's layout. One Bot drawn as its kite shows it in the kite itself, as Working: a blue square
+ * that pulses beside it. Faces and groups get three bouncing dots at the bottom-right instead.
  *
- * Where Bots are orbs (`useBotLook`), each is drawn from its `avatarSeed`, as `AbstractAvatar`
- * draws it, so a Bot is one color everywhere; a skin that has not opted in keeps the faces. The orbs
- * are hidden from screen readers: the row beside the avatar names the conversation, and an id read
- * aloud would name nothing.
+ * Where Bots are kites (`useBotLook`), each is drawn from its `avatarSeed`, as `AbstractAvatar`
+ * draws it, so a Bot is one colour everywhere; a skin that has not opted in keeps the faces. The
+ * kites are hidden from screen readers: the row beside the avatar names the conversation, and an id
+ * read aloud would name nothing.
  */
 export const ChannelAvatar = memo(function ChannelAvatar({
   participantIds,
@@ -30,24 +31,33 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   size?: number;
   typing?: boolean;
 }) {
-  const orbs = useBotLook() === "orb";
-  const face = orbs ? orbFace : boringFace;
-  const avatar =
-    participantIds.length === 1 ? (
-      face(participantIds[0], size)
+  const kites = useBotLook() === "kite";
+  const single = participantIds.length === 1;
+  const avatar = single ? (
+    kites ? (
+      <KiteFace id={participantIds[0]} size={size} working={typing} />
     ) : (
-      <GroupFaces
-        face={face}
-        layout={orbs ? ORB_PAIR : participantIds.length === 2 ? 2 : 3}
-        participantIds={participantIds}
-        size={size}
-      />
-    );
+      boringFace(participantIds[0], size)
+    )
+  ) : (
+    <GroupFaces
+      face={kites ? kiteFace : boringFace}
+      layout={kites ? KITE_PAIR : participantIds.length === 2 ? 2 : 3}
+      participantIds={participantIds}
+      size={size}
+    />
+  );
 
   return (
     <div className="relative" style={{ height: size, width: size }}>
       {avatar}
-      {typing ? <TypingBadge /> : null}
+      {typing ? (
+        single && kites ? (
+          <span className="sr-only">Working…</span>
+        ) : (
+          <TypingBadge />
+        )
+      ) : null}
     </div>
   );
 });
@@ -76,8 +86,8 @@ type Layout = {
   at: readonly (readonly [number, number])[];
 };
 
-/** The orbs' group: the first two Bots side by side, overlapping by a third of an orb. */
-const ORB_PAIR: Layout = {
+/** The kites' group: the first two Bots side by side, overlapping by a third of a kite. */
+const KITE_PAIR: Layout = {
   diameter: 0.6,
   at: [
     [0, 0.2],
@@ -89,19 +99,32 @@ function boringFace(id: string, size: number) {
   return <Avatar className="size-full" name={id} size={size} />;
 }
 
-function orbFace(id: string, size: number) {
-  return <OrbFace id={id} size={size} />;
+function kiteFace(id: string, size: number) {
+  return <KiteFace id={id} size={size} />;
 }
 
 /** A participant that is not a listed Bot, such as a computer, is seeded by its id. */
-function OrbFace({ id, size }: { id: string; size: number }) {
+function KiteFace({
+  id,
+  size,
+  working = false,
+}: {
+  id: string;
+  size: number;
+  working?: boolean;
+}) {
   const { data: seed } = useQuery({
     ...agentListQueryOptions(),
     select: (agents) => agents.find((agent) => agent.id === id)?.avatarSeed,
   });
   return (
     <span aria-hidden="true" className="contents">
-      <BotOrb name={id} seed={seed ?? id} size={size} />
+      <BotKite
+        name={id}
+        seed={seed ?? id}
+        size={size}
+        state={working ? "thinking" : "idle"}
+      />
     </span>
   );
 }

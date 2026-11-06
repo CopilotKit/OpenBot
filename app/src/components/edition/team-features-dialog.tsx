@@ -15,7 +15,7 @@ import {
 import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { useEffect, useSyncExternalStore } from "react";
-import { BusinessOrb } from "@/components/edition/business-orb";
+import { BusinessKite } from "@/components/edition/business-kite";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -106,11 +106,11 @@ export function TeamFeaturesDialog() {
       <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-5xl">
         <div className="grid min-h-0 sm:grid-cols-[2fr_3fr]">
           {/*
-           * OpenBot's mark over the orb and its field, which fill the panel. Only where there is room
-           * beside the list.
+           * OpenBot's mark and name over its kite and the field of Bots, which fill the panel. Only where
+           * there is room beside the list.
            */}
           <div className="relative hidden min-h-96 border-border border-r bg-muted/50 p-6 sm:block">
-            <BusinessOrb />
+            <BusinessKite />
             <div className="relative flex items-center gap-2 font-medium">
               <OpenBotLogo className="size-7" />
               OpenBot

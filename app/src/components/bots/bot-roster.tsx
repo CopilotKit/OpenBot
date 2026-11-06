@@ -10,6 +10,7 @@ import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   attentionSummary,
+  kiteStateOf,
   waitingOnYou,
 } from "@/components/bot-profile/attention";
 import {
@@ -201,7 +202,12 @@ function RosterRow({
       size="sm"
     >
       <ItemMedia>
-        <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={28} />
+        <AbstractAvatar
+          name={agent.name}
+          seed={agent.avatarSeed}
+          size={28}
+          state={kiteStateOf(state)}
+        />
       </ItemMedia>
       <ItemContent>
         <ItemTitle>{agent.name}</ItemTitle>

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
+import type { KiteState } from "@/components/agents/kite/kite-draw";
 import {
   type BotAttention,
   botAttentionQueryOptions,
@@ -29,6 +30,21 @@ export function needsInput(bot: BotAttention): number {
  */
 export function asksOf(bot: BotAttention): number {
   return needsInput(bot) + bot.tasks.needsInput;
+}
+
+/**
+ * How a Bot's kite is drawn from what it is waiting on. Something only the person can answer comes
+ * first (Waiting for you, an amber dot), then a failed task (Error), then a Bot its owner paused
+ * (Sleeping: dimmed, no face, no dot), then a reply to read (Done). Anything else is Idle. What its
+ * check-ins found is not here: that never blocks the Bot, so it never changes the kite.
+ */
+export function kiteStateOf(bot: BotAttention | undefined): KiteState {
+  if (!bot) return "idle";
+  if (asksOf(bot) > 0) return "waiting";
+  if (bot.tasks.failed > 0) return "error";
+  if (bot.paused) return "sleeping";
+  if (bot.tasks.ready > 0) return "done";
+  return "idle";
 }
 
 /**

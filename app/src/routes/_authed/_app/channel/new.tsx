@@ -2,8 +2,8 @@ import type { Message } from "@ag-ui/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { OpenBotKite } from "@/components/agents/kite/kite";
 import { NewBotSheet } from "@/components/agents/new-bot-sheet";
-import AgentOrb from "@/components/agents/orb/agent-orb";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import {
   canSend,
@@ -212,7 +212,7 @@ function RouteComponent() {
                   setCreatingBot(true);
                 }}
               >
-                <AgentOrb size="24px" state="idle" />
+                <OpenBotKite size={24} />
                 <span className="font-medium">New Bot</span>
                 <span className="text-muted-foreground">Create a new Bot</span>
               </button>

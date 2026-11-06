@@ -7,7 +7,7 @@ import {
   IconShieldCheck,
 } from "@tabler/icons-react";
 import { useReducedMotion } from "motion/react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import { OpenBotKite } from "@/components/agents/kite/kite";
 
 /*
  * Drawn on one fixed grid so the connectors and the pills always meet: the SVG and the pills share
@@ -141,7 +141,7 @@ export function OrganizationFlow() {
         className="absolute flex size-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card shadow-xs"
         style={{ left: HUB.x, top: HUB.y }}
       >
-        <AgentOrb size="28px" />
+        <OpenBotKite size={28} />
       </div>
 
       {OUTCOMES.map((node, index) => (

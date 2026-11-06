@@ -7,7 +7,8 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { BotLookProvider } from "@/components/agents/bot-look";
 import { BotProfile } from "@/components/bot-profile/profile";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { settleReactWork } from "./settle-react-work";
@@ -87,7 +88,7 @@ function serving(paused: boolean, writes: string[] = []) {
   }) as unknown as typeof fetch;
 }
 
-function draw(agent: AgentProfile) {
+function draw(agent: AgentProfile, look: "kite" | "face" = "face") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -99,7 +100,9 @@ function draw(agent: AgentProfile) {
   });
   return render(
     <QueryClientProvider client={client}>
-      <RouterProvider router={router as never} />
+      <BotLookProvider value={look}>
+        <RouterProvider router={router as never} />
+      </BotLookProvider>
     </QueryClientProvider>,
   );
 }
@@ -135,4 +138,21 @@ test("switching a running Bot off pauses it", async () => {
   fireEvent.click(await view.findByRole("switch", { name: "Active" }));
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(writes).toEqual(["pause"]);
+});
+
+test("a paused Bot's kite sleeps, and wakes to idle when it runs", async () => {
+  serving(true);
+  const paused = draw(BOT, "kite");
+  await waitFor(() =>
+    expect(paused.getByRole("img", { name: "Expenses" }).dataset.state).toBe(
+      "sleeping",
+    ),
+  );
+  cleanup();
+  serving(false);
+  const running = draw(BOT, "kite");
+  await running.findByRole("switch", { name: "Active" });
+  expect(running.getByRole("img", { name: "Expenses" }).dataset.state).toBe(
+    "idle",
+  );
 });

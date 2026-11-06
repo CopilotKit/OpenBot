@@ -110,7 +110,7 @@ export function ConversationView({
   restoring?: boolean;
   /**
    * The top of the conversation, drawn above the first message and scrolled away with it. Only
-   * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
+   * where Bots are kites (`useBotLook`); elsewhere the transcript starts at its first message.
    */
   intro?: ReactNode;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
@@ -130,7 +130,7 @@ export function ConversationView({
    * See `composer/queue.ts` for what this state is worth: it is memory in one tab, it does not
    * survive a reload, and it is not an outbox.
    */
-  const orbs = useBotLook() === "orb";
+  const kites = useBotLook() === "kite";
   const [queued, setQueued] = useState<readonly QueuedMessage[]>([]);
   const queuedRef = useRef<readonly QueuedMessage[]>(queued);
 
@@ -450,7 +450,7 @@ export function ConversationView({
           threadId={threadId}
           busy={busy}
           commandLabels={skillLabels(commands ?? [])}
-          {...(orbs && intro ? { intro } : {})}
+          {...(kites && intro ? { intro } : {})}
           messages={messages}
           onRemoveQueued={(id) => {
             apply({ id, type: "remove" });

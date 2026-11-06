@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { DemoOrb } from "@/components/onboarding/demo-orb";
+import { DemoKite } from "@/components/onboarding/demo-kite";
 import { useSaveProfileName } from "@/components/settings/profile";
 import { Input } from "@/components/ui/input";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
@@ -15,7 +15,7 @@ import type { OnboardingStep } from "./onboarding-wizard";
  * beside Continue everywhere else, and Enter in the field submits as it would in any form.
  *
  * THREE STATES ON THE WAY OUT. Get started; Saving… while the name and then the completion are
- * saved; then, while the orb plays its finish (`finished`), All set, green with a check, which is
+ * saved; then, while the kite plays its finish (`finished`), All set, green with a check, which is
  * what has happened. Nothing can be submitted twice: the field is disabled from the first press,
  * and a press during the finish does nothing. A save or a completion that fails is said under the
  * field, and the button reads Get started again.
@@ -26,7 +26,7 @@ export function useNameStep({
 }: {
   /** Saves completion and plays the finish. Resolves when the app is about to open. */
   finish: () => Promise<void>;
-  /** The orb is playing its finish. */
+  /** The kite is playing its finish. */
   finished: boolean;
 }): OnboardingStep {
   const formId = useId();
@@ -77,7 +77,7 @@ export function useNameStep({
         <p>You can change your name later in Settings.</p>
       </StepIntro>
     ),
-    demo: () => <NameOrb finished={finished} size={128} />,
+    demo: () => <NameKite finished={finished} size={128} />,
     demoFirst: true,
     primaryForm: formId,
     primaryLabel: finished
@@ -90,14 +90,14 @@ export function useNameStep({
   };
 }
 
-/** How long the orb holds its done state before the app opens. */
+/** How long the kite holds its done state before the app opens. */
 export const FINISH_MS = 1_200;
 
 /**
- * OpenBot's orb, listening while somebody types their name. `finished` settles it into done, which
+ * OpenBot's kite, listening while somebody types their name. `finished` settles it into done, which
  * is how onboarding ends.
  */
-export function NameOrb({
+export function NameKite({
   finished = false,
   size = 64,
 }: {
@@ -109,7 +109,7 @@ export function NameOrb({
       className="flex justify-center"
       data-onboarding-finish={finished ? "" : undefined}
     >
-      <DemoOrb size={size} state={finished ? "done" : "listening"} />
+      <DemoKite size={size} state={finished ? "done" : "listening"} />
     </span>
   );
 }

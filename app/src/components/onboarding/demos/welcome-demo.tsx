@@ -1,6 +1,6 @@
 import { IconArrowUp, IconMicrophone, IconPlus } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { DemoOrb } from "@/components/onboarding/demo-orb";
+import { DemoKite } from "@/components/onboarding/demo-kite";
 import { cn } from "@/lib/utils";
 import { DemoStage } from "../demo-stage";
 
@@ -40,14 +40,14 @@ function useTyped(text: string, active: boolean): string {
 }
 
 /**
- * Welcome's picture: OpenBot's orb listening while a request is typed, then working on it.
+ * Welcome's picture: OpenBot's kite listening while a request is typed, then working on it.
  *
  * A DRAWING OF THE COMPOSER, NOT THE COMPOSER. The real one reads its text once, when it mounts,
  * so it cannot be typed into from outside; and a live editor in a picture would be one more thing
  * to tab to. This is its outline: the same card, the same buttons, and the words arriving.
  *
  * Three beats: typing, handed off and working, done. With reduced motion it is the typed request
- * with the orb listening.
+ * with the kite listening.
  */
 export function WelcomeDemo() {
   return (
@@ -80,7 +80,7 @@ function WelcomeScene({
   const state = typing ? "listening" : beat === 1 ? "thinking" : "done";
   return (
     <>
-      <DemoOrb
+      <DemoKite
         size={72}
         state={reduced ? "listening" : state}
         still={!playing}

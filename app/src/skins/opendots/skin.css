@@ -305,7 +305,7 @@
 /*
  * Reduced motion. The frame's own chrome (rail, sidebar, top bar, computer pane, phone drawer) and
  * the menus, tooltips, sheets and dialogs it opens stop moving: no transitions, no animations.
- * OpenBot's orb in the rail already stills itself through `useReducedMotion`. No `!important`:
+ * OpenBot's kite in the rail already stills itself through `useReducedMotion`. No `!important`:
  * this rule sits in no cascade layer, so it outranks every Tailwind utility as it is.
  */
 @media (prefers-reduced-motion: reduce) {

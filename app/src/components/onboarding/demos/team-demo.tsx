@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { DemoOrb } from "@/components/onboarding/demo-orb";
+import { DemoKite } from "@/components/onboarding/demo-kite";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { cn } from "@/lib/utils";
 import { DemoStage } from "../demo-stage";
@@ -59,7 +59,7 @@ export function teamCards(agents: AgentProfile[] | undefined): TeamCard[] {
 }
 
 /**
- * Your team of Bots: three Bots, each its own orb in its own colour, and a place for one of yours.
+ * Your team of Bots: three Bots, each its own kite in its own colour, and a place for one of yours.
  * One at a time, a Bot picks something up and works on it, so the cards read as a team.
  */
 export function TeamDemo() {
@@ -91,14 +91,12 @@ export function TeamDemo() {
                 data-working={working ? "" : undefined}
                 key={card.id}
               >
-                <span className="inline-flex shrink-0 overflow-hidden rounded-full">
-                  <DemoOrb
-                    seed={card.avatarSeed}
-                    size={44}
-                    state={working ? "thinking" : "idle"}
-                    still={!playing}
-                  />
-                </span>
+                <DemoKite
+                  seed={card.avatarSeed}
+                  size={44}
+                  state={working ? "thinking" : "idle"}
+                  still={!playing}
+                />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm truncate font-medium">{card.name}</p>
                   <p className="text-xs truncate text-muted-foreground">

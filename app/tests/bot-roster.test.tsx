@@ -16,6 +16,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { BotLookProvider } from "@/components/agents/bot-look";
 import { BotRoster } from "@/components/bots/bot-roster";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
@@ -93,7 +94,7 @@ beforeEach(() => {
   });
 });
 
-function draw() {
+function draw(look: "kite" | "face" = "face") {
   const rootRoute = createRootRoute();
   const routeTree = rootRoute.addChildren([
     createRoute({
@@ -113,7 +114,9 @@ function draw() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router as never} />
+      <BotLookProvider value={look}>
+        <RouterProvider router={router as never} />
+      </BotLookProvider>
     </QueryClientProvider>,
   );
 }
@@ -275,4 +278,42 @@ test("personal edition labels starter Bots as included with OpenBot", async () =
     view.getByRole("heading", { name: "Included with OpenBot" }),
   ).toBeTruthy();
   expect(view.queryByText("Shared with you")).toBeNull();
+});
+
+test("each Bot's kite shows what it is waiting on", async () => {
+  const counts = (
+    agentId: string,
+    over: Record<string, unknown>,
+  ): Record<string, unknown> => ({
+    agentId,
+    name: agentId,
+    questions: 0,
+    approvals: 0,
+    handoffs: 0,
+    unread: 0,
+    paused: false,
+    notify: "all",
+    items: 0,
+    tasks: { needsInput: 0, ready: 0, failed: 0 },
+    ...over,
+  });
+  serving(
+    ["Asks", "Failed", "Paused", "Ready", "Quiet"].map((name) =>
+      bot({ id: name, name }),
+    ),
+    [],
+    [
+      counts("Asks", { questions: 1 }),
+      counts("Failed", { tasks: { needsInput: 0, ready: 0, failed: 1 } }),
+      counts("Paused", { paused: true }),
+      counts("Ready", { tasks: { needsInput: 0, ready: 1, failed: 0 } }),
+    ],
+  );
+  const view = draw("kite");
+  const state = (name: string) => view.getByRole("img", { name }).dataset.state;
+  await waitFor(() => expect(state("Asks")).toBe("waiting"));
+  expect(state("Failed")).toBe("error");
+  expect(state("Paused")).toBe("sleeping");
+  expect(state("Ready")).toBe("done");
+  expect(state("Quiet")).toBe("idle");
 });
