@@ -3,8 +3,8 @@
 FROM oven/bun:1.4-alpine
 
 WORKDIR /app
-COPY agent-mastra/package.json ./
-RUN bun install
+COPY agent-mastra/package.json agent-mastra/bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY shared/listen-port.ts /shared/listen-port.ts
 COPY shared/model-providers.ts /shared/model-providers.ts
