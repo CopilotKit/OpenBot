@@ -7,8 +7,8 @@ import type {
   LearningProposalDetail,
   LearningRunSummary,
   LearningSettings,
-  PersonalLearningSharing,
   PeopleProposals,
+  PersonalLearningSharing,
   PersonalReview,
 } from "@openbot/shared/learning";
 import { queryOptions } from "@tanstack/react-query";

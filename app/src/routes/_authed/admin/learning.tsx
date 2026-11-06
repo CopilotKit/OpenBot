@@ -15,7 +15,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
 import { Streamdown } from "streamdown";
-import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { SkillSharingSection } from "@/components/admin/controls/skill-sharing-section";
 import {
   PageEmpty,
@@ -23,6 +22,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -50,9 +50,9 @@ import {
 } from "@/lib/learning/mutations";
 import {
   createLearningContainer,
+  learnedSkillsQueryOptions,
   learningAutomaticQueryOptions,
   learningDeliveryQueryOptions,
-  learnedSkillsQueryOptions,
   learningKeys,
   learningOverviewQueryOptions,
   learningProposalQueryOptions,
@@ -701,7 +701,6 @@ function AnalysisRuns({ agentId }: { agentId?: string }) {
   );
 }
 
-/** SKILL.md without its front matter, whose name and description the dialog's header already shows. */
 /** The skills published in the container shown above, each opening to its files. */
 function PublishedSkills({ agentId }: { agentId?: string }) {
   const skills = useQuery(learnedSkillsQueryOptions(agentId));
@@ -709,7 +708,7 @@ function PublishedSkills({ agentId }: { agentId?: string }) {
   return (
     <PageSection
       title="Published skills"
-      description="The skills Bots on this container can use."
+      description="Bots on this container use these skills. Open one to read it."
     >
       {skills.isPending ? null : skills.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
@@ -758,6 +757,7 @@ function PublishedSkills({ agentId }: { agentId?: string }) {
   );
 }
 
+/** SKILL.md without its front matter, whose name and description the dialog's header already shows. */
 function skillBody(markdown: string): string {
   return markdown.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
 }
