@@ -139,7 +139,7 @@ export function createSkillApprovalStore(database: Database) {
 
     /**
      * Records an approval and says whether the skill already had one, and what that one was, so a caller that has to
-     * take the approval back can `forget` a row it created or `restore` the row it replaced. A person's approval of a
+     * take the approval back can `forget` a row it created or write back the row it replaced. A person's approval of a
      * skill already approved for sharing asks for sharing again, since what was shared has changed; an admin's
      * approval clears sharing; a new row starts with no sharing.
      *
@@ -162,30 +162,6 @@ export function createSkillApprovalStore(database: Database) {
         by,
       );
       return { existed, previous };
-    },
-
-    /** Writes back an approval exactly as `recordApproval` reported it before replacing it. */
-    async restore(previous: SkillApproval): Promise<void> {
-      await database
-        .insert(learningSkillApprovals)
-        .values({
-          userId: previous.userId,
-          skillName: previous.skillName,
-          approvedBy: previous.approvedBy,
-          sharing: previous.sharing,
-          updatedAt: sql`clock_timestamp()`,
-        })
-        .onConflictDoUpdate({
-          target: [
-            learningSkillApprovals.userId,
-            learningSkillApprovals.skillName,
-          ],
-          set: {
-            approvedBy: previous.approvedBy,
-            sharing: previous.sharing,
-            updatedAt: sql`clock_timestamp()`,
-          },
-        });
     },
 
     /**

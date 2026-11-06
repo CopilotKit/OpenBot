@@ -112,32 +112,6 @@ describe("skill approvals", () => {
     });
   });
 
-  test("restore puts back the previous approver and sharing", async () => {
-    await store.recordApproval(grace, "restored", "person");
-    await store.requestSharing(grace, "restored");
-    await store.decideSharing(grace, "restored", "approved");
-    const { existed, previous } = await store.recordApproval(
-      grace,
-      "restored",
-      "admin",
-    );
-    expect(existed).toBe(true);
-    expect(await store.get(grace, "restored")).toEqual({
-      userId: grace,
-      skillName: "restored",
-      approvedBy: "admin",
-      sharing: "none",
-    });
-    if (!previous) throw new Error("expected the replaced approval");
-    await store.restore(previous);
-    expect(await store.get(grace, "restored")).toEqual({
-      userId: grace,
-      skillName: "restored",
-      approvedBy: "person",
-      sharing: "approved",
-    });
-  });
-
   test("forget deletes the row", async () => {
     await store.recordApproval(grace, "gone", "person");
     await store.forget(grace, "gone");

@@ -2145,6 +2145,15 @@ const copilotRuntime = mountCopilotRuntime(
   },
 );
 
+/** Reads one named skill from a container; throws when the runtime or the read is unavailable, null when absent. */
+const skillIn = async (containerId: string, name: string) => {
+  const read = await copilotRuntime.learning?.containerSkills(containerId);
+  if (!read || "unavailable" in read) {
+    throw new Error("Skills are unavailable.");
+  }
+  return read.skills.find((skill) => skill.name === name) ?? null;
+};
+
 const responsibilityEngine = createServerResponsibilityEngine({
   productTelemetry,
   database,
@@ -2972,15 +2981,8 @@ const app = createApp(
     skills: copilotRuntime.learning?.containerSkills,
     approvals: skillApprovalStore,
     people: createLearningPeople(database),
-    personSkill: async (userId, name) => {
-      const read = await copilotRuntime.learning?.containerSkills(
-        personalLearningContainerId(userId),
-      );
-      if (!read || "unavailable" in read) {
-        throw new Error("Skills are unavailable.");
-      }
-      return read.skills.find((skill) => skill.name === name) ?? null;
-    },
+    personSkill: (userId, name) =>
+      skillIn(personalLearningContainerId(userId), name),
     invalidate: () => openSkillIndex.invalidate(),
     recordingTitles: recorderExtension.recordingTitles,
   },
@@ -3059,15 +3061,8 @@ const app = createApp(
       skillsOf: (userId) =>
         copilotRuntime.learning?.personalSkills(userId) ??
         Promise.resolve({ unavailable: "unavailable" as const }),
-      skillOf: async (userId, name) => {
-        const read = await copilotRuntime.learning?.containerSkills(
-          personalLearningSpaces.containerFor(userId),
-        );
-        if (!read || "unavailable" in read) {
-          throw new Error("Skills are unavailable.");
-        }
-        return read.skills.find((skill) => skill.name === name) ?? null;
-      },
+      skillOf: (userId, name) =>
+        skillIn(personalLearningSpaces.containerFor(userId), name),
       containerSkills: (id) =>
         copilotRuntime.learning?.containerSkills(id) ??
         Promise.resolve({ unavailable: "unavailable" as const }),
