@@ -364,6 +364,29 @@ describe("reviewing proposed skills", () => {
             containerId: "openbot",
             proposals: [{ ...pending, status }],
           });
+        if (path === "/api/admin/learning/skills")
+          return Response.json({
+            containerId: "openbot",
+            skills: [
+              {
+                name: "invoice-lookup",
+                description: "Find an invoice by number.",
+              },
+            ],
+          });
+        if (path === "/api/admin/learning/skills/invoice-lookup")
+          return Response.json({
+            skill: {
+              name: "invoice-lookup",
+              description: "Find an invoice by number.",
+              files: [
+                {
+                  path: "SKILL.md",
+                  text: "---\nname: invoice-lookup\n---\n\nSearch billing for the invoice number.\n",
+                },
+              ],
+            },
+          });
         if (path === "/api/admin/learning/runs" && init?.method !== "POST")
           return Response.json({ containerId: "openbot", runs: [] });
         if (path === "/api/admin/learning/runs")
@@ -401,6 +424,16 @@ describe("reviewing proposed skills", () => {
         view.getByRole("button", { name: /Refund triage/ }).textContent,
       ).toContain("Published"),
     );
+  });
+
+  test("Published skills lists the container's skills and opens one", async () => {
+    intelligence();
+    const view = shared();
+    await view.findByText("Published skills");
+    fireEvent.click(
+      await view.findByRole("button", { name: /invoice-lookup/ }),
+    );
+    await view.findByText("Search billing for the invoice number.");
   });
 
   test("Learn now starts Learning on the container shown", async () => {

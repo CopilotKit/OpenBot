@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
 import { Streamdown } from "streamdown";
+import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { SkillSharingSection } from "@/components/admin/controls/skill-sharing-section";
 import {
   PageEmpty,
@@ -51,6 +52,7 @@ import {
   createLearningContainer,
   learningAutomaticQueryOptions,
   learningDeliveryQueryOptions,
+  learnedSkillsQueryOptions,
   learningKeys,
   learningOverviewQueryOptions,
   learningProposalQueryOptions,
@@ -516,6 +518,7 @@ export function LearningPage() {
       </PageSection>
       <ProposedSkills agentId={selected || undefined} />
       <AnalysisRuns agentId={selected || undefined} />
+      <PublishedSkills agentId={selected || undefined} />
       <SkillSharingSection />
     </PageShell>
   );
@@ -699,6 +702,62 @@ function AnalysisRuns({ agentId }: { agentId?: string }) {
 }
 
 /** SKILL.md without its front matter, whose name and description the dialog's header already shows. */
+/** The skills published in the container shown above, each opening to its files. */
+function PublishedSkills({ agentId }: { agentId?: string }) {
+  const skills = useQuery(learnedSkillsQueryOptions(agentId));
+  const [open, setOpen] = useState<string | null>(null);
+  return (
+    <PageSection
+      title="Published skills"
+      description="The skills Bots on this container can use."
+    >
+      {skills.isPending ? null : skills.error ? (
+        <p role="alert" className="mt-4 text-destructive text-sm">
+          {skills.error.message}
+        </p>
+      ) : !skills.data.containerId ? (
+        <PageEmpty icon={IconSparkles} title="No container">
+          Choose a container under Participation to see its published skills.
+        </PageEmpty>
+      ) : skills.data.skills.length === 0 ? (
+        <PageEmpty icon={IconSparkles} title="No published skills yet">
+          Skills you approve above appear here.
+        </PageEmpty>
+      ) : (
+        <PageRows>
+          {skills.data.skills.map((skill, index) => (
+            <Fragment key={skill.name}>
+              {index > 0 ? <Separator /> : null}
+              <Item
+                render={
+                  <button onClick={() => setOpen(skill.name)} type="button" />
+                }
+                size="sm"
+              >
+                <ItemMedia variant="icon">
+                  <IconSparkles />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{skill.name}</ItemTitle>
+                  <ItemDescription>{skill.description}</ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <IconChevronRight className="size-4 text-muted-foreground" />
+                </ItemActions>
+              </Item>
+            </Fragment>
+          ))}
+        </PageRows>
+      )}
+      <LearnedSkillDialog
+        name={open}
+        onClose={() => setOpen(null)}
+        source={{ kind: "admin", agentId }}
+      />
+    </PageSection>
+  );
+}
+
 function skillBody(markdown: string): string {
   return markdown.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
 }
