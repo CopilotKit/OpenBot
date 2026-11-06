@@ -1,9 +1,11 @@
 import type {
+  LearnedSkillContent,
   LearningAutoAssignState,
   LearningDeliveryStatus,
   LearningOverview,
   LearningProposal,
   LearningProposalDetail,
+  LearningRunSummary,
   LearningSettings,
   PersonalLearningSharing,
 } from "@openbot/shared/learning";
@@ -19,6 +21,12 @@ export const learningKeys = {
     ["learning", "proposals", { agentId: agentId ?? null }] as const,
   proposal: (proposalId: string, agentId?: string) =>
     ["learning", "proposal", { proposalId, agentId: agentId ?? null }] as const,
+  runs: (agentId?: string) =>
+    ["learning", "runs", { agentId: agentId ?? null }] as const,
+  skills: (agentId?: string) =>
+    ["learning", "skills", { agentId: agentId ?? null }] as const,
+  skill: (source: LearnedSkillSource, name: string) =>
+    ["learning", "skill", { source, name }] as const,
 };
 
 /** `?agentId=…` for a Bot's own container, nothing for the deployment default. */
@@ -139,5 +147,70 @@ export function learningProposalQueryOptions(
         "proposal",
         { fallback: "Couldn't load this skill. Try again." },
       ),
+  });
+}
+
+/** The analysis runs of a Bot's container, or the default, newest first. */
+export function learningRunsQueryOptions(agentId?: string) {
+  return queryOptions({
+    queryKey: learningKeys.runs(agentId),
+    retry: false,
+    queryFn: async (): Promise<{
+      containerId: string | null;
+      runs: LearningRunSummary[];
+    }> =>
+      (
+        await client(`/api/admin/learning/runs${forBot(agentId)}`, {
+          fallback: "Couldn't load analysis runs. Try again.",
+        })
+      ).json(),
+  });
+}
+
+/** The skills published in a Bot's container, or the default. */
+export function learnedSkillsQueryOptions(agentId?: string) {
+  return queryOptions({
+    queryKey: learningKeys.skills(agentId),
+    retry: false,
+    queryFn: (): Promise<{
+      containerId: string | null;
+      skills: { name: string; description: string }[];
+    }> =>
+      client(`/api/admin/learning/skills${forBot(agentId)}`, "skills", {
+        fallback: "Couldn't load published skills. Try again.",
+      }),
+  });
+}
+
+/** Whose published skill is being read: an admin's container, your own, or one person's. */
+export type LearnedSkillSource =
+  | { kind: "admin"; agentId?: string }
+  | { kind: "personal" }
+  | { kind: "person"; userId: string };
+
+function learnedSkillPath(source: LearnedSkillSource, name: string) {
+  const skill = encodeURIComponent(name);
+  switch (source.kind) {
+    case "admin":
+      return `/api/admin/learning/skills/${skill}${forBot(source.agentId)}`;
+    case "personal":
+      return `/api/settings/learning/skills/${skill}`;
+    case "person":
+      return `/api/admin/learning/people/${encodeURIComponent(source.userId)}/skills/${skill}`;
+  }
+}
+
+/** One published skill with every file it contains. */
+export function learnedSkillQueryOptions(
+  source: LearnedSkillSource,
+  name: string,
+) {
+  return queryOptions({
+    queryKey: learningKeys.skill(source, name),
+    retry: false,
+    queryFn: (): Promise<LearnedSkillContent> =>
+      client(learnedSkillPath(source, name), "skill", {
+        fallback: "Couldn't load this skill. Try again.",
+      }),
   });
 }
