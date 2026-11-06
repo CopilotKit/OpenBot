@@ -75,6 +75,7 @@ export function ProposalDialog<TKey extends QueryKey>({
   deciding,
   decided,
   error,
+  publishedNote = "Published. Bots on this container use it from their next conversation.",
   onClose,
 }: {
   load: UseQueryOptions<
@@ -87,6 +88,8 @@ export function ProposalDialog<TKey extends QueryKey>({
   deciding: boolean;
   decided?: "approved" | "rejected";
   error?: Error | null;
+  /** What the dialog says once the skill is published; the default is written for Admin. */
+  publishedNote?: string;
   onClose: () => void;
 }) {
   const detail = useQuery(load);
@@ -168,7 +171,7 @@ export function ProposalDialog<TKey extends QueryKey>({
                   role="status"
                 >
                   {status === "approved"
-                    ? "Published. Bots on this container use it from their next conversation."
+                    ? publishedNote
                     : "Rejected. It won't be published."}
                 </span>
               )}
