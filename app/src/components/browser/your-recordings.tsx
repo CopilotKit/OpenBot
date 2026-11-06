@@ -38,7 +38,9 @@ function endedLabel(row: RecordingRow): string | null {
 export function YourRecordings() {
   const recordings = useInfiniteQuery(recordingsQueryOptions());
   if (recordings.isPending) return null;
-  const unavailable = recordings.data?.pages[0]?.unavailable;
+  const unavailable = recordings.data?.pages.find(
+    (page) => page.unavailable,
+  )?.unavailable;
   const rows = recordings.data?.pages.flatMap((page) => page.recordings) ?? [];
 
   return (
@@ -47,13 +49,7 @@ export function YourRecordings() {
         <p className="mt-4 text-destructive text-sm" role="alert">
           {recordings.error.message}
         </p>
-      ) : unavailable ? (
-        <p className="mt-4 text-muted-foreground text-sm">
-          {unavailable === "unreachable"
-            ? "Couldn't reach Intelligence to list your recordings. Try again in a moment."
-            : "Intelligence isn't available, so your recordings can't be listed."}
-        </p>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && !recordings.hasNextPage && !unavailable ? (
         <PageEmpty>
           No recordings yet. Record a task with the OpenBot Recorder to see it
           here.
@@ -88,6 +84,13 @@ export function YourRecordings() {
               );
             })}
           </PageRows>
+          {unavailable ? (
+            <p className="mt-4 text-muted-foreground text-sm">
+              {unavailable === "unreachable"
+                ? "Couldn't reach Intelligence to list your recordings. Try again in a moment."
+                : "Intelligence isn't available, so your recordings can't be listed."}
+            </p>
+          ) : null}
           {recordings.hasNextPage ? (
             <Button
               className="mt-3"

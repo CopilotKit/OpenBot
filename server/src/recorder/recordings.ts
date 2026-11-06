@@ -130,7 +130,8 @@ export function createRecordings(deps: {
       if ("unavailable" in result)
         return {
           recordings: [],
-          nextCursor: null,
+          // A later page keeps its cursor so Show more retries it; the first page has nothing to retry from.
+          nextCursor: cursor,
           unavailable: result.unavailable,
         };
       const byId = new Map(

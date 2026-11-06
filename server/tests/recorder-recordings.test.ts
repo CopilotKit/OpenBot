@@ -224,6 +224,15 @@ describe("createRecordings", () => {
     });
   });
 
+  test("a later page that cannot be read keeps its cursor so it can be retried", async () => {
+    const { recordings } = build([bound], { unavailable: "unreachable" });
+    expect(await recordings.list("u-1", "c2")).toEqual({
+      recordings: [],
+      nextCursor: "c2",
+      unavailable: "unreachable",
+    });
+  });
+
   test("a recording is joined to its summary by id", async () => {
     const { recordings, asked } = build([bound], { items: [summary] });
     const page = await recordings.list("u-1", null);

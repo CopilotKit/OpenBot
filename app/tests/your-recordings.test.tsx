@@ -155,3 +155,39 @@ test("Show more loads the next page", async () => {
   await waitFor(() => expect(view.queryByText("Show more")).toBeNull());
   expect(asked).toContain("/api/recorder/recordings?cursor=c2");
 });
+
+test("a later page that cannot be reached says so below the rows, and Show more retries it", async () => {
+  pages[""] = { recordings: [row({})], nextCursor: "c2" };
+  pages.c2 = {
+    recordings: [],
+    nextCursor: "c2",
+    unavailable: "unreachable",
+  };
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <YourRecordings />
+    </QueryClientProvider>,
+  );
+  await view.findByText("Refund an order");
+  fireEvent.click(view.getByText("Show more"));
+  await view.findByText(/Couldn't reach Intelligence/);
+  expect(view.getByText("Refund an order")).toBeTruthy();
+  expect(view.getByText("Show more")).toBeTruthy();
+});
+
+test("a first page with no rows still offers Show more when older ones exist", async () => {
+  pages[""] = { recordings: [], nextCursor: "c2" };
+  pages.c2 = {
+    recordings: [row({ id: "r2", title: "Close a ticket" })],
+    nextCursor: null,
+  };
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <YourRecordings />
+    </QueryClientProvider>,
+  );
+  await view.findByText("Show more");
+  expect(view.queryByText(/No recordings yet/)).toBeNull();
+  fireEvent.click(view.getByText("Show more"));
+  await view.findByText("Close a ticket");
+});
