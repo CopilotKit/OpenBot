@@ -812,6 +812,7 @@ function Setup() {
     return (
       <main>
         <CopilotKitAccount
+          root={root.trim()}
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
             // Intelligence sets itself up once the install has Docker answering; see above. The

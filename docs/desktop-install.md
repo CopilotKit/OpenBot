@@ -150,16 +150,27 @@ fill a gap. Three rules hold that boundary:
 | `~/OpenBot/` | The installation: deployment, `.env` settings, `.openbot-*` records |
 | `~/OpenBot/.openbot-project.json` | The Compose project this installation runs as |
 | `~/OpenBot/.env` | Settings only. A person's own `COMPOSIO_API_KEY` goes here and always wins |
-| Protected store (see `vault.rs`) | Model keys and service tokens |
+| Protected store (see `vault.rs`) | Model keys, service tokens and a provisioned Composio key |
 | `%LOCALAPPDATA%\OpenBot` (Windows) | Recorder host files and the local browser profile |
 
 ## Apps through Composio
 
 A person's own Composio key, in `.env` or the environment, is passed to the server at Start and is
-never moved or rewritten (`src-tauri/src/composio.rs`, `resolve`). The app can also ask CopilotKit
-Ops for a project key with a CopilotKit session (`provision`), but nothing in the standalone flow
-calls it yet: the backend route it needs is not live. Until it is, web search and app connections
-need a key in `~/OpenBot/.env`.
+never moved or rewritten (`src-tauri/src/composio.rs`, `resolve`).
+
+Without one, the app gets this installation's own Composio project from CopilotKit, with the
+CopilotKit sign-in the bundled CLI already holds. The CLI runs `integrations composio provision`
+(`local_eval.rs`, `apps_arguments`): it posts the installation id to Ops with its own session, and
+writes the project key into `~/OpenBot/.openbot-apps/composio.env`, an owner-only folder the app
+removes as soon as it has read the key. The key goes to the protected store as
+`COMPOSIO_PROVISIONED_API_KEY`, never to `.env`, and Start passes it to the server as
+`COMPOSIO_API_KEY`. The app never reads the CLI's session.
+
+It runs on the Account step once the person is signed in, where a failure shows Connect apps and
+Continue, and on every Start of an installation with local Intelligence that still has no key. An
+installation signed in under 0.3.0 gets its key on its next Start. Ops replays the same key for an
+installation, so a retry never makes a second project. A failure never stops Start: OpenBot starts
+with apps unavailable.
 
 ## Builds
 

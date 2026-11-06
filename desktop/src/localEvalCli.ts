@@ -208,6 +208,34 @@ export function signInToCopilotKit(): {
   return { attempt, signedIn };
 }
 
+/**
+ * Connects this installation's apps with the CopilotKit sign-in the CLI now holds: CopilotKit
+ * makes or replays its Composio project, and the native side keeps the key. Resolves once
+ * connected, or when a key was already in place. Rejects with a `Problem` the window shows as it
+ * is; nothing secret comes back either way.
+ */
+export function connectCopilotKitApps(root: string): {
+  attempt: string;
+  connected: Promise<void>;
+} {
+  const attempt = crypto.randomUUID();
+  const connected = invoke<void>("connect_copilotkit_apps", {
+    attempt,
+    root,
+  }).catch((rejection: unknown) => {
+    if (rejection && typeof rejection === "object" && "said" in rejection) {
+      throw rejection as Problem;
+    }
+    // Anything else is not echoed.
+    throw { said: APPS_UNAVAILABLE } satisfies Problem;
+  });
+  return { attempt, connected };
+}
+
+/** What the native side says when apps could not be connected (`composio::setup_problem`). */
+export const APPS_UNAVAILABLE =
+  "OpenBot couldn't connect your apps. Check your connection, then choose Connect apps. If it keeps happening, ask an admin.";
+
 /** The evaluation agreement, as the CLI reports it: what the person reads before Accept. */
 export type LocalTerms =
   | {

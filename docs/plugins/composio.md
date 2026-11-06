@@ -38,16 +38,17 @@ reachable from another's.
 ### Automatic project setup
 
 In OpenBot Desktop, once you sign in to CopilotKit, OpenBot connects this installation's apps.
-The native app uses the same sign-in session to create or reuse its isolated Composio project,
-saves the project key in protected local storage, and supplies it to the server when you start or
-restart OpenBot. No terminal, CLI installation, or key copying is needed. Sign-in and Start never
-wait on this step. If it fails, OpenBot starts with apps unavailable, and the sign-in screen offers
-Connect apps to try again. A `COMPOSIO_API_KEY` you put in `.env` or the environment always wins
-over a provisioned key, and OpenBot never moves or removes it. Individual apps still require their
-own account consent after an administrator enables them.
+The CopilotKit CLI bundled with the app uses its own sign-in to create or reuse the installation's
+isolated Composio project. The app saves the project key in protected local storage and supplies it
+to the server when you start or restart OpenBot. No terminal or key copying is needed. If it fails,
+the Account step offers Connect apps to try again or Continue without apps, and every Start tries
+again by itself; OpenBot starts with apps unavailable until it succeeds. An installation that
+signed in with an earlier release gets its key on its next Start. A `COMPOSIO_API_KEY` you put in
+`.env` or the environment always wins over a provisioned key, and OpenBot never moves or removes
+it. Individual apps still require their own account consent after an administrator enables them.
+See [Desktop install](../desktop-install.md#apps-through-composio) for where each part lives.
 
-Desktop requires the deployed Ops provisioning backend and an updated desktop release. The
-source-checkout flow below additionally requires a compatible published CopilotKit CLI.
+The source-checkout flow below requires a compatible published CopilotKit CLI.
 
 After `npx --yes copilotkit@latest login`, `bash scripts/start.sh` provisions Composio before
 starting services. This step is best-effort, like Learning setup. If it cannot complete,
