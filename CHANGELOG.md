@@ -8,6 +8,177 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`. Eight
+things change for an existing deployment:
+- On OpenBot Desktop, the first Start after the app updates to this release moves the installed
+  OpenBot to it too. Until now an installation kept the release it was installed at until you moved
+  it under Runtime updates. While the old release keeps running, Start checks the installation
+  against its release's published manifest and downloads the new release and its images; then it
+  stops OpenBot, backs up the database, installs the new release and starts it, which can take a few
+  minutes. A move that fails is undone, database included, and the old release starts. Pinned builds
+  (internal and candidates), and an installation already on a newer release than the app, are left
+  as they are (below).
+- OpenBot Desktop installations signed in to CopilotKit with no Composio key get one at their next
+  Start: the bundled CopilotKit CLI asks CopilotKit for this installation's own Composio project,
+  and the key goes to the app's protected store, never to `.env`. Apps, unavailable on Desktop since
+  0.3.0, become available. A `COMPOSIO_API_KEY` in `~/OpenBot/.env` or the environment, or an Arcade
+  choice, still wins, and then nothing is asked (below).
+- Built-in Bots, and the Bot framework picked at setup when it is OpenBot's own LangGraph or Claude
+  Agent SDK harness, now answer on the middle of the provider's current line when nobody has picked
+  a model, instead of `BOT_MODEL`: the newest model of each line, ordered by price, and the one in
+  the middle (on 2026-11-05, `gpt-6.1-terra`, `claude-sonnet-5-5`, `gemini-3.8-flash` and
+  `grok-4.7`). This holds whether or not people may pick, within the model allowlist when it is on.
+  `BOT_MODEL` stays the default only behind a gateway in `OPENAI_BASE_URL` that lists it, or while
+  the provider's model list cannot be read. A ChatGPT plan answers only on a model its own list
+  offers (below).
+- The server now reads the provider's model list (a plan's own, through its harness) and
+  `https://models.dev/api.json` when it starts and every six hours after, whether or not people may
+  pick, and again at once, at most once a minute, when a provider refuses a model as unknown or
+  unsupported. A refresh that fails keeps the last good list. `OPENBOT_MODEL_CAPABILITIES_URL`
+  points at a mirror of models.dev, or `off` reads none, and then the default is the configured
+  model while the provider lists it.
+- With `OPENBOT_SINGLE_USER=true` (OpenBot Desktop among them), "Let people choose a model" under
+  Admin → Providers is now on until somebody turns it off. A deployment that saved it off keeps it
+  off.
+- A Bot's commands now run in one interactive bash on its computer, one for each Bot a person uses,
+  instead of a fresh `bash -c` each (below). `cd` and exported variables carry over to the next
+  command. A command's stdout and stderr come back together as its output, with `stderr` empty, as a
+  terminal shows them. Something a command starts in the background with `&` keeps running after the
+  command returns, even while it still prints; such a process used to hold the command open until
+  its time limit stopped both. Two commands from the same Bot and person run one after the other,
+  and the wait counts against each one's time limit. Commands see `TERM=xterm-256color`, and
+  `PAGER=cat`, `GIT_PAGER=cat` and `GIT_TERMINAL_PROMPT=0` unless `COMPUTER_SHELL_ENV` passes
+  others.
+- Upgrade the server and its computers together. A computer from 0.3.0 has no terminal for the
+  Computer panel's new Terminal tab to connect to, and refuses every pointer move made with no
+  button held, which the live screen now sends as you hover.
+- The Python LangGraph and Pydantic AI Bots set no upper bound on `google-genai`, so an image of
+  either built from source since 3.0.0 came out on 2026-11-06 installed it, and 3.0.0 sends Gemini
+  requests to `/v1` instead of `/v1beta`. Both now hold `google-genai` at 2.34 or later and below 3,
+  and the Google ADK Bot names the same range, so Gemini is called on `/v1beta` as before.
+
+### A Bot's commands run in one live shell you can watch and take control of
+
+The Computer panel has a Terminal tab beside the Screen: a real terminal where you watch each of the
+Bot's commands typed and its output stream, in colour. Whoever may watch a Bot's screen may watch
+its terminal. Take control gives you its keyboard, as it does the browser's, and the Bot waits until
+you hand back, then carries on in the same shell. The panel opens on the view the Bot last worked
+in, the terminal after a command and the screen after a page; a tab you pick, or a command you click
+in the conversation, holds until the panel closes.
+
+- **The Bot gets what it got before.** Each command's output and exit code come back within the same
+  time limit (120 seconds unless the Bot asks for up to 600) and the same 64 KB of output, and
+  approvals and policy for commands are unchanged. What changes is under Before upgrading.
+- **Commands in the conversation and in Activity are terminal blocks**: the prompt and the command,
+  the last lines of output with "Show all N lines" for the rest, and how it ended, as "Exit 0",
+  "Exit 1", "Running", "Blocked", "Declined" or "Done by you". Clicking one opens the Computer panel
+  on its terminal.
+- **A shell left busy is not typed over.** If you hand back with something still running in the
+  foreground, the Bot's next command is not run and the Bot is told why. A command the Bot sends
+  unfinished (an unclosed quote, bracket or here-document) is abandoned at once with exit code 2,
+  instead of waiting out its time limit.
+- **The shell ends** when the computer is stopped or reset, or after an hour nobody used or watched
+  it, and a new one starts when it is next needed.
+
+### Taking over a Bot's screen feels like using your own browser
+
+- **Clicks land at once.** Your browser sends at most one pointer position per screen refresh and
+  adds scrolls together, and the Bot's computer replaces a waiting move with the newer one instead
+  of playing every move before your click. Clicks, keys and pastes are never merged or dropped, and
+  land in the order you made them.
+- **The picture is the page as it is now.** The computer sends the next frame only once the last has
+  gone out, with at most two on their way to your browser, and a newer frame replaces one still
+  waiting, so a slow connection no longer shows frames seconds old. The once-a-second screenshot
+  stops while the full-size live view is open, and a hidden tab draws nothing until you come back.
+- **Keys and the mouse behave as on your own page.** Hovering is a hover, not a drag with the left
+  button held. Letting go of the mouse outside the screen lets go on the page, and releasing Command
+  releases the keys held with it. Emoji type as text, Firefox scrolls normal distances, and the
+  cursor is an arrow rather than a crosshair.
+- **A missed input is a note, not an error screen.** One key or click that doesn't land shows a
+  short note in the corner for a few seconds, and the screen stays live. One missed check of who has
+  control no longer pauses your input; two in a row do, and the computer still refuses input from
+  anyone not in control. A click made the moment the screen appears is held until the connection to
+  the computer opens, not lost.
+
+### OpenBot Desktop moves your OpenBot to the app's release when it starts
+
+An updated app used to keep running the OpenBot it was first installed with, so server fixes never
+reached an existing installation. Now Start moves a stable app's installation to the app's own
+release, through the same path as Runtime updates, and says "Updating OpenBot from v0.3.0 to v0.3.1.
+Your Bots, sign-ins and data stay as they are." while it runs. A modified installation is refused
+before anything stops.
+
+- A move that fails before OpenBot stopped changes nothing, and the next Start tries again. One that
+  fails after is undone, the database restored from its backup, and the old release starts with a
+  note saying so. Start does not try that release again by itself; Runtime updates can.
+- Stop or Quit during a move stops it, and the next Start recovers it as any interrupted update.
+- Runtime updates, and this move, download only the images this installation runs: eight for 0.3.0,
+  where the release names nineteen. Staging an update no longer fails on an Apple silicon Mac with
+  "no matching manifest for linux/arm64/v8" over the all-in-one `openbot` image, which Desktop never
+  runs and which 0.3.0 published for x86-64 only.
+
+### OpenBot Desktop gets your apps from your CopilotKit sign-in again
+
+0.3.0 started every Desktop installation without a Composio key, so apps were unavailable unless you
+put your own `COMPOSIO_API_KEY` in `~/OpenBot/.env`. The Account step now connects your apps once
+you have signed in ("Connecting your apps…"): the bundled CopilotKit CLI, with its own sign-in,
+makes or reuses this installation's Composio project, and the app keeps the key in its protected
+store. If that fails, the step says so, with Connect apps to try again and Continue to go on without
+apps, and every Start tries again by itself without ever stopping Start. An installation signed in
+under 0.3.0 gets its key at its next Start, without signing in again.
+
+### Signing in with ChatGPT in Desktop setup no longer ends on "localhost refused to connect"
+
+- A browser tab that comes back after the sign-in finished (from "Open the sign-in page", or from
+  approving again at OpenAI) gets an OpenBot page saying OpenBot is signed in and the tab isn't
+  needed. OpenBot answers that address for 15 minutes after a sign-in ends, then gives the port up,
+  and gives it up sooner to a new sign-in or to the Codex CLI.
+- Starting a sign-in again no longer fails with "port is already allocated". The earlier sign-in is
+  stopped first, and so is one you leave by picking another provider, Change, Escape or leaving the
+  screen, whose tab then says the sign-in ended rather than "You're signed in". Quit stops it too.
+- A tab left over from an earlier attempt can no longer end the attempt in progress: it is told its
+  link is out of date.
+
+### Pick the model and thinking effort for every Bot, from the provider's live list
+
+The composer's model picker is now a text button naming the model and its thinking effort ("Claude
+Sonnet 5.5 · High"), and its list adds a Thinking group with the levels the model in use accepts,
+its default marked. A model is only ever shown, saved and sent the levels it takes, and switching to
+a model that doesn't take the chosen effort clears it. The pick is still kept per person and
+conversation, and a new conversation saves both before its first message.
+
+- **More Bots and every sign-in.** It is offered for the Bot framework picked at setup when it is
+  OpenBot's own LangGraph or Claude Agent SDK harness, and on OpenAI, Anthropic, Google and xAI keys
+  and sign-ins, any OpenAI-compatible endpoint, and ChatGPT and Claude plans, each listed from its
+  own source (see The model list in `docs/configuration.md`). A Bot on any other framework, or a
+  harness somebody brought, still picks its own model.
+- **Fixed: every message failed on a ChatGPT plan** with "The 'gpt-5.5' model is not supported when
+  using Codex with a ChatGPT account". A plan now runs only a model its own list offers.
+- **Out of credit says so.** A provider refusing because the account is out of credit or at its
+  spending limit now reads as that, naming the provider and quoting it, on built-in Bots (which
+  showed "Forbidden" or a retry count) and on the LangGraph harness (which asked you to sign in
+  again, and flagged the sign-in as failed). Any other refusal from the provider ends the harness's
+  run with the provider's own words, where the run used to stop with no answer.
+- Admin → Providers names who serves the model: OpenAI, Anthropic, Google, xAI, ChatGPT plan, Claude
+  plan or OpenAI-compatible endpoint, with Google, xAI and Claude marks beside OpenAI's and
+  Anthropic's. Each run logs one `run-model` line with its Bot, run id, model and effort.
+- `CHATGPT_CODEX_CLIENT_VERSION` (default `0.167.0`) is the Codex client version the LangGraph
+  harness names when it reads a ChatGPT plan's list.
+
+### Every step a Bot takes with one of OpenBot's own tools reads as words
+
+Each tool OpenBot itself gives a Bot is named in words chosen for it, in the present while it runs
+and the past once done ("Using a skill", then "Used a skill"; "Saved a memory"; "Checked existing
+Bots"), where most showed words split from their identifier ("Copilotkit load skill", "Remember
+personal fact"). That covers skills, memory, follow-ups, check-ins, responsibilities, asking a
+person or another Bot, subtasks, the browser, and files and commands on the Bot's computer or yours.
+
+### The Mastra Bot's image installs from a lockfile
+
+The Mastra Bot was the one Bot image built from version ranges with no lockfile, so two builds of
+one release could ship different code, and a build could fail on a package npm had only just
+published. It now installs from `agent-mastra/bun.lock` with `--frozen-lockfile`.
+
 ## 0.3.0
 
 **Before upgrading.** Forty things change for an existing deployment:
@@ -158,16 +329,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `--reuse-values` included. `routines.enabled` now defaults to `true`, and a changed value under
   `secrets` restarts the server.
 - Migration `0077_channel_opening` adds a nullable `channels.opening`.
-
-### A Bot's commands run in one live shell you can watch and take control of
-
-The Computer panel has a Terminal tab beside the screen: a real terminal where you watch each of the
-Bot's commands typed and its output stream, in colour. Take control gives you the keyboard there, as
-it does in the browser, and the Bot waits until you hand it back, then carries on in the same shell.
-`cd` and exported variables carry over from one command to the next. The Bot still gets each
-command's output and exit code within the same time and size limits, and approvals and policy for
-commands are unchanged. A command's stdout and stderr now come back as one stream, as a terminal
-shows them.
 
 ### Teach a Bot: do a task once in your own browser, and your Bots learn it
 
