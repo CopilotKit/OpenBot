@@ -37,6 +37,10 @@ import type { Recognition } from "@/lib/browser/narration";
 import { queryClient } from "@/query-client";
 import { installChrome } from "./browser-narration.fixture";
 import {
+  installDesktopShell,
+  removeDesktopShell,
+} from "./desktop-shell.fixture";
+import {
   everyLanguage,
   type OnDeviceModel,
   onDeviceModel,
@@ -371,6 +375,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  removeDesktopShell();
   global.fetch = originalFetch;
   globalThis.WebSocket = originalSocket;
   delete speechGlobals.SpeechRecognition;
@@ -932,6 +937,96 @@ test("on hosted OpenBot the page narrates a recording, and Stop sends the phrase
       "Saved “Submit an expense report” to your Learning space: 7 actions and 1 narrated phrase.",
     ),
   ).toBeTruthy();
+});
+
+test("in the OpenBot Desktop window the page narrates through the desktop app's on-device recognition, where the web view has none", async () => {
+  // Seen on the Mac: narration said it was on, then "Narration is off." a few seconds into the recording, because the
+  // window's web view has no speech recognition that stays on the computer.
+  state = screenState();
+  openAnswer = answerFor("screen");
+  installChrome(null);
+  const { calls } = installDesktopShell({
+    heard: [
+      { type: "result", index: 0, text: "I am opening", final: false },
+      {
+        type: "result",
+        index: 0,
+        text: "I am opening the expenses page",
+        final: true,
+      },
+      { type: "result", index: 1, text: "now the", final: false },
+    ],
+    atStop: [
+      {
+        type: "result",
+        index: 1,
+        text: "Now the receipt from the taxi ride",
+        final: true,
+      },
+    ],
+  });
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await pressRecord(view, user);
+  // Listening starts with the recording, through the desktop app, in the language the recording was started in.
+  await waitFor(() =>
+    expect(calls.map((call) => call.command)).toContain(
+      "plugin:openbot-desktop|speech_start",
+    ),
+  );
+  expect(
+    calls.find((call) => call.command.endsWith("|speech_start"))?.args,
+  ).toMatchObject({ language: navigator.language });
+  expect(
+    await view.findByText("Narration is on. We're capturing your voice."),
+  ).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      writes.some(
+        (write) =>
+          write.path === browserApiPaths.narration &&
+          "text" in (write.body as object),
+      ),
+    ).toBe(true),
+  );
+
+  await user.click(view.getByRole("button", { name: "Stop" }));
+  await waitFor(() =>
+    expect(writes.at(-1)).toEqual({
+      path: "/api/browser/recording",
+      method: "POST",
+      body: { action: "stop" },
+    }),
+  );
+  expect(calls.map((call) => call.command)).toContain(
+    "plugin:openbot-desktop|speech_stop",
+  );
+  // Both phrases reached the Recorder, the one being said at Stop included, before the recording was stopped, each
+  // after the word that it began.
+  const narration = writes.filter(
+    (write) => write.path === browserApiPaths.narration,
+  );
+  expect(
+    narration.map(({ body }) => {
+      const { sentAt: _sent, ...rest } = body as { sentAt: number };
+      return "text" in rest ? { text: (rest as { text: string }).text } : rest;
+    }),
+  ).toEqual([
+    { speaking: true, since: expect.any(Number) },
+    { text: "I am opening the expenses page" },
+    { speaking: false },
+    { speaking: true, since: expect.any(Number) },
+    { text: "Now the receipt from the taxi ride" },
+    { speaking: false },
+  ]);
+  expect(writes.indexOf(narration.at(-1) as Write)).toBeLessThan(
+    writes.findLastIndex((write) => write.path === "/api/browser/recording"),
+  );
+  expect(view.queryByText("Narration is off.")).toBeNull();
 });
 
 test("on hosted OpenBot a narration the Recorder refused says why, beside the narration switch", async () => {
