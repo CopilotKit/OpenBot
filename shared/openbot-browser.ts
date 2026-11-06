@@ -93,6 +93,14 @@ export type LauncherState = {
      * keeps what is not sent yet for the person's next connection here instead of sending it now.
      */
     sending?: boolean;
+    /**
+     * Some of this recording is not in Intelligence, and is kept in this browser instead:
+     * - `refused`: Intelligence turned the recording's capture pass away (a stop (hold) or stop (park) row, such as an
+     *   Intelligence with Trajectories turned off), and the Recorder tries again later.
+     * - `signed-out`: the browser was signed out, and it waits for its person to connect this browser again.
+     * Absent when nothing of it is kept. OpenBot never says such a recording was saved to the Learning space.
+     */
+    kept?: "refused" | "signed-out";
     /** The person discarded it from the Recorder's mark in the browser rather than saving it. */
     discarded?: boolean;
   };

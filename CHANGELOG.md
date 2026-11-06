@@ -18,6 +18,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the back end. The Recorder's disclosure says recordings go to the learning part of OpenBot's back
   end. Env var names (`INTELLIGENCE_API_URL` and the rest), logs and the docs under `docs/` and
   `charts/` are unchanged.
+- Teach a Bot says a recording was saved to your Learning space only once the back end has all of
+  it. A recording the back end refused, such as one sent to a back end with Trajectories turned
+  off, is said not to be saved and to be kept in the browser; one still on its way says Saving.
+  Before, both were called saved. This needs the Recorder from this release.
 - OpenBot Desktop installs the personal edition: nobody signs in, one computer is shared by your
   Bots, and you start with the Personal Assistant. Before, it installed the team edition, with its
   admin screens, the fintech example's Bots and a computer for each Bot. An existing installation

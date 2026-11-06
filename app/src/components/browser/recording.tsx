@@ -5,6 +5,7 @@ import type {
 import {
   IconAlertTriangle,
   IconCircleCheck,
+  IconLoader2,
   IconPlayerRecordFilled,
   IconTrash,
 } from "@tabler/icons-react";
@@ -255,12 +256,28 @@ function heldIn(stopped: Stopped): string {
     : actionCount(stopped.actions);
 }
 
+/**
+ * Why a recording that held something is not in the Learning space, from the Recorder's own report: Intelligence
+ * refused it, or the browser was signed out. Undefined while it is sent or on its way. The Desktop's run of 2026-11-06
+ * saw a recording an Intelligence with Trajectories turned off refused said to be saved to the Learning space.
+ */
+const NOT_SAVED: Record<NonNullable<Stopped["kept"]>, string> = {
+  refused:
+    "It's kept in this browser and sent again later.",
+  "signed-out":
+    "It's kept in this browser until you connect it to OpenBot again.",
+};
+
 /** What the page says once Stop ended a recording, naming it. The sidebar's Browser button says the same. */
 export function stoppedSentence(stopped: Stopped): string {
   if (stopped.discarded) return `Discarded “${stopped.title}”.`;
-  return stopped.empty
-    ? `Nothing was recorded in “${stopped.title}”. ${WHAT_IT_RECORDS}`
-    : `Saved “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
+  if (stopped.empty)
+    return `Nothing was recorded in “${stopped.title}”. ${WHAT_IT_RECORDS}`;
+  if (stopped.kept)
+    return `“${stopped.title}” wasn't saved to your Learning space. ${NOT_SAVED[stopped.kept]}`;
+  if (stopped.sending)
+    return `Saving “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
+  return `Saved “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
 }
 
 export function StoppedIcon({
@@ -277,7 +294,14 @@ export function StoppedIcon({
         className={cn("text-muted-foreground", className)}
       />
     );
-  return stopped.empty ? (
+  if (stopped.sending && !stopped.empty && !stopped.kept)
+    return (
+      <IconLoader2
+        aria-hidden="true"
+        className={cn("animate-spin text-muted-foreground", className)}
+      />
+    );
+  return stopped.empty || stopped.kept ? (
     <IconAlertTriangle
       aria-hidden="true"
       className={cn("text-amber-600 dark:text-amber-400", className)}
@@ -306,7 +330,11 @@ export function StoppedRow({
     ? "Discarded. You chose not to save it."
     : stopped.empty
       ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
-      : `Saved to your Learning space: ${heldIn(stopped)}.`;
+      : stopped.kept
+        ? `Not saved to your Learning space. ${NOT_SAVED[stopped.kept]}`
+        : stopped.sending
+          ? `Saving to your Learning space: ${heldIn(stopped)}.`
+          : `Saved to your Learning space: ${heldIn(stopped)}.`;
   return (
     <Item size="sm" role="status">
       <ItemMedia variant="icon">

@@ -214,18 +214,22 @@ export function lastStopped(
 }
 
 /**
- * Whether some of a stopped recording is still on its way to Intelligence: its drain is still in storage (it goes on
- * offscreen.done, once all of it is sent), and it is neither kept for later (a hold or park row, or waiting for its
- * person to connect again) nor being discarded.
+ * Where a stopped recording has got to on its way to Intelligence, from its drain (it goes on offscreen.done, once all
+ * of it is sent): still `sending` while the drain is neither kept for later nor being discarded; `kept` when Intelligence
+ * refused it (a hold or park row) or it waits for its person to connect again. Neither once all of it is sent.
  */
-async function stillSending(recordingId: string): Promise<boolean> {
+async function delivery(
+  recordingId: string,
+): Promise<
+  Pick<NonNullable<LauncherState["lastStopped"]>, "sending" | "kept">
+> {
   const drains = (await readLocal("drains")) ?? [];
-  return drains.some(
-    (drain) =>
-      drain.recordingId === recordingId &&
-      !drain.discarding &&
-      drain.kept === undefined,
+  const drain = drains.find(
+    (entry) => entry.recordingId === recordingId && !entry.discarding,
   );
+  if (!drain) return {};
+  if (drain.kept === undefined) return { sending: true };
+  return { kept: drain.kept.waitingForReconnect ? "signed-out" : "refused" };
 }
 
 export function createLauncher(
@@ -239,8 +243,10 @@ export function createLauncher(
     const state: RecorderState = await controls.current();
     const narration = connection?.narration ?? "own";
     const stopped = lastStopped(state);
-    const sending =
-      stopped !== undefined && (await stillSending(stopped.recordingId));
+    const where =
+      stopped === undefined || stopped.discarded
+        ? {}
+        : await delivery(stopped.recordingId);
     return {
       connected: connection !== null,
       ...(connection
@@ -253,9 +259,7 @@ export function createLauncher(
       actions: state.actions,
       narration,
       ...(narration === "own" ? { voice: voiceOf(state) } : {}),
-      ...(stopped
-        ? { lastStopped: sending ? { ...stopped, sending } : stopped }
-        : {}),
+      ...(stopped ? { lastStopped: { ...stopped, ...where } } : {}),
     };
   }
 

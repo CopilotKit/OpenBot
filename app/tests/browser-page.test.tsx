@@ -565,7 +565,11 @@ async function stopSays(view: ReturnType<typeof draw>): Promise<string> {
     said =
       statuses
         .map((status) => status.textContent ?? "")
-        .find((text) => /Saved|Nothing was recorded/.test(text)) ?? "";
+        .find((text) =>
+          /Saved|Saving|saved to your Learning space|Nothing was recorded/.test(
+            text,
+          ),
+        ) ?? "";
     expect(said).not.toBe("");
   });
   return said;
@@ -675,6 +679,55 @@ test("after a reload the page says what the last recording held as the Recorder 
       openAnswer = answerFor(shape);
       const view = draw(<BrowserPage />);
       expect(await stopSays(view)).toBe(says);
+    }
+  }
+});
+
+test("a recording Intelligence refused, or one still on its way, is never said to be saved, on both shapes", async () => {
+  // OpenBot Desktop, 2026-11-06: its local Intelligence has Trajectories turned off and refused the recording's capture
+  // pass (TRAJECTORIES_UNAVAILABLE), and the page said “Saved … to your Learning space: 1 action.”
+  for (const shape of ["native", "screen"] as const) {
+    for (const [delivery, says] of [
+      [
+        { kept: "refused" },
+        shape === "native"
+          ? "Check example.com headingNot saved to your Learning space. It's kept in this browser and sent again later."
+          : "“Check example.com heading” wasn't saved to your Learning space. It's kept in this browser and sent again later.",
+      ],
+      [
+        { kept: "signed-out" },
+        shape === "native"
+          ? "Check example.com headingNot saved to your Learning space. It's kept in this browser until you connect it to OpenBot again."
+          : "“Check example.com heading” wasn't saved to your Learning space. It's kept in this browser until you connect it to OpenBot again.",
+      ],
+      [
+        { sending: true },
+        shape === "native"
+          ? "Check example.com headingSaving to your Learning space: 1 action."
+          : "Saving “Check example.com heading” to your Learning space: 1 action.",
+      ],
+    ] as const) {
+      cleanup();
+      queryClient.clear();
+      const base = shape === "native" ? nativeState() : screenState();
+      state = {
+        ...base,
+        recorder: {
+          ...(base.recorder as NonNullable<BrowserApiState["recorder"]>),
+          lastStopped: {
+            recordingId: "rec-0",
+            title: "Check example.com heading",
+            stoppedAt: Date.now() - 1_000,
+            actions: 1,
+            phrases: 0,
+            ...delivery,
+          },
+        },
+      };
+      openAnswer = answerFor(shape);
+      const view = draw(<BrowserPage />);
+      expect(await stopSays(view)).toBe(says);
+      expect(view.queryByText(/Saved/)).toBeNull();
     }
   }
 });

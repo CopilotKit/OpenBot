@@ -55,7 +55,8 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
   const saved =
     recording.stopped &&
     !recording.stopped.discarded &&
-    !recording.stopped.empty;
+    !recording.stopped.empty &&
+    !recording.stopped.kept;
   useEffect(() => {
     if (saved) rememberIntroduced();
   }, [saved]);
