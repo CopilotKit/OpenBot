@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useState } from "react";
 
 /** What the Install step says while it downloads OpenBot's software. */
 export const INSTALL_BLURB =
-  "This installs the full OpenBot platform on this computer: the server, your Bots and the computers they work on, and Intelligence. It's a large download the first time, so it can take a while.";
+  "This installs the full OpenBot platform on this computer: the app, the server, your Bots, and the computers they work on. It's a large download the first time, so you might want to grab a coffee or tea.";
 
 /** One image downloading now. `size` is there once the image has said how big it is. */
 export type ImagePull = { name: string; bytes: number; size?: number };

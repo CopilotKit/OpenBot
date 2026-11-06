@@ -70,7 +70,9 @@ test("item progress advances as pulls finish and disappears after the download",
 
 test("the install blurb says the full platform is installed, in two sentences at most", () => {
   expect(INSTALL_BLURB).toContain("full OpenBot platform");
-  expect(INSTALL_BLURB).toContain("Intelligence");
+  expect(INSTALL_BLURB).toContain(
+    "the app, the server, your Bots, and the computers they work on.",
+  );
   expect(INSTALL_BLURB.split(/(?<=\.)\s/).length).toBeLessThanOrEqual(2);
   expect(INSTALL_BLURB).not.toMatch(/—|agent/);
 });
