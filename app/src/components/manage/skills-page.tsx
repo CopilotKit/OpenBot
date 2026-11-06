@@ -63,8 +63,8 @@ export function SkillsPage() {
       action={newSkill("lg")}
       description={
         personal
-          ? "Write instructions your Bots follow when you type / and the skill's name. A skill only uses what a Bot can already do."
-          : "Write instructions people run by typing / and the skill's name. A skill only uses what a Bot can already do, and you choose which Bots offer it."
+          ? "Write instructions your Bots follow when you pick a skill from the / menu. A skill only uses what a Bot can already do."
+          : "Write instructions a Bot follows when someone picks a skill from the / menu. A skill only uses what a Bot can already do, and you choose which Bots offer it."
       }
       title="Skills"
     >
@@ -81,7 +81,9 @@ export function SkillsPage() {
             icon={IconFileText}
             title="No skills yet"
           >
-            Write one, then choose which Bots offer it.
+            {personal
+              ? "Write one. Your Bots offer it as soon as you save."
+              : "Write one, then choose which Bots offer it."}
           </PageEmpty>
         ) : (
           <PageRows>

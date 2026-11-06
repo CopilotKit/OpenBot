@@ -38,6 +38,11 @@ export type ProposedSkillCardProps = {
   /** The recorded answer, once there is one. Completed cards show it instead of controls. */
   result?: string;
   save: (values: SkillFormValues) => Promise<void>;
+  /**
+   * The personal edition, where a saved skill is on every Bot already (the server grants it), so
+   * there is no "Put it on a Bot" step to point at.
+   */
+  personal?: boolean;
 };
 
 export function ProposedSkillCard({
@@ -46,6 +51,7 @@ export function ProposedSkillCard({
   respond,
   result,
   save,
+  personal = false,
 }: ProposedSkillCardProps) {
   const [sending, setSending] = useState<"save" | "decline" | null>(null);
   /**
@@ -64,7 +70,7 @@ export function ProposedSkillCard({
         title={titleFor(args.slug, replaces)}
       >
         <p className="text-sm">{result}</p>
-        {args.slug && wasSaved(result) ? (
+        {args.slug && wasSaved(result) && !personal ? (
           <PutItOnABot slug={args.slug} />
         ) : null}
       </GalleryFrame>

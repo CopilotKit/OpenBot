@@ -1,8 +1,9 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { PageShell } from "@/components/layout/page-shell";
 import { SkillFields } from "@/components/skills/skill-fields";
 import { Button } from "@/components/ui/button";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
 import { emptySkillForm } from "@/lib/skills/form";
@@ -12,18 +13,25 @@ import { emptySkillForm } from "@/lib/skills/form";
  * list, as every other screen that adds something does (`new-credential-page.tsx`).
  *
  * Saving opens the skill's own page, because a skill no Bot offers does nothing yet: choosing the
- * Bots is the step that makes it work.
+ * Bots is the step that makes it work. In the personal edition every Bot already offers a new skill
+ * (the server grants it, `personal-defaults.ts`), so there the page is where to turn one off.
  */
 export function NewSkillPage() {
   const paths = useManagePaths();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
 
   return (
     <PageShell
       backButton={{ label: "Skills", linkProps: paths.skills() }}
-      description="Write an instruction people run by typing / and its command. After saving, choose which Bots offer it."
+      description={
+        personal
+          ? "Write instructions a Bot follows when you pick the skill from the / menu. Your Bots offer it as soon as you save."
+          : "Write instructions a Bot follows when someone picks the skill from the / menu. After saving, choose which Bots offer it."
+      }
       title="New skill"
     >
       <SkillFields
