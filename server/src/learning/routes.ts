@@ -12,7 +12,7 @@ import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { type AppVariables, requireAdmin } from "../auth/guards";
-import type { SkillApprovalStore } from "./approvals";
+import { recordApprovalBefore, type SkillApprovalStore } from "./approvals";
 import type { LearningAutoAssign } from "./auto-assign";
 import type { InspectorLearning, InspectorLearningRequest } from "./inspector";
 import {
@@ -22,6 +22,7 @@ import {
   readProposal,
   readProposals,
   requestFailure,
+  reviewProposal,
   runSummary,
 } from "./review";
 import { type LearningSettingsStore, parseLearningSettings } from "./settings";
@@ -515,6 +516,87 @@ export function createLearningRoutes(
       return context.json({ error: "This skill doesn't exist." }, 404);
     return context.json({ skill });
   });
+  /**
+   * Approve or reject a proposal learned from a person's recordings. On approve, OpenBot records the skill as
+   * admin-approved before Intelligence is asked, and takes that record back if Intelligence refuses.
+   */
+  for (const action of ["approve", "reject"] as const) {
+    routes.post(
+      `/people/:userId/proposals/:candidateId/${action}`,
+      async (context) => {
+        if (!sameOriginJson(context))
+          return context.json(
+            { error: "Use a same-origin JSON request to review a skill." },
+            403,
+          );
+        const { manage, people, approvals } = dependencies;
+        if (!manage || !people)
+          return context.json(
+            { error: "Reviewing skills from people is unavailable." },
+            503,
+          );
+        const candidateId = context.req.param("candidateId");
+        if (!CANDIDATE_ID.test(candidateId))
+          return context.json({ error: "Invalid skill ID." }, 400);
+        const userId = context.req.param("userId");
+        const person = (await people()).find(
+          (entry) => entry.userId === userId,
+        );
+        if (!person)
+          return context.json({ error: "This person doesn't exist." }, 404);
+        const containerId = person.containerId;
+        const actor = context.var.actor;
+        try {
+          const review = await reviewProposal({
+            manage,
+            containerId,
+            candidateId,
+            action,
+            ...(action === "approve" && approvals
+              ? { before: recordApprovalBefore(approvals, userId, "admin") }
+              : {}),
+          });
+          if (audit)
+            await recordAuditEvent(audit, {
+              eventType: "configuration.changed",
+              targetType: "learning_skill",
+              targetId: candidateId,
+              actorUserId: actor.id,
+              payload: {
+                change:
+                  action === "approve" ? "skill_approved" : "skill_rejected",
+                userId,
+                containerId,
+                title: review.title,
+                operation: review.operation,
+                by: actor.email,
+              },
+            });
+          return context.json({
+            proposal: { id: candidateId, status: review.status },
+          });
+        } catch (error) {
+          if (audit)
+            await recordAuditEvent(audit, {
+              eventType: "configuration.changed",
+              targetType: "learning_skill",
+              targetId: candidateId,
+              actorUserId: actor.id,
+              payload: {
+                change: "skill_review_failed",
+                decision: action,
+                userId,
+                containerId,
+                code: requestFailure(error).code ?? null,
+                by: actor.email,
+              },
+            });
+          const failure = learningFailure(error);
+          return context.json({ error: failure.error }, failure.status);
+        }
+      },
+    );
+  }
   /**
    * Approve (which publishes it to every Bot on the container) or reject a proposal. Intelligence
    * records the runtime key as the reviewer, so OpenBot's own audit records which admin it was.
