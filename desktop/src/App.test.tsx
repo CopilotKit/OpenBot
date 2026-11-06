@@ -34,8 +34,6 @@ const progressListeners = new Set<
 >();
 type QuitEvent = { seq: number; steps: ProgressEvent[] };
 const quitListeners = new Set<(event: { payload: QuitEvent }) => void>();
-type OpeningEvent = { state: "opening" | "opened" | "failed"; said: string };
-const openingListeners = new Set<(event: { payload: OpeningEvent }) => void>();
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
@@ -52,14 +50,9 @@ mock.module("@tauri-apps/api/event", () => ({
     if (name === "setup:progress") progressListeners.add(listener);
     const quit = listener as unknown as (event: { payload: QuitEvent }) => void;
     if (name === "quit:progress") quitListeners.add(quit);
-    const opening = listener as unknown as (event: {
-      payload: OpeningEvent;
-    }) => void;
-    if (name === "intelligence:opening") openingListeners.add(opening);
     return () => {
       progressListeners.delete(listener);
       quitListeners.delete(quit);
-      openingListeners.delete(opening);
     };
   },
 }));
@@ -80,7 +73,6 @@ afterEach(() => {
   invokeCalls = [];
   progressListeners.clear();
   quitListeners.clear();
-  openingListeners.clear();
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -830,7 +822,7 @@ function intelligenceCalls() {
   );
 }
 
-test("a first local run offers the Intelligence dashboard in the menus and opens OpenBot", async () => {
+test("a first local run offers the back end dashboard to the app page and opens OpenBot", async () => {
   setupRootConfiguration("/tmp/local-eval-view", async () =>
     emptyConfiguration(),
   );
@@ -844,7 +836,7 @@ test("a first local run offers the Intelligence dashboard in the menus and opens
   await installLocal(view);
   await chooseOpenAi(view);
   await expectHandover();
-  // The menus offer the dashboard once local mode has a recorded stack.
+  // The app page may offer the dashboard once local mode has a recorded stack.
   expect(intelligenceCalls()).toEqual([
     {
       command: "offer_local_intelligence",
@@ -1239,49 +1231,6 @@ test("Stop OpenBot and Show OpenBot say what they are doing at once", async () =
   await act(async () => stopping.resolve(null));
   await view.findByRole("heading", { name: "OpenBot is stopped" });
   expect(view.queryByText("Stopping OpenBot…")).toBeNull();
-});
-
-test("the menu's dashboard opening shows on a setup screen with a spinner, then how it went", async () => {
-  setupConnectedLocalStack(
-    "/tmp/local-eval-menu-opening",
-    localStatus("ready", "valid"),
-  );
-  const view = await renderApp();
-  await view.findByRole("heading", { name: "OpenBot is running" });
-  const emitOpening = async (payload: OpeningEvent) => {
-    await act(async () => {
-      for (const listener of openingListeners) listener({ payload });
-    });
-  };
-
-  await emitOpening({
-    state: "opening",
-    said: "Opening the back end dashboard…",
-  });
-  expectWorking(view, "Opening the back end dashboard…");
-  // The screen under it is unchanged.
-  expect(
-    view.getByRole("heading", { name: "OpenBot is running" }),
-  ).toBeTruthy();
-
-  await emitOpening({ state: "opened", said: "Opened in your browser." });
-  const opened = view
-    .getAllByRole("status")
-    .find((line) => line.textContent === "Opened in your browser.");
-  expect(opened?.querySelector(".step-spinner")).toBeNull();
-
-  await emitOpening({
-    state: "failed",
-    said: "Your browser did not open. Try again.",
-  });
-  expect(
-    view
-      .getAllByRole("status")
-      .some(
-        (line) => line.textContent === "Your browser did not open. Try again.",
-      ),
-  ).toBe(true);
-  expect(view.queryByText("Opened in your browser.")).toBeNull();
 });
 
 test("relaunch's Starting and Opening screens use the standard setup column", async () => {

@@ -39,21 +39,22 @@ import { installChromeFake } from "./support/chrome-fake";
 import { type FakeGateway, startFakeGateway } from "./support/fake-gateway";
 
 // The table's sentences, pinned here as the person reads them.
-const BUSY = "Intelligence is busy or unreachable. Retrying; nothing is lost.";
+const BUSY =
+  "OpenBot's back end is busy or unreachable. Retrying; nothing is lost.";
 const ENTITLEMENT =
-  "Intelligence could not confirm this organization's licence (entitlement_unavailable). Retrying; nothing is lost.";
+  "OpenBot's back end could not confirm this organization's licence (entitlement_unavailable). Retrying; nothing is lost.";
 const MARKETPLACE =
-  "Intelligence needs its marketplace licence before it can capture. Retrying; nothing is lost.";
+  "OpenBot's back end needs its marketplace licence before it can capture. Retrying; nothing is lost.";
 const GATEWAY_OFF =
-  "Learning capture is off: the Intelligence gateway has trajectory capture turned off.";
+  "Learning capture is off: OpenBot's back end has trajectory capture turned off.";
 const PASS_REFUSED =
-  "Learning capture is off: Intelligence refused the capture pass.";
+  "Learning capture is off: OpenBot's back end refused the capture pass.";
 const NOT_ENABLED =
-  "Learning capture is paused: Intelligence says this organization's licence does not include Product Trajectories, or that its billing is blocked.";
+  "Learning capture is paused: OpenBot's back end says this organization's licence does not include Product Trajectories, or that its billing is blocked.";
 const MESSAGES_REFUSED =
-  "Learning capture is off: Intelligence refused the recorder's messages.";
+  "Learning capture is off: OpenBot's back end refused the recorder's messages.";
 const checkOrigin = (id: string) =>
-  `Intelligence refused the connection. If it sets CHECK_ORIGIN, that list must include chrome-extension://${id}.`;
+  `OpenBot's back end refused the connection. If it sets CHECK_ORIGIN, that list must include chrome-extension://${id}.`;
 /** An id Edge Add-ons could assign the Recorder: published there, it runs under that one, not the fixed one. */
 const EDGE_ADDONS_ID = "jdnkfgmofbmnjdbcpjgbgmmlhoiopnkp";
 
@@ -429,7 +430,7 @@ const notEnabledPass = () =>
 const busyPass = () =>
   classifyGrantError(502, {
     code: "CONNECTION_FAILED",
-    message: "Could not connect to Intelligence",
+    message: "Could not connect to OpenBot's back end",
   });
 
 async function streaming(h: Harness) {
@@ -925,7 +926,7 @@ describe("streamer", () => {
       await h.start();
       await until(() => h.last().intelligence === "held", "held");
       expect(h.last().reason).toBe(
-        "Learning capture is paused: Intelligence refused to open the capture channel (join crashed).",
+        "Learning capture is paused: OpenBot's back end refused to open the capture channel (join crashed).",
       );
       expect(h.grants).toHaveLength(2);
     });
@@ -936,7 +937,7 @@ describe("streamer", () => {
       await h.start();
       await until(() => h.last().intelligence === "held", "held");
       expect(h.last().reason).toBe(
-        "Learning capture is paused: Intelligence refused to open the capture channel (something new).",
+        "Learning capture is paused: OpenBot's back end refused to open the capture channel (something new).",
       );
       expect(h.grants).toHaveLength(1);
     });
@@ -1113,7 +1114,7 @@ describe("streamer", () => {
       s.push(click(1));
       await until(() => h.last().intelligence === "held", "held");
       expect(h.last().reason).toBe(
-        "Learning capture is paused: Intelligence refused the recorder's messages (something_else).",
+        "Learning capture is paused: OpenBot's back end refused the recorder's messages (something_else).",
       );
       expect(await h.pending(h.trajectoryId)).toBe(1);
     });
@@ -1153,7 +1154,7 @@ describe("streamer", () => {
       expire();
       await until(() => h.last().intelligence === "held", "held");
       expect(h.last().reason).toBe(
-        "Learning capture is paused: Intelligence ended the capture session (session_revoked).",
+        "Learning capture is paused: OpenBot's back end ended the capture session (session_revoked).",
       );
     });
 
@@ -1177,7 +1178,7 @@ describe("streamer", () => {
       h.gateway.expire(h.trajectoryId, "session_expired");
       await until(() => h.last().intelligence === "held", "held");
       expect(h.last().reason).toBe(
-        "Learning capture is paused: Intelligence ended this person's capture sessions.",
+        "Learning capture is paused: OpenBot's back end ended this person's capture sessions.",
       );
       expect(h.grants).toHaveLength(3);
     });
@@ -1483,7 +1484,7 @@ describe("streamer", () => {
     h.passScript = [
       classifyGrantError(503, {
         code: "INTELLIGENCE_RUNTIME_REQUIRED",
-        message: "Intelligence is not configured.",
+        message: "OpenBot's back end is not configured.",
       }),
     ];
     for (let i = 0; i < 4; i++) s.push(click(i));

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type LocalReadiness, runLocalEval } from "./localEvalCli";
+import { type PartGroup, partLabel } from "./partNames";
 import { StatusLine } from "./SetupProgress";
 
 /** The Status window is the setup page at this hash, in a window of its own. */
@@ -198,9 +199,9 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
           <StatusLine>Reading OpenBot's status…</StatusLine>
         ) : (
           <>
-            <section className="status-part" aria-label="OpenBot">
+            <section className="status-part" aria-label="Your Bots">
               <div className="status-head">
-                <h2>OpenBot</h2>
+                <h2>Your Bots</h2>
                 <span className="status-state">
                   {status.openbotRunning ? "Running" : "Stopped"}
                   {openbotMemory !== null &&
@@ -208,7 +209,10 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                     ` · ${formatBytes(openbotMemory)}`}
                 </span>
               </div>
-              <PartList parts={[...status.processes, ...status.containers]} />
+              <PartList
+                group="bots"
+                parts={[...status.processes, ...status.containers]}
+              />
               {status.openbotRunning && (
                 <div className="row">
                   {/* Restart is Compose restarting the server and worker containers this session started. */}
@@ -259,7 +263,10 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                       ` · ${formatBytes(intelligenceMemory)}`}
                   </span>
                 </div>
-                <PartList parts={status.intelligenceContainers} />
+                <PartList
+                  group="back-end"
+                  parts={status.intelligenceContainers}
+                />
                 <div className="row">
                   {intelligenceRunning ? (
                     <>
@@ -366,14 +373,14 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
   );
 }
 
-/** Each container or process and its memory, small, under its part's heading. */
-function PartList({ parts }: { parts: Part[] }) {
+/** Each container or process and its memory, small, under its part's heading, by what it is for. */
+function PartList({ parts, group }: { parts: Part[]; group: PartGroup }) {
   if (parts.length === 0) return null;
   return (
     <ul className="status-list">
       {parts.map((part) => (
         <li key={part.name}>
-          <span>{part.name}</span>
+          <span>{partLabel(part.name, group)}</span>
           <span>
             {part.memoryBytes === null ? "—" : formatBytes(part.memoryBytes)}
           </span>
