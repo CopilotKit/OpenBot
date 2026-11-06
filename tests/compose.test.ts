@@ -103,6 +103,10 @@ function runLangGraphAguiModelProbe(
         "tools = ModuleType('src.tool_runtime')",
         "tools.ToolAwareAgent = LangGraphAgent",
         "tools.bind_tools = tools.execute_tools = tools.next_step = lambda *args: None",
+        "tools.billing_refusal = tools.provider_message = tools.provider_refusal = lambda *args, **kwargs: None",
+        "from types import SimpleNamespace",
+        // No run chose a model or effort, so the deployment's own configuration applies.
+        "tools.current_tools = lambda: SimpleNamespace(model='', effort='')",
         "tools.model_messages = lambda messages: messages",
         "sys.modules['src.tool_runtime'] = tools",
         "from src import main",
@@ -176,6 +180,17 @@ function runLangGraphAguiModelProbe(
     writeFileSync(
       join(dir, "langgraph", "checkpoint", "memory.py"),
       ["class MemorySaver:", "    pass", ""].join("\n"),
+    );
+    // The ChatGPT plan's model list (`chatgpt_models`) imports httpx at module level. The probe
+    // only builds a model, so a stand-in is enough, like the packages above.
+    writeFileSync(
+      join(dir, "httpx.py"),
+      [
+        "class AsyncClient:",
+        "    def __init__(self, *_args, **_kwargs):",
+        "        pass",
+        "",
+      ].join("\n"),
     );
 
     const env: NodeJS.ProcessEnv = {
