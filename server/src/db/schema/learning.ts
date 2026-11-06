@@ -97,3 +97,36 @@ export const learningOpenSkills = pgTable(
   },
   (table) => [primaryKey({ columns: [table.userId, table.skillName] })],
 );
+
+/**
+ * One row per person and Skill they or an admin approved in the person's space. No row means an admin approved it.
+ * `sharing` follows the request to open the Skill to every Bot.
+ */
+export const learningSkillApprovals = pgTable(
+  "learning_skill_approvals",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    skillName: text("skill_name").notNull(),
+    approvedBy: text("approved_by").$type<"person" | "admin">().notNull(),
+    sharing: text("sharing")
+      .$type<"none" | "requested" | "approved" | "declined">()
+      .notNull()
+      .default("none"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.skillName] }),
+    check(
+      "learning_skill_approvals_approved_by_check",
+      sql`${table.approvedBy} IN ('person', 'admin')`,
+    ),
+    check(
+      "learning_skill_approvals_sharing_check",
+      sql`${table.sharing} IN ('none', 'requested', 'approved', 'declined')`,
+    ),
+  ],
+);

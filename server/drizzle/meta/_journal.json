@@ -547,6 +547,13 @@
       "when": 1793900387181,
       "tag": "0077_channel_opening",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1793993987797,
+      "tag": "0078_learning_skill_approvals",
+      "breakpoints": true
     }
   ]
 }
