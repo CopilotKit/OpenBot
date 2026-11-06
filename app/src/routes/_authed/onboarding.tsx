@@ -271,7 +271,7 @@ function RouteComponent() {
 
   /*
    * THE WAY OUT IS THE LAST STEP'S BUTTON. On the name step, Get started saves the name first. Then
-   * completion is saved, the orb or the button plays its finish, the page fades, and the app opens.
+   * completion is saved, the kite or the button plays its finish, the page fades, and the app opens.
    * A completion that fails is said on the step, and the button can be pressed again.
    */
   const reduced = useReducedMotion() === true;

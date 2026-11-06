@@ -2,7 +2,7 @@ import type { Message } from "@ag-ui/core";
 import { IconX } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotKite } from "@/components/agents/kite/kite";
 import { Button } from "@/components/ui/button";
 import {
   Questionnaire,
@@ -219,7 +219,7 @@ export function QuestionNotice({
       aria-label={`${botName} is waiting on your answer`}
       className="flex gap-2.5 px-3 pt-2.5 pb-2"
     >
-      <BotOrb name={botName} seed={avatarSeed} size={20} />
+      <BotKite name={botName} seed={avatarSeed} size={20} state="waiting" />
       <div className="flex max-h-80 min-w-0 flex-1 flex-col gap-1 overflow-y-auto">
         <p className="text-muted-foreground text-xs">
           <span className="font-medium text-foreground">{botName}</span> is

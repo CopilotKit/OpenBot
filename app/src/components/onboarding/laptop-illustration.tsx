@@ -1,13 +1,13 @@
 import { motion, useReducedMotion } from "motion/react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import { OpenBotKite } from "@/components/agents/kite/kite";
 import { appConfig } from "@/lib/generated/application-config";
 
 /**
- * A laptop whose lid swings open, then whose screen lights up with the product: the orb the Welcome
+ * A laptop whose lid swings open, then whose screen lights up with the product: the kite the Welcome
  * slide opens on, and the product's name from the brand config, so a white-label build shows its own.
  *
  * Drawn here rather than loaded: a local install should not fetch artwork from somebody else's
- * server to say its data stays home. There is no logo file to use instead, so the orb stands in.
+ * server to say its data stays home. There is no logo file to use instead, so the kite stands in.
  *
  * The lid starts tilted back on mount and the screen fades in after it, so it plays each time the
  * slide arrives. Somebody who asks for reduced motion gets the laptop already open.
@@ -31,7 +31,7 @@ export function LaptopIllustration() {
             initial={reduceMotion ? false : { opacity: 0, filter: "blur(8px)" }}
             transition={{ delay: 1, duration: 0.6 }}
           >
-            <AgentOrb size="44px" />
+            <OpenBotKite size={44} />
             <span className="text-xs font-semibold tracking-tight">
               {appConfig.brand.productName}
             </span>

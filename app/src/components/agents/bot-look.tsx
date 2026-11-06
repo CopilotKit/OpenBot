@@ -1,11 +1,11 @@
 import { createContext, useContext } from "react";
 
-/** How a Bot is drawn: as its orb, or as the generated face. */
-export type BotLook = "orb" | "face";
+/** How a Bot is drawn: as its kite, OpenBot's mascot, or as the generated face. */
+export type BotLook = "kite" | "face";
 
 /*
  * Set once, from the active skin's `botLook` (see `_authed.tsx`), so a component asks how to draw a
- * Bot rather than which skin is on. A skin opts in to orbs by setting `botLook: "orb"`; without a
+ * Bot rather than which skin is on. A skin opts in to kites by setting `botLook: "kite"`; without a
  * provider, as in a component test, Bots are faces.
  */
 const BotLookContext = createContext<BotLook>("face");

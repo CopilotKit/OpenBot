@@ -1,6 +1,5 @@
 import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
 import {
-  IconCheck,
   IconInfoCircle,
   IconLock,
   IconPlugConnected,
@@ -10,7 +9,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { MotionConfig, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import { OpenBotKite } from "@/components/agents/kite/kite";
 import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
@@ -360,11 +359,11 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
     >
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pt-8 pb-6">
         <MotionConfig reducedMotion="user">
-          {/* Shares its layout id with the orb on the created view, so it travels there. */}
+          {/* Shares its layout id with the kite on the created view, so it travels there. */}
           <div className="flex items-center gap-3">
-            <motion.div className="w-fit" layoutId={ORB_LAYOUT_ID}>
-              <AgentOrb
-                size="40px"
+            <motion.div className="w-fit" layoutId={KITE_LAYOUT_ID}>
+              <OpenBotKite
+                size={40}
                 state={busy ? "thinking" : named ? "listening" : "idle"}
               />
             </motion.div>
@@ -519,15 +518,15 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 const CREATED_BEAT_MS = 1600;
 /** Shorter with reduced motion: nothing is moving, so the pause is only long enough to read. */
 const CREATED_BEAT_REDUCED_MS = 900;
-const ORB_LAYOUT_ID = "new-bot-orb";
+const KITE_LAYOUT_ID = "new-bot-kite";
 
 /**
  * The beat between the Bot existing and the person arriving at it.
  *
  * Without it the sheet vanished mid-press and a different page appeared, which read as the form
- * being lost rather than finished. The orb that has sat in the corner of every step travels to the
- * middle, grows, settles into its finished state with a check beside it, and the Bot is named as
- * ready. Then the caller closes the sheet and takes the person there.
+ * being lost rather than finished. The kite that has sat in the corner of every step travels to the
+ * middle, grows and lands in Done: happy eyes, one small hop and the green dot that says it is
+ * finished. Then the Bot is named as ready. Then the caller closes the sheet and takes the person there.
  *
  * It is a status, announced once, with nothing to press: closing the sheet now leaves the Bot made
  * and on the roster, which is the same place the hand-over would have led.
@@ -539,27 +538,12 @@ function CreatedView({ name }: { name: string }) {
       className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 px-6 text-center"
       role="status"
     >
-      <div className="relative">
-        <motion.div
-          layoutId={ORB_LAYOUT_ID}
-          transition={{ type: "spring", bounce: 0.25, duration: 0.7 }}
-        >
-          <AgentOrb size="88px" state="done" />
-        </motion.div>
-        <motion.span
-          animate={{ opacity: 1, scale: 1 }}
-          className="absolute -right-0.5 -bottom-0.5 flex size-7 items-center justify-center rounded-full bg-emerald-500 text-white ring-3 ring-popover"
-          initial={{ opacity: 0, scale: 0 }}
-          transition={{
-            delay: 0.45,
-            type: "spring",
-            bounce: 0.5,
-            duration: 0.5,
-          }}
-        >
-          <IconCheck aria-hidden className="size-4" stroke={3} />
-        </motion.span>
-      </div>
+      <motion.div
+        layoutId={KITE_LAYOUT_ID}
+        transition={{ type: "spring", bounce: 0.25, duration: 0.7 }}
+      >
+        <OpenBotKite enterFrom="thinking" size={88} state="done" />
+      </motion.div>
       <motion.div
         animate={{ opacity: 1, y: 0 }}
         initial={{ opacity: 0, y: 8 }}

@@ -242,9 +242,9 @@ test("in the personal edition the menu opens OpenBot for Business instead of Adm
   const entry = within(menu).getByRole("menuitem", {
     name: "OpenBot for Business",
   });
-  // As wide as the links beside it, and marked with OpenBot's own logo.
+  // As wide as the links beside it, and marked with OpenBot's own kite.
   expect(entry.className).toContain("w-full");
-  expect(entry.querySelector("svg image")).toBeTruthy();
+  expect(entry.querySelector("svg polygon")).toBeTruthy();
   await user.click(entry);
   const dialog = await view.findByRole("dialog");
   expect(

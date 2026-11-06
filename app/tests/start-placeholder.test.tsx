@@ -126,7 +126,7 @@ function renderAt(path: string, { home = false } = {}) {
   });
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <BotLookProvider value="orb">
+      <BotLookProvider value="kite">
         <RouterProvider router={router} />
       </BotLookProvider>
     </QueryClientProvider>,

@@ -8,7 +8,7 @@ import { deploymentKeys } from "@/lib/deployment/queries";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * The top of a conversation with one Bot: its orb, its name, what it does, and who can see it.
+ * The top of a conversation with one Bot: its kite, its name, what it does, and who can see it.
  * Drawn from the Bot's profile the conversation already has.
  */
 
@@ -54,11 +54,17 @@ test("a Bot with no role shows its title alone", () => {
   view.getByText("Finance Operations");
 });
 
-test("the orb is the large one, named once", () => {
+test("the kite is the large one, named once, and rests between turns", () => {
   const view = draw(<ConversationIntro agent={expenseReview} />);
-  const orb = view.getByRole("img");
-  expect(orb.getAttribute("aria-label")).toBe("Expense Review");
-  expect(orb.dataset.variant).toBe("live");
+  const kite = view.getByRole("img");
+  expect(kite.getAttribute("aria-label")).toBe("Expense Review");
+  expect(kite.style.width).toBe("96px");
+  expect(kite.dataset.state).toBe("idle");
+});
+
+test("the kite works while the Bot has the turn", () => {
+  const view = draw(<ConversationIntro agent={expenseReview} busy />);
+  expect(view.getByRole("img").dataset.state).toBe("thinking");
 });
 
 test("a paragraph-long role is held to two lines, with the whole text on hover", () => {

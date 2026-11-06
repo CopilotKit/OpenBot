@@ -12,7 +12,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import { OpenBotKite } from "@/components/agents/kite/kite";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
@@ -174,7 +174,8 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
                       size={52}
                     />
                   ) : (
-                    <AgentOrb size="100%" />
+                    // Drawn at its widest and scaled to the slot, which is narrower on a phone.
+                    <OpenBotKite className="size-full!" size={52} />
                   )}
                 </span>
                 <span className="flex max-w-full items-center gap-1 font-semibold text-[16px] text-foreground tracking-[-0.4px]">

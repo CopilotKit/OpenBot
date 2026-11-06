@@ -24,7 +24,7 @@ const COLUMN_WIDTH = {
  * OpenDuet's frame around every OpenBot page.
  *
  * Chat and Tasks are one column the width of a phone, centred on a wide screen, with the header
- * floating at the top (the menu, the orb and the person's initial) and the frosted tab bar at the
+ * floating at the top (the menu, the kite and the person's initial) and the frosted tab bar at the
  * foot. When a conversation opens its Bot's details or computer, the column grows by OpenBot's own
  * 400px pane, so the computer sits beside the conversation as it does in OpenBot. Every other page
  * opens over the app with a back disc and keeps OpenBot's own width, so a Bot's page or Admin is as

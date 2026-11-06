@@ -8,7 +8,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotKite } from "@/components/agents/kite/kite";
 import {
   answerMessage,
   QuestionNotice,
@@ -1221,7 +1221,12 @@ export function ChannelChat({
             channelId={channel.id}
             intro={
               /* From the roster this screen already reads; nothing while it loads. */
-              botProfile ? <ConversationIntro agent={botProfile} /> : undefined
+              botProfile ? (
+                <ConversationIntro
+                  agent={botProfile}
+                  busy={agent.isRunning || turnsInFlight > 0}
+                />
+              ) : undefined
             }
             /*
              * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
@@ -1390,7 +1395,14 @@ export function ChannelChat({
                   {readingAnswer ? (
                     <ProgressRow
                       label={`${botName} is reading your answer…`}
-                      media={<BotOrb name={botName} seed={botSeed} size={20} />}
+                      media={
+                        <BotKite
+                          name={botName}
+                          seed={botSeed}
+                          size={20}
+                          state="thinking"
+                        />
+                      }
                     />
                   ) : null}
                   <ChannelWorkRows
