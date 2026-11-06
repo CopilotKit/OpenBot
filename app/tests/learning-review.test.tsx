@@ -9,6 +9,7 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type {
   LearningProposal,
+  LearningProposalDetail,
   PersonalReview,
 } from "@openbot/shared/learning";
 import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
@@ -29,6 +30,7 @@ afterAll(() => {
 
 const originalFetch = global.fetch;
 let review: PersonalReview | null;
+let insights: LearningProposalDetail["insights"] = [];
 const posts: string[] = [];
 
 const proposal = (
@@ -70,6 +72,7 @@ beforeEach(() => {
   queryClient.clear();
   posts.length = 0;
   review = body(false);
+  insights = [];
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(path);
@@ -84,7 +87,7 @@ beforeEach(() => {
           proposal: {
             ...proposal(detail[1] ?? "", "refund-order", "add"),
             files: [{ path: "SKILL.md", content: "Look up the order." }],
-            insights: [],
+            insights,
           },
         });
       if (method === "POST") {
@@ -235,4 +238,28 @@ test("with admins approving, there is no Learn now", async () => {
   await view.findByText("Waiting for an admin");
   expect(view.queryByRole("button", { name: "Learn now" })).toBeNull();
   expect(view.queryByText(/Latest run/)).toBeNull();
+});
+
+test("evidence names the recording by its title", async () => {
+  const recording = (id: string, title: string | null) => ({
+    kind: "recording" as const,
+    id,
+    title,
+    available: true,
+    eventCount: 2,
+    events: ["Open the order", "Click Refund"],
+  });
+  insights = [
+    {
+      id: "i1",
+      statement: "Refunds start from the order page.",
+      impact: "Faster refunds.",
+      evidence: [recording("r1", "Refund an order"), recording("r2", null)],
+    },
+  ];
+  const view = draw();
+  fireEvent.click(await view.findByText("refund-order"));
+  expect(await view.findByText("Refund an order")).toBeTruthy();
+  expect(view.getByText("A recording")).toBeTruthy();
+  expect(view.getAllByText("Open the order, Click Refund")).toHaveLength(2);
 });

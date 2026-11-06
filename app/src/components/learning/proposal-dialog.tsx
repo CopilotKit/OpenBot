@@ -54,9 +54,15 @@ function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
               ))}
             </>
           ) : (
-            <p>
-              {`A recording${entry.available ? "" : " (no longer available)"}: ${entry.events.join(", ") || `${entry.eventCount} steps`}`}
-            </p>
+            <>
+              <p className="font-medium">
+                {entry.title ?? "A recording"}
+                {entry.available ? "" : " (no longer available)"}
+              </p>
+              <p className="text-pretty">
+                {entry.events.join(", ") || `${entry.eventCount} steps`}
+              </p>
+            </>
           )}
         </li>
       ))}
