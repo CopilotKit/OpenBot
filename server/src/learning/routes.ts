@@ -6,6 +6,7 @@ import type {
   LearningOverview,
   LearningProposal,
   LearningProposalDetail,
+  LearningRunSummary,
   LearningTarget,
 } from "@openbot/shared/learning";
 import { type Context, Hono, type MiddlewareHandler } from "hono";
@@ -215,6 +216,22 @@ type CandidateDetail = Awaited<
 type Evidence = Awaited<
   ReturnType<LearningManagement["getLearningInsightEvidence"]>
 >[number];
+
+type Run = Awaited<ReturnType<LearningManagement["listLearningRuns"]>>[number];
+
+function runSummary(run: Run): LearningRunSummary {
+  return {
+    id: run.id,
+    status: run.status,
+    trigger: run.triggerSource,
+    proposals: run.candidateCount,
+    insights: run.insightCount,
+    failureCode: run.failureCode,
+    createdAt: run.createdAt,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+  };
+}
 
 function proposal(candidate: Candidate): LearningProposal {
   return {
@@ -586,6 +603,26 @@ export function createLearningRoutes(
       }
     });
   }
+  /** The container's analysis runs, in the order Intelligence lists them. */
+  routes.get("/runs", async (context) => {
+    const manage = dependencies.manage;
+    if (!manage)
+      return context.json(
+        { error: "Reviewing Learning here is unavailable." },
+        503,
+      );
+    const scope = await targetFor(context);
+    if (!scope.ok) return context.json({ error: "Invalid Bot ID." }, 400);
+    if (!scope.target) return context.json({ containerId: null, runs: [] });
+    const containerId = scope.target.containerId;
+    try {
+      const runs = await manage.listLearningRuns({ containerId });
+      return context.json({ containerId, runs: runs.map(runSummary) });
+    } catch (error) {
+      const failure = learningFailure(error);
+      return context.json({ error: failure.error }, failure.status);
+    }
+  });
   /** Learn now: start a Learning run on the container over every finished conversation not yet used. */
   routes.post("/runs", async (context) => {
     if (!sameOriginJson(context))

@@ -283,6 +283,25 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
       agents: {},
     });
 
+  test("an admin lists the container's analysis runs", async () => {
+    const { app, store } = admin();
+    await useDefault(store);
+    const response = await app.request("/runs");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      containerId: string;
+      runs: unknown[];
+    };
+    expect(body.containerId).toBe("openbot");
+    expect(body.runs[0]).toMatchObject({
+      status: "succeeded",
+      trigger: expect.any(String),
+    });
+    expect((await admin("current", "user").app.request("/runs")).status).toBe(
+      403,
+    );
+  });
+
   test("only an admin may list, read, approve, reject or start Learning", async () => {
     const { app, intelligence } = admin("current", "user");
     for (const response of [
