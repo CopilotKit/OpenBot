@@ -19,6 +19,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse, parseAllDocuments } from "yaml";
+import {
+  dependencyKeys,
+  underDependency,
+  withoutChartDefault,
+} from "./chart-reuse-values";
 
 const [valuesFile, ...rest] = process.argv.slice(2);
 if (!valuesFile) {
@@ -115,13 +120,16 @@ if (added.length === 0) {
 }
 
 /** Render, and say what came out. */
-function render(extra: string[]): { ok: boolean; out: string; err: string } {
+function render(
+  extra: string[],
+  chart = "charts/openbot",
+): { ok: boolean; out: string; err: string } {
   const result = Bun.spawnSync(
     [
       "helm",
       "template",
       "ci",
-      "charts/openbot",
+      chart,
       "--values",
       valuesFile,
       "--set-string",
@@ -202,9 +210,21 @@ const refusedWhenAbsent: Record<string, string> = {
   intelligence: "this release's values have no `intelligence` key",
 };
 
+/*
+ * A key under a dependency's block is taken out of a copy of values.yaml rather than nulled, so the
+ * dependency's own default stays beneath it, as it does on an upgrade (chart-reuse-values.ts).
+ */
+const dependencies = dependencyKeys(
+  await Bun.file("charts/openbot/Chart.yaml").text(),
+);
+
 let bad = 0;
 for (const path of added) {
-  const attempt = render(["--set", `${path}=null`]);
+  const attempt = underDependency(path, dependencies)
+    ? await withoutChartDefault("charts/openbot", path, (copy) =>
+        render([], copy),
+      )
+    : render(["--set", `${path}=null`]);
   const refusal = refusedWhenAbsent[path];
   if (refusal !== undefined) {
     if (attempt.ok || !attempt.err.includes(refusal)) {

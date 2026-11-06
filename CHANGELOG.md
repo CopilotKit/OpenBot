@@ -19,7 +19,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   bundled one does on an upgrade that changes its image. The Learning agent reads its model key from
   a mounted file before every run, so a new `secrets.modelApiKey` reaches it on its next run after
   `helm upgrade`, without a restart. The skills Learning proposes have descriptions that read
-  correctly. Nothing in this chart's values changes.
+  correctly.
+- The Job that installs Learning's queue in the bundled Intelligence waits up to 15 minutes for
+  Intelligence's PostgreSQL, up from Intelligence's own 5
+  (`intelligence.learning.queue.migration.activeDeadlineSeconds: 900`). An upgrade that moves the
+  bundled Intelligence replaces that database's pod, and on 5 minutes an in-place upgrade from rc.5
+  stopped with `UPGRADE FAILED` and the Job `DeadlineExceeded` while the database came back.
+  `--reuse-values` drops this chart's defaults, so an upgrade run with it keeps the 5 minutes: pass
+  the value, or drop the flag. The chart README's upgrade section says what to do when the Job runs
+  out of time, and why to give your values again rather than `--reuse-values` after a failed
+  revision.
 - OpenBot runs on CopilotKit 1.84.2-canary.openbot-intel-fixes (`@copilotkit/runtime`,
   `react-core` and `shared`, from 1.83.0, and `@copilotkit/learning`, from a patched 0.0.1). AG-UI
   stays 1.0.2. A run keeps its conversation until its last events reach Intelligence, so a failed
