@@ -657,15 +657,17 @@ fn current(root: &Path) -> Result<Value, String> {
 /// Explicit adoption uses the installed pin and independently configured publisher, then compares
 /// every managed source leaf with the checksum-verified archive. It never rewrites source.
 pub fn establish_baseline(root: &Path) -> Result<Value, String> {
+    establish_baseline_with(root, &deployment::get)
+}
+/// [`establish_baseline`], downloading through `get`.
+pub fn establish_baseline_with(root: &Path, get: deployment::Download) -> Result<Value, String> {
     require_no_interruption(root)?;
     let installed=deployment::installed(root).ok_or("No installed release pin exists. Restore the original installation record before establishing a baseline.")?;
     let policy = distribution(root)?;
-    let manifest = read_candidate(&policy, &installed.version)?;
-    let archive = deployment::get(
-        manifest["artifacts"]["source"]["url"]
-            .as_str()
-            .ok_or("missing source URL")?,
-    )?;
+    let manifest = read_candidate_with(&policy, &installed.version, get)?;
+    let archive = get(manifest["artifacts"]["source"]["url"]
+        .as_str()
+        .ok_or("missing source URL")?)?;
     establish_baseline_bytes(root, &manifest, &policy, &archive)
 }
 fn establish_baseline_bytes(
@@ -790,7 +792,14 @@ pub fn check(root: &Path, version: &str) -> Result<Value, String> {
     Ok(plan(&current, &candidate, &policy, "extended"))
 }
 fn read_candidate(policy: &Distribution, version: &str) -> Result<Value, String> {
-    let candidate = parse_manifest(&deployment::get(&manifest_url(policy, version)?)?)?;
+    read_candidate_with(policy, version, &deployment::get)
+}
+fn read_candidate_with(
+    policy: &Distribution,
+    version: &str,
+    get: deployment::Download,
+) -> Result<Value, String> {
+    let candidate = parse_manifest(&get(&manifest_url(policy, version)?)?)?;
     if candidate["version"] != version {
         return Err("candidate version does not match requested tag".into());
     }
@@ -840,14 +849,16 @@ fn unpack_safe(destination: &Path, body: &[u8]) -> Result<(), String> {
 }
 
 pub fn stage(root: &Path, version: &str) -> Result<Value, String> {
+    stage_with(root, version, &deployment::get)
+}
+/// [`stage`], downloading through `get`.
+pub fn stage_with(root: &Path, version: &str, get: deployment::Download) -> Result<Value, String> {
     require_no_interruption(root)?;
     let policy = distribution(root)?;
-    let candidate = read_candidate(&policy, version)?;
-    let archive = deployment::get(
-        candidate["artifacts"]["source"]["url"]
-            .as_str()
-            .ok_or("missing source URL")?,
-    )?;
+    let candidate = read_candidate_with(&policy, version, get)?;
+    let archive = get(candidate["artifacts"]["source"]["url"]
+        .as_str()
+        .ok_or("missing source URL")?)?;
     stage_bytes(root, &candidate, &policy, &archive)
 }
 fn stage_bytes(
@@ -942,13 +953,21 @@ pub fn accepted_database_identity(root: &Path) -> Result<String, String> {
 pub fn staged_manifest(root: &Path) -> Result<Value, String> {
     read_manifest(&stage_path(root)?.join(STAGED))
 }
+/// The release's all-in-one image, for running OpenBot as one container. Desktop runs its services
+/// from their own images and never this one, and v0.3.0 published it for amd64 only, so staging it
+/// on an Apple silicon Mac failed with "no matching manifest for linux/arm64/v8".
+const ALL_IN_ONE: &str = "openbot";
+
+/// Every image a desktop installation of the candidate may run, which staging pulls and apply
+/// requires.
 pub fn candidate_images(candidate: &Value) -> Result<Vec<String>, String> {
     let images = candidate["artifacts"]["images"]
         .as_object()
         .ok_or("missing candidate images")?;
     Ok(images
-        .values()
-        .map(|image| image["reference"].as_str().unwrap_or("").into())
+        .iter()
+        .filter(|(name, _)| name.as_str() != ALL_IN_ONE)
+        .map(|(_, image)| image["reference"].as_str().unwrap_or("").into())
         .collect())
 }
 pub fn mark_images_staged(root: &Path, engine: crate::engine::Engine) -> Result<(), String> {

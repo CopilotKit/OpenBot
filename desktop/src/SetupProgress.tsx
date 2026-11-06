@@ -242,6 +242,10 @@ function label(step: string): string {
       return "Engine answering";
     case "deployment":
       return "Deployment";
+    case "release":
+      return "OpenBot update";
+    case "update-images":
+      return "Update software";
     case "env":
       return "Settings";
     case "ports":
