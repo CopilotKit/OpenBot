@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { inArray } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { recorderTrajectoryBindings } from "../src/db/schema/recorder";
@@ -12,6 +12,7 @@ const store = createTrajectoryBindingStore(database);
 const prefix = `trajectory-bindings-${randomUUID()}`;
 const person = `${prefix}-person`;
 const other = `${prefix}-other`;
+const micro = `${prefix}-micro`;
 
 /** Oldest first; all within one second so the paging has to use the milliseconds. */
 const mine = Array.from({ length: 5 }, (_, index) => ({
@@ -30,11 +31,12 @@ beforeAll(async () => {
   await database.insert(users).values([
     { id: person, email: `${person}@example.test`, name: "Person" },
     { id: other, email: `${other}@example.test`, name: "Other" },
+    { id: micro, email: `${micro}@example.test`, name: "Micro" },
   ]);
   await database.insert(recorderTrajectoryBindings).values([...mine, theirs]);
 });
 afterAll(async () => {
-  await database.delete(users).where(inArray(users.id, [person, other]));
+  await database.delete(users).where(inArray(users.id, [person, other, micro]));
   await database.$client.close();
 });
 
@@ -78,5 +80,28 @@ describe("pageForUser", () => {
     await expect(store.pageForUser(person, noId)).rejects.toThrow(
       "Invalid cursor",
     );
+  });
+
+  test("rows written within one millisecond are neither skipped nor repeated", async () => {
+    const ids = [randomUUID(), randomUUID(), randomUUID()];
+    await database.insert(recorderTrajectoryBindings).values(
+      ids.map((trajectoryId, index) => ({
+        trajectoryId,
+        userId: micro,
+        createdAt: sql`${`2026-01-02 12:00:00.000${index + 1}00+00`}::timestamptz`,
+      })),
+    );
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const page = await store.pageForUser(micro, cursor, 1);
+      seen.push(...page.ids.map((row) => row.trajectoryId));
+      cursor = page.nextCursor;
+      pages += 1;
+    } while (cursor !== null);
+    expect(pages).toBe(3);
+    expect(new Set(seen).size).toBe(3);
+    expect(seen).toEqual([...ids].sort().reverse());
   });
 });
