@@ -2856,6 +2856,8 @@ fn quit_cleanup<P>(shell: &Shell, progress: P) -> Stopped
 where
     P: FnMut(QuitStep, QuitStepState),
 {
+    // A ChatGPT sign-in left waiting would keep its container, and the callback port, after Quit.
+    openbot_desktop_lib::plan::release_chatgpt_callback_port();
     exit_cleanup_reporting(
         shell,
         &stack::default_root(),
@@ -5109,6 +5111,29 @@ async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String>
         .map_err(|error| format!("The sign-in did not finish: {error}"))?
 }
 
+/**
+Stop a ChatGPT sign-in the person has left: another provider, Back, Escape.
+
+Whoever is waiting in `finish_chatgpt_sign_in` gets an error, which the screen it came from has
+already stopped listening for. The browser tab gets OpenBot's page saying the sign-in ended.
+*/
+#[tauri::command]
+async fn cancel_chatgpt_sign_in(app: tauri::AppHandle) -> Result<(), String> {
+    // Started but not yet waited on: dropping it removes its container.
+    let held = app
+        .state::<Shell>()
+        .signing_in_to_chatgpt
+        .lock()
+        .unwrap()
+        .take();
+    tauri::async_runtime::spawn_blocking(move || {
+        drop(held);
+        openbot_desktop_lib::plan::cancel_chatgpt_sign_in();
+    })
+    .await
+    .map_err(|error| format!("The sign-in did not stop: {error}"))
+}
+
 /// The model screen's rows. Independent of the Bot, and required to stay that way: no harness is
 /// tied to a vendor's models, so the Bot may not narrow this.
 #[tauri::command]
@@ -7132,6 +7157,7 @@ fn main() {
             finish_model_oauth,
             cancel_model_oauth,
             finish_chatgpt_sign_in,
+            cancel_chatgpt_sign_in,
             run_local_eval,
             list_local_eval,
             cancel_local_eval,
