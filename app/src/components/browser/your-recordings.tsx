@@ -55,7 +55,7 @@ export function YourRecordings() {
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty>
-          No recordings yet. Record a task with the OpenBot extension to see it
+          No recordings yet. Record a task with the OpenBot Recorder to see it
           here.
         </PageEmpty>
       ) : (
