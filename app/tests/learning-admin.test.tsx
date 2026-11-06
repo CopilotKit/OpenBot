@@ -278,6 +278,14 @@ describe("reviewing proposed skills", () => {
     createdAt: "2026-11-04T12:00:00.000Z",
     reviewedAt: null,
   };
+  const PERSON = "user-dana";
+  const PERSON_PROPOSAL = "0198a012-a20f-77c0-9e33-8992f18e74d2";
+  const personPending: LearningProposal = {
+    ...pending,
+    id: PERSON_PROPOSAL,
+    title: "Quote follow-up",
+    description: "Send a follow-up after a quote goes quiet.",
+  };
   const detail: LearningProposalDetail = {
     ...pending,
     files: [
@@ -336,6 +344,7 @@ describe("reviewing proposed skills", () => {
 
   function intelligence(overview: LearningOverview = noDashboard) {
     let status: LearningProposal["status"] = "pending_review";
+    let personStatus: LearningProposal["status"] = "pending_review";
     const posts: string[] = [];
     global.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -351,6 +360,37 @@ describe("reviewing proposed skills", () => {
             automatic: { state: "saved" },
           });
         if (path.includes("/api/agents")) return Response.json({ agents: [] });
+        if (path === "/api/admin/learning/people/proposals")
+          return Response.json({
+            people: [
+              {
+                userId: PERSON,
+                name: "Dana Reyes",
+                proposals: [{ ...personPending, status: personStatus }],
+              },
+              { userId: "user-unreadable", name: "Sam Ortiz", proposals: null },
+            ],
+          });
+        if (
+          path ===
+          `/api/admin/learning/people/${PERSON}/proposals/${PERSON_PROPOSAL}/approve`
+        ) {
+          personStatus = "approved";
+          return Response.json({
+            proposal: { id: PERSON_PROPOSAL, status: personStatus },
+          });
+        }
+        if (
+          path ===
+          `/api/admin/learning/people/${PERSON}/proposals/${PERSON_PROPOSAL}`
+        )
+          return Response.json({
+            proposal: {
+              ...detail,
+              ...personPending,
+              status: personStatus,
+            },
+          });
         if (path.startsWith("/api/admin/learning/overview"))
           return Response.json({ overview });
         if (path === `/api/admin/learning/proposals/${PROPOSAL}/approve`) {
@@ -424,6 +464,48 @@ describe("reviewing proposed skills", () => {
         view.getByRole("button", { name: /Refund triage/ }).textContent,
       ).toContain("Published"),
     );
+  });
+
+  test("an admin approves a person's proposal", async () => {
+    const posts = intelligence();
+    const view = shared();
+    const row = await view.findByRole("button", { name: /Quote follow-up/ });
+    expect(row.textContent).toContain("Dana Reyes");
+    await view.findByText("Couldn't read Sam Ortiz's skills.", {
+      exact: false,
+    });
+    fireEvent.click(row);
+    await view.findByText("Read the order date from the conversation.");
+    fireEvent.click(view.getByRole("button", { name: "Approve and publish" }));
+    await view.findByText("Their Bots use it from their next conversation.", {
+      exact: false,
+    });
+    expect(posts).toEqual([
+      `/api/admin/learning/people/${PERSON}/proposals/${PERSON_PROPOSAL}/approve`,
+    ]);
+  });
+
+  test("people's proposals are not listed once each person approves their own", async () => {
+    intelligence();
+    const base = global.fetch;
+    global.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).endsWith("/settings")
+          ? Response.json({
+              settings: {
+                enabled: true,
+                defaultTarget: { containerId: "openbot" },
+                agents: {},
+                personalReview: "people",
+              },
+              automatic: { state: "saved" },
+            })
+          : base(input, init),
+      { preconnect: originalFetch.preconnect },
+    );
+    const view = shared();
+    await view.findByRole("button", { name: /Refund triage/ });
+    expect(view.queryByRole("button", { name: /Quote follow-up/ })).toBeNull();
   });
 
   test("Who approves opens a dialog and saves people", async () => {
