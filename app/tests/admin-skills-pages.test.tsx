@@ -175,7 +175,14 @@ describe("the Skills list", () => {
     const { view } = renderAt("/admin/skills");
     const row = (await view.findByText("Triage the inbox")).closest("a");
     expect(row?.getAttribute("href")).toBe("/admin/skills/triage");
-    expect(within(row as HTMLElement).getByText("/triage")).toBeTruthy();
+    expect(
+      within(row as HTMLElement).getByText(
+        "Sorts new mail by what needs an answer",
+      ),
+    ).toBeTruthy();
+    // The command is the skill's key, not something to read, and the row has no icon.
+    expect(row?.textContent).not.toContain("/triage");
+    expect(row?.querySelector("svg.tabler-icon-file-text")).toBeNull();
     expect(within(row as HTMLElement).getByText("1 of 2 Bots")).toBeTruthy();
     // No chip per Bot and no Remove on the row: those are on the skill's page.
     expect(view.queryByRole("button", { name: "Ada" })).toBeNull();
@@ -277,7 +284,7 @@ describe("a skill's page", () => {
   test("each Bot's switch offers or withdraws the skill at once", async () => {
     const { view } = renderAt("/admin/skills/triage");
     const grace = await view.findByRole("switch", {
-      name: "Grace offers /triage",
+      name: "Grace offers Triage the inbox",
     });
     fireEvent.click(grace);
     await waitFor(() => expect(writes).toHaveLength(1));
@@ -286,7 +293,9 @@ describe("a skill's page", () => {
       path: "/api/plugins/grants",
       body: { kind: "skill", ref: "triage", agentId: "bot-grace" },
     });
-    fireEvent.click(view.getByRole("switch", { name: "Ada offers /triage" }));
+    fireEvent.click(
+      view.getByRole("switch", { name: "Ada offers Triage the inbox" }),
+    );
     await waitFor(() => expect(writes).toHaveLength(2));
     expect(writes[1]?.method).toBe("DELETE");
     expect(writes[1]?.path).toBe(
@@ -300,7 +309,7 @@ describe("a skill's page", () => {
     await user.click(await view.findByRole("button", { name: "Delete skill" }));
     expect(writes).toEqual([]);
     const dialog = await view.findByRole("dialog");
-    expect(within(dialog).getByText("Delete /triage?")).toBeTruthy();
+    expect(within(dialog).getByText("Delete Triage the inbox?")).toBeTruthy();
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/admin/skills"),

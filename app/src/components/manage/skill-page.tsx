@@ -83,7 +83,7 @@ export function SkillPage({ slug }: { slug: string }) {
   /* A list that could not be read is not a missing skill: `isPending` goes false on a failure too. */
   if (!plugins.data) {
     return (
-      <PageShell backButton={back} title={`/${slug}`}>
+      <PageShell backButton={back} title="Skill">
         <p className="text-destructive text-sm" role="alert">
           Couldn't load this skill. Reload the page.
         </p>
@@ -93,7 +93,7 @@ export function SkillPage({ slug }: { slug: string }) {
 
   if (!skill) {
     return (
-      <PageShell backButton={back} title={`/${slug}`}>
+      <PageShell backButton={back} title="Skill">
         <PageEmpty icon={IconFileOff} title="Skill not found">
           It may have been deleted. Go back to Skills to see the ones there are.
         </PageEmpty>
@@ -110,14 +110,7 @@ export function SkillPage({ slug }: { slug: string }) {
   return (
     <PageShell
       backButton={back}
-      description={
-        <>
-          <code className="font-mono text-foreground/80 text-xs">
-            /{skill.slug}
-          </code>
-          {skill.summary ? ` · ${skill.summary}` : null}
-        </>
-      }
+      {...(skill.summary ? { description: skill.summary } : {})}
       title={skill.title}
     >
       {error ? (
@@ -129,8 +122,8 @@ export function SkillPage({ slug }: { slug: string }) {
       <PageSection
         description={
           <>
-            Bots with their switch on offer <code>/{skill.slug}</code> when
-            someone types <code>/</code>. It takes effect at once.
+            Bots with their switch on offer {skill.title} when someone types{" "}
+            <code>/</code>. It takes effect at once.
           </>
         }
         title="Bots"
@@ -162,7 +155,7 @@ export function SkillPage({ slug }: { slug: string }) {
                        * not freeze the rest of the list.
                        */}
                       <Switch
-                        aria-label={`${bot.name} offers /${skill.slug}`}
+                        aria-label={`${bot.name} offers ${skill.title}`}
                         checked={held}
                         disabled={
                           setGrant.isPending &&
@@ -226,7 +219,7 @@ export function SkillPage({ slug }: { slug: string }) {
       <Dialog onOpenChange={setRemoving} open={removing}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete /{skill.slug}?</DialogTitle>
+            <DialogTitle>Delete {skill.title}?</DialogTitle>
             <DialogDescription>
               People can't run it any more, and no Bot offers it. You can't undo
               this.

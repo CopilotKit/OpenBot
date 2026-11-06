@@ -14,7 +14,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
@@ -106,21 +105,15 @@ export function SkillsPage() {
                     render={<Link {...paths.skill(skill.slug)} />}
                     size="sm"
                   >
-                    <ItemMedia variant="icon">
-                      <IconFileText />
-                    </ItemMedia>
                     <ItemContent>
                       <ItemTitle>{skill.title}</ItemTitle>
                       {/*
-                       * The command first: it is what a person types. The interpunct only appears
-                       * when there is a summary to separate it from.
+                       * The name and what it is for. Not the command: the `/` menu finds a skill by
+                       * its name, so the command is the skill's key rather than something to read.
                        */}
-                      <ItemDescription>
-                        <code className="font-mono text-foreground/80 text-xs">
-                          /{skill.slug}
-                        </code>
-                        {skill.summary ? ` · ${skill.summary}` : null}
-                      </ItemDescription>
+                      {skill.summary ? (
+                        <ItemDescription>{skill.summary}</ItemDescription>
+                      ) : null}
                     </ItemContent>
                     <ItemActions>
                       <span className="text-muted-foreground text-xs">
