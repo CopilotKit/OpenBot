@@ -219,11 +219,18 @@ export function createPersonalLearningRoutes(
       return context.json({ error: "Name a Skill to ask to share." }, 400);
     }
     const userId = context.var.actor.id;
+    const row = await deps.approvals.get(userId, name);
+    if (
+      row?.approvedBy === "person" &&
+      (row.sharing === "approved" || row.sharing === "requested")
+    ) {
+      return context.json({ name, sharing: row.sharing });
+    }
     if (!(await deps.approvals.requestSharing(userId, name))) {
       return context.json(
         {
           error:
-            "Only a Skill you approved yourself is shared this way. An admin already approved this one.",
+            "Only a Skill you approved yourself needs an admin to share it. Share any other Skill with its Open switch.",
         },
         409,
       );

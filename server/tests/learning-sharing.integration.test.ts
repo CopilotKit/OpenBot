@@ -429,6 +429,7 @@ describe("Settings, Learning", () => {
   test("asking to share a skill puts it in the admin's requests", async () => {
     await approvals.recordApproval(ada, "ada-only", "person");
     await approvals.recordApproval(ada, "ada-admin", "admin");
+    const before = audits.length;
     try {
       const asked = await call(
         "/api/settings/learning/skills/ada-only/share-request",
@@ -459,8 +460,35 @@ describe("Settings, Learning", () => {
         { method: "POST" },
       );
       expect(refused.status).toBe(409);
+      const requestedAudits = () =>
+        audits.filter((e) => e.eventType === "learning.sharing_requested")
+          .length;
+      const count = requestedAudits();
+      const again = await call(
+        "/api/settings/learning/skills/ada-only/share-request",
+        "ada",
+        { method: "POST" },
+      );
+      expect(await again.json()).toEqual({
+        name: "ada-only",
+        sharing: "requested",
+      });
+      expect(requestedAudits()).toBe(count);
+      await approvals.decideSharing(ada, "ada-only", "approved");
+      const repeat = await call(
+        "/api/settings/learning/skills/ada-only/share-request",
+        "ada",
+        { method: "POST" },
+      );
+      expect(repeat.status).toBe(200);
+      expect(await repeat.json()).toEqual({
+        name: "ada-only",
+        sharing: "approved",
+      });
+      expect((await approvals.get(ada, "ada-only"))?.sharing).toBe("approved");
+      expect(requestedAudits()).toBe(count);
     } finally {
-      audits.length = 0;
+      audits.length = before;
       await database
         .delete(learningSkillApprovals)
         .where(eq(learningSkillApprovals.userId, ada));
