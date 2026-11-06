@@ -188,6 +188,7 @@ import {
 } from "./intelligence-client";
 import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
 import { createSkillApprovalStore } from "./learning/approvals";
+import { createAutoApprover } from "./learning/auto-approve";
 import {
   createLearningAutoAssign,
   probeLearningContainer,
@@ -1536,6 +1537,42 @@ const recorderExpirySweep = repeatAfterEach(async () => {
     );
   }
 }, 60_000);
+/*
+ * The personal edition has one reviewer, who is DEV_ACTOR (it requires single-user mode, which admits every request as
+ * DEV_ACTOR), so what its Bots learn is approved for them every 15 minutes while automatic approval is on.
+ */
+const autoApprover = createAutoApprover({
+  manage: learningProbeIntelligence.experimental.learning,
+  enabled: async () =>
+    currentEdition() === "personal" &&
+    ((await learningSettings.read()).autoApprove ?? true),
+  sources: async () =>
+    learningScopes({
+      edition: "personal",
+      userId: DEV_ACTOR.id,
+      settings: await learningSettings.read(),
+    }),
+  approvals: skillApprovalStore,
+  userId: DEV_ACTOR.id,
+  audit: bootAuditStore,
+});
+const autoApproveTimer =
+  currentEdition() === "personal"
+    ? setInterval(
+        () =>
+          void autoApprover.sweep().catch((error) =>
+            console.error(
+              JSON.stringify({
+                type: "learning-auto-approve-sweep-error",
+                error: error instanceof Error ? error.name : "UnknownError",
+                timestamp: new Date().toISOString(),
+              }),
+            ),
+          ),
+        15 * 60_000,
+      )
+    : undefined;
+autoApproveTimer?.unref();
 const memoryIngestion = createMemoryIngestion({
   store: personalMemoryStore,
   plugins: pluginStore,
@@ -3018,6 +3055,7 @@ const app = createApp(
     personalLearning: {
       store: learningSharingStore,
       approvals: skillApprovalStore,
+      autoApprover,
       skillsOf: (userId) =>
         copilotRuntime.learning?.personalSkills(userId) ??
         Promise.resolve({ unavailable: "unavailable" as const }),
@@ -3168,6 +3206,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     personResponseSweep.stop();
     groupSweep.stop();
     recorderExpirySweep.stop();
+    if (autoApproveTimer) clearInterval(autoApproveTimer);
     for (const sweep of deliverySweeps) sweep.stop();
     void Promise.allSettled([
       productTelemetry.flush(),
