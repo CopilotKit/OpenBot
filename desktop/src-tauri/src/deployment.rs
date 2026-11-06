@@ -2,9 +2,8 @@
 //!
 //! The installer stays small: a Tauri binary and nothing else. What it needs to run a deployment is
 //! fetched on first run and kept beside it, at a version this app records: `docker-compose.yml` and
-//! the image list for the containers, and the few files the person's own browser runs from on the
-//! host (see `LAYOUT`). Everything else runs from the release's images, the server, the app, the
-//! worker, their migrations and the tenant package included.
+//! the image list for the containers (see `LAYOUT`). Everything else runs from the release's images,
+//! the server, the app, the worker, the computer, their migrations and the tenant package included.
 //!
 //! What is fetched is the release's own source tarball, at a tag. Not `main`: an app that pulls
 //! whatever is on a branch this morning is not a version anybody can be given, and the images the
@@ -301,24 +300,12 @@ fn layout() -> Vec<String> {
 /// server's migrations and the tenant package (`examples/`) included. So no `server`, `app`,
 /// `worker`, `toolkit`, `scripts` or `patches` is laid out, and nothing installs their packages.
 ///
-/// The one host process that runs from source is the person's own browser (`local_browser`):
-/// `bun src/index.ts` in `agent-computer`, with its own lockfile, and the `shared` files it imports
-/// by relative path (`../../shared/...`), which `agent-computer/Dockerfile` copies into its image
-/// for the same reason. The built Recorder it loads (`extension/dist`) is copied out of the release's
-/// computer image at installation (`preparation::place_recorder`), not out of the tarball.
-pub const LAYOUT: [&str; 11] = [
-    "docker-compose.yml",
-    "agent-computer/package.json",
-    "agent-computer/bun.lock",
-    "agent-computer/tsconfig.json",
-    "agent-computer/src",
-    "shared/openbot-browser.ts",
-    "shared/bot-browser.ts",
-    "shared/computer-control.ts",
-    "shared/file-download.ts",
-    "shared/recorder-extension.ts",
-    "shared/recorder-extension.json",
-];
+/// Nothing runs from source on the host either. Earlier versions laid out `agent-computer` and the
+/// `shared` files it imports, for a browser of the person's own they ran on the desktop beside the
+/// server; the person's browser is on the one computer now, shown in the OpenBot window. A stamp that
+/// laid those out still covers this layout ([`needs_fetch`]), and Start's upgrade takes the files
+/// away with the previous version (`upgrade::KEPT`).
+pub const LAYOUT: [&str; 1] = ["docker-compose.yml"];
 
 /// Fetch the tagged tarball and lay the deployment out under `root`.
 ///
@@ -869,13 +856,11 @@ mod tests {
         tarball.into_inner().unwrap().finish().unwrap()
     }
 
-    /// Every path in `LAYOUT` as a file in a tarball, with a folder entry given a file inside it,
-    /// and the rest of a release's tree beside them.
+    /// Every path in `LAYOUT` as a file in a tarball, and the rest of a release's tree beside them.
     fn whole_release(top: &str) -> Vec<u8> {
         let mut paths: Vec<(String, String)> = LAYOUT
             .iter()
             .map(|entry| match *entry {
-                "agent-computer/src" => (format!("{entry}/index.ts"), String::new()),
                 "docker-compose.yml" => (
                     entry.to_string(),
                     "services:\n  server: {}\n  worker: {}\n".to_string(),
@@ -894,6 +879,9 @@ mod tests {
             "package.json",
             "bun.lock",
             "shared/harnesses.json",
+            "shared/openbot-browser.ts",
+            "agent-computer/package.json",
+            "agent-computer/src/index.ts",
             "extension/package.json",
         ] {
             paths.push((rest.into(), format!("release {rest}")));
@@ -905,10 +893,11 @@ mod tests {
         release_tarball(top, &borrowed)
     }
 
-    /// The containers run from images, so a deployment lays out the Compose file and the person's
-    /// browser and nothing of the server, the app, the worker or the root workspace.
+    /// The containers run from images, so a deployment lays out the Compose file and nothing of the
+    /// server, the app, the worker, the computer or the root workspace. Nor the browser earlier
+    /// versions ran on the person's desktop: the person's browser is on the one computer now.
     #[test]
-    fn only_the_compose_file_and_the_persons_browser_are_laid_out() {
+    fn only_the_compose_file_is_laid_out() {
         let root = crate::test_support::temp_root("deployment-layout");
         std::fs::create_dir_all(&root).unwrap();
         unpack(&root, &whole_release("OpenBot-0.3.1")).unwrap();
@@ -925,7 +914,8 @@ mod tests {
             "patches",
             "package.json",
             "bun.lock",
-            "shared/harnesses.json",
+            "shared",
+            "agent-computer",
             "extension",
         ] {
             assert!(!root.join(left).exists(), "{left} is laid out");
@@ -975,13 +965,13 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let tarball = whole_release("OpenBot-0.0.7");
         unpack(&root, &tarball).unwrap();
-        std::fs::remove_dir_all(root.join("agent-computer")).unwrap();
-        // Laid out by an app that copied no browser.
+        std::fs::remove_file(root.join("docker-compose.yml")).unwrap();
+        // Laid out by an app that left the Compose file out.
         std::fs::write(
             stamp_path(&root),
             serde_json::to_string(&Installed {
                 version: "v0.0.7".into(),
-                layout: vec!["docker-compose.yml".into(), "shared".into()],
+                layout: vec!["shared".into()],
                 pinned: false,
             })
             .unwrap(),
@@ -1006,8 +996,8 @@ mod tests {
         };
         fetch_with(&root, "v0.0.7", &get).expect("Install lays the same release out again");
         assert_eq!(
-            std::fs::read_to_string(root.join("agent-computer/package.json")).unwrap(),
-            "release agent-computer/package.json"
+            std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+            "services:\n  server: {}\n  worker: {}\n"
         );
         assert!(!needs_fetch(&root, "v0.0.7"));
         assert_eq!(
@@ -1038,22 +1028,10 @@ mod tests {
         // The latest release's Compose file has the server and worker in it.
         let tarball = release_tarball(
             "OpenBot-0.0.16",
-            &[
-                (
-                    "docker-compose.yml",
-                    "services:\n  server: {}\n  worker: {}\n",
-                ),
-                ("agent-computer/package.json", "{}"),
-                ("agent-computer/bun.lock", "{}"),
-                ("agent-computer/tsconfig.json", "{}"),
-                ("agent-computer/src/index.ts", ""),
-                ("shared/openbot-browser.ts", ""),
-                ("shared/bot-browser.ts", ""),
-                ("shared/computer-control.ts", ""),
-                ("shared/file-download.ts", ""),
-                ("shared/recorder-extension.ts", ""),
-                ("shared/recorder-extension.json", "{}"),
-            ],
+            &[(
+                "docker-compose.yml",
+                "services:\n  server: {}\n  worker: {}\n",
+            )],
         );
         let published: Vec<&str> = IMAGE_VARIABLES.iter().map(|(name, _)| *name).collect();
         let images = serde_json::to_vec(&manifest(&published)).unwrap();
@@ -1255,9 +1233,8 @@ mod tests {
     fn a_download_that_climbs_out_of_the_root_is_refused() {
         // `root.join("agent-computer/src/../../../x")` starts with `root` --
         // `Path::starts_with` compares components and does not resolve `..` -- so
-        // asking where the path landed cannot answer this. The entry sits under
-        // `agent-computer/src`, which a deployment wants, so the wanted-list does
-        // not stop it either.
+        // asking where the path landed cannot answer this. Refused before the
+        // wanted-list is asked, so it is refused whatever a deployment lays out.
         let dir = scratch("escape");
         let root = dir.join("deployment");
         std::fs::create_dir_all(&root).expect("the root is made");
@@ -1285,146 +1262,21 @@ mod tests {
         let dir = scratch("ordinary");
 
         let archive = tarball(&[
-            ("OpenBot-0.0.8/agent-computer/src/index.ts", b"export {}"),
             ("OpenBot-0.0.8/docker-compose.yml", b"services: {}"),
             // Not part of a deployment: skipped, not refused.
+            ("OpenBot-0.0.8/agent-computer/src/index.ts", b"export {}"),
             ("OpenBot-0.0.8/docs/readme.md", b"# hi"),
         ]);
         unpack(&dir, &archive).expect("an ordinary download is laid out");
 
-        let app = std::fs::read_to_string(dir.join("agent-computer/src/index.ts")).ok();
         let compose = std::fs::read_to_string(dir.join("docker-compose.yml")).ok();
+        let computer = dir.join("agent-computer").exists();
         let docs = dir.join("docs").exists();
         let _ = std::fs::remove_dir_all(&dir);
 
-        assert_eq!(app.as_deref(), Some("export {}"));
         assert_eq!(compose.as_deref(), Some("services: {}"));
+        assert!(!computer, "the computer runs from its image");
         assert!(!docs, "the rest of the tree is not part of a deployment");
-    }
-
-    /// Relative module specifiers in one source file: `from "..."`, `import("...")` and
-    /// `require("...")`, with either quote. Package names are not relative and are skipped.
-    fn relative_imports(source: &str) -> Vec<String> {
-        let mut found = Vec::new();
-        for opener in [
-            "from \"",
-            "from '",
-            "import(\"",
-            "import('",
-            "require(\"",
-            "require('",
-        ] {
-            let quote = opener.chars().last().unwrap();
-            for (at, _) in source.match_indices(opener) {
-                let rest = &source[at + opener.len()..];
-                if let Some(end) = rest.find(quote) {
-                    let specifier = &rest[..end];
-                    // `import("./x").Type` names a type, which Bun erases: nothing is loaded.
-                    let type_query = rest[end + 1..]
-                        .strip_prefix(").")
-                        .is_some_and(|after| after.starts_with(|c: char| c.is_ascii_uppercase()));
-                    if (specifier.starts_with("./") || specifier.starts_with("../")) && !type_query
-                    {
-                        found.push(specifier.to_owned());
-                    }
-                }
-            }
-        }
-        found
-    }
-
-    fn sources_under(dir: &Path, into: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if path.is_dir() {
-                // Tests and build output run from a checkout, never from a deployment.
-                if !matches!(
-                    name.as_str(),
-                    "node_modules" | "dist" | "tests" | "test" | "__tests__"
-                ) {
-                    sources_under(&path, into);
-                }
-            } else if [".ts", ".tsx", ".js", ".mjs", ".cjs"]
-                .iter()
-                .any(|suffix| name.ends_with(suffix))
-                && !name.contains(".test.")
-                && !name.contains(".spec.")
-            {
-                into.push(path);
-            }
-        }
-    }
-
-    /// `#673` made the server import `../../../agent-computer/src/egress`, and the unpacker kept
-    /// copying only the folders listed here, so every new Desktop install of v0.2.0 had a server
-    /// that exited at start with `Cannot find module`. A checkout has every file, which is why
-    /// nothing caught it. The person's browser is the code a deployment runs from its own files now:
-    /// this walks the real tree from its entry point, and whatever it imports by a relative path has
-    /// to be something the unpacker keeps.
-    #[test]
-    fn everything_the_persons_browser_imports_is_laid_out_too() {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
-            .unwrap();
-        let kept = |path: &Path| {
-            let relative = path
-                .strip_prefix(&repo)
-                .unwrap()
-                .to_string_lossy()
-                .replace('\\', "/");
-            LAYOUT
-                .iter()
-                .any(|entry| relative == *entry || relative.starts_with(&format!("{entry}/")))
-        };
-        let mut files = Vec::new();
-        sources_under(&repo.join("agent-computer/src"), &mut files);
-        assert!(
-            files.iter().any(|file| file.ends_with("index.ts")),
-            "the walk found no browser sources, so it proves nothing"
-        );
-        let mut seen = std::collections::BTreeSet::new();
-        let mut missing = Vec::new();
-        while let Some(file) = files.pop() {
-            if !seen.insert(file.clone()) {
-                continue;
-            }
-            let Ok(source) = std::fs::read_to_string(&file) else {
-                continue;
-            };
-            for specifier in relative_imports(&source) {
-                let mut resolved = file.parent().unwrap().to_path_buf();
-                for part in Path::new(&specifier).components() {
-                    match part {
-                        std::path::Component::ParentDir => {
-                            resolved.pop();
-                        }
-                        std::path::Component::Normal(name) => resolved.push(name),
-                        _ => {}
-                    }
-                }
-                let target = ["", ".ts", ".tsx", ".js", ".json"]
-                    .iter()
-                    .map(|suffix| PathBuf::from(format!("{}{suffix}", resolved.display())))
-                    .find(|candidate| candidate.is_file());
-                match target {
-                    Some(target) if kept(&target) => files.push(target),
-                    _ => missing.push(format!(
-                        "{} imports {specifier}",
-                        file.strip_prefix(&repo).unwrap_or(&file).display()
-                    )),
-                }
-            }
-        }
-        assert!(
-            missing.is_empty(),
-            "a deployment would not contain what these import:\n{}",
-            missing.join("\n")
-        );
     }
 
     #[test]

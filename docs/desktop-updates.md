@@ -7,7 +7,7 @@ OpenBot Desktop updates itself with its signed updater (**Check for Updates…**
 The app's own release is the tag it was released as, or, for an internal or candidate build, the release it was pinned to. One rule for every build: when the installed version (`.openbot-deployment`) is not that release, Start (`desktop/src-tauri/src/upgrade.rs`):
 
 1. Stops OpenBot.
-2. Takes one `pg_dump` of its database (a custom-format archive, checked with `pg_restore --list`), and sets the previous version's files aside in `.openbot-previous/`: `docker-compose.yml`, `container-images.json`, `.openbot-deployment`, the installation records, and the person's browser (`agent-computer/`, `shared/`, `extension/`).
+2. Takes one `pg_dump` of its database (a custom-format archive, checked with `pg_restore --list`), and sets the previous version's files aside in `.openbot-previous/`: `docker-compose.yml`, `container-images.json`, `.openbot-deployment`, the installation records, and what earlier versions laid out for a browser they ran on the desktop (`agent-computer/`, `shared/`, `extension/`), which goes with the previous version.
 3. Lays the new version out exactly as Install does.
 4. Pulls its images.
 5. Starts. Migrations run once, as the `migrate` service Compose completes before it starts `server`.
@@ -22,7 +22,7 @@ A deployment newer than the app is never moved back: its database is already mig
 
 ## What is laid out
 
-Every container runs from an image the release pins by digest, the server's migrations and the tenant package included. So a deployment is the Compose file and image list, plus the one host process that runs from source: the person's own browser, `bun src/index.ts` in `agent-computer/`, with the few `shared/` files it imports (`deployment::LAYOUT`). Its packages are installed from `agent-computer`'s own lockfile, and the packages the shared files import (`zod`) are put beside them from that install. Nothing of `server/`, `app/`, `worker/`, `toolkit/`, `scripts/`, `patches/` or `examples/` is laid out, and the root workspace is never installed. An installation laid out by an earlier app keeps those folders; nothing reads them.
+Every container runs from an image the release pins by digest, the server's migrations and the tenant package included. So a deployment is the Compose file and image list (`deployment::LAYOUT`), and nothing runs on the host: the person's own browser runs on the one computer, shown in the OpenBot window. Nothing of `server/`, `app/`, `worker/`, `agent-computer/`, `shared/`, `toolkit/`, `scripts/`, `patches/` or `examples/` is laid out, and nothing is installed with Bun. An installation laid out by an earlier app keeps those folders until its next upgrade sets them aside with the previous version; nothing reads them.
 
 ## Distribution policy
 

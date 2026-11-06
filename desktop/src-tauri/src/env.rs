@@ -49,9 +49,6 @@ pub struct Ports {
     pub langgraph: u16,
     pub supervisor: u16,
     pub harness: Option<u16>,
-    /// The host-side computer that runs the person's own browser, only where this machine runs one
-    /// (see `local_browser`). A host process's port, like the server's, never a container's.
-    pub browser: Option<u16>,
 }
 
 impl Default for Ports {
@@ -65,7 +62,6 @@ impl Default for Ports {
             langgraph: 4201,
             supervisor: 4500,
             harness: None,
-            browser: None,
         }
     }
 }
@@ -83,7 +79,6 @@ impl Ports {
                 "LANGGRAPH_PORT",
                 "SUPERVISOR_PORT",
                 "PICKED_HARNESS_HOST_PORT",
-                "BROWSER_PORT",
             ],
         )?;
         let mut ports = Self::default();
@@ -104,10 +99,6 @@ impl Ports {
             .get("PICKED_HARNESS_HOST_PORT")
             .map(|value| parse_port("PICKED_HARNESS_HOST_PORT", value))
             .transpose()?;
-        ports.browser = values
-            .get("BROWSER_PORT")
-            .map(|value| parse_port("BROWSER_PORT", value))
-            .transpose()?;
         Ok(ports)
     }
 
@@ -127,29 +118,24 @@ impl Ports {
         if let Some(port) = self.harness {
             settings.insert("PICKED_HARNESS_HOST_PORT".into(), port.to_string());
         }
-        if let Some(port) = self.browser {
-            settings.insert("BROWSER_PORT".into(), port.to_string());
-        }
         settings
     }
 
     /// A connect probe misses Windows excluded ports: only a bind proves a port is usable.
     /// Hold the probes until every port is chosen so allocations cannot collide with each other.
     /// Existing containers from this exact Compose project are reusable, never foreign listeners.
-    /// `browser` asks for a port for the person's browser, kept from the last run where it is free.
     /// The app and the API are among them: both are host ports of the one `server` container, so
     /// a running OpenBot keeps its own ports across a Start rather than being moved off them.
     pub fn available(
         self,
         ours: &std::collections::HashSet<u16>,
         harness: Option<u16>,
-        browser: bool,
     ) -> std::io::Result<Self> {
         let mut held = Vec::new();
         let mut chosen = std::collections::HashSet::new();
-        let mut choose = |preferred, container: bool| -> std::io::Result<u16> {
+        let mut choose = |preferred| -> std::io::Result<u16> {
             if !chosen.contains(&preferred) {
-                if container && ours.contains(&preferred) {
+                if ours.contains(&preferred) {
                     chosen.insert(preferred);
                     return Ok(preferred);
                 }
@@ -177,23 +163,15 @@ impl Ports {
             }))
         };
         Ok(Self {
-            app: choose(self.app, true)?,
-            server: choose(self.server, true)?,
-            postgres: choose(self.postgres, true)?,
-            computer: choose(self.computer, true)?,
-            bot: choose(self.bot, true)?,
-            langgraph: choose(self.langgraph, true)?,
-            supervisor: choose(self.supervisor, true)?,
+            app: choose(self.app)?,
+            server: choose(self.server)?,
+            postgres: choose(self.postgres)?,
+            computer: choose(self.computer)?,
+            bot: choose(self.bot)?,
+            langgraph: choose(self.langgraph)?,
+            supervisor: choose(self.supervisor)?,
             harness: harness
-                .map(|default| choose(self.harness.unwrap_or(default), true))
-                .transpose()?,
-            browser: browser
-                .then(|| {
-                    choose(
-                        self.browser.unwrap_or(crate::local_browser::DEFAULT_PORT),
-                        false,
-                    )
-                })
+                .map(|default| choose(self.harness.unwrap_or(default)))
                 .transpose()?,
         })
     }
@@ -330,9 +308,8 @@ mod port_tests {
                 langgraph: port,
                 supervisor: port,
                 harness: None,
-                browser: None,
             };
-            let chosen = preferred.available(&HashSet::new(), None, false).unwrap();
+            let chosen = preferred.available(&HashSet::new(), None).unwrap();
             assert!(!chosen
                 .settings()
                 .values()
@@ -354,17 +331,14 @@ mod port_tests {
             langgraph: port,
             supervisor: port,
             harness: Some(port),
-            browser: Some(port),
         };
-        let chosen = preferred
-            .available(&HashSet::new(), Some(port), true)
-            .unwrap();
+        let chosen = preferred.available(&HashSet::new(), Some(port)).unwrap();
         let values: HashSet<u16> = chosen
             .settings()
             .values()
             .map(|value| value.parse().unwrap())
             .collect();
-        assert_eq!(values.len(), 9);
+        assert_eq!(values.len(), 8);
         assert!(!values.contains(&port));
         for value in values {
             assert!(bind_loopbacks(value).is_ok(), "port {value} is unavailable");
@@ -384,7 +358,7 @@ mod port_tests {
             postgres: port,
             ..Ports::default()
         };
-        let chosen = preferred.available(&HashSet::new(), None, false).unwrap();
+        let chosen = preferred.available(&HashSet::new(), None).unwrap();
         assert_ne!(chosen.postgres, port);
     }
 
@@ -394,7 +368,7 @@ mod port_tests {
         let root = crate::test_support::temp_root("saved-local-ports");
         std::fs::create_dir_all(&root).unwrap();
         let chosen = Ports::default()
-            .available(&HashSet::new(), Some(4206), true)
+            .available(&HashSet::new(), Some(4206))
             .unwrap();
         std::fs::write(
             root.join(".env"),
@@ -405,15 +379,11 @@ mod port_tests {
         let reopened = Ports::read(&root).unwrap();
         assert_eq!(reopened, chosen);
         assert_eq!(
-            reopened
-                .available(&HashSet::new(), Some(4206), true)
-                .unwrap(),
+            reopened.available(&HashSet::new(), Some(4206)).unwrap(),
             chosen
         );
         let foreign = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, chosen.server)).unwrap();
-        let changed = reopened
-            .available(&HashSet::new(), Some(4206), true)
-            .unwrap();
+        let changed = reopened.available(&HashSet::new(), Some(4206)).unwrap();
         assert_ne!(changed.server, chosen.server);
         assert_eq!(
             Ports {
@@ -438,15 +408,10 @@ mod port_tests {
             postgres: port,
             ..Ports::default()
         };
-        let chosen = preferred
-            .available(&HashSet::from([port]), None, false)
-            .unwrap();
+        let chosen = preferred.available(&HashSet::from([port]), None).unwrap();
         assert_eq!(chosen.postgres, port);
         assert_ne!(
-            preferred
-                .available(&HashSet::new(), None, false)
-                .unwrap()
-                .postgres,
+            preferred.available(&HashSet::new(), None).unwrap().postgres,
             port
         );
     }
@@ -462,13 +427,13 @@ mod port_tests {
             ..Ports::default()
         };
         let ours = HashSet::from([preferred.app, preferred.server]);
-        let chosen = preferred.available(&ours, None, false).unwrap();
+        let chosen = preferred.available(&ours, None).unwrap();
         assert_eq!(
             (chosen.app, chosen.server),
             (preferred.app, preferred.server)
         );
         // Held by somebody else, they are moved, as they always were.
-        let moved = preferred.available(&HashSet::new(), None, false).unwrap();
+        let moved = preferred.available(&HashSet::new(), None).unwrap();
         assert_ne!(moved.app, preferred.app);
         assert_ne!(moved.server, preferred.server);
     }
@@ -485,31 +450,6 @@ mod port_tests {
             );
         }
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    /// The person's browser is a host process, so a foreign listener on its port moves it, as one
-    /// on the server's port moves the server. Where this machine runs no browser, no port is held
-    /// for one and none is written.
-    #[test]
-    fn the_browser_gets_a_port_of_its_own_only_where_it_runs() {
-        let _ports = crate::test_support::hold_ports();
-        let foreign = TcpListener::bind("127.0.0.1:0").unwrap();
-        let taken = foreign.local_addr().unwrap().port();
-        let preferred = Ports {
-            browser: Some(taken),
-            ..Ports::default()
-        };
-        let chosen = preferred.available(&HashSet::new(), None, true).unwrap();
-        let port = chosen.browser.expect("a running browser is given a port");
-        assert_ne!(port, taken);
-        assert_eq!(
-            chosen.settings().get("BROWSER_PORT"),
-            Some(&port.to_string())
-        );
-
-        let none = preferred.available(&HashSet::new(), None, false).unwrap();
-        assert_eq!(none.browser, None);
-        assert!(!none.settings().contains_key("BROWSER_PORT"));
     }
 }
 
@@ -908,28 +848,15 @@ pub fn compose(
      *
      * The computer is started as the person's (`COMPUTER_PERSON_ID`, as `scripts/start.sh` does for
      * the personal edition), which is what lets them record in a Bot's browser.
+     *
+     * The person's own browser runs there too, shown in the OpenBot window as hosted OpenBot shows
+     * it, so no `OPENBOT_BROWSER_URL` is written: that would send the server to a browser on this
+     * machine's desktop, a separate Chrome window, which Desktop no longer runs. Start takes out
+     * the one an earlier Desktop wrote ([`REMOVED_WHEN_UNSET`]).
      */
     env.insert("COMPUTER_SUPERVISOR_URL".into(), String::new());
     env.insert("COMPUTER_SUPERVISOR_CONTAINER_URL".into(), String::new());
     env.insert("COMPUTER_PERSON_ID".into(), "personal".into());
-
-    /*
-     * The person's own browser, where this machine runs one: the host-side local Chrome computer
-     * started beside the server (see `local_browser`). The Bots keep the one computer above; only a
-     * person's browser is sent here.
-     *
-     * Left out rather than written blank where there is none, so it is not set at all. `write`
-     * keeps a line it does not own, so Start purges the value an earlier run wrote.
-     */
-    if let Some(port) = ports.browser {
-        let address = format!("http://127.0.0.1:{port}");
-        // The server is a container, and this is the host's loopback. See `container_address`.
-        env.insert(
-            BROWSER_CONTAINER_URL_ENV.into(),
-            container_address(&address),
-        );
-        env.insert(crate::local_browser::BROWSER_URL_ENV.into(), address);
-    }
 
     // The worker refuses to start without this, by design: it is a fact about where this process
     // runs, and it would rather stop than guess. `start.sh` sets it at run time, so a `.env` copied
@@ -950,7 +877,7 @@ pub fn compose(
     // The whole deployment is on this machine, so the server must be allowed to talk to it.
     //
     // The private-address floor stops a hosted deployment reaching into its own network, which is
-    // right there and wrong here: the computer, the person's browser and the Bots are all on
+    // right there and wrong here: the computer, the person's browser on it and the Bots are all on
     // loopback by design. Without this the server refuses to call its own computer and the failure
     // arrives as an Unauthorized wrapped in a 500, which names neither the address nor the rule.
     env.insert("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS".into(), "true".into());
@@ -991,8 +918,8 @@ pub fn compose(
     // Only rootless Podman on Linux needs this; see engine.rs.
     if let Some(socket) = &engine.engine_socket {
         env.insert("ENGINE_SOCKET".into(), socket.clone());
-        // And only there is `host-gateway` not this machine's loopback, which is where the
-        // person's browser and a local Intelligence listen. See `engine::ROOTLESS_HOST_LOOPBACK`.
+        // And only there is `host-gateway` not this machine's loopback, which is where a local
+        // Intelligence listens. See `engine::ROOTLESS_HOST_LOOPBACK`.
         env.insert(
             HOST_GATEWAY_ENV.into(),
             crate::engine::ROOTLESS_HOST_LOOPBACK.into(),
@@ -1147,13 +1074,18 @@ pub const MINTED: [&str; 6] = [
 /// earlier run wrote outlives the answer that implied it: `BOT_MODEL` once asked OpenAI for a model
 /// an earlier endpoint had named, and `OPENBOT_BROWSER_URL` would send the person to a browser that
 /// no longer runs.
-pub const REMOVED_WHEN_UNSET: [&str; 8] = [
+pub const REMOVED_WHEN_UNSET: [&str; 9] = [
     "BOT_PROVIDER",
     "BOT_MODEL",
     "AGENT_BOT_MODEL",
-    crate::local_browser::BROWSER_URL_ENV,
-    BROWSER_CONTAINER_URL_ENV,
-    crate::local_browser::BROWSER_ABSENT_ENV,
+    // What earlier Desktops wrote for the host-side Chrome they ran beside the server: its port, its
+    // address (the host's and the server container's), and why there was none. Desktop runs no such
+    // browser now, and a server still pointed at one shows the person a separate window, or a port
+    // nothing answers on, rather than their browser in the OpenBot window.
+    "BROWSER_PORT",
+    "OPENBOT_BROWSER_URL",
+    "OPENBOT_BROWSER_CONTAINER_URL",
+    "OPENBOT_BROWSER_ABSENT",
     // A machine that moves from rootless Podman to Docker must go back to `host-gateway`.
     HOST_GATEWAY_ENV,
     // Written by earlier apps that could sign in through an organization's OpenBot. This app runs
@@ -1163,23 +1095,6 @@ pub const REMOVED_WHEN_UNSET: [&str; 8] = [
 
 /// What `docker-compose.yml` maps `host.docker.internal` to, in place of `host-gateway`.
 pub const HOST_GATEWAY_ENV: &str = "OPENBOT_HOST_GATEWAY";
-
-/// [`crate::local_browser::BROWSER_URL_ENV`] as the server's container reaches it, which
-/// `docker-compose.yml` prefers for the `server` service.
-pub const BROWSER_CONTAINER_URL_ENV: &str = "OPENBOT_BROWSER_CONTAINER_URL";
-
-/// Tell the server why this machine runs no browser of the person's own (`BROWSER_ABSENT_ENV`), so
-/// the app can say it to them in a sentence of their own rather than leave it in Desktop's log.
-/// Nothing where a browser runs, and [`REMOVED_WHEN_UNSET`] then takes out what an earlier Start
-/// wrote: a Chrome installed since is no longer explained away.
-pub fn explain_browser_absence(
-    settings: &mut BTreeMap<String, String>,
-    absent: Option<crate::local_browser::Absent>,
-) {
-    if let Some(code) = absent.and_then(crate::local_browser::Absent::code) {
-        settings.insert(crate::local_browser::BROWSER_ABSENT_ENV.into(), code.into());
-    }
-}
 
 const PUBLISHED: [&str; 4] = [
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -1946,41 +1861,6 @@ HTTPS_PROXY=http://proxy:8080
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    #[test]
-    fn the_server_finds_the_persons_browser_and_the_bots_keep_their_computers() {
-        let with = compose(
-            &intelligence(),
-            &Model::default(),
-            &engine_status(None),
-            &Ports {
-                browser: Some(4107),
-                ..Ports::default()
-            },
-            &pinned(),
-            None,
-            &BTreeMap::new(),
-        );
-        assert_eq!(
-            with.get("OPENBOT_BROWSER_URL").map(String::as_str),
-            Some("http://127.0.0.1:4107")
-        );
-        assert_eq!(with.get("BROWSER_PORT").map(String::as_str), Some("4107"));
-        let without = compose(
-            &intelligence(),
-            &Model::default(),
-            &engine_status(None),
-            &Ports::default(),
-            &pinned(),
-            None,
-            &BTreeMap::new(),
-        );
-        assert!(!without.contains_key("OPENBOT_BROWSER_URL"));
-        assert!(!without.contains_key("BROWSER_PORT"));
-        for key in ["AGENT_COMPUTER_URL", "COMPUTER_SUPERVISOR_URL"] {
-            assert_eq!(with[key], without[key], "the Bots' computer moved: {key}");
-        }
-    }
-
     /// An earlier app that could sign in through an organization wrote its address here. A Start
     /// takes it out, so the server runs for this one person; the person's own lines stay.
     #[test]
@@ -2015,85 +1895,53 @@ HTTPS_PROXY=http://proxy:8080
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Chrome uninstalled since the last Start: the server must stop being pointed at a browser that
-    /// no longer runs, or it sends the person's Browser button to a port nothing answers on.
+    /// The person's browser is shown in the OpenBot window, on the one computer, as hosted OpenBot
+    /// shows it: Desktop runs no Chrome of its own beside the server. A Start over a file an earlier
+    /// Desktop wrote, which ran one, points the server at no host-side browser (it would show the
+    /// person a separate Chrome window for Teach a Bot) and leaves none of that browser's settings.
     #[test]
-    fn a_browser_an_earlier_start_ran_is_not_left_in_the_file() {
-        let dir = temp_root("env-browser-gone");
+    fn a_start_points_the_server_at_no_host_side_browser_and_takes_out_an_earlier_ones() {
+        let dir = temp_root("env-no-host-browser");
         std::fs::create_dir_all(&dir).unwrap();
         let path = env_at(&dir);
-        let run = |browser: Option<u16>| {
-            let settings = compose(
-                &intelligence(),
-                &Model::default(),
-                &engine_status(None),
-                &Ports {
-                    browser,
-                    ..Ports::default()
-                },
-                &pinned(),
-                None,
-                &BTreeMap::new(),
-            );
-            let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
-                .iter()
-                .filter(|key| !settings.contains_key(**key))
-                .map(|key| (key.to_string(), String::new()))
-                .collect();
-            write(&path, &settings, &purge).unwrap();
-        };
-        run(Some(4107));
-        assert_eq!(
-            value_of(
-                &std::fs::read_to_string(&path).unwrap(),
-                "OPENBOT_BROWSER_URL"
-            ),
-            "http://127.0.0.1:4107"
+        std::fs::write(
+            &path,
+            "BROWSER_PORT=4107\n\
+             OPENBOT_BROWSER_URL=http://127.0.0.1:4107\n\
+             OPENBOT_BROWSER_CONTAINER_URL=http://host.docker.internal:4107\n\
+             OPENBOT_BROWSER_ABSENT=no-chrome-or-edge\n\
+             MY_OWN=kept\n",
+        )
+        .unwrap();
+        // As a Start reads the ports an earlier Start chose, and composes this one's settings.
+        let ports = Ports::read(&dir).unwrap();
+        let settings = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &ports,
+            &pinned(),
+            None,
+            &BTreeMap::new(),
         );
-        run(None);
+        let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
+            .iter()
+            .filter(|key| !settings.contains_key(**key))
+            .map(|key| (key.to_string(), String::new()))
+            .collect();
+        write(&path, &settings, &purge).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(!text.contains("OPENBOT_BROWSER_URL"), "{text}");
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// No browser of the person's own on this machine: the server is told why, so the app can say
-    /// it, and a later Start that finds one takes the reason out again.
-    #[test]
-    fn why_there_is_no_browser_is_written_and_taken_out_once_there_is_one() {
-        use crate::local_browser::{Absent, Product, BROWSER_ABSENT_ENV};
-        let dir = temp_root("env-browser-absent");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = env_at(&dir);
-        let run = |browser: Option<u16>, absent: Option<Absent>| {
-            let mut settings = compose(
-                &intelligence(),
-                &Model::default(),
-                &engine_status(None),
-                &Ports {
-                    browser,
-                    ..Ports::default()
-                },
-                &pinned(),
-                None,
-                &BTreeMap::new(),
-            );
-            explain_browser_absence(&mut settings, absent);
-            let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
-                .iter()
-                .filter(|key| !settings.contains_key(**key))
-                .map(|key| (key.to_string(), String::new()))
-                .collect();
-            write(&path, &settings, &purge).unwrap();
-            std::fs::read_to_string(&path).unwrap()
-        };
-        let flatpak = run(None, Some(Absent::FlatpakOnly(Product::Chrome)));
-        assert_eq!(value_of(&flatpak, BROWSER_ABSENT_ENV), "flatpak-chrome");
-        assert!(!flatpak.contains("OPENBOT_BROWSER_URL"), "{flatpak}");
-        let found = run(Some(4107), None);
-        assert!(!found.contains(BROWSER_ABSENT_ENV), "{found}");
-        // A release from before the browser has nothing to explain.
-        let old = run(None, Some(Absent::NotInRelease));
-        assert!(!old.contains(BROWSER_ABSENT_ENV), "{old}");
+        for key in [
+            "OPENBOT_BROWSER_URL",
+            "OPENBOT_BROWSER_CONTAINER_URL",
+            "BROWSER_PORT",
+            "OPENBOT_BROWSER_ABSENT",
+        ] {
+            assert!(!settings.contains_key(key), "{key} composed");
+            assert!(!text.contains(key), "{key} left in the file:\n{text}");
+        }
+        assert!(text.contains("MY_OWN=kept"), "{text}");
+        assert_eq!(value_of(&text, "OPENBOT_EDITION"), "personal");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

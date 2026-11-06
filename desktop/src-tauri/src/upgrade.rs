@@ -40,15 +40,19 @@ pub const DUMP: &str = "database.dump";
 /// added. Without it nothing was moved yet.
 const MOVED: &str = "moved.json";
 
-/// The previous version's files: what the containers run from, what the person's browser runs
-/// from, and the installation records that describe them, so a version put back is installed and
-/// starts as it was without installing again.
+/// The previous version's files: what the containers run from, and the installation records that
+/// describe them, so a version put back is installed and starts as it was without installing again.
+///
+/// And what earlier versions laid out for the browser they ran on the person's desktop beside the
+/// server: its sources and the `shared` files they import, its packages' record, and the Recorder it
+/// loaded. This app runs no such browser, so an upgrade takes them away with the previous version,
+/// and puts them back only with it.
 pub const KEPT: [&str; 9] = [
     "docker-compose.yml",
     "container-images.json",
     ".openbot-deployment",
     preparation::FILE,
-    preparation::DEPENDENCIES,
+    ".openbot-dependencies.json",
     preparation::LAUNCH,
     "agent-computer",
     "shared",
@@ -568,7 +572,7 @@ mod tests {
 
     // ---- The steps, against files on disk and a recording of what ran ----
 
-    /// Lays out `version` as the new release, with a Compose file and a browser of its own.
+    /// Lays out `version` as the new release: its Compose file.
     struct Recorded {
         root: PathBuf,
         version: String,
@@ -607,8 +611,6 @@ mod tests {
             )
             .unwrap();
             std::fs::write(deployment::images_path(&self.root), &self.version).unwrap();
-            std::fs::create_dir_all(self.root.join("agent-computer")).unwrap();
-            std::fs::write(self.root.join("agent-computer/package.json"), &self.version).unwrap();
             deployment::record(&self.root, &self.version, false).unwrap();
             Ok(())
         }
@@ -678,8 +680,8 @@ mod tests {
         );
         assert_eq!(deployment::installed(&root).unwrap().version, "v0.3.1");
         assert!(!root.join(PREVIOUS).exists(), "nothing is left aside");
-        // The previous browser's packages went with its files; the new one installs its own.
-        assert!(!root.join("agent-computer/node_modules").exists());
+        // The browser an earlier version ran on the desktop went with its files: this one runs none.
+        assert!(!root.join("agent-computer").exists());
         untouched(&root);
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -941,22 +943,17 @@ volumes:
         )
     }
 
-    /// GitHub's tag tarball for `version`: the Compose file and the person's browser's files.
+    /// GitHub's tag tarball for `version`: the Compose file, beside what the deployment leaves out.
     fn tarball(version: &str) -> Vec<u8> {
         let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         let mut tarball = tar::Builder::new(encoder);
         let compose = compose(version);
-        let mut files: Vec<(&str, &str)> = vec![("docker-compose.yml", compose.as_str())];
-        let browser = format!("// the browser at {version}\n");
-        for path in deployment::LAYOUT.iter().skip(1) {
-            files.push((path, browser.as_str()));
-        }
+        let source = format!("// the computer at {version}\n");
+        let files: Vec<(&str, &str)> = vec![
+            ("docker-compose.yml", compose.as_str()),
+            ("agent-computer/src/index.ts", source.as_str()),
+        ];
         for (path, body) in files {
-            let path = if path == "agent-computer/src" {
-                "agent-computer/src/index.ts".to_string()
-            } else {
-                path.to_string()
-            };
             let mut header = tar::Header::new_gnu();
             header.set_size(body.len() as u64);
             header.set_mode(0o644);

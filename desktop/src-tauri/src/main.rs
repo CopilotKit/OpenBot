@@ -18,10 +18,10 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
-    install, local_browser, local_eval, local_eval_state, preparation,
+    install, local_eval, local_eval_state, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install,
-    shell_updates, stack, supervise, telemetry, tray, upgrade, windows as win,
+    shell_updates, stack, telemetry, tray, upgrade, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -43,9 +43,6 @@ struct Shell {
     update_cancelled: std::sync::atomic::AtomicBool,
     /// Session-only local folder authority; shutdown retires it before stopping the API server.
     host_access: Mutex<Option<host_access::HostAccess>>,
-    /// The person's browser, the one host process a Start runs (see `local_browser`). Held so Stop
-    /// can let Chrome close its windows and profile before anything is forced.
-    browser: Mutex<Option<std::process::Child>>,
     /// Native Linux engine API owned by this desktop session, kept through Stop/Start.
     #[cfg(target_os = "linux")]
     podman_api: Mutex<engine::local_api::Service>,
@@ -1170,8 +1167,8 @@ async fn prepare_installation_inner(
          * OpenBot is pulling images and nothing else. This step used to download Bun and install
          * the app's packages here, on every machine, and on a fresh Windows machine that took longer
          * than everything else in the install together: Defender scans each of the thousands of
-         * small files it writes. The one thing on the host that still needs them, the person's own
-         * browser, has them prepared by the first Start that runs it.
+         * small files it writes. Nothing on the host needs them now: the person's own browser runs
+         * on the one computer, from its image, with the Recorder built into that image.
          */
         report_running(
             &handle,
@@ -1214,18 +1211,6 @@ async fn prepare_installation_inner(
                 images.len()
             ),
         );
-        // Out of the computer image just downloaded, where the release's own build put it.
-        if local_browser::in_release(&root) {
-            attempt.require_current()?;
-            report_running(
-                &handle,
-                "recorder",
-                "Adding the Recorder to OpenBot's browser.",
-                None,
-            );
-            preparation::place_recorder(&root, &address)?;
-            report(&handle, "recorder", true, "The Recorder is ready.");
-        }
         report_running(&handle, "installation", "Finishing installation.", None);
         attempt.require_current()?;
         preparation::complete(&root, harness.as_ref(), images, &address)?;
@@ -1960,10 +1945,7 @@ fn reset_leftover_database_with(
     }
     let attempt = StartAttempt::begin(shell)?;
     let _startup = attempt.lock_current()?;
-    if shell.containers.lock().unwrap().is_some()
-        || shell.root.lock().unwrap().is_some()
-        || shell.browser.lock().unwrap().is_some()
-    {
+    if shell.containers.lock().unwrap().is_some() || shell.root.lock().unwrap().is_some() {
         return Err(Problem::plain("OpenBot still owns running services. Choose Stop OpenBot before resetting leftover data."));
     }
     if shell
@@ -2218,7 +2200,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
     let host_token =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
 
-    let (found, secrets, ports, local_browser) = {
+    let (found, secrets, ports) = {
         let _startup = attempt.lock_current()?;
 
         // Belt and braces: a fetch that reported success and left something out is still not a
@@ -2325,37 +2307,16 @@ async fn start_stack_inner<R: tauri::Runtime>(
         })?;
         let reclaimed = cleanup_before_start(&app, &attempt, &root, stack::stop_processes_under)?;
         if reclaimed > 0 {
-            let mut held = vec![previous_ports.server, previous_ports.app];
-            held.extend(previous_ports.browser);
-            stack::wait_for_ports_to_clear(&held, std::time::Duration::from_secs(5));
+            stack::wait_for_ports_to_clear(
+                &[previous_ports.server, previous_ports.app],
+                std::time::Duration::from_secs(5),
+            );
         }
-        /*
-         * The person's own browser, where this machine can run one. Decided at every start from
-         * what is installed now, so a Chrome installed since the last start is found and one
-         * removed is no longer pointed at. Its absence is not a failure: OpenBot runs without it,
-         * and the server is told why, so the app can tell the person rather than leave the reason
-         * in this log.
-         */
-        let (local_browser, browser_absent) = match local_browser::for_this_person(&root) {
-            Ok(browser) => {
-                eprintln!(
-                    "[browser] {} at {}",
-                    browser.product.name(),
-                    browser.executable.display()
-                );
-                (Some(browser), None)
-            }
-            Err(absent) => {
-                eprintln!("[browser] none: {}", absent.said());
-                (None, Some(absent))
-            }
-        };
         let ours = stack::ports_we_already_publish(&found, &root);
         let ports = previous_ports
             .available(
                 &ours,
                 picked.as_ref().and_then(|picked| picked.installed_port()),
-                local_browser.is_some(),
             )
             .map_err(|error| {
                 Problem::with(
@@ -2395,7 +2356,6 @@ async fn start_stack_inner<R: tauri::Runtime>(
         {
             settings.insert(key, value);
         }
-        openbot_env::explain_browser_absence(&mut settings, browser_absent);
         /*
          * Each Bot's computer on the network the server container is on.
          *
@@ -2528,7 +2488,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             }
         }
 
-        (found, secrets, ports, local_browser)
+        (found, secrets, ports)
     };
 
     /*
@@ -2577,50 +2537,8 @@ async fn start_stack_inner<R: tauri::Runtime>(
         report(&app, "answering", false, problem.said.clone());
         return Err(problem);
     }
-    /*
-     * The person's own browser, the one host process left (see `local_browser`).
-     *
-     * After the server answers: the server reaches it only when the person opens their browser, so
-     * it is not on the way to the window answering. Bun and the computer's packages are prepared the
-     * first time a Start has a browser to run, and reused after that. Installing OpenBot no longer
-     * does.
-     */
-    let browser_bun = match local_browser.as_ref() {
-        Some(_) => {
-            report_running(&app, "browser", "Preparing your browser.", None);
-            let prepare_root = root.clone();
-            let prepared = tauri::async_runtime::spawn_blocking(move || {
-                preparation::install_dependencies_if_needed(&prepare_root, || {
-                    install::ensure_bun(&prepare_root, which_bun())
-                })
-            })
-            .await
-            .unwrap_or_else(|error| {
-                Err(Problem::with(
-                    "OpenBot could not prepare your browser. Try Start again.",
-                    error.to_string(),
-                ))
-            });
-            attempt.require_current()?;
-            Some(
-                prepared
-                    .inspect_err(|problem| report(&app, "browser", false, problem.said.clone()))?,
-            )
-        }
-        None => None,
-    };
     // Stop must not finish between accepting readiness and reporting a successful Start.
     let _startup = attempt.lock_current()?;
-    if let (Some(browser), Some(bun)) = (local_browser.as_ref(), browser_bun.as_ref()) {
-        start_local_browser(&shell, &root, bun, &secrets, &ports, browser)
-            .inspect_err(|problem| report(&app, "browser", false, problem.said.clone()))?;
-        report(
-            &app,
-            "browser",
-            true,
-            format!("{} is ready.", browser.product.name()),
-        );
-    }
     *shell.root.lock().unwrap() = Some(root.clone());
     clear_recovery_required(&shell, &root);
     let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
@@ -2652,9 +2570,6 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
     preparation::save_selected_root(&config, &root)?;
-    if let (Some(browser), Some(bun)) = (local_browser, browser_bun) {
-        supervise_local_browser(app.clone(), root.clone(), bun, secrets, browser, generation);
-    }
     watch_connections(app.clone(), root, host_token, generation, ports.server);
 
     report(&app, "answering", true, "OpenBot is ready.");
@@ -3154,12 +3069,7 @@ where
         .unwrap()
         .clone()
         .unwrap_or_else(|| root.to_path_buf());
-    // Closed while it is still held, before `cleanup` ends whatever was recorded.
-    let result = match (close_held_browser(shell, &selected), cleanup(&selected)) {
-        (Ok(()), result) => result,
-        (Err(problem), Ok(_)) => Err(problem),
-        (Err(_), Err(problem)) => Err(problem),
-    };
+    let result = cleanup(&selected);
     let result = match (host_access_result, result) {
         (Ok(()), result) => result,
         (Err(error), Ok(_)) => Err(Problem::with(
@@ -5918,32 +5828,6 @@ fn showing_setup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
         .is_ok_and(|current| same_window_app(&current, &setup))
 }
 
-/// `bun` from PATH, or the places an installer puts it when PATH has not been reloaded.
-fn which_bun() -> Option<PathBuf> {
-    if quiet::command("bun")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        if let Some(path) = std::env::var_os("PATH").and_then(|path| {
-            std::env::split_paths(&path)
-                .map(|directory| directory.join(if cfg!(windows) { "bun.exe" } else { "bun" }))
-                .find(|path| path.is_file())
-        }) {
-            return Some(path);
-        }
-    }
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()?;
-    let candidates = [
-        PathBuf::from(&home).join(".bun/bin/bun"),
-        PathBuf::from(&home).join(".bun/bin/bun.exe"),
-    ];
-    candidates.into_iter().find(|path| path.exists())
-}
-
 /// Mark this run as needing its connection refreshed, and send the window to setup to do it.
 ///
 /// False when the run it was found for is no longer the current one, which a Stop or a new Start
@@ -5976,160 +5860,6 @@ fn publish_connection_failure<R: tauri::Runtime>(
     *shell.last_failure.lock().unwrap() = Some(Problem::plain(said).connection(connection));
     show_setup_and_focus(app.clone())?;
     Ok(true)
-}
-
-/// Start the person's browser and hand it to this window and to the record a later window ends it
-/// from. Called under the startup lock, so a Stop cannot finish between the spawn and the handoff.
-fn start_local_browser(
-    shell: &Shell,
-    root: &Path,
-    bun: &Path,
-    secrets: &stack::Secrets,
-    ports: &openbot_env::Ports,
-    browser: &local_browser::LocalBrowser,
-) -> Result<(), Problem> {
-    let port = ports.browser.ok_or_else(|| {
-        Problem::plain("OpenBot did not choose a port for your browser. Try Start again.")
-    })?;
-    if let Some(problem) = stack::port_already_taken(&[("browser", port)]) {
-        return Err(problem.into());
-    }
-    let child = spawn_local_browser(root, bun, secrets, browser)?;
-    hold_local_browser(shell, root, child)
-}
-
-fn spawn_local_browser(
-    root: &Path,
-    bun: &Path,
-    secrets: &stack::Secrets,
-    browser: &local_browser::LocalBrowser,
-) -> Result<std::process::Child, Problem> {
-    stack::spawn_host_process(
-        stack::local_browser_process(),
-        root,
-        &root.join(".logs"),
-        bun,
-        secrets,
-        Some(browser),
-    )
-    .map_err(|error| {
-        Problem::with(
-            "OpenBot could not start your browser. Try Start again.",
-            error.to_string(),
-        )
-    })
-}
-
-/// Record it, then hold it. One that cannot be recorded is ended, rather than left running where no
-/// later window could find it.
-fn hold_local_browser(
-    shell: &Shell,
-    root: &Path,
-    child: std::process::Child,
-) -> Result<(), Problem> {
-    if let Err(problem) = stack::record_host_processes(root, &[(stack::LOCAL_BROWSER, child.id())])
-    {
-        let mut held = [(stack::LOCAL_BROWSER, child)];
-        if stack::stop_host_children(root, &mut held).is_err() {
-            let [(_, mut child)] = held;
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        return Err(problem);
-    }
-    *shell.browser.lock().unwrap() = Some(child);
-    Ok(())
-}
-
-/// The browser this window holds, closed so Chrome closes its windows and profile before anything
-/// is forced (see `stack::stop_host_children`). Kept on failure, so another Stop can try again.
-fn close_held_browser(shell: &Shell, root: &Path) -> Result<(), Problem> {
-    let mut slot = shell.browser.lock().unwrap();
-    let Some(child) = slot.take() else {
-        return Ok(());
-    };
-    let mut held = [(stack::LOCAL_BROWSER, child)];
-    match stack::stop_host_children(root, &mut held) {
-        Ok(_) => Ok(()),
-        Err(problem) => {
-            let [(_, child)] = held;
-            *slot = Some(child);
-            Err(problem)
-        }
-    }
-}
-
-/**
-The person's browser, started again when it dies, as the host-process supervisor once did for all
-four. It ends with the run it was started for, like [`watch_connections`].
-
-Giving up is said, with the tail of its log, and OpenBot is left running: it runs without the
-browser, and sending the window back to setup over it would stop everything else too.
-*/
-fn supervise_local_browser<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    root: PathBuf,
-    bun: PathBuf,
-    secrets: stack::Secrets,
-    browser: local_browser::LocalBrowser,
-    generation: u64,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let mut watch = supervise::Watch::new(stack::LOCAL_BROWSER);
-        let current = |shell: &Shell| {
-            shell.generation.load(std::sync::atomic::Ordering::SeqCst) == generation
-                && shell.root.lock().unwrap().as_deref() == Some(root.as_path())
-        };
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            let shell = app.state::<Shell>();
-            if !current(&shell) {
-                return;
-            }
-            let exited = match shell.browser.lock().unwrap().as_mut() {
-                // Stop took it.
-                None => return,
-                Some(child) => matches!(child.try_wait(), Ok(Some(_))),
-            };
-            if !exited {
-                continue;
-            }
-            if !watch.should_restart(std::time::Instant::now()) {
-                *shell.browser.lock().unwrap() = None;
-                report(
-                    &app,
-                    stack::LOCAL_BROWSER,
-                    false,
-                    format!(
-                        "{}\n{}",
-                        watch.gave_up(),
-                        stack::tail_of(&root.join(".logs"), stack::LOCAL_BROWSER)
-                    ),
-                );
-                return;
-            }
-            report(
-                &app,
-                stack::LOCAL_BROWSER,
-                false,
-                "Your browser stopped. Starting it again.",
-            );
-            std::thread::sleep(supervise::backoff(watch.restarts - 1));
-
-            // Asked again under the lock: a Stop, or another Start, may have happened meanwhile,
-            // and starting a browser into either is how an orphan is made.
-            let _startup = shell.startup.lock().unwrap();
-            if !current(&shell) {
-                return;
-            }
-            match spawn_local_browser(&root, &bun, &secrets, &browser)
-                .and_then(|child| hold_local_browser(&shell, &root, child))
-            {
-                Ok(()) => report(&app, stack::LOCAL_BROWSER, true, "started again"),
-                Err(problem) => report(&app, stack::LOCAL_BROWSER, false, problem.said),
-            }
-        }
-    })
 }
 
 /**
@@ -13249,8 +12979,7 @@ fn main() {
 
     fn write_installed_deployment(root: &Path) {
         const DEPLOYMENT_VERSION: &str = "v0.0.8";
-        std::fs::create_dir_all(root.join("agent-computer")).unwrap();
-        std::fs::create_dir_all(root.join("shared/node_modules/zod")).unwrap();
+        std::fs::create_dir_all(root).unwrap();
         std::fs::write(root.join("docker-compose.yml"), INSTALLED_COMPOSE).unwrap();
         let images = deployment::Images {
             version: DEPLOYMENT_VERSION.into(),
@@ -13300,11 +13029,6 @@ fn main() {
             serde_json::json!({ "project": stack::DESKTOP_PROJECT }).to_string(),
         )
         .unwrap();
-        // The person's browser's packages, installed: its own, and zod beside the shared files.
-        std::fs::write(root.join("agent-computer/package.json"), "{}").unwrap();
-        std::fs::write(root.join("agent-computer/bun.lock"), "synthetic-lock").unwrap();
-        std::fs::write(root.join("shared/node_modules/zod/package.json"), "{}").unwrap();
-        preparation::record_dependencies(root, Path::new("bun")).unwrap();
         preparation::record(root, None, vec!["fixture-image".into()]).unwrap();
     }
 

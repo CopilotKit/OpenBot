@@ -6,8 +6,10 @@
 ; %LOCALAPPDATA%\OpenBot. Not on an update, which runs the old uninstaller with /UPDATE; the new version writes them
 ; again when it starts.
 ;
-; And the person's own browser (src/local_browser.rs): its whole data root, %LOCALAPPDATA%\OpenBot\local-computer,
-; which holds the profile they signed in to by hand. Each of Desktop's folders goes with everything in it (RMDir /r);
+; And the data of the browser earlier versions ran on the person's desktop: its whole data root,
+; %LOCALAPPDATA%\OpenBot\local-computer, which holds the profile they signed in to by hand. Desktop no longer runs that
+; browser (the person's browser is shown in the OpenBot window), but an installation that did keeps it until it is
+; uninstalled. Each of Desktop's folders goes with everything in it (RMDir /r);
 ; %LOCALAPPDATA%\OpenBot itself only once nothing else is left in it, since the app may be installed there.
 ;
 ; And what registered the Recorder from its stores with Chrome and Edge (src/recorder_external.rs): each store id's
