@@ -348,7 +348,18 @@ export function LiveScreen({
     };
   }, [computerId, driving]);
 
-  const send = useCallback(
+  /**
+   * A move or a scroll not sent yet, held until the next animation frame.
+   *
+   * A mouse reports a move 60 to 144 times a second and a trackpad scrolls faster than that, and every
+   * one was its own message, each a trip into the remote browser that the computer applies in turn.
+   * The queue over there grew for as long as the hand moved, and a click landed behind it. One move per
+   * frame is all the screen can show anyway, and scrolls held in the same frame add up to one.
+   */
+  const heldInput = useRef<Record<string, unknown> | null>(null);
+  const heldFrame = useRef<number | null>(null);
+
+  const sendNow = useCallback(
     (message: Record<string, unknown>) => {
       const socket = socketRef.current;
       if (
@@ -358,6 +369,63 @@ export function LiveScreen({
       )
         return;
       socket.send(JSON.stringify(message));
+    },
+    [driving],
+  );
+
+  /** Send the held move or scroll now, so whatever comes next lands after it. */
+  const flushHeld = useCallback(() => {
+    if (heldFrame.current !== null) cancelAnimationFrame(heldFrame.current);
+    heldFrame.current = null;
+    const held = heldInput.current;
+    heldInput.current = null;
+    if (held) sendNow(held);
+  }, [sendNow]);
+
+  /** A press, a release, a key or a paste: never held, never merged, and always after the move before it. */
+  const send = useCallback(
+    (message: Record<string, unknown>) => {
+      flushHeld();
+      sendNow(message);
+    },
+    [flushHeld, sendNow],
+  );
+
+  /** A move or a scroll: held to the next frame and merged with any of the same kind held already. */
+  const sendSoon = useCallback(
+    (message: Record<string, unknown>) => {
+      const held = heldInput.current;
+      if (
+        held &&
+        held.type === message.type &&
+        held.modifiers === message.modifiers
+      ) {
+        heldInput.current =
+          message.type === "wheel"
+            ? {
+                ...message,
+                deltaX: Number(held.deltaX) + Number(message.deltaX),
+                deltaY: Number(held.deltaY) + Number(message.deltaY),
+              }
+            : message;
+      } else {
+        flushHeld();
+        heldInput.current = message;
+      }
+      heldFrame.current ??= requestAnimationFrame(() => {
+        heldFrame.current = null;
+        flushHeld();
+      });
+    },
+    [flushHeld],
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handing back control drops a held move too.
+  useEffect(
+    () => () => {
+      if (heldFrame.current !== null) cancelAnimationFrame(heldFrame.current);
+      heldFrame.current = null;
+      heldInput.current = null;
     },
     [driving],
   );
@@ -386,7 +454,7 @@ export function LiveScreen({
           event.currentTarget.focus({ preventScroll: true });
         const point = at(event);
         if (!point) return;
-        send({
+        (kind === "moved" ? sendSoon : send)({
           type: "mouse",
           event: kind,
           ...point,
@@ -414,7 +482,7 @@ export function LiveScreen({
           modifiers: modifierBits(event),
         });
       },
-    [at, send],
+    [at, send, sendSoon],
   );
 
   useImperativeHandle(
@@ -523,7 +591,7 @@ export function LiveScreen({
       const point = at(event);
       if (!point) return;
       event.preventDefault();
-      send({
+      sendSoon({
         type: "wheel",
         ...point,
         deltaX: event.deltaX,
@@ -533,7 +601,7 @@ export function LiveScreen({
     };
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", onWheel);
-  }, [driving, connected, at, send]);
+  }, [driving, connected, at, sendSoon]);
 
   return (
     <canvas

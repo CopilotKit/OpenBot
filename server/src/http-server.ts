@@ -38,6 +38,10 @@ import {
 type StreamData = {
   upstream: string;
   inward?: WebSocket;
+  /** The newest frame not sent yet, because the browser was still receiving the ones before it. */
+  heldFrame?: string;
+  /** Looks again for room for `heldFrame`; see `sendHeldFrame`. */
+  heldRetry?: ReturnType<typeof setTimeout>;
 };
 
 /**
@@ -96,6 +100,52 @@ function carryTerminal(
  */
 type ChannelSocket = Parameters<typeof channelSocket.open>[0];
 type SocketData = StreamData | GatewaySocketData | ChannelSocket["data"];
+
+/** How every screencast frame from the computer starts: `JSON.stringify({ type: "frame", ... })`. */
+const FRAME_PREFIX = '{"type":"frame"';
+
+/** How much may sit unsent to a person's browser before a new frame is held back: about one frame. */
+const STREAM_BUFFER_LIMIT = 128 * 1024;
+
+/** How often a held frame looks again for room, besides when Bun says the socket drained. */
+const HELD_FRAME_RETRY_MS = 50;
+
+type HeldFrameSocket = {
+  data: StreamData;
+  getBufferedAmount(): number;
+  send(message: string): unknown;
+};
+
+/**
+ * Send the frame held for this browser, once the frames ahead of it have gone.
+ *
+ * Held, not dropped. The frame that arrives while the browser is still receiving is often the last one
+ * the page makes, and Chrome sends nothing more for a page that has gone still: dropped, the screen
+ * stayed on the page as it was a moment before it stopped, for as long as it stayed still.
+ *
+ * Bun's `drain` is the quick way to hear there is room, and not the only one: a frame sent from inside
+ * `drain` that did not fit was, about one time in twenty, followed by no further `drain` at all, and
+ * the held frame waited for ever. So while one is held, the socket is also looked at again shortly.
+ */
+function sendHeldFrame(ws: HeldFrameSocket) {
+  const held = ws.data.heldFrame;
+  if (held === undefined) return;
+  if (ws.getBufferedAmount() > STREAM_BUFFER_LIMIT) {
+    ws.data.heldRetry ??= setTimeout(() => {
+      ws.data.heldRetry = undefined;
+      sendHeldFrame(ws);
+    }, HELD_FRAME_RETRY_MS);
+    return;
+  }
+  clearTimeout(ws.data.heldRetry);
+  ws.data.heldRetry = undefined;
+  ws.data.heldFrame = undefined;
+  try {
+    ws.send(held);
+  } catch {
+    ws.data.inward?.close();
+  }
+}
 
 export function startHttpServer(deps: {
   port: number;
@@ -322,11 +372,20 @@ export function startHttpServer(deps: {
         const stream = ws.data;
         const inward = new WebSocket(stream.upstream);
         stream.inward = inward;
-        // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
-        // should be dropped, not queued, because a stale frame is worse than a missing one.
+        // Frames outward, input inward. A frame the browser is too slow for is not queued, because a
+        // stale frame is worse than a late one. Bun queues whatever `send` cannot write yet, so that is
+        // decided here: while the frames before it are still going out, a new one is held, a newer one
+        // replaces it, and the newest goes when there is room (`drain` below). Anything that is not a
+        // frame, such as an error the person has to read, always goes at once.
         inward.onmessage = (event) => {
+          const message = String(event.data);
+          if (message.startsWith(FRAME_PREFIX)) {
+            stream.heldFrame = message;
+            sendHeldFrame(ws as typeof ws & { data: StreamData });
+            return;
+          }
           try {
-            ws.send(String(event.data));
+            ws.send(message);
           } catch {
             inward.close();
           }
@@ -350,6 +409,11 @@ export function startHttpServer(deps: {
         }
         if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
       },
+      /** Room to the browser again: the frame held while it was busy goes now. */
+      drain(ws) {
+        if (isProxiedStream(ws.data))
+          sendHeldFrame(ws as typeof ws & { data: StreamData });
+      },
       close(ws, code, reason) {
         if (isGatewaySocket(ws.data)) {
           closeGatewaySocket(
@@ -363,6 +427,8 @@ export function startHttpServer(deps: {
           channelSocket.close(asChannelSocket(ws), code, reason);
           return;
         }
+        clearTimeout(ws.data.heldRetry);
+        ws.data.heldFrame = undefined;
         ws.data.inward?.close();
       },
     },

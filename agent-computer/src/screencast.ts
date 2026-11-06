@@ -154,9 +154,20 @@ export async function startScreencast(
 
   client.on("Page.screencastFrame", (event: ScreencastFrame) => {
     const { data, sessionId, metadata } = event;
-    // Acknowledge every frame. Chrome will not send the next one until the current is acked, which is
-    // the backpressure that stops a slow client drowning in frames. Forgetting this is why a naive
-    // implementation delivers one frame and then appears to hang.
+    /*
+     * Acknowledge every frame, the moment it arrives.
+     *
+     * Chrome will not send the next frame until this one is acked. Forgetting the ack is why a naive
+     * implementation delivers one frame and then appears to hang.
+     *
+     * Not held back to pace a slow viewer, though that looks like the backpressure it is for. Chrome
+     * keeps two frames unacked at most, and a change it makes while two are out is never sent, then
+     * or later: a page that has gone still has nothing new to send. Holding the ack until the
+     * viewer's connection had taken the frame left the screen on the page as it was a moment before
+     * it stopped, measured on Chromium 151 as the last of five quick changes never arriving
+     * (screencast-pacing-browser.test.ts). The viewer is paced where the frames leave instead, by
+     * holding only the newest one while its connection is busy (index.ts).
+     */
     void client
       .send("Page.screencastFrameAck", { sessionId })
       .catch(() => undefined);
