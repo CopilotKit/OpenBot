@@ -24,10 +24,10 @@ import { createIntelligenceClient } from "../src/intelligence-client";
  * writing down when a stop is recorded (`POST /api/threads/:id/connect`, the first step of
  * recording one) and when a run's terminal event arrives.
  *
- * The CopilotKit release that records stops (`ɵrecordRunStop` on the client, `recordStop` on the
- * Intelligence runner, from 1.84.1) is not what CI installs; `@copilotkit/runtime` 1.83.0 has
- * neither. So where the installed runtime lacks it, two stand-ins carry that release's behaviour on
- * top of the real client and runner: `recordingStops` gives the client the method, and
+ * CopilotKit records stops from 1.84.1 (`ɵrecordRunStop` on the client, `recordStop` on the
+ * Intelligence runner), and that is what CI installs; `@copilotkit/runtime` 1.83.0 had neither. So
+ * where an installed runtime lacks it, two stand-ins carry that release's behaviour on top of the
+ * real client and runner: `recordingStops` gives the client the method, and
  * `StopRecordingRunner` calls a run's `recordStop` when it is asked to stop the run, within two
  * seconds, before the terminal event, and stops the run whatever the record did. Where the installed
  * runtime records stops itself, its runner does that and the stand-in does nothing, so a stop is
@@ -537,7 +537,7 @@ test("on the installed runtime, a client without the method is handed nothing an
 
 test("a paused hop's run is closed on the platform before the hop lets go of it", async () => {
   const client = installedClient();
-  // The installed runner, unchanged: this holds on 1.83.0 as it stands.
+  // The installed runner, unchanged: this holds on 1.83.0 as it stood, and on the runtime now.
   const runner = new IntelligenceAgentRunner({
     url: client.ɵgetRunnerWsUrl(),
     authToken: client.ɵgetRunnerAuthToken(),

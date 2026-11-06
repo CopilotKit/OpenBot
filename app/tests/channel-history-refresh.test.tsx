@@ -226,8 +226,12 @@ async function mounted() {
   return view;
 }
 
-test("generated UI actions run the actual channel agent and thread with edited values", async () => {
-  const activity = {
+/**
+ * A trip form a Bot drew, as its conversation stores it: a committed surface activity whose operations
+ * carry the A2UI version they were written in.
+ */
+function tripForm(version: string) {
+  return {
     id: "channel-trip-form",
     role: "activity",
     activityType: "generative-ui-surface",
@@ -239,7 +243,7 @@ test("generated UI actions run the actual channel agent and thread with edited v
       rejected: [],
       operations: [
         {
-          version: "v1.0",
+          version,
           createSurface: {
             surfaceId: "trip",
             catalogId: OPENBOT_UI.id,
@@ -247,7 +251,7 @@ test("generated UI actions run the actual channel agent and thread with edited v
           },
         },
         {
-          version: "v1.0",
+          version,
           updateComponents: {
             surfaceId: "trip",
             components: [
@@ -279,6 +283,10 @@ test("generated UI actions run the actual channel agent and thread with edited v
       ],
     },
   } satisfies Message;
+}
+
+test("generated UI actions run the actual channel agent and thread with edited values", async () => {
+  const activity = tripForm("1.0");
   const view = mounting(async () => stored([activity]), [activity], null, true);
   const user = userEvent.setup({ document: view.container.ownerDocument });
   const destination = await view.findByRole("textbox", { name: "Destination" });
@@ -311,6 +319,26 @@ test("generated UI actions run the actual channel agent and thread with edited v
       },
     },
   });
+});
+/*
+ * CopilotKit 1.83 wrote A2UI 1.0's version as "v1.0", and every interface a Bot drew on it is stored
+ * that way. 1.84 reads only "1.0" (CopilotKit #8155), so a conversation from before the upgrade lost
+ * its interfaces when it was reopened, and the next run in it took them away again.
+ */
+test("an interface a Bot drew before the upgrade draws when its conversation is reopened, and stays through the next run", async () => {
+  const activity = tripForm("v1.0");
+  const view = mounting(async () => stored([activity]), [activity], null, true);
+  const destination = await view.findByRole("textbox", { name: "Destination" });
+  expect((destination as HTMLInputElement).value).toBe("Paris");
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(view.getByRole("button", { name: "Confirm trip" }));
+  await waitFor(() => expect(runRequests).toHaveLength(1));
+  await waitFor(() => expect(currentAgent().isRunning).toBe(false));
+  expect(
+    (view.getByRole("textbox", { name: "Destination" }) as HTMLInputElement)
+      .value,
+  ).toBe("Paris");
 });
 function currentAgent(selected = channel) {
   const agent = core?.getAgent(`channel:${selected.id}`);

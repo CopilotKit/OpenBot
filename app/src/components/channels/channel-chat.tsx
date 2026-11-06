@@ -57,7 +57,10 @@ import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
-import { readThreadMessages } from "@/lib/copilot/thread-messages";
+import {
+  readThreadMessages,
+  withCurrentA2uiVersions,
+} from "@/lib/copilot/thread-messages";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
 import {
@@ -491,7 +494,12 @@ export function ChannelChat({
         if (isCurrent) {
           // The gateway snapshot can lag the store. Keep its valid local rows even when the
           // corresponding stored row is unreadable, while restoring other readable additions.
-          const messages = mergeStoredMessages(agent.messages, stored.messages);
+          // The snapshot's interfaces are read in the A2UI version CopilotKit reads now, as the
+          // store's are (thread-messages.ts), or the local copy kept here would not draw.
+          const messages = mergeStoredMessages(
+            withCurrentA2uiVersions(agent.messages),
+            stored.messages,
+          );
           if (messages !== agent.messages) agent.setMessages(messages);
         }
         /*
@@ -597,7 +605,7 @@ export function ChannelChat({
           setHistoryReadFailed(false);
           const current = agentRef.current;
           const messages = mergeStoredMessages(
-            current.messages,
+            withCurrentA2uiVersions(current.messages),
             stored.messages,
           );
           if (messages === current.messages) continue;

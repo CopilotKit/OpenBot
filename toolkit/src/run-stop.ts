@@ -10,8 +10,8 @@
  * most the runner's own short deadline. A failed record never keeps the run going, and a stop
  * Intelligence relayed to the runner is already recorded, so the runner does not call it then.
  *
- * `@copilotkit/runtime` 1.83.0 has neither half. Its client has no `ɵrecordRunStop`, so nothing is
- * handed to the runner and a stop works exactly as it did.
+ * The runtime OpenBot installs has both halves. A client without `ɵrecordRunStop`, as in
+ * `@copilotkit/runtime` 1.83.0, is handed nothing, and a stop works exactly as it did there.
  */
 
 /** A run as Intelligence knows it: its thread, its id, and whose and which agent's it is. */

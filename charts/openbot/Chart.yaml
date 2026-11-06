@@ -39,6 +39,6 @@ dependencies:
     # EXACT, NOT A RANGE, for the reason the pin above gives: a new release of this chart carries new
     # images and new required values, and arriving on its own it would be an install nobody tested.
     # Bump it deliberately, with the values under `intelligence` in values.yaml.
-    version: "0.16.0-rc.5"
+    version: "0.16.0-rc.6"
     repository: "oci://ghcr.io/copilotkit/charts"
     condition: intelligence.enabled

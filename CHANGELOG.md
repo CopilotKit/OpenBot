@@ -8,6 +8,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The Helm chart installs Intelligence 0.16.0-rc.6 instead of rc.5. A run that fails shows its own
+  error in the chat instead of "Runner connection dropped". A first install logs no PostgreSQL
+  errors. Intelligence's services, Learning and its jobs stay up while PostgreSQL restarts, as the
+  bundled one does on an upgrade that changes its image. The Learning agent reads its model key from
+  a mounted file before every run, so a new `secrets.modelApiKey` reaches it on its next run after
+  `helm upgrade`, without a restart. The skills Learning proposes have descriptions that read
+  correctly. Nothing in this chart's values changes.
+- OpenBot runs on CopilotKit 1.84.2-canary.openbot-intel-fixes (`@copilotkit/runtime`,
+  `react-core` and `shared`, from 1.83.0, and `@copilotkit/learning`, from a patched 0.0.1). AG-UI
+  stays 1.0.2. A run keeps its conversation until its last events reach Intelligence, so a failed
+  run's error is no longer lost, and lets go of it itself when it ends, so the next run, such as the
+  one that carries a command's result back to a Bot, starts at once. A follow-up sent within ten
+  seconds of pressing Stop no longer stays on "Thinking". Generated interfaces write A2UI's version
+  as `1.0`, and the ones a Bot drew on 0.3.0 and 0.3.1, written `v1.0`, still draw when their
+  conversation is reopened.
+
 ## 0.3.1
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`. Ten
