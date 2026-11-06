@@ -78,6 +78,12 @@ export const KITE_PATTERNS = [
 
 export type KitePattern = (typeof KITE_PATTERNS)[number];
 
+/**
+ * OpenBot's own sail: violet quarters, as openbot.co, the launch film and the favicon draw the
+ * product's kite.
+ */
+export const OPENBOT_PATTERN: KitePattern = "quarters";
+
 /** The status dot's reserved system colours. Idle and sleeping have no dot. */
 export const KITE_STATUS: Partial<Record<KiteState, string>> = {
   listening: "#2f6fed",

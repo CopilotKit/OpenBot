@@ -9,6 +9,7 @@ import {
   type KiteTimeline,
   kiteBleed,
   needsFrames,
+  OPENBOT_PATTERN,
   OPENBOT_SLOT,
   poseAt,
 } from "./kite-draw";
@@ -233,7 +234,7 @@ export function BotKite({
 }
 
 /**
- * OpenBot's own kite: violet with a plain sail, for the product rather than one Bot, as sign-in,
+ * OpenBot's own kite: violet quarters, for the product rather than one Bot, as sign-in,
  * onboarding and the skins' frames draw it. Decorative unless given a `label`.
  */
 export function OpenBotKite({
@@ -256,6 +257,7 @@ export function OpenBotKite({
       className={className}
       enterFrom={enterFrom}
       label={label}
+      pattern={OPENBOT_PATTERN}
       seed={7}
       size={size}
       slot={OPENBOT_SLOT}

@@ -113,13 +113,13 @@ test("a Bot is announced once, by its name", () => {
   expect(view.getAllByRole("img")).toHaveLength(1);
 });
 
-test("OpenBot's own kite is violet, with a plain sail, and decorative", () => {
+test("OpenBot's own kite is violet quarters, and decorative", () => {
   const view = render(<OpenBotKite size={56} />);
   expect(view.queryByRole("img")).toBeNull();
   const kite = view.container.querySelector<HTMLElement>("[data-kite]");
   expect(kite?.getAttribute("aria-hidden")).toBe("true");
   expect(kite?.dataset.slot).toBe(String(OPENBOT_SLOT));
-  expect(kite?.dataset.pattern).toBe("solid");
+  expect(kite?.dataset.pattern).toBe("quarters");
   expect(bodies).toEqual(["#6430ab"]);
 });
 
