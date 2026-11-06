@@ -1,6 +1,5 @@
 import type {
   LearningAutoAssignState,
-  LearningEvidence,
   LearningProposal,
   LearningRunSummary,
   LearningSettings,
@@ -14,7 +13,6 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
-import { Streamdown } from "streamdown";
 import { SkillSharingSection } from "@/components/admin/controls/skill-sharing-section";
 import {
   PageEmpty,
@@ -23,16 +21,8 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
+import { ProposalDialog } from "@/components/learning/proposal-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -61,7 +51,6 @@ import {
   learningSettingsQueryOptions,
   saveLearningSettings,
 } from "@/lib/learning/queries";
-import { markdownComponents } from "@/lib/markdown";
 import { queryClient as appQueryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/learning")({
@@ -538,6 +527,9 @@ const STATUS: Record<LearningProposal["status"], string> = {
 function ProposedSkills({ agentId }: { agentId?: string }) {
   const proposals = useQuery(learningProposalsQueryOptions(agentId));
   const learnNow = useMutation(startLearningRunMutationOptions(appQueryClient));
+  const review = useMutation(
+    reviewLearningProposalMutationOptions(appQueryClient),
+  );
   const [open, setOpen] = useState<string | null>(null);
   const containerId = proposals.data?.containerId ?? null;
   return (
@@ -611,9 +603,21 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
       )}
       {open && (
         <ProposalDialog
-          agentId={agentId}
-          onClose={() => setOpen(null)}
-          proposalId={open}
+          decided={review.data?.status}
+          deciding={review.isPending}
+          error={review.error}
+          load={learningProposalQueryOptions(open, agentId)}
+          onClose={() => {
+            setOpen(null);
+            review.reset();
+          }}
+          onDecide={(decision) =>
+            review.mutate({
+              proposalId: open,
+              decision,
+              ...(agentId ? { agentId } : {}),
+            })
+          }
         />
       )}
     </PageSection>
@@ -754,188 +758,5 @@ function PublishedSkills({ agentId }: { agentId?: string }) {
         source={{ kind: "admin", agentId }}
       />
     </PageSection>
-  );
-}
-
-/** SKILL.md without its front matter, whose name and description the dialog's header already shows. */
-function skillBody(markdown: string): string {
-  return markdown.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
-}
-
-/** What one Insight was learned from: the messages a conversation was cited for, or a recording. */
-function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
-  if (evidence === null)
-    return (
-      <p className="text-muted-foreground text-sm">
-        Couldn't load the evidence for this.
-      </p>
-    );
-  return (
-    <ul className="grid gap-3">
-      {evidence.map((entry) => (
-        <li
-          className="grid gap-1.5 rounded-md bg-muted p-3 text-sm"
-          key={`${entry.kind}:${entry.id}`}
-        >
-          {entry.kind === "conversation" ? (
-            <>
-              <p className="font-medium">
-                {entry.title ?? "A conversation"}
-                {entry.available ? "" : " (no longer available)"}
-              </p>
-              {entry.messages.map((message) => (
-                <p className="text-pretty" key={message.id}>
-                  <span className="text-muted-foreground">
-                    {message.role === "user"
-                      ? "Person: "
-                      : message.role === "assistant"
-                        ? "Bot: "
-                        : "Tool: "}
-                  </span>
-                  {message.content}
-                </p>
-              ))}
-            </>
-          ) : (
-            <p>
-              {`A recording${entry.available ? "" : " (no longer available)"}: ${entry.events.join(", ") || `${entry.eventCount} steps`}`}
-            </p>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** One proposed skill: the SKILL.md it publishes, why, and the evidence, with Approve and Reject. */
-function ProposalDialog({
-  agentId,
-  onClose,
-  proposalId,
-}: {
-  agentId?: string;
-  onClose: () => void;
-  proposalId: string;
-}) {
-  const detail = useQuery(learningProposalQueryOptions(proposalId, agentId));
-  const review = useMutation(
-    reviewLearningProposalMutationOptions(appQueryClient),
-  );
-  const proposal = detail.data;
-  const skill = proposal?.files.find((file) => file.path === "SKILL.md");
-  const others = proposal?.files.filter((file) => file.path !== "SKILL.md");
-  const decide = (decision: "approve" | "reject") =>
-    review.mutate({ proposalId, decision, ...(agentId ? { agentId } : {}) });
-  const decided = review.data?.status ?? proposal?.status;
-  return (
-    <Dialog onOpenChange={(next) => (next ? undefined : onClose())} open>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{proposal?.title ?? "Proposed skill"}</DialogTitle>
-          {proposal && (
-            <DialogDescription>{proposal.description}</DialogDescription>
-          )}
-        </DialogHeader>
-        <DialogBody className="mt-4 gap-5 overflow-y-auto">
-          {detail.isPending ? null : detail.error ? (
-            <p role="alert" className="text-destructive text-sm">
-              {detail.error.message}
-            </p>
-          ) : (
-            <>
-              <section className="grid gap-1.5">
-                <h3 className="font-medium text-sm">Why</h3>
-                <p className="text-pretty text-sm">{proposal?.reason}</p>
-              </section>
-              {skill && (
-                <section className="grid gap-1.5">
-                  <h3 className="font-medium text-sm">SKILL.md</h3>
-                  <div className="rounded-md border p-3">
-                    <Streamdown
-                      className="min-w-0 text-sm [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_li]:my-0 [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-                      components={markdownComponents}
-                      mode="static"
-                    >
-                      {skillBody(skill.content)}
-                    </Streamdown>
-                  </div>
-                </section>
-              )}
-              {others && others.length > 0 && (
-                <section className="grid gap-1.5">
-                  <h3 className="font-medium text-sm">Other files</h3>
-                  {others.map((file) => (
-                    <details
-                      className="rounded-md border p-3 text-sm"
-                      key={file.path}
-                    >
-                      <summary className="cursor-pointer">{file.path}</summary>
-                      <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-xs">
-                        {file.content}
-                      </pre>
-                    </details>
-                  ))}
-                </section>
-              )}
-              {proposal && proposal.insights.length > 0 && (
-                <section className="grid gap-3">
-                  <h3 className="font-medium text-sm">Learned from</h3>
-                  {proposal.insights.map((insight) => (
-                    <div className="grid gap-2" key={insight.id}>
-                      <p className="text-pretty text-sm">{insight.statement}</p>
-                      <EvidenceList evidence={insight.evidence} />
-                    </div>
-                  ))}
-                </section>
-              )}
-            </>
-          )}
-          {review.error && (
-            <p role="alert" className="text-destructive text-sm">
-              {review.error.message}
-            </p>
-          )}
-        </DialogBody>
-        <DialogFooter className="mt-4">
-          {decided === "pending_review" ? (
-            <>
-              <Button
-                disabled={review.isPending}
-                onClick={() => decide("reject")}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                Reject
-              </Button>
-              <Button
-                disabled={review.isPending}
-                onClick={() => decide("approve")}
-                size="sm"
-                type="button"
-              >
-                {review.isPending ? "Saving…" : "Approve and publish"}
-              </Button>
-            </>
-          ) : (
-            <>
-              {decided && (
-                <span
-                  className="mr-auto text-muted-foreground text-sm"
-                  role="status"
-                >
-                  {decided === "approved"
-                    ? "Published. Bots on this container use it from their next conversation."
-                    : "Rejected. It won't be published."}
-                </span>
-              )}
-              <Button onClick={onClose} size="sm" type="button">
-                Done
-              </Button>
-            </>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
