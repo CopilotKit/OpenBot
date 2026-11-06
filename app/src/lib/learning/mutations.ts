@@ -80,3 +80,47 @@ export function startLearningRunMutationOptions(queryClient: QueryClient) {
       queryClient.invalidateQueries({ queryKey: learningKeys.all }),
   });
 }
+
+/** Approve a skill proposed from your own recordings, which publishes it to your Bots, or reject it. */
+export function reviewPersonalProposalMutationOptions(
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationFn: (variables: {
+      container: string;
+      proposalId: string;
+      decision: "approve" | "reject";
+    }): Promise<{ id: string; status: "approved" | "rejected" }> =>
+      client(
+        `/api/settings/learning/proposals/${encodeURIComponent(variables.proposalId)}/${encodeURIComponent(variables.decision)}?container=${encodeURIComponent(variables.container)}`,
+        "proposal",
+        {
+          method: "POST",
+          body: {},
+          fallback: "Couldn't save your decision. Try again.",
+        },
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: learningKeys.all }),
+  });
+}
+
+/** Learn now: start a Learning run over your own recordings. */
+export function startPersonalLearningRunMutationOptions(
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationFn: (container: string): Promise<{ id: string; status: string }> =>
+      client(
+        `/api/settings/learning/runs?container=${encodeURIComponent(container)}`,
+        "run",
+        {
+          method: "POST",
+          body: {},
+          fallback: "Couldn't start Learning. Try again.",
+        },
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: learningKeys.all }),
+  });
+}

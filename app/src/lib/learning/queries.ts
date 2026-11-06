@@ -8,6 +8,7 @@ import type {
   LearningRunSummary,
   LearningSettings,
   PersonalLearningSharing,
+  PersonalReview,
 } from "@openbot/shared/learning";
 import { queryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
@@ -214,5 +215,40 @@ export function learnedSkillQueryOptions(
       client(learnedSkillPath(source, name), "skill", {
         fallback: "Couldn't load this skill. Try again.",
       }),
+  });
+}
+
+/** Settings, Learning: the skills proposed from your own recordings that wait for your decision. */
+export function personalReviewQueryOptions() {
+  return queryOptions({
+    queryKey: ["learning", "review"] as const,
+    retry: false,
+    queryFn: async (): Promise<PersonalReview> =>
+      (
+        await client("/api/settings/learning/review", {
+          fallback: "Couldn't load your skills to review. Reload the page.",
+        })
+      ).json(),
+  });
+}
+
+/** One skill proposed from your own recordings, with every file it publishes. */
+export function personalProposalQueryOptions(
+  container: string,
+  proposalId: string,
+) {
+  return queryOptions({
+    queryKey: [
+      "learning",
+      "personal-proposal",
+      { container, proposalId },
+    ] as const,
+    retry: false,
+    queryFn: (): Promise<LearningProposalDetail> =>
+      client(
+        `/api/settings/learning/proposals/${encodeURIComponent(proposalId)}?container=${encodeURIComponent(container)}`,
+        "proposal",
+        { fallback: "Couldn't load this skill. Try again." },
+      ),
   });
 }
