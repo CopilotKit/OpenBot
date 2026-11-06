@@ -49,6 +49,7 @@ function makeService(
       undecided: RoutingUndecided | null;
     };
     reachableSystems?: (agentId: string) => Promise<readonly string[]>;
+    skillsFor?: (agentId: string) => Promise<readonly string[]>;
   } = {},
 ) {
   const roster = options.roster ?? [
@@ -97,6 +98,7 @@ function makeService(
       router,
       auditStore,
       reachableSystems: options.reachableSystems,
+      skillsFor: options.skillsFor,
     }),
     modelCalls,
     audits,
@@ -782,5 +784,68 @@ describe("CoworkerRoutingService", () => {
       });
       expect({ text, model: modelCalls.length }).toEqual({ text, model: 0 });
     }
+  });
+});
+
+describe("routing selected skills", () => {
+  test("routes among Bots offering every selected skill and audits the final Bot", async () => {
+    const { service, modelCalls, audits } = makeService({
+      skillsFor: async (id) =>
+        id === "knowledge" ? ["first", "second"] : ["first"],
+    });
+    const result = await service.route({
+      actor: ACTOR,
+      text: "Help me",
+      skillSlugs: ["first", "second"],
+    });
+    expect(result).toMatchObject({ kind: "selected", agentId: "knowledge" });
+    expect(modelCalls[0]?.candidates.map(({ id }) => id)).toEqual([
+      "knowledge",
+    ]);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      targetId: "knowledge",
+      payload: { chosen: "knowledge", candidates: ["knowledge"] },
+    });
+  });
+
+  test("refuses incompatible skills before routing or recording a choice", async () => {
+    const { service, modelCalls, audits } = makeService({
+      skillsFor: async (id) => (id === "knowledge" ? ["second"] : ["first"]),
+    });
+    expect(
+      await service.route({
+        actor: ACTOR,
+        text: "Help me",
+        skillSlugs: ["first", "second"],
+      }),
+    ).toEqual({ kind: "none" });
+    expect(modelCalls).toHaveLength(0);
+    expect(audits).toHaveLength(0);
+  });
+
+  test("does not silently drop skill constraints when the grant store is unavailable", async () => {
+    const { service, modelCalls, audits } = makeService();
+    expect(
+      await service.route({
+        actor: ACTOR,
+        text: "Help me",
+        skillSlugs: ["first"],
+      }),
+    ).toEqual({ kind: "none" });
+    expect(modelCalls).toHaveLength(0);
+    expect(audits).toHaveLength(0);
+  });
+  test("a failed grant read stops routing instead of broadening the roster", async () => {
+    const { service, modelCalls, audits } = makeService({
+      skillsFor: async () => {
+        throw new Error("Grant read failed");
+      },
+    });
+    await expect(
+      service.route({ actor: ACTOR, text: "Help me", skillSlugs: ["first"] }),
+    ).rejects.toThrow("Grant read failed");
+    expect(modelCalls).toHaveLength(0);
+    expect(audits).toHaveLength(0);
   });
 });

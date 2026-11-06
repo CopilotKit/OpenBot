@@ -23,6 +23,39 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   seconds of pressing Stop no longer stays on "Thinking". Generated interfaces write A2UI's version
   as `1.0`, and the ones a Bot drew on 0.3.0 and 0.3.1, written `v1.0`, still draw when their
   conversation is reopened.
+- A new conversation's sidebar name no longer waits a minute when another server replica tries to
+  name it before Intelligence has its thread. That miss is now "not readable yet", retried in 15
+  seconds without using up a real failure's backoff, and it no longer logs
+  `Intelligence platform request failed` with `THREAD_NOT_FOUND`.
+- Skills (Admin → Skills, and Settings → Skills in the personal edition) lists each skill as one
+  row with its name, what it does and how many Bots offer it, and the row opens the skill's own
+  page. There, each Bot has a switch, the skill's words can be edited, and deleting asks first.
+  **New skill** is a page of its own. The personal edition's entry is called Skills.
+- The `/` menu, the chip it puts in the message box and the badge on a sent message show a skill's
+  name instead of its command. The message still carries the command, so a renamed skill keeps its
+  badge. On the home page, `/` offers the skills of all your Bots, and a message that uses one goes
+  to a Bot that offers every selected skill, with the skills' instructions. Incompatible selections
+  are refused, and the routing audit records the Bot that receives the message. The placeholder
+  `summarize` command is gone.
+- In the personal edition every Bot offers every skill: the skills there are, each new skill, and
+  every skill for a Bot made later. Each Bot is given them once, so a skill switched off for one Bot
+  stays off.
+- A skill can ask for web research (`@research/search`, `@research/fetch`). Saving one was refused
+  with "No tool by that name has been seen here".
+- The personal edition's home page has a **Meet OpenBot for Business** link at the top right, which
+  stays closed for the session once you close it.
+- Approvals and a Bot's questions are drawn as one kind of card: each answer is a row saying what
+  it does, the first is picked, and one button sends the pick and is named for it. Keys 1 to 9 pick
+  a row and Enter sends it, on the newest card waiting and never while you are typing. A Bot's
+  approval and question take words instead in a last row ("Tell the Bot something else…"), which
+  replaces the reason field. Answering folds the card into one line with the answer; an app's
+  approval then folds away into the conversation's line for that action.
+- The model picker under the message box is a CPU icon, with the model and its thinking in the
+  tooltip. It opens on two columns, the models on the left and the model's thinking levels on the
+  right, and stays open after a model is picked so its thinking can be picked next.
+- Save and Cancel sit on the right of their forms, with Cancel first: Profile, Passwords, a skill
+  in Capabilities, app consent, a Bot's proposed skill or Bot, and Automatic Learning.
+- The notifications prompt over the message box has the message box's background.
 
 ## 0.3.1
 

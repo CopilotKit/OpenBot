@@ -25,6 +25,8 @@ describe("where the pages a person manages live", () => {
     );
     expect(href(paths.brokerDirectory("arcade"))).toBe("/admin/plugins/arcade");
     expect(href(paths.skills())).toBe("/admin/skills");
+    expect(href(paths.newSkill())).toBe("/admin/skills/new");
+    expect(href(paths.skill("triage"))).toBe("/admin/skills/triage");
     expect(href(paths.credentials())).toBe("/admin/credentials");
     expect(href(paths.newCredential())).toBe("/admin/credentials/new");
     expect(href(paths.computers())).toBe("/admin/computers");
@@ -51,6 +53,8 @@ describe("where the pages a person manages live", () => {
     expect(paths.pluginsLabel).toBe("Connections");
     expect(managePaths("team").pluginsLabel).toBe("Plugins");
     expect(href(paths.skills())).toBe("/settings/skills");
+    expect(href(paths.newSkill())).toBe("/settings/skills/new");
+    expect(href(paths.skill("triage"))).toBe("/settings/skills/triage");
     expect(href(paths.credentials())).toBe("/settings/credentials");
     expect(href(paths.newCredential())).toBe("/settings/credentials/new");
     expect(href(paths.computers())).toBe("/settings/computer");

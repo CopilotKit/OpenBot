@@ -18,5 +18,4 @@ export {
   type QueueTransition,
   reduceQueue,
 } from "./queue";
-export { PLACEHOLDER_COMMANDS } from "./sources";
 export { type AgentOption, toAgentOptions } from "./triggers";

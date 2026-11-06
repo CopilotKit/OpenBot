@@ -660,9 +660,11 @@ test("a command the person declines shows as declined in their words, not in the
   const view = render(app());
   const user = await ask(view, "Clear out the build folder.");
 
+  // Pick Deny, then send it: the button is named for the answer picked.
   await user.click(
-    await view.findByRole("button", { name: "Deny" }, { timeout: 5000 }),
+    await view.findByRole("radio", { name: "Deny" }, { timeout: 5000 }),
   );
+  await user.click(view.getByRole("button", { name: "Deny" }));
   act(() => {
     queryClient.setQueryData<InfiniteData<ChannelPage>>(
       channelKeys.list(),
@@ -935,8 +937,9 @@ test("a command the person declines on the Bot's own approval card is listed onc
   );
 
   await user.click(
-    await view.findByRole("button", { name: "Keep file" }, { timeout: 5000 }),
+    await view.findByRole("radio", { name: "Keep file" }, { timeout: 5000 }),
   );
+  await user.click(view.getByRole("button", { name: "Keep file" }));
   expect(
     await view.findByText(
       "I did not run the command because you declined.",

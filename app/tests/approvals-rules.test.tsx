@@ -390,7 +390,7 @@ test("a pending change is drawn in the conversation where the action was, and de
     </QueryClientProvider>,
   );
   await view.findByRole("region", { name: "Waiting for your approval" });
-  expect(view.getByText(/This needs you: click on shop.example/)).toBeTruthy();
+  expect(view.getByText("Click on shop.example")).toBeTruthy();
   // Another call's line is left to its own renderer.
   expect(view.getByText("Filled in field")).toBeTruthy();
   expect(view.queryByText("Clicked on page")).toBeNull();

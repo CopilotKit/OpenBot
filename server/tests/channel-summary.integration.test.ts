@@ -414,6 +414,42 @@ describe("naming a claimed conversation", () => {
     expect(item?.runAt.getTime()).toBeGreaterThan(Date.now());
   });
 
+  test("comes back later when Intelligence does not know the thread yet", async () => {
+    const owner = await createUser();
+    const channel = await createUsedChannel(owner);
+    await offer(channel.id);
+
+    // A channel holds its thread id from the moment it is created, but Intelligence creates the
+    // thread only when the first run starts, so a sweep on any replica can ask about it first and
+    // be told 404 THREAD_NOT_FOUND. That is "not yet", not a failure that waits a minute.
+    const notFound = Object.assign(
+      new Error(
+        'Intelligence platform error 404: {"error":{"code":"THREAD_NOT_FOUND"}}',
+      ),
+      { name: "PlatformRequestError", status: 404 },
+    );
+    const report = await summariseClaimedChannels(
+      options({
+        transcript: {
+          getThreadMessages: async () => {
+            throw notFound;
+          },
+        },
+      }),
+    );
+
+    expect(report.skipped).toContainEqual({
+      channelId: channel.id,
+      reason: "not readable yet",
+    });
+    const [item] = await database
+      .select({ finishedAt: workItems.finishedAt, runAt: workItems.runAt })
+      .from(workItems)
+      .where(eq(workItems.key, channel.id));
+    expect(item?.finishedAt).toBeNull();
+    expect(item?.runAt.getTime()).toBeLessThan(Date.now() + 30_000);
+  });
+
   test("a conversation that no longer exists is dropped, not retried", async () => {
     const owner = await createUser();
     const channel = await createUsedChannel(owner);

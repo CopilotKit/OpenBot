@@ -31,6 +31,9 @@ export function managePaths(edition: "team" | "personal") {
           ? linkOptions({ to: "/connections/browse/composio" })
           : linkOptions({ to: "/connections/browse/arcade" }),
       skills: () => linkOptions({ to: "/settings/skills" }),
+      newSkill: () => linkOptions({ to: "/settings/skills/new" }),
+      skill: (slug: string) =>
+        linkOptions({ to: "/settings/skills/$slug", params: { slug } }),
       // Under Settings, and linked from Connections beside the apps that use them.
       credentialsLabel: "Keys",
       credentials: () => linkOptions({ to: "/settings/credentials" }),
@@ -59,6 +62,9 @@ export function managePaths(edition: "team" | "personal") {
         ? linkOptions({ to: "/admin/plugins/composio" })
         : linkOptions({ to: "/admin/plugins/arcade" }),
     skills: () => linkOptions({ to: "/admin/skills" }),
+    newSkill: () => linkOptions({ to: "/admin/skills/new" }),
+    skill: (slug: string) =>
+      linkOptions({ to: "/admin/skills/$slug", params: { slug } }),
     credentialsLabel: "Credentials",
     credentials: () => linkOptions({ to: "/admin/credentials" }),
     newCredential: () => linkOptions({ to: "/admin/credentials/new" }),

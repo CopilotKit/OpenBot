@@ -5,7 +5,13 @@
  * next run, and ends by replacing the agent's messages — losing anything added in between.
  */
 
-/** Resolves once `connect` has finished, ending it early if `deadline` comes first. */
+/**
+ * Resolves once `connect` has finished, ending it early if `deadline` comes first.
+ *
+ * Says which: `"connected"` when the connect finished on its own, `"deadline"` when it was ended.
+ * Whatever an ended connect replayed stops part way through the thread's history, so a caller that
+ * reads something off the replay (how the last run ended) cannot trust it after `"deadline"`.
+ */
 export async function joinWithin({
   connect,
   deadline,
@@ -17,7 +23,7 @@ export async function joinWithin({
   deadline: Promise<void>;
   /** End the in-flight connect. Asked for once, and only when the deadline came first. */
   detach: () => Promise<unknown>;
-}): Promise<void> {
+}): Promise<"connected" | "deadline"> {
   // Settled either way: a connect that failed is a join that is over, and the caller restores
   // history separately. Kept as one promise so it can be awaited twice without a second rejection.
   const finished = connect.then(
@@ -30,7 +36,7 @@ export async function joinWithin({
     deadline.then(() => "deadline" as const),
   ]);
   if (outcome === "connected") {
-    return;
+    return outcome;
   }
 
   try {
@@ -53,6 +59,7 @@ export async function joinWithin({
    * conversation that never answers again. The first is recoverable and visible. The second is not.
    */
   await Promise.race([finished, afterMs(DETACH_GRACE_MS)]);
+  return outcome;
 }
 
 /**

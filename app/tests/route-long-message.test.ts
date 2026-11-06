@@ -157,3 +157,10 @@ test("a message that fits is sent as it was written", async () => {
 
   expect(asked).toEqual(["Is this contract compliant? 😀"]);
 });
+
+test("selected skills cross the HTTP boundary without being dropped", async () => {
+  serve();
+  await expect(
+    routeMessage("Help me", undefined, ["first", "second"]),
+  ).rejects.toThrow("No Bot offers all the selected skills");
+});

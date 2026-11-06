@@ -12,6 +12,7 @@ import {
   type ComposerDraft,
   toAgentOptions,
 } from "@/components/channels/composer";
+import { BusinessLink } from "@/components/edition/business-link";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,6 +35,10 @@ import {
 } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
 import { newId } from "@/lib/new-id";
+import {
+  skillInstructionsFor,
+  useAnyBotSkillCommands,
+} from "@/lib/plugins/skill-commands";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
 const EXPLORE_SHOWN = 4;
@@ -79,6 +84,14 @@ function RouteComponent() {
   );
 
   /** Default recipient when the composer draft has no mention. */
+  /*
+   * Every skill any of the person's Bots offers. The Bot is not known until it is chosen with `@` or
+   * routed to after sending, so the menu offers them all and sending picks a Bot that has the one
+   * used. Without this the box fell back to a placeholder command no Bot has.
+   */
+  const { commands: skillCommands, botsFor } = useAnyBotSkillCommands(
+    agents?.map((agent) => agent.id) ?? [],
+  );
   const fallback = defaultAgentProfile(
     agents,
     agents?.find((agent) => agent.visibility === "public"),
@@ -97,23 +110,42 @@ function RouteComponent() {
    * looking at the placeholder; otherwise the next home page they open shows it.
    */
   const startBehind = async (pendingId: string, draft: ComposerDraft) => {
+    // With its `/` skills, put in front of the first message as a conversation does for every later
+    // one; see `skillInstructionsFor`.
+    const skills = skillInstructionsFor(draft.commandIds, skillCommands);
     try {
       if (draft.agentId) {
         // Recorded and started as one sequence, shared with `/channel/new`: the person already
         // decided, and the trail has to say so wherever they decided it.
-        await startChosen(draft.agentId, draft.text, [], undefined, pendingId);
+        // Only the skills this Bot offers, as in a conversation with it.
+        const chosen = draft.agentId;
+        await startChosen(
+          chosen,
+          draft.text,
+          skillInstructionsFor(
+            draft.commandIds.filter((slug) => botsFor(slug).includes(chosen)),
+            skillCommands,
+          ),
+          undefined,
+          pendingId,
+        );
         return;
       }
       let agentId: string | undefined;
       try {
-        agentId = (await routeMessage(draft.text)).agentId;
+        agentId = (await routeMessage(draft.text, undefined, draft.commandIds))
+          .agentId;
       } catch (caught) {
-        if (caught instanceof CoworkerRoutingRefusedError) throw caught;
+        if (
+          draft.commandIds.length ||
+          caught instanceof CoworkerRoutingRefusedError
+        )
+          throw caught;
         agentId = fallback?.id;
       }
       if (!agentId)
         throw new Error("There's no Bot to send this to. Reload the page.");
-      await start(agentId, draft.text, [], undefined, pendingId);
+      await start(agentId, draft.text, skills, undefined, pendingId);
     } catch (caught) {
       stashFailedStart({
         text: draft.text,
@@ -131,7 +163,9 @@ function RouteComponent() {
 
   return (
     <>
-      <SidebarToggleBar />
+      <SidebarToggleBar>
+        <BusinessLink />
+      </SidebarToggleBar>
       <div className="flex-1 flex flex-col items-center justify-center w-full p-4 mt-8">
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
@@ -154,6 +188,7 @@ function RouteComponent() {
         >
           <Composer
             agents={toAgentOptions(agents)}
+            commands={skillCommands}
             className="w-full max-w-2xl"
             disabled={!fallback}
             // The box reads its words once, when it mounts; a start that fails while this page is

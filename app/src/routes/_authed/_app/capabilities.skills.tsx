@@ -164,19 +164,12 @@ function SkillsPage() {
                     <ItemContent>
                       <ItemTitle>{skill.title}</ItemTitle>
                       {/*
-                       * THE COMMAND FIRST, because it is the only part a person has to know. The title
-                       * says what the skill is for; `/slug` is what they actually type, and a page that
-                       * lists skills without showing how to invoke one leaves them guessing at it.
-                       *
-                       * The interpunct only appears when there is a summary to separate it from —
-                       * a trailing "· " on a skill written without one reads as something missing.
+                       * The name and what it is for. Not the command: the `/` menu finds a skill by
+                       * its name, so the command is the skill's key rather than something to read.
                        */}
-                      <ItemDescription>
-                        <code className="font-mono text-foreground/80 text-xs">
-                          /{skill.slug}
-                        </code>
-                        {skill.summary ? ` · ${skill.summary}` : null}
-                      </ItemDescription>
+                      {skill.summary ? (
+                        <ItemDescription>{skill.summary}</ItemDescription>
+                      ) : null}
                     </ItemContent>
                     <ItemActions>
                       <DropdownMenu>
@@ -198,7 +191,7 @@ function SkillsPage() {
                             </DropdownMenuItem>
                             {/*
                              * Deleting is immediate and there is no undo. It is behind a menu rather
-                             * than sitting on the row for that reason, and the slug is named in the
+                             * than sitting on the row for that reason, and the skill is named in the
                              * label so the destructive item says WHICH skill it destroys — a menu
                              * opened over the wrong row is the ordinary way this goes wrong.
                              */}
@@ -209,7 +202,7 @@ function SkillsPage() {
                               }}
                               variant="destructive"
                             >
-                              Delete /{skill.slug}
+                              Delete {skill.title}
                             </DropdownMenuItem>
                           </DropdownMenuGroup>
                         </DropdownMenuContent>
@@ -245,19 +238,12 @@ function SkillsPage() {
                     <ItemContent>
                       <ItemTitle>{skill.title}</ItemTitle>
                       {/*
-                       * THE COMMAND FIRST, because it is the only part a person has to know. The title
-                       * says what the skill is for; `/slug` is what they actually type, and a page that
-                       * lists skills without showing how to invoke one leaves them guessing at it.
-                       *
-                       * The interpunct only appears when there is a summary to separate it from —
-                       * a trailing "· " on a skill written without one reads as something missing.
+                       * The name and what it is for. Not the command: the `/` menu finds a skill by
+                       * its name, so the command is the skill's key rather than something to read.
                        */}
-                      <ItemDescription>
-                        <code className="font-mono text-foreground/80">
-                          /{skill.slug}
-                        </code>
-                        {skill.summary ? ` · ${skill.summary}` : null}
-                      </ItemDescription>
+                      {skill.summary ? (
+                        <ItemDescription>{skill.summary}</ItemDescription>
+                      ) : null}
                     </ItemContent>
                   </Item>
                   {index !== deployment.length - 1 && <Separator />}

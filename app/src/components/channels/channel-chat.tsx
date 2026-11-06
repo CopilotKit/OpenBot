@@ -56,7 +56,7 @@ import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
-import { stoppedReason } from "@/lib/copilot/stopped-turn";
+import { followLastRun, stoppedReason } from "@/lib/copilot/stopped-turn";
 import {
   readThreadMessages,
   withCurrentA2uiVersions,
@@ -454,6 +454,14 @@ export function ChannelChat({
     "ready" | "unavailable"
   >("ready");
   const [historyReadFailed, setHistoryReadFailed] = useState(false);
+  /**
+   * Why the last run ended without an answer, drawn under the transcript.
+   *
+   * Set by a turn of this mount that fails, and on joining the thread when the history it replays
+   * ends in a failed run (`followLastRun`), so the failure is still there after a reload. Cleared by
+   * the next turn.
+   */
+  const [runError, setRunError] = useState<string | null>(null);
   // Mount reads and Bot refreshes share one ordering: only the newest read owns the notice.
   const historyReadVersion = useRef(0);
   useEffect(() => {
@@ -465,11 +473,14 @@ export function ChannelChat({
     if (!isReady) return;
     let current = true;
     const version = ++historyReadVersion.current;
+    // Before the connect: it is handed the subscribers the agent has when it starts.
+    const lastRun = followLastRun(agent);
 
     void (async () => {
+      let joined: "connected" | "deadline" = "deadline";
       try {
         // Bounded, and finished when it returns; `join-thread.ts` has why that matters.
-        await joinWithin({
+        joined = await joinWithin({
           // A turn too: restoring a thread can run the calls it left unanswered.
           connect: whileObserved(agent, () =>
             copilotkit.connectAgent({ agent }),
@@ -483,6 +494,17 @@ export function ChannelChat({
          * typed afterwards waits on that gate, so a throw here would silence the conversation
          * rather than degrade it. History is restored below either way.
          */
+      } finally {
+        lastRun.stop();
+      }
+      /*
+       * The last run failed, so say so again, as the turn did when it failed. Only from a replay
+       * that finished: one ended at the deadline may stop short of the run that answered. Not over
+       * a turn already waiting to go, which clears it the moment it starts.
+       */
+      const failed = joined === "connected" ? lastRun.failure() : null;
+      if (failed !== null && current && turnsRef.current === 0) {
+        setRunError((shown) => shown ?? failed);
       }
 
       try {
@@ -688,8 +710,6 @@ export function ChannelChat({
     unreadable,
   });
 
-  // Run failures arrive as events and are reported only for turns started in this mount.
-  const [runError, setRunError] = useState<string | null>(null);
   const awaitingReply = useRef(false);
   /**
    * WHY THIS TURN ENDED WITHOUT AN ANSWER, KEPT WHERE `deliver` CAN STILL SEE IT — because the one

@@ -94,10 +94,17 @@ function draw(node: ReactNode) {
   );
 }
 
-const names = (scope: HTMLElement) =>
+/** The answers a row on the Bot's page offers, as its buttons name them. */
+const buttons = (scope: HTMLElement) =>
   within(scope)
     .getAllByRole("button")
     .map((button) => button.textContent);
+
+/** The answers a card offers, as its rows name them. */
+const names = (scope: HTMLElement) =>
+  within(scope)
+    .getAllByRole("radio")
+    .map((radio) => radio.getAttribute("aria-label"));
 
 test("in the conversation, a check-in task's approval offers Allow once and Deny, and no standing rule", async () => {
   serving();
@@ -135,11 +142,11 @@ test("on the Bot's page, the same: the task's row has no Always allow here, the 
     (await view.findByText(path, { exact: false })).closest(
       "[data-slot=item]",
     ) as HTMLElement;
-  expect(names(await row("deno-rollback-note.md"))).toEqual([
+  expect(buttons(await row("deno-rollback-note.md"))).toEqual([
     "Allow once",
     "Deny",
   ]);
-  expect(names(await row("notes.md"))).toEqual([
+  expect(buttons(await row("notes.md"))).toEqual([
     "Allow once",
     "Always allow here",
     "Deny",

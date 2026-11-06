@@ -126,9 +126,9 @@ test("an app's call OpenBot asks about draws its card in the conversation", asyn
   expect(
     card.getByText("Sending something to other people always asks you first."),
   ).toBeTruthy();
-  expect(card.getByRole("button", { name: "Allow once" })).toBeTruthy();
-  expect(card.getByRole("button", { name: "Deny" })).toBeTruthy();
-  expect(card.queryByRole("button", { name: "Always allow here" })).toBeNull();
+  expect(card.getByRole("radio", { name: "Allow once" })).toBeTruthy();
+  expect(card.getByRole("radio", { name: "Deny" })).toBeTruthy();
+  expect(card.queryByRole("radio", { name: "Always allow here" })).toBeNull();
 });
 
 test("with nothing waiting, the call is the line it always was", async () => {

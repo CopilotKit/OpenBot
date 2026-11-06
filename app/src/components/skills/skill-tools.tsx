@@ -1,7 +1,29 @@
 import { RESEARCH_ROLES } from "@openbot/shared/research";
+import { IconChevronRight, IconPlugOff, IconWorld } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
+import { type ReactNode, useState } from "react";
+import { PageRows } from "@/components/layout/page-shell";
+import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
 import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 import { undeclaredElsewhere } from "@/lib/skills/form";
 
@@ -11,20 +33,63 @@ import { undeclaredElsewhere } from "@/lib/skills/form";
  * WHY IT MATTERS THAT THIS EXISTS AT ALL. Selection is over skills: before a run the deployment asks
  * its own model which skills the message needs, and the Bot is built with those skills' tools plus
  * every granted tool no skill claims. A deployment where no skill declares anything has nothing to
- * select on, so every Bot is offered its whole catalogue — which is the case the narrowing was built
- * to fix. Until this screen existed the only way to declare a tool was to call the API by hand.
+ * select on, so every Bot is offered its whole catalogue, which is the case the narrowing was built
+ * to fix.
  *
  * A DECLARATION IS NOT A GRANT, and this is the one thing the screen has to get across. Anybody
- * signed in may write a skill; adding an MCP server is an administrator's decision. If naming a tool
- * here made it callable, the first surface would be a way around the second. It does not: the offer
- * is intersected with what the Bot was granted, so a skill naming a tool its Bot does not hold
- * selects the skill and loads nothing. Said in the hint rather than left for somebody to discover,
- * because the failure it prevents is somebody ticking boxes expecting access.
+ * signed in may write a skill; adding an MCP server is an administrator's decision. Naming a tool
+ * here does not make it callable: the offer is intersected with what the Bot was granted. Said in the
+ * section's description, because the failure it prevents is somebody ticking boxes expecting access.
  *
- * PART OF THE FORM, unlike the Agents toggles below it. What a skill needs is the author's draft
- * until they press save, so unticking one and closing the panel changes nothing. Granting is the
- * opposite and saves on press, which is why the two look different on purpose.
+ * ONE ROW PER APP, AND A DIALOG FOR ITS TOOLS. The picker used to be a wrap of buttons per app, one
+ * per tool, named in snake case with a pencil glyph on writes. At a dozen tools it read as noise,
+ * and which ones were on did not survive a glance. A set of choices is a summary, a chevron and a
+ * dialog in the layout skill's vocabulary, which is what each app's row is now.
+ *
+ * PART OF THE FORM, unlike granting. What a skill needs is the author's draft until they press save,
+ * so the dialog changes the form's value and nothing else.
  */
+
+/** One group of choices: an app, web research, or refs no app here offers. */
+type ToolGroup = {
+  key: string;
+  title: string;
+  media: ReactNode;
+  tools: {
+    ref: string;
+    title: string;
+    /** The vendor's own name, which is what its documentation calls it. */
+    name?: string;
+    description: string;
+    writes: boolean;
+  }[];
+  /** Refs no app here offers: shown so they can be removed, never offered for adding. */
+  unavailable?: boolean;
+};
+
+/** `create_routine` → "Create routine". The raw name stays on the row's tooltip. */
+function toolTitle(name: string): string {
+  const words = name.replace(/[_-]+/g, " ").trim();
+  return words ? words[0]?.toUpperCase() + words.slice(1) : name;
+}
+
+/**
+ * A tool's description is written for the model and often runs to a paragraph. Its first sentence
+ * is what a person needs to tell the tools apart.
+ */
+function firstSentence(text: string): string {
+  const trimmed = text.trim();
+  const end = trimmed.search(/[.!?](\s|$)/);
+  return end === -1 ? trimmed : trimmed.slice(0, end + 1);
+}
+
+function summary(held: number, total: number, unavailable?: boolean): string {
+  if (unavailable) return held === 1 ? "1 tool" : `${held} tools`;
+  if (held === 0) return "None";
+  if (held === total) return total === 1 ? "1 tool" : `All ${total} tools`;
+  return `${held} of ${total} tools`;
+}
+
 export function SkillTools({
   selected,
   onChange,
@@ -33,159 +98,214 @@ export function SkillTools({
   onChange: (refs: string[]) => void;
 }) {
   const plugins = useQuery(pluginsPageQueryOptions());
+  const [open, setOpen] = useState<string | null>(null);
   const held = new Set(selected);
 
-  const toggle = (ref: string) => {
+  const toggle = (ref: string, on: boolean) => {
     /*
-     * Rebuilt rather than mutated, and filtered rather than spliced, so the array handed to the form
-     * is a new one. React Form compares by reference; mutating in place leaves the field's value
-     * looking unchanged and the submit button disabled on a form the person has edited.
+     * Rebuilt rather than mutated, so the array handed to the form is a new one. React Form compares
+     * by reference; mutating in place leaves the field looking unchanged and Save disabled.
      */
     onChange(
-      held.has(ref)
-        ? selected.filter((each) => each !== ref)
-        : [...selected, ref],
+      on
+        ? [...selected.filter((each) => each !== ref), ref]
+        : selected.filter((each) => each !== ref),
     );
   };
 
-  /*
-   * Only servers that actually offer something. A server whose tools have never been refreshed has
-   * an empty list, and a heading with nothing under it reads as a tool that failed to draw.
-   */
-  const servers = (plugins.data?.servers ?? []).filter(
+  if (plugins.isPending) return null;
+  if (!plugins.data) {
+    return (
+      <p className="mt-4 text-destructive text-sm" role="alert">
+        Couldn't load the tools. Reload the page.
+      </p>
+    );
+  }
+
+  /* Only apps that offer something: a heading with nothing under it reads as a failed draw. */
+  const servers = plugins.data.servers.filter(
     (server) => server.tools.length > 0,
   );
-
   /*
-   * Declared, and offered by nothing this deployment has connected.
-   *
-   * Shown rather than dropped, because the alternative is a screen that states part of the
-   * declaration as though it were all of it. A package ships skills declaring tools for connectors
-   * nobody has added yet, and a person's own skill outlives the server it was written against, so
-   * this is the ordinary case rather than a corner of one. Left out, a skill needing two tools drew
-   * one and the second was invisible to the person governing it.
-   *
-   * Only computed once the list has actually loaded: while the query is pending every ref looks
-   * unmatched, and flashing the whole declared set into this group and out again would be worse
-   * than showing nothing for a moment.
+   * Declared, and offered by nothing connected here. Shown rather than dropped: a package ships
+   * skills declaring tools for apps nobody has added yet, and leaving them out would state part of
+   * the declaration as if it were all of it.
    */
-  const elsewhere = plugins.data
-    ? undeclaredElsewhere(
-        selected,
-        servers.flatMap((server) => server.tools.map((tool) => tool.ref)),
-      )
-    : [];
+  const elsewhere = undeclaredElsewhere(
+    selected,
+    servers.flatMap((server) => server.tools.map((tool) => tool.ref)),
+  );
+
+  const groups: ToolGroup[] = [
+    ...servers.map((server) => ({
+      key: server.id,
+      title: server.title,
+      media: <PluginLogo logo={server.logo} name={server.title} />,
+      tools: server.tools.map((tool) => ({
+        ref: tool.ref,
+        title: toolTitle(tool.name),
+        name: tool.name,
+        description: firstSentence(tool.description) || tool.name,
+        writes: tool.effect === "write",
+      })),
+    })),
+    {
+      key: "research",
+      title: "Web research",
+      media: <IconWorld />,
+      tools: RESEARCH_ROLES.map((role) => ({
+        ref: role.ref,
+        title: role.label,
+        description: "Uses whichever research app the Bot has.",
+        writes: false,
+      })),
+    },
+    ...(elsewhere.length > 0
+      ? [
+          {
+            key: "elsewhere",
+            title: "Not available here",
+            media: <IconPlugOff />,
+            unavailable: true,
+            tools: elsewhere.map((ref) => ({
+              ref,
+              title: ref,
+              description: "No app here offers this.",
+              writes: false,
+            })),
+          },
+        ]
+      : []),
+  ];
+  const current = groups.find((group) => group.key === open);
 
   return (
-    <Field>
-      <FieldLabel>Tools it needs</FieldLabel>
+    <>
+      <PageRows>
+        {groups.map((group, index) => {
+          const count = group.tools.filter((tool) => held.has(tool.ref)).length;
+          return (
+            <div key={group.key}>
+              {/* A real button with no children: children passed to `render` replace the row's own. */}
+              <Item
+                render={
+                  <button onClick={() => setOpen(group.key)} type="button" />
+                }
+                size="sm"
+              >
+                <ItemMedia variant="icon">{group.media}</ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{group.title}</ItemTitle>
+                  <ItemDescription>
+                    {group.unavailable
+                      ? "This skill asks for these, but no app here offers them."
+                      : count > 0
+                        ? group.tools
+                            .filter((tool) => held.has(tool.ref))
+                            .map((tool) => tool.title)
+                            .join(", ")
+                        : group.tools.length === 1
+                          ? "1 tool"
+                          : `${group.tools.length} tools`}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-xs">
+                    {summary(count, group.tools.length, group.unavailable)}
+                  </span>
+                  <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                </ItemActions>
+              </Item>
+              {index !== groups.length - 1 && <Separator />}
+            </div>
+          );
+        })}
+      </PageRows>
 
-      {plugins.isPending ? null : plugins.error ? (
-        <p className="text-destructive text-xs" role="alert">
-          Couldn't load the tools. Reload the page.
-        </p>
-      ) : servers.length === 0 ? (
-        <p className="text-muted-foreground text-xs">
-          No app offers tools yet. You can still write the skill. Most skills
-          are only instructions.
-        </p>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {servers.map((server) => (
-            <div className="flex flex-col gap-1.5" key={server.id}>
-              <p className="text-muted-foreground text-xs">{server.title}</p>
-              <div className="flex flex-wrap gap-2">
-                {server.tools.map((tool) => {
-                  const on = held.has(tool.ref);
-                  return (
-                    <Button
-                      key={tool.ref}
-                      onClick={() => toggle(tool.ref)}
-                      size="sm"
-                      /*
-                       * The vendor's own tool name, not the namespaced one a model sees. The person
-                       * reading this is matching it against the vendor's documentation.
-                       */
-                      title={tool.description}
-                      type="button"
-                      variant={on ? "default" : "outline"}
-                    >
-                      {tool.name}
+      <Dialog
+        onOpenChange={(next) => {
+          if (!next) setOpen(null);
+        }}
+        open={current !== undefined}
+      >
+        {current ? (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{current.title}</DialogTitle>
+              <DialogDescription>
+                {current.unavailable
+                  ? "These do nothing until an admin adds the app. Untick one to remove it from the skill."
+                  : "Using this skill loads the tools you tick for that reply."}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogBody className="mt-4 overflow-y-auto">
+              <div className="flex flex-col gap-px">
+                {current.tools.map((tool) => (
+                  <Item
+                    key={tool.ref}
+                    size="sm"
+                    title={tool.name}
+                    variant="muted"
+                  >
+                    <ItemContent>
+                      <ItemTitle>{tool.title}</ItemTitle>
+                      <ItemDescription>{tool.description}</ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
                       {/*
-                       * Writes are marked. Which tools a skill pulls in is a governance question, and
-                       * "this one changes something at the vendor" is the part worth seeing before
-                       * ticking it rather than after.
+                       * Writes are marked: "this one changes something at the vendor" is the part
+                       * worth seeing before ticking it.
                        */}
-                      {tool.effect === "write" ? (
-                        <span
-                          aria-label="changes something"
-                          className="ml-1 opacity-60"
-                          role="img"
-                        >
-                          ✎
+                      {tool.writes ? (
+                        <span className="text-amber-600 text-xs dark:text-amber-500">
+                          changes things
                         </span>
                       ) : null}
-                    </Button>
-                  );
-                })}
+                      <Checkbox
+                        aria-label={`Use ${tool.title}`}
+                        checked={held.has(tool.ref)}
+                        onCheckedChange={(checked) =>
+                          toggle(tool.ref, checked === true)
+                        }
+                      />
+                    </ItemActions>
+                  </Item>
+                ))}
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {plugins.data ? (
-        <div className="flex flex-col gap-1.5">
-          <p className="text-muted-foreground text-xs">Public-web research</p>
-          <div className="flex flex-wrap gap-2">
-            {RESEARCH_ROLES.map((role) => (
-              <Button
-                key={role.ref}
-                onClick={() => toggle(role.ref)}
-                size="sm"
-                title={`${role.ref}: uses whichever research app the Bot has`}
-                type="button"
-                variant={held.has(role.ref) ? "default" : "outline"}
-              >
-                {role.label}
+            </DialogBody>
+            <DialogFooter className="mt-4 justify-between">
+              {current.unavailable ? (
+                <span />
+              ) : (
+                <Button
+                  onClick={() => {
+                    const refs = current.tools.map((tool) => tool.ref);
+                    const all = refs.every((ref) => held.has(ref));
+                    onChange(
+                      all
+                        ? selected.filter((ref) => !refs.includes(ref))
+                        : [
+                            ...selected,
+                            ...refs.filter((ref) => !held.has(ref)),
+                          ],
+                    );
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  {current.tools.every((tool) => held.has(tool.ref))
+                    ? "Clear all"
+                    : "Select all"}
+                </Button>
+              )}
+              <Button onClick={() => setOpen(null)} size="sm" type="button">
+                Done
               </Button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {elsewhere.length > 0 ? (
-        <div className="flex flex-col gap-1.5">
-          <p className="text-muted-foreground text-xs">Not available here</p>
-          <div className="flex flex-wrap gap-2">
-            {elsewhere.map((ref) => (
-              <Button
-                key={ref}
-                onClick={() => toggle(ref)}
-                size="sm"
-                /*
-                 * The whole ref, not a tool name. There is no server here to put it under, and the
-                 * server id is the part that says which connector is missing.
-                 */
-                title={`${ref}: no app here offers this`}
-                type="button"
-                variant="secondary"
-              >
-                {ref}
-              </Button>
-            ))}
-          </div>
-          <p className="text-muted-foreground text-xs">
-            This skill asks for these, but no app here offers them. They do
-            nothing until an admin adds the app. Click one to remove it.
-          </p>
-        </div>
-      ) : null}
-
-      <p className="text-muted-foreground text-xs">
-        Using this skill loads these tools for that reply. It doesn't give
-        access. A Bot can only use tools it already has.
-      </p>
-    </Field>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+    </>
   );
 }

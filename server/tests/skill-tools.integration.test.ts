@@ -153,6 +153,21 @@ describe("a skill declaring the tools it needs", () => {
     expect(await declaredBy(skill)).toEqual([heldRef]);
   });
 
+  test("accepts the web research roles, which name no one server's tool", async () => {
+    // What the skill editor offers under Web research, and what a Bot proposes for reading a page.
+    await saveSkill(["@research/fetch", "@research/search"]);
+    expect(await declaredBy(skill)).toEqual([
+      "@research/fetch",
+      "@research/search",
+    ]);
+  });
+
+  test("still refuses a research role that does not exist", async () => {
+    await expect(saveSkill(["@research/browse"])).rejects.toBeInstanceOf(
+      PluginRefusedError,
+    );
+  });
+
   test("duplicates in one save are stored once", async () => {
     await saveSkill([heldRef, heldRef]);
     expect(await declaredBy(skill)).toEqual([heldRef]);

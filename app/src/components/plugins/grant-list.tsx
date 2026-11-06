@@ -263,7 +263,10 @@ function ConsentNotice({
       data-consent-copy=""
     >
       <p className="text-sm">{sentence}</p>
-      <div className="flex gap-2">
+      <div className="flex justify-end gap-2">
+        <Button onClick={onCancel} size="sm" type="button" variant="ghost">
+          Cancel
+        </Button>
         <Button
           disabled={busy}
           onClick={onContinue}
@@ -272,9 +275,6 @@ function ConsentNotice({
           variant="outline"
         >
           Continue to consent
-        </Button>
-        <Button onClick={onCancel} size="sm" type="button" variant="ghost">
-          Cancel
         </Button>
       </div>
     </fieldset>
