@@ -507,14 +507,16 @@ export const intelligenceChannelMappings = pgTable(
       .references(() => channels.id, { onDelete: "cascade" }),
     threadId: text("thread_id").notNull(),
     /**
-     * The model this person picked for this conversation's built-in Bot, or null for the
-     * configured one. Per person, like the thread: in a shared channel each member answers on
-     * their own pick. The provider is kept so a pick made under one provider is not sent to
-     * another after the deployment switches. See channels/model-choice.ts.
+     * The model and effort this person picked for this conversation's Bot, or null for the
+     * default. Per person, like the thread: in a shared channel each member answers on their own
+     * pick. The provider is kept so a pick made under one provider is not sent to another after the
+     * deployment switches. `model` absent means the default model, with only an effort picked.
+     * See channels/model-choice.ts.
      */
     modelSelection: jsonb("model_selection").$type<{
       provider: string;
-      model: string;
+      model?: string | null;
+      effort?: string | null;
     }>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

@@ -216,12 +216,19 @@ describe("deployment model selection", () => {
     expect(request.model).toBe("selected-local-model");
   });
 
+  test("a model the operator named is the built-in Bot's on OpenAI's own API too", async () => {
+    const request = await runGeneralAssistantWithEnvironment({
+      BOT_MODEL: "selected-local-model",
+    });
+
+    expect(request.model).toBe("selected-local-model");
+  });
+
   test.each([
     {},
     { OPENAI_BASE_URL: "http://127.0.0.1:11434/v1", BOT_MODEL: "   " },
-    { BOT_MODEL: "selected-local-model" },
   ])(
-    "package default remains the model without a compatible endpoint selection: %j",
+    "package default remains the model when nobody named one: %j",
     async (environment) => {
       const request = await runGeneralAssistantWithEnvironment(environment);
 

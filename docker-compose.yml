@@ -520,7 +520,11 @@ services:
       # A path into the mount below, set only when a ChatGPT plan was signed in to. The file is
       # there either way; this variable is what tells the harness to read it.
       CHATGPT_AUTH_FILE: ${CHATGPT_AUTH_FILE:-}
-      BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
+      # Empty when nobody named one, never a stand-in that looks like a choice. The server sends the
+      # model on every run (`forwardedProps.openbotModel`): the one named here when the credential
+      # lists it, otherwise the middle of the provider's line. A stand-in here was how a ChatGPT
+      # plan ran gpt-5.5, which it refuses.
+      BOT_MODEL: ${BOT_MODEL:-}
     extra_hosts:
       - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
     volumes:

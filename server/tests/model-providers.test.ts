@@ -102,7 +102,7 @@ describe("deployment API-key provider selection", () => {
         BOT_MODEL: " claude-sonnet-4-5 ",
         OPENAI_BASE_URL: "",
       }),
-    ).toEqual(anthropicModel);
+    ).toEqual({ ...anthropicModel, pinned: true });
     expect(
       runtimeModelForEnvironment(packageModel, {
         BOT_PROVIDER: "anthropic",
@@ -121,18 +121,23 @@ describe("deployment API-key provider selection", () => {
         BOT_MODEL: "",
       }),
     ).toEqual(packageModel);
+    // A model named on its own is the operator's, on OpenAI's own API too.
     expect(
       runtimeModelForEnvironment(packageModel, {
-        BOT_MODEL: "unselected-model",
+        BOT_MODEL: "named-model",
       }),
-    ).toEqual(packageModel);
+    ).toEqual({ ...packageModel, defaultModel: "named-model", pinned: true });
     expect(
       runtimeModelForEnvironment(packageModel, {
         BOT_PROVIDER: "openai",
         BOT_MODEL: "local-model",
         OPENAI_BASE_URL: "http://localhost:11434/v1",
       }),
-    ).toEqual({ provider: "openai", defaultModel: "local-model" });
+    ).toEqual({
+      provider: "openai",
+      defaultModel: "local-model",
+      pinned: true,
+    });
   });
 
   test("credentials stay provider-scoped and a rotated stored key is read on the next call", async () => {
