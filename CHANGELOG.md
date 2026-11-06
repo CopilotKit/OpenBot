@@ -17,6 +17,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - `docker-compose.yml` gives the `server` container no supervisor when
   `COMPUTER_SUPERVISOR_CONTAINER_URL` is set empty. Unset, it is the supervisor, as before.
 
+- A Bot knows that an answer it got from another Bot with `message_bot` is that Bot's. Asked to
+  quote what Knowledge said, General Assistant quotes it, instead of saying it never arrived or
+  calling the words its own.
+- Every Bot knows its own name. "Ask the Knowledge Bot for one sentence on Helm", sent to
+  Knowledge, is answered by Knowledge, instead of Knowledge saying it can't reach the Knowledge Bot.
 - The Helm chart installs Intelligence 0.16.0-rc.7 instead of rc.5. A run that fails shows its own
   error in the chat instead of "Runner connection dropped". A first install logs no PostgreSQL
   errors. Intelligence's services, Learning and its jobs stay up while PostgreSQL restarts, as the

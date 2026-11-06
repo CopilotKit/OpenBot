@@ -50,6 +50,7 @@ import {
   type ActorAgentResolver,
   CoworkerUnavailableError,
 } from "./agents/agent-resolver";
+import { attributeBotAnswers } from "./agents/bot-answers";
 import {
   PlanModel,
   type PlanModelConfig,
@@ -214,6 +215,28 @@ function claimsServerInstructionId(message: Message): boolean {
 }
 
 /**
+ * How a Bot knows a request is for it.
+ *
+ * People address a Bot as "Knowledge" or "the Knowledge Bot", and the router sends "ask the
+ * Knowledge Bot for one sentence on Helm" to Knowledge, rightly. A Bot that was never told its own
+ * name read that as a request to reach somebody else: Knowledge went looking for a way to ask the
+ * Knowledge Bot, found none, and told the person it could not. So every Bot is told the names it
+ * answers to, and that a request to ask one of them is a request to answer.
+ */
+export function selfAddressGuidance(name: string): string {
+  const named = /\bbot$/i.test(name.trim()) ? `the ${name}` : `the ${name} Bot`;
+  return `People call you "${name}" or "${named}". A request to ask, message or hand work to ${name} is a request to you, so answer it yourself.`;
+}
+
+/**
+ * The first thing a built-in Bot reads: its name. A Bot's prompt is whatever somebody wrote about
+ * its job, and the package's own Knowledge prompt never says what it is called.
+ */
+function identityGuidance(name: string): string {
+  return `You are ${name}, a Bot in OpenBot. ${selfAddressGuidance(name)}`;
+}
+
+/**
  * The coworker's job, as one system message.
  *
  * It is an ordinary AG-UI system message rather than `forwardedProps` or framework-specific state
@@ -228,7 +251,7 @@ export function standingRoleMessage(
     id: `${STANDING_ROLE_ID_PREFIX}${profile.id}`,
     role: "system",
     content: [
-      `You are ${profile.name}, ${profile.title}.`,
+      `You are ${profile.name}, ${profile.title}. ${selfAddressGuidance(profile.name)}`,
       profile.roleDescription,
       "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
       /*
@@ -609,6 +632,13 @@ export function builtInAgentConfiguration(
      * their precedence sentence only means anything next to the role it defers to.
      */
     prompt: [
+      /*
+       * Who it is, first. Left off only where the prompt already says it: a remote Bot run here for
+       * a check-in (`onOpenBotRunner`) carries its standing role, which names it the same way.
+       */
+      ...(agent.systemPrompt.includes(selfAddressGuidance(agent.name))
+        ? []
+        : [identityGuidance(agent.name)]),
       agent.systemPrompt,
       ...(standing ? [standing] : []),
       /*
@@ -763,6 +793,14 @@ export async function buildAgents(
    * positional reason `loadInstructions` gives. Absent, every run uses the deployment's model.
    */
   pickedModel?: PickedModel,
+  /**
+   * The display name of every Bot whose answer may be in a conversation, by id, so the model is
+   * told which Bot answered (`bot-answers.ts`). After `pickedModel`, for the positional reason
+   * `loadInstructions` gives. Absent, the Bots being built are the ones named.
+   */
+  botNames: ReadonlyMap<string, string> = new Map(
+    agents.map((agent) => [agent.id, agent.name]),
+  ),
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -822,6 +860,7 @@ export async function buildAgents(
           recordToolLimitRefusal,
           holdsTools,
           pickedModel,
+          botNames,
         );
         if (loadPersonalMemory)
           built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
@@ -1090,6 +1129,8 @@ async function buildAgent(
   holdsTools?: HoldsTools,
   /** The model the person picked for this conversation. See {@link buildAgents}. */
   pickedModel?: PickedModel,
+  /** Who answered, by Bot id, for another Bot's answer in this one's thread. See {@link buildAgents}. */
+  botNames: ReadonlyMap<string, string> = new Map(),
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -1225,6 +1266,7 @@ async function buildAgent(
             };
           }
         : undefined,
+      botNames,
     );
   }
 
@@ -1358,6 +1400,8 @@ async function buildAgent(
        * or not there is anything to load, because a tool's picture is not a stored attachment;
        * see `tool-images.ts`.
        */
+      // Another Bot's answer, as that Bot's words rather than this one's. See `bot-answers.ts`.
+      attribute: (messages) => attributeBotAnswers(messages, botNames),
       inline: async (messages: AgentRunInput["messages"], threadId: string) =>
         inlineToolImages(
           loadAttachment
@@ -1722,6 +1766,8 @@ function remoteAgentWithStandingRole(
   chooseModel?: (
     input: RunAgentInput,
   ) => Promise<{ model: string; reasoningEffort?: string } | undefined>,
+  /** Who answered, by Bot id, for another Bot's answer in this one's thread. See {@link buildAgents}. */
+  botNames: ReadonlyMap<string, string> = new Map(),
 ) {
   const holds = (input: RunAgentInput) => !holdsTools || holdsTools(input);
   /*
@@ -1872,7 +1918,11 @@ function remoteAgentWithStandingRole(
           messages: [
             agent.standingMessage,
             ...(holdingsMessage ? [holdingsMessage] : []),
-            ...messages,
+            /*
+             * Another Bot's answer as that Bot's words, after the sanitiser and the attachments as
+             * on the built-in path. See `bot-answers.ts`.
+             */
+            ...attributeBotAnswers(messages, botNames),
           ],
           /*
            * The Bot's own grants, added to whatever the surface offered.
@@ -2132,6 +2182,9 @@ export async function resolveRuntimeAgents(
     recordToolLimitRefusal,
     holdsTools,
     pickedModel,
+    // Every Bot this person has, not only the one being built: an answer in its thread can be any
+    // of theirs.
+    new Map(all.map((agent) => [agent.id, agent.name])),
   );
 }
 

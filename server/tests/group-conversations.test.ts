@@ -38,6 +38,30 @@ test("the transcript names speakers and leaves out what the turn already quotes"
   expect(named.content).toContain('"speaker":"Ada"');
 });
 
+test("an answer another Bot handed back is quoted as that Bot's, not the asking Bot's", () => {
+  // As `announceHandoff` writes it: in the asking Bot's row, naming the Bot that answered.
+  const message = groupTurnMessage(
+    "turn",
+    "Quote exactly what Knowledge answered",
+    [
+      {
+        id: "handoff:1",
+        agentId: "general-assistant",
+        text: "Helm is a package manager for Kubernetes.",
+        details: { via: "message_bot", answeredBy: "knowledge" },
+      },
+    ],
+    new Map([
+      ["general-assistant", "General Assistant"],
+      ["knowledge", "Knowledge"],
+    ]),
+  );
+  expect(message.content).toContain(
+    '{"speaker":"Knowledge","text":"Helm is a package manager for Kubernetes."}',
+  );
+  expect(message.content).not.toContain('"speaker":"General Assistant"');
+});
+
 test("a reply addresses peers by their whole @name, never itself", () => {
   const roster = [
     { id: "ada", name: "Ada" },
