@@ -12,7 +12,14 @@ import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
 import { currentEdition } from "../edition";
 import type { SkillApprovalStore } from "./approvals";
-import { type LearningManagement, readProposals, runSummary } from "./review";
+import {
+  CANDIDATE_ID,
+  type LearningManagement,
+  learningFailure,
+  readProposal,
+  readProposals,
+  runSummary,
+} from "./review";
 import type { LearningSettingsStore } from "./settings";
 import type { LearningSharingStore } from "./sharing";
 
@@ -47,6 +54,11 @@ export type PersonalLearningRouteDeps = {
   settings: LearningSettingsStore;
   /** The Learning spaces this person reviews (learning/scopes.ts). */
   scopesFor: (actor: AuthenticatedActor) => Promise<LearningSource[]>;
+  /** The titles of this person's own recordings by id; an id they don't own is left out. */
+  recordingTitles?: (
+    userId: string,
+    ids: string[],
+  ) => Promise<Map<string, string | null>>;
 };
 
 /** What a person reads when they try to open their Skills while an administrator has not allowed it. */
@@ -153,6 +165,45 @@ export function createPersonalLearningRoutes(
       sources,
     };
     return context.json(answer);
+  });
+
+  routes.get("/proposals/:candidateId", async (context) => {
+    const candidateId = context.req.param("candidateId");
+    if (!CANDIDATE_ID.test(candidateId)) {
+      return context.json({ error: "Name a skill to open." }, 400);
+    }
+    const manage = deps.manage;
+    if (!manage) {
+      return context.json(
+        { error: "Couldn't reach Intelligence just now. Try again." },
+        503,
+      );
+    }
+    const actor = context.var.actor;
+    const scopes = await deps.scopesFor(actor);
+    const wanted = context.req.query("container");
+    const source = wanted
+      ? scopes.find((scope) => scope.containerId === wanted)
+      : scopes[0];
+    if (!source) {
+      return context.json({ error: "You have no skill like that." }, 404);
+    }
+    const recordingTitles = deps.recordingTitles;
+    try {
+      return context.json({
+        proposal: await readProposal(
+          manage,
+          source.containerId,
+          candidateId,
+          source.kind === "recordings" && recordingTitles
+            ? (ids) => recordingTitles(actor.id, ids)
+            : undefined,
+        ),
+      });
+    } catch (error) {
+      const failure = learningFailure(error);
+      return context.json({ error: failure.error }, failure.status);
+    }
   });
 
   routes.get("/skills/:name", async (context) => {

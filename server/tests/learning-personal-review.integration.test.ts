@@ -70,6 +70,7 @@ function review(options: {
   personalReview?: LearningSettings["personalReview"];
   withManage?: boolean;
   manage?: LearningManagement;
+  recordingTitles?: PersonalLearningRouteDeps["recordingTitles"];
 }) {
   const intelligence = fakeIntelligence("current", {
     containers: options.containers ?? [personalLearningContainerId(ada)],
@@ -109,6 +110,9 @@ function review(options: {
     ...(options.withManage === false
       ? {}
       : { manage: options.manage ?? client.experimental.learning }),
+    ...(options.recordingTitles
+      ? { recordingTitles: options.recordingTitles }
+      : {}),
     settings: {
       read: async () => settings,
     } as unknown as LearningSettingsStore,
@@ -200,5 +204,53 @@ describe("reviewing the skills learned from your own recordings", () => {
   test("with no Intelligence connection it answers 503", async () => {
     const app = review({ withManage: false });
     expect((await app.request("/review")).status).toBe(503);
+  });
+
+  test("another container than the person's own is not found", async () => {
+    setEdition("team");
+    const app = review({});
+    expect(
+      (await app.request(`/proposals/${PROPOSAL}?container=openbot`)).status,
+    ).toBe(404);
+  });
+
+  test("evidence names the person's own recordings and no one else's", async () => {
+    const asked: { userId: string; ids: string[] }[] = [];
+    const read = async (titled: boolean) => {
+      const app = review({
+        recordingTitles: async (userId, ids) => {
+          asked.push({ userId, ids });
+          return new Map(
+            titled ? [] : [["someone-elses-recording", "Not yours"]],
+          );
+        },
+      });
+      const response = await app.request(
+        `/proposals/${PROPOSAL}?container=${personalLearningContainerId(ada)}`,
+      );
+      expect(response.status).toBe(200);
+      const { proposal } = (await response.json()) as {
+        proposal: {
+          insights: { evidence: { kind: string; title: string | null }[] }[];
+        };
+      };
+      return proposal.insights
+        .flatMap((insight) => insight.evidence ?? [])
+        .filter((item) => item.kind === "recording");
+    };
+    const recordings = await read(false);
+    expect(recordings.length).toBeGreaterThan(0);
+    expect(recordings.every((item) => item.title === null)).toBe(true);
+    expect(asked.length).toBe(1);
+    expect(asked[0]?.userId).toBe(ada);
+    expect(asked[0]?.ids.length).toBeGreaterThan(0);
+  });
+
+  test("a bad proposal id answers 400 and no Intelligence connection answers 503", async () => {
+    expect((await review({}).request("/proposals/nope")).status).toBe(400);
+    expect(
+      (await review({ withManage: false }).request(`/proposals/${PROPOSAL}`))
+        .status,
+    ).toBe(503);
   });
 });
