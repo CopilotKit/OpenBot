@@ -9,6 +9,7 @@ import {
   type RecorderConnectionsResponse,
   type RecorderMe,
   type RecorderUser,
+  type RecordingsPage,
   recorderActivitySchema,
 } from "@openbot/shared/recorder-api";
 import { extensionIdFromOrigin } from "@openbot/shared/recorder-extension";
@@ -42,6 +43,11 @@ export type RecorderRouteDeps = {
   sealOrganizationSession: (
     cookieHeader: string | undefined,
   ) => Promise<SealedOrganizationSession | null>;
+  /** A person's recordings, a page at a time. Throws a RangeError for a cursor that does not decode. Absent where
+   * recordings are not kept. */
+  recordings?: {
+    list(userId: string, cursor: string | null): Promise<RecordingsPage>;
+  };
   auditStore?: AuditStore;
 };
 
@@ -232,6 +238,28 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
       extensionIds: deps.allowedExtensionIds(),
     };
     return context.json(answer);
+  });
+
+  routes.get("/recordings", deps.requireUser, async (context) => {
+    if (!deps.recordings) {
+      return context.json({ error: "Recordings are not available here." }, 503);
+    }
+    try {
+      return context.json(
+        await deps.recordings.list(
+          context.var.actor.id,
+          context.req.query("cursor") ?? null,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof RangeError) {
+        return context.json(
+          { error: "That page of recordings is not one." },
+          400,
+        );
+      }
+      throw error;
+    }
   });
 
   // Declared before `:id`, or "current" would be taken for a connection id.

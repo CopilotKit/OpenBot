@@ -6,6 +6,7 @@ import {
   RECORDER_ACTIVITY_STALE_MS,
   RECORDER_SIGNED_OUT,
   type RecorderConnectionsResponse,
+  type RecordingsPage,
 } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { eq, inArray } from "drizzle-orm";
@@ -14,7 +15,10 @@ import type { AuditEventInput } from "../src/audit";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
-import { recorderConnections } from "../src/db/schema/recorder";
+import {
+  recorderConnections,
+  recorderTrajectoryBindings,
+} from "../src/db/schema/recorder";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { SESSION_LIFETIME_MS, testEnvironment } from "./support/environment";
@@ -45,6 +49,8 @@ function build(
     kickThrows?: boolean;
     /** The trail refuses every row written with a connection (connections.ts writes them in its transaction). */
     auditFails?: boolean;
+    /** What Intelligence answers for trajectory summaries. */
+    intelligenceFetch?: typeof fetch;
   } = {},
 ) {
   const config = loadConfig(
@@ -83,6 +89,9 @@ function build(
     },
     sessionLifetimeMs: SESSION_LIFETIME_MS,
     auditStore,
+    ...(options.intelligenceFetch
+      ? { intelligenceFetch: options.intelligenceFetch }
+      : {}),
     ...(options.auditFails
       ? {
           auditFor: () => ({
@@ -624,5 +633,72 @@ describe("using the bearer", () => {
       });
       expect([method, path, answer.status]).toEqual([method, path, 404]);
     }
+  });
+});
+
+describe("recordings", () => {
+  test("a person sees only their own recordings, newest first, 50 at a time", async () => {
+    const mine = Array.from({ length: 51 }, () => randomUUID());
+    const theirs = randomUUID();
+    const base = Date.parse("2026-01-01T00:00:00.000Z");
+    await database.insert(recorderTrajectoryBindings).values([
+      ...mine.map((trajectoryId, index) => ({
+        trajectoryId,
+        userId: owner,
+        createdAt: new Date(base + index * 1_000),
+      })),
+      { trajectoryId: theirs, userId: busy, createdAt: new Date(base) },
+    ]);
+    const asked: string[] = [];
+    const intelligenceFetch = (async (input: Request | string | URL) => {
+      const url = String(input);
+      asked.push(url);
+      const ids = (new URL(url).searchParams.get("ids") ?? "")
+        .split(",")
+        .filter(Boolean);
+      return Response.json({
+        items: ids.map((trajectoryId) => ({
+          trajectoryId,
+          createdAt: new Date(base).toISOString(),
+          firstEventAt: new Date(base).toISOString(),
+          lastEventAt: new Date(base).toISOString(),
+          eventCount: 3,
+          workflow: "Send the report",
+          outcome: { phase: "succeeded", reason: null },
+        })),
+      });
+    }) as unknown as typeof fetch;
+    const h = build({}, { intelligenceFetch });
+
+    const anonymous = await call(h, "/api/recorder/recordings");
+    expect(anonymous.status).toBe(401);
+
+    const first = await call(h, "/api/recorder/recordings", {
+      headers: COOKIE,
+    });
+    expect(first.status).toBe(200);
+    const page1 = (await first.json()) as RecordingsPage;
+    expect(page1.recordings).toHaveLength(50);
+    expect(page1.recordings.map((row) => row.id)).toEqual(
+      [...mine].reverse().slice(0, 50),
+    );
+    expect(page1.nextCursor).not.toBeNull();
+
+    const second = await call(
+      h,
+      `/api/recorder/recordings?cursor=${encodeURIComponent(page1.nextCursor ?? "")}`,
+      { headers: COOKIE },
+    );
+    const page2 = (await second.json()) as RecordingsPage;
+    expect(page2.recordings.map((row) => row.id)).toEqual([mine[0]]);
+    expect(page2.nextCursor).toBeNull();
+
+    expect(asked.join(" ")).not.toContain(theirs);
+    expect(JSON.stringify([page1, page2])).not.toContain(theirs);
+
+    const bad = await call(h, "/api/recorder/recordings?cursor=nonsense", {
+      headers: COOKIE,
+    });
+    expect(bad.status).toBe(400);
   });
 });
