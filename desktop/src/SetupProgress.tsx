@@ -33,15 +33,21 @@ export type Progress = {
 export function SetupProgress({
   steps,
   label = "Setup progress",
+  showElapsed = true,
 }: {
   steps: Progress[];
   label?: string;
+  showElapsed?: boolean;
 }) {
   if (steps.length === 0) return null;
   return (
     <ol className="steps" aria-label={label} aria-live="polite">
       {steps.map((step) => (
-        <SetupProgressRow key={step.step} step={step} />
+        <SetupProgressRow
+          key={step.step}
+          step={step}
+          showElapsed={showElapsed}
+        />
       ))}
     </ol>
   );
@@ -102,9 +108,8 @@ const PREPARING = new Set([
  * An installation's native rows as two plain ones, for local mode: "Preparing this computer" and
  * "Installing OpenBot". A failure is shown in full under the rows.
  *
- * While a row runs it carries the running step's own sentence and download size, so a wait of
- * minutes says what it is waiting on ("Installing the app's packages.", "Downloading local
- * software (2/4)."). "Preparing this computer" says, for instance, "Starting Docker Desktop.
+ * Keep actionable directions for the current step. Image pulls only need an item count.
+ * "Preparing this computer" says, for instance, "Starting Docker Desktop.
  * Accept anything it asks in its own window." Docker is named on purpose. Its agreement and
  * helper prompt appear in windows of their own, and a row that only said "Preparing" sat for
  * minutes while one of them waited, unseen, behind this one.
@@ -142,17 +147,24 @@ export function plainInstallSteps(
       step: "Installing OpenBot",
       ok: !installingFailed,
       running: installingNow,
-      detail: restNow?.detail ?? "",
-      downloadBytes: restNow?.downloadBytes,
+      detail: restNow?.step === "images" ? "" : (restNow?.detail ?? ""),
+      downloadBytes:
+        restNow?.step === "images" ? undefined : restNow?.downloadBytes,
       downloads: restNow?.downloads,
     });
   }
   return rows;
 }
 
-function SetupProgressRow({ step }: { step: Progress }) {
+function SetupProgressRow({
+  step,
+  showElapsed,
+}: {
+  step: Progress;
+  showElapsed: boolean;
+}) {
   const running = step.running ?? false;
-  const elapsed = useElapsed(running, step.startedAt);
+  const elapsed = useElapsed(running && showElapsed, step.startedAt);
   const downloads = running ? step.downloads : undefined;
   return (
     <li className="step" aria-label={label(step.step)}>
@@ -167,7 +179,7 @@ function SetupProgressRow({ step }: { step: Progress }) {
         className={`step-status${running ? "" : step.ok ? " good" : " bad"}`}
       >
         {running ? "In progress" : step.ok ? "Complete" : "Failed"}
-        {running && (
+        {running && showElapsed && (
           <span className="step-elapsed" aria-hidden="true" aria-live="off">
             {" · "}
             {formatElapsed(elapsed)} elapsed
@@ -180,46 +192,31 @@ function SetupProgressRow({ step }: { step: Progress }) {
           downloads == null &&
           ` ${formatDownloadBytes(step.downloadBytes)} downloaded.`}
       </span>
-      {downloads && <DownloadDetail downloads={downloads} />}
+      {downloads && downloads.total > 0 && (
+        <ItemProgress downloads={downloads} />
+      )}
     </li>
   );
 }
 
-/** The images downloading now, each with its own figure, over one line for the whole download. */
-function DownloadDetail({ downloads }: { downloads: Downloads }) {
+function ItemProgress({
+  downloads: { done, total },
+}: {
+  downloads: Downloads;
+}) {
+  const remaining = total - done;
+  const summary = `${remaining} of ${total} ${total === 1 ? "item" : "items"} remaining`;
   return (
     <div className="downloads">
-      {downloads.pulling.length > 0 && (
-        <ul className="downloads-now" aria-label="Downloading now">
-          {downloads.pulling.map((image) => (
-            <li key={image.name} aria-label={image.name}>
-              <span className="downloads-name">{image.name}</span>
-              {image.bytes > 0 && (
-                <span className="downloads-bytes">{imageFigure(image)}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="downloads-summary">{downloadsSummary(downloads)}</p>
+      <progress
+        aria-label="Item download progress"
+        aria-valuetext={summary}
+        value={done}
+        max={total}
+      />
+      <span>{summary}</span>
     </div>
   );
-}
-
-function imageFigure(image: ImagePull): string {
-  const bytes = formatDownloadBytes(image.bytes);
-  return image.size ? `${bytes} of ${formatDownloadBytes(image.size)}` : bytes;
-}
-
-/** "1.2 GB downloaded · 24.5 MB/s · 3 of 9 images done", leaving out what is not known yet. */
-export function downloadsSummary(downloads: Downloads): string {
-  const parts: string[] = [];
-  if (downloads.bytes > 0)
-    parts.push(`${formatDownloadBytes(downloads.bytes)} downloaded`);
-  if (downloads.bytesPerSecond != null)
-    parts.push(`${formatDownloadBytes(downloads.bytesPerSecond)}/s`);
-  parts.push(`${downloads.done} of ${downloads.total} images done`);
-  return parts.join(" · ");
 }
 
 export function formatDownloadBytes(bytes: number): string {
