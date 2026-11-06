@@ -121,16 +121,17 @@ carries on once it is connected.
 four settings: Routines, Memory, **What it can do** (the apps and skills it has, what it asks before
 doing, and its goals) and Setup.
 
-**Settings** holds Saved logins, Keys, Skills for every Bot, Computer and Activity (the audit trail).
+**Settings** holds Saved logins, Keys, Skills for every Bot, Learning, Computer and Activity (the audit trail).
 Where Admin was, **OpenBot for Business** opens a list of what the team edition adds. An old
 `/admin/...` or `/settings/plugins/...` address opens the same page where it is now. There is no Sharing, Visibility, Isolated, or Reaching you, which are
 all about other people, other computers or Slack and Teams.
 
 **Settings → Learning** is where the skills OpenBot learns from your recordings and conversations
 wait for your review. You approve or reject them yourself, under **Waiting for your review**, and
-**Learn now** starts a run on demand. **Your Skills** lists the skills learned from your recordings,
-and a row opens one to read. They reach every Bot on your computer, and there is no one to share
-with, so **Ask to share** is not offered here.
+**Learn now** starts a run on demand. **Your Skills** lists the skills learned from your recordings and conversations,
+and a row opens one to read. A skill from your recordings reaches every Bot. A skill from
+conversations reaches the Bots that share its Learning container, which is every Bot unless one
+has a container of its own. There is no one to share with, so **Ask to share** is not offered here.
 
 **Approve new skills automatically** is on from the start, so you don't have to review each one. It
 approves what OpenBot proposes from your recordings and conversations. It runs when Learning opens,
