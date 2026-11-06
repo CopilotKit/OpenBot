@@ -170,23 +170,34 @@ export function createOpenSkillIndex(deps: {
   const ttlMs = deps.ttlMs ?? INDEX_TTL_MS;
   const now = deps.now ?? Date.now;
   let current: { sources: OpenSkillSource[]; readAt: number } | undefined;
-  let reading: Promise<OpenSkillSource[]> | undefined;
-  /** Bumped by `invalidate`, so a read that began before a change cannot overwrite what came after. */
+  /**
+   * Bumped by `invalidate`. A read that began before a change is neither shared with callers that come after it nor
+   * kept as the index, so neither sees the answer from before the change.
+   */
   let generation = 0;
+  /** The read in flight for the current generation, which every caller in that generation shares. */
+  let reading:
+    | { generation: number; sources: Promise<OpenSkillSource[]> }
+    | undefined;
 
   const refresh = () => {
-    if (reading) return reading;
+    if (reading?.generation === generation) return reading.sources;
     const started = generation;
-    reading = deps
-      .read()
-      .then((sources) => {
-        if (started === generation) current = { sources, readAt: now() };
-        return sources;
-      })
-      .finally(() => {
-        reading = undefined;
-      });
-    return reading;
+    const read: NonNullable<typeof reading> = {
+      generation: started,
+      sources: deps
+        .read()
+        .then((sources) => {
+          if (started === generation) current = { sources, readAt: now() };
+          return sources;
+        })
+        .finally(() => {
+          // A read from an older generation must not clear the one that replaced it.
+          if (reading === read) reading = undefined;
+        }),
+    };
+    reading = read;
+    return read.sources;
   };
 
   return {
