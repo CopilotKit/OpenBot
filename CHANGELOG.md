@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop's sign-ins show whose account they are: CopilotKit's logo on the CopilotKit
+  sign-in, Google's and xAI's marks in the AI provider list, and each provider's mark on its
+  "Sign in with" button. Google's button reads "Sign in with Google".
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
