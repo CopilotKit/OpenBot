@@ -1,8 +1,10 @@
-// The OpenBot address rule lives beside the Recorder's API in shared/, so OpenBot itself checks an address with the same
-// rule before it hands one to the Recorder (the OpenBot browser's connection).
-export { normaliseOpenBotOrigin } from "@openbot/shared/recorder-api";
-
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]"]);
+// The OpenBot address rule and the gateway rule live beside the Recorder's API in shared/, so OpenBot itself checks an
+// address with the same rule before it hands one to the Recorder (the OpenBot browser's connection, the capture pass's
+// gateway).
+export {
+  isAllowedGatewayUrl,
+  normaliseOpenBotOrigin,
+} from "@openbot/shared/recorder-api";
 
 function parse(raw: string): URL | null {
   try {
@@ -10,21 +12,6 @@ function parse(raw: string): URL | null {
   } catch {
     return null;
   }
-}
-
-/** wss:// required; ws:// only when the gateway host is 127.0.0.1 or [::1]; when `allowed` is not null the
- * grant's origin must equal one of the allowed URLs' origins. */
-export function isAllowedGatewayUrl(
-  clientUrl: string,
-  allowed: readonly string[] | null,
-): boolean {
-  const url = parse(clientUrl);
-  if (!url) return false;
-  const secure = url.protocol === "wss:";
-  if (!secure && !(url.protocol === "ws:" && LOOPBACK_HOSTS.has(url.hostname)))
-    return false;
-  if (allowed === null) return true;
-  return allowed.some((entry) => parse(entry)?.origin === url.origin);
 }
 
 const NON_RECORDABLE_HOSTS = new Set([
