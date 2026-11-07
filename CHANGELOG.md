@@ -150,6 +150,7 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 - **One row per action.** A computer action that failed or was stopped shows once, as "Did not
   happen", and Computer actions lists blocked, failed and stopped actions as well as allowed ones.
 - **A Bot's actions in folders on your computer read as computer actions**: "Read a file todo.txt", "Run a command dir", and a write you denied as "Save a file todo.txt, Blocked", listed under Computer actions and Blocked. Each read "Change a setting", twice per action, and a denied write was missing from Blocked. Older rows read in the same words.
+- **Activity leaves out choosing tools for a run** ("Choose tools for a run, 96 of 96 tools"), which was written on every turn and is OpenBot's own working. Admin's Audit still lists it. **Giving a Bot a folder** on Settings → Computer reads "Give a Bot a folder" with the folder and the Bot, and taking it away or stopping folder access reads in words too, where each read "Change a setting" with no Bot. Older rows show the Bot when they recorded one.
 - **Rows say what they were about in words**, such as "Choose tools for a run" and "Save a file",
   where they showed "mcp.tools_discovered" and "write_file". Admin shows the stored name on hover,
   and the export keeps it.

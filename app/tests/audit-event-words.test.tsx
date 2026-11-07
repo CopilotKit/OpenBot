@@ -9,7 +9,10 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AuditPage } from "@/components/manage/audit-page";
+import {
+  AuditPage,
+  withoutOpenBotWorking,
+} from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
@@ -107,7 +110,12 @@ async function renderAs(edition: "team" | "personal") {
     localEvaluation: edition === "personal",
     edition,
   });
-  queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
+  // Activity asks without OpenBot's own working, and the server answers without it.
+  if (edition === "personal")
+    queryClient.setQueryData([...auditKeys.all, withoutOpenBotWorking("")], {
+      events: ROWS.filter((row) => row.eventType !== "mcp.tools_discovered"),
+    });
+  else queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
   queryClient.setQueryData(agentKeys.list(false), [
     { id: "personal-assistant", name: "Personal Assistant" },
   ]);
@@ -133,9 +141,10 @@ const whats = (container: HTMLElement) =>
 test("each row says in words what it was about, and no stored name shows in Activity", async () => {
   const view = await renderAs("personal");
   const lines = whats(view.container);
-  expect(lines.map((line) => line.textContent)).toEqual(WORDS);
+  // Every row but choosing tools for a run, which Activity leaves out.
+  expect(lines.map((line) => line.textContent)).toEqual(WORDS.slice(1));
   expect(lines.map((line) => line.getAttribute("title"))).toEqual(
-    STORED.map(() => null),
+    STORED.slice(1).map(() => null),
   );
   const table = view.container.querySelector("tbody")?.textContent ?? "";
   for (const stored of ["mcp.tools_discovered", "write_file", "read_file"])
@@ -155,11 +164,11 @@ test("the search box still finds a row by its stored name", async () => {
     .setup({ document })
     .type(
       view.getByRole("searchbox", { name: "Search events" }),
-      "tools_discovered",
+      "channel.routed",
     );
   await waitFor(() =>
     expect(whats(view.container).map((line) => line.textContent)).toEqual([
-      "Choose tools for a run",
+      "Choose a Bot for a message",
     ]),
   );
 });

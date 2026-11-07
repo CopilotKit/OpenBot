@@ -8,7 +8,10 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
-import { AuditPage } from "@/components/manage/audit-page";
+import {
+  AuditPage,
+  withoutOpenBotWorking,
+} from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
@@ -137,7 +140,11 @@ async function renderAs(edition: "team" | "personal") {
     localEvaluation: edition === "personal",
     edition,
   });
-  queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
+  // Activity asks without OpenBot's own working; Admin asks for everything.
+  queryClient.setQueryData(
+    [...auditKeys.all, edition === "personal" ? withoutOpenBotWorking("") : ""],
+    { events: ROWS },
+  );
   queryClient.setQueryData(agentKeys.list(false), [
     { id: BOT, name: "ChatGPT Plan Check" },
   ]);

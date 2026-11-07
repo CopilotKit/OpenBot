@@ -104,6 +104,16 @@ export const COMPUTER_ACTION_EVENT_TYPES = [
   "computer.action_stopped",
 ] as const;
 
+/**
+ * OpenBot's own working, which the personal edition's Activity leaves out.
+ *
+ * Choosing which tools to offer a run is written on every turn ("Choose tools for a run, 96 of 96
+ * tools"), and none of it is something a Bot did or a person can act on: everything offered was
+ * already the Bot's, and a run that is offered too many says so on its own row
+ * (`agent.tool_limit_refused`). Admin keeps it, for an admin tuning which skills declare which tools.
+ */
+export const OPENBOT_WORKING_EVENT_TYPES = ["mcp.tools_discovered"] as const;
+
 export type AuditOutcome = "refused" | "did-not-happen" | "allowed";
 
 const REFUSED = new Set<string>(REFUSED_EVENT_TYPES);

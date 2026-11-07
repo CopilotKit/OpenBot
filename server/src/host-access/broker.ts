@@ -403,7 +403,8 @@ export function createHostAccessBroker(
       state.resolve(result.result ?? {});
     },
 
-    revokeGrant(grantId: string, actorId: string) {
+    /** Ends a folder grant, and answers with it, so the trail can name the Bot and the folder. */
+    revokeGrant(grantId: string, actorId: string): HostAccessGrant {
       expireDesktopLeaseIfNeeded();
       const grant = grants.get(grantId);
       if (!grant || grant.actorId !== actorId) {
@@ -422,6 +423,7 @@ export function createHostAccessBroker(
           "That folder grant was revoked before the operation finished.",
         );
       }
+      return publicGrant(grant);
     },
 
     stop(actorId: string) {

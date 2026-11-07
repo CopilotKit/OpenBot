@@ -31,22 +31,30 @@ function desktopAuthorized(request: Request, token: string) {
   return !!given && given.length === token.length && sameToken(given, token);
 }
 
+/**
+ * A person giving a Bot a folder, taking one away, or stopping folder access, on the trail with the
+ * Bot (`bot`, which Activity's Bot column and its Bot filter read) and the folder by the name the
+ * Computer page shows it under. Never the folder's path, which the desktop keeps to itself.
+ */
 async function audit(
   auditStore: AuditStore | undefined,
   input: {
-    actorUserId?: string;
+    actorUserId: string;
     targetId?: string;
     change: string;
-    botId?: string;
+    bot?: string;
+    folder?: string;
+    folders?: string[];
   },
 ) {
   if (!auditStore) return;
+  const { actorUserId, targetId, ...payload } = input;
   await recordAuditEvent(auditStore, {
     eventType: "configuration.changed",
     targetType: "host_access",
-    ...(input.targetId ? { targetId: input.targetId } : {}),
-    ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
-    payload: input,
+    ...(targetId ? { targetId } : {}),
+    actorUserId,
+    payload,
   });
 }
 
@@ -135,7 +143,8 @@ export function createHostAccessRoutes(options: {
         actorUserId: actor.id,
         targetId: grant.id,
         change: "host_folder_granted",
-        botId,
+        bot: botId,
+        folder: grant.displayName,
       });
       return context.json({ grant });
     } catch (error) {
@@ -157,11 +166,13 @@ export function createHostAccessRoutes(options: {
       return context.json({ error: "A grant id is required." }, 400);
     }
     try {
-      broker.revokeGrant(id, actor.id);
+      const grant = broker.revokeGrant(id, actor.id);
       await audit(auditStore, {
         actorUserId: actor.id,
         targetId: id,
         change: "host_folder_revoked",
+        bot: grant.botId,
+        folder: grant.displayName,
       });
       return context.json({ ok: true });
     } catch (error) {
@@ -179,10 +190,17 @@ export function createHostAccessRoutes(options: {
 
   routes.post("/stop", requireUser, async (context) => {
     const actor = context.var.actor;
+    // The folders this ends, read before the broker marks them ended.
+    const open = broker
+      .statusFor(actor.id)
+      .grants.filter((grant) => !grant.revoked);
     broker.stop(actor.id);
+    const bots = new Set(open.map((grant) => grant.botId));
     await audit(auditStore, {
       actorUserId: actor.id,
       change: "host_access_stopped",
+      ...(bots.size === 1 ? { bot: [...bots][0] } : {}),
+      folders: open.map((grant) => grant.displayName),
     });
     return context.json({ ok: true });
   });
