@@ -162,6 +162,144 @@ pub fn check(
     Err(last)
 }
 
+/// Where a build that is offered updates reads its feed, and the version it asks about.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Feed {
+    pub current: Version,
+    pub endpoints: Vec<reqwest::Url>,
+    pub platform: String,
+}
+
+impl Feed {
+    /// This build's feed, or `None` for a build offered no updates: an internal, candidate or
+    /// pinned build (`offered_against`), one without the updater (`endpoints`), or a machine the
+    /// updater has no name for (`platform`). The schedule and a check somebody asks for both start
+    /// here, so they agree on which builds are offered anything.
+    pub fn of(version: &Version, pinned: bool, updater: Option<&Value>) -> Option<Self> {
+        Some(Self {
+            current: offered_against(version, pinned)?,
+            endpoints: endpoints(updater)?,
+            platform: platform()?,
+        })
+    }
+
+    pub fn read(&self) -> Result<Option<Version>, String> {
+        check(&self.current, &self.endpoints, &self.platform)
+    }
+}
+
+/// What a check somebody asked for found: Check for Updates… in a menu, or Check for updates in a
+/// window. Tagged `found` for the page.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "found", rename_all = "camelCase")]
+pub enum Asked {
+    /// A newer version. Named even when this person closed the banner on it, because they asked.
+    Available {
+        version: String,
+        current: String,
+    },
+    UpToDate {
+        current: String,
+    },
+    /// An update is already on its way in.
+    Installing {
+        version: String,
+        current: String,
+    },
+    /// This build never updates itself: an internal or candidate build, or one without the updater.
+    NotOffered {
+        current: String,
+    },
+}
+
+/// Read the feed now, for somebody who asked, and keep the answer as a scheduled read's is, so the
+/// banner says the same. A feed that can't be read is `Err`: unlike the schedule's, this check has
+/// somebody waiting for its answer.
+pub fn ask(feed: Option<&Feed>, current: &Version, known: &Known) -> Result<Asked, String> {
+    let current_text = current.to_string();
+    if known.installing.lock().unwrap().is_some() {
+        if let Some(version) = known.newer() {
+            return Ok(Asked::Installing {
+                version: version.to_string(),
+                current: current_text,
+            });
+        }
+    }
+    let Some(feed) = feed else {
+        return Ok(Asked::NotOffered {
+            current: current_text,
+        });
+    };
+    let answer = feed.read();
+    known.record(&answer);
+    Ok(match answer? {
+        Some(version) => Asked::Available {
+            version: version.to_string(),
+            current: current_text,
+        },
+        None => Asked::UpToDate {
+            current: current_text,
+        },
+    })
+}
+
+/// The menu item that asks, in the tray and in the OpenBot menu.
+pub const MENU_ID: &str = "check-updates";
+pub const MENU_LABEL: &str = "Check for Updates…";
+pub const UPDATE: &str = "Update and restart";
+pub const NOT_NOW: &str = "Not now";
+
+/// A native dialog: its title, its text, and its two buttons when it asks something.
+#[derive(Debug, PartialEq)]
+pub struct Prompt {
+    pub title: String,
+    pub message: String,
+    pub buttons: Option<(&'static str, &'static str)>,
+}
+
+/// What Check for Updates… says, whatever it found. The words are the setup window's.
+pub fn prompt(asked: &Result<Asked, String>) -> Prompt {
+    let say = |title: String, message: String| Prompt {
+        title,
+        message,
+        buttons: None,
+    };
+    match asked {
+        Ok(Asked::Available { version, current }) => Prompt {
+            title: format!("OpenBot {version} is available"),
+            message: format!(
+                "You are running {current}. Updating downloads the new version and restarts OpenBot."
+            ),
+            buttons: Some((UPDATE, NOT_NOW)),
+        },
+        Ok(Asked::UpToDate { current }) => say(
+            "OpenBot is up to date".into(),
+            format!("OpenBot {current} is up to date."),
+        ),
+        Ok(Asked::Installing { version, .. }) => say(
+            "OpenBot is updating".into(),
+            format!("OpenBot is downloading {version} and restarts when it's done."),
+        ),
+        Ok(Asked::NotOffered { .. }) => say(
+            "This version of OpenBot doesn't update itself".into(),
+            "Install a released version of OpenBot to get updates.".into(),
+        ),
+        Err(_) => say(
+            "OpenBot couldn't check for updates".into(),
+            "Check your internet connection and try again.".into(),
+        ),
+    }
+}
+
+/// An install somebody asked for that did not happen. By then they are waiting, so it is said.
+pub fn install_failed(said: &str) -> Prompt {
+    Prompt {
+        title: "OpenBot couldn't install the update".into(),
+        message: format!("{said}\n\nTry again with {MENU_LABEL}"),
+        buttons: None,
+    }
+}
+
 /// When the feed is next read: at launch, then once `every` has passed since the last read.
 pub struct Schedule {
     every: Duration,
@@ -731,5 +869,188 @@ mod tests {
         let (only, only_server) = serve(vec![(404, "not found".into())]);
         assert!(check(&v("0.3.1"), &[only], "darwin-aarch64").is_err());
         only_server.join().unwrap();
+    }
+
+    /// The updater block a signed Windows release ships (`tauri.windows-signing.conf.json`), read
+    /// from `url` instead, as the updater's own local test feed switch allows.
+    fn release_updater(url: &reqwest::Url) -> Value {
+        let mut overlay: Value =
+            serde_json::from_str(include_str!("../tauri.windows-signing.conf.json")).unwrap();
+        let mut block = overlay["plugins"]["updater"].take();
+        block["endpoints"] = serde_json::json!([url.as_str()]);
+        block["dangerousInsecureTransportProtocol"] = Value::Bool(true);
+        block
+    }
+
+    /// A release's feed at `version` with a signed archive for the machine running the test.
+    fn feed_for_this_machine(version: &str) -> String {
+        let mut feed: Value = serde_json::from_str(NEXT_WITH_WINDOWS).unwrap();
+        feed["version"] = Value::String(version.into());
+        let entry = feed["platforms"]["windows-x86_64"].clone();
+        feed["platforms"][platform().unwrap()] = entry;
+        feed.to_string()
+    }
+
+    /// The signed releases carry the updater, so a check asked for on one reads the real feed, the
+    /// downloads mirror first. The setup window's check used to ask a separate mechanism that
+    /// release builds do not carry, and said updates were not configured.
+    #[test]
+    fn a_signed_release_is_offered_updates_from_the_downloads_mirror() {
+        for overlay in [
+            include_str!("../tauri.windows-signing.conf.json"),
+            include_str!("../tauri.macos-signing.conf.json"),
+        ] {
+            let overlay: Value = serde_json::from_str(overlay).unwrap();
+            let feed = Feed::of(&v("0.3.2"), false, Some(&overlay["plugins"]["updater"]))
+                .expect("a signed release is offered updates");
+            assert_eq!(feed.current, v("0.3.2"));
+            assert_eq!(
+                feed.endpoints.first().map(reqwest::Url::as_str),
+                Some("https://downloads.copilotkit.ai/latest/latest.json")
+            );
+            assert_eq!(Some(feed.platform), platform());
+        }
+    }
+
+    #[test]
+    fn asked_on_the_newest_release_it_says_it_is_up_to_date() {
+        let (url, server) = serve(vec![(200, feed_for_this_machine("0.3.2"))]);
+        let known = Known::default();
+        let feed = Feed::of(&v("0.3.2"), false, Some(&release_updater(&url)));
+        assert_eq!(
+            ask(feed.as_ref(), &v("0.3.2"), &known),
+            Ok(Asked::UpToDate {
+                current: "0.3.2".into()
+            })
+        );
+        assert_eq!(server.join().unwrap(), 1);
+        assert_eq!(known.newer(), None);
+    }
+
+    /// Asked for, a newer version is named even after this person closed the banner on it. The
+    /// answer is kept, so the banner agrees from then on.
+    #[test]
+    fn asked_on_an_older_release_it_offers_the_newer_one_even_if_closed_before() {
+        let config = crate::test_support::temp_root("app-update-asked");
+        dismiss(&config, &v("0.3.3")).unwrap();
+        let (url, server) = serve(vec![(200, feed_for_this_machine("0.3.3"))]);
+        let known = Known::default();
+        let feed = Feed::of(&v("0.3.2"), false, Some(&release_updater(&url)));
+        assert_eq!(
+            ask(feed.as_ref(), &v("0.3.2"), &known),
+            Ok(Asked::Available {
+                version: "0.3.3".into(),
+                current: "0.3.2".into()
+            })
+        );
+        server.join().unwrap();
+        assert_eq!(known.newer(), Some(v("0.3.3")));
+        // The banner still keeps the person's close.
+        assert_eq!(status(&known, &v("0.3.2"), Some(&config)).version, None);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    /// Internal and candidate builds, and builds without the updater, say so, and never read a feed.
+    #[test]
+    fn a_build_offered_no_updates_says_so_without_reading_anything() {
+        let url = reqwest::Url::parse("http://127.0.0.1:9/latest.json").unwrap();
+        let release = release_updater(&url);
+        assert_eq!(Feed::of(&v("0.3.2"), false, None), None);
+        assert_eq!(Feed::of(&v("0.3.2"), true, Some(&release)), None);
+        for build in ["0.3.2-internal.731.gabc1234", "0.3.3-rc.1"] {
+            assert_eq!(Feed::of(&v(build), false, Some(&release)), None, "{build}");
+        }
+        assert_eq!(
+            ask(None, &v("0.3.2-internal.731.gabc1234"), &Known::default()),
+            Ok(Asked::NotOffered {
+                current: "0.3.2-internal.731.gabc1234".into()
+            })
+        );
+    }
+
+    /// A feed that can't be read is said to whoever asked, and the last good answer stands.
+    #[test]
+    fn a_check_that_fails_says_so_and_keeps_the_last_answer() {
+        let (url, server) = serve(vec![(503, "<html>down</html>".into())]);
+        let known = Known::default();
+        known.record(&Ok(Some(v("0.3.3"))));
+        let feed = Feed::of(&v("0.3.2"), false, Some(&release_updater(&url)));
+        let asked = ask(feed.as_ref(), &v("0.3.2"), &known);
+        assert!(asked.is_err());
+        server.join().unwrap();
+        assert_eq!(known.newer(), Some(v("0.3.3")));
+        assert_eq!(prompt(&asked).title, "OpenBot couldn't check for updates");
+    }
+
+    #[test]
+    fn asked_while_an_update_downloads_it_says_so() {
+        let known = Known::default();
+        known.record(&Ok(Some(v("0.3.3"))));
+        known.begin_install();
+        // No feed is read: the address answers nothing.
+        let url = reqwest::Url::parse("http://127.0.0.1:9/latest.json").unwrap();
+        let feed = Feed::of(&v("0.3.2"), false, Some(&release_updater(&url)));
+        assert_eq!(
+            ask(feed.as_ref(), &v("0.3.2"), &known),
+            Ok(Asked::Installing {
+                version: "0.3.3".into(),
+                current: "0.3.2".into()
+            })
+        );
+    }
+
+    /// The page reads `found`, in the words the setup window's TypeScript names.
+    #[test]
+    fn a_check_reads_as_the_page_expects() {
+        let as_json = |asked: Asked| serde_json::to_value(asked).unwrap();
+        assert_eq!(
+            as_json(Asked::Available {
+                version: "0.3.3".into(),
+                current: "0.3.2".into()
+            }),
+            serde_json::json!({"found": "available", "version": "0.3.3", "current": "0.3.2"})
+        );
+        assert_eq!(
+            as_json(Asked::UpToDate {
+                current: "0.3.2".into()
+            }),
+            serde_json::json!({"found": "upToDate", "current": "0.3.2"})
+        );
+        assert_eq!(
+            as_json(Asked::NotOffered {
+                current: "0.3.2".into()
+            }),
+            serde_json::json!({"found": "notOffered", "current": "0.3.2"})
+        );
+    }
+
+    #[test]
+    fn check_for_updates_says_what_it_found() {
+        assert_eq!(
+            prompt(&Ok(Asked::Available {
+                version: "0.3.3".into(),
+                current: "0.3.2".into()
+            })),
+            Prompt {
+                title: "OpenBot 0.3.3 is available".into(),
+                message:
+                    "You are running 0.3.2. Updating downloads the new version and restarts OpenBot."
+                        .into(),
+                buttons: Some(("Update and restart", "Not now")),
+            }
+        );
+        let up_to_date = prompt(&Ok(Asked::UpToDate {
+            current: "0.3.2".into(),
+        }));
+        assert_eq!(up_to_date.title, "OpenBot is up to date");
+        assert_eq!(up_to_date.message, "OpenBot 0.3.2 is up to date.");
+        assert_eq!(up_to_date.buttons, None);
+        let not_offered = prompt(&Ok(Asked::NotOffered {
+            current: "0.3.2-internal.1.gabc".into(),
+        }));
+        assert!(!not_offered.message.contains("configured"));
+        assert!(install_failed("The download didn't finish.")
+            .message
+            .ends_with("Try again with Check for Updates…"));
     }
 }

@@ -1141,6 +1141,45 @@ test("relaunch says it is starting while it starts, and never offers a CopilotKi
   expectPlain(view);
 });
 
+/*
+ * The bug, on a signed 0.3.2 on Windows: the stopped window's update check asked an old mechanism
+ * release builds do not carry (`check_shell_update`), and said "Signed desktop shell updates are
+ * not configured. This build does not include the optional updater feature." Both commands answer
+ * here as a release build answered them, so only the one the window asks decides what it says.
+ */
+test("the stopped window's update check asks the update feed and says this version is up to date", async () => {
+  setupConnectedLocalStack(
+    "/tmp/check-for-updates",
+    localStatus("ready", "valid"),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "check_app_update")
+      return { found: "upToDate", current: "0.3.2" };
+    if (command === "check_shell_update")
+      return {
+        configured: false,
+        available: false,
+        version: null,
+        detail:
+          "Signed desktop shell updates are not configured. This build does not include the optional updater feature.",
+      };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  await userEvent.click(view.getByRole("button", { name: /^Check/ }));
+  await waitFor(() =>
+    expect(view.getByText("OpenBot 0.3.2 is up to date.")).toBeTruthy(),
+  );
+  expect(view.queryByText(/not configured/)).toBeNull();
+  expect(invokeCalls.filter((call) => call.command.includes("update"))).toEqual(
+    [{ command: "check_app_update", args: undefined }],
+  );
+});
+
 test("Quit shows Shutting down with each part's row as it starts and ends", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-quit-screen",

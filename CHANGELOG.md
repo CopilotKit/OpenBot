@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop's Check for updates says "OpenBot 0.3.2 is up to date." or offers the newer
+  version with Update and restart, where a signed release said updates were not configured. It is
+  also Check for Updates… in the tray menu on every platform and under About in the Mac's OpenBot
+  menu, and Check for updates on the Version row of Settings › This computer, so Windows, which has
+  no menu bar, has a way to ask.
 - Pressing + for a new conversation opens the To: picker with the caret in it every time. A second
   press used to leave it closed. With nobody in To:, Enter or Send keeps the message, opens To: and
   says "Choose a Bot first." where it used to do nothing.

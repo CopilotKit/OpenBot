@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CheckForUpdates } from "./CheckForUpdates";
 import { CopilotKitAccount } from "./CopilotKitAccount";
 import { useWindowFitsContent } from "./fitWindow";
 import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
@@ -24,7 +25,6 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
-import { ShellUpdates } from "./ShellUpdates";
 import { Sections } from "./Sections";
 import { StartFresh } from "./StartFresh";
 import {
@@ -380,13 +380,9 @@ function Setup() {
         return next;
       });
     });
-    const updateStopped = listen<void>("runtime:update-stopped", () => {
-      if (active) setRunning(false);
-    });
     return () => {
       active = false;
       stop.then((unlisten) => unlisten());
-      updateStopped.then((unlisten) => unlisten());
     };
   }, [recoverFromStart]);
 
@@ -579,24 +575,8 @@ function Setup() {
     }
   }
 
-  async function applyShellUpdate(version: string) {
-    setBusy(true);
-    setFailure(null);
-    try {
-      return await invoke("apply_shell_update", {
-        root: root.trim(),
-        version,
-        restartAcknowledged: true,
-      });
-    } catch (error) {
-      recoverFromStart(error);
-      throw error;
-    } finally {
-      setBusy(false);
-    }
-  }
   // OpenBot's own updates. The installation follows the app: Start upgrades it to the app's release.
-  const appUpdates = <ShellUpdates key={root} onApply={applyShellUpdate} />;
+  const appUpdates = <CheckForUpdates />;
 
   /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
   async function startFresh(volumes: string[], containers: string[]) {

@@ -1,5 +1,9 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { desktopKeys, invokeDesktop } from "./queries";
+import {
+  type DesktopAppUpdateCheck,
+  desktopKeys,
+  invokeDesktop,
+} from "./queries";
 
 function invalidateDesktop(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: desktopKeys.all });
@@ -24,6 +28,19 @@ export function restartOpenBotMutationOptions(queryClient: QueryClient) {
 export function stopOpenBotMutationOptions() {
   return mutationOptions({
     mutationFn: (): Promise<void> => invokeDesktop("stop"),
+  });
+}
+
+/**
+ * Check for updates now. The desktop app reads its update feed and keeps the answer, so the banner
+ * reads it too. Rejects with the app's own sentence when the feed couldn't be read.
+ */
+export function checkAppUpdateMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (): Promise<DesktopAppUpdateCheck> =>
+      invokeDesktop("check_update"),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate }),
   });
 }
 
