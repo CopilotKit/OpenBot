@@ -12,9 +12,9 @@ import {
   type ComposerDraft,
   toAgentOptions,
 } from "@/components/channels/composer";
-import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { BusinessLink } from "@/components/edition/business-link";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
+import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
@@ -187,6 +187,14 @@ function RouteComponent() {
             typed.current = true;
           }}
         >
+          <StarterSuggestions
+            agentId={fallback?.id}
+            disabled={pending}
+            onSelect={async (message) => {
+              if (!fallback) return;
+              await startChosen(fallback.id, message);
+            }}
+          />
           <Composer
             agents={toAgentOptions(agents)}
             commands={skillCommands}
@@ -213,16 +221,6 @@ function RouteComponent() {
               void startBehind(pendingId, draft);
             }}
           />
-          <div className="mt-4 w-full max-w-2xl">
-            <StarterSuggestions
-              agentId={fallback?.id}
-              disabled={pending}
-              onSelect={async (message) => {
-                if (!fallback) return;
-                await startChosen(fallback.id, message);
-              }}
-            />
-          </div>
           {fallback ? (
             // Said out loud: a message that silently reaches somebody you did not choose is the
             // kind of surprise that costs trust the first time it happens.

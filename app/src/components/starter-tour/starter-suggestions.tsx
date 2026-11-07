@@ -1,5 +1,6 @@
 import { CopilotChatSuggestionView } from "@copilotkit/react-core/v2";
 import { isStarterTourAgent } from "@openbot/shared/starter-tour";
+import { IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
@@ -11,7 +12,7 @@ import {
   userPreferencesQueryOptions,
 } from "@/lib/settings/message-list";
 import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
-import { showStarterTour, STARTER_SUGGESTIONS } from "./suggestions";
+import { STARTER_SUGGESTIONS, showStarterTour } from "./suggestions";
 
 type Props = {
   agentId: string | undefined;
@@ -107,19 +108,19 @@ function StarterSuggestionChoices({
   return (
     <section
       aria-label="Starter tasks"
-      className="mb-3 w-full max-w-2xl rounded-xl border border-border bg-card p-3"
+      className="relative mb-3 w-full max-w-2xl pr-8"
     >
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">Try something useful</h2>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={dismiss.isPending}
-          onClick={() => dismiss.mutate({ starterTourDismissed: true })}
-        >
-          Hide starter tasks
-        </Button>
-      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute right-0 top-0 size-7 text-muted-foreground"
+        aria-label="Hide starter tasks"
+        title="Hide starter tasks"
+        disabled={dismiss.isPending}
+        onClick={() => dismiss.mutate({ starterTourDismissed: true })}
+      >
+        <IconX className="size-3.5" />
+      </Button>
       <CopilotChatSuggestionView
         suggestions={STARTER_SUGGESTIONS}
         suggestion={{ disabled: disabled || sending || dismiss.isPending }}
