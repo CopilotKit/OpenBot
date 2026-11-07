@@ -249,11 +249,13 @@ export function standingRoleMessage(
   profile: AgentStandingProfile,
   instructions?: string,
 ): StandingRoleMessage {
+  const title = profile.title.trimEnd();
+  const titleEnd = /[.!?]$/.test(title) ? "" : ".";
   return {
     id: `${STANDING_ROLE_ID_PREFIX}${profile.id}`,
     role: "system",
     content: [
-      `You are ${profile.name}, ${profile.title}. ${selfAddressGuidance(profile.name)}`,
+      `You are ${profile.name}, ${title}${titleEnd} ${selfAddressGuidance(profile.name)}`,
       profile.roleDescription,
       ...(instructions ? [instructions] : []),
       "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
