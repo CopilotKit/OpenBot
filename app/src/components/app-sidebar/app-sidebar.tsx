@@ -44,6 +44,7 @@ import {
 import { BotsNavBadge } from "../bot-profile/attention";
 import { BrowserNavItem } from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
+import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -65,7 +66,7 @@ function UserAvatar() {
       .join("") ?? currentUser?.email.slice(0, 2).toUpperCase();
 
   return (
-    <div className="size-[28px] bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden">
+    <div className="size-[28px] shrink-0 bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden">
       {initials}
     </div>
   );
@@ -361,8 +362,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 }
               >
                 <UserAvatar />
-                <span className="text-sm trackint-tight">
-                  {currentUser?.name || currentUser?.email}
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate text-sm trackint-tight">
+                    {currentUser?.name || currentUser?.email}
+                  </span>
+                  <OpenBotVersion className="text-[10px] leading-3 text-muted-foreground" />
                 </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent

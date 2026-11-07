@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The sidebar shows which OpenBot release is running, in small grey type under your name at the
+  bottom left (in OpenDots, under your name in the account menu and the phone drawer). It is the
+  server's own version, so it names what is deployed, and nothing shows when the server has none,
+  as in development.
 - OpenBot Desktop's menu bar and tray no longer have an item that opens the back end's own
   dashboard, which is branded as another product. The Status window and Settings, This computer
   list each part by what it does: "Front end and Bots", "Background jobs", "Database" and "Bot
