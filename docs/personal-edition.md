@@ -39,13 +39,28 @@ with the rest.
 OpenBot Desktop installs the personal edition: it writes `OPENBOT_EDITION=personal` and the settings
 below into its deployment's `.env` on every Start (`desktop/src-tauri/src/env.rs`). It runs
 PostgreSQL, the one computer, the server and the worker, and no supervisor and no bundled Bot
-containers. The Bot picked during setup, if any, joins the Personal Assistant: the `picked-harness`
-row in [`examples/personal/agents.yaml`](../examples/personal/agents.yaml) is dropped while
-`PICKED_HARNESS_URL` is empty, which is how `start.sh` leaves it.
+containers.
 
 The server's container is given the supervisor by name in `docker-compose.yml` unless
 `COMPUTER_SUPERVISOR_CONTAINER_URL` is set, so the desktop sets it empty as well as
 `COMPUTER_SUPERVISOR_URL`.
+
+A new installation starts with one Bot, the Personal Assistant. When a Bot was picked during setup,
+the Personal Assistant runs on what was picked: it takes the `picked-harness` row's id and
+connection, and the Personal Assistant's instructions, skills and conversation, and its subtitle
+says what runs it ("Everyday life. Powered by LangChain (LangGraph)."). With nothing picked, as
+`start.sh` leaves it, `PICKED_HARNESS_URL` is empty, the `picked-harness` row in
+[`examples/personal/agents.yaml`](../examples/personal/agents.yaml) is dropped, and the Personal
+Assistant runs inside the server ("Everyday life. Powered by OpenBot."). Either way it is an
+ordinary Bot: its name, subtitle and instructions can be changed on its Setup page. On OpenBot
+Desktop, after a change of AI provider, Start moves it to the new framework, renamed or not, and
+rewrites the "Powered by" part of its subtitle, keeping any words around it. A connection the person
+set on the Setup page is left alone.
+
+The starter is seeded once, into a new installation only (`personalStarterSeed` in
+`server/src/tenant-package.ts`). An existing installation keeps the Bots it has: where the Personal
+Assistant and the picked Bot are two Bots, they stay two, and neither is rewritten from the package
+on Start. Only the picked Bot's connection still follows the installer.
 
 **Teach a Bot** shows your browser inside the OpenBot window, as hosted OpenBot does: its tabs, its
 address bar and the live page, with the Recorder already in it and Record and Stop in OpenBot. It
@@ -172,9 +187,12 @@ account are the same decision when one person makes both:
 - **Parallel Search is on from the start**, and can be turned off. See
   [Web search is on from the start](#web-search-is-on-from-the-start).
 
-**In a conversation**, when a Bot needs an app that isn't connected, it shows a card with
-**Connect**: one press turns the app on and opens its sign-in in a new tab, and the conversation
-carries on once it is connected.
+**In a conversation**, when a Bot needs an app that isn't connected, it shows a card. For an app
+you sign in to, **Connect** turns the app on and opens its sign-in in a new tab, and the
+conversation carries on once it is connected. An app with nothing to sign in to, or whose sign-in
+isn't known until it is on, shows **Turn on**, and one that takes a key shows **Set up**, which
+opens its page under Connections. The Bot is told which button the card shows, so it names that one
+(`server/src/plugins/app-access-tool.ts`).
 
 **Bots** lists your Bots and, under **What your Bots know**, Skills and Memory. A Bot's own page has
 four settings: Routines, Memory, **What it can do** (the apps and skills it has, what it asks before
