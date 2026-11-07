@@ -50,6 +50,7 @@ import { computerTokenOf } from "./computer-token";
 import { checkComputerAddress } from "./target";
 
 export {
+  ActionUnfinishedError,
   ComputerStillStartingError,
   ComputerUnavailableError,
   ElementNotFoundError,
