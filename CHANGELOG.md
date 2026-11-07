@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot filling in an ordinary form on a page whose address carries a signature or token in its
+  query string (an S3 presigned link's `X-Amz-Credential=`, a sign-in's `access_token=`) is no
+  longer stopped with "This needs you" as if it were changing a credential. A password field, a
+  Change password button or a security page's path still hands off.
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
