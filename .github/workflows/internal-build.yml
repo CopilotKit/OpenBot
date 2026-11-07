@@ -1,88 +1,59 @@
 name: Internal build
-
-# Installers for the team to try, from any branch. The images are the ones built from this commit,
-# pinned by digest into the installer, and never `latest`, so what a person installs is exactly what
-# this commit builds. Nothing is published: the installers are shared as run artifacts, kept 30 days.
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
-concurrency:
-  group: internal-build-${{ github.ref }}
-  cancel-in-progress: false
-
+  actions: read
 jobs:
-  # The manifest version names the build after its commit. Twelve characters is enough to tell two
-  # builds apart and short enough to read in an installer's About box.
-  prepare:
-    name: prepare
-    runs-on: ubuntu-latest
-    outputs:
-      manifest_version: ${{ steps.version.outputs.manifest_version }}
+  tour-macos:
+    runs-on: macos-latest
     steps:
-      - id: version
-        name: Name the build
-        run: echo "manifest_version=internal-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-
-  # `tags` is empty because the images workflow always tags `sha-<commit>`, and that is the only tag
-  # an internal build needs. `latest` stays where it is.
-  images:
-    name: images
-    needs: prepare
-    uses: $/.github/workflows/images.yml
-    with:
-      ref: ${{ github.sha }}
-      tags: ""
-      latest: false
-      manifest_version: ${{ needs.prepare.outputs.manifest_version }}
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write
-
-  desktop:
-    name: desktop
-    needs: images
-    uses: $/.github/workflows/desktop-build.yml
-    with:
-      ref: ${{ github.sha }}
-      channel: internal
-      bundle_cli: true
-      manifest_artifact: ${{ needs.images.outputs.manifest-artifact }}
-      retention_days: 30
-      platforms: '["macos","windows"]'
-    secrets:
-      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
-
-  # One link per installer, so nobody has to dig through the run page for them. The CLI and Node
-  # versions are already in each desktop leg's own summary.
-  summary:
-    name: summary
-    needs: [prepare, desktop]
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-    steps:
-      - name: Link the installers
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 668de6b43a6392de78b7607ac376d5b2a4d582c2
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.3
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          workspaces: desktop/src-tauri
+          key: macos
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: container-images
+          run-id: 42345399317
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/tour-pinned
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - run: bun scripts/desktop-version.ts internal
+        working-directory: desktop
+      - run: bun desktop/scripts/cli-bundle.ts darwin arm64
+      - name: Build a separately identified test installer from main
+        working-directory: desktop
         env:
-          GH_TOKEN: ${{ github.token }}
-          MANIFEST_VERSION: ${{ needs.prepare.outputs.manifest_version }}
+          APPLE_SIGNING_IDENTITY: '-'
+          OPENBOT_BUNDLED_CLI: '1'
+          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
         run: |
           set -euo pipefail
-          {
-            echo "## Internal build"
-            echo
-            echo "- Commit: \`$GITHUB_SHA\`"
-            echo "- Manifest version: \`$MANIFEST_VERSION\`"
-            echo
-            echo "Installers, kept 30 days:"
-            echo
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate \
-              --jq '.artifacts[] | select(.name | startswith("openbot-desktop-")) | "\(.name)\t\(.id)"' |
-              while IFS=$'\t' read -r name id; do
-                echo "- [$name](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts/$id)"
-              done
-          } >> "$GITHUB_STEP_SUMMARY"
+          export OPENBOT_PINNED_DEPLOYMENT="$RUNNER_TEMP/tour-pinned/container-images.json"
+          test -f "$OPENBOT_PINNED_DEPLOYMENT"
+          printf '%s\n' '{"productName":"OpenBot Tour Test","identifier":"ai.copilotkit.openbot.tourtest668de6b4"}' > "$RUNNER_TEMP/tour-identity.json"
+          bun run tauri build --config src-tauri/tauri.build-version.conf.json --config src-tauri/tauri.bundled-cli.conf.json --config "$RUNNER_TEMP/tour-identity.json" -- --locked
+      - name: Verify source label
+        run: bash desktop/scripts/check-build-label.sh desktop/src-tauri/target/release/openbot-desktop
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: openbot-tour-test-macos
+          path: |
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            desktop/build-version.json
+          retention-days: 7
