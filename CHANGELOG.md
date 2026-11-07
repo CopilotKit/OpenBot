@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot that creates, changes or lists a routine is told its next run on the person's clock and how
+  far away it is ("Saturday, November 7, 2026 at 9:00 AM UTC, 6 minutes from now"), so it no longer
+  tells the person that a run due in minutes is tomorrow.
 - A routine's title in a Bot page's Activity list is its whole instruction, kept to one line with an
   ellipsis and shown in full on hover. It was cut at 120 characters, mid-word and with nothing to
   say so.
