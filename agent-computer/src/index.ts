@@ -1612,7 +1612,9 @@ serve<StreamData & TerminalSocketData>({
         const startedAt = Date.now();
         try {
           const target = await currentPage(botId, "navigate");
-          session.control.assertBotMayAct(true);
+          // Opening an address needs no fresh look after a handback (`mutatesBrowser`). Following a
+          // link off the page does: it acts on that page, as a click on the link would.
+          session.control.assertBotMayAct(citation !== undefined);
           // A followed link is checked against the live page as a click on it would be: the snapshot
           // it came from must still be current, the ref must still name an element, and that element
           // must still go where the server was told it goes. Otherwise it is stale, and nothing opens.
@@ -1649,6 +1651,8 @@ serve<StreamData & TerminalSocketData>({
           // Bumping the generation makes an action carrying one fail with "take a new snapshot" rather
           // than fall through to a selector that matches nothing and read as a missing element.
           session.snapshotId += 1;
+          // And the page a person handed back is gone, so the Bot has nothing of theirs left to look at.
+          session.control.pageReplaced();
           const extract = await readablePageText(target);
           return json({
             url: target.url(),

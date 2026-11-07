@@ -82,7 +82,13 @@ export function actsOnTheComputer(pathname: string): boolean {
   return ACTING_PATHS.has(pathname);
 }
 
-/** Only page mutations need a fresh browser snapshot after handback. */
+/**
+ * Which actions work on the page in front of the Bot, and so need a fresh snapshot after a handback.
+ *
+ * Opening an address is not one of them. It replaces the page the person handed back and reads the
+ * new one, so looking at the old page first tells the Bot nothing. Gated, it turned away the first
+ * thing a later conversation does, which is open a page, with an instruction meant for the Bot.
+ */
 export function mutatesBrowser(pathname: string): boolean {
-  return ["/navigate", "/click", "/type", "/key", "/scroll"].includes(pathname);
+  return ["/click", "/type", "/key", "/scroll"].includes(pathname);
 }

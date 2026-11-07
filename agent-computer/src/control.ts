@@ -307,15 +307,23 @@ export function createControl(
     return get();
   }
   // A persisted active request names a page in a previous process. Never call that completion.
-  if (restored && (active(current()) || data.holder === "human"))
+  const interruptedByRestart =
+    restored !== undefined && (active(current()) || data.holder === "human");
+  if (interruptedByRestart)
     interrupt(
       "The computer process restarted; the previous page was interrupted. Request help again to continue.",
       { keepPage: true },
     );
   // Records saved before finished requests dropped their pages are cleaned on first read.
   if (restored && scrubPages(now())) persist();
-  if (restored && !active(current()) && data.holder === "bot") {
-    data.resumeSnapshotRequired = true;
+  /*
+   * A finished handback's fresh look does not outlive the process. It is about the page the person
+   * handed back, and that page went with the browser that showed it: the browser starts again with
+   * this process. Kept, or set on every start as it once was, it turned away the first page action of
+   * the next conversation, long after the handback, with an instruction meant for the Bot.
+   */
+  if (restored && !interruptedByRestart && data.resumeSnapshotRequired) {
+    data.resumeSnapshotRequired = false;
     persist();
   }
   syncAdmission();
@@ -509,6 +517,13 @@ export function createControl(
         data.resumeSnapshotRequired = false;
         persist();
       }
+    },
+    /**
+     * The Bot opened another address. The page a person handed back is gone with it, so there is
+     * nothing left for the Bot to look at first.
+     */
+    pageReplaced() {
+      this.snapshotTaken();
     },
     assertBotMayAct(browserMutation = false) {
       expire();

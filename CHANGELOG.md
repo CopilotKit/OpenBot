@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- After a person hands a Bot's browser back, the Bot no longer has to take a snapshot before it
+  opens another page. Only clicking, typing, pressing keys and scrolling on the page the person
+  left still wait for one. The wait no longer survives a restart, so the first page a new
+  conversation opens after OpenBot was quit and reopened no longer fails with "Take a fresh browser
+  snapshot after handback before acting." A conversation never shows that instruction, which is
+  meant for the Bot.
 - A personal edition set up with `start.sh` under v0.3.1 starts on this release. Its package is now
   called `openbot`, and the server would have refused the Personal Assistant it seeded as `personal`
   as another package's Bot and stopped. `brand.yaml` takes `tenant.former_ids`: a deployment set up
