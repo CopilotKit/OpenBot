@@ -66,6 +66,9 @@ const entry = catalogueEntry(SERVER);
 if (entry?.auth.kind !== "user-oauth") {
   throw new Error("notion is not a user-oauth catalogue entry");
 }
+if (!entry.host) {
+  throw new Error("notion has no host to list tools from");
+}
 const VENDOR = entry.host;
 
 const realVault = createCredentialStore(database);
@@ -220,7 +223,6 @@ beforeAll(async () => {
     .insert(agentProfiles)
     .values({
       agentId: botId,
-      name: botId,
       title: "",
       roleDescription: "",
       avatarSeed: botId,
