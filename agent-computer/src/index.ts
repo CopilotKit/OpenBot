@@ -32,6 +32,7 @@ import {
   SnapshotRequiredError,
   TAKE_CONTROL_FIRST,
 } from "./control";
+import { keyForOpenList } from "./dropdown-list";
 import { handleEgressPolicyRequest, startEgressFilter } from "./egress";
 import { enterText, FieldValueError } from "./enter-text";
 import { identity } from "./identity";
@@ -2120,7 +2121,9 @@ async function performAction(
       .evaluate(unmarkPersonFilled, PERSON_FILLED_ATTRIBUTE)
       .catch(() => undefined);
     if (body.submit === true) {
-      await field.press("Enter", acting);
+      // Enter on a dropdown whose list is open would accept the list's stale highlight over the
+      // choice just typed, so it closes the list instead (dropdown-list.ts).
+      await field.press(await keyForOpenList(target, "Enter", field), acting);
     }
     // The text itself is deliberately NOT returned. It is echoed nowhere: this response is read by
     // the model and logged by the server, and a value typed into a form is exactly where a password
@@ -2138,13 +2141,15 @@ async function performAction(
     if (typeof body.key !== "string" || !body.key) {
       throw new Error("A key press needs a key name, such as Enter or Tab.");
     }
+    // An Enter meant for a dropdown's open list closes it, keeping the Bot's choice (dropdown-list.ts).
     if (ref) {
-      await (await resolveRef(session, target, ref, expected)).press(
-        body.key,
+      const element = await resolveRef(session, target, ref, expected);
+      await element.press(
+        await keyForOpenList(target, body.key, element),
         acting,
       );
     } else {
-      await target.keyboard.press(body.key);
+      await target.keyboard.press(await keyForOpenList(target, body.key));
     }
     return { action: "key", key: body.key, ref, url: target.url() };
   }
