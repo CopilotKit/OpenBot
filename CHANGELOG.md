@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The Setup page of a Bot on the harness OpenBot Desktop runs, such as the personal starter, says
+  "OpenBot runs this Bot, so it can use its tools without a key." It said the Bot "can't use tools"
+  and offered a key, while the Bot used its tools.
 - Asked in a conversation for a goal, a Bot makes one, where it said it had no goals tool and set up
   a routine instead. Every Bot holds `create_goal`, `list_goals` and the other goal tools in Routines.
 - A goal that runs only when asked is counted "on demand" on a Bot's page and listed under On demand
