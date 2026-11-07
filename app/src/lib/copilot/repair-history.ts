@@ -1,5 +1,6 @@
 import type { Message } from "@ag-ui/core";
 import { newId } from "../new-id";
+import { withoutWaitingPlaceholders } from "./approval-context";
 
 /**
  * Insert explanatory tool results for unanswered tool calls before sending history to providers.
@@ -41,7 +42,7 @@ function isToolResult(message: Message): message is Message & ToolResult {
  * provider rejects it for the same reason it rejects the mirror image.
  */
 export function repairUnansweredToolCalls(
-  messages: ReadonlyArray<Message>,
+  given: ReadonlyArray<Message>,
   /*
    * Named so it cannot shadow the import it defaults to. A parameter called `newId` defaulting to
    * `newId()` resolves to itself and recurses until the stack goes, and it does so only on the
@@ -49,6 +50,14 @@ export function repairUnansweredToolCalls(
    */
   mintId: () => string = newId,
 ): ReadonlyArray<Message> {
+  /*
+   * A held step's stand-in is not its answer. Counted as one, it sat right after the call, so the
+   * real answer the server's continuation put in later read as a second answer and was dropped as
+   * misplaced: the next message went out with no answer for the step, and the transcript drew a
+   * declined file save as "Saved file". See `withoutWaitingPlaceholders`.
+   */
+  const messages = withoutWaitingPlaceholders(given);
+  const changed = messages.length !== given.length;
   const called = new Set<string>();
   /** Answered where a provider can see it: by a result later in the array than the call. */
   const answered = new Set<string>();
@@ -78,7 +87,7 @@ export function repairUnansweredToolCalls(
       message.role === "assistant" &&
       (message.toolCalls ?? []).some((call) => !answered.has(call.id)),
   );
-  if (!missing && misplaced.size === 0) return messages;
+  if (!missing && misplaced.size === 0) return changed ? messages : given;
 
   const repaired: Message[] = [];
   const filled = new Set(answered);
