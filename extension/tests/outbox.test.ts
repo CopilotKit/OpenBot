@@ -6,6 +6,7 @@ import {
   type TrajectoryMeta,
   trajectoryMetaKey,
 } from "../src/offscreen/outbox";
+import { rejection } from "./support/rejection";
 
 type IndexedDbGlobals = {
   indexedDB?: IDBFactory;
@@ -150,7 +151,7 @@ describe("outbox", () => {
     const outbox = await openOutbox(freshName());
     await outbox.put(item("t1", 7));
     const clash = { ...item("t1", 7), bytes: 99 };
-    await expect(outbox.put(clash)).rejects.toBeDefined();
+    expect(await rejection(outbox.put(clash))).toBeInstanceOf(Error);
     const [stored] = await outbox.oldest("t1", 10, 1000);
     expect(stored?.bytes).toBe(10);
   });

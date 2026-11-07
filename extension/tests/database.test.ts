@@ -8,6 +8,7 @@ import {
   STORES,
   tx,
 } from "../src/shared/database";
+import { rejection } from "./support/rejection";
 
 // Installed per test rather than by "fake-indexeddb/auto": that import sets the globals once at module
 // load, and another file's teardown in the same `bun test` process can delete them afterwards.
@@ -36,21 +37,6 @@ const freshName = () => `recorder-test-${Date.now()}-${counter++}`;
 
 const keyPathOf = (db: IDBDatabase, store: string) =>
   db.transaction(store, "readonly").objectStore(store).keyPath;
-
-/**
- * What `promise` rejected with, or undefined when it resolved, read with a plain `await`.
- *
- * Not `expect(promise).rejects`: Bun's `rejects` waits for a promise that is still pending by blocking in a loop of its
- * own, and that loop runs no `setImmediate` callback until a timer or I/O wakes it. fake-indexeddb runs every request,
- * commit and abort on `setImmediate`. Run alone, this file has no timer waiting and the wait is instant; in the full
- * suite an earlier file's timer is still waiting, and the wait for an abort one `setImmediate` would have delivered ran
- * past the 5 s test timeout on CI.
- */
-const rejection = (promise: Promise<unknown>) =>
-  promise.then(
-    () => undefined,
-    (error: unknown) => error,
-  );
 
 describe("recorder database", () => {
   test("declares the default name and version 2", () => {
