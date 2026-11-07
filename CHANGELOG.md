@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Renaming the personal starter Bot on its Setup page no longer keeps it on the old AI provider's
+  harness after a provider change, where every message then failed to connect. A starter already
+  caught this way follows the installer again on upgrade.
 - Asked in a conversation for a goal, a Bot makes one, where it said it had no goals tool and set up
   a routine instead. Every Bot holds `create_goal`, `list_goals` and the other goal tools in Routines.
 - A goal that runs only when asked is counted "on demand" on a Bot's page and listed under On demand

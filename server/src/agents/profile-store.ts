@@ -289,6 +289,24 @@ function endpointOf(configuration: unknown): string | null {
   return typeof endpoint === "string" ? endpoint : null;
 }
 
+/**
+ * Whether an edit's endpoint is the address the Bot already has.
+ *
+ * Compared as URLs, not as text. The edit form sends the stored address back unchanged, and the
+ * route stores what `new URL` makes of it, which adds a "/" to an address with no path: the
+ * installer's `http://agent-harness:4212` came back as `http://agent-harness:4212/`. Compared as
+ * text, renaming the personal starter repointed it at that copy and counted it as the person's own
+ * connection, so the next provider change left it dialling a harness that no longer runs.
+ */
+function sameAddress(edited: string, stored: string | null): boolean {
+  if (stored === null) return false;
+  try {
+    return new URL(edited).toString() === new URL(stored).toString();
+  } catch {
+    return edited === stored;
+  }
+}
+
 /** Which agent on a Mastra server this Bot means, when the row names one. */
 function remoteAgentIdOf(configuration: unknown): string | null {
   if (!configuration || typeof configuration !== "object") return null;
@@ -651,13 +669,18 @@ export function createAgentProfileStore(
            * tenant package's Bots, whose `system_prompt` is deliberately not their
            * `role_description`, remain protected except for the editable personal starter.
            */
+          // An edit that sends the address the Bot already has leaves the stored one as it is.
+          const repointed =
+            input.endpoint !== undefined &&
+            input.endpoint !== "" &&
+            !sameAddress(input.endpoint, profile.endpoint);
           const configuration: Record<string, unknown> = {
             ...previous,
             ...(row?.type === "built_in" &&
             input.roleDescription !== profile.roleDescription
               ? { systemPrompt: input.roleDescription }
               : {}),
-            ...(input.endpoint ? { endpoint: input.endpoint } : {}),
+            ...(repointed ? { endpoint: input.endpoint } : {}),
             ...(input.auth && vault
               ? {
                   auth: await storeAgentAuth({
@@ -681,8 +704,7 @@ export function createAgentProfileStore(
           // A connection edited in the profile belongs to the person, not installer setup.
           if (
             previous.personalStarter === true &&
-            ((input.endpoint && input.endpoint !== profile.endpoint) ||
-              (input.auth && vault))
+            (repointed || (input.auth && vault))
           ) {
             configuration.personalConnection = true;
           }
