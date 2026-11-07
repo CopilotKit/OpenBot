@@ -44,6 +44,8 @@ import {
   forDisplay,
   REFUSAL_MARKER,
   toolResultFailed,
+  UNOFFERED_TOOL_SENTENCE,
+  unofferedTool,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import {
@@ -399,15 +401,19 @@ export function stepDetails(step: ToolItem): StepDetails {
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
   // A tool whose answer is for the model, not the person; see `ServerToolLine`.
   const own = answersTheModel(name);
+  // A tool the Bot was never offered: the runtime's answer lists every tool it has, for the model.
+  const unoffered = unofferedTool(step.result);
   const outcome = {
     id: step.id,
     pending: step.result === undefined,
-    failed: !refused && toolResultFailed(step.result),
+    failed: !refused && (unoffered || toolResultFailed(step.result)),
     refused,
     // Neither what it was given nor what it said: both were for the model (a tool search's query
     // and limit), so the line says what it did and does not open.
     inputs: own ? [] : inputs,
-    ...(body && !own ? { output: body } : {}),
+    ...(body && !own
+      ? { output: unoffered ? UNOFFERED_TOOL_SENTENCE : body }
+      : {}),
   };
   // Not a connector: one of this deployment's own tools, or one an external agent runs itself.
   // Named in words, never as an identifier.

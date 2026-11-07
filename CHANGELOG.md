@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's step that asked for a tool the Bot doesn't have says so in one sentence and reads "didn't
+  work". It opened to the runtime's error for the model, listing every tool the Bot has by its raw name.
 - The personal edition's Settings > Activity page is titled Activity, as its sidebar entry is, where it
   was titled Audit and spoke of "this deployment's policy". Admin keeps Audit.
 - Activity and Audit say what each row was about in words, such as "Choose tools for a run" and "Save
