@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- When OpenBot Desktop changes AI provider, the personal starter Bot's subtitle names the new one
+  ("Powered by LangChain (LangGraph)"), keeping the rest of a subtitle the person wrote. It went on
+  naming the provider it was moved off.
 - Renaming the personal starter Bot on its Setup page no longer keeps it on the old AI provider's
   harness after a provider change, where every message then failed to connect. A starter already
   caught this way follows the installer again on upgrade.

@@ -853,6 +853,34 @@ function catalogueNamesOf(harness: Harness): string[] {
   return [harness.name, ...(EARLIER_HARNESS_NAMES[harness.id] ?? [])];
 }
 
+/**
+ * "Powered by <framework>" for any framework the installer can run, longest name first so that
+ * "LangChain (LangGraph)" is read whole rather than as "LangChain" followed by text.
+ */
+const POWERED_BY = new RegExp(
+  `Powered by (?:${HARNESSES.filter(({ image }) => image !== null)
+    .flatMap(catalogueNamesOf)
+    .sort((a, b) => b.length - a.length)
+    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|")})(?![\\w])`,
+);
+
+/**
+ * A subtitle with its "Powered by" part following the harness the installer runs now.
+ *
+ * Only that part changes, so a subtitle the person wrote around it keeps their words. When what runs
+ * the Bot now is not a framework the installer knows by name, the claim is dropped rather than kept
+ * untrue, unless it is all the subtitle says.
+ */
+function attributionFollowing(title: string, harness: Harness | undefined) {
+  if (!POWERED_BY.test(title)) return title;
+  if (harness) return title.replace(POWERED_BY, `Powered by ${harness.name}`);
+  const rest = title
+    .replace(new RegExp(`\\s*${POWERED_BY.source}\\.?`), "")
+    .trim();
+  return rest || title;
+}
+
 function personalStarterSeed(
   tenantPackage: LoadedTenantPackage,
   fresh: boolean,
@@ -1080,7 +1108,7 @@ export async function synchronizeTenantPackage(
       const renamedOnly = sql`(${stored}->'personalStarter' = 'true'::jsonb
         and ${stored}->'auth' is null
         and ${stored}->>'endpoint' ~ '^http://agent-harness:[0-9]+/$')`;
-      await transaction
+      const [managed] = await transaction
         .update(agentTable)
         .set({
           type: picked.type,
@@ -1109,7 +1137,32 @@ export async function synchronizeTenantPackage(
                 ),
             ),
           ),
-        );
+        )
+        .returning({ id: agentTable.id });
+      /*
+       * And what the subtitle says runs it, for a Bot that now runs on what the installer picked.
+       * The starter is seeded "Everyday life. Powered by Claude Agent SDK.", and a person may have
+       * rewritten the first half; either way it went on naming the harness it was moved off. A
+       * connection the person set themselves is not moved above, so its subtitle is not touched.
+       */
+      if (managed) {
+        const [profile] = await transaction
+          .select({ title: agentProfiles.title })
+          .from(agentProfiles)
+          .where(
+            and(
+              eq(agentProfiles.agentId, PICKED_HARNESS),
+              isNull(agentProfiles.ownerUserId),
+            ),
+          );
+        const title = profile && attributionFollowing(profile.title, selected);
+        if (profile && title !== profile.title) {
+          await transaction
+            .update(agentProfiles)
+            .set({ title })
+            .where(eq(agentProfiles.agentId, PICKED_HARNESS));
+        }
+      }
     }
 
     // Disable only explicitly unconfigured agents still owned by this package. Keep canonical
