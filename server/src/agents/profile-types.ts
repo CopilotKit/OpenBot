@@ -19,6 +19,8 @@ export type AgentProfile = {
   /** An administrator assigned this Team Bot to this person; it stays in their sidebar. */
   assignedToMe?: boolean;
   deletedAt: Date | null;
+  /** The registry kind, used to identify the conversation loop. */
+  runtimeType?: "built_in" | "remote_ag_ui" | "remote_mastra";
   /** Where this coworker runs. Null for the Bot in the box. */
   endpoint: string | null;
   /** Whether a key is set for it. Never the key. */

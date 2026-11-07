@@ -3,16 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
-import {
-  and,
-  desc,
-  eq,
-  inArray,
-  isNotNull,
-  isNull,
-  ne,
-  sql,
-} from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { parse } from "yaml";
 import { DEPLOYMENT_ROUTES } from "./computer/deployment-routes";
 import type { Database } from "./db/client";
@@ -844,6 +835,7 @@ function personalStarterSeed(
             configuration: {
               ...picked.configuration,
               standingInstructions: fallback.configuration.systemPrompt,
+              personalStarter: true,
             },
           }
         : fallback,
@@ -953,24 +945,29 @@ export async function synchronizeTenantPackage(
 
     if (personal?.picked && !freshPersonal) {
       const { picked } = personal;
-      // The installer owns the remote connection only. Leave names, instructions, grants and
-      // conversation membership as stored, and never claim a Bot owned by someone else.
-      const [updated] = await transaction
+      // Earlier desktops addressed their own container by its Compose service name. A custom
+      // package can share the tenant and Bot IDs, so those IDs alone do not confer ownership.
+      const stored = sql`(case when jsonb_typeof(${agentTable.configuration}) = 'string'
+        then (${agentTable.configuration} #>> '{}')::jsonb
+        else ${agentTable.configuration}
+      end)`;
+      const connection = JSON.stringify({
+        ...picked.configuration,
+        personalStarter: true,
+      });
+      await transaction
         .update(agentTable)
         .set({
           type: picked.type,
-          configuration: sql`(
-            case when jsonb_typeof(${agentTable.configuration}) = 'string'
-              then (${agentTable.configuration} #>> '{}')::jsonb
-              else ${agentTable.configuration}
-            end - 'remoteAgentId'
-          ) || ${JSON.stringify(picked.configuration)}::text::jsonb`,
+          configuration: sql`(${stored} - 'remoteAgentId') || ${connection}::text::jsonb`,
           updatedAt: new Date(),
         })
         .where(
           and(
             eq(agentTable.id, PICKED_HARNESS),
             ne(agentTable.type, "built_in"),
+            sql`(${stored}->'personalStarter' = 'true'::jsonb
+              or ${stored}->>'endpoint' ~ '^http://agent-harness:[0-9]+([/?]|$)')`,
             inArray(agentTable.packageId, [
               deploymentPackage.id,
               ...(formerPersonal ? [formerPersonal.id] : []),
@@ -980,24 +977,15 @@ export async function synchronizeTenantPackage(
               transaction
                 .select({ id: agentProfiles.agentId })
                 .from(agentProfiles)
-                .where(isNull(agentProfiles.ownerUserId)),
+                .where(
+                  and(
+                    isNull(agentProfiles.ownerUserId),
+                    isNull(agentProfiles.deletedAt),
+                  ),
+                ),
             ),
           ),
-        )
-        .returning({ id: agentTable.id });
-      if (updated) {
-        // Older versions could tombstone this Bot when its endpoint was blank.
-        await transaction
-          .update(agentProfiles)
-          .set({ deletedAt: null, updatedAt: new Date() })
-          .where(
-            and(
-              eq(agentProfiles.agentId, updated.id),
-              isNull(agentProfiles.ownerUserId),
-              isNotNull(agentProfiles.deletedAt),
-            ),
-          );
-      }
+        );
     }
 
     // Disable only explicitly unconfigured agents still owned by this package. Keep canonical

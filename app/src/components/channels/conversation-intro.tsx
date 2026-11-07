@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { BotHarness } from "@/components/agents/bot-harness";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { Skeleton } from "@/components/ui/skeleton";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -20,6 +21,7 @@ export function ConversationIntro({
     name: string;
     title?: string | null;
     roleDescription?: string | null;
+    conversationHarness?: string;
     avatarSeed?: string | null;
     visibility: "public" | "private";
   };
@@ -51,6 +53,7 @@ export function ConversationIntro({
             {about}
           </p>
         ) : null}
+        <BotHarness name={agent.conversationHarness} />
         {personal ? null : (
           <div className="mt-3 flex flex-wrap gap-2">
             <span className="inline-flex h-6.5 items-center rounded-lg bg-muted px-2.5 font-semibold text-[13px] text-muted-foreground">

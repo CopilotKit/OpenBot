@@ -212,6 +212,7 @@ const joinedProjection = {
   /* The hash, only so a surface can say whether one exists. It never leaves this module. */
   callbackTokenHash: agentProfiles.callbackTokenHash,
   configuration: agents.configuration,
+  runtimeType: agents.type,
 };
 
 function joinedProfiles(executor: DatabaseExecutor, actor: AgentActor) {
@@ -265,6 +266,7 @@ function mapProfile(
     deletedAt: row.deletedAt,
     isolated: row.isolated,
     endpoint: endpointOf(row.configuration),
+    runtimeType: row.runtimeType,
     // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
     // wipe one by saving an unrelated edit; showing the value would put a secret in a screenshot.
     hasAuth: authFromConfiguration(row.configuration) !== null,
@@ -293,16 +295,19 @@ function remoteAgentIdOf(configuration: unknown): string | null {
 }
 
 /**
- * The instruction a Bot in the box runs on, read back out of its stored configuration.
+ * The instruction a Bot runs on, read back out of its stored configuration.
  *
  * The mirror of {@link endpointOf}, and needed for the same reason: a copy has to be made of what
  * the original actually was, and for a `built_in` coworker the prompt IS the coworker. Trimmed and
  * required to be non-empty, matching `registeredAgentFromRow`, which will not build a Bot from a
  * blank one either.
  */
-function systemPromptOf(configuration: unknown): string | null {
+function promptOf(
+  configuration: unknown,
+  key: "systemPrompt" | "standingInstructions",
+): string | null {
   if (!configuration || typeof configuration !== "object") return null;
-  const prompt = (configuration as { systemPrompt?: unknown }).systemPrompt;
+  const prompt = (configuration as Record<string, unknown>)[key];
   if (typeof prompt !== "string") return null;
   const trimmed = prompt.trim();
   return trimmed.length > 0 ? trimmed : null;
@@ -349,7 +354,7 @@ export function runForDuplicate(
   },
   managed: Record<string, unknown> | undefined,
 ): AgentRun | null {
-  const systemPrompt = systemPromptOf(source.configuration);
+  const systemPrompt = promptOf(source.configuration, "systemPrompt");
   if (source.type === "built_in" && systemPrompt) {
     return { type: "built_in", configuration: { systemPrompt } };
   }
@@ -366,16 +371,22 @@ export function runForDuplicate(
      * and a copy that forgets the name falls back to a different agent, or refuses. See
      * `pickFromRoster`.
      */
-    if (source.type === "remote_mastra") {
-      const remoteAgentId = remoteAgentIdOf(source.configuration);
-      return {
-        type: "remote_mastra",
-        configuration: remoteAgentId
-          ? { endpoint, remoteAgentId }
-          : { endpoint },
-      };
-    }
-    return { type: "remote_ag_ui", configuration: { endpoint } };
+    const standingInstructions = promptOf(
+      source.configuration,
+      "standingInstructions",
+    );
+    const remoteAgentId =
+      source.type === "remote_mastra"
+        ? remoteAgentIdOf(source.configuration)
+        : null;
+    return {
+      type: source.type === "remote_mastra" ? "remote_mastra" : "remote_ag_ui",
+      configuration: {
+        endpoint,
+        ...(remoteAgentId ? { remoteAgentId } : {}),
+        ...(standingInstructions ? { standingInstructions } : {}),
+      },
+    };
   }
 
   return managed ? { type: "remote_ag_ui", configuration: managed } : null;

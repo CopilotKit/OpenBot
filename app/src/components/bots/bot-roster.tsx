@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { BotHarness } from "@/components/agents/bot-harness";
 import {
   attentionSummary,
   waitingOnYou,
@@ -206,6 +207,7 @@ function RosterRow({
       <ItemContent>
         <ItemTitle>{agent.name}</ItemTitle>
         <ItemDescription>{summary || agent.title}</ItemDescription>
+        <BotHarness name={agent.conversationHarness} />
       </ItemContent>
       <ItemActions>
         {waiting > 0 ? (

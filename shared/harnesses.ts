@@ -99,3 +99,8 @@ export const WEB_HARNESSES: readonly Harness[] = HARNESSES.filter(
 export function summaryFor(harness: Harness): string {
   return harness.webSummary ?? harness.summary;
 }
+
+/** The name shown on setup and runtime surfaces without changing stored framework names. */
+export function displayNameFor(harness: Pick<Harness, "id" | "name">): string {
+  return harness.id === "langgraph" ? "LangChain" : harness.name;
+}

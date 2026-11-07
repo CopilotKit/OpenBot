@@ -1837,7 +1837,7 @@ describe("bundled personal starter", () => {
           avatarSeed: "custom-orb",
           title: "My title",
           roleDescription: "My custom role.",
-          visibility: "public",
+          visibility: "public" as const,
         })),
       );
       await database.insert(pluginGrants).values([
@@ -1901,12 +1901,33 @@ describe("bundled personal starter", () => {
         .select()
         .from(agents)
         .where(eq(agents.id, "picked-harness"));
-      expect(picked?.configuration).toEqual({
+      expect(picked?.configuration).toMatchObject({
         endpoint: langchain,
         custom: "preserve",
       });
     },
   );
+
+  test("restarting does not restore a deleted picked Bot", async () => {
+    const tenantId = starterTestTenant();
+    const pkg = await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    await database
+      .update(agentProfiles)
+      .set({ deletedAt: new Date() })
+      .where(eq(agentProfiles.agentId, "picked-harness"));
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, langchain),
+    );
+    expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
+    expect(await profiles.get(actor, "picked-harness")).toBeNull();
+    expect((await runtime(actor)).map(({ id }) => id)).not.toContain(
+      "picked-harness",
+    );
+  });
 
   test("a starter owned by the former personal package prevents reseeding", async () => {
     const formerTenantId = "personal";
@@ -1922,6 +1943,26 @@ describe("bundled personal starter", () => {
     expect(await ownedIds(legacy.id)).toEqual(["personal-assistant"]);
     expect(await ownedIds(current.id)).toEqual([]);
     expect(await channelBots()).toEqual(["personal-assistant"]);
+  });
+
+  test("switching from a copied package preserves its remote Bot across restarts", async () => {
+    const tenantId = starterTestTenant();
+    const customEndpoint = "https://example.test/custom-bot";
+    const custom = await loadStarter(tenantId, customEndpoint);
+    const pkg = await synchronizeTenantPackage(database, {
+      ...custom,
+      sourcePath: "/customer/personal",
+    });
+    const bundled = await loadStarter(tenantId, langchain);
+    await synchronizeTenantPackage(database, bundled);
+    await synchronizeTenantPackage(database, bundled);
+    expect(await ownedIds(pkg.id)).toEqual([
+      "personal-assistant",
+      "picked-harness",
+    ]);
+    expect(
+      (await runtime(actor)).find((agent) => agent.id === "picked-harness"),
+    ).toMatchObject({ type: "remote_ag_ui", endpoint: customEndpoint });
   });
 
   test("an existing user-owned picked-harness ID is left alone", async () => {

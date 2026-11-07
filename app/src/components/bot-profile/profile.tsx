@@ -8,6 +8,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { BotHarness } from "@/components/agents/bot-harness";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
@@ -84,6 +85,7 @@ export function BotProfile({
           <p className="line-clamp-2 text-muted-foreground text-sm">
             {agent.roleDescription}
           </p>
+          <BotHarness name={agent.conversationHarness} />
         </div>
       </div>
       <div className="mt-4">

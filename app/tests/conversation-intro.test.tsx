@@ -40,6 +40,18 @@ test("shows the Bot's name, what it does, and that it is private", () => {
   expect(view.queryByText("Public")).toBeNull();
 });
 
+test("shows the conversation harness separately from the role", () => {
+  const view = draw(
+    <ConversationIntro
+      agent={{ ...expenseReview, conversationHarness: "LangChain" }}
+    />,
+  );
+  const role = view.getByText(
+    "Finance Operations · Reads every expense claim against the travel policy.",
+  );
+  expect(role).not.toBe(view.getByText("Powered by LangChain"));
+});
+
 test("a public Bot says so", () => {
   const view = draw(
     <ConversationIntro agent={{ ...expenseReview, visibility: "public" }} />,
