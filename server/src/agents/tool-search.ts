@@ -4,6 +4,7 @@ import { SEARCH_TOOLS } from "@openbot/shared/tool-search";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import { researchRoleFor } from "../plugins/catalogue";
+import { isAlwaysOn } from "../plugins/personal-defaults";
 import { markUntrusted } from "../untrusted-content";
 
 export { SEARCH_TOOLS };
@@ -102,9 +103,11 @@ type PromptPart = { type: string; toolName?: string; output?: unknown };
  *
  * Only an app's tools wait, and not every one of those: a tool that finds or reads sources on the
  * web stays, because the computer's instructions route searching to it and a Bot told to use a tool
- * it cannot see reaches for the browser instead. A tool the run's chosen skills asked for stays too,
- * unless even those leave the run over the floor, where a skill has asked for more than a model
- * chooses well among and they wait like the rest.
+ * it cannot see reaches for the browser instead. Routines stay, because they are the app every Bot
+ * holds to schedule its own work (`isAlwaysOn`): FOUND LIVE, a Bot past the floor spent three
+ * searches finding `create_routine` before it could set up a routine. A tool the run's chosen skills
+ * asked for stays too, unless even those leave the run over the floor, where a skill has asked for
+ * more than a model chooses well among and they wait like the rest.
  */
 export function planToolSearch(
   tools: readonly GrantedTool[],
@@ -118,7 +121,10 @@ export function planToolSearch(
   const total = tools.length + (options.alsoSent ?? 0);
   if (total <= TOOL_SEARCH_FLOOR) return new Set();
   const searchable = tools.filter(
-    (tool) => tool.searchable && researchRoleFor(tool.ref) === null,
+    (tool) =>
+      tool.searchable &&
+      researchRoleFor(tool.ref) === null &&
+      !isAlwaysOn(tool.ref),
   );
   /*
    * Fewer app tools than one search returns are not worth a search. A Bot with a computer can be over
