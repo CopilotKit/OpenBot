@@ -80,6 +80,13 @@ export type ApprovalCandidate = {
    */
   ownConnectionRead?: true;
   /**
+   * The app marks this tool as destroying something: MCP's `destructiveHint`, or a broker's
+   * destructive flag, as recorded when the app was listed (`mcpTools.destructive`). It asks as
+   * deleting does, whatever the tool is called (see `safetyRequirement` in ./policy). A fact about
+   * the tool, not about this call, so not in the action's digest.
+   */
+  destructive?: true;
+  /**
    * The row the trail records for this action if the person denies it, built by the code that would
    * have carried it out, so a denial reads like that surface's other refusals and lands in the
    * Blocked view. Written once, with the decision, in the transaction that saves it. Not part of what

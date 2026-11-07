@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Deleting always asks, with Allow once or Deny, when an app calls its delete "archive", such as
+  HubSpot's `HUBSPOT_ARCHIVE_CONTACT` or a Gmail archive, and for any app tool its app marks
+  destructive (MCP's `destructiveHint`, or Composio's and Arcade's own flag), whatever the tool is
+  called. A Bot asked to delete a HubSpot contact archived it without asking. Listing archived mail,
+  reading archive settings and unarchiving still don't ask.
 - A goal's run is offered one tool for each goal job. It was also given Routines' copies, so it saw
   `create_goal` beside `mcp__routines__create_goal` and the same for each goal tool.
 - A Bot that can't be reached says so in words: "Couldn't reach Personal Assistant. Check that
