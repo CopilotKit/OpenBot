@@ -55,7 +55,7 @@ export const TRIGGER_TOOLS: readonly McpToolShape[] = Object.freeze([
   {
     name: "create_trigger",
     description: [
-      "Add an event trigger to one of this person's responsibilities that you carry out, so an outside",
+      "Add an event trigger to one of this person's goals that you carry out, so an outside",
       "event starts a real run of it. Kinds: `webhook` (any system POSTs to a URL), `github`, `linear`,",
       "`sentry`, `pagerduty` (the vendor's signed webhook), `email` (mail to a dedicated address), `slack`",
       "(messages in Slack channels the person is in).",
@@ -65,7 +65,7 @@ export const TRIGGER_TOOLS: readonly McpToolShape[] = Object.freeze([
       "`fieldPath`/`fieldEquals` pair such as `data.team.key` = `ENG`.",
       "",
       "You never see or handle a secret. The result gives the URL (or address); tell the person to open",
-      "the responsibility's card on the Bot's Responsibilities page to copy the key, or to paste the vendor's",
+      "the goal's card on the Bot's Goals page to copy the key, or to paste the vendor's",
       "signing secret there for Linear, Sentry and PagerDuty. Never ask them to paste a secret into chat.",
       "",
       "Slack needs `teamId` and `mode` (`mention`, `phrase` with `phrases`, `reaction` with optional",
@@ -76,9 +76,9 @@ export const TRIGGER_TOOLS: readonly McpToolShape[] = Object.freeze([
     inputSchema: {
       type: "object",
       properties: {
-        responsibilityId: {
+        goalId: {
           type: "string",
-          description: "The responsibility's id, from list_responsibilities.",
+          description: "The goal's id, from list_goals.",
         },
         kind: {
           type: "string",
@@ -112,13 +112,13 @@ export const TRIGGER_TOOLS: readonly McpToolShape[] = Object.freeze([
         reactions: stringList,
         channels: stringList,
       },
-      required: ["responsibilityId", "kind"],
+      required: ["goalId", "kind"],
     },
   },
   {
     name: "list_triggers",
     description:
-      "List the event triggers on this person's responsibilities that you carry out: id, kind, responsibility, what it listens for, whether it is paused, and its URL or address. Keys are never listed.",
+      "List the event triggers on this person's goals that you carry out: id, kind, goal, what it listens for, whether it is paused, and its URL or address. Keys are never listed.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -188,12 +188,11 @@ export async function callTriggerTool(
   };
   if (name === "list_triggers") {
     const all = await deps.triggers.listForAgent(ownerUserId, agentId);
-    if (all.length === 0)
-      return "There are no triggers on your responsibilities for me.";
+    if (all.length === 0) return "There are no triggers on your goals for me.";
     return all
       .map(
         (trigger) =>
-          `- ${trigger.kind} on "${trigger.title}" (responsibility ${trigger.responsibilityId}) · ${
+          `- ${trigger.kind} on "${trigger.title}" (goal ${trigger.responsibilityId}) · ${
             trigger.enabled ? "active" : "paused"
           } · ${where(deps, trigger)} · listens for ${JSON.stringify(
             trigger.config.kind === "slack"
@@ -204,11 +203,10 @@ export async function callTriggerTool(
       .join("\n");
   }
   if (name === "create_trigger") {
-    const responsibilityId = str(args.responsibilityId);
+    // `responsibilityId` is what this argument was called before it said goal.
+    const responsibilityId = str(args.goalId) ?? str(args.responsibilityId);
     if (!responsibilityId)
-      throw new ResponsibilityRefusedError(
-        "Say which responsibility, by its id.",
-      );
+      throw new ResponsibilityRefusedError("Say which goal, by its id.");
     const goal = await deps.responsibilities.get(ownerUserId, responsibilityId);
     if (goal.agentId !== agentId) throw new ResponsibilityNotFoundError();
     const kind = str(args.kind);
@@ -249,10 +247,10 @@ export async function callTriggerTool(
     );
     const next =
       trigger.kind === "webhook" || trigger.kind === "github"
-        ? "Ask the person to open this responsibility's card on the Bot's Responsibilities page to copy the key (and, for a webhook, the Authorization header). Do not ask for the key in chat."
+        ? "Ask the person to open this goal's card on the Bot's Goals page to copy the key (and, for a webhook, the Authorization header). Do not ask for the key in chat."
         : trigger.kind === "email" || trigger.kind === "slack"
           ? "It is ready."
-          : "Ask the person to paste the provider's signing secret on this responsibility's card on the Bot's Responsibilities page. Until then deliveries are refused. Do not ask for the secret in chat.";
+          : "Ask the person to paste the provider's signing secret on this goal's card on the Bot's Goals page. Until then deliveries are refused. Do not ask for the secret in chat.";
     return `Added a ${trigger.kind} trigger to "${goal.title}" (id: ${trigger.id}). ${where(deps, trigger)}. ${next}`;
   }
   if (name === "pause_trigger" || name === "resume_trigger") {

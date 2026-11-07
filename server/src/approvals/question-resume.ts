@@ -19,7 +19,7 @@ export const PERSON_QUESTION_WAITING = "person_question";
  *
  * The answer goes back into the same conversation as a user message either way. What differs is the
  * turn around it: a question asked by a responsibility's run must come back to that responsibility,
- * run with its tools (`report_responsibility_progress` bound to its latest run) and its initiator,
+ * run with its tools (`report_goal_progress` bound to its latest run) and its initiator,
  * or the Bot can read the answer but cannot record progress or complete the goal it was working on.
  * A question from anything else keeps the initiator it was asked under rather than becoming a
  * person's own turn.
@@ -66,7 +66,7 @@ export async function resumePersonQuestion(input: {
       responsibility.agentId !== agentId
     )
       throw new ApprovalRefusedError(
-        "That answer does not belong to this responsibility's conversation.",
+        "That answer does not belong to this goal's conversation.",
       );
     const [latest] = await input.responsibilities.listRuns(
       ownerUserId,

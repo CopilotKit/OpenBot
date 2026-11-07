@@ -10,7 +10,15 @@ import {
   responsibilityPatchSchema,
 } from "./types";
 
-/** Identities come from the signed run, never model arguments. */
+/**
+ * A goal's own tools, for the run that works on it. Identities come from the signed run, never model
+ * arguments.
+ *
+ * Named and described as a goal, the word every screen uses: the model repeats the words its tools
+ * give it, and a run's reply is what the person reads in the conversation and in Activity. When they
+ * were `*_responsibility`, a goal's run told the person "I've marked the responsibility complete".
+ * The code, the routes and the database keep the old word.
+ */
 export function responsibilityTools(options: {
   store: ResponsibilityStore;
   engine: Pick<ResponsibilityEngine, "ingest">;
@@ -47,7 +55,7 @@ export function responsibilityTools(options: {
       async execute(args) {
         const value = parameters.safeParse(args);
         if (!value.success)
-          return `Refused. ${value.error.issues[0]?.message ?? "Invalid responsibility arguments."}`;
+          return `Refused. ${value.error.issues[0]?.message ?? "Invalid goal arguments."}`;
         try {
           return JSON.stringify(await execute(value.data));
         } catch (error) {
@@ -63,14 +71,14 @@ export function responsibilityTools(options: {
   }
   const tools = [
     tool(
-      "create_responsibility",
-      "Create a durable goal for this Bot in this conversation. State the instruction and measurable success criteria; optional event subscriptions trigger future runs.",
+      "create_goal",
+      "Create a lasting goal for this Bot in this conversation. State the instruction and measurable success criteria; optional event subscriptions trigger future runs.",
       responsibilityInputSchema.omit({ agentId: true, channelId: true }),
       (input) => store.create(ownerUserId, { ...input, agentId, channelId }),
     ),
     tool(
-      "list_responsibilities",
-      "Inspect this person's durable responsibilities and progress for this Bot.",
+      "list_goals",
+      "List this person's goals for this Bot, with their progress.",
       z.object({}).strict(),
       async () =>
         (await store.list(ownerUserId)).filter(
@@ -78,8 +86,8 @@ export function responsibilityTools(options: {
         ),
     ),
     tool(
-      "update_responsibility",
-      "Edit a responsibility's instruction, success criteria, title or event subscriptions.",
+      "update_goal",
+      "Edit a goal's instruction, success criteria, title or event subscriptions.",
       identity.extend({ patch: responsibilityPatchSchema }),
       async ({ id, patch }) => {
         await owned(id);
@@ -87,8 +95,8 @@ export function responsibilityTools(options: {
       },
     ),
     tool(
-      "report_responsibility_progress",
-      "Record concrete progress and evidence for a responsibility. Mark complete only when its success criteria have been met.",
+      "report_goal_progress",
+      "Record concrete progress and evidence for a goal. Mark the goal complete only when its success criteria have been met.",
       identity.extend({
         summary: z.string().trim().min(1).max(6000),
         complete: z.boolean().optional(),
@@ -104,8 +112,8 @@ export function responsibilityTools(options: {
       },
     ),
     tool(
-      "run_responsibility",
-      "Queue an owned active responsibility for this Bot to work on without the person's browser open.",
+      "run_goal",
+      "Queue one of this Bot's active goals to be worked on without the person's browser open.",
       identity,
       async ({ id }) => {
         await owned(id);
@@ -120,21 +128,16 @@ export function responsibilityTools(options: {
       },
     ),
   ];
-  for (const [action, status] of [
-    ["pause", "paused"],
-    ["resume", "active"],
-    ["complete", "completed"],
+  for (const [action, status, description] of [
+    ["pause", "paused", "Pause one of this Bot's goals."],
+    ["resume", "active", "Resume one of this Bot's paused goals."],
+    ["complete", "completed", "Mark one of this Bot's goals complete."],
   ] as const) {
     tools.push(
-      tool(
-        `${action}_responsibility`,
-        `${action} this Bot's owned responsibility.`,
-        identity,
-        async ({ id }) => {
-          await owned(id);
-          return store.transition(ownerUserId, id, status);
-        },
-      ),
+      tool(`${action}_goal`, description, identity, async ({ id }) => {
+        await owned(id);
+        return store.transition(ownerUserId, id, status);
+      }),
     );
   }
   return tools;
