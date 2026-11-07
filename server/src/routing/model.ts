@@ -2,12 +2,19 @@ import { PlanModel, type PlanModelConfig } from "../agents/plan-model";
 import type { RuntimeModel } from "../copilot";
 
 /**
- * The one model call the router makes, kept apart from the routing logic so that logic stays a pure
- * function the tests drive without a network. This reuses the deployment's own model and key — the
- * same ones the built-in coworkers answer on — so a router is never a second thing to configure.
+ * One model call on the deployment's own model, for the router, the approval reviewer and the tool
+ * chooser, kept apart from their logic so that logic stays a pure function the tests drive without a
+ * network. This reuses the model the built-in Bots answer on, with its key, or on a Claude or ChatGPT
+ * plan its plan (`model.plan`), so none of them is a second thing to configure.
  *
- * It throws on a missing key or a bad response on purpose: the router treats a throw as "not sure"
- * and lands on the default, so failure here is a soft landing, not an error a person sees.
+ * It throws on a missing key, a bad response or a timeout on purpose: the router treats a throw as
+ * "not sure" and lands on the default, the reviewer as "ask the person", and the chooser as "offer
+ * what fits". A failure here is a soft landing, not an error a person sees.
+ *
+ * ON A PLAN THERE IS NO KEY, so the call is asked of the plan's own harness, the way the built-in
+ * Bots and a conversation's title are. Asked for a key there, every call threw "no model key": the
+ * chooser offered every tool, the router sent every message to the default Bot, and Auto-review
+ * asked the person about everything it was meant to let through.
  */
 export function createModelCompleter(deps: {
   model: RuntimeModel;
@@ -22,15 +29,9 @@ export function createModelCompleter(deps: {
    * model allowlist) applies to the next call and not the next restart.
    */
   fastModel?: string | (() => string | undefined);
-  /**
-   * The plan the deployment signed in to instead of a key (a Claude or ChatGPT plan on OpenBot
-   * Desktop). Present, the call is asked of the plan's own harness, the way the built-in Bots and a
-   * conversation's title are: a plan holds no key, so without this every call threw "no model key".
-   */
-  plan?: PlanModelConfig;
 }): (prompt: string, signal?: AbortSignal) => Promise<string> {
   return async (prompt: string, signal?: AbortSignal) => {
-    if (deps.plan) return askPlan(deps.plan, prompt, signal);
+    if (deps.model.plan) return askPlan(deps.model.plan, prompt, signal);
     const fast =
       typeof deps.fastModel === "function" ? deps.fastModel() : deps.fastModel;
     const models =
@@ -119,11 +120,7 @@ export function createSkillChooser(
   model: RuntimeModel,
   resolveApiKey: () => Promise<string | null>,
 ): (prompt: string, signal?: AbortSignal) => Promise<string> {
-  const complete = createModelCompleter({
-    model,
-    resolveApiKey,
-    ...(model.plan ? { plan: model.plan } : {}),
-  });
+  const complete = createModelCompleter({ model, resolveApiKey });
   /*
    * Why it could not choose, in the log, once for each reason. The run carries on with every tool
    * that fits (see `fitToolLimit`) and its Activity row says it could not choose, but not why, and

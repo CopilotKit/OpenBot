@@ -20,6 +20,7 @@ import {
   skillSharingAllowed,
   skillSharingInSnapshot,
 } from "./admin/controls";
+import { fixSettings } from "./admin/settings-store";
 import {
   CoworkerUnavailableError,
   createActorAgentResolver,
@@ -171,7 +172,6 @@ import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
 import { setEdition } from "./edition";
-import { fixSettings } from "./admin/settings-store";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -244,13 +244,13 @@ import {
   startPersonalDefaultApps,
   withPersonalDefaults,
 } from "./plugins/personal-defaults";
-import { startBrokeredRelist } from "./plugins/relist";
 import {
   arcadeVerifierNotice,
   ownsBrokerProject,
   selectProviderWiring,
   storedProvider,
 } from "./plugins/provider-wiring";
+import { startBrokeredRelist } from "./plugins/relist";
 import {
   createSharedUseGate,
   createSharedUseStore,
@@ -281,6 +281,10 @@ import { createRecorderExtension } from "./recorder/wiring";
 import { createRequestActor } from "./request-actor";
 import { createResponsibilityBindingStore } from "./responsibilities/bindings";
 import {
+  useGoalTools,
+  withoutGoalCopiesInGoalRun,
+} from "./responsibilities/chat-tools";
+import {
   createEmailTriggerRoutes,
   createSnsVerifier,
   fetchText as fetchSnsText,
@@ -295,10 +299,6 @@ import {
 import { createResponsibilityStore } from "./responsibilities/store";
 import { responsibilityTools } from "./responsibilities/tools";
 import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
-import {
-  useGoalTools,
-  withoutGoalCopiesInGoalRun,
-} from "./responsibilities/chat-tools";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
 import type { Responsibility } from "./responsibilities/types";
@@ -805,8 +805,9 @@ const chooseSkills = createSkillChooser(
 );
 
 /**
- * The approval reviewer's model, the deployment's own key. Not the plan's harness: the reviewer
- * decides whether an action may go ahead, and asking a plan for that is a change of its own.
+ * The approval reviewer's model: the deployment's own, with its key or on its plan's harness (see
+ * `createModelCompleter`). On a plan it threw on every call and failed closed, so Auto-review asked
+ * the person about everything. It still fails closed on an error or a timeout (`reviewAction`).
  */
 const reviewActions = createModelCompleter({
   model: runtimeModel,
