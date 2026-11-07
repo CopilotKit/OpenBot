@@ -47,9 +47,16 @@ The root `package.json` is the release version source. CI rejects drift in the d
 manifest or lockfile. The release workflow updates those files automatically; after a manual
 root version change, run `bun desktop/scripts/desktop-version.ts sync`.
 
-Internal desktop artifacts use `X.Y.Z-internal.g<commit>` so testers can identify the source
-revision. Both desktop CI and protected Windows signing prepare this version before compilation
-and packaging. A signing run on a release tag, and the release's own build, use the plain release
+Internal desktop artifacts use `X.Y.Z-internal.<commits>.g<commit>`, for example
+`0.3.1-internal.730.g4400ba023e0c`, so testers can identify the source revision. `<commits>` is
+the number of commits in the build's history. Installers and the app compare versions by semver,
+which compares a number as a number and the hash as text, so the count is what orders a later
+build after an earlier one; without it, the Windows installer took a newer internal build for an
+older one. Counting needs the whole history, so the workflows that prepare this version check out
+with `fetch-depth: 0`, and `desktop-version.ts internal` refuses a shallow checkout.
+
+Both desktop CI and protected Windows signing prepare this version before compilation and
+packaging. A signing run on a release tag, and the release's own build, use the plain release
 version instead. The artifact includes `build-version.json` with the full commit and release version.
 
 To build locally, from the repository root:

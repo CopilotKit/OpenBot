@@ -69,9 +69,11 @@ jobs:
             internal|release) ;;
             *) echo "::error::channel must be internal or release, got '$CHANNEL'"; exit 1 ;;
           esac
+      # The whole history: an internal build is numbered by its commit count (desktop-version.ts).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
           persist-credentials: false
       # No cache, Rust or Bun, for a release: its installers are attached to the release, and they
       # must come from the tree and the lockfiles, not from anything an earlier run left behind. A
