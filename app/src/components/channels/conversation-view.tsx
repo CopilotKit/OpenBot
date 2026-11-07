@@ -36,6 +36,7 @@ export function ConversationView({
   commands,
   channelId,
   disabled = false,
+  onSendHeld,
   pending = false,
   autoFocus = false,
   stopped,
@@ -72,6 +73,8 @@ export function ConversationView({
    */
   channelId?: string;
   disabled?: boolean;
+  /** Writing is open and sending waits on the caller; forwarded to the composer. */
+  onSendHeld?: () => void;
   /**
    * A turn is in flight: the Bot has been asked something and has not come back yet.
    *
@@ -496,6 +499,7 @@ export function ConversationView({
           compact
           voiceCall={voiceCall}
           disabled={disabled}
+          {...(onSendHeld ? { onSendHeld } : {})}
           droppedAttachments={droppedAttachments}
           onQueue={
             queueWhileBusy
