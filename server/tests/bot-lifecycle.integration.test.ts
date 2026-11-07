@@ -332,7 +332,9 @@ describe("Activity and attention", () => {
   test("a routine's schedule reads in words, as the Routines page says it", async () => {
     // Seen on the Bot page: "Repeats on 0 9 * * * (UTC)", five cron fields shown to a person.
     const result = await activity.forBot(owner, bot);
-    const routine = result.scheduled.find((item) => item.kind === "routine");
+    const routine = result.scheduled.find(
+      (item) => item.id === `routine:${prefix}-routine-${owner}`,
+    );
     expect(routine?.detail).toBe("Every day at 09:00 (UTC)");
   });
 
