@@ -438,12 +438,17 @@ export function createApprovalService(
       return store.decide(ownerUserId, id, decision);
     },
     revoke: (ownerUserId: string, id: string) => store.revoke(ownerUserId, id),
-    async answerQuestion(ownerUserId: string, id: string, response: string) {
+    async answerQuestion(
+      ownerUserId: string,
+      id: string,
+      response: string,
+      options?: { inConversation?: boolean },
+    ) {
       if (!questions)
         throw new ApprovalRefusedError(
           "Questions are unavailable in this deployment.",
         );
-      return questions.respond(ownerUserId, id, response);
+      return questions.respond(ownerUserId, id, response, options);
     },
     async dismissQuestion(ownerUserId: string, id: string) {
       if (!questions)

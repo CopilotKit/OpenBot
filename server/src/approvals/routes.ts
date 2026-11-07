@@ -181,13 +181,21 @@ export function createApprovalRoutes(
   });
   routes.post("/questions/:id/respond", async (context) => {
     const input = z
-      .strictObject({ response: z.string().trim().min(1).max(6000) })
+      .strictObject({
+        response: z.string().trim().min(1).max(6000),
+        /*
+         * Sent from the open conversation, which runs the answer as its own next turn when that is
+         * where it belongs, live and stoppable, rather than waiting on a turn run out of its sight.
+         */
+        inConversation: z.boolean().optional(),
+      })
       .parse(await context.req.json());
     return context.json(
       await service.answerQuestion(
         context.var.actor.id,
         context.req.param("id"),
         input.response,
+        { inConversation: input.inConversation ?? false },
       ),
     );
   });
