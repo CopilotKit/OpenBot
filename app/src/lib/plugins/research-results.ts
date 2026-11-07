@@ -41,10 +41,14 @@ const MAX_EXCERPT = 1200;
  * which still shows everything: an error, an empty result, a shape no provider has sent yet.
  */
 export function readResearchSources(result: string): ResearchSource[] | null {
-  const text = withoutUntrustedEnvelope(asText(result)).trim();
+  const whole = withoutUntrustedEnvelope(asText(result)).trim();
+  const text = whole.replace(CUT_MARKER, "").trim();
+  const cut = text !== whole;
   const found =
     text.startsWith("{") || text.startsWith("[")
-      ? fromJson(text)
+      ? cut
+        ? fromCutJson(text)
+        : fromJson(text)
       : fromExaText(text);
   // A page found twice is one page, the first time it was found.
   const seen = new Set<string>();
@@ -52,6 +56,63 @@ export function readResearchSources(result: string): ResearchSource[] | null {
     (source) => !seen.has(source.url) && !!seen.add(source.url),
   );
   return sources.length ? sources : null;
+}
+
+/**
+ * What the server appends to a tool's answer it cut at its result cap (`server/src/plugins/mcp.ts`).
+ *
+ * A search's answer is usually past the cap, so the JSON stops part-way through a result and is not
+ * JSON at all: parsed whole it fails and the step fell back to the raw text.
+ */
+const CUT_MARKER = /\n*\[truncated: the tool returned \d+ characters\]\s*$/;
+
+/**
+ * The results that arrived whole in a JSON answer cut short: each entry of the first result list
+ * that closes before the cut, in order. The entry the cut went through is left out rather than
+ * shown half-read.
+ */
+function fromCutJson(text: string): ResearchSource[] {
+  const list = text.startsWith("[")
+    ? 0
+    : (text.match(/"(?:results|web|news|data)"\s*:\s*\[/)?.index ?? -1);
+  if (list < 0) return [];
+  const sources: ResearchSource[] = [];
+  let at = text.indexOf("[", list) + 1;
+  for (;;) {
+    while (at < text.length && /[\s,]/.test(text.charAt(at))) at++;
+    if (text.charAt(at) !== "{") break;
+    const end = closingBrace(text, at);
+    if (end < 0) break;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(text.slice(at, end + 1));
+    } catch {
+      break;
+    }
+    const source = fromEntry(entry);
+    if (source) sources.push(source);
+    at = end + 1;
+  }
+  return sources;
+}
+
+/** Where the object opening at `start` closes, or -1 when the text ends first. Strings are skipped. */
+function closingBrace(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  for (let index = start; index < text.length; index++) {
+    const character = text.charAt(index);
+    if (inString) {
+      if (character === "\\") index++;
+      else if (character === '"') inString = false;
+    } else if (character === '"') inString = true;
+    else if (character === "{" || character === "[") depth++;
+    else if (character === "}" || character === "]") {
+      depth--;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
 }
 
 function fromJson(text: string): ResearchSource[] {

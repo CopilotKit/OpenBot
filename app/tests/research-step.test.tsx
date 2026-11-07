@@ -9,6 +9,7 @@ import {
   type ToolGroup,
 } from "../src/components/channels/tool-activity";
 import { readResearchSources } from "../src/lib/plugins/research-results";
+import { TRUNCATED_PARALLEL_SEARCH } from "./research-step-truncated.fixture";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -226,4 +227,52 @@ test("every research provider's answer is read into the same list", () => {
     ),
   ).toBeNull();
   expect(readResearchSources('{"error":"rate limited"}')).toBeNull();
+});
+
+test("a search the server cut at its result cap still opens to the pages it found", () => {
+  // Live on OpenBot Desktop: the answer stops mid-excerpt, then "[truncated: …]", so it is not JSON.
+  const sources = readResearchSources(TRUNCATED_PARALLEL_SEARCH);
+  // Every result that arrived whole, in order; the one the cut went through is left out.
+  expect(sources?.map((source) => source.url)).toEqual([
+    "https://bun.sh/blog/bun-v1.4.3.md",
+    "https://bun.com/blog/bun-v1.4.3",
+    "https://bun.com/blog/release-notes/bun-v1.4.3",
+    "https://bun.sh/blog/bun-v1.4.3",
+    "https://www.mail-studio.com/en/tools/bun-143-bun-check-typescript-2",
+    "https://pulse.adyog.com/insights/bun-1-4-3-type-check-gate-ignored-flag",
+    "https://daily.dev/posts/bun-v1-4-3-adds-bun-check-a-built-in-typescript-type-checker-yjjoukrmc",
+    "https://x.com/bunjavascript/status/2108793934256525570",
+  ]);
+  expect(sources?.[1]).toMatchObject({
+    site: "bun.com",
+    title: "Bun v1.4.3 | Bun Blog",
+    published: "2026-10-10",
+  });
+
+  const view = render(
+    <ServerToolLine
+      name="mcp__parallel__web_search"
+      result={TRUNCATED_PARALLEL_SEARCH}
+    />,
+  );
+  for (const summary of view.container.querySelectorAll("summary"))
+    fireEvent.click(summary);
+  const text = view.container.textContent ?? "";
+  expect(text).not.toContain("search_id");
+  expect(text).not.toContain("[truncated");
+  expect(text).not.toContain("untrusted");
+  expect(view.getByRole("region", { name: "Search results" })).toBeDefined();
+  expect(
+    view.getByRole("link", { name: /Bun 1\.4\.3 Ships bun check/ }),
+  ).toBeDefined();
+});
+
+test("a cut answer with no whole result left still falls back to the generic output", () => {
+  expect(
+    readResearchSources(
+      connectorResult(
+        '{\n  "search_id": "s",\n  "results": [\n    {\n      "url": "https://a.example/x",\n      "excerpts": ["half\n\n[truncated: the tool returned 90000 characters]',
+      ),
+    ),
+  ).toBeNull();
 });
