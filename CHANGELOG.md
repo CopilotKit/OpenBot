@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- At every start the server brings the saved tools of OpenBot's own apps, Routines and Google Drive,
+  up to date with the release it runs, so a tool a release renames, rewords or adds reaches an
+  existing installation without anybody pressing Refresh (OpenBot Desktop has no Admin page to press
+  it on). A start where nothing changed writes nothing, and which Bots hold an app, and which apps
+  are on, stay as they were.
 - A goal's run is told "goal", the word every screen uses, so a Bot no longer says it "marked the
   responsibility complete". Its tools are now `create_goal`, `list_goals`, `update_goal`,
   `report_goal_progress`, `run_goal`, `pause_goal`, `resume_goal` and `complete_goal` (they were
