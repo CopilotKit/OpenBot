@@ -3200,7 +3200,8 @@ fn legacy_containers(
 }
 
 /// The folder as the file system resolves it, so `/var` and `/private/var`, or `..` in a label,
-/// compare equal. A folder that no longer exists compares as written.
+/// compare equal. A folder that no longer exists compares as written. Plain, because the folder of
+/// another copy goes into the message that says where it runs from.
 fn canonical(folder: &Path) -> PathBuf {
     std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf())
 }
@@ -9123,6 +9124,16 @@ fn main() {
         );
         assert!(
             problem.said.contains("Nothing was changed or deleted"),
+            "{}",
+            problem.said
+        );
+        // The other copy's folder as a person reads it, never Windows' `\\?\C:\...` form.
+        let checkout = crate::paths::plain(std::fs::canonicalize(&checkout).unwrap());
+        assert!(
+            problem
+                .said
+                .contains(&format!("from {}.", checkout.display()))
+                && !problem.said.contains(r"\\?\"),
             "{}",
             problem.said
         );

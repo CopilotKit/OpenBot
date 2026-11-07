@@ -11847,6 +11847,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// Settings › This computer › Details said "Installed in \\?\C:\Users\Administrator\OpenBot" on
+    /// Windows. The folder there is the one the app remembered, read at launch into the shell and
+    /// named by `read_desktop_status`; this follows it the same way.
+    #[test]
+    fn details_name_the_installation_folder_without_the_windows_extended_length_prefix() {
+        let config = temp_root("openbot-details-installed-in");
+        let root = config.join("OpenBot");
+        std::fs::create_dir_all(&root).unwrap();
+        preparation::save_selected_root(&config, &root).unwrap();
+        let shown = |config: &Path| {
+            let shell = Shell::default();
+            remember_selected_root(&shell, &preparation::selected_root(config).unwrap());
+            cleanup_root(&shell, &stack::default_root())
+                .display()
+                .to_string()
+        };
+
+        let installed_in = shown(&config);
+        assert!(!installed_in.starts_with(r"\\?\"), "{installed_in}");
+        assert_eq!(
+            std::fs::canonicalize(&installed_in).unwrap(),
+            std::fs::canonicalize(&root).unwrap()
+        );
+
+        // What an app before this fix left saved on Windows.
+        #[cfg(windows)]
+        {
+            std::fs::write(
+                config.join("last-launched-root.json"),
+                r#""\\\\?\\C:\\Users\\Administrator\\OpenBot""#,
+            )
+            .unwrap();
+            assert_eq!(shown(&config), r"C:\Users\Administrator\OpenBot");
+        }
+        std::fs::remove_dir_all(config).unwrap();
+    }
+
     #[test]
     fn production_stop_root_selection_retains_resolved_root_not_menu_fallback() {
         let selected = temp_root("openbot-production-stop-selected-root");
