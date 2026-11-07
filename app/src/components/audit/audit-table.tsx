@@ -195,6 +195,9 @@ export function AuditTable({
                         cell.column.id === "mark" && "w-8 pr-0 pl-4",
                         cell.column.id === "when" &&
                           "whitespace-nowrap font-mono text-muted-foreground text-xs tabular-nums",
+                        // Room for a Bot's name and "Started by a person" on a line each; a longer
+                        // name wraps. Without it the column gave way to Decision's longer lines.
+                        cell.column.id === "bot" && "min-w-40",
                       )}
                       data-column={cell.column.id}
                       key={cell.id}
