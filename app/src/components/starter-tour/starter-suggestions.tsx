@@ -108,7 +108,7 @@ function StarterSuggestionChoices({
   return (
     <section
       aria-label="Starter tasks"
-      className="relative mb-3 w-full max-w-2xl pr-8"
+      className="relative mb-3 w-full max-w-2xl pr-8 [&>div]:bg-transparent"
     >
       <Button
         variant="ghost"
