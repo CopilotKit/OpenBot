@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot that can't be reached says so in words: "Couldn't reach Personal Assistant. Check that
+  it's running and that its address on its Setup page is right, then try again." A conversation
+  showed "ECONNREFUSED: Unable to connect. Is the computer able to access the url?". The error itself
+  goes to the server log.
 - A Bot's question that you answer in your own words, such as which city you're in, reaches you
   with a field to type the answer. On the "Find weekend plans" starter it showed "Blocked: Asked
   you", and you were never asked.
