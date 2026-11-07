@@ -207,6 +207,12 @@ const OWN_TOOLS: Record<string, OwnTool> = {
   },
   save_skill: { running: "Proposing a skill", done: "Proposed a skill" },
 
+  /*
+   * Drawing a generated interface in the conversation. The runtime offers it, not an OpenBot
+   * registration, so `built-in-tool-labels.test.ts` cannot find it; its words go here by hand.
+   */
+  render_ui: { running: "Drawing an interface", done: "Drew an interface" },
+
   // Making a Bot from a conversation.
   list_bots: {
     running: "Checking existing Bots",
