@@ -2306,7 +2306,7 @@ pub fn link_telemetry_installed(
 /// Bound the optional handshake separately from product CLI operations.
 fn telemetry_link_limits() -> Limits {
     Limits {
-        timeout: Duration::from_secs(2),
+        timeout: Duration::from_secs(8),
         grace: Duration::from_millis(250),
         output: MAX_OUTPUT,
     }
@@ -4432,6 +4432,12 @@ fn main() {
             std::fs::rename(dir.join("grandchild.tmp"), dir.join("grandchild")).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(60));
         }
+        // A valid machine response can precede the CLI's bounded telemetry flush.
+        "flush" => {
+            print!("{body}");
+            std::io::stdout().flush().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2300));
+        }
         "flood" => {
             let chunk = vec![b' '; 65536];
             let mut out = std::io::stdout();
@@ -4481,6 +4487,12 @@ fn main() {
             let root = temp_root(label);
             std::fs::create_dir_all(&root).unwrap();
             let program = root.join(format!("cli{}", std::env::consts::EXE_SUFFIX));
+            // On Linux, another test's fork can inherit fs::copy's writable descriptor
+            // until exec, even after copy returns. Executing that inode then fails ETXTBSY.
+            // The fixture binary is immutable; link it without opening a new write handle.
+            #[cfg(target_os = "linux")]
+            std::fs::hard_link(compiled(), &program).unwrap();
+            #[cfg(not(target_os = "linux"))]
             std::fs::copy(compiled(), &program).unwrap();
             std::fs::write(root.join("scenario"), scenario).unwrap();
             let warm = std::process::Command::new(&program).arg("--warm").status();
@@ -4571,6 +4583,38 @@ fn main() {
     }
 
     #[test]
+    fn fixture_executables_keep_scenarios_and_cleanup_independent() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let signed_out = Fixture::new(
+            "telemetry-fixture-signed-out",
+            "0\n{\"type\":\"signed_out\"}",
+        );
+        let skipped = Fixture::new("telemetry-fixture-skipped", "0\n{\"type\":\"skipped\"}");
+        assert_eq!(
+            link_telemetry(
+                &signed_out.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::SignedOut)
+        );
+        drop(signed_out);
+        assert_eq!(
+            link_telemetry(
+                &skipped.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::Skipped)
+        );
+        assert!(compiled().is_file());
+    }
+
+    #[test]
     fn telemetry_process_uses_fixed_arguments_and_ignores_stderr() {
         let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
         let account = "a".repeat(64);
@@ -4621,10 +4665,26 @@ fn main() {
     }
 
     #[test]
-    fn telemetry_process_has_a_short_startup_budget_and_kills_a_hung_cli() {
+    fn telemetry_process_keeps_a_valid_response_while_cli_finishes_flushing() {
+        let fixture = Fixture::new("telemetry-flush", "flush\n{\"type\":\"signed_out\"}");
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        assert_eq!(
+            link_telemetry(
+                &fixture.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::SignedOut)
+        );
+    }
+
+    #[test]
+    fn telemetry_process_bounds_startup_wait_and_kills_a_hung_cli() {
         let limits = telemetry_link_limits();
-        // Two account-handshake calls add at most 4.5 seconds, including kill grace.
-        assert!(limits.timeout + limits.grace <= Duration::from_millis(2250));
+        // Each call remains bounded while leaving room for cold start, Ops and CLI flush.
+        assert!(limits.timeout + limits.grace <= Duration::from_millis(8250));
         let fixture = Fixture::new("telemetry-timeout", "stubborn");
         let cli = fixture.cli();
         let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
@@ -4633,8 +4693,8 @@ fn main() {
             link_telemetry(&cli, &installation, None, limits, &Cancel::default()),
             Err(Failure::Timeout)
         );
-        // Allow scheduler overhead, but not the previous 10-second request budget.
-        assert!(started.elapsed() < Duration::from_secs(4));
+        // Allow scheduler overhead beyond the eight-second budget and kill grace.
+        assert!(started.elapsed() < Duration::from_secs(10));
         #[cfg(unix)]
         assert!(fixture.grandchild_stops());
     }
