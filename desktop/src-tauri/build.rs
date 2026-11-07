@@ -53,6 +53,7 @@ fn main() {
                     "stop",
                     "intelligence",
                     "update_offer",
+                    "check_update",
                     "dismiss_update",
                     "install_update",
                     // Narration's speech recognition, on this computer. See `src/speech.rs`.
