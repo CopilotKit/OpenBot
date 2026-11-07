@@ -341,17 +341,59 @@ const WEEKDAYS = [
  * and so waits for the person's approval. A subagent it gave the work to stopped at the same command
  * and handed it back. One line in the prompt answers all of that before it starts.
  *
- * In UTC, and said to be, because OpenBot does not know where the person is. Only the day, so the
- * prompt changes once a day and not on every run, which keeps a provider's prompt cache warm. Last
- * in the prompt for the same reason: everything before it stays a stable prefix.
+ * In the person's own time zone when the run carries it (`person-time-zone.ts`), and said to be, so
+ * "tomorrow" late on a Friday in California is Saturday and not the Sunday it already is in UTC,
+ * and "9am" is their nine o'clock. In UTC, and said to be, when it does not: a run nobody started
+ * from a browser, or a zone this runtime does not know.
+ *
+ * Only the day, so the prompt changes once a day and not on every run, which keeps a provider's
+ * prompt cache warm. Last in the prompt for the same reason: everything before it stays a stable
+ * prefix.
  */
-export function todayGuidance(now: Date): string {
+export function todayGuidance(now: Date, timeZone?: string): string {
+  const local = timeZone ? dayIn(now, timeZone) : undefined;
+  if (local) {
+    return [
+      `Today is ${local.day}, ${local.date} in the person's time zone, ${timeZone}. Use this date for`,
+      `anything relative to now, such as "tomorrow", "this quarter", "last week" or "recent", and this`,
+      `time zone for any time of day the person gives, such as "9am", unless they name another. Do`,
+      "not run a command or start a subagent to find either out.",
+    ].join(" ");
+  }
   const day = WEEKDAYS[now.getUTCDay()];
   const date = now.toISOString().slice(0, 10);
   return [
     `Today is ${day}, ${date} (UTC). Use this date for anything relative to now, such as "this quarter",`,
     `"last week" or "recent", and do not run a command or start a subagent to find it out.`,
   ].join(" ");
+}
+
+/** The weekday and ISO date `now` falls on in `timeZone`, or undefined when Intl cannot say. */
+function dayIn(
+  now: Date,
+  timeZone: string,
+): { day: string; date: string } | undefined {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "long",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((entry) => entry.type === type)?.value;
+    const [day, year, month, date] = [
+      part("weekday"),
+      part("year"),
+      part("month"),
+      part("day"),
+    ];
+    if (!day || !year || !month || !date) return undefined;
+    return { day, date: `${year}-${month}-${date}` };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

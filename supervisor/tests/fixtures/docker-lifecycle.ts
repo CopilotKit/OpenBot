@@ -496,6 +496,61 @@ describe("a computer built from an older image", () => {
     expect(kept.Id).toBe(after.Id);
   }, 180_000);
 
+  /*
+   * Found on OpenBot Desktop: quit and opened again, compose removed its network and made a new one,
+   * and the person's stopped computer still named the old one. Docker refused to start it ("network
+   * not found") and the Bot said Docker was unreachable.
+   */
+  test("stopped on a network that was made again is replaced onto it, keeping its files", async () => {
+    const docker = withDocker().docker;
+    const network = `${namespace}-net`;
+    await docker.createNetwork({
+      Name: network,
+      Labels: { "openbot.namespace": namespace },
+    });
+    try {
+      await withDocker().supervisor.ensure(names, {
+        image: IMAGE,
+        environment: [],
+        network,
+      });
+      const volumes = await Promise.all(
+        [names.profileVolume, names.workspaceVolume].map((volume) =>
+          docker.getVolume(volume).inspect(),
+        ),
+      );
+      await docker.getContainer(names.container).stop({ t: 0 });
+      await docker.getNetwork(network).remove();
+      const remade = await docker.createNetwork({
+        Name: network,
+        Labels: { "openbot.namespace": namespace },
+      });
+      const live = (await remade.inspect()).Id;
+
+      const state = await withDocker().supervisor.ensure(names, {
+        image: IMAGE,
+        environment: [],
+        network,
+      });
+      const after = await docker.getContainer(names.container).inspect();
+
+      expect(state?.status).toBe("running");
+      expect(after.NetworkSettings.Networks[network]?.NetworkID).toBe(live);
+      const kept = await Promise.all(
+        [names.profileVolume, names.workspaceVolume].map((volume) =>
+          docker.getVolume(volume).inspect(),
+        ),
+      );
+      expect(kept.map(createdAt)).toEqual(volumes.map(createdAt));
+    } finally {
+      await remove(names.container);
+      await docker
+        .getNetwork(network)
+        .remove()
+        .catch(() => {});
+    }
+  }, 180_000);
+
   test("is left alone when it holds the token asked for", async () => {
     /*
      * The half that keeps this from replacing a working browser on every request, which is the same

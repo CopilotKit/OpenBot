@@ -5,6 +5,7 @@ import type {
 import {
   IconAlertTriangle,
   IconCircleCheck,
+  IconLoader2,
   IconPlayerRecordFilled,
   IconTrash,
 } from "@tabler/icons-react";
@@ -78,7 +79,7 @@ export type RecordingHooks = {
  * Record and Stop for the person's browser, from the Recorder's own report in `state`. Record asks about narration
  * first when the person has never said (`useRecordingWith`).
  *
- * With `opens` (OpenBot Desktop, where the browser is a window on the person's desktop), Record opens the browser, or
+ * With `opens` (where the browser is a window on the person's desktop), Record opens the browser, or
  * brings it forward, and starts recording in it, so a closed browser holds nothing back.
  */
 export function useRecording(
@@ -255,12 +256,27 @@ function heldIn(stopped: Stopped): string {
     : actionCount(stopped.actions);
 }
 
+/**
+ * Why a recording that held something is not in the Learning space, from the Recorder's own report: Intelligence
+ * refused it, or the browser was signed out. Undefined while it is sent or on its way. The Desktop's run of 2026-11-06
+ * saw a recording an Intelligence with Trajectories turned off refused said to be saved to the Learning space.
+ */
+const NOT_SAVED: Record<NonNullable<Stopped["kept"]>, string> = {
+  refused: "It's kept in this browser and sent again later.",
+  "signed-out":
+    "It's kept in this browser until you connect it to OpenBot again.",
+};
+
 /** What the page says once Stop ended a recording, naming it. The sidebar's Browser button says the same. */
 export function stoppedSentence(stopped: Stopped): string {
   if (stopped.discarded) return `Discarded “${stopped.title}”.`;
-  return stopped.empty
-    ? `Nothing was recorded in “${stopped.title}”. ${WHAT_IT_RECORDS}`
-    : `Saved “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
+  if (stopped.empty)
+    return `Nothing was recorded in “${stopped.title}”. ${WHAT_IT_RECORDS}`;
+  if (stopped.kept)
+    return `“${stopped.title}” wasn't saved to your Learning space. ${NOT_SAVED[stopped.kept]}`;
+  if (stopped.sending)
+    return `Saving “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
+  return `Saved “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
 }
 
 export function StoppedIcon({
@@ -277,7 +293,14 @@ export function StoppedIcon({
         className={cn("text-muted-foreground", className)}
       />
     );
-  return stopped.empty ? (
+  if (stopped.sending && !stopped.empty && !stopped.kept)
+    return (
+      <IconLoader2
+        aria-hidden="true"
+        className={cn("animate-spin text-muted-foreground", className)}
+      />
+    );
+  return stopped.empty || stopped.kept ? (
     <IconAlertTriangle
       aria-hidden="true"
       className={cn("text-amber-600 dark:text-amber-400", className)}
@@ -291,7 +314,7 @@ export function StoppedIcon({
 }
 
 /**
- * The recording Stop ended last, by name, on a page of rows (OpenBot Desktop, a Bot's screen), until the next one
+ * The recording Stop ended last, by name, on a page of rows (Teach a Bot's steps, a Bot's screen), until the next one
  * starts: Stop says where the recording went and what it held, or that it held nothing. `ended` comes first when
  * something other than Stop ended it, in a sentence saying what did.
  */
@@ -306,7 +329,11 @@ export function StoppedRow({
     ? "Discarded. You chose not to save it."
     : stopped.empty
       ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
-      : `Saved to your Learning space: ${heldIn(stopped)}.`;
+      : stopped.kept
+        ? `Not saved to your Learning space. ${NOT_SAVED[stopped.kept]}`
+        : stopped.sending
+          ? `Saving to your Learning space: ${heldIn(stopped)}.`
+          : `Saved to your Learning space: ${heldIn(stopped)}.`;
   return (
     <Item size="sm" role="status">
       <ItemMedia variant="icon">
@@ -363,7 +390,7 @@ function progressLine(recording: Recording): string {
 }
 
 /**
- * The recording row on a page of rows (OpenBot Desktop, a Bot's screen): a task name and Record, or while recording its
+ * The recording row on a page of rows (Teach a Bot's steps, a Bot's screen): a task name and Record, or while recording its
  * name, how long it has run, its actions and Stop. `placeholder` is shorter where the row is narrow (the column beside
  * a Bot's screen), so the field says what it is for rather than half an example.
  */

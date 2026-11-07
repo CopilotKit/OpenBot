@@ -7,8 +7,9 @@ alone. The worker also builds its options once, so context and grants changed af
 never reached it. Here each query gets a fresh worker, built from this run's input, and the
 conversation as its prompt: all of it, or its newest messages up to `REPLAY_BUDGET_TOKENS`.
 
-Client-tool continuations never take this path: the adapter resolves their PostToolUse hook in the
-same SDK query that emitted the tool use.
+Client-tool continuations do not take this path: the adapter resolves their PostToolUse hook in the
+same SDK query that emitted the tool use. The exception is a model-endpoint step sent other tools than
+that query holds, which is answered by a fresh query from here; see `OpenBotClaudeAgentAdapter.run`.
 """
 
 import asyncio
@@ -210,7 +211,8 @@ async def run_replayed_query(adapter, input_data):
     )
     # A fresh worker receives the current Bot instructions and granted schemas.
     # Tool-boundary HTTP continuations consume this still-running query instead
-    # of creating a second worker or changing its identity.
+    # of creating a second worker or changing its identity, unless the model
+    # endpoint sends them other tools than this query holds (see `adapter.run`).
     worker = SessionWorker(thread, adapter.build_options(input_data, thread))
     adapter._workers[thread] = {
         "worker": worker,

@@ -81,17 +81,22 @@ export function personHoldsTheWheel(since: string): ComputerControlState {
  *
  * A PERSON'S BROWSER RUNS ONLY ON A COMPUTER OF ITS OWN. Beside Bots it would share their container, where a Bot may
  * run a shell (`/exec`) as the same user, and its profile holds what the person signed in to by hand: a
- * prompt-injected Bot could read `/profiles/person-<hex>/Default/Cookies` straight off the disk. So the computer
- * decides this for itself, from what it was started with, as well as the server deciding where to send the person:
+ * prompt-injected Bot could read `/profiles/person-<hex>/Default/Cookies` straight off the disk. The one exception is
+ * the personal edition, where every Bot is the person's own. So the computer decides this for itself, from what it was
+ * started with, as well as the server deciding where to send the person:
  *
- *   - `people`: OpenBot Desktop's host-side computer (`COMPUTER_PEOPLE_ONLY=on`), which runs people's own browsers and
- *     no Bot.
+ *   - `people`: a host-side computer that runs people's own browsers and no Bot (`COMPUTER_PEOPLE_ONLY=on`), as
+ *     `scripts/start-local-chrome-computer.ts` starts it.
  *   - `one`: a computer started for one id (`COMPUTER_BOT_ID`): an isolated Bot's, or a person's own browser's, as the
  *     supervisor and a Sandbox start them. Started for a person's browser, it runs that browser and nothing else.
  *   - `person`: one person's computer (`COMPUTER_PERSON_ID`), carrying every Bot that person uses. Their Bots share it,
  *     so their own browser does not run there, but Record in one of those Bots' browsers does: the connection it holds
- *     is the person's own, beside only their own Bots' work. The supervisor and a Sandbox start one per person; the
- *     personal edition starts its one computer this way too (scripts/start.sh), since its only person owns every Bot.
+ *     is the person's own, beside only their own Bots' work. The supervisor and a Sandbox start one per person, and
+ *     the Bots on it may be shared with them by anybody, so their own browser gets a computer of its own.
+ *   - `personal`: the personal edition's one computer (`COMPUTER_PERSON_ID` with `OPENBOT_EDITION=personal`, as
+ *     scripts/start.sh and OpenBot Desktop start it). Its one person owns every Bot on it, as on their own laptop, and
+ *     already signs in to sites in those Bots' browsers here, so their own browser runs here too, shown in the page as
+ *     a hosted one is, and Record runs in their Bots' browsers.
  *   - `shared`: none of these, the one computer every person's Bots reach. No person's browser runs there, and nobody
  *     records in a Bot's browser there.
  */
@@ -99,6 +104,7 @@ export type ComputerOwner =
   | { kind: "people" }
   | { kind: "one"; id: string }
   | { kind: "person"; id: string }
+  | { kind: "personal"; id: string }
   | { kind: "shared" };
 
 export function computerOwner(
@@ -109,7 +115,10 @@ export function computerOwner(
   const id = env.COMPUTER_BOT_ID?.trim();
   if (id) return { kind: "one", id };
   const person = env.COMPUTER_PERSON_ID?.trim();
-  return person ? { kind: "person", id: person } : { kind: "shared" };
+  if (!person) return { kind: "shared" };
+  return env.OPENBOT_EDITION?.trim().toLowerCase() === "personal"
+    ? { kind: "personal", id: person }
+    : { kind: "person", id: person };
 }
 
 /** Why a person's browser is refused on a computer Bots run on. Said to whoever runs OpenBot: the server tells the
@@ -131,14 +140,16 @@ export const ONLY_THE_PERSONS =
 
 /**
  * What this computer refuses an id, before the id reaches anything: a person's browser anywhere but a computer of its
- * own (503, as for any browser this computer cannot run), and anything but the person's on a computer that is theirs
- * (403). Null when the id may go on. A Bot's computer takes Bots as it always has.
+ * own or the personal edition's one computer (503, as for any browser this computer cannot run), and anything but the
+ * person's on a computer that is theirs (403). Null when the id may go on. A Bot's computer takes Bots as it always has.
  */
 export function refusedHere(
   owner: ComputerOwner,
   botId: string,
 ): { status: 403 | 503; error: string } | null {
   const person = isPersonBrowserId(botId);
+  // The personal edition's one computer: the person's own browser and their own Bots, side by side.
+  if (owner.kind === "personal") return null;
   if (owner.kind === "people")
     return person ? null : { status: 403, error: ONLY_THE_PERSONS };
   if (owner.kind === "one" && isPersonBrowserId(owner.id))

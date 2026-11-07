@@ -35,8 +35,9 @@ export function ShellUpdates({
     <details>
       <summary>Desktop application updates</summary>
       <p>
-        The native application uses its distributor’s signed updater artifacts.
-        Its delivery is separate from runtime updates.
+        OpenBot updates itself with signed updates from its publisher. The next
+        Start after an update brings this installation to the same version and
+        keeps your data.
       </p>
       <button
         type="button"

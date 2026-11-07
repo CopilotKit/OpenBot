@@ -81,6 +81,10 @@ let learning: LearningSpaceState | null = null;
 /** The token OpenBot mints for OpenBot Desktop's code, and the tokens the Recorder asked OpenBot to revoke. */
 const DESKTOP_TOKEN = "obr_desktop-made";
 let revokedTokens: string[] = [];
+/** While set, the runtime's capture pass refuses with this status and body, as an Intelligence with Trajectories
+ * turned off does (404 TRAJECTORIES_UNAVAILABLE). */
+let passRefusal: { status: number; body: Record<string, unknown> } | null =
+  null;
 /** While set, OpenBot answers the exchange of OpenBot Desktop's code only once it resolves. */
 let exchangeHeld: Promise<void> | null = null;
 let exchangeArrived = () => {};
@@ -131,6 +135,8 @@ function route(request: Request): Response | Promise<Response> | null {
   const pass = /^\/api\/copilotkit\/trajectory\/([^/]+)\/connect$/.exec(path);
   if (!pass || request.method !== "POST") return null;
   const trajectoryId = decodeURIComponent(pass[1] ?? "");
+  if (passRefusal)
+    return Response.json(passRefusal.body, { status: passRefusal.status });
   return Response.json({
     joinToken: gateway.mintToken(trajectoryId),
     realtime: {
@@ -339,6 +345,7 @@ beforeEach(async () => {
   revokedTokens = [];
   exchangeHeld = null;
   exchangeArrived = () => {};
+  passRefusal = null;
   gateway = await startFakeGateway({ extraRoutes: route });
   fake = installChromeFake({
     extensionId: EXTENSION_ID,
@@ -1062,6 +1069,44 @@ test("Stop says the recording is still sending until the last of it has reached 
   expect(after).not.toHaveProperty("sending");
 }, 15_000);
 
+test("a recording Intelligence refused is reported kept, never sent or still sending, for OpenBot to say it was not saved", async () => {
+  // OpenBot Desktop, 2026-11-06: the local Intelligence has Trajectories turned off and refused the capture pass, and
+  // OpenBot said the recording was saved to the person's Learning space.
+  passRefusal = {
+    status: 404,
+    body: {
+      error:
+        "This Intelligence deployment does not serve Trajectory capture; enable Trajectories for this deployment",
+      code: "TRAJECTORIES_UNAVAILABLE",
+    },
+  };
+  await launcher().connect({ connection: connection(), narration: "external" });
+  openOrder();
+  const started = await launcher().record({
+    action: "start",
+    title: "Check example.com heading",
+  });
+  expect(started).toMatchObject({ ok: true, state: { phase: "recording" } });
+  const recordingId = (await launcher().state()).recordingId;
+  clock += 10_000;
+  expect(await launcher().record({ action: "stop" })).toMatchObject({
+    ok: true,
+    state: { phase: "idle" },
+  });
+  await until(
+    async () => (await launcher().state()).lastStopped?.kept !== undefined,
+    "the refusal to reach the stopped recording",
+  );
+  const stopped = (await launcher().state()).lastStopped;
+  expect(stopped).toMatchObject({
+    recordingId: recordingId ?? "",
+    title: "Check example.com heading",
+    kept: "refused",
+  });
+  expect(stopped).not.toHaveProperty("sending");
+  expect(stopped).not.toHaveProperty("discarded");
+}, 15_000);
+
 test("a stopped recording a disconnect catches part sent is kept for its person, and no longer said to be sending", async () => {
   await launcher().connect({ connection: connection(), narration: "external" });
   await record(clock, "Archive order 1043");
@@ -1078,6 +1123,7 @@ test("a stopped recording a disconnect catches part sent is kept for its person,
     drains.find((drain) => drain.recordingId === recordingId)?.kept,
   ).toMatchObject({ waitingForReconnect: true });
   expect((await launcher().state()).lastStopped?.sending).toBeUndefined();
+  expect((await launcher().state()).lastStopped?.kept).toBe("signed-out");
 }, 15_000);
 
 test("Stop reports what the recording held: narration alone is something, and actions and phrases are both counted", async () => {

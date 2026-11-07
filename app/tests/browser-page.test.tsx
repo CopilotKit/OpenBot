@@ -37,6 +37,10 @@ import type { Recognition } from "@/lib/browser/narration";
 import { queryClient } from "@/query-client";
 import { installChrome } from "./browser-narration.fixture";
 import {
+  installDesktopShell,
+  removeDesktopShell,
+} from "./desktop-shell.fixture";
+import {
   everyLanguage,
   type OnDeviceModel,
   onDeviceModel,
@@ -371,6 +375,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  removeDesktopShell();
   global.fetch = originalFetch;
   globalThis.WebSocket = originalSocket;
   delete speechGlobals.SpeechRecognition;
@@ -565,7 +570,11 @@ async function stopSays(view: ReturnType<typeof draw>): Promise<string> {
     said =
       statuses
         .map((status) => status.textContent ?? "")
-        .find((text) => /Saved|Nothing was recorded/.test(text)) ?? "";
+        .find((text) =>
+          /Saved|Saving|saved to your Learning space|Nothing was recorded/.test(
+            text,
+          ),
+        ) ?? "";
     expect(said).not.toBe("");
   });
   return said;
@@ -675,6 +684,55 @@ test("after a reload the page says what the last recording held as the Recorder 
       openAnswer = answerFor(shape);
       const view = draw(<BrowserPage />);
       expect(await stopSays(view)).toBe(says);
+    }
+  }
+});
+
+test("a recording Intelligence refused, or one still on its way, is never said to be saved, on both shapes", async () => {
+  // OpenBot Desktop, 2026-11-06: its local Intelligence has Trajectories turned off and refused the recording's capture
+  // pass (TRAJECTORIES_UNAVAILABLE), and the page said “Saved … to your Learning space: 1 action.”
+  for (const shape of ["native", "screen"] as const) {
+    for (const [delivery, says] of [
+      [
+        { kept: "refused" },
+        shape === "native"
+          ? "Check example.com headingNot saved to your Learning space. It's kept in this browser and sent again later."
+          : "“Check example.com heading” wasn't saved to your Learning space. It's kept in this browser and sent again later.",
+      ],
+      [
+        { kept: "signed-out" },
+        shape === "native"
+          ? "Check example.com headingNot saved to your Learning space. It's kept in this browser until you connect it to OpenBot again."
+          : "“Check example.com heading” wasn't saved to your Learning space. It's kept in this browser until you connect it to OpenBot again.",
+      ],
+      [
+        { sending: true },
+        shape === "native"
+          ? "Check example.com headingSaving to your Learning space: 1 action."
+          : "Saving “Check example.com heading” to your Learning space: 1 action.",
+      ],
+    ] as const) {
+      cleanup();
+      queryClient.clear();
+      const base = shape === "native" ? nativeState() : screenState();
+      state = {
+        ...base,
+        recorder: {
+          ...(base.recorder as NonNullable<BrowserApiState["recorder"]>),
+          lastStopped: {
+            recordingId: "rec-0",
+            title: "Check example.com heading",
+            stoppedAt: Date.now() - 1_000,
+            actions: 1,
+            phrases: 0,
+            ...delivery,
+          },
+        },
+      };
+      openAnswer = answerFor(shape);
+      const view = draw(<BrowserPage />);
+      expect(await stopSays(view)).toBe(says);
+      expect(view.queryByText(/Saved/)).toBeNull();
     }
   }
 });
@@ -881,6 +939,96 @@ test("on hosted OpenBot the page narrates a recording, and Stop sends the phrase
   ).toBeTruthy();
 });
 
+test("in the OpenBot Desktop window the page narrates through the desktop app's on-device recognition, where the web view has none", async () => {
+  // Seen on the Mac: narration said it was on, then "Narration is off." a few seconds into the recording, because the
+  // window's web view has no speech recognition that stays on the computer.
+  state = screenState();
+  openAnswer = answerFor("screen");
+  installChrome(null);
+  const { calls } = installDesktopShell({
+    heard: [
+      { type: "result", index: 0, text: "I am opening", final: false },
+      {
+        type: "result",
+        index: 0,
+        text: "I am opening the expenses page",
+        final: true,
+      },
+      { type: "result", index: 1, text: "now the", final: false },
+    ],
+    atStop: [
+      {
+        type: "result",
+        index: 1,
+        text: "Now the receipt from the taxi ride",
+        final: true,
+      },
+    ],
+  });
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await pressRecord(view, user);
+  // Listening starts with the recording, through the desktop app, in the language the recording was started in.
+  await waitFor(() =>
+    expect(calls.map((call) => call.command)).toContain(
+      "plugin:openbot-desktop|speech_start",
+    ),
+  );
+  expect(
+    calls.find((call) => call.command.endsWith("|speech_start"))?.args,
+  ).toMatchObject({ language: navigator.language });
+  expect(
+    await view.findByText("Narration is on. We're capturing your voice."),
+  ).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      writes.some(
+        (write) =>
+          write.path === browserApiPaths.narration &&
+          "text" in (write.body as object),
+      ),
+    ).toBe(true),
+  );
+
+  await user.click(view.getByRole("button", { name: "Stop" }));
+  await waitFor(() =>
+    expect(writes.at(-1)).toEqual({
+      path: "/api/browser/recording",
+      method: "POST",
+      body: { action: "stop" },
+    }),
+  );
+  expect(calls.map((call) => call.command)).toContain(
+    "plugin:openbot-desktop|speech_stop",
+  );
+  // Both phrases reached the Recorder, the one being said at Stop included, before the recording was stopped, each
+  // after the word that it began.
+  const narration = writes.filter(
+    (write) => write.path === browserApiPaths.narration,
+  );
+  expect(
+    narration.map(({ body }) => {
+      const { sentAt: _sent, ...rest } = body as { sentAt: number };
+      return "text" in rest ? { text: (rest as { text: string }).text } : rest;
+    }),
+  ).toEqual([
+    { speaking: true, since: expect.any(Number) },
+    { text: "I am opening the expenses page" },
+    { speaking: false },
+    { speaking: true, since: expect.any(Number) },
+    { text: "Now the receipt from the taxi ride" },
+    { speaking: false },
+  ]);
+  expect(writes.indexOf(narration.at(-1) as Write)).toBeLessThan(
+    writes.findLastIndex((write) => write.path === "/api/browser/recording"),
+  );
+  expect(view.queryByText("Narration is off.")).toBeNull();
+});
+
 test("on hosted OpenBot a narration the Recorder refused says why, beside the narration switch", async () => {
   state = screenState();
   openAnswer = answerFor("screen");
@@ -897,23 +1045,15 @@ test("on hosted OpenBot a narration the Recorder refused says why, beside the na
   await pressRecord(view, user);
   await waitFor(() => expect(recognitions.at(-1)?.heard).toBe(true));
   expect(
-    await view.findByText(
-      "Some of what you said didn't reach the Recorder. This browser hears your voice itself.",
-    ),
+    await view.findByText("Narration is on. We're capturing your voice."),
   ).toBeTruthy();
 });
 
 test("on hosted OpenBot narration that cannot hear the person shows its switch off, and turning it on tries again", async () => {
   // The fourth end-to-end run: in a browser with no microphone the page said narration was off while its switch read on.
   for (const [error, sentence] of [
-    [
-      "not-allowed",
-      "OpenBot can't use your microphone, so narration is off. Allow the microphone for this site, then turn narration on again. Recording still works.",
-    ],
-    [
-      "audio-capture",
-      "No microphone was found, or another app is using it. Recording still works.",
-    ],
+    ["not-allowed", "Narration is off."],
+    ["audio-capture", "Narration is off."],
   ] as const) {
     cleanup();
     queryClient.clear();
@@ -967,11 +1107,7 @@ test("on hosted OpenBot narration whose speech service cannot be reached stays o
     "Submit an expense report",
   );
   await pressRecord(view, user);
-  expect(
-    await view.findByText(
-      "Can't reach this browser's speech service. Narration tries again in a moment.",
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   expect(
     view
       .getByRole("switch", { name: "Narration" })
@@ -1072,21 +1208,11 @@ test("on OpenBot Desktop the narration row says what the Recorder hears, as it r
   state = { ...nativeState(), recorder: recorder("off") };
   const view = draw(<BrowserPage />);
   // While nothing records, the row is the person's choice, and its sentence stays the same.
-  expect(
-    await view.findByText(
-      "Talk through the task as you do it, and what you say is added to the recording.",
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   for (const [voice, sentence] of [
-    ["listening", "Listening. Say what you're doing as you go."],
-    [
-      "muted",
-      "Muted in the Recorder, so what you say isn't recorded. Turn it on again from the Recorder's button in your browser's toolbar.",
-    ],
-    [
-      "unavailable",
-      "The Recorder can't hear your microphone, so what you say isn't recorded. The Recorder's button in your browser's toolbar says why. Recording still works.",
-    ],
+    ["listening", "Narration is on. We're capturing your voice."],
+    ["muted", "Narration is off."],
+    ["unavailable", "Narration is off."],
   ] as const) {
     state = { ...nativeState(), recorder: recorder(voice) };
     await queryClient.invalidateQueries();
@@ -1098,11 +1224,7 @@ test("on hosted OpenBot in a browser with no speech recognition, the page says n
   state = screenState();
   openAnswer = answerFor("screen");
   const view = draw(<BrowserPage />);
-  expect(
-    await view.findByText(
-      "Narration isn't available in this browser, so what you say isn't recorded. Recording still works.",
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   expect(view.queryByRole("switch", { name: "Narration" })).toBeNull();
   const user = userEvent.setup({ document });
   await user.type(
@@ -1136,11 +1258,7 @@ test("Record asks whether to narrate before the first recording, keeps the answe
   narrationChoice = null;
   const view = draw(<BrowserPage />);
   const user = userEvent.setup({ document });
-  expect(
-    await view.findByText(
-      "Talk through the task as you do it, and what you say is added to the recording.",
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   await user.type(
     await view.findByRole("textbox", { name: "Task name" }),
     "Submit an expense report",
@@ -1291,11 +1409,7 @@ test("on hosted OpenBot a language still to be downloaded is asked for on the sw
     "Submit an expense report",
   );
   await pressRecord(view, user);
-  expect(
-    await view.findByText(
-      /^Your browser has to download its .+ speech recognition to your computer first\. Turn narration on to download it\./,
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   expect(recognitions).toHaveLength(0);
   const toggle = view.getByRole("switch", { name: "Narration" });
   expect(toggle.getAttribute("aria-checked")).toBe("false");
@@ -1308,11 +1422,7 @@ test("on hosted OpenBot a language still to be downloaded is asked for on the sw
   );
   await user.click(toggle);
   expect(model.installs).toEqual([navigator.language]);
-  expect(
-    await view.findByText(
-      /^Your browser is downloading its .+ speech recognition to your computer\. Narration starts when it's ready\./,
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   expect(recognitions).toHaveLength(0);
   model.finishDownloads();
   await waitFor(() => expect(recognitions.at(-1)?.heard).toBe(true), {
@@ -1331,11 +1441,7 @@ test("on hosted OpenBot a browser that cannot keep speech on the computer never 
     "Submit an expense report",
   );
   await pressRecord(view, user);
-  expect(
-    await view.findByText(
-      "This browser can't turn speech into text on your computer, and OpenBot sends your voice nowhere else, so narration is off. Recording still works.",
-    ),
-  ).toBeTruthy();
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   expect(recognitions).toHaveLength(0);
 });
 
@@ -1706,17 +1812,6 @@ test("where the server says why there is no browser of the person's own, the pag
   const view = draw(<BrowserPage />);
   expect(await view.findByText(why)).toBeTruthy();
   expect(opens()).toBe(0);
-});
-
-test("on OpenBot Desktop with no Chrome or Edge it can open, the browser in the page says why", async () => {
-  // Chrome installed only as a Flatpak, which used to be said only in Desktop's log.
-  const why =
-    "OpenBot can't open the Flatpak version of Google Chrome, so install Chrome from google.com/chrome to use your own browser.";
-  state = { ...screenState(), note: why };
-  openAnswer = answerFor("screen");
-  const view = draw(<BrowserPage />);
-  await view.findByLabelText(SCREEN);
-  expect(view.getByText(why)).toBeTruthy();
 });
 
 /**

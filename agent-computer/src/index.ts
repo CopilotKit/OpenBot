@@ -37,6 +37,11 @@ import { enterText, FieldValueError } from "./enter-text";
 import { identity } from "./identity";
 import { createInputQueue, type InputQueue } from "./input-queue";
 import {
+  LOOPBACK_RELAYS_ENV,
+  parseLoopbackRelays,
+  startLoopbackRelays,
+} from "./loopback-relay";
+import {
   assertPageAccess,
   navigateWebPage,
   type PagePurpose,
@@ -348,6 +353,12 @@ const terminalSockets = createTerminalSockets<StreamData & TerminalSocketData>({
 // Only the running computer points its shell at it: a test that imports this module shares its
 // process with every later test.
 await startEgressFilter({ forShell: import.meta.main });
+// The deployment's loopback addresses, where a browser here is handed one (OpenBot Desktop). Before any browser exists,
+// so a Recorder never connects to an address that is not there yet. See loopback-relay.ts.
+if (import.meta.main)
+  await startLoopbackRelays(
+    parseLoopbackRelays(process.env[LOOPBACK_RELAYS_ENV]),
+  );
 const profiles = createProfiles(
   process.env.PROFILES_DIR?.trim() || "/profiles",
   async (botId) => {

@@ -24,14 +24,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the back end. The Recorder's disclosure says recordings go to the learning part of OpenBot's back
   end. Env var names (`INTELLIGENCE_API_URL` and the rest), logs and the docs under `docs/` and
   `charts/` are unchanged.
+- Teach a Bot says a recording was saved to your Learning space only once the back end has all of
+  it. A recording the back end refused, such as one sent to a back end with Trajectories turned
+  off, is said not to be saved and to be kept in the browser; one still on its way says Saving.
+  Before, both were called saved. This needs the Recorder from this release.
 - OpenBot Desktop on a Mac tells you when a newer version is out, in OpenBot's own window. It
   checks at launch and every six hours while it runs, and shows a bar, "OpenBot 0.3.2 is
   available.", with **Update and restart** and a close button. Closing it, or **Not now** in the
   setup window, hides the offer until a newer version comes out, across reloads and restarts.
   **Update and restart** downloads and checks the update while OpenBot keeps running, then stops
-  OpenBot and restarts the app, and that Start moves your OpenBot to the new release. Before, the
-  app checked once at launch and only the setup window said so. The app now reads its updates from
-  `downloads.copilotkit.ai`, and from GitHub only when that does not answer. Windows, internal and
+  OpenBot and restarts the app, and that Start moves your OpenBot to the new release. It replaces
+  the Check for Updates… menu item and the dialog the app showed once after handing over to
+  OpenBot. The app now reads its updates from `downloads.copilotkit.ai`, and from GitHub only when
+  that does not answer. Windows, internal and
   candidate builds have no updater and show nothing, and a self-hosted OpenBot (Helm or Compose)
   never checks.
 - OpenBot Desktop installs the personal edition: nobody signs in, one computer is shared by your
@@ -58,13 +63,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   calling the words its own.
 - Every Bot knows its own name. "Ask the Knowledge Bot for one sentence on Helm", sent to
   Knowledge, is answered by Knowledge, instead of Knowledge saying it can't reach the Knowledge Bot.
-- The Helm chart installs Intelligence 0.16.0-rc.7 instead of rc.5. A run that fails shows its own
+- The Helm chart installs Intelligence 0.16.0-rc.9 instead of rc.5. A run that fails shows its own
   error in the chat instead of "Runner connection dropped". A first install logs no PostgreSQL
   errors. Intelligence's services, Learning and its jobs stay up while PostgreSQL restarts, as the
   bundled one does on an upgrade that changes its image. The Learning agent reads its model key from
   a mounted file before every run, so a new `secrets.modelApiKey` reaches it on its next run after
   `helm upgrade`, without a restart. The skills Learning proposes have descriptions that read
-  correctly.
+  correctly. Trajectories, the sessions the Recorder captures, run on any valid licence: the
+  licence no longer has to carry a `trajectories` feature.
+- OpenBot Desktop's local Intelligence is 0.16.0-rc.9, the same release the Helm chart installs.
+  The app carries the Intelligence CLI built from the rc.9 commit to install exactly that release
+  (`copilotkit` 4.34.0-pre.48a3863, from 4.33.1-pre.256cc68), where the stable CLI (4.34.0)
+  would install the newest stable Intelligence, 0.15.1.
 - The Job that installs Learning's queue in the bundled Intelligence waits up to 15 minutes for
   Intelligence's PostgreSQL, up from Intelligence's own 5
   (`intelligence.learning.queue.migration.activeDeadlineSeconds: 900`). An upgrade that moves the
@@ -74,14 +84,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the value, or drop the flag. The chart README's upgrade section says what to do when the Job runs
   out of time, and why to give your values again rather than `--reuse-values` after a failed
   revision.
-- OpenBot runs on CopilotKit 1.84.2-canary.openbot-intel-fixes (`@copilotkit/runtime`,
-  `react-core` and `shared`, from 1.83.0, and `@copilotkit/learning`, from a patched 0.0.1). AG-UI
-  stays 1.0.2. A run keeps its conversation until its last events reach Intelligence, so a failed
-  run's error is no longer lost, and lets go of it itself when it ends, so the next run, such as the
-  one that carries a command's result back to a Bot, starts at once. A follow-up sent within ten
-  seconds of pressing Stop no longer stays on "Thinking". Generated interfaces write A2UI's version
-  as `1.0`, and the ones a Bot drew on 0.3.0 and 0.3.1, written `v1.0`, still draw when their
-  conversation is reopened.
+- OpenBot runs on CopilotKit 1.85.0 (`@copilotkit/runtime`, `react-core` and `shared`, from 1.83.0,
+  and `@copilotkit/learning`, from a patched 0.0.1). AG-UI stays 1.0.2, the version CopilotKit
+  1.85.0 itself pins. A run keeps its conversation until its last events reach Intelligence, so a
+  failed run's error is no longer lost, and lets go of it itself when it ends, so the next run, such
+  as the one that carries a command's result back to a Bot, starts at once. A follow-up sent within
+  ten seconds of pressing Stop no longer stays on "Thinking". Each run's analytics context reaches
+  Intelligence. Generated interfaces write A2UI's version as `1.0`, and the ones a Bot drew on 0.3.0
+  and 0.3.1, written `v1.0`, still draw when their conversation is reopened.
 - A new conversation's sidebar name no longer waits a minute when another server replica tries to
   name it before Intelligence has its thread. That miss is now "not readable yet", retried in 15
   seconds without using up a real failure's backoff, and it no longer logs

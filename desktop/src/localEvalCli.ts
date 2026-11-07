@@ -8,7 +8,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Problem } from "./Problem";
 
-export type LocalAction = "status" | "start" | "stop";
+/** `update` installs the release this app's CLI installs over an older stack, keeping its data. */
+export type LocalAction = "status" | "start" | "stop" | "update";
 export type LocalOutcome = "completed" | "blocked" | "failed";
 
 /** Static categories from `local_eval::Failure`. None carries CLI output. */
@@ -96,6 +97,11 @@ export type LocalReport = {
   licence: LocalLicence;
   /** A strict ISO-8601 instant, or null. */
   licenceExpiresAt: string | null;
+  /**
+   * On `status`: the release this app's CLI installs, when the stack runs an older one
+   * (`local_eval::update_due`). Absent or null when there is nothing to update.
+   */
+  updateTo?: string | null;
 };
 
 /** What `local connect` answered. The key it wrote went to the credential store, not here. */
@@ -245,7 +251,9 @@ export type LocalTerms =
       url: string;
       organizationName: string;
     }
-  | { status: "not-required" | "unavailable" | "signed-out" };
+  | { status: "not-required" | "unavailable" | "signed-out" }
+  /** No container engine answers yet, so the CLI says nothing about the account. */
+  | { status: "engine-not-ready" };
 
 export function localEvalTerms(): {
   attempt: string;

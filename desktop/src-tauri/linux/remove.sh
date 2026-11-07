@@ -2,11 +2,12 @@
 # OpenBot Desktop's package removal on Linux: the .deb's postrm and the .rpm's %postun
 # (bundle.linux.deb.postRemoveScript and bundle.linux.rpm.postRemoveScript in tauri.conf.json).
 #
-# Uninstalling takes away what Desktop left in each person's home for the browser it opened for them
-# (src/local_browser.rs) and for the Recorder to find it (src/recorder_install.rs): the browser's data
-# root, which holds the profile the person signed in to by hand, and the native messaging host
-# manifest in each browser's folder, which would otherwise point the browsers at a program that is
-# gone. A test reads this file against the paths the code writes, so the two cannot drift.
+# Uninstalling takes away what Desktop left in each person's home for the browser earlier versions
+# opened on their desktop and for the Recorder to find it (src/recorder_install.rs): that browser's
+# data root, which holds the profile the person signed in to by hand (Desktop no longer runs that
+# browser, but an installation that did keeps its data until it is removed), and the native
+# messaging host manifest in each browser's folder, which would otherwise point the browsers at a
+# program that is gone. A test reads this file against the paths the code writes, so the two cannot drift.
 #
 # Not on an upgrade: the new version is going on in its place and keeps them. dpkg calls this with
 # "remove" or "purge" when the package goes, and rpm with 0.

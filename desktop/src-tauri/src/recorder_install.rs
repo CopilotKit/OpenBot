@@ -456,6 +456,33 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    /// Where the host-side browser earlier Desktops ran kept its data, the profile the person signed
+    /// in to by hand among it: what the uninstallers still take away. The defaults
+    /// `scripts/start-local-chrome-computer.ts` uses; a relative `$XDG_DATA_HOME` is ignored, as the
+    /// XDG Base Directory specification says it must be.
+    fn earlier_browser_data_root(
+        os: Os,
+        home: &Path,
+        var: &dyn Fn(&str) -> Option<std::ffi::OsString>,
+    ) -> PathBuf {
+        match os {
+            Os::Mac => home
+                .join("Library")
+                .join("Application Support")
+                .join("OpenBot"),
+            Os::Windows => var("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join("AppData").join("Local"))
+                .join("OpenBot"),
+            Os::Linux => var("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .filter(|path| path.to_string_lossy().starts_with('/'))
+                .unwrap_or_else(|| home.join(".local").join("share"))
+                .join("openbot"),
+        }
+        .join("local-computer")
+    }
+
     const ID: &str = "icpcnhgjghecmklnjbccdgdicklblcgd";
 
     #[derive(Default)]
@@ -1178,7 +1205,7 @@ mod tests {
             uninstall.contains(&format!("RMDir /r \"$LOCALAPPDATA\\{folder}\"")),
             "{uninstall}"
         );
-        let data = crate::local_browser::data_root(Os::Windows, Path::new("/home/a"), &|name| {
+        let data = earlier_browser_data_root(Os::Windows, Path::new("/home/a"), &|name| {
             (name == "LOCALAPPDATA").then(|| local.clone().into_os_string())
         });
         let data: Vec<String> = data
@@ -1213,7 +1240,7 @@ mod tests {
         let home = scratch.join("home/ada");
         let system = scratch.join("var/lib/daemon");
         let dirs = UserDirs::at(&home);
-        let data_root = crate::local_browser::data_root(Os::Linux, &home, &|_| None);
+        let data_root = earlier_browser_data_root(Os::Linux, &home, &|_| None);
         let mut left = vec![data_root.join("profiles/person-0123/Default/Cookies")];
         for browser in BROWSERS {
             left.push(host_manifest_location(Os::Linux, browser, dirs));

@@ -557,6 +557,25 @@ test("a record the Bot draws after its person has left the conversation is check
   expect(view.queryByTestId("component-refused")).toBeNull();
 });
 
+/*
+ * A Bot works out "tomorrow" from the date the server tells it, which was UTC: late on a Friday in
+ * California it looked up Sunday. Every run the app starts, the first and the one carrying a call's
+ * result alike, says the device's IANA time zone, so the server can tell the Bot the person's day.
+ */
+test("every run the app starts carries the person's time zone", async () => {
+  call = { name: "showRecord", args: RECORD_ARGS };
+  await leaveBeforeTheCall("conversation");
+
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  expect(zone).toBeTruthy();
+  expect(runs.length).toBeGreaterThan(1);
+  for (const run of runs)
+    expect(
+      (run.forwardedProps as Record<string, unknown> | undefined)
+        ?.openbotTimeZone,
+    ).toBe(zone);
+});
+
 test("a record the Bot draws while its person is in another Bot's conversation is checked for the Bot that drew it", async () => {
   call = { name: "showRecord", args: RECORD_ARGS };
   await leaveBeforeTheCall("another Bot");

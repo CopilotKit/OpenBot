@@ -5,6 +5,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
+import type { StartOutcome } from "./LocalIntelligence";
 import type { LocalConnection, LocalReport } from "./localEvalCli";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
@@ -102,7 +103,7 @@ type Props = {
   prepare?: boolean;
   /** Shows the status card another screen shows, whatever runs. */
   status?: boolean;
-  onStart?: (startable: Startable) => Promise<boolean>;
+  onStart?: (startable: Startable) => Promise<StartOutcome>;
   pollDelays?: number[];
 };
 
@@ -112,7 +113,7 @@ function Holder(props: Props) {
     root: "/tmp/openbot",
     stack: props.stack ?? null,
     connected: props.connected ?? false,
-    onStart: props.onStart ?? (async () => true),
+    onStart: props.onStart ?? (async () => "started"),
     pollDelays: props.pollDelays ?? [0, 0, 0],
   });
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
@@ -178,7 +179,7 @@ test("the whole sequence runs by itself: set up, connect, wait for ready and val
   const screen = view({
     onStart: async (startable) => {
       started.push(startable);
-      return true;
+      return "started";
     },
   });
   await waitFor(() => expect(started).toEqual([startableUrls]));
@@ -210,12 +211,125 @@ test("a recorded, connected stack skips straight to waiting", async () => {
     connected: true,
     onStart: async (startable) => {
       started.push(startable);
-      return true;
+      return "started";
     },
   });
   await waitFor(() => expect(started).toEqual([startableUrls]));
   expect(commands()).toEqual(["run_local_eval:status"]);
   expect(statusCalls()[0]?.args).toMatchObject({ stack: "local-abc123" });
+});
+
+/** A ready stack an older app set up on rc.8, which this app's CLI would install as rc.9. */
+function onRelease(installedRelease: string, updateTo: string | null) {
+  const base = report({ readiness: "ready", licence: "valid", updateTo });
+  return { ...base, stack: base.stack && { ...base.stack, installedRelease } };
+}
+
+test("a back end an older app installed is updated to this app's release before OpenBot starts on it", async () => {
+  const updating = deferred<LocalReport>();
+  let calls = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updating.promise;
+    calls += 1;
+    return calls === 1
+      ? onRelease("0.16.0-rc.8", "0.16.0-rc.9")
+      : onRelease("0.16.0-rc.9", null);
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  // One plain line while it runs, on the back end's own row.
+  await waitFor(() =>
+    expect(row(screen, WAIT).textContent).toContain(
+      "Updating the back end to 0.16.0-rc.9. Its data stays.",
+    ),
+  );
+  expect(started).toEqual([]);
+  updating.resolve(onRelease("0.16.0-rc.9", null));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+  expect(
+    invokeCalls.find(
+      (call) => (call.args as { action?: string })?.action === "update",
+    )?.args,
+  ).toMatchObject({ stack: "local-abc123" });
+  expect(
+    screen.queryByRole("listitem", { name: "Updating the back end" }),
+  ).toBeNull();
+});
+
+test("a back end already on this app's release is not updated", async () => {
+  invokeHandler = answers({
+    run_local_eval: [onRelease("0.16.0-rc.9", null)],
+  });
+  const started: Startable[] = [];
+  view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual(["run_local_eval:status"]);
+});
+
+test("an update that fails says so and starts OpenBot on the release the back end still has", async () => {
+  for (const failed of [
+    report({
+      outcome: "failed",
+      stack: null,
+      reason: "local-command-failed",
+    }),
+    new Error("timeout"),
+  ]) {
+    let calls = 0;
+    invokeHandler = async (command, args) => {
+      if (command === "cancel_local_eval") return null;
+      const action = (args as { action: string }).action;
+      if (action === "update") {
+        if (failed instanceof Error) throw "timeout";
+        return failed;
+      }
+      calls += 1;
+      // Still rc.8, and still due: tried once in this run, not again.
+      return onRelease("0.16.0-rc.8", "0.16.0-rc.9");
+    };
+    const started: Startable[] = [];
+    const screen = view({
+      stack: "local-abc123",
+      connected: true,
+      onStart: async (startable) => {
+        started.push(startable);
+        return "started";
+      },
+    });
+    await waitFor(() => expect(started).toEqual([startableUrls]));
+    expect(commands()).toEqual([
+      "run_local_eval:status",
+      "run_local_eval:update",
+      "run_local_eval:status",
+    ]);
+    expect(row(screen, "Updating the back end").textContent).toContain(
+      "The back end could not be updated to 0.16.0-rc.9, so it stays on 0.16.0-rc.8. OpenBot tries again the next time it starts.",
+    );
+    expect(calls).toBe(2);
+    cleanup();
+    invokeCalls = [];
+  }
 });
 
 const blockedOnSignIn = report({
@@ -363,7 +477,7 @@ test("a blocked or conflicted connection stops at its row, and Retry resumes at 
     const screen = view({
       onStart: async (startable) => {
         started.push(startable);
-        return true;
+        return "started";
       },
     });
     await waitFor(() =>
@@ -404,7 +518,7 @@ test("readiness or a licence that is not exactly ready and valid never starts", 
       connected: true,
       onStart: async (startable) => {
         started.push(startable);
-        return true;
+        return "started";
       },
     });
     await waitFor(() => expect(row(screen, WAIT).textContent).toContain(said));
@@ -505,7 +619,7 @@ test("a stopped stack is started, then polled", async () => {
     connected: true,
     onStart: async (startable) => {
       started.push(startable);
-      return true;
+      return "started";
     },
   });
   await waitFor(() => expect(started).toEqual([startableUrls]));
@@ -522,7 +636,7 @@ test("a start that fails stops at its row, and Retry starts again without asking
   const screen = view({
     stack: "local-abc123",
     connected: true,
-    onStart: async () => ++starts > 1,
+    onStart: async () => (++starts > 1 ? "started" : "failed"),
   });
   await waitFor(() =>
     expect(row(screen, START).textContent).toContain("OpenBot did not start."),
@@ -542,13 +656,48 @@ test("a start that fails says OpenBot did not start, not that Intelligence stopp
     stack: "local-abc123",
     connected: true,
     status: true,
-    onStart: async () => false,
+    onStart: async () => "failed",
   });
   const card = await screen.findByRole("alert", { name: "OpenBot" });
   expect(card.textContent).toContain("OpenBot did not start");
   expect(card.textContent).toContain("The back end is ready");
   expect(card.textContent).not.toContain("Back end setup stopped");
   expect(within(card).getByRole("button", { name: "Retry" })).toBeTruthy();
+});
+
+/**
+ * A Start the window put off until OpenBot is installed again is not one that failed. Saying "OpenBot
+ * did not start" over it sent a person who had changed nothing to look for a problem.
+ */
+test("a start that is put off says nothing, and starts on the next go-ahead", async () => {
+  invokeHandler = answers({ run_local_eval: [ready, ready] });
+  let starts = 0;
+  let sequence!: ReturnType<typeof useLocalSequence>;
+  function Window() {
+    sequence = useLocalSequence({
+      root: "/tmp/openbot",
+      stack: "local-abc123",
+      connected: true,
+      onStart: async () => (++starts > 1 ? "started" : "deferred"),
+      pollDelays: [0, 0, 0],
+    });
+    return (
+      <>
+        <LocalStatus sequence={sequence} />
+        <LocalIntelligence sequence={sequence} />
+      </>
+    );
+  }
+  const screen = render(<Window />);
+  sequence.start();
+  await waitFor(() => expect(starts).toBe(1));
+  await waitFor(() => expect(sequence.running).toBe(false));
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByText(/did not start/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  sequence.start();
+  await waitFor(() => expect(starts).toBe(2));
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("without auto, nothing runs until Start OpenBot is chosen", async () => {
@@ -560,7 +709,7 @@ test("without auto, nothing runs until Start OpenBot is chosen", async () => {
     auto: false,
     onStart: async (startable) => {
       started.push(startable);
-      return true;
+      return "started";
     },
   });
   await new Promise((resolve) => setTimeout(resolve, 10));
@@ -580,7 +729,7 @@ test("prepare runs to ready and waits for the go-ahead, which starts at once", a
     prepare: true,
     onStart: async (startable) => {
       started.push(startable);
-      return true;
+      return "started";
     },
   });
   await waitFor(() =>

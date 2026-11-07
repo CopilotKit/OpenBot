@@ -904,7 +904,7 @@ Where a container under rootless Podman reaches this machine's loopback.
 Rootless Podman puts its containers in a network namespace of the person's own, and by default
 nothing in it leads back to the host's `127.0.0.1`: slirp4netns runs with host loopback disabled
 and pasta with `--no-map-gw`. The server is a container now, and what it calls on this machine
-listens only on loopback: the person's browser, deliberately, and a local Intelligence. Measured
+listens only on loopback: a local Intelligence. Measured
 on Ubuntu 24.04 (Podman 4.9.3, slirp4netns) and Fedora 44 (Podman 5.8.9, pasta): a container on a
 Compose network reached neither, at any address, until [`local_api::HOST_LOOPBACK_CONFIG`] was in
 place, and then reached both at this address, which is slirp4netns's fixed one and which pasta is
@@ -968,7 +968,7 @@ pub mod local_api {
         let address = super::ROOTLESS_HOST_LOOPBACK;
         format!(
             "# Written by OpenBot Desktop: lets its containers reach services this machine runs on\n\
-             # 127.0.0.1, such as the person's browser and OpenBot's back end, at {address}.\n\
+             # 127.0.0.1, such as OpenBot's back end, at {address}.\n\
              [engine]\n\
              network_cmd_options = [\"allow_host_loopback=true\", {{append=true}}]\n\
              \n\

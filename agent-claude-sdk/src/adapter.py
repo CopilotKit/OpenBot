@@ -189,6 +189,14 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 }
 
             options.hooks["PreToolUse"] = [HookMatcher(hooks=[only_offered])]
+        else:
+            # A full Bot acts through what OpenBot grants it: its computer, its apps, web search,
+            # Routines and `run_subagent`, each under the deployment's policy and audit trail.
+            # Claude Code's own versions (WebSearch, Bash, Read, CronCreate, Agent, RemoteTrigger
+            # and the rest) run in this container instead, ungoverned and unapproved. Left in
+            # view, Claude reached for its own WebSearch, was refused, and told the person to
+            # grant it. No built-ins, as on the model endpoint; OpenBot's tools still load.
+            options.tools = []  # SDK 0.2.152 maps this to --tools "".
         return options
 
     async def _run_query(self, input_data):
@@ -329,16 +337,26 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 self._model_only
                 and (input_data.forwarded_props or {}).get("openbotAnswerOnly") is True
             )
-            if answer_only:
-                # An SDK query keeps the tools it started with. The last model step must
-                # replay the real collected results in a fresh query with no tools, rather
-                # than resume a query that can keep calling them until the step cap.
-                await self.interrupt(thread_id)
-                input_data = input_data.model_copy(update={"tools": []})
             turn = self._turns.get(thread_id)
             if turn is not None and turn.task.done():
                 self._turns.pop(thread_id)
                 turn = None
+            # An SDK query keeps the tools it started with. On the model endpoint the server
+            # decides each step's tools, and a step that is sent other tools than the running
+            # query holds is answered by a fresh query replaying the real collected results:
+            # the last step is sent none, and a step after `search_tools` is sent what it found.
+            # Resumed instead, the query never holds a found tool, and Claude called it by the
+            # name in the search's text, which is no tool it was given.
+            replaced = answer_only or (
+                self._model_only
+                and turn is not None
+                and {tool.name for tool in input_data.tools} != turn.tool_names
+            )
+            if replaced:
+                await self.interrupt(thread_id)
+                turn = None
+            if answer_only:
+                input_data = input_data.model_copy(update={"tools": []})
 
             yield RunStartedEvent(thread_id=thread_id, run_id=run_id)
             if turn is not None:
@@ -363,7 +381,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     return
             else:
                 if (
-                    not answer_only
+                    not replaced
                     and input_data.messages
                     and input_data.messages[-1].role == "tool"
                 ):

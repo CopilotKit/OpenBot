@@ -1821,13 +1821,19 @@ def login_chatgpt(*, store_path=None, host="localhost", port=1455, callback_path
     #[test]
     #[cfg(unix)]
     fn the_relay_keeps_other_redirects_away_from_the_sign_in_in_progress() {
+        // Its relay and upstream take free ports; no other port test may take one in between.
+        let _ports = crate::test_support::hold_ports();
         let root = crate::test_support::temp_root("chatgpt-relay");
         let package = root.join("langchain_openai");
         std::fs::create_dir_all(&package).unwrap();
         std::fs::write(package.join("__init__.py"), "").unwrap();
         std::fs::write(package.join("chatgpt_oauth.py"), FAKE_CHATGPT_OAUTH).unwrap();
         let store = root.join(".langchain").join("chatgpt-auth.json");
-        let (relay, loopback) = (free_port(), free_port());
+        // Two different ports: a port given back can be handed out again at once.
+        let relay = free_port();
+        let loopback = std::iter::repeat_with(free_port)
+            .find(|port| *port != relay)
+            .unwrap();
         // Rendered as `render_login` does, with this test's ports, its store, and loopback for the
         // relay: a test has no business listening on the network.
         let program = CHATGPT_LOGIN

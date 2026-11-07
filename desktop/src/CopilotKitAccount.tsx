@@ -29,6 +29,14 @@ type Seen =
 const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
 
 /**
+ * How long the account check waits for a container engine, and how often it asks again. A new
+ * Windows computer installs Podman and its machine while the person signs in, a few minutes at
+ * most; an engine that never comes is Install's failure to show, not this step's.
+ */
+const ENGINE_WAIT_MS = 2000;
+const ENGINE_WAIT_LIMIT_MS = 15 * 60 * 1000;
+
+/**
  * The CopilotKit account step of a local first run: sign in, then read and accept the evaluation
  * agreement, before anything licensed is set up.
  *
@@ -93,6 +101,9 @@ export function CopilotKitAccount({
     [finish],
   );
 
+  /** When the account check first found no engine answering, while it waits for one. */
+  const waitingSince = useRef<number | null>(null);
+  const askAgain = useRef<ReturnType<typeof setTimeout> | null>(null);
   const check = useCallback(() => {
     setSeen({ at: "checking" });
     const started = localEvalTerms();
@@ -101,6 +112,19 @@ export function CopilotKitAccount({
       (terms) => {
         if (attempt.current !== started.attempt) return;
         attempt.current = null;
+        if (terms.status === "engine-not-ready") {
+          // Install is still bringing the engine up: keep checking rather than fail.
+          const since = waitingSince.current ?? Date.now();
+          waitingSince.current = since;
+          if (Date.now() - since < ENGINE_WAIT_LIMIT_MS) {
+            askAgain.current = setTimeout(
+              () => checkAgain.current(),
+              ENGINE_WAIT_MS,
+            );
+            return;
+          }
+        }
+        waitingSince.current = null;
         if (terms.status === "signed-out") setSeen({ at: "signed-out" });
         else if (terms.status === "required" && !terms.accepted)
           setSeen({ at: "agreement", terms });
@@ -122,12 +146,15 @@ export function CopilotKitAccount({
       },
     );
   }, [connectApps]);
+  const checkAgain = useRef(check);
+  checkAgain.current = check;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
   useEffect(() => {
     check();
     return () => {
       // Leaving stops whatever is still waiting, the browser sign-in included.
+      if (askAgain.current) clearTimeout(askAgain.current);
       if (attempt.current) cancelLocalEval(attempt.current).catch(() => {});
       attempt.current = null;
     };

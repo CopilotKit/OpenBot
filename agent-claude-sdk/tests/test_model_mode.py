@@ -112,3 +112,34 @@ def test_model_history_keeps_role_labels_and_real_image_blocks():
         "type": "image",
         "source": {"type": "base64", "media_type": "image/png", "data": "AQID"},
     } in content
+
+
+def test_full_bot_cannot_see_claude_code_web_search_or_shell():
+    # Seen live: asked to search the web, a Claude Agent SDK Bot called Claude Code's WebSearch
+    # four times, was refused each time, and asked the person to grant it.
+    adapter = OpenBotClaudeAgentAdapter(name="openbot")
+    request = RunAgentInput.model_validate(
+        {
+            "threadId": "channel",
+            "runId": "run",
+            "state": {},
+            "messages": [{"id": "user", "role": "user", "content": "Search the web"}],
+            "tools": [
+                {
+                    "name": "show_app_access",
+                    "description": "Offer to turn on an app",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            "context": [],
+            "forwardedProps": {"disallowed_tools": ["Task"]},
+        }
+    )
+    options = adapter.build_options(request, request.thread_id)
+    assert options.tools == []
+    assert "mcp__ag_ui__show_app_access" in options.allowed_tools
+    options.cli_path = "/not-executed/claude"
+    command = SubprocessCLITransport(
+        prompt="contract only", options=options
+    )._build_command()
+    assert command[command.index("--tools") + 1] == ""

@@ -23,7 +23,7 @@ export const BROWSER_CLOSED_POLL_MS = 30_000;
 /**
  * How often the sidebar asks, from what it last heard. Every second while a Record pressed in a Recorder's own toolbar
  * button could put the red dot on the Browser button: while the OpenBot browser is open, while a Recorder is recording
- * (`activity`, so Stop takes the dot away as quickly), and on OpenBot Desktop while a Recorder in the person's own
+ * (`activity`, so Stop takes the dot away as quickly), and with a host-side computer while a Recorder in the person's own
  * everyday browser is connected (`real`). Each within about two seconds. Rarely otherwise; never where OpenBot cannot
  * run a browser, where there is no button to update. Asking never starts a computer: the server answers a browser
  * whose computer is not running as closed.

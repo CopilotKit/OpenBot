@@ -72,8 +72,8 @@ export type BrowserRouteDeps = {
   computers?: BrowserComputers;
   /**
    * What the person is told about where their browser runs (`BrowserApiState.note`), in one plain sentence: why there
-   * are no `computers` for it here (its Bots share one computer, browser/host.ts), or, on OpenBot Desktop, why it is not
-   * their own installed Chrome or Edge (`OPENBOT_BROWSER_ABSENT`). Absent when there is nothing to explain.
+   * are no `computers` for it here (its Bots share one computer, browser/host.ts). Absent when there is nothing to
+   * explain.
    */
   note?: string;
   /** The Recorder's connections and what goes with them (recorder/wiring.ts). */

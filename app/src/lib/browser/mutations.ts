@@ -17,11 +17,11 @@ function invalidateBrowser(queryClient: QueryClient) {
 }
 
 /**
- * Opens the person's browser, or brings it forward when it is already open: on OpenBot Desktop a window on their
- * desktop, on hosted OpenBot a browser the page shows. The answer says which, and names the computer the live screen
+ * Opens the person's browser, or brings it forward when it is already open: a window on their desktop where a
+ * host-side computer runs people's browsers, and elsewhere (hosted OpenBot, OpenBot Desktop) a browser the page shows. The answer says which, and names the computer the live screen
  * streams.
  *
- * On OpenBot Desktop it may instead be the person's own everyday Chrome or Edge (`opened`): brought forward when the
+ * With a host-side computer it may instead be the person's own everyday Chrome or Edge (`opened`): brought forward when the
  * Recorder in it is connected, or showing the Recorder's store page for them to add it.
  */
 export function openBrowserMutationOptions(queryClient: QueryClient) {
@@ -96,7 +96,7 @@ export const RECORD_THERE =
   "Your browser is open. Start recording with the Recorder's button in its toolbar.";
 
 /**
- * Start recording on OpenBot Desktop: opens the person's browser as a window on their desktop, or brings it forward,
+ * Start recording where the browser is a window on the person's desktop: opens it, or brings it forward,
  * and starts recording in it, so the person is doing the task as soon as the window is in front of them. Open answers
  * once the Recorder in it is connected, so the start that follows finds it ready.
  *

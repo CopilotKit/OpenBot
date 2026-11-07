@@ -99,11 +99,14 @@ fill a gap. Three rules hold that boundary:
 - **Everything fetched is pinned.** Engine installers, Compose, the CLI and Node are pinned by
   digest. A mismatch is refused, never run.
 - **A small installer, a downloaded deployment.** The installer is the app and the bundled CLI.
-  The deployment (`docker-compose.yml`, server, app, worker, tenant package) is the release's
-  source tarball at a tag, laid out under the installation folder, and its images are named by
-  digest in that release's `container-images.json` (`src-tauri/src/deployment.rs`). A new
-  deployment takes the latest release. An existing one keeps its version until the person applies
-  an explicit runtime update.
+  The deployment is `docker-compose.yml`, out of the release's source tarball at a tag, laid out
+  under the installation folder; everything else, server, app, worker, computer and tenant package,
+  runs from the images that release's `container-images.json` names by digest
+  (`src-tauri/src/deployment.rs`). Nothing runs on the host: the person's own browser runs on the
+  one computer and is shown in the OpenBot window, as hosted OpenBot shows it.
+  A new deployment takes the latest release. An existing one keeps its version through Install
+  and Repair; the first Start after the app updates itself upgrades it to the app's own release
+  (`src-tauri/src/upgrade.rs`, [desktop updates](desktop-updates.md)).
 - **The app's own Compose project.** Every new installation runs as the Compose project
   `openbot-desktop`, not the folder's name. A source checkout called `openbot` would otherwise share
   containers and volumes with the app (`src-tauri/src/stack.rs`, `project`).
@@ -151,7 +154,7 @@ fill a gap. Three rules hold that boundary:
 | `~/OpenBot/.openbot-project.json` | The Compose project this installation runs as |
 | `~/OpenBot/.env` | Settings only. A person's own `COMPOSIO_API_KEY` goes here and always wins |
 | Protected store (see `vault.rs`) | Model keys, service tokens and a provisioned Composio key |
-| `%LOCALAPPDATA%\OpenBot` (Windows) | Recorder host files and the local browser profile |
+| `%LOCALAPPDATA%\OpenBot` (Windows) | Recorder host files, and the browser profile earlier versions kept in `local-computer` |
 
 ## Apps through Composio
 

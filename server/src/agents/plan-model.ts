@@ -321,7 +321,12 @@ export class PlanModel implements PlanLanguageModel {
               openbotModelOnly: true,
               openbotBotId: this.botId,
               ...(this.choice ? { openbotModel: this.choice } : {}),
-              // Claude must replace its still-running SDK query to change the tools it holds.
+              /*
+               * Claude must replace its still-running SDK query to change the tools it holds. The
+               * harness does so whenever a step's `tools` differ from what that query started
+               * with (a tool `search_tools` found, or none on the last step); see
+               * agent-claude-sdk/src/adapter.py `run`.
+               */
               ...(answerOnly ? { openbotAnswerOnly: true } : {}),
             },
           })

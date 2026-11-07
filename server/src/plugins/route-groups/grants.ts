@@ -4,6 +4,7 @@ import { currentEdition } from "../../edition";
 import { approveOwnersSharedUse, ownerGrantRefusal } from "../owner-grants";
 import {
   ALWAYS_ON_REFUSAL,
+  EVERY_BOT_ASKS_REFUSAL,
   EVERY_BOT_REFUSAL,
   isAlwaysOn,
 } from "../personal-defaults";
@@ -422,6 +423,9 @@ export function mountGrantRoutes({
     // One person: every Bot has every connected app. See personal-defaults.ts.
     if (kind === "mcp" && currentEdition() === "personal")
       return context.json({ error: EVERY_BOT_REFUSAL }, 403);
+    // One person: every Bot can ask every other. A removed row would change nothing.
+    if (kind === "bot" && currentEdition() === "personal")
+      return context.json({ error: EVERY_BOT_ASKS_REFUSAL }, 403);
     const refusal = await enablementRefusal(
       context,
       kind,
