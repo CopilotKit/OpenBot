@@ -46,8 +46,15 @@ function resultText(result: unknown): string {
   return JSON.stringify(result ?? {});
 }
 
-/** What the desktop answers when the person presses Deny on its own dialog (`desktop_host_access.rs`). */
-const DENIED_ON_DESKTOP = "The local owner denied this operation.";
+/**
+ * What the desktop answers when the person presses Deny on its own dialog (`DECLINED` in
+ * `desktop_host_access.rs`). The sentence it used before is kept, for a desktop older than this
+ * server. Exported for the test that holds the two sides together.
+ */
+export const DENIED_ON_DESKTOP: ReadonlySet<string> = new Set([
+  "Declined in OpenBot Desktop.",
+  "The local owner denied this operation.",
+]);
 
 type Outcome = "allowed" | "refused" | "failed" | "stopped";
 
@@ -105,7 +112,7 @@ async function auditHostAccess(
       ...(input.attempt ? { attempt: input.attempt } : {}),
       // A person's Deny, on the desktop or in the conversation, reads as theirs.
       ...(input.outcome === "refused" &&
-      (input.reason === DENIED_ON_DESKTOP ||
+      ((input.reason !== undefined && DENIED_ON_DESKTOP.has(input.reason)) ||
         input.reason === DECLINED_BY_PERSON)
         ? { refusal: "person_declined" }
         : {}),

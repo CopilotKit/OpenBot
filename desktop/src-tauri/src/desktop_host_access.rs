@@ -16,7 +16,8 @@ const ALWAYS_HERE: &str = "Always allow in this folder";
 const DENY: &str = "Deny";
 /// What the server is told when the person presses Deny. It reaches the Bot, and the person reads it
 /// on the Computer page and under the step in the conversation, so it names no "owner": the person
-/// at this computer is the one reading it.
+/// at this computer is the one reading it. The server knows this sentence (`DENIED_ON_DESKTOP` in
+/// `server/src/host-access/tools.ts`) and records it as the person declining; change both together.
 const DECLINED: &str = "Declined in OpenBot Desktop.";
 
 pub struct NativeApproval<R: tauri::Runtime>(pub tauri::AppHandle<R>);
