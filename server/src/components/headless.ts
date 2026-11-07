@@ -161,14 +161,14 @@ const ChecklistCardProps = z.object({
     .array(
       z.object({
         text: z.string(),
-        done: z.boolean().describe("Whether this one is already finished"),
+        done: z.boolean().describe("Whether this task is already finished"),
         note: z
           .string()
           .optional()
           .describe("A short aside, e.g. who it is waiting on"),
       }),
     )
-    .describe("The items, in the order they should be done"),
+    .describe("The tasks, in the order they should be done"),
 });
 
 const NoticeCardProps = z.object({
