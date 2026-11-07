@@ -8,8 +8,9 @@ never reached it. Here each query gets a fresh worker, built from this run's inp
 conversation as its prompt: all of it, or its newest messages up to `REPLAY_BUDGET_TOKENS`.
 
 Client-tool continuations do not take this path: the adapter resolves their PostToolUse hook in the
-same SDK query that emitted the tool use. The exception is a model-endpoint step sent other tools than
-that query holds, which is answered by a fresh query from here; see `OpenBotClaudeAgentAdapter.run`.
+same SDK query that emitted the tool use. The exceptions are answered by a fresh query from here: a
+model-endpoint step sent other tools than that query holds, and a result whose query is no longer
+running (it outlived the query's bound, or the process restarted); see `OpenBotClaudeAgentAdapter.run`.
 """
 
 import asyncio
@@ -23,8 +24,10 @@ from datetime import datetime
 from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, StateSnapshotEvent
 from ag_ui_claude_sdk.session import SessionWorker
 
-# The model endpoint has always bounded a query; the full harness runs agentic work that can take
-# longer, and upstream only bounds it when a timeout is configured.
+# How long a query may go without an event: the model endpoint's own, and the full harness's through
+# upstream's `query_timeout_seconds`, which defaults to 300 seconds. A client tool or the person can
+# take longer than that; a result that arrives after its query ended is answered by a replay (see
+# `adapter.run`).
 MODEL_QUERY_TIMEOUT_SECONDS = 300
 
 # The ids the server gives the system messages it writes for a remote Bot: `standingRoleMessage`
@@ -267,9 +270,21 @@ async def run_replayed_query(adapter, input_data):
         await worker.start()
         if state is not None:
             yield StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=state)
-        async with asyncio.timeout(timeout):
+        # A bound on a query that has stopped moving, not on how long it works: each message from
+        # Claude Code pushes the deadline back. Counted from the start, it cut off a Bot that was
+        # still working (nine browser steps took it past five minutes) with an error the person
+        # never saw. Waiting on a client tool or the person brings no messages, so that wait still
+        # ends here, before the PostToolUse hook's own timeout could hand Claude a placeholder.
+        async with asyncio.timeout(timeout) as deadline:
+
+            async def moving(messages):
+                async for message in messages:
+                    if timeout is not None:
+                        deadline.reschedule(asyncio.get_running_loop().time() + timeout)
+                    yield message
+
             async for event in adapter._stream_claude_sdk(
-                worker.query(prompt(), session_id=thread),
+                moving(worker.query(prompt(), session_id=thread)),
                 thread,
                 run,
                 input_data,
