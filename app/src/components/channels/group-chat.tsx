@@ -14,7 +14,11 @@ import {
   groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
-import { markdownComponents, markdownPlugins } from "@/lib/markdown";
+import {
+  markdownComponents,
+  markdownPlugins,
+  replyRemarkPlugins,
+} from "@/lib/markdown";
 import { newId } from "@/lib/new-id";
 import { ChannelAvatar } from "./avatar";
 import { Composer, toAgentOptions } from "./composer";
@@ -237,6 +241,7 @@ function GroupLine({
               <Streamdown
                 components={markdownComponents}
                 plugins={markdownPlugins}
+                remarkPlugins={replyRemarkPlugins}
               >
                 {message.text}
               </Streamdown>
