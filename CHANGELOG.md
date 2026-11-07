@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot whose click or Enter on a button could not finish is told why: the page refused to send its
+  form, something covers the button, or the page is still loading. It was told the button was "not
+  on the page any more", and clicked it again and again.
 - The Audit table fits OpenBot Desktop's default window: what an action acted on sits under it
   and who started it under the Bot, so Decision shows without scrolling sideways.
 - A Bot's Activity page says it lists the Bot's tasks, routines and goals, and links to every

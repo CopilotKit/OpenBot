@@ -2,12 +2,13 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { setDefaultAutoSelectFamily } from "node:net";
 import { join } from "node:path";
 import { type ServerWebSocket, serve } from "bun";
-import type { Page } from "playwright";
+import type { ConsoleMessage, Page } from "playwright";
 import { downloadHeaders } from "../../shared/file-download";
 import {
   isPersonBrowserId,
   RECORDER_DIR_ENV,
 } from "../../shared/openbot-browser";
+import { unfinishedAction } from "./action-failure";
 import {
   cutAtCodeUnits,
   parseAriaSnapshot,
@@ -1902,9 +1903,20 @@ serve<StreamData & TerminalSocketData>({
         }
 
         const startedAt = Date.now();
+        // What the page logs while the action runs: a form its own security policy refuses to send
+        // is reported only there (see action-failure.ts). Capped, so a page that logs errors in a
+        // loop cannot grow it for the length of the action.
+        const logged: string[] = [];
+        const listen = (message: ConsoleMessage) => {
+          if (message.type() === "error" && logged.length < 50)
+            logged.push(message.text());
+        };
+        let watched: Page | undefined;
         try {
           const target = await currentPage(botId);
           session.control.assertBotMayAct(true);
+          watched = target;
+          target.on("console", listen);
           const detail = await performAction(
             session,
             target,
@@ -1951,7 +1963,20 @@ serve<StreamData & TerminalSocketData>({
           if (error instanceof FieldValueError) {
             return json({ error: error.message }, 400);
           }
+          // The element is on the page and the action could not finish: the page refused to send its
+          // form, something covers the element, it is hidden or turned off, or the page is still
+          // loading what the action set off. Said as that, and marked so the server does not read the
+          // timeout as a ref that has gone (action-failure.ts).
+          const unfinished = unfinishedAction(error, logged);
+          if (unfinished) {
+            return json(
+              { error: unfinished.message, unfinished: unfinished.reason },
+              409,
+            );
+          }
           return json({ error: describe(error, "The action failed.") }, 502);
+        } finally {
+          watched?.off("console", listen);
         }
       }
 

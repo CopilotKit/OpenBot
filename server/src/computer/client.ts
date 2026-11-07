@@ -65,6 +65,25 @@ export class ElementNotFoundError extends Error {
   }
 }
 
+/**
+ * The element is on the page, and the action on it could not finish.
+ *
+ * The page refused to send its form, something covers the element, it is hidden or turned off, or the
+ * page is still loading what the action set off. The computer says which
+ * (agent-computer/src/action-failure.ts). Its own condition because the next step differs from a stale
+ * ref: a fresh snapshot returns the same ref, so a Bot told to take one clicks the same button again,
+ * and repeating a click whose form is still being sent can send it twice.
+ */
+export class ActionUnfinishedError extends Error {
+  constructor(
+    reason: string,
+    readonly unfinished: string,
+  ) {
+    super(reason);
+    this.name = "ActionUnfinishedError";
+  }
+}
+
 /** The navigation target is not permitted. */
 export class NavigationRefusedError extends Error {
   constructor(reason: string) {
@@ -458,6 +477,9 @@ function throwMappedError(
           ? (body.handoff as HandoffRequest)
           : undefined,
       );
+    }
+    if (typeof body?.unfinished === "string") {
+      throw new ActionUnfinishedError(detail, body.unfinished);
     }
     throw new StaleSnapshotError(detail, body?.snapshotRequired === true);
   }
