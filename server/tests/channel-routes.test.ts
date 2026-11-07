@@ -1095,6 +1095,48 @@ describe("channel store integration", () => {
     );
   });
 
+  test("a conversation is called by its Bot's new name after the Bot is renamed", async () => {
+    const actor = await createPersistentUser();
+    const renamed = await createPersistentAgent({
+      name: "Personal Assistant",
+      owner: actor,
+    });
+    const other = await createPersistentAgent({
+      name: "Researcher",
+      owner: actor,
+    });
+    const direct = await persistentStore.create(actor, [renamed]);
+    const group = await persistentStore.create(actor, [other, renamed]);
+    createdChannelIds.push(direct.id, group.id);
+    const profile = await profileStore.get(actor, renamed);
+    if (!profile) throw new Error("Missing profile");
+    await profileStore.update(actor, renamed, {
+      name: "Personal Assistant F5",
+      title: profile.title,
+      roleDescription: profile.roleDescription,
+      visibility: profile.visibility,
+    });
+
+    // What the conversation header and the sidebar read.
+    const app = appFor(persistentStore, async (context, next) => {
+      context.set("actor", actor);
+      await next();
+    });
+    const opened = await json(
+      await app.request(`http://openbot.test/${direct.id}`),
+    );
+    expect(opened.channel.name).toBe("Personal Assistant F5");
+    const listed = await json(await app.request("http://openbot.test/"));
+    const names = Object.fromEntries(
+      (listed.channels as { id: string; name: string }[]).map(
+        ({ id, name }) => [id, name],
+      ),
+    );
+    expect(names[direct.id]).toBe("Personal Assistant F5");
+    // The group's other Bot keeps its place, and the renamed one follows it.
+    expect(names[group.id]).toBe("Researcher, Personal Assistant F5");
+  });
+
   test("keeps a historical channel readable but inactive after a linked profile is deleted", async () => {
     const actor = await createPersistentUser();
     const activeAgentId = await createPersistentAgent({

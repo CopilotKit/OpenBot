@@ -1,4 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { channelKeys } from "@/lib/channels/queries";
 import { client } from "@/lib/client";
 import {
   type AgentProfile,
@@ -54,7 +55,12 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
         body: variables.input,
         fallback: FALLBACK,
       }),
-    onSuccess: () => invalidateAgents(queryClient),
+    // A conversation is called by its Bot's name, so a rename shows in the sidebar and the header.
+    onSuccess: () =>
+      Promise.all([
+        invalidateAgents(queryClient),
+        queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+      ]),
   });
 }
 
