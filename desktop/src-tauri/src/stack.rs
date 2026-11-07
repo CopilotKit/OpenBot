@@ -3203,7 +3203,9 @@ fn legacy_containers(
 /// compare equal. A folder that no longer exists compares as written. Plain, because the folder of
 /// another copy goes into the message that says where it runs from.
 fn canonical(folder: &Path) -> PathBuf {
-    std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf())
+    std::fs::canonicalize(folder)
+        .map(crate::paths::plain)
+        .unwrap_or_else(|_| folder.to_path_buf())
 }
 
 /// The namespace the supervisor gives this installation's Bots' computers and volumes, when the

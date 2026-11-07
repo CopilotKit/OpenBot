@@ -4,6 +4,7 @@ use openbot_desktop_lib::host_access::{
     CommandPrompt, HostAccessError, HostAccessResult, HostApprovalUi, LocalCommandAllowList,
     WritePrompt,
 };
+use openbot_desktop_lib::paths;
 use std::path::Path;
 use tauri::Manager;
 use tauri_plugin_dialog::{
@@ -23,7 +24,7 @@ fn refused(message: impl Into<String>) -> HostAccessError {
 /// The approved folder as a person reads it. The grant keeps it canonical, `\\?\C:\...` on Windows,
 /// for its containment checks; the dialog shows it plain.
 fn folder(root: &Path) -> String {
-    root.display().to_string()
+    paths::plain(root.to_path_buf()).display().to_string()
 }
 
 // A native message dialog is deliberately small. Refuse content that cannot be reviewed here;
