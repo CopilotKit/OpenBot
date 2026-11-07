@@ -833,9 +833,12 @@ export function ProviderPicker({
               </>
             ) : (
               <>
+                {/* Says what the flow below asks for: Claude's sign-in hands back a
+                    code to paste here, ChatGPT's finishes in the browser. */}
                 <p className="lede">
-                  Opens {row.name} in your browser. Nothing is typed here and no
-                  key is stored.
+                  {row.id === "anthropic"
+                    ? `${row.name} opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.`
+                    : `${row.name} opens in your browser. You won't type anything here or need an API key.`}
                 </p>
                 <div className="provider-sign-in-actions">
                   <button type="button" disabled={busy} onClick={beginSignIn}>
