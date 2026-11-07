@@ -385,6 +385,46 @@ test("a CopilotKit sign-in that does not finish says so and can be tried again",
   expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(1);
 });
 
+test("a CopilotKit sign-in waiting on the browser shows its code and page, and Cancel stops it", async () => {
+  const page = {
+    url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
+    userCode: "WXYZ-2345",
+  };
+  invokeHandler = answers({
+    set_up_local_eval: [blockedOnSignIn],
+    // Waits on the browser until it is stopped.
+    sign_in_to_copilotkit: [new Promise(() => {})],
+    copilotkit_sign_in_page: [page],
+    cancel_local_eval: [null],
+  });
+  const screen = view();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+  );
+  await screen.findByText("WXYZ-2345");
+  expect(
+    screen
+      .getByRole("link", { name: "Open the sign-in page" })
+      .getAttribute("href"),
+  ).toBe(page.url);
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  const signIn = invokeCalls.find(
+    (call) => call.command === "sign_in_to_copilotkit",
+  );
+  expect(
+    invokeCalls.filter((call) => call.command === "cancel_local_eval"),
+  ).toContainEqual({
+    command: "cancel_local_eval",
+    args: {
+      attempt: (signIn?.args as { attempt?: string } | undefined)?.attempt,
+    },
+  });
+  expect(
+    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+  ).toBeTruthy();
+  expect(screen.queryByText("WXYZ-2345")).toBeNull();
+});
+
 test("setup that needs the agreement shows it, and only Accept sets up again with that version", async () => {
   invokeHandler = answers({
     set_up_local_eval: [blockedOnTerms, report()],

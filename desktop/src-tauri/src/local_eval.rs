@@ -15,7 +15,9 @@
 //!   a file OpenBot made, as separate arguments with no shell. The CLI's `resumeCommand` strings
 //!   are text for a terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
-//!   cross IPC or reach a log. Failures are static categories with no payload.
+//!   cross IPC or reach a log. Failures are static categories with no payload. The account
+//!   sign-in's approval page and code are the one CLI-printed text the window shows, checked
+//!   first (`sign_in_page`).
 //!
 //! A command that *completed* is not Intelligence that is ready or licensed. Those two facts come
 //! only from the additive v1 `readiness` and `license` fields of `local status`, read by exact
@@ -590,12 +592,80 @@ pub fn normalize_login(stack: &StackId, exit_code: i32, stdout: &[u8]) -> Result
     })
 }
 
-/// Whether the CopilotKit account sign-in finished. The approval page address and its code stay
-/// in the CLI and the browser; only the outcome is kept.
+/// Whether the CopilotKit account sign-in finished. Only the outcome is kept; the page and code
+/// the person approves are shown while it waits (`SignInPage`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSignIn {
     pub signed_in: bool,
+}
+
+/**
+The approval page `login --json` opened, and the code it shows, for the window to show while the
+sign-in waits.
+
+The window needs both. An account in several organizations can land on the CopilotKit dashboard
+instead of the approval, and the CLI then waits until its code expires; the person finishes by
+opening the same page again, and checks the code before approving. Neither is a secret: the CLI
+prints both for whoever runs it, and approving the code signs in this computer's CLI only.
+*/
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignInPage {
+    pub url: String,
+    pub user_code: String,
+}
+
+/// The longest approval page address taken from the CLI.
+const MAX_SIGN_IN_URL: usize = 2048;
+
+/**
+The approval page the CLI has printed so far, from its `authentication_url` records: the last
+one, since a code that expires unapproved is replaced by a new one (`renewed`). Only complete
+lines are read, and a record is taken only when it is the page for its own code: `https`, or
+`http` on this computer, with no credentials, carrying `user_code` as the code it names. Anything
+else is not shown.
+*/
+pub fn sign_in_page(stdout: &[u8]) -> Option<SignInPage> {
+    let complete = &stdout[..stdout.iter().rposition(|byte| *byte == b'\n')? + 1];
+    std::str::from_utf8(complete)
+        .ok()?
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record.get("type").and_then(Value::as_str) == Some("authentication_url"))
+        .find_map(|record| {
+            let url = record.get("url")?.as_str()?;
+            let code = record.get("user_code")?.as_str()?;
+            checked_sign_in_page(url, code)
+        })
+}
+
+fn checked_sign_in_page(url: &str, code: &str) -> Option<SignInPage> {
+    let code_ok = (1..=32).contains(&code.len())
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-');
+    if !code_ok || url.len() > MAX_SIGN_IN_URL {
+        return None;
+    }
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed.host_str()?;
+    let on_this_computer = host == "localhost"
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback());
+    let scheme_ok = parsed.scheme() == "https" || (parsed.scheme() == "http" && on_this_computer);
+    let carries_code = parsed
+        .query_pairs()
+        .any(|(name, value)| name == "user_code" && value == code);
+    let no_credentials = parsed.username().is_empty() && parsed.password().is_none();
+    (scheme_ok && no_credentials && carries_code).then(|| SignInPage {
+        url: parsed.into(),
+        user_code: code.to_owned(),
+    })
 }
 
 /**
@@ -1646,14 +1716,23 @@ pub fn setup(
     normalize_setup(code, &bytes)
 }
 
-/// `login --json`: the CopilotKit account sign-in.
+/// `login --json`: the CopilotKit account sign-in. `shown` hears each new approval page the CLI
+/// prints while it waits, so the window can show it (`sign_in_page`).
 pub fn account_sign_in(
     cli: &PinnedCli,
     limits: Limits,
     cancel: &Cancel,
+    shown: &mut dyn FnMut(SignInPage),
 ) -> Result<AccountSignIn, Failure> {
     let arguments = account_sign_in_arguments(login_takes_mode(cli, cancel)?);
-    let (code, bytes) = execute(cli, &arguments, None, limits, cancel)?;
+    let mut last: Option<SignInPage> = None;
+    let mut watch = |so_far: &[u8]| {
+        if let Some(page) = sign_in_page(so_far).filter(|page| last.as_ref() != Some(page)) {
+            last = Some(page.clone());
+            shown(page);
+        }
+    };
+    let (code, bytes) = execute_watching(cli, &arguments, None, limits, cancel, Some(&mut watch))?;
     normalize_account_sign_in(code, &bytes)
 }
 
@@ -1762,6 +1841,22 @@ fn execute(
     limits: Limits,
     cancel: &Cancel,
 ) -> Result<(i32, Vec<u8>), Failure> {
+    execute_watching(cli, arguments, folder, limits, cancel, None)
+}
+
+/// Hears the stdout a running CLI has written so far. See `execute_watching`.
+type Watch<'a> = &'a mut dyn FnMut(&[u8]);
+
+/// `execute`, with `watch` given the stdout written so far each time it grows while the CLI runs.
+/// What `watch` reads stays inside this module: only what it chooses to keep leaves.
+fn execute_watching(
+    cli: &PinnedCli,
+    arguments: &[&str],
+    folder: Option<&std::path::Path>,
+    limits: Limits,
+    cancel: &Cancel,
+    mut watch: Option<Watch>,
+) -> Result<(i32, Vec<u8>), Failure> {
     let engine = recorded_engine();
     refuse_rootless(arguments, engine.as_ref())?;
     let output = Output::create()?;
@@ -1783,6 +1878,7 @@ fn execute(
     drop(command);
 
     let deadline = Instant::now() + limits.timeout;
+    let mut watched = 0;
     loop {
         if exited(&mut child)? {
             let code = child.wait().map_err(|_| Failure::Spawn)?.code();
@@ -1790,8 +1886,15 @@ fn execute(
             // A signal-terminated CLI has no code and no report.
             return Ok((code.ok_or(Failure::UnexpectedExit)?, bytes));
         }
-        if output.len() > limits.output as u64 {
+        let written = output.len();
+        if written > limits.output as u64 {
             return Err(stop_tree(&mut child, limits.grace, Failure::OutputLimit));
+        }
+        if let Some(watch) = watch.as_mut().filter(|_| written > watched) {
+            if let Some(so_far) = output.peek(limits.output) {
+                watched = so_far.len() as u64;
+                watch(&so_far);
+            }
         }
         if cancel.requested() {
             return Err(stop_tree(&mut child, limits.grace, Failure::Cancelled));
@@ -1832,6 +1935,18 @@ impl Output {
             .metadata()
             .map(|metadata| metadata.len())
             .unwrap_or(0)
+    }
+
+    /// What the CLI has written so far, while it is still writing. Read through a handle of its
+    /// own: seeking the shared one would move where the CLI writes next.
+    fn peek(&self, cap: usize) -> Option<Vec<u8>> {
+        let mut bytes = Vec::new();
+        std::fs::File::open(&self.path)
+            .ok()?
+            .take(cap as u64)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        Some(bytes)
     }
 
     fn read(&self, cap: usize) -> Result<Vec<u8>, Failure> {
@@ -2153,13 +2268,50 @@ pub fn setup_installed(
     })
 }
 
-/// The CopilotKit account sign-in against the installed CLI.
+/// The CopilotKit account sign-in against the installed CLI. While it waits, `shown_sign_in_page`
+/// answers for `attempt` with the page the CLI opened.
 pub fn account_sign_in_installed(attempt: &str) -> Result<AccountSignIn, Failure> {
+    let showing = ShowingSignIn(attempt.to_owned());
     let attempt = Attempt::register(attempt);
     one_at_a_time(&attempt.0, Limits::for_account_sign_in(), |limits| {
         let cli = installed()?;
-        account_sign_in(&cli, limits, &attempt.0)
+        account_sign_in(&cli, limits, &attempt.0, &mut |page| showing.show(page))
     })
+}
+
+/// The approval page each waiting account sign-in has shown, by attempt id.
+static SIGN_IN_PAGES: std::sync::Mutex<Vec<(String, SignInPage)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn sign_in_pages() -> std::sync::MutexGuard<'static, Vec<(String, SignInPage)>> {
+    SIGN_IN_PAGES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// An account sign-in's place in `SIGN_IN_PAGES`, removed however the sign-in ends.
+struct ShowingSignIn(String);
+
+impl ShowingSignIn {
+    fn show(&self, page: SignInPage) {
+        let mut pages = sign_in_pages();
+        pages.retain(|(attempt, _)| attempt != &self.0);
+        pages.push((self.0.clone(), page));
+    }
+}
+
+impl Drop for ShowingSignIn {
+    fn drop(&mut self) {
+        sign_in_pages().retain(|(attempt, _)| attempt != &self.0);
+    }
+}
+
+/// The approval page the account sign-in `attempt` is waiting on, once the CLI has opened one.
+pub fn shown_sign_in_page(attempt: &str) -> Option<SignInPage> {
+    sign_in_pages()
+        .iter()
+        .find(|(id, _)| id == attempt)
+        .map(|(_, page)| page.clone())
 }
 
 /// The evaluation agreement against the installed CLI.
@@ -4154,6 +4306,13 @@ fn main() {
             }
             std::thread::sleep(std::time::Duration::from_secs(60));
         }
+        // `login --json` waiting for the approval: what it printed so far, then nothing more.
+        "wait" => {
+            print!("{body}");
+            std::io::stdout().flush().unwrap();
+            std::fs::write(dir.join("pid"), std::process::id().to_string()).unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
         // Like the real CLI, which forwards SIGTERM to its children instead of exiting: only
         // SIGKILL stops it.
         "stubborn" => {
@@ -4806,7 +4965,8 @@ fn main() {
             account_sign_in(
                 &current.cli(),
                 Limits::for_account_sign_in(),
-                &Cancel::default()
+                &Cancel::default(),
+                &mut |_| {}
             ),
             Ok(AccountSignIn { signed_in: true })
         );
@@ -4820,7 +4980,8 @@ fn main() {
             account_sign_in(
                 &older.cli(),
                 Limits::for_account_sign_in(),
-                &Cancel::default()
+                &Cancel::default(),
+                &mut |_| {}
             ),
             Ok(AccountSignIn { signed_in: true })
         );
@@ -4831,11 +4992,152 @@ fn main() {
             &current.cli(),
             Limits::for_account_sign_in(),
             &Cancel::default(),
+            &mut |_| {},
         )
         .unwrap();
         assert_eq!(
             std::fs::read_to_string(current.root.join("help-asked")).unwrap(),
             "x"
+        );
+    }
+
+    /// What `login --json` prints before it waits, as the CLI writes it at Intelligence e03c163a
+    /// (`commands/login.tsx`), with a synthetic code.
+    fn authentication_url(url: &str, code: &str) -> String {
+        format!(
+            "{}\n",
+            json!({
+                "expires_at": "2026-11-06T12:15:00.000Z",
+                "type": "authentication_url",
+                "url": url,
+                "user_code": code,
+            })
+        )
+    }
+
+    const DEVICE_PAGE: &str =
+        "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345&source=cli&mode=openbot";
+
+    /// The sign-in that waited forever: an account in several organizations lands on the
+    /// dashboard instead of the approval. The window shows the page the CLI is waiting on, and
+    /// Cancel stops the CLI rather than leaving it waiting behind the window.
+    #[test]
+    fn the_account_sign_in_shows_its_page_while_it_waits_and_cancel_stops_the_cli() {
+        let printed = format!(
+            "{}{}\n",
+            authentication_url(DEVICE_PAGE, "WXYZ-2345"),
+            json!({"type": "action_required", "browser_opened": true, "message": SECRET})
+        );
+        let fixture = Fixture::new("local-eval-sign-in-wait", &format!("wait\n{printed}"));
+        let cli = fixture.cli();
+        let cancel = Cancel::default();
+        let stop = cancel.clone();
+        let (pages, shown) = std::sync::mpsc::channel();
+        let signing_in = std::thread::spawn(move || {
+            account_sign_in(&cli, Limits::for_account_sign_in(), &cancel, &mut |page| {
+                pages.send(page).unwrap()
+            })
+        });
+        let page = shown
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the page was shown while the CLI waited");
+        assert_eq!(
+            page,
+            SignInPage {
+                url: DEVICE_PAGE.to_owned(),
+                user_code: "WXYZ-2345".to_owned(),
+            }
+        );
+        assert!(!signing_in.is_finished(), "the CLI was still waiting");
+
+        stop.cancel();
+        let started = Instant::now();
+        assert_eq!(signing_in.join().unwrap(), Err(Failure::Cancelled));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        #[cfg(unix)]
+        {
+            let pid: libc::pid_t = std::fs::read_to_string(fixture.root.join("pid"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            // SAFETY: signal 0 only checks existence. The CLI was reaped, so it is gone.
+            assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "the CLI outlived Cancel");
+        }
+        // Shown once: the same page printed again is not news.
+        assert!(shown.try_recv().is_err());
+    }
+
+    /// The window asks by attempt while the sign-in waits, and hears nothing once it has ended.
+    #[test]
+    fn a_shown_sign_in_page_lasts_as_long_as_its_sign_in() {
+        let page = SignInPage {
+            url: DEVICE_PAGE.to_owned(),
+            user_code: "WXYZ-2345".to_owned(),
+        };
+        let showing = ShowingSignIn("sign-in-page-lifetime".to_owned());
+        assert_eq!(shown_sign_in_page("sign-in-page-lifetime"), None);
+        showing.show(page.clone());
+        assert_eq!(shown_sign_in_page("sign-in-page-lifetime"), Some(page));
+        assert_eq!(shown_sign_in_page("another-sign-in"), None);
+        drop(showing);
+        assert_eq!(shown_sign_in_page("sign-in-page-lifetime"), None);
+    }
+
+    #[test]
+    fn the_sign_in_page_is_the_clis_latest_page_for_its_own_code() {
+        let first = authentication_url(DEVICE_PAGE, "WXYZ-2345");
+        assert_eq!(
+            sign_in_page(first.as_bytes()),
+            Some(SignInPage {
+                url: DEVICE_PAGE.to_owned(),
+                user_code: "WXYZ-2345".to_owned(),
+            })
+        );
+        // A code that expired unapproved is replaced, and the window shows the new one.
+        let renewed_page = "https://dashboard.copilotkit.ai/cli-auth/device?user_code=MNPQ-6789";
+        let renewed = format!("{first}{}", authentication_url(renewed_page, "MNPQ-6789"));
+        assert_eq!(
+            sign_in_page(renewed.as_bytes()).map(|page| page.user_code),
+            Some("MNPQ-6789".to_owned())
+        );
+        // A line the CLI is still writing is not read yet.
+        assert_eq!(sign_in_page(&first.as_bytes()[..first.len() - 1]), None);
+        // A local dashboard is allowed over http; nothing else is.
+        let local = "http://127.0.0.1:3000/cli-auth/device?user_code=WXYZ-2345";
+        assert!(sign_in_page(authentication_url(local, "WXYZ-2345").as_bytes()).is_some());
+        for (url, code) in [
+            (
+                "http://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
+                "WXYZ-2345",
+            ),
+            (
+                "https://someone:secret@dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
+                "WXYZ-2345",
+            ),
+            // The page has to be the one for the code it names.
+            (DEVICE_PAGE, "ABCD-0000"),
+            ("file:///etc/passwd?user_code=WXYZ-2345", "WXYZ-2345"),
+            ("javascript:alert(1)//?user_code=WXYZ-2345", "WXYZ-2345"),
+            (
+                "https://dashboard.copilotkit.ai/cli-auth/device?user_code=%3Cb%3E",
+                "<b>",
+            ),
+        ] {
+            assert_eq!(
+                sign_in_page(authentication_url(url, code).as_bytes()),
+                None,
+                "{url}"
+            );
+        }
+        let long = format!("{DEVICE_PAGE}&pad={}", "a".repeat(MAX_SIGN_IN_URL));
+        assert_eq!(
+            sign_in_page(authentication_url(&long, "WXYZ-2345").as_bytes()),
+            None
+        );
+        // Nothing else the CLI prints is taken as a page.
+        assert_eq!(
+            sign_in_page(b"{\"type\":\"action_required\",\"url\":\"https://x\"}\nnot json\n"),
+            None
         );
     }
 

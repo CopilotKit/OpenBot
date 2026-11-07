@@ -802,6 +802,13 @@ a:hover {
   color: var(--text-primary);
 }
 
+/* The code a CopilotKit sign-in page shows, to compare letter by letter. */
+.sign-in-code {
+  font-family: var(--mono);
+  color: var(--text-primary);
+  letter-spacing: 0.04em;
+}
+
 /* A failure said inside a row: the sentence in the destructive colour, the rest as before. */
 .inline-failure .caution,
 .inline-error {
