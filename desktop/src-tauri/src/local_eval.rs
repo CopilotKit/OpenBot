@@ -1545,15 +1545,43 @@ fn command_for(
     folder: Option<&std::path::Path>,
     engine: Option<&CliEngine>,
 ) -> std::process::Command {
+    command_inheriting(
+        cli,
+        arguments,
+        folder,
+        engine,
+        |name| std::env::var_os(name),
+        crate::docker_config::owned(),
+    )
+}
+
+/// `command_for`, with this process's environment read through `var` and OpenBot's Docker
+/// configuration kept in `docker_config`.
+fn command_inheriting(
+    cli: &PinnedCli,
+    arguments: &[&str],
+    folder: Option<&std::path::Path>,
+    engine: Option<&CliEngine>,
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+    docker_config: Option<&std::path::Path>,
+) -> std::process::Command {
     let mut command = crate::quiet::command(&cli.program);
     if let Some(entry) = &cli.entry {
         command.arg(entry);
     }
     command.env_clear();
     for name in INHERITED {
-        if let Some(value) = std::env::var_os(name) {
+        if let Some(value) = var(name) {
             command.env(name, value);
         }
+    }
+    // Docker's configuration without the person's credential helper, which macOS stops to ask
+    // about when OpenBot runs it, so the chart and image downloads never wait on a dialog. See
+    // `docker_config`. The person's own configuration is what it mirrors.
+    if let Some(dir) =
+        docker_config.and_then(|owned| crate::docker_config::for_commands_in(owned, &var))
+    {
+        command.env("DOCKER_CONFIG", dir);
     }
     // The CLI looks `docker` and `podman` up by name. Opened from Finder, this app has the system's
     // minimal PATH, which reaches neither Docker Desktop's `/usr/local/bin` nor `/opt/podman/bin`;
@@ -3593,6 +3621,138 @@ mod tests {
         input = envelope();
         input["stack"]["installedRelease"] = json!("0.15.0-rc.1+build.7");
         assert!(status(&input).is_ok());
+    }
+
+    /// The CLI's environment, from an environment of `pairs` and OpenBot's Docker configuration
+    /// in `owned`.
+    #[cfg(unix)]
+    fn cli_environment(
+        pairs: &[(&str, &Path)],
+        owned: &Path,
+    ) -> std::collections::BTreeMap<String, Option<String>> {
+        let cli = PinnedCli {
+            program: PathBuf::from("copilotkit"),
+            entry: None,
+            sha256: String::new(),
+        };
+        let pairs: std::collections::HashMap<String, std::ffi::OsString> = pairs
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.as_os_str().to_owned()))
+            .collect();
+        let docker = CliEngine {
+            engine: crate::engine::Engine::Docker,
+            api: None,
+            connection: None,
+            rootless: false,
+        };
+        command_inheriting(
+            &cli,
+            &["local", "setup", "--json"],
+            None,
+            Some(&docker),
+            |name| pairs.get(name).cloned(),
+            Some(owned),
+        )
+        .get_envs()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.map(|value| value.to_string_lossy().into_owned()),
+            )
+        })
+        .collect()
+    }
+
+    /// Docker Desktop's `~/.docker` on a Mac: its credential helper, which macOS stops to ask about
+    /// when OpenBot runs it, and its context.
+    #[cfg(unix)]
+    fn docker_desktop_home(home: &Path) {
+        let docker = home.join(".docker");
+        std::fs::create_dir_all(docker.join("contexts/meta/fe9c6bd7")).unwrap();
+        std::fs::write(
+            docker.join("config.json"),
+            r#"{"auths":{"ghcr.io":{}},"credsStore":"desktop","currentContext":"desktop-linux"}"#,
+        )
+        .unwrap();
+    }
+
+    /// The CLI's `helm pull` of the chart, and its `docker run` of the probe image, read Docker's
+    /// configuration. Docker Desktop's names `docker-credential-desktop`, which macOS stopped to ask
+    /// "OpenBot would like to access data from other apps" and setup timed out behind. The CLI runs
+    /// with OpenBot's own configuration instead: no credential store, the person's context.
+    #[cfg(unix)]
+    #[test]
+    fn the_cli_runs_without_the_persons_docker_credential_helper() {
+        let root = temp_root("cli-docker-config");
+        let home = root.join("home");
+        docker_desktop_home(&home);
+        let owned = root.join("docker-config");
+
+        let variables = cli_environment(&[("HOME", &home)], &owned);
+
+        assert_eq!(
+            variables.get("DOCKER_CONFIG"),
+            Some(&Some(owned.to_string_lossy().into_owned()))
+        );
+        let config: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(owned.join("config.json")).unwrap()).unwrap();
+        for key in crate::docker_config::CREDENTIAL_KEYS {
+            assert!(config.get(key).is_none(), "{key} reached the CLI");
+        }
+        assert_eq!(config["currentContext"], "desktop-linux");
+        assert!(owned.join("contexts/meta/fe9c6bd7").is_dir());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A person who points Docker somewhere themselves: their DOCKER_CONFIG is the configuration
+    /// mirrored, and their DOCKER_HOST and DOCKER_CONTEXT reach the CLI untouched.
+    #[cfg(unix)]
+    #[test]
+    fn the_cli_keeps_an_explicit_docker_config_host_and_context() {
+        let root = temp_root("cli-docker-config-explicit");
+        let home = root.join("home");
+        docker_desktop_home(&home);
+        let theirs = root.join("theirs");
+        std::fs::create_dir_all(theirs.join("contexts")).unwrap();
+        std::fs::write(
+            theirs.join("config.json"),
+            r#"{"credsStore":"osxkeychain","currentContext":"colima"}"#,
+        )
+        .unwrap();
+        let host = Path::new("unix:///Users/a/.colima/default/docker.sock");
+        let context = Path::new("colima");
+        let owned = root.join("docker-config");
+
+        let variables = cli_environment(
+            &[
+                ("HOME", &home),
+                ("DOCKER_CONFIG", &theirs),
+                ("DOCKER_HOST", host),
+                ("DOCKER_CONTEXT", context),
+            ],
+            &owned,
+        );
+
+        assert_eq!(
+            variables.get("DOCKER_CONFIG"),
+            Some(&Some(owned.to_string_lossy().into_owned()))
+        );
+        assert_eq!(
+            variables.get("DOCKER_HOST"),
+            Some(&Some(host.to_string_lossy().into_owned()))
+        );
+        assert_eq!(
+            variables.get("DOCKER_CONTEXT"),
+            Some(&Some("colima".into()))
+        );
+        let config: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(owned.join("config.json")).unwrap()).unwrap();
+        assert_eq!(config, json!({"currentContext": "colima"}));
+        assert_eq!(
+            std::fs::read_link(owned.join("contexts")).unwrap(),
+            theirs.join("contexts")
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn engine_variables(

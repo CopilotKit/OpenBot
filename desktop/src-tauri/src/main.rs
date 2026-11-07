@@ -16,8 +16,8 @@ mod outside_links;
 mod test_support;
 
 use openbot_desktop_lib::{
-    acquire, app_update, deployment, deployment_release, engine, env as openbot_env, harness,
-    host_access, install, local_eval, local_eval_state, preparation,
+    acquire, app_update, deployment, deployment_release, docker_config, engine, env as openbot_env,
+    harness, host_access, install, local_eval, local_eval_state, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install,
     shell_updates, stack, telemetry, tray, upgrade, windows as win,
@@ -7173,6 +7173,11 @@ fn main() {
             engine::tools_live_in(engine::tools_dir_under(&acquire::download_dir(
                 &stack::default_root(),
             )));
+            // Where OpenBot's own Docker configuration lives, the one without the person's
+            // credential helper (see `docker_config`). Before anything runs a container command.
+            if let Ok(data) = app.path().app_local_data_dir() {
+                docker_config::lives_in(data.join("docker-config"));
+            }
 
             remember_setup_url(app.handle())?;
             if let Some(main) = app.get_webview_window("main") {
