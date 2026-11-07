@@ -116,8 +116,12 @@ const TOOLS: readonly McpTool[] = Object.freeze([
       "",
       'When the person gives the routine a name ("call it Morning briefing", "a daily routine called Inbox',
       'sweep"), pass that name as `title`, in their words. The Routines page and your own page in OpenBot',
-      "show the routine by it. Pass a title only when the person named the routine, and never make one up:",
-      "without one, the instruction names it.",
+      "show the routine by it. Pass a title only when the person named the routine, and never make one up.",
+      "Without one, a routine that runs one of your goals carries that goal's title, and any other is",
+      "named by its instruction.",
+      "",
+      "To run one of your goals on a schedule, name the goal in the `instruction` by its title or its id",
+      '(`Run the goal "Track OpenBot releases"`) and leave `title` out unless the person named the routine.',
       "",
       "It takes no owner and no Bot. The routine belongs to the person you are talking to and runs as you;",
       "both are taken from the run itself, and there is no field for either.",
@@ -133,7 +137,7 @@ const TOOLS: readonly McpTool[] = Object.freeze([
         title: {
           type: "string",
           description:
-            "The name the person gave the routine, in their words, such as `Morning briefing`. At most 100 characters. Omit it unless they named it; never make one up.",
+            "The name the person gave the routine, in their words, such as `Morning briefing`. At most 100 characters. Omit it unless they named it; never make one up. Omitted, a routine that runs one of your goals carries the goal's title.",
         },
         cron: {
           type: "string",

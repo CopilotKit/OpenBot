@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { createActivityStore } from "../src/activity/activity";
 import { createAgentProfileStore } from "../src/agents/profile-store";
@@ -12,12 +12,16 @@ import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
   agents,
+  channelAgents,
   channels,
   intelligenceChannelMappings,
+  responsibilities,
   routines,
   users,
 } from "../src/db/schema";
 import { callTool, useRoutineTools } from "../src/plugins/builtin-routines";
+import { useGoalTools } from "../src/responsibilities/chat-tools";
+import { createResponsibilityStore } from "../src/responsibilities/store";
 import { createRoutineRoutes } from "../src/routines/routes";
 import { createRoutineStore } from "../src/routines/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -46,6 +50,27 @@ const channelStore = createChannelStore(
 );
 const store = createRoutineStore(database);
 const activity = createActivityStore(database);
+const goalStore = createResponsibilityStore(database, {
+  resolveTarget: async (ownerUserId, agentId, channelId) => {
+    const [row] = await database
+      .select({ threadId: intelligenceChannelMappings.threadId })
+      .from(intelligenceChannelMappings)
+      .innerJoin(
+        channelAgents,
+        and(
+          eq(channelAgents.channelId, intelligenceChannelMappings.channelId),
+          eq(channelAgents.agentId, agentId),
+        ),
+      )
+      .where(
+        and(
+          eq(intelligenceChannelMappings.userId, ownerUserId),
+          eq(intelligenceChannelMappings.channelId, channelId),
+        ),
+      );
+    return row ? { threadId: row.threadId } : null;
+  },
+});
 
 const prefix = `routine-title-${randomUUID()}`;
 const createdUserIds: string[] = [];
@@ -54,8 +79,12 @@ const createdChannelIds: string[] = [];
 
 afterEach(async () => {
   useRoutineTools(null);
+  useGoalTools(null);
   for (const userId of createdUserIds) {
     await database.delete(routines).where(eq(routines.ownerUserId, userId));
+    await database
+      .delete(responsibilities)
+      .where(eq(responsibilities.ownerUserId, userId));
   }
   for (const channelId of createdChannelIds.splice(0)) {
     await database
@@ -98,6 +127,11 @@ async function setUp() {
   const channel = await channelStore.create(owner, [profile.id]);
   createdChannelIds.push(channel.id);
   useRoutineTools(store);
+  useGoalTools({
+    store: goalStore,
+    engine: { ingest: async () => ({ duplicate: false }) as never },
+    conversationFor: store.conversationFor,
+  });
   const connection = {
     url: "builtin://routines/",
     actorId: owner.id,
@@ -223,6 +257,88 @@ describe("a routine the person names", () => {
         .from(routines)
         .where(eq(routines.ownerUserId, owner.id)),
     ).toEqual([]);
+  });
+});
+
+/*
+ * FOUND ON WINDOWS: asked to "make a goal to check the latest OpenBot release every morning and tell
+ * me what changed", a Bot made the goal "Track OpenBot releases" and, with no title as its tool says,
+ * a daily routine to run it. The Bot's page and Activity listed that routine by the sentence the Bot
+ * wrote for the next turn: `Run the existing goal "Track OpenBot releases" and report its result in
+ * this conversation.`
+ */
+describe("a routine a Bot makes to run one of its goals", () => {
+  const instruction =
+    "Run the existing goal \u201cTrack OpenBot releases\u201d and report its result in this conversation.";
+
+  async function withGoal() {
+    const setup = await setUp();
+    const goal = await callTool(setup.connection, "create_goal", {
+      title: "Track OpenBot releases",
+      instruction: "Check the latest OpenBot release and say what changed.",
+      successCriteria: "The person is told what changed in the latest release.",
+      recurring: true,
+    });
+    expect(goal.isError).toBe(false);
+    return setup;
+  }
+
+  test("carries the goal's title, on the Routines page and under Scheduled", async () => {
+    const { owner, agentId, connection } = await withGoal();
+
+    const result = await callTool(connection, "create_routine", {
+      instruction,
+      cron: "0 8 * * *",
+      timezone: "UTC",
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain('"Track OpenBot releases", instruction');
+    const page = await routinesPage(owner);
+    expect(page.routines).toEqual([
+      expect.objectContaining({ title: "Track OpenBot releases", instruction }),
+    ]);
+    const scheduled = (await activity.forBot(owner.id, agentId)).scheduled;
+    expect(scheduled.find((item) => item.kind === "routine")?.title).toBe(
+      "Track OpenBot releases",
+    );
+    expect(scheduled.map((item) => item.title)).not.toContain(instruction);
+  });
+
+  test("keeps the title the person gave it", async () => {
+    const { owner, connection } = await withGoal();
+
+    await callTool(connection, "create_routine", {
+      title: "Morning release check",
+      instruction,
+      cron: "0 8 * * *",
+      timezone: "UTC",
+    });
+
+    expect((await routinesPage(owner)).routines[0]?.title).toBe(
+      "Morning release check",
+    );
+  });
+
+  test("runs no goal of another Bot's, and stays untitled", async () => {
+    const { owner } = await withGoal();
+    const other = await profileStore.create(owner, {
+      name: "Other",
+      title: "Other",
+      roleDescription: "Something else.",
+      visibility: "private",
+    });
+    createdAgentIds.push(other.id);
+    const channel = await channelStore.create(owner, [other.id]);
+    createdChannelIds.push(channel.id);
+
+    await callTool(
+      { url: "builtin://routines/", actorId: owner.id, botId: other.id },
+      "create_routine",
+      { instruction, cron: "0 8 * * *", timezone: "UTC" },
+    );
+
+    expect((await routinesPage(owner)).routines[0]?.title).toBeNull();
   });
 });
 

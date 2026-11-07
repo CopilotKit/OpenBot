@@ -44,10 +44,12 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  responsibilities,
   routineRuns,
   routineSweeps,
   routines,
 } from "../db/schema";
+import { routineRunsGoal } from "../responsibilities/types";
 import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
 
 const SWEEP_ID = "routines";
@@ -163,7 +165,10 @@ export type RoutineInput = {
    */
   threadId?: string;
   instruction: string;
-  /** What the person called it, in their words. Absent or blank: it has no title. */
+  /**
+   * What the person called it, in their words. Absent or blank: the title of the goal it runs
+   * (`routineRunsGoal`), and no title when it runs none.
+   */
   title?: string;
   cron: string;
   timezone?: string;
@@ -618,6 +623,46 @@ export function createRoutineStore(database: Database): RoutineStore {
   }
 
   /**
+   * The title of the goal a new, untitled routine runs, or null when it runs none.
+   *
+   * FOUND ON WINDOWS: asked to "make a goal to check the latest OpenBot release every morning", a Bot
+   * made the goal "Track OpenBot releases" and a daily routine to run it, with no title, as its tool
+   * says unless the person named one. The routine was then listed by its instruction, `Run the
+   * existing goal "Track OpenBot releases" and report its result in this conversation.`, on the Bot's
+   * page and under Scheduled. A routine that runs a goal is the person's goal on a schedule, so it
+   * carries the goal's title. Which goal is `routineRunsGoal`, the rule Activity lists it by: one named
+   * by id first, else the longest title named, among this Bot's goals for this person that still run.
+   */
+  async function titleOfGoalItRuns(
+    ownerUserId: string,
+    agentId: string,
+    instruction: string,
+  ): Promise<string | null> {
+    const goals = await database
+      .select({ id: responsibilities.id, title: responsibilities.title })
+      .from(responsibilities)
+      .where(
+        and(
+          eq(responsibilities.ownerUserId, ownerUserId),
+          eq(responsibilities.agentId, agentId),
+          ne(responsibilities.status, "completed"),
+        ),
+      );
+    const run = goals.filter((goal) => routineRunsGoal(instruction, goal));
+    const goal =
+      run.find((candidate) => instruction.includes(candidate.id)) ??
+      run.sort((first, second) => second.title.length - first.title.length)[0];
+    if (!goal) return null;
+    // A goal's title may run to 160 characters and a routine's to 100, so a longer one is cut. Cut on
+    // graphemes, which can hold more code points than the cap counts: such a title leaves it untitled.
+    try {
+      return validTitle(oneLine(goal.title, MAX_TITLE_CODE_POINTS));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Serialize this owner's cap-guarded writes: count and write under one advisory lock.
    *
    * The cap used to be a bare count-then-write, and two concurrent creates that both counted 19 both
@@ -727,7 +772,13 @@ export function createRoutineStore(database: Database): RoutineStore {
 
     async create(input) {
       const instruction = validInstruction(input.instruction);
-      const title = validTitle(input.title);
+      const title =
+        validTitle(input.title) ??
+        (await titleOfGoalItRuns(
+          input.ownerUserId,
+          input.agentId,
+          instruction,
+        ));
       const timezone = input.timezone ?? "UTC";
       const channelId = await resolveChannel(input.ownerUserId, input.agentId, {
         channelId: input.channelId,
