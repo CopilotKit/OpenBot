@@ -270,6 +270,47 @@ test("a back end an older app installed is updated to this app's release before 
   ).toBeNull();
 });
 
+/**
+ * Found on a Mac: Quit stops the back end, so the first Start after an app update finds an rc.8
+ * stack stopped. Updated while stopped, the CLI waited three minutes for services that were not
+ * running and failed. It is started first, as any stopped stack is, and updated once it is up.
+ */
+test("a stopped back end an older app installed is started first, then updated", async () => {
+  const stopped = {
+    ...onRelease("0.16.0-rc.8", "0.16.0-rc.9"),
+    readiness: "stopped" as const,
+  };
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    const action = (args as { action: string }).action;
+    const done = (what: string) =>
+      invokeCalls.some(
+        (call) => (call.args as { action?: string })?.action === what,
+      );
+    if (action === "start") return report();
+    if (action === "update") return onRelease("0.16.0-rc.9", null);
+    if (done("update")) return onRelease("0.16.0-rc.9", null);
+    return done("start") ? onRelease("0.16.0-rc.8", "0.16.0-rc.9") : stopped;
+  };
+  const started: Startable[] = [];
+  view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:start",
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+});
+
 test("a back end already on this app's release is not updated", async () => {
   invokeHandler = answers({
     run_local_eval: [onRelease("0.16.0-rc.9", null)],
