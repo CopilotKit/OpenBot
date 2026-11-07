@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A goal's run is offered one tool for each goal job. It was also given Routines' copies, so it saw
+  `create_goal` beside `mcp__routines__create_goal` and the same for each goal tool.
 - OpenBot Desktop's Updates section on a build that doesn't update itself, such as an internal
   build, says so up front. It promised signed updates and then said the opposite after Check for
   updates.
