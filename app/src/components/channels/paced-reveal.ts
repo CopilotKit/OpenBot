@@ -25,6 +25,15 @@ const MIN_CHARS_PER_MS = MIN_CHARS_PER_SECOND / 1000;
 /** One frame at 60Hz, and the most one step may count: a tab in the background stalls frames. */
 const FRAME_MS = 16;
 const MAX_FRAME_MS = 50;
+/**
+ * How long the reveal waits for a frame before taking its step on a timer instead.
+ *
+ * A window nobody can see draws no frames: WebKit stops them for an OpenBot Desktop window covered
+ * by another app, and browsers for a hidden tab. Paced by frames alone, a reply that arrived then
+ * stayed cut off mid-sentence until somebody looked, and a screen reader or a glance at the window
+ * read the cut. Timers still run there (throttled), so the reveal keeps going and finishes.
+ */
+export const STALLED_FRAME_MS = 100;
 
 function isSpace(character: string | undefined): boolean {
   return character !== undefined && /\s/.test(character);
@@ -124,7 +133,18 @@ export function usePacedReveal(
   useEffect(() => {
     if (!pending) return;
     let last: number | null = null;
-    let frame = window.requestAnimationFrame(function step(now) {
+    let frame = 0;
+    let stalled: ReturnType<typeof setTimeout> | undefined;
+    // A frame, or the timer if no frame comes: whichever is first takes the step, the other is off.
+    const schedule = () => {
+      frame = window.requestAnimationFrame(step);
+      stalled = setTimeout(() => {
+        window.cancelAnimationFrame(frame);
+        step(performance.now());
+      }, STALLED_FRAME_MS);
+    };
+    function step(now: number) {
+      clearTimeout(stalled);
       // The first frame of a loop has no previous one; a frame's worth keeps it moving.
       const elapsedMs = Math.min(
         MAX_FRAME_MS,
@@ -143,9 +163,13 @@ export function usePacedReveal(
           finishInMs: finishAt === null ? FINISH_MS : finishAt - now,
         }),
       );
-      frame = window.requestAnimationFrame(step);
-    });
-    return () => window.cancelAnimationFrame(frame);
+      schedule();
+    }
+    schedule();
+    return () => {
+      window.cancelAnimationFrame(frame);
+      clearTimeout(stalled);
+    };
   }, [pending]);
 
   return pending ? text.slice(0, shown) : text;
