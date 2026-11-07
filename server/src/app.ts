@@ -627,6 +627,18 @@ export function createApp(
       );
     }
     if (!auth) {
+      /*
+       * One person and no sign-in (OpenBot Desktop): there is no session for Sign out to end, so
+       * ending it has already happened. The app no longer offers Sign out here; a page loaded
+       * before that change still could, and a 503 left the person staring at "No identity provider
+       * is configured." for a button that cannot fail.
+       */
+      if (
+        config.singleUser &&
+        context.req.method === "POST" &&
+        new URL(context.req.url).pathname === "/api/auth/sign-out"
+      )
+        return context.json({ success: true });
       return context.json(
         { error: "No identity provider is configured." },
         503,

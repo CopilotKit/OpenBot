@@ -150,6 +150,35 @@ describe("runtime capabilities", () => {
 });
 
 describe("authentication availability", () => {
+  test("a single-person install answers Sign out as done, since it has no sign-in to end", async () => {
+    // OpenBot Desktop: one person, no identity provider, no sessions. A page that still offers Sign
+    // out must not be told "No identity provider is configured." for a button that cannot fail.
+    const single = createApp(
+      loadConfig(
+        testEnvironment({
+          OPENBOT_SINGLE_USER: "true",
+          BETTER_AUTH_URL: undefined,
+          BETTER_AUTH_SECRET: undefined,
+          GOOGLE_OAUTH_CLIENT_ID: undefined,
+          GOOGLE_OAUTH_CLIENT_SECRET: undefined,
+          INITIAL_ADMIN_EMAILS: undefined,
+        }),
+      ),
+    );
+    const signOut = await single.request(
+      "http://127.0.0.1:3001/api/auth/sign-out",
+      { method: "POST" },
+    );
+    expect(signOut.status).toBe(200);
+    await expect(signOut.json()).resolves.toEqual({ success: true });
+    // Only Sign out: anything else that needs a provider still says there is none.
+    const signIn = await single.request(
+      "http://127.0.0.1:3001/api/auth/sign-in/social",
+      { method: "POST" },
+    );
+    expect(signIn.status).toBe(503);
+  });
+
   test("fails loudly when no identity provider has been configured", async () => {
     const response = await app.request(
       "http://openbot.local/api/auth/sign-in/social",
