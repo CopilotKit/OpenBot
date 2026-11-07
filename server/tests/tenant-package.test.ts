@@ -1665,11 +1665,15 @@ describe("bundled personal starter", () => {
     return tenantId;
   }
 
-  async function loadStarter(tenantId: string, endpoint: string) {
+  async function loadStarter(
+    tenantId: string,
+    endpoint: string,
+    name?: string,
+  ) {
     const env = {
       PICKED_HARNESS_URL: endpoint,
       PICKED_HARNESS_NAME:
-        endpoint === claude ? "Claude Agent SDK" : "LangGraph",
+        name ?? (endpoint === claude ? "Claude Agent SDK" : "LangGraph"),
       PICKED_HARNESS_KIND: "remote-ag-ui",
     };
     const previous = Object.fromEntries(
@@ -1733,8 +1737,9 @@ describe("bundled personal starter", () => {
       expect(await profiles.get(actor, "picked-harness")).toMatchObject({
         name: "Personal Assistant",
         title: `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}.`,
-        roleDescription:
-          "Help with email, your calendar, research, planning and everyday errands.",
+        roleDescription: loaded.agents.find(
+          ({ id }) => id === "personal-assistant",
+        )?.configuration.systemPrompt,
       });
       expect(await attachedSkills("picked-harness")).toEqual([
         "bot-creator",
@@ -1811,6 +1816,101 @@ describe("bundled personal starter", () => {
     });
   });
 
+  test.each(["", claude])(
+    "starter instructions remain visible through subtitle and instruction edits: %s",
+    async (endpoint) => {
+      const tenantId = starterTestTenant();
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(tenantId, endpoint),
+      );
+      const id = endpoint ? "picked-harness" : "personal-assistant";
+      const starter = await profiles.get(actor, id);
+      if (!starter) throw new Error("Missing starter");
+      expect(starter.roleDescription).toContain("Never type a password");
+      await profiles.update(actor, id, {
+        name: starter.name,
+        title: "Everyday life.",
+        roleDescription: starter.roleDescription,
+        visibility: "public",
+      });
+      const [before] = await database
+        .select({ configuration: agents.configuration })
+        .from(agents)
+        .where(eq(agents.id, id));
+      if (!endpoint)
+        expect(before?.configuration).toMatchObject({
+          systemPrompt: starter.roleDescription,
+        });
+      await profiles.update(actor, id, {
+        name: starter.name,
+        title: "Everyday life.",
+        roleDescription: `${starter.roleDescription} I live in Berlin.`,
+        visibility: "public",
+      });
+      const [after] = await database
+        .select({ configuration: agents.configuration })
+        .from(agents)
+        .where(eq(agents.id, id));
+      if (!endpoint)
+        expect(after?.configuration).toMatchObject({
+          systemPrompt: `${starter.roleDescription} I live in Berlin.`,
+        });
+      else {
+        const running = (await runtime(actor)).find((agent) => agent.id === id);
+        if (running?.type !== "remote_ag_ui")
+          throw new Error("Expected remote starter");
+        expect(running.standingMessage.content).toContain(
+          "Never type a password",
+        );
+        expect(running.standingMessage.content).toContain("I live in Berlin.");
+        expect(after?.configuration).not.toHaveProperty("standingInstructions");
+      }
+    },
+  );
+
+  test("fresh external starters have no guessed attribution", async () => {
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(
+        starterTestTenant(),
+        "https://agents.example/run",
+        "An agent you already run",
+      ),
+    );
+    expect(await profiles.get(actor, "picked-harness")).toMatchObject({
+      title: "Everyday life.",
+    });
+  });
+
+  test("a personally edited connection survives restart and installer harness switches", async () => {
+    const tenantId = starterTestTenant();
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    const starter = await profiles.get(actor, "picked-harness");
+    if (!starter) throw new Error("Missing starter");
+    await profiles.update(actor, starter.id, {
+      name: starter.name,
+      title: starter.title,
+      roleDescription: starter.roleDescription,
+      visibility: "public",
+      endpoint: "https://agents.example/run",
+    });
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, langchain),
+    );
+    expect(await profiles.get(actor, starter.id)).toMatchObject({
+      endpoint: "https://agents.example/run",
+    });
+  });
+
   test("legacy catalogue names follow harness changes without renaming custom Bots", async () => {
     const tenantId = starterTestTenant();
     const legacy = await loadStarter(tenantId, langchain);
@@ -1833,6 +1933,25 @@ describe("bundled personal starter", () => {
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       name: "Claude Agent SDK",
       title: "Claude Agent SDK",
+      endpoint: claude,
+      systemOwned: true,
+    });
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(
+        tenantId,
+        "https://agents.example/run",
+        "An agent you already run",
+      ),
+    );
+    expect(await profiles.get(actor, "picked-harness")).toMatchObject({
+      endpoint: "https://agents.example/run",
+    });
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       endpoint: claude,
       systemOwned: true,
     });

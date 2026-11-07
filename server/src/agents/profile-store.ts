@@ -653,7 +653,8 @@ export function createAgentProfileStore(
            */
           const configuration: Record<string, unknown> = {
             ...previous,
-            ...(row?.type === "built_in"
+            ...(row?.type === "built_in" &&
+            input.roleDescription !== profile.roleDescription
               ? { systemPrompt: input.roleDescription }
               : {}),
             ...(input.endpoint ? { endpoint: input.endpoint } : {}),
@@ -676,6 +677,15 @@ export function createAgentProfileStore(
                 }
               : {}),
           };
+
+          // A connection edited in the profile belongs to the person, not installer setup.
+          if (
+            previous.personalStarter === true &&
+            ((input.endpoint && input.endpoint !== profile.endpoint) ||
+              (input.auth && vault))
+          ) {
+            configuration.personalConnection = true;
+          }
 
           if (
             row?.type !== "built_in" &&

@@ -853,7 +853,10 @@ function personalStarterSeed(
   );
   if (fresh && fallback) {
     const harness =
-      picked && HARNESSES.find(({ name }) => name === picked.name);
+      picked &&
+      HARNESSES.find(
+        ({ name, image }) => image !== null && name === picked.name,
+      );
     // Starter copy is ordinary editable profile text, written only on the first seed.
     const harnessName = picked
       ? harness
@@ -867,17 +870,18 @@ function personalStarterSeed(
       picked
         ? {
             ...fallback,
+            roleDescription: String(fallback.configuration.systemPrompt),
             title,
             id: picked.id,
             type: picked.type,
             configuration: {
               ...picked.configuration,
-              standingInstructions: fallback.configuration.systemPrompt,
               personalStarter: true,
             },
           }
         : {
             ...fallback,
+            roleDescription: String(fallback.configuration.systemPrompt),
             title,
             configuration: { ...fallback.configuration, personalStarter: true },
           },
@@ -1022,10 +1026,12 @@ export async function synchronizeTenantPackage(
             isNull(agentProfiles.ownerUserId),
             isNull(agentProfiles.deletedAt),
             sql`coalesce(${stored}->>'personalStarter', 'false') <> 'true'`,
-            sql`${stored}->>'endpoint' ~ '^http://agent-harness:[0-9]+([/?]|$)'`,
+            sql`(${stored}->'installerManaged' = 'true'::jsonb or ${stored}->>'endpoint' ~ '^http://agent-harness:[0-9]+([/?]|$)')`,
           ),
         );
-      const selected = HARNESSES.find(({ name }) => name === picked.name);
+      const selected = HARNESSES.find(
+        ({ name, image }) => image !== null && name === picked.name,
+      );
       if (legacy && selected) {
         const catalogueNames = HARNESSES.flatMap((harness) => [
           harness.name,
@@ -1046,6 +1052,7 @@ export async function synchronizeTenantPackage(
       }
       const connection = JSON.stringify({
         ...picked.configuration,
+        installerManaged: true,
       });
       await transaction
         .update(agentTable)
@@ -1058,7 +1065,9 @@ export async function synchronizeTenantPackage(
           and(
             eq(agentTable.id, PICKED_HARNESS),
             ne(agentTable.type, "built_in"),
+            sql`coalesce(${stored}->>'personalConnection', 'false') <> 'true'`,
             sql`(${stored}->'personalStarter' = 'true'::jsonb
+              or ${stored}->'installerManaged' = 'true'::jsonb
               or ${stored}->>'endpoint' ~ '^http://agent-harness:[0-9]+([/?]|$)')`,
             eq(agentTable.packageId, deploymentPackage.id),
             inArray(
