@@ -339,6 +339,91 @@ describe("Activity and attention", () => {
     }
   });
 
+  /*
+   * FOUND LIVE: a goal a daily routine runs was listed under On demand as "Runs when asked", below
+   * the routine that runs it every morning, and its run under Completed as "Goal · succeeded" under
+   * the goal's own title, which read as a second goal that had finished.
+   */
+  test("a goal a routine runs says when, from its routine, and is lined up with it", async () => {
+    const goal = `responsibility:${prefix}-goal-${owner}`;
+    const routine = `${prefix}-routine-runs-goal`;
+    const nextRunAt = new Date(Date.now() + 7_200_000);
+    await database.insert(routines).values({
+      id: routine,
+      ownerUserId: owner,
+      agentId: bot,
+      channelId: direct,
+      // As a Bot wrote it live: the goal named by its title.
+      instruction:
+        "Find and run the active goal \u201cKeep the build green\u201d and report what changed.",
+      cron: "0 8 * * *",
+      timezone: "America/Los_Angeles",
+      nextRunAt,
+    });
+    try {
+      const lined = await activity.forBot(owner, bot);
+      expect(lined.onDemand.some((item) => item.id === goal)).toBe(false);
+      const item = lined.scheduled.find((candidate) => candidate.id === goal);
+      expect(item).toMatchObject({
+        title: "Keep the build green",
+        detail: "Every day at 08:00 (America/Los_Angeles), from its routine",
+        status: "active",
+      });
+      expect(item?.at).toBe(nextRunAt.toISOString());
+
+      // Switched off, the routine runs nothing, and the goal waits to be asked again.
+      await database
+        .update(routines)
+        .set({ enabled: false })
+        .where(eq(routines.id, routine));
+      const asked = await activity.forBot(owner, bot);
+      expect(asked.onDemand).toContainEqual(
+        expect.objectContaining({ id: goal, detail: "Runs when asked" }),
+      );
+      expect(asked.scheduled.some((candidate) => candidate.id === goal)).toBe(
+        false,
+      );
+    } finally {
+      await database.delete(routines).where(eq(routines.id, routine));
+    }
+  });
+
+  test("a goal's run is named as a run of that goal", async () => {
+    await database.insert(responsibilityEvents).values({
+      id: `${prefix}-named-run-event`,
+      ownerUserId: owner,
+      source: "manual",
+      externalId: `${prefix}-named-run-event`,
+      type: "requested",
+      payload: {},
+    });
+    await database.insert(responsibilityRuns).values({
+      id: `${prefix}-named-run`,
+      responsibilityId: `${prefix}-goal-${owner}`,
+      eventId: `${prefix}-named-run-event`,
+      status: "succeeded",
+      replyText: "The build is green.",
+      startedAt: new Date(),
+      finishedAt: new Date(),
+    });
+    const result = await activity.forBot(owner, bot);
+    expect(
+      result.completed.find(
+        (item) => item.id === `responsibility-run:${prefix}-named-run`,
+      ),
+    ).toMatchObject({
+      title: "Run of Keep the build green",
+      status: "succeeded",
+      detail: "The build is green.",
+    });
+    // The goal itself keeps its own name.
+    expect(
+      result.onDemand.find(
+        (item) => item.id === `responsibility:${prefix}-goal-${owner}`,
+      )?.title,
+    ).toBe("Keep the build green");
+  });
+
   test("sections hold the owner's work and nobody else's", async () => {
     const result = await activity.forBot(owner, bot);
     const all = [

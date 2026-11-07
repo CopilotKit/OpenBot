@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
 import type { ComponentType } from "react";
+import { withoutOpenBotWorking } from "@/components/manage/audit-page";
 import { settingsSidebarItems } from "@/components/settings/settings-sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { auditKeys } from "@/lib/audit/queries";
@@ -43,7 +44,11 @@ async function renderAs(edition: "team" | "personal", Page: ComponentType) {
     localEvaluation: edition === "personal",
     edition,
   });
-  queryClient.setQueryData([...auditKeys.all, ""], { events: [] });
+  // Activity asks without OpenBot's own working; Admin asks for everything.
+  queryClient.setQueryData(
+    [...auditKeys.all, edition === "personal" ? withoutOpenBotWorking("") : ""],
+    { events: [] },
+  );
   queryClient.setQueryData(agentKeys.list(false), []);
   queryClient.setQueryData(agentKeys.list(true), []);
   const router = createRouter({

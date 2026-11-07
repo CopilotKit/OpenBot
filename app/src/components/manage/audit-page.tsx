@@ -21,6 +21,7 @@ import {
   COMPUTER_ACTION_EVENT_TYPES,
   DID_NOT_HAPPEN_EVENT_TYPES,
   eventTypeFilter,
+  OPENBOT_WORKING_EVENT_TYPES,
   oneRowPerAction,
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
@@ -76,6 +77,19 @@ export function withBot(search: string, bot: string | undefined): string {
   return `?${params.toString()}`;
 }
 
+/**
+ * A view's query as the personal edition's Activity asks it: without OpenBot's own working, asked of
+ * the server so the page still holds a full page of rows. The export asks the same, so the file is
+ * the table.
+ */
+export function withoutOpenBotWorking(search: string): string {
+  const params = new URLSearchParams(
+    search.startsWith("?") ? search.slice(1) : search,
+  );
+  params.set("excludeEventType", OPENBOT_WORKING_EVENT_TYPES.join(","));
+  return `?${params.toString()}`;
+}
+
 /** What the page says under its title in Admin, where an admin reviews every Bot against policy. */
 const ADMIN_DESCRIPTION =
   "Review Bot actions and actions blocked by this deployment’s policy.";
@@ -100,13 +114,17 @@ export function AuditPage({
 } = {}) {
   const paths = useManagePaths();
   const [view, setView] = useState<string>(FILTERS[0].search);
-  const search = withBot(view, bot);
+  // The stored event names and OpenBot's own working are Admin's to read; the personal edition's
+  // Activity is anybody's page. Its route has the edition loaded before this draws.
+  const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
+  const search =
+    edition === "personal"
+      ? withoutOpenBotWorking(withBot(view, bot))
+      : withBot(view, bot);
   const [query, setQuery] = useState("");
   const events = useQuery(auditEventsQueryOptions(search));
   const rows = oneRowPerAction((events.data?.events ?? []) as AuditEvent[]);
   const nameFor = useBotNames();
-  // The stored event names are Admin's to read; the personal edition's Activity is anybody's page.
-  const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportCapped, setExportCapped] = useState<number | null>(null);

@@ -20,6 +20,7 @@ import {
   skillSharingAllowed,
   skillSharingInSnapshot,
 } from "./admin/controls";
+import { fixSettings } from "./admin/settings-store";
 import {
   CoworkerUnavailableError,
   createActorAgentResolver,
@@ -171,7 +172,6 @@ import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
 import { setEdition } from "./edition";
-import { fixSettings } from "./admin/settings-store";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -244,13 +244,13 @@ import {
   startPersonalDefaultApps,
   withPersonalDefaults,
 } from "./plugins/personal-defaults";
-import { startBrokeredRelist } from "./plugins/relist";
 import {
   arcadeVerifierNotice,
   ownsBrokerProject,
   selectProviderWiring,
   storedProvider,
 } from "./plugins/provider-wiring";
+import { startBrokeredRelist } from "./plugins/relist";
 import {
   createSharedUseGate,
   createSharedUseStore,
@@ -281,6 +281,10 @@ import { createRecorderExtension } from "./recorder/wiring";
 import { createRequestActor } from "./request-actor";
 import { createResponsibilityBindingStore } from "./responsibilities/bindings";
 import {
+  useGoalTools,
+  withoutGoalCopiesInGoalRun,
+} from "./responsibilities/chat-tools";
+import {
   createEmailTriggerRoutes,
   createSnsVerifier,
   fetchText as fetchSnsText,
@@ -295,10 +299,6 @@ import {
 import { createResponsibilityStore } from "./responsibilities/store";
 import { responsibilityTools } from "./responsibilities/tools";
 import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
-import {
-  useGoalTools,
-  withoutGoalCopiesInGoalRun,
-} from "./responsibilities/chat-tools";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
 import type { Responsibility } from "./responsibilities/types";
@@ -306,7 +306,11 @@ import { createServerResponsibilityEngine } from "./responsibilities/wiring";
 import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
-import { createModelCompleter, routingModelFor } from "./routing/model";
+import {
+  createModelCompleter,
+  createSkillChooser,
+  routingModelFor,
+} from "./routing/model";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createSetupSources, modelKeyOf } from "./setup/checklist";
 import { createComputerCheck } from "./setup/computer-check";
@@ -780,22 +784,34 @@ if (chooseOpenAIApi(runtimeModel) === "responses")
     }),
   );
 
+/** The deployment's own model key, resolved on every call so a rotated one is used by the next. */
+const resolveDeploymentModelKey = () =>
+  resolveModelApiKey({
+    encryptionKey: config.keyEncryptionKey,
+    reader: credentialStore,
+    provider: runtimeModel.provider,
+    keyId: tenantPackage.model.credentialSecretRef,
+    environment: process.env,
+  });
+
 /**
- * Pass one of tool selection: which skills a message needs, on the deployment's own model.
- *
- * Built once rather than per request, because it holds nothing about a person: the key is resolved
- * on every call, so a credential rotated a moment ago is used by the next run.
+ * Pass one of tool selection, on the model the built-in Bots run on: their key, or their plan's
+ * harness. See `createSkillChooser`. Built once rather than per request, because it holds nothing
+ * about a person.
  */
-const chooseSkills = createModelCompleter({
+const chooseSkills = createSkillChooser(
+  runtimeModel,
+  resolveDeploymentModelKey,
+);
+
+/**
+ * The approval reviewer's model: the deployment's own, with its key or on its plan's harness (see
+ * `createModelCompleter`). On a plan it threw on every call and failed closed, so Auto-review asked
+ * the person about everything. It still fails closed on an error or a timeout (`reviewAction`).
+ */
+const reviewActions = createModelCompleter({
   model: runtimeModel,
-  resolveApiKey: () =>
-    resolveModelApiKey({
-      encryptionKey: config.keyEncryptionKey,
-      reader: credentialStore,
-      provider: runtimeModel.provider,
-      keyId: tenantPackage.model.credentialSecretRef,
-      environment: process.env,
-    }),
+  resolveApiKey: resolveDeploymentModelKey,
 });
 
 /*
@@ -851,7 +867,7 @@ const approvalService = createServerApprovalService({
   authoriseQuestion,
   routineIntelligence,
   approvalComputerTools,
-  review: (prompt, signal) => chooseSkills(prompt, signal),
+  review: (prompt, signal) => reviewActions(prompt, signal),
   // Assigned further down, once delivery is wired.
   notify: (scope, input) => deliveryNotifications(scope, input),
 });
@@ -1870,6 +1886,8 @@ const selectionForActor = (actorId: string): ToolSelection => ({
         granted: selection.granted,
         offered: selection.offered.length,
         skills: selection.skills,
+        // Set when the offer was cut to what one request may carry. See `fitToolLimit`.
+        ...(selection.limit === undefined ? {} : { limit: selection.limit }),
       },
     });
   },

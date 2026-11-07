@@ -38,6 +38,17 @@ describe("plainFailure", () => {
     expect(plainFailure("invalid x-api-key")).toBe(
       "the model provider turned the request away",
     );
+    // A provider's refusal, as a run now ends with it (provider-refusal.ts).
+    expect(
+      plainFailure(
+        "OpenAI turned down the request because this Bot has more tools than the model accepts. Remove some of this Bot's apps, then try again.",
+      ),
+    ).toBe("the model provider turned the request away");
+    expect(
+      plainFailure(
+        "OpenAI is having problems right now. Wait a few minutes, then try again.",
+      ),
+    ).toBe("a service didn't answer");
     expect(plainFailure('429 {"error":{"type":"rate_limit"}} at line 3')).toBe(
       "something went wrong during the run",
     );

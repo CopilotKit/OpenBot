@@ -403,7 +403,9 @@ function auditColumns(
     {
       id: "decision",
       header: "Decision",
-      cell: ({ row }) => <DecisionCell event={row.original} />,
+      cell: ({ row }) => (
+        <DecisionCell event={row.original} storedNames={storedNames} />
+      ),
       enableSorting: false,
     },
     {

@@ -20,6 +20,21 @@ describe("buildResponsibilityTurn", () => {
       `${PARTS.instruction}\n\nSuccess criteria: ${PARTS.successCriteria}\nProgress so far: No progress recorded yet.\nTrigger: manual/requested\nEvent data:\n${PARTS.eventData}\n\nRecord meaningful progress with report_goal_progress for goal ${PARTS.responsibilityId}.`,
     );
   });
+
+  test("tells the run of a goal that repeats that it is one of many, and reads back the same", () => {
+    const turn = buildResponsibilityTurn({
+      ...PARTS,
+      repeats: "a routine runs it",
+    });
+    expect(turn).toContain(
+      `${PARTS.eventData}\n\nThis goal repeats because a routine runs it. This run is one of many: record its result with report_goal_progress, and the goal stays active. Only the person ends it. If it looks finished for good, say so in your reply.\n\nRecord meaningful progress with report_goal_progress for goal ${PARTS.responsibilityId}.`,
+    );
+    expect(readResponsibilityTurn(turn)).toEqual({
+      instruction: PARTS.instruction,
+      trigger: "manual/requested",
+      responsibilityId: PARTS.responsibilityId,
+    });
+  });
 });
 
 describe("readResponsibilityTurn", () => {

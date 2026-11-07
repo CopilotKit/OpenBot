@@ -16,6 +16,14 @@ const CRITERIA = "\n\nSuccess criteria: ";
 const PROGRESS = "\nProgress so far: ";
 const TRIGGER = "\nTrigger: ";
 const EVENT = "\nEvent data:\n";
+/**
+ * A goal that repeats: why, then what its run does. Every run of one meets its success criteria, and
+ * a run told only to record progress completed the goal it was one run of. Inside the scaffolding
+ * that `readResponsibilityTurn` takes back apart, so the person's instruction is drawn as it was.
+ */
+const REPEATS = "\n\nThis goal repeats because ";
+const ONE_OF_MANY =
+  ". This run is one of many: record its result with report_goal_progress, and the goal stays active. Only the person ends it. If it looks finished for good, say so in your reply.";
 const REPORT =
   "\n\nRecord meaningful progress with report_goal_progress for goal ";
 /**
@@ -33,13 +41,18 @@ export type ResponsibilityTurnParts = {
   /** The event payload, already wrapped in its untrusted envelope by the caller. */
   eventData: string;
   responsibilityId: string;
+  /** Why the goal repeats, in words ("a routine runs it"), when it does. */
+  repeats?: string;
 };
 
 /** The model-facing message for one responsibility turn. */
 export function buildResponsibilityTurn(
   parts: ResponsibilityTurnParts,
 ): string {
-  return `${parts.instruction}${CRITERIA}${parts.successCriteria}${PROGRESS}${parts.progress || "No progress recorded yet."}${TRIGGER}${parts.trigger.source}/${parts.trigger.type}${EVENT}${parts.eventData}${REPORT}${parts.responsibilityId}.`;
+  const repeats = parts.repeats
+    ? `${REPEATS}${parts.repeats}${ONE_OF_MANY}`
+    : "";
+  return `${parts.instruction}${CRITERIA}${parts.successCriteria}${PROGRESS}${parts.progress || "No progress recorded yet."}${TRIGGER}${parts.trigger.source}/${parts.trigger.type}${EVENT}${parts.eventData}${repeats}${REPORT}${parts.responsibilityId}.`;
 }
 
 export type ResponsibilityTurn = {

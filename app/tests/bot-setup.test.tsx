@@ -102,6 +102,7 @@ function serve(
     isolated?: boolean;
     isolationAvailable?: boolean;
     visibility?: AgentProfile["visibility"];
+    instructions?: string;
   } = {},
 ) {
   let profile: AgentProfile = {
@@ -121,6 +122,9 @@ function serve(
     hasAuth: false,
     hasCallbackToken: false,
     isolated: options.isolated ?? false,
+    ...(options.instructions === undefined
+      ? {}
+      : { instructions: options.instructions }),
   };
   const store = {
     get: async () => profile,
@@ -223,6 +227,48 @@ test("the personal edition's Setup has no Visibility or Isolated: one person, on
   ).toBe("https://calendly.com/d/dwfr-k64-8d2/openbot-for-business");
   expect(view.queryByText("Visibility")).toBeNull();
   expect(view.queryByText("Isolated")).toBeNull();
+});
+
+/*
+ * The starter Bot's header shows what it does, so what it does is a sentence for the person and
+ * its instructions are their own row, labelled as instructions and saved on their own.
+ */
+test("the starter Bot's Setup edits its instructions apart from what it does", async () => {
+  const instructions =
+    "You are a personal assistant for one person. Be clear and brief.";
+  serve(PICKED, actor.id, { instructions });
+  const view = draw("personal");
+  const user = userEvent.setup({ document: view.baseElement.ownerDocument });
+
+  const described = await view.findByRole("button", { name: /^What it does/ });
+  expect(described.textContent).toContain("Review receipts.");
+  expect(described.textContent).not.toContain("You are");
+  const instructed = view.getByRole("button", { name: /^Instructions/ });
+  expect(instructed.textContent).toContain(instructions);
+
+  await user.click(instructed);
+  const field = await view.findByDisplayValue(instructions);
+  await user.type(field, " I live in Berlin.");
+  await user.click(view.getByRole("button", { name: "Save" }));
+
+  await waitFor(() => expect(updates).toHaveLength(1));
+  expect(updates[0]).toMatchObject({
+    roleDescription: "Review receipts.",
+    instructions: `${instructions} I live in Berlin.`,
+  });
+});
+
+test("a Bot whose instructions are what it does has no separate Instructions row", async () => {
+  serve(MANAGED);
+  const view = draw("personal");
+  expect(
+    await view.findByRole("button", { name: /^What it does/ }),
+  ).toBeTruthy();
+  expect(view.queryByRole("button", { name: /^Instructions/ })).toBeNull();
+
+  await rename(view, "Receipts");
+  await waitFor(() => expect(updates).toHaveLength(1));
+  expect(updates[0]).not.toHaveProperty("instructions");
 });
 
 test("a built-in coworker can be renamed on a deployment whose own Bot lives on localhost", async () => {

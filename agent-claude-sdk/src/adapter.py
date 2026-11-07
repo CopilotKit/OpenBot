@@ -25,6 +25,7 @@ from claude_agent_sdk import (
     CLINotFoundError,
     EffortLevel,
     HookMatcher,
+    TextBlock,
     ToolResultBlock,
     UserMessage,
 )
@@ -52,6 +53,26 @@ START_FAILED = (
 
 class ModelAuthenticationError(Exception):
     pass
+
+
+class ModelRefusedError(Exception):
+    """The model provider refused the run, in Claude Code's words for it.
+
+    Claude Code answers a refusal (out of credit, a rate limit, an unknown model, a prompt too long,
+    the API down) with an assistant message of its own, marked with `error`. Streamed as one, it read
+    as the Bot's answer: "API Error: Request rejected (429) · This request would exceed the rate
+    limit …", and the turn finished as if it had worked. It ends the run as a RUN_ERROR instead,
+    coded `OPENBOT_MODEL_REFUSED`, and the server says it in words
+    (server/src/agents/provider-refusal.ts).
+    """
+
+
+def refusal_text(message):
+    """What Claude Code said about a refusal, or a name for it when it said nothing."""
+    text = " ".join(
+        block.text for block in message.content if isinstance(block, TextBlock) and block.text
+    ).strip()
+    return text or f"The model provider refused the request ({message.error})."
 
 
 def not_started(error):
@@ -266,9 +287,15 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     turn = self._turns.get(thread_id)
                     if turn:
                         turn.authentication_failed = True
+                    # Claude Code's own words stay here, in the log: the sentence below replaces them.
+                    logger.warning(
+                        "The model provider refused the credential: %s", refusal_text(message)
+                    )
                     raise ModelAuthenticationError(
                         "Sign in to your model provider again."
                     )
+                if isinstance(message, AssistantMessage) and message.error:
+                    raise ModelRefusedError(refusal_text(message))
                 if (
                     isinstance(message, StreamEvent)
                     and message.event.get("type") == "message_start"
@@ -403,6 +430,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     message=str(error),
                     code="OPENBOT_MODEL_AUTH_REQUIRED"
                     if isinstance(error, ModelAuthenticationError)
+                    else "OPENBOT_MODEL_REFUSED"
+                    if isinstance(error, ModelRefusedError)
                     else None,
                 )
             )

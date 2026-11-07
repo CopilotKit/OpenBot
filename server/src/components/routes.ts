@@ -5,7 +5,9 @@ import type { AuditInitiator, AuditStore } from "../audit";
 import { DEPLOYMENT_INITIATOR, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
-import { DATA_FUNCTIONS, dataFunction } from "./functions";
+import { currentEdition } from "../edition";
+import { DATA_FUNCTIONS, dataFunction, functionRefusal } from "./functions";
+import { COMPONENT_DATA_FUNCTIONS } from "./headless";
 import {
   SandboxedNotFoundError,
   SandboxedPublicationRefusedError,
@@ -24,6 +26,9 @@ import {
  * lose the row entirely. Who it was is in the payload either way.
  */
 const DEV_ACTOR_EMAIL = "dev@openbot.local";
+
+/** Who a component's data grant names when OpenBot Personal gave it, not a person. */
+export const PERSONAL_GRANTED_BY = "openbot:personal-defaults";
 
 /**
  * Granting, publishing and asking whether a Bot may use a component.
@@ -178,6 +183,31 @@ export function createComponentRoutes(
         DEPLOYMENT_INITIATOR,
       );
     }
+    /*
+     * The personal edition gives a component the data it reads, as it gives every Bot every app's
+     * tools. The person owns all of it and there is no admin to grant it, so without this the
+     * Activity report was refused in every personal install. Asked of every component announced,
+     * not only new ones, so an install from before this gets its grants on its next page load; a
+     * component that holds them already writes nothing.
+     */
+    if (currentEdition() === "personal") {
+      for (const { name } of valid) {
+        for (const functionName of COMPONENT_DATA_FUNCTIONS.get(name) ?? []) {
+          if (await store.mayCall(name, functionName)) continue;
+          await store.grantFunction(name, functionName, PERSONAL_GRANTED_BY);
+          await audit(
+            context,
+            "component.function_granted",
+            name,
+            {
+              function: functionName,
+              note: "Given by OpenBot Personal, where everything it reads is yours.",
+            },
+            DEPLOYMENT_INITIATOR,
+          );
+        }
+      }
+    }
     return context.json({ added });
   });
 
@@ -261,7 +291,7 @@ export function createComponentRoutes(
      */
     for (const functionName of functions) {
       if (await store.mayCall(name, functionName)) continue;
-      const reason = `${name} can't use the function ${functionName}. An admin has to give it to this component.`;
+      const reason = functionRefusal(name, functionName);
       await audit(context, "component.function_refused", name, {
         bot: agentId,
         function: functionName,
@@ -352,11 +382,8 @@ export function createComponentRoutes(
       );
     }
 
-    if (!(await store.mayCall(name, functionName))) {
-      return refuse(
-        `${name} can't use the function ${functionName}. An admin has to give it to this component.`,
-      );
-    }
+    if (!(await store.mayCall(name, functionName)))
+      return refuse(functionRefusal(name, functionName));
 
     try {
       const data = await store.callFunction(

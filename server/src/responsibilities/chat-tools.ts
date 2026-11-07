@@ -77,6 +77,11 @@ const goalFields = {
       required: ["source", "eventType"],
     },
   },
+  recurring: {
+    type: "boolean",
+    description:
+      "True when the person wants it done again and again, such as every morning or each time something happens. Its runs never complete it.",
+  },
 } as const;
 const goalId = {
   type: "object",
@@ -102,6 +107,10 @@ export const GOAL_TOOLS: readonly McpToolShape[] = Object.freeze([
       "Give a short `title`, the `instruction` for one run, and `successCriteria` that say when it is",
       "met. Leave `subscriptions` empty unless the person names an event.",
       "",
+      "Set `recurring` when the person wants it done again and again: every morning, each time something",
+      "happens. A goal that repeats, because it is `recurring`, a routine runs it or an event wakes it, is",
+      "never completed by one of its runs. Each run reports its result, and only the person ends it.",
+      "",
       "Its runs post into this conversation. Leave `channelId` out, or empty, for this conversation, and",
       "pass one only when the person asks for a different conversation you share. It takes no owner and",
       "no Bot: the goal is the person's, and you carry it out.",
@@ -122,16 +131,16 @@ export const GOAL_TOOLS: readonly McpToolShape[] = Object.freeze([
   {
     name: "list_goals",
     description: [
-      "List the person's goals that you carry out: each one's id, title, status, progress, last result",
-      "and conversation. Take the id from here before changing, running, pausing, resuming or",
-      "completing one, or adding a trigger to it.",
+      "List the person's goals that you carry out: each one's id, title, status, whether it is recurring,",
+      "progress, last result and conversation. Take the id from here before changing, running, pausing,",
+      "resuming or completing one, or adding a trigger to it.",
     ].join("\n"),
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "update_goal",
     description:
-      "Change one of the person's goals that you carry out: its title, instruction, success criteria or event subscriptions. Give the id from `list_goals` and, in `patch`, only what changes; an empty field is left as it is.",
+      "Change one of the person's goals that you carry out: its title, instruction, success criteria, event subscriptions or whether it is recurring. Give the id from `list_goals` and, in `patch`, only what changes; an empty field is left as it is.",
     inputSchema: {
       type: "object",
       properties: {
@@ -144,7 +153,7 @@ export const GOAL_TOOLS: readonly McpToolShape[] = Object.freeze([
   {
     name: "run_goal",
     description:
-      "Start one of the person's active goals now. It runs on its own, without the person's browser, and posts what it did into the goal's conversation.",
+      "Start one of the person's active goals now. It runs on its own, without the person's browser, and posts what it did into the goal's conversation. A completed or paused goal doesn't run, and you are told so.",
     inputSchema: goalId,
   },
   {
@@ -161,7 +170,7 @@ export const GOAL_TOOLS: readonly McpToolShape[] = Object.freeze([
   {
     name: "complete_goal",
     description:
-      "Mark one of the person's goals complete, when its success criteria are met or the person says it is done. A completed goal cannot be resumed.",
+      "End one of the person's goals for good, when the person says it is done, or when a one-off goal's success criteria are met. A goal that repeats (recurring, run by a routine or woken by an event) ends only when the person asks: one good run doesn't finish it. A completed goal can't be resumed.",
     inputSchema: goalId,
   },
 ]);

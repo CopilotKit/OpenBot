@@ -41,6 +41,7 @@ import {
   routines,
   workItems,
 } from "../db/schema";
+import { routineRunsGoal } from "../responsibilities/types";
 import { describeCron } from "../routines/schedule";
 import { listedTask } from "../tasks/store";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
@@ -242,8 +243,8 @@ export function createActivityStore(database: Database) {
         }
       }
 
-      // Responsibilities: an active one is standing work; each run is a piece of it. One that wakes
-      // on an event is lined up for it; one with no event runs only when somebody asks.
+      // Responsibilities: an active one is standing work; each run is a piece of it. One a routine
+      // runs or an event wakes is lined up for it; one nothing starts runs only when somebody asks.
       const goals = await database
         .select()
         .from(responsibilities)
@@ -274,21 +275,48 @@ export function createActivityStore(database: Database) {
         : [];
       for (const goal of goals) {
         if (goal.status !== "active") continue;
+        /*
+         * The routines that run it, by the rule its run is told it repeats by. FOUND LIVE: a goal a
+         * daily routine runs was listed under On demand as "Runs when asked", below the routine that
+         * runs it every morning. It says when it runs, from the soonest routine, and sits with them.
+         */
+        const runBy = ownedRoutines
+          .filter(
+            (routine) =>
+              routine.enabled && routineRunsGoal(routine.instruction, goal),
+          )
+          .sort(
+            (first, second) =>
+              first.nextRunAt.getTime() - second.nextRunAt.getTime(),
+          );
         const wakesOn = [
           ...goal.subscriptions.map((s) => `${s.source}/${s.eventType}`),
           ...triggers
             .filter((trigger) => trigger.goalId === goal.id)
             .map((trigger) => trigger.kind),
         ];
-        (wakesOn.length ? activity.scheduled : activity.onDemand).push({
+        const starts = [
+          ...(runBy.length
+            ? [
+                `${runBy
+                  .map(
+                    (routine) =>
+                      `${describeCron(routine.cron)} (${routine.timezone})`,
+                  )
+                  .join(
+                    "; ",
+                  )}, from its ${runBy.length === 1 ? "routine" : "routines"}`,
+              ]
+            : []),
+          ...(wakesOn.length ? [`Wakes on ${wakesOn.join(", ")}`] : []),
+        ];
+        (starts.length ? activity.scheduled : activity.onDemand).push({
           id: `responsibility:${goal.id}`,
           kind: "responsibility",
           title: goal.title,
-          detail: wakesOn.length
-            ? `Wakes on ${wakesOn.join(", ")}`
-            : "Runs when asked",
+          detail: starts.length ? starts.join(" · ") : "Runs when asked",
           status: "active",
-          at: iso(goal.updatedAt),
+          at: iso(runBy[0]?.nextRunAt ?? goal.updatedAt),
           channelId: goal.channelId,
           needsYou: false,
           stoppable: false,
@@ -317,7 +345,9 @@ export function createActivityStore(database: Database) {
           const item: ActivityItem = {
             id: `responsibility-run:${run.id}`,
             kind: "responsibility",
-            title: goal.title,
+            // A run, not the goal: "Goal · succeeded" under the goal's own title read as a second
+            // goal that had finished, beside the one still active.
+            title: `Run of ${goal.title}`,
             detail:
               clip(run.error ?? run.replyText) ?? `${source}/${eventType}`,
             status: run.status,

@@ -1743,12 +1743,14 @@ describe("bundled personal starter", () => {
       const loaded = await loadStarter(starterTestTenant(), endpoint);
       const pkg = await synchronizeTenantPackage(database, loaded);
       expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
+      const declared = loaded.agents.find(
+        ({ id }) => id === "personal-assistant",
+      );
       expect(await profiles.get(actor, "picked-harness")).toMatchObject({
         name: "Personal Assistant",
         title: `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain (LangGraph)"}.`,
-        roleDescription: loaded.agents.find(
-          ({ id }) => id === "personal-assistant",
-        )?.configuration.systemPrompt,
+        roleDescription: declared?.roleDescription,
+        instructions: declared?.configuration.systemPrompt,
       });
       expect(await attachedSkills("picked-harness")).toEqual([
         "bot-creator",
@@ -1884,8 +1886,46 @@ describe("bundled personal starter", () => {
     });
   });
 
+  /*
+   * What a conversation's header shows under the starter's name is its title and what it does, so
+   * what it does has to be the sentence the package wrote for the person. Seeded with the
+   * package's `system_prompt` instead, the header read "You are a personal assistant for one
+   * person..." to the person.
+   */
   test.each(["", claude])(
-    "starter instructions remain visible through subtitle and instruction edits: %s",
+    "a fresh starter says what it does in the package's words for the person, not its instructions: %s",
+    async (endpoint) => {
+      const loaded = await loadStarter(starterTestTenant(), endpoint);
+      await synchronizeTenantPackage(database, loaded);
+      const declared = loaded.agents.find(
+        ({ id }) => id === "personal-assistant",
+      );
+      const id = endpoint ? "picked-harness" : "personal-assistant";
+      const starter = await profiles.get(actor, id);
+      expect(starter?.roleDescription).toBe(
+        "Help with email, your calendar, research, planning and everyday errands.",
+      );
+      expect(starter?.roleDescription).toBe(declared?.roleDescription);
+      expect(starter?.roleDescription).not.toContain("You are");
+      expect(starter?.instructions).toBe(
+        String(declared?.configuration.systemPrompt),
+      );
+      // And the Bot still runs on the instructions.
+      const running = (await runtime(actor)).find((agent) => agent.id === id);
+      if (running?.type === "built_in")
+        expect(running.systemPrompt).toBe(
+          String(declared?.configuration.systemPrompt),
+        );
+      else if (running?.type === "remote_ag_ui")
+        expect(running.standingMessage.content).toContain(
+          String(declared?.configuration.systemPrompt),
+        );
+      else throw new Error("Expected a runnable starter");
+    },
+  );
+
+  test.each(["", claude])(
+    "starter instructions are edited apart from what it does: %s",
     async (endpoint) => {
       const tenantId = starterTestTenant();
       await synchronizeTenantPackage(
@@ -1893,49 +1933,185 @@ describe("bundled personal starter", () => {
         await loadStarter(tenantId, endpoint),
       );
       const id = endpoint ? "picked-harness" : "personal-assistant";
+      const key = endpoint ? "standingInstructions" : "systemPrompt";
       const starter = await profiles.get(actor, id);
-      if (!starter) throw new Error("Missing starter");
-      expect(starter.roleDescription).toContain("Never type a password");
+      if (!starter?.instructions) throw new Error("Missing starter");
+      expect(starter.instructions).toContain("Never type a password");
+      const stored = async () => {
+        const [row] = await database
+          .select({ configuration: agents.configuration })
+          .from(agents)
+          .where(eq(agents.id, id));
+        return row?.configuration as Record<string, unknown>;
+      };
+
+      // A new description leaves the instructions as they were.
       await profiles.update(actor, id, {
         name: starter.name,
         title: "Everyday life.",
-        roleDescription: starter.roleDescription,
+        roleDescription: "Plans my week.",
         visibility: "public",
       });
-      const [before] = await database
-        .select({ configuration: agents.configuration })
-        .from(agents)
-        .where(eq(agents.id, id));
-      if (!endpoint)
-        expect(before?.configuration).toMatchObject({
-          systemPrompt: starter.roleDescription,
-        });
+      expect(await profiles.get(actor, id)).toMatchObject({
+        roleDescription: "Plans my week.",
+        instructions: starter.instructions,
+      });
+      expect((await stored())[key]).toBe(starter.instructions);
+
+      // New instructions leave the description as it was, and the Bot runs on them.
       await profiles.update(actor, id, {
         name: starter.name,
         title: "Everyday life.",
-        roleDescription: `${starter.roleDescription} I live in Berlin.`,
+        roleDescription: "Plans my week.",
         visibility: "public",
+        instructions: `${starter.instructions} I live in Berlin.`,
       });
-      const [after] = await database
-        .select({ configuration: agents.configuration })
-        .from(agents)
-        .where(eq(agents.id, id));
-      if (!endpoint)
-        expect(after?.configuration).toMatchObject({
-          systemPrompt: `${starter.roleDescription} I live in Berlin.`,
-        });
-      else {
-        const running = (await runtime(actor)).find((agent) => agent.id === id);
-        if (running?.type !== "remote_ag_ui")
-          throw new Error("Expected remote starter");
-        expect(running.standingMessage.content).toContain(
-          "Never type a password",
-        );
+      expect(await profiles.get(actor, id)).toMatchObject({
+        roleDescription: "Plans my week.",
+        instructions: `${starter.instructions} I live in Berlin.`,
+      });
+      expect((await stored())[key]).toBe(
+        `${starter.instructions} I live in Berlin.`,
+      );
+      const running = (await runtime(actor)).find((agent) => agent.id === id);
+      if (running?.type === "built_in")
+        expect(running.systemPrompt).toContain("I live in Berlin.");
+      else if (running?.type === "remote_ag_ui") {
+        expect(running.standingMessage.content).toContain("Plans my week.");
         expect(running.standingMessage.content).toContain("I live in Berlin.");
-        expect(after?.configuration).not.toHaveProperty("standingInstructions");
-      }
+      } else throw new Error("Expected a runnable starter");
     },
   );
+
+  /*
+   * A desktop set up on 0.3.2 holds its starter in the shape that seed wrote: the package's
+   * `system_prompt` as what it does, and for a harness nothing else, so the header showed the
+   * instructions. The next start keeps what the Bot runs on and gives the header the package's
+   * sentence, whether or not the person had added to the text.
+   */
+  test.each([
+    ["Claude Agent SDK, as seeded", claude, ""],
+    ["Claude Agent SDK, added to", claude, " I live in Berlin."],
+    ["OpenBot, as seeded", "", ""],
+    ["OpenBot, added to", "", " I live in Berlin."],
+  ])(
+    "a starter seeded with its instructions as what it does is repaired on the next start: %s",
+    async (_case, endpoint, added) => {
+      const tenantId = starterTestTenant();
+      const loaded = await loadStarter(tenantId, endpoint);
+      await synchronizeTenantPackage(database, loaded);
+      const declared = loaded.agents.find(
+        ({ id }) => id === "personal-assistant",
+      );
+      const prompt = String(declared?.configuration.systemPrompt);
+      const id = endpoint ? "picked-harness" : "personal-assistant";
+      const old = `${prompt}${added}`;
+      // The rows as 0.3.2 left them.
+      const [seeded] = await database
+        .select({ configuration: agents.configuration })
+        .from(agents)
+        .where(eq(agents.id, id));
+      if (!seeded) throw new Error("Missing starter");
+      const { standingInstructions: _dropped, ...configuration } =
+        seeded.configuration as Record<string, unknown>;
+      await database
+        .update(agents)
+        .set({
+          configuration: endpoint
+            ? configuration
+            : { ...configuration, systemPrompt: old },
+        })
+        .where(eq(agents.id, id));
+      await database
+        .update(agentProfiles)
+        .set({ roleDescription: old })
+        .where(eq(agentProfiles.agentId, id));
+
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(tenantId, endpoint),
+      );
+      expect(await profiles.get(actor, id)).toMatchObject({
+        roleDescription: declared?.roleDescription,
+        instructions: old,
+      });
+      const running = (await runtime(actor)).find((agent) => agent.id === id);
+      if (running?.type === "built_in") expect(running.systemPrompt).toBe(old);
+      else if (running?.type === "remote_ag_ui")
+        expect(running.standingMessage.content).toContain(old);
+      else throw new Error("Expected a runnable starter");
+
+      // Once apart, a description the person writes stays theirs across starts.
+      const starter = await profiles.get(actor, id);
+      if (!starter) throw new Error("Missing starter");
+      await profiles.update(actor, id, {
+        name: starter.name,
+        title: starter.title,
+        roleDescription: "Plans my week.",
+        visibility: starter.visibility,
+      });
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(tenantId, endpoint),
+      );
+      expect(await profiles.get(actor, id)).toMatchObject({
+        roleDescription: "Plans my week.",
+        instructions: old,
+      });
+    },
+  );
+
+  test("the starter's Setup page saves its instructions over HTTP", async () => {
+    const tenantId = starterTestTenant();
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    const userId = await createUser();
+    const signedIn = {
+      id: userId,
+      email: `${userId}@example.test`,
+      role: "admin" as const,
+    };
+    const starter = await profiles.get(signedIn, "picked-harness");
+    if (!starter) throw new Error("Missing starter");
+    const requireUser: MiddlewareHandler<{
+      Variables: AppVariables;
+    }> = async (context, next) => {
+      context.set("actor", signedIn);
+      await next();
+    };
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route("/api/agents", createAgentRoutes(profiles, requireUser, true));
+    const body = {
+      name: starter.name,
+      title: starter.title,
+      roleDescription: starter.roleDescription,
+      visibility: starter.visibility,
+      endpoint: starter.endpoint,
+    };
+    const read = await app.request("/api/agents/picked-harness");
+    expect((await read.json()).agent).toMatchObject({
+      roleDescription: starter.roleDescription,
+      instructions: starter.instructions,
+    });
+    const saved = await app.request("/api/agents/picked-harness", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, instructions: "Answer in French." }),
+    });
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).agent).toMatchObject({
+      roleDescription: starter.roleDescription,
+      instructions: "Answer in French.",
+    });
+    const blank = await app.request("/api/agents/picked-harness", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, instructions: "  " }),
+    });
+    expect(blank.status).toBe(400);
+  });
 
   test("fresh external starters have no guessed attribution", async () => {
     await synchronizeTenantPackage(

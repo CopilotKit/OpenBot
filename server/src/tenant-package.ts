@@ -881,6 +881,24 @@ function attributionFollowing(title: string, harness: Harness | undefined) {
   return rest || title;
 }
 
+/**
+ * A Bot's stored configuration as an object. Earlier desktops stored some as a JSON string, which
+ * the queries above read the same way.
+ */
+function storedConfiguration(value: unknown): Record<string, unknown> | null {
+  let parsed = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : null;
+}
+
 function personalStarterSeed(
   tenantPackage: LoadedTenantPackage,
   fresh: boolean,
@@ -904,22 +922,27 @@ function personalStarterSeed(
     const title = harnessName
       ? `Everyday life. Powered by ${harnessName}.`
       : "Everyday life.";
+    /*
+     * What it does is the package's `role_description`, the sentence written for the person, and
+     * what a conversation's header shows. Its instructions are the package's `system_prompt`,
+     * written for the model, and they stay where the Bot reads them: the prompt a Bot that runs here
+     * runs on, or the instructions a harness is sent in its standing role.
+     */
     agents.unshift(
       picked
         ? {
             ...fallback,
-            roleDescription: String(fallback.configuration.systemPrompt),
             title,
             id: picked.id,
             type: picked.type,
             configuration: {
               ...picked.configuration,
+              standingInstructions: String(fallback.configuration.systemPrompt),
               personalStarter: true,
             },
           }
         : {
             ...fallback,
-            roleDescription: String(fallback.configuration.systemPrompt),
             title,
             configuration: { ...fallback.configuration, personalStarter: true },
           },
@@ -1162,6 +1185,66 @@ export async function synchronizeTenantPackage(
             .set({ title })
             .where(eq(agentProfiles.agentId, PICKED_HARNESS));
         }
+      }
+    }
+
+    /*
+     * A personal starter seeded before what it does and what it is told were kept apart.
+     *
+     * Those seeds (0.3.2) wrote the package's `system_prompt` as the starter's role description,
+     * so every conversation's header showed the person the instructions written for the model.
+     * Whatever that text says now is what the Bot runs on, since an edit to it moved the Bot's
+     * instructions with it, so it becomes the instructions, and what it does goes back to the
+     * package's own sentence. A starter whose instructions are already apart is left alone, so
+     * this changes a deployment once.
+     */
+    const description = tenantPackage.agents.find(
+      ({ id }) => id === PERSONAL_ASSISTANT,
+    )?.roleDescription;
+    if (bundledPersonal && !freshPersonal && description) {
+      const starters = await transaction
+        .select({
+          id: agentTable.id,
+          type: agentTable.type,
+          configuration: agentTable.configuration,
+          roleDescription: agentProfiles.roleDescription,
+        })
+        .from(agentTable)
+        .innerJoin(agentProfiles, eq(agentTable.id, agentProfiles.agentId))
+        .where(
+          and(
+            eq(agentTable.packageId, deploymentPackage.id),
+            inArray(agentTable.id, [PERSONAL_ASSISTANT, PICKED_HARNESS]),
+            isNull(agentProfiles.ownerUserId),
+          ),
+        );
+      for (const starter of starters) {
+        const configuration = storedConfiguration(starter.configuration);
+        if (configuration?.personalStarter !== true) continue;
+        if (starter.roleDescription === description) continue;
+        const together =
+          starter.type === "built_in"
+            ? configuration.systemPrompt === starter.roleDescription
+            : typeof configuration.standingInstructions !== "string" ||
+              configuration.standingInstructions.trim() === "";
+        if (!together) continue;
+        const updatedAt = new Date();
+        if (starter.type !== "built_in") {
+          await transaction
+            .update(agentTable)
+            .set({
+              configuration: {
+                ...configuration,
+                standingInstructions: starter.roleDescription,
+              },
+              updatedAt,
+            })
+            .where(eq(agentTable.id, starter.id));
+        }
+        await transaction
+          .update(agentProfiles)
+          .set({ roleDescription: description, updatedAt })
+          .where(eq(agentProfiles.agentId, starter.id));
       }
     }
 

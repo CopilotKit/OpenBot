@@ -96,6 +96,8 @@ async function oneTurn(
     content: "What page is your browser on?",
   });
   let failure: string | undefined;
+  /** The provider's own words, behind the sentence a person reads. See provider-refusal.ts. */
+  let said: string | undefined;
   await agent
     .runAgent({
       tools: [
@@ -108,6 +110,10 @@ async function oneTurn(
     })
     .catch((error: unknown) => {
       failure = error instanceof Error ? error.message : String(error);
+      said =
+        error instanceof Error && error.cause instanceof Error
+          ? error.cause.message
+          : undefined;
     });
   const last = agent.messages.at(-1);
   return {
@@ -115,6 +121,7 @@ async function oneTurn(
     requests: endpoint.requests,
     answer: last?.role === "assistant" ? last.content : undefined,
     failure,
+    said,
   };
 }
 
@@ -181,7 +188,11 @@ describe("an operator who chose the API", () => {
     expect(turn.requests).toEqual([
       { api: "chat", model: "gpt-5.6-terra", tools: OFFERED },
     ]);
-    expect(turn.failure).toContain(
+    // The person is told in words; the provider's reason stays on the error for the log.
+    expect(turn.failure).toBe(
+      "Your model provider turned down the request. Try again, or ask an admin if it keeps happening.",
+    );
+    expect(turn.said).toContain(
       "Function tools with reasoning_effort are not supported for gpt-5.6-terra",
     );
   });

@@ -45,7 +45,7 @@ import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { sanitizeSeededHistory } from "@openbot/toolkit/history-sanitize";
 import { executeNativeApprovalTool } from "@openbot/toolkit/native-approval";
 import { historyOrEmpty } from "@openbot/toolkit/thread-history";
-import { catchError, defer, from, switchMap, throwError } from "rxjs";
+import { defer, from, switchMap } from "rxjs";
 import { z } from "zod";
 import {
   type ActorAgentResolver,
@@ -65,6 +65,7 @@ import {
   toolLimitRefusal,
 } from "./agents/tool-limit";
 import {
+  fitToolLimit,
   isSearchingModel,
   planToolSearch,
   SEARCH_RESULTS_LIMIT,
@@ -80,13 +81,20 @@ import {
   type StoredAttachment,
 } from "./channels/attachment-parts";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
+import {
+  type RefusingProvider,
+  sayingProviderRefusals,
+} from "./agents/provider-refusal";
 import { sayingWhenUnreachable } from "./agents/unreachable";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { capturePassOrigin } from "./intelligence-gateway-proxy";
-import { RemoteLearnedSkillsMiddleware } from "./learning/remote";
+import {
+  LEARNED_SKILL_TOOL_COUNT,
+  RemoteLearnedSkillsMiddleware,
+} from "./learning/remote";
 import {
   type AcquireLearnedSkills,
   createLearningRuntime,
@@ -106,11 +114,12 @@ import {
   SELECTION_FLOOR,
   selectTools,
 } from "./plugins/selection";
+import { refFromToolName } from "./plugins/plugin-store/model";
 import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
 import type { ProductTelemetry } from "./telemetry/product";
 import { productRuntimeHook } from "./telemetry/product-boundaries";
-import { billingRefusal, providerName } from "./model-billing";
+import { providerName } from "./model-billing";
 import { modelSourceFor, type RunChoice } from "./model-catalogue";
 import { inlineToolImages } from "./tool-images";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
@@ -1153,6 +1162,14 @@ async function inlineAttachments(
   return inlined;
 }
 
+/** Who refuses this deployment's model calls, as a person knows them. See `provider-refusal.ts`. */
+function refusingProvider(model: RuntimeModel): RefusingProvider {
+  return {
+    provider: providerName(modelSourceFor(model, process.env)),
+    signIn: !!model.plan,
+  };
+}
+
 async function buildAgent(
   agent: RegisteredAgent,
   model: RuntimeModel,
@@ -1240,29 +1257,47 @@ async function buildAgent(
   const selectionFor = async (
     input: RunAgentInput,
     signal?: AbortSignal,
+    /**
+     * The most tools this run may be offered, for an endpoint sent everything it is offered. See
+     * `fitToolLimit`. Absent: a built-in Bot, whose app tools wait behind a search instead.
+     */
+    limit?: number,
   ): Promise<{ offered: GrantedTool[]; pinned: ReadonlySet<string> }> => {
-    if (!narrowing) return { offered: granted, pinned: new Set() };
-    const chosen = await selectTools({
+    const text = latestUserText(input.messages);
+    if (!narrowing)
+      return {
+        offered:
+          limit === undefined
+            ? granted
+            : fitToolLimit(granted, { limit, text }),
+        pinned: new Set(),
+      };
+    const selected = await selectTools({
       tools: granted,
       skills,
-      text: latestUserText(input.messages),
+      text,
       choose: narrowing.choose,
       signal,
       ...(narrowing.floor === undefined ? {} : { floor: narrowing.floor }),
     });
     signal?.throwIfAborted();
+    const pinned = new Set(selected.chosen.map((tool) => tool.name));
+    const fitted =
+      limit === undefined
+        ? selected.offered
+        : fitToolLimit(selected.offered, { limit, text, pinned });
+    // What the run is actually offered, cut or not, so the row never counts tools it was not sent.
+    const chosen =
+      fitted.length === selected.offered.length
+        ? selected
+        : { ...selected, offered: fitted, limit };
     // Awaited, so the row is on record before the model is handed the tools it names. A discovery
     // written afterwards would sit in the trail after the calls it explains.
     await narrowing.record?.(agent.id, chosen).catch(() => {
       diagnoseRecordFailure(chosen);
     });
-    return {
-      offered: chosen.offered,
-      pinned: new Set(chosen.chosen.map((tool) => tool.name)),
-    };
+    return { offered: chosen.offered, pinned };
   };
-  const offeredFor = async (input: RunAgentInput, signal?: AbortSignal) =>
-    (await selectionFor(input, signal)).offered;
 
   if (agent.type === "remote_ag_ui" || agent.type === "remote_mastra") {
     /*
@@ -1288,7 +1323,9 @@ async function buildAgent(
       granted,
       signRun,
       connectedVendors,
-      narrowing ? offeredFor : undefined,
+      // Every remote run, narrowed or not: its tools all reach its model in one request.
+      async (input, limit) =>
+        (await selectionFor(input, undefined, limit)).offered,
       loadAttachment,
       markAttachmentsSent,
       acquireLearnedSkills,
@@ -1331,6 +1368,7 @@ async function buildAgent(
               async () => [],
             )
         : undefined,
+      refusingProvider(model),
     );
   }
 
@@ -1446,20 +1484,17 @@ async function buildAgent(
     const admit = admitTools(held, runModel);
     return new BuiltInAgentWithSaneHistory(configuration, {
       /*
-       * A provider out of credit or at its spending limit is told as that, with its name and its
-       * own words, rather than as "Forbidden" or a retry count. See `model-billing.ts`.
+       * A provider's refusal is told in words, naming the provider, rather than as the SDK's text, a
+       * "Forbidden" or a retry count. Out of credit keeps its own sentence, from `model-billing.ts`.
+       * Outside the connection observer, which reads the provider's own words. See
+       * `provider-refusal.ts`.
        */
       observe: (stream) =>
-        observeModelConnection(stream).pipe(
-          catchError((error: unknown) =>
-            throwError(
-              () =>
-                billingRefusal(
-                  error,
-                  providerName(modelSourceFor(runModel, process.env)),
-                ) ?? error,
-            ),
-          ),
+        sayingProviderRefusals(
+          observeModelConnection(stream),
+          agent,
+          refusingProvider(runModel),
+          { untilError: true },
         ),
       ...(admit ? { admitTools: admit } : {}),
       ...(held.size > 0 ? { waiting: held } : {}),
@@ -1664,14 +1699,16 @@ async function remoteTransport(
   if (agent.type === "remote_ag_ui") {
     return sayingWhenUnreachable(
       withoutGenerativeUIEnvelope(
-        new HttpAgent({
-          url: agent.endpoint,
-          agentId: agent.id,
-          // The customer's own key, if their agent sits behind one. `HttpAgentConfig` is
-          // `{ url, headers?, fetch? }`, verified against @ag-ui/client 0.0.57.
-          ...(agent.headers ? { headers: agent.headers } : {}),
-          ...(dial ? { fetch: dial } : {}),
-        }),
+        heldToToolLimit(
+          new HttpAgent({
+            url: agent.endpoint,
+            agentId: agent.id,
+            // The customer's own key, if their agent sits behind one. `HttpAgentConfig` is
+            // `{ url, headers?, fetch? }`, verified against @ag-ui/client 0.0.57.
+            ...(agent.headers ? { headers: agent.headers } : {}),
+            ...(dial ? { fetch: dial } : {}),
+          }),
+        ),
       ),
       agent,
     );
@@ -1718,7 +1755,9 @@ async function remoteTransport(
   const picked = pickFromRoster(Object.keys(roster), agent);
   return sayingWhenUnreachable(
     withoutGenerativeUIEnvelope(
-      quotingConversationSystemRows(roster[picked] as AbstractAgent),
+      heldToToolLimit(
+        quotingConversationSystemRows(roster[picked] as AbstractAgent),
+      ),
     ),
     agent,
   );
@@ -1755,6 +1794,63 @@ function withoutGenerativeUIEnvelope(transport: AbstractAgent): AbstractAgent {
       });
     },
     clone: () => withoutGenerativeUIEnvelope(clone() as AbstractAgent),
+  });
+}
+
+/**
+ * A run as an endpoint is sent it, never with more tools than one request to a model may carry.
+ *
+ * The last word, after every middleware has added what it adds, so the count is what reaches the
+ * endpoint and, through it, the model: a harness OpenBot installs binds exactly the tools it is sent
+ * (`agent-langgraph-agui`'s `bind_tools`; `agent-claude-sdk` adds Claude Code's own only on a
+ * provider that documents no count). The Bot's grants are fitted first, where its chosen skills are
+ * known (`remoteAgentWithStandingRole`), so this cuts nothing unless that left too little room. What
+ * it cuts is an app's tools, the ones least like the person's request (`fitToolLimit`).
+ */
+function heldToToolLimit(transport: AbstractAgent): AbstractAgent {
+  const run = transport.run.bind(transport);
+  const clone = transport.clone.bind(transport);
+  return Object.assign(transport, {
+    run: (input: RunAgentInput) => {
+      const tools = input.tools ?? [];
+      if (tools.length <= MODEL_TOOL_LIMIT) return run(input);
+      const asGranted = tools.map((tool) => {
+        const ref = refFromToolName(tool.name);
+        return {
+          tool,
+          granted: {
+            name: tool.name,
+            description: tool.description ?? "",
+            parameters: parametersFor(
+              isPlainObject(tool.parameters) ? tool.parameters : {},
+            ),
+            execute: async () => "",
+            // Only an app's tools are named `mcp__<app>__<tool>`; anything else is sent on every step.
+            ...(ref ? { ref, searchable: true as const } : { ref: tool.name }),
+          } satisfies GrantedTool,
+        };
+      });
+      const kept = new Set(
+        fitToolLimit(
+          asGranted.map((entry) => entry.granted),
+          { limit: MODEL_TOOL_LIMIT, text: latestUserText(input.messages) },
+        ),
+      );
+      console.warn(
+        JSON.stringify({
+          type: "tool-limit-trimmed",
+          sent: tools.length,
+          limit: MODEL_TOOL_LIMIT,
+        }),
+      );
+      return run({
+        ...input,
+        tools: asGranted
+          .filter((entry) => kept.has(entry.granted))
+          .map((entry) => entry.tool),
+      });
+    },
+    clone: () => heldToToolLimit(clone() as AbstractAgent),
   });
 }
 
@@ -1873,7 +1969,7 @@ function remoteAgentWithStandingRole(
    *
    * Absent means no narrowing, which is the behaviour every deployment had before this existed.
    */
-  narrow?: (input: RunAgentInput) => Promise<GrantedTool[]>,
+  narrow?: (input: RunAgentInput, limit: number) => Promise<GrantedTool[]>,
   /*
    * No `agentFetch` and no `initiator` here any more, and they were not dropped: the transport this
    * function used to build itself is now built by `remoteTransport` and handed in as `next`, and
@@ -1907,6 +2003,11 @@ function remoteAgentWithStandingRole(
    * the endpoint. Absent, those runs go to the endpoint holding nothing. See `answersOwnRunsHere`.
    */
   answerOwnRuns?: () => Promise<AbstractAgent>,
+  /**
+   * Who serves this deployment's model, for a harness this deployment runs. A Bot somebody else runs
+   * may be on any provider, so its refusals name the provider only when its own words do.
+   */
+  ourProvider?: RefusingProvider,
 ) {
   const holds = (input: RunAgentInput) => !holdsTools || holdsTools(input);
   /*
@@ -2152,6 +2253,18 @@ function remoteAgentWithStandingRole(
   };
 
   /*
+   * The tools a run gains after this middleware, so the Bot's grants leave room for them: a learned
+   * skill's two, and the generative UI tool the runtime makes from the browser's catalog.
+   */
+  const toolsAddedAfter = (input: RunAgentInput) =>
+    (acquireLearnedSkills ? LEARNED_SKILL_TOOL_COUNT : 0) +
+    (isPlainObject(input.forwardedProps) &&
+    isPlainObject(input.forwardedProps.copilotkit) &&
+    Object.hasOwn(input.forwardedProps.copilotkit, "ui")
+      ? 1
+      : 0);
+
+  /*
    * Deferred, because choosing the tools is a model call and middleware has to answer with a stream
    * straight away. `defer` puts the work on the subscription, which is where the run actually
    * begins, so nothing happens until somebody is listening and a retried run chooses again.
@@ -2167,13 +2280,27 @@ function remoteAgentWithStandingRole(
       const stream = defer(() =>
         from(
           holds(input)
-            ? Promise.all([
-                narrow ? narrow(input) : Promise.resolve(tools),
-                coordination?.(agent.id, input) ?? Promise.resolve([]),
-              ]).then(([offered, coordinationTools]) => [
-                ...offered,
-                ...coordinationTools,
-              ])
+            ? (coordination?.(agent.id, input) ?? Promise.resolve([])).then(
+                async (coordinationTools) => {
+                  /*
+                   * What the browser offers and the coordination tools are always sent, so the
+                   * Bot's own grants get what is left of what one request may carry. See
+                   * `fitToolLimit`.
+                   */
+                  const limit =
+                    MODEL_TOOL_LIMIT -
+                    (input.tools?.length ?? 0) -
+                    coordinationTools.length -
+                    toolsAddedAfter(input);
+                  const offered = narrow
+                    ? await narrow(input, limit)
+                    : fitToolLimit(tools, {
+                        limit,
+                        text: latestUserText(input.messages),
+                      });
+                  return [...offered, ...coordinationTools];
+                },
+              )
             : // A run the runtime makes for itself is offered none of them. See `isAskedRun`.
               Promise.resolve([]),
         ).pipe(switchMap((offered) => runWith(offered, input, next))),
@@ -2189,7 +2316,13 @@ function remoteAgentWithStandingRole(
           (url) =>
             url?.replace(/\/$/, "") === agent.endpoint.replace(/\/$/, ""),
         );
-      return owned ? observeModelConnection(stream) : stream;
+      // Outside the connection observer, which reads the provider's own words. See
+      // `provider-refusal.ts`.
+      return sayingProviderRefusals(
+        owned ? observeModelConnection(stream) : stream,
+        agent,
+        owned ? ourProvider : undefined,
+      );
     });
     if (acquireLearnedSkills) {
       const learned = new RemoteLearnedSkillsMiddleware(

@@ -8,8 +8,12 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
-import { AuditPage } from "@/components/manage/audit-page";
+import {
+  AuditPage,
+  withoutOpenBotWorking,
+} from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
+import { OPENBOT_WORKING_EVENT_TYPES } from "@/lib/audit/outcome";
 import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { settleReactWork } from "./settle-react-work";
@@ -137,7 +141,22 @@ async function renderAs(edition: "team" | "personal") {
     localEvaluation: edition === "personal",
     edition,
   });
-  queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
+  // Activity asks without OpenBot's own working; Admin asks for everything.
+  queryClient.setQueryData(
+    [...auditKeys.all, edition === "personal" ? withoutOpenBotWorking("") : ""],
+    // What the server answers each: Activity's query leaves a build's components out.
+    {
+      events:
+        edition === "personal"
+          ? ROWS.filter(
+              (row) =>
+                !(OPENBOT_WORKING_EVENT_TYPES as readonly string[]).includes(
+                  row.eventType,
+                ),
+            )
+          : ROWS,
+    },
+  );
   queryClient.setQueryData(agentKeys.list(false), [
     { id: BOT, name: "ChatGPT Plan Check" },
   ]);
@@ -190,11 +209,6 @@ test("Activity says what changed in words, and that OpenBot started what it did 
       startedBy: "Started by a person",
     },
     { what: "Send email", on: "Gmail", startedBy: "Started by a person" },
-    {
-      what: "Publish a component",
-      on: "showTable",
-      startedBy: "Started by OpenBot",
-    },
   ]);
   const table = view.container.querySelector("tbody")?.textContent ?? "";
   for (const stored of [

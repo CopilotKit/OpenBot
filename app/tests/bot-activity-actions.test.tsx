@@ -10,7 +10,11 @@ import {
 import { cleanup, render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { BotActivitySections } from "@/components/bot-profile/activity";
-import { AuditPage, withBot } from "@/components/manage/audit-page";
+import {
+  AuditPage,
+  withBot,
+  withoutOpenBotWorking,
+} from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { auditKeys } from "@/lib/audit/queries";
 import { authKeys } from "@/lib/auth/queries";
@@ -131,7 +135,7 @@ test("the trail opened for one Bot asks the server for that Bot's rows, and says
     role: "admin",
     ready: "Decision",
     audit: {
-      [search]: [
+      [withoutOpenBotWorking(search)]: [
         {
           id: "e1",
           actorUserId: "person",

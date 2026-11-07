@@ -289,6 +289,10 @@ class ToolAwareAgent(WholeThreadAgent):
                     code="OPENBOT_MODEL_BILLING",
                 )
             elif context.connection.get("authentication_failed"):
+                # The provider's own words stay here, in the log: the sentence below replaces them.
+                logger.warning(
+                    "The model provider refused the credential: %s", provider_message(error)
+                )
                 yield RunErrorEvent(
                     type=EventType.RUN_ERROR,
                     message="Sign in to your model provider again.",
@@ -296,10 +300,13 @@ class ToolAwareAgent(WholeThreadAgent):
                 )
             elif provider_refusal(error):
                 # Raised, it ended the response stream after RUN_STARTED with no terminal event,
-                # and the provider's reason never reached anyone.
+                # and the provider's reason never reached anyone. Coded as a refusal, so the server
+                # tells it in words and keeps the provider's for its log (provider-refusal.ts).
                 message = provider_message(error)
                 logger.warning("The model provider refused the run: %s", message)
-                yield RunErrorEvent(type=EventType.RUN_ERROR, message=message)
+                yield RunErrorEvent(
+                    type=EventType.RUN_ERROR, message=message, code="OPENBOT_MODEL_REFUSED"
+                )
             else:
                 raise
         finally:

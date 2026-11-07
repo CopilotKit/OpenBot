@@ -63,7 +63,14 @@ test("startup closes updater pipes while its background services remain live", a
       "AGENT_TOOL_TOKEN=synthetic-tool-token",
     ].join("\n"),
   );
-  await executable("docker", "echo agent_profiles; echo agent_preferences");
+  // Answers start.sh's `psql -tAc "select to_regclass('public.<table>')"` the way psql does: the one
+  // table it names, and nothing more. Printing both names to every query made the check flaky. Its
+  // `grep -q` stops reading at the first match, a second line written after that dies of SIGPIPE,
+  // and `set -o pipefail` turns that into "agent_profiles is missing" and exit 1.
+  await executable(
+    "docker",
+    `printf '%s\\n' "$*" | sed -n "s/.*to_regclass('public\\.\\([a-z_]*\\)').*/\\1/p"`,
+  );
   await executable("sleep", "exit 0");
   await executable("pkill", "exit 0");
   await executable(
@@ -96,9 +103,12 @@ case "$*" in
 esac
 exec "$REAL_BUN" "$TEST_ROOT/service.ts" "$role"`,
   );
+  // The pid file appears whole, by rename. Written in place, it exists empty for a moment, and a read
+  // in that moment is `Number("")`, 0: the cleanup below then signals pid 0, which is this test
+  // runner's own process group.
   await writeFile(
     join(root, "service.ts"),
-    'import {join} from "node:path"; await Bun.write(join(process.env.TEST_ROOT!, process.argv[2]+".pid"), String(process.pid)); await Bun.sleep(30_000);',
+    'import {join} from "node:path"; import {renameSync, writeFileSync} from "node:fs"; const file = join(process.env.TEST_ROOT!, process.argv[2]+".pid"); writeFileSync(file+".tmp", String(process.pid)); renameSync(file+".tmp", file); await Bun.sleep(30_000);',
   );
   invocation = runCommand(["bash", "scripts/start.sh"], {
     cwd: root,
