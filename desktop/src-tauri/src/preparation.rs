@@ -103,6 +103,9 @@ pub fn save_engine(root: &Path, engine: Engine) -> Result<(), Problem> {
     write_record(root, ENGINE, &SavedEngine { engine })
 }
 
+/// Saved resolved and in the form a person reads: on Windows `canonicalize` answers
+/// `\\?\C:\Users\Ada\OpenBot`, and this record is where Settings, the setup window and every
+/// later Start take the installation's folder from.
 pub fn save_selected_root(config: &Path, root: &Path) -> Result<(), Problem> {
     let root = std::fs::canonicalize(root).map_err(|e| {
         Problem::with(
@@ -119,6 +122,7 @@ pub fn save_selected_root(config: &Path, root: &Path) -> Result<(), Problem> {
     write_record(config, "last-launched-root.json", &root)
 }
 
+/// Plain as well when an earlier app saved it as `\\?\C:\...`.
 pub fn selected_root(config: &Path) -> Option<PathBuf> {
     let root: PathBuf =
         serde_json::from_slice(&std::fs::read(config.join("last-launched-root.json")).ok()?)
@@ -528,14 +532,55 @@ mod tests {
         assert!(launch(&f.root).is_none());
         record_launch(&f.root, Some(&chosen)).unwrap();
         save_selected_root(&config, &f.root).unwrap();
-        assert_eq!(selected_root(&config), Some(f.root.clone()));
+        // The fixture's root is canonical, so `\\?\C:\...` on Windows; the record keeps it plain.
+        let remembered = crate::paths::plain(f.root.clone());
+        assert_eq!(selected_root(&config), Some(remembered.clone()));
         assert_eq!(launch(&f.root).unwrap().harness, Some(chosen));
         invalidate(&f.root).unwrap();
         assert!(launch(&f.root).is_none());
         assert_eq!(
             selected_root(&config),
-            Some(f.root.clone()),
+            Some(remembered),
             "repair must not forget the last successful folder"
         );
+    }
+
+    /// Windows' `canonicalize` answers `\\?\C:\Users\Administrator\OpenBot`, and the saved folder
+    /// is what Settings shows under Installed in. It is saved plain, and a record an earlier app
+    /// saved with the prefix reads back plain.
+    #[test]
+    fn the_remembered_installation_folder_is_saved_and_read_without_the_windows_prefix() {
+        let f = Fixture::new();
+        let config = f.root.join("app-config");
+        save_selected_root(&config, &f.root).unwrap();
+        let saved: PathBuf =
+            serde_json::from_slice(&std::fs::read(config.join("last-launched-root.json")).unwrap())
+                .unwrap();
+        for root in [saved, selected_root(&config).unwrap()] {
+            assert!(
+                !root.to_string_lossy().starts_with(r"\\?\"),
+                "{}",
+                root.display()
+            );
+            assert_eq!(
+                std::fs::canonicalize(&root).unwrap(),
+                f.root,
+                "the same folder"
+            );
+        }
+
+        #[cfg(windows)]
+        {
+            write_record(
+                &config,
+                "last-launched-root.json",
+                &PathBuf::from(r"\\?\C:\Users\Administrator\OpenBot"),
+            )
+            .unwrap();
+            assert_eq!(
+                selected_root(&config),
+                Some(PathBuf::from(r"C:\Users\Administrator\OpenBot"))
+            );
+        }
     }
 }
