@@ -1,0 +1,1 @@
+ALTER TABLE "mcp_servers" ADD COLUMN "listing_revision" integer DEFAULT 0 NOT NULL;

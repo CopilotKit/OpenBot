@@ -244,6 +244,7 @@ import {
   startPersonalDefaultApps,
   withPersonalDefaults,
 } from "./plugins/personal-defaults";
+import { startBrokeredRelist } from "./plugins/relist";
 import {
   arcadeVerifierNotice,
   ownsBrokerProject,
@@ -1186,6 +1187,12 @@ startPersonalDefaultApps(
   personalDefaultsDeps(database),
   personalDefaultAppsMemory(database),
 );
+/*
+ * An app of the broker listed by an older build is listed again once, so an upgraded install records
+ * its actions as a fresh one would (see `relistOutdatedBrokeredApps`). Not awaited, for the reason
+ * above, and it keeps trying until every app is listed.
+ */
+startBrokeredRelist(pluginStore);
 const responsibilityStore = createResponsibilityStore(database, {
   resolveTarget: async (ownerUserId, agentId, channelId) => {
     const actor = await actorFor(ownerUserId);

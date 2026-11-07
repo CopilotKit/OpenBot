@@ -8,9 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Two migrations each add one column: `0078_routine_title` adds a nullable
-`routines.title`, and `0079_tool_unclassified` adds `mcp_tools.unclassified`, false on every
-existing row. The database moves to `0079_tool_unclassified`. Seven things change for an existing
+**Before upgrading.** Three migrations each add one column: `0078_routine_title` adds a nullable
+`routines.title`, `0079_tool_unclassified` adds `mcp_tools.unclassified`, false on every existing
+row, and `0080_listing_revision` adds `mcp_servers.listing_revision`, 0 on every existing row. The
+database moves to `0080_listing_revision`. Seven things change for an existing
 deployment:
 - A goal's tools are named for goals. `create_responsibility`, `list_responsibilities`,
   `update_responsibility`, `report_responsibility_progress`, `run_responsibility`,
@@ -25,10 +26,11 @@ deployment:
 - An app tool whose action is archive, and any app tool its app marks destructive, asks with
   **Allow once** or **Deny** every time, whatever your settings (below). This starts at once, with
   nothing to refresh.
-- An Arcade action that publishes no behaviour flags, listed before this release, is still recorded
-  as destructive. Until an admin presses **Refresh tools** on that app's page, every call to one
-  asks with **Allow once** or **Deny**, and its Bot is told it deletes or overwrites something.
-  After the refresh it is an ordinary change (below).
+- At the first start, every app of your broker (Arcade or Composio) is listed again once, so an
+  action its app says nothing about is recorded as a fresh install records it: an ordinary change
+  (below). Nobody has to press anything. Actions the broker flags destructive, and delete or archive
+  names, still ask every time. If the broker can't be reached, an app's actions ask as before until
+  it answers, and OpenBot keeps trying.
 - The audit trail records a person's denial as the action's own refusal (`computer.action_refused`
   or `mcp.call_rejected`), and an approved computer action as one `computer.action_allowed`, where
   it wrote up to three. Counts taken from the export or a log collector change. Rows recorded before
@@ -58,8 +60,8 @@ deployment:
   no behaviour flags, such as every AirtableApi and GithubApi action, or a Composio action with no
   label, asks only where any change would (**Ask before making changes**, or a rule). Check-ins,
   tasks and memory still never call one on their own. On an app's page for a Bot, such an Arcade
-  action no longer says "destroys things". It is recorded this way on its app's next refresh
-  (above).
+  action no longer says "destroys things". An app listed before this release is listed again at the
+  first start (above).
 
 ### Goals and routines
 
