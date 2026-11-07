@@ -18,7 +18,8 @@
         "minWidth": 720,
         "minHeight": 560,
         "resizable": true,
-        "titleBarStyle": "Transparent"
+        "titleBarStyle": "Transparent",
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": { "csp": null }
