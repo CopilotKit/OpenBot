@@ -2873,6 +2873,64 @@ pub fn server_publishes_in(listing: &str, ports: &[u16]) -> bool {
 }
 
 /**
+The per-run host token the installation's running `server` container was given, if it has one.
+
+Start mints it, hands it to Compose for `server` alone and keeps it only in memory, so a session
+that shows a deployment an earlier session raised (after a crash, a force quit, or an installer
+that closed the app without its Quit) never had it. The container's own environment is the one
+place it is still kept, and it is exactly the token the server checks. Only reads, and the token is
+never logged.
+
+Every service's row rather than `server` named, for the reason `server_publishes` gives.
+*/
+pub fn server_host_token(engine: &Address, root: &Path) -> Result<Option<String>, String> {
+    let listed = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "--format", "{{.Service}}\t{{.ID}}"])
+        .output()
+        .map_err(|error| format!("could not list the Compose services: {error}"))?;
+    if !listed.status.success() {
+        return Err(command_said(&listed.stderr));
+    }
+    let listing = String::from_utf8_lossy(&listed.stdout);
+    let Some(id) = listing
+        .lines()
+        .filter_map(|row| row.split_once('\t'))
+        .find(|(service, id)| service.trim() == "server" && !id.trim().is_empty())
+        .map(|(_, id)| id.trim().to_owned())
+    else {
+        return Ok(None);
+    };
+    let inspected = engine
+        .command()
+        .current_dir(root)
+        .args([
+            "container",
+            "inspect",
+            "--format",
+            "{{json .Config.Env}}",
+            &id,
+        ])
+        .output()
+        .map_err(|error| format!("could not read the server container's settings: {error}"))?;
+    if !inspected.status.success() {
+        return Err(command_said(&inspected.stderr));
+    }
+    host_token_in(&inspected.stdout)
+}
+
+/// `server_host_token` over a container's `{{json .Config.Env}}`. Pure, for the reason
+/// `published_in` is. An empty value is no token, as the server reads it.
+pub fn host_token_in(environment: &[u8]) -> Result<Option<String>, String> {
+    let environment: Vec<String> = serde_json::from_slice(environment)
+        .map_err(|_| "the server container's settings could not be read".to_string())?;
+    Ok(environment
+        .iter()
+        .find_map(|entry| entry.strip_prefix("OPENBOT_DESKTOP_HOST_TOKEN="))
+        .filter(|token| !token.trim().is_empty())
+        .map(str::to_owned))
+}
+
+/**
 Restart OpenBot itself, the server and the worker, and leave everything else running.
 
 What the Status window's Restart did to the host processes, now done by the engine that runs them:
@@ -9186,6 +9244,22 @@ fn main() {
             !server_publishes_in(listing, &[]),
             "nothing asked is nothing proven"
         );
+    }
+
+    /// What `docker container inspect --format '{{json .Config.Env}}'` printed for a Compose
+    /// `server` service given the token, and given none (`${OPENBOT_DESKTOP_HOST_TOKEN:-}`).
+    #[test]
+    fn the_host_token_is_read_from_the_server_containers_environment() {
+        let given = br#"["OTHER=value","OPENBOT_DESKTOP_HOST_TOKEN=probe-token-abc","PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
+"#;
+        assert_eq!(host_token_in(given), Ok(Some("probe-token-abc".into())));
+        let empty = br#"["OPENBOT_DESKTOP_HOST_TOKEN=","PATH=/usr/bin"]"#;
+        assert_eq!(host_token_in(empty), Ok(None));
+        assert_eq!(host_token_in(br#"["PATH=/usr/bin"]"#), Ok(None));
+        // A value that merely contains the name is not it.
+        let other = br#"["NOT_OPENBOT_DESKTOP_HOST_TOKEN=x"]"#;
+        assert_eq!(host_token_in(other), Ok(None));
+        assert!(host_token_in(b"no such container").is_err());
     }
 
     #[test]

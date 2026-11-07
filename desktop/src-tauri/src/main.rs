@@ -2724,18 +2724,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         .as_ref()
         .map(|owned| owned.address.clone())
         .ok_or_else(|| Problem::plain("The local container runtime is unavailable."))?;
-    let config = host_access::HostAccessConfig::new(
-        format!("http://127.0.0.1:{}", ports.server),
-        host_token.clone(),
-        address,
-        deployment::reference(&root, "agent-computer")?,
-        vec![root.clone()],
-    );
-    let broker = host_access::HostAccess::start_with_approval(
-        config,
-        std::sync::Arc::new(desktop_host_access::NativeApproval(app.clone())),
-    )
-    .map_err(|error| Problem::with("Local folder access could not start.", error.to_string()))?;
+    let broker = start_host_access(&app, &root, ports.server, address, host_token.clone())?;
     *shell.host_access.lock().unwrap() = Some(broker);
     preparation::record_launch(&root, requested_harness.as_ref())?;
     let config = app.path().app_config_dir().map_err(|error| {
@@ -2749,6 +2738,29 @@ async fn start_stack_inner<R: tauri::Runtime>(
 
     report(&app, "answering", true, "OpenBot is ready.");
     Ok(())
+}
+
+/// Local folder access for the deployment at `root`, answering to its server with the per-run
+/// host token that server was given.
+fn start_host_access<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    root: &Path,
+    server_port: u16,
+    address: engine::Address,
+    host_token: String,
+) -> Result<host_access::HostAccess, Problem> {
+    let config = host_access::HostAccessConfig::new(
+        format!("http://127.0.0.1:{server_port}"),
+        host_token,
+        address,
+        deployment::reference(root, "agent-computer")?,
+        vec![root.to_path_buf()],
+    );
+    host_access::HostAccess::start_with_approval(
+        config,
+        std::sync::Arc::new(desktop_host_access::NativeApproval(app.clone())),
+    )
+    .map_err(|error| Problem::with("Local folder access could not start.", error.to_string()))
 }
 
 /// This dedicated command accepts no setting, value, root or policy from the webview.
@@ -3821,7 +3833,7 @@ fn show_openbot_on<R: tauri::Runtime>(
     let (url, address) = owned_app(&shell, &root, ports).ok_or_else(|| {
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
-    hold_shown_deployment(&shell, &root, address);
+    hold_shown_deployment(&app, &shell, &root, address, ports.server);
     refresh_menus(&app);
     // Only the owned app itself.
     trust_owned_app(&app, &url);
@@ -4832,7 +4844,13 @@ fn held_engine(shell: &Shell, root: &Path) -> Option<engine::Address> {
 /// not held, one an earlier app left running stayed up through Quit and was shown again at the next
 /// launch. Called holding `Shell::startup`, with the engine that verified the deployment; a session
 /// that already holds a deployment keeps it.
-fn hold_shown_deployment(shell: &Shell, root: &Path, address: engine::Address) {
+fn hold_shown_deployment<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    shell: &Shell,
+    root: &Path,
+    address: engine::Address,
+    server_port: u16,
+) {
     let free = shell.containers.lock().unwrap().is_none();
     let free = free && shell.root.lock().unwrap().is_none();
     if !free {
@@ -4840,9 +4858,61 @@ fn hold_shown_deployment(shell: &Shell, root: &Path, address: engine::Address) {
     }
     *shell.containers.lock().unwrap() = Some(ContainerDeployment {
         root: root.to_path_buf(),
-        address,
+        address: address.clone(),
     });
     *shell.root.lock().unwrap() = Some(root.to_path_buf());
+    serve_shown_deployment(app, shell, root, address, server_port);
+}
+
+/// The rest of what Start gives the deployment it raised, given to one the window took over: local
+/// folder access, and the watcher that sends the window to setup when the server reports a
+/// connection refused. Both answer to the server with the per-run host token, and the session that
+/// minted it is gone, so it is read back from the `server` container, the one place it is kept.
+/// Without them, a deployment shown after a crash, a force quit or an installer that closed the app
+/// looked running while neither worked until the person quit and started again. A failure here
+/// leaves the deployment shown and held, as before, and says why in the log.
+fn serve_shown_deployment<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    shell: &Shell,
+    root: &Path,
+    address: engine::Address,
+    server_port: u16,
+) {
+    let token = match server_host_token(&address, root) {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            eprintln!("[show] the server was given no host token: local folder access and the connection watcher are off until Start");
+            return;
+        }
+        Err(error) => {
+            eprintln!("[show] could not read the server's host token, so local folder access and the connection watcher are off until Start: {error}");
+            return;
+        }
+    };
+    match start_host_access(app, root, server_port, address, token.clone()) {
+        Ok(broker) => *shell.host_access.lock().unwrap() = Some(broker),
+        Err(problem) => eprintln!("[show] {}", problem_detail(problem)),
+    }
+    let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
+    watch_connections(
+        app.clone(),
+        root.to_path_buf(),
+        token,
+        generation,
+        server_port,
+    );
+}
+
+/// The host token `root`'s running `server` container was given, asked of the engine that holds it.
+#[cfg(not(test))]
+fn server_host_token(address: &engine::Address, root: &Path) -> Result<Option<String>, String> {
+    stack::server_host_token(address, root)
+}
+
+/// Tests never ask a real engine. They say which token a root's server container was given.
+#[cfg(test)]
+fn server_host_token(_address: &engine::Address, root: &Path) -> Result<Option<String>, String> {
+    Ok(tests::host_token_given_to_server(root))
 }
 
 /// [`owned_app_url`] without a window: the Recorder's native host is a process of its own, started
@@ -6220,7 +6290,7 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
             .then(|| owned_app(&shell, &root, ports))
             .flatten()
         {
-            hold_shown_deployment(&shell, &root, address);
+            hold_shown_deployment(app, &shell, &root, address, ports.server);
             refresh_menus(app);
             trust_owned_app(app, &url);
             url.parse().ok()
@@ -13814,6 +13884,30 @@ fn main() {
         }
     }
 
+    /// Which host token each root's `server` container was given, as far as the code under test
+    /// can tell. Keyed by root, as `PUBLISHED_BY_SERVER` is.
+    static HOST_TOKEN_GIVEN_TO_SERVER: Mutex<Vec<(PathBuf, String)>> = Mutex::new(Vec::new());
+
+    pub(super) fn host_token_given_to_server(root: &Path) -> Option<String> {
+        HOST_TOKEN_GIVEN_TO_SERVER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .find(|(given, _)| given == root)
+            .map(|(_, token)| token.clone())
+    }
+
+    /// The token `root`'s server container was started with, which the fixture's server responder
+    /// also checks, as the real server checks the one in its environment.
+    fn give_server_host_token(root: &Path, token: &str) {
+        std::fs::write(root.join("server-host-token"), token).unwrap();
+        let mut given = HOST_TOKEN_GIVEN_TO_SERVER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        given.retain(|(given, _)| given != root);
+        given.push((root.to_path_buf(), token.to_owned()));
+    }
+
     fn temp_root(name: &str) -> PathBuf {
         static NEXT_TEMP_ROOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let next = NEXT_TEMP_ROOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -13977,16 +14071,44 @@ fn serve(listener: TcpListener) {
         let mut stream = stream.unwrap();
         stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
         let mut request = [0; 2048];
-        if stream.read(&mut request).unwrap_or(0) > 0 {
+        let read = stream.read(&mut request).unwrap_or(0);
+        if read > 0 {
             if std::path::Path::new("pause-response").exists() {
                 std::fs::write("response-entered", "").unwrap();
                 while std::path::Path::new("pause-response").exists() {
                     std::thread::sleep(std::time::Duration::from_millis(5));
                 }
             }
-            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+            let (status, body) = desktop_answer(&String::from_utf8_lossy(&request[..read]))
+                .unwrap_or(("200 OK", "{}".into()));
+            let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
         }
     }
+}
+// What the server answers the desktop's folder access and connection watcher: only with the host
+// token it was started with (`server-host-token`), and each request recorded as one or the other.
+fn desktop_answer(request: &str) -> Option<(&'static str, String)> {
+    let path = request.split_whitespace().nth(1)?;
+    let empty = match path {
+        "/api/host-access/desktop/next" => "{\"operations\":[],\"leaseMs\":30000}",
+        "/api/desktop/connection-failure" => "null",
+        _ => return None,
+    };
+    let token = std::fs::read_to_string("server-host-token").unwrap_or_default();
+    let offered = request.lines().filter_map(|line| line.split_once(':')).find_map(|(name, value)| {
+        let value = value.trim();
+        if name.eq_ignore_ascii_case("authorization") {
+            value.strip_prefix("Bearer ")
+        } else if name.eq_ignore_ascii_case("x-openbot-desktop-host-token") {
+            Some(value)
+        } else {
+            None
+        }
+    });
+    let authorized = !token.is_empty() && offered == Some(token.as_str());
+    let mut log = std::fs::OpenOptions::new().create(true).append(true).open("server-requests.log").unwrap();
+    writeln!(log, "{} {path}", if authorized { "authorized" } else { "refused" }).unwrap();
+    Some(if authorized { ("200 OK", empty.into()) } else { ("401 Unauthorized", "{}".into()) })
 }
 fn main() {
     let api = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -14396,8 +14518,10 @@ fn main() {
     }
 
     /// A deployment shown as the window's own is this session's, as one Start raised is: the menus
-    /// say it is running, and Quit takes its containers down. Shown and not held, the tray said
-    /// "Not running", Quit left every container up, and the next launch showed them again.
+    /// say it is running, local folder access and the connection watcher answer to its server, and
+    /// Quit takes its containers down. Shown and not held, the tray said "Not running", Quit left
+    /// every container up, and the next launch showed them again. Held without the host token only
+    /// Start had, the window looked fine while folder access and the watcher never ran.
     #[test]
     fn a_deployment_shown_at_launch_is_held_so_the_menus_and_quit_act_on_it() {
         if crate::test_support::isolated_process(
@@ -14415,6 +14539,8 @@ fn main() {
             &std::collections::BTreeMap::new(),
         )
         .unwrap();
+        // Minted by the session that started it, which is gone: only its server container has it.
+        give_server_host_token(&f.owned, "earlier-session-token");
         let app = f.app(&f.owned, "tauri://localhost/");
         let shell = app.state::<Shell>();
         assert!(already_running_now(
@@ -14428,6 +14554,27 @@ fn main() {
             shell.root.lock().unwrap().as_deref(),
             Some(f.owned.as_path())
         );
+        // Local folder access and the connection watcher, each let in by the server.
+        assert!(
+            shell.host_access.lock().unwrap().is_some(),
+            "local folder access is not running for the deployment shown"
+        );
+        let requests = f.owned.join("server-requests.log");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            let seen = std::fs::read_to_string(&requests).unwrap_or_default();
+            if [
+                "authorized /api/host-access/desktop/next",
+                "authorized /api/desktop/connection-failure",
+            ]
+            .iter()
+            .all(|wanted| seen.lines().any(|line| line == *wanted))
+            {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "{seen}");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
         let stopped = exit_cleanup_then(
             &shell,
             &f.owned,
@@ -14439,6 +14586,9 @@ fn main() {
         assert_compose_down_ran_under(&record, &f.owned);
         assert!(shell.root.lock().unwrap().is_none());
         assert!(shell.containers.lock().unwrap().is_none());
+        assert!(shell.host_access.lock().unwrap().is_none());
+        let seen = std::fs::read_to_string(&requests).unwrap();
+        assert!(!seen.contains("refused"), "{seen}");
     }
 
     #[test]
