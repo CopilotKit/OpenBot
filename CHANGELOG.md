@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- On OpenBot Desktop signed in with a Claude or ChatGPT plan, conversations get a generated name in
+  the sidebar. With no model key, nothing named them, so each showed the start of its first message.
+  The name now comes from the plan's own model, as the built-in Bots' answers do; a Bot you brought
+  yourself is never run to name one.
 - A goal's summary on a Bot's Activity page is plain text. The Bot's reply showed there with its
   Markdown marks ("Saved `heading.txt` with **Example Domain**"); it now reads "Saved heading.txt
   with Example Domain.", the way the sidebar shows a conversation's last message.
