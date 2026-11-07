@@ -1144,6 +1144,11 @@ export async function synchronizeTenantPackage(
         );
       }
 
+      // A personal starter is editable by the local administrator, not a published Team Bot.
+      const visibility =
+        bundledPersonal && agent.configuration.personalStarter === true
+          ? "private"
+          : "public";
       const [profile] = await transaction
         .insert(agentProfiles)
         .values({
@@ -1152,7 +1157,7 @@ export async function synchronizeTenantPackage(
           title: agent.title,
           roleDescription: agent.roleDescription,
           avatarSeed: agent.avatarSeed ?? canonicalAgent.id,
-          visibility: "public",
+          visibility,
           deletedAt: null,
           updatedAt,
         })
@@ -1164,7 +1169,7 @@ export async function synchronizeTenantPackage(
             title: agent.title,
             roleDescription: agent.roleDescription,
             avatarSeed: agent.avatarSeed ?? canonicalAgent.id,
-            visibility: "public",
+            visibility,
             deletedAt: null,
             updatedAt,
           },

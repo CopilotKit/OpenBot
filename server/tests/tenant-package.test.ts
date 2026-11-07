@@ -5,6 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { and, eq, inArray } from "drizzle-orm";
+import { Hono, type MiddlewareHandler } from "hono";
+import { installEnterpriseControls } from "../src/admin/controls";
+import { createEnterpriseGate } from "../src/admin/gate";
+import { createAgentRoutes } from "../src/agents/routes";
+import { createAuditStore } from "../src/audit";
+import type { AppVariables } from "../src/auth/guards";
+import { setEdition } from "../src/edition";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createDatabase } from "../src/db/client";
@@ -1758,6 +1765,65 @@ describe("bundled personal starter", () => {
       expect(starter.standingMessage.content).toContain(
         String(fallback?.configuration.systemPrompt),
       );
+    },
+  );
+
+  test.each(["", claude])(
+    "the personal edition permits starter edits through the HTTP capability gate: %s",
+    async (endpoint) => {
+      setEdition("personal");
+      const userId = await createUser();
+      const signedIn = {
+        id: userId,
+        email: `${userId}@example.test`,
+        role: "admin" as const,
+      };
+      const controls = await installEnterpriseControls({
+        database,
+        databaseUrl: testDatabaseUrl(),
+        auditStore: createAuditStore(database),
+        env: {},
+      });
+      try {
+        await synchronizeTenantPackage(
+          database,
+          await loadStarter(starterTestTenant(), endpoint),
+        );
+        const id = endpoint ? "picked-harness" : "personal-assistant";
+        const starter = await profiles.get(signedIn, id);
+        if (!starter) throw new Error("Missing starter");
+        const requireUser: MiddlewareHandler<{
+          Variables: AppVariables;
+        }> = async (context, next) => {
+          context.set("actor", signedIn);
+          await next();
+        };
+        const app = new Hono<{ Variables: AppVariables }>();
+        app.use("/api/*", createEnterpriseGate(requireUser));
+        app.route("/api/agents", createAgentRoutes(profiles, requireUser));
+        const input = {
+          name: starter.name,
+          title: "Everyday life.",
+          roleDescription: starter.roleDescription,
+          visibility: starter.visibility,
+        };
+        const response = await app.request(`/api/agents/${id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        expect(response.status).toBe(200);
+        expect((await response.json()).agent.title).toBe("Everyday life.");
+        const publish = await app.request(`/api/agents/${id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...input, visibility: "public" }),
+        });
+        expect(publish.status).toBe(403);
+      } finally {
+        await controls.stop();
+        setEdition("team");
+      }
     },
   );
 
