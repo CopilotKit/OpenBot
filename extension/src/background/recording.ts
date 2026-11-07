@@ -661,8 +661,18 @@ export function installRecording(
   /** Set from Record's first step until it finished starting (or rolled back). A stop (Stop, Disconnect, a sign-out)
    * and Start over wait for it. A stop that comes before the recording is live cancels it: Record checks just before
    * making the recording live and rolls back. One that comes later stops the recording once Record finished, so the
-   * network capture and the tab's script Record starts are there for the stop to end. */
-  let starting: { done: Promise<void>; cancelled: boolean } | null = null;
+   * network capture and the tab's script Record starts are there for the stop to end.
+   *
+   * `pageChanges` holds the page changes of the tab Record starts in that come while it starts: the tab is the person's
+   * from the moment they press Record, and OpenBot's own address bar or a link can take it to a website before the
+   * recording is live. Record reads the tab's address once, early, and they would otherwise be neither its first page
+   * nor a step of it; it records them as steps once the recording is live, and starts on the page they reached. */
+  let starting: {
+    done: Promise<void>;
+    cancelled: boolean;
+    tabId: number;
+    pageChanges: { details: NavigationDetails; kind: "commit" | "history" }[];
+  } | null = null;
   /** The stop under way, from the moment it takes the live recording until it finished: Disconnect waits for it, so the
    * recording it moves into the drains is discarded with the rest. */
   let stopInFlight: Promise<void> | null = null;
@@ -1552,11 +1562,13 @@ export function installRecording(
       learning: learningSpace,
     });
     let finish = () => {};
-    const attempt = {
+    const attempt: NonNullable<typeof starting> = {
       done: new Promise<void>((resolve) => {
         finish = resolve;
       }),
       cancelled: false,
+      tabId: message.tabId,
+      pageChanges: [],
     };
     starting = attempt;
     try {
@@ -1581,7 +1593,7 @@ export function installRecording(
   async function start(
     message: Extract<PageToBackground, { type: "page.record" }>,
     connection: ConnectionRecord,
-    attempt: { cancelled: boolean },
+    attempt: NonNullable<typeof starting>,
   ): Promise<PageResponse> {
     const { title, tabId } = message;
     let tab: chrome.tabs.Tab;
@@ -1695,17 +1707,22 @@ export function installRecording(
       injected = true;
       openSteps(recordingId);
       startStep(tabId, url ?? "");
+      // The pages the tab reached while Record started are its first steps, after the page it was on: the same address
+      // as that page is not recorded twice. What follows starts on the page the tab is on now.
+      for (const change of attempt.pageChanges.splice(0))
+        recordTopNavigation(change.details, change.kind);
+      const top = state.topUrls[tabId] || url || "";
       // A page the Recorder may not read refuses the script; its first commit to a website injects it. On a site the
       // person keeps out, the script only shows the mark saying so.
       await injectRecordingScripts(tabId, recordingId, undefined, {
-        active: !excludedUrl(url),
+        active: !excludedUrl(top),
       }).catch(() => undefined);
       // The capture owns the fallback: it alone starts, extends, resumes and stops it.
       capture = deps.createNetworkCapture(networkDeps, {
         fallback: deps.createPageFallback(),
       });
       network = capture;
-      networkMode = await capture.start(tabId, url ?? "");
+      networkMode = await capture.start(tabId, top);
       dispatch({ type: "capture", capture: { network: networkMode } });
       postToContentPorts([tabId], captureFor(tabId));
       return { ok: true };
@@ -2894,6 +2911,15 @@ export function installRecording(
     details: NavigationDetails,
     kind: "commit" | "history",
   ): void {
+    // The tab Record is starting in, reaching a page before the recording is live: Record records it once it is.
+    if (
+      state.phase === "starting" &&
+      starting?.tabId === details.tabId &&
+      details.frameId === 0
+    ) {
+      starting.pageChanges.push({ details, kind });
+      return;
+    }
     if (state.phase !== "recording" || !live) return;
     const { tabId, frameId, url } = details;
     if (!state.tabIds.includes(tabId)) {
