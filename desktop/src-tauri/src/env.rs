@@ -272,7 +272,32 @@ pub fn container_address(address: &str) -> String {
     if !loopback || url.set_host(Some(CONTAINER_HOST)).is_err() {
         return String::new();
     }
-    // The parser writes an empty path as `/`; given without one, it is returned without one.
+    written_as_given(&url, address)
+}
+
+/**
+An address with a `localhost` host written as `127.0.0.1`, keeping the scheme, port and path.
+
+`localhost` does not resolve the same way everywhere: Node takes `::1` first and bun `127.0.0.1`,
+and the local Intelligence stack publishes its ports on `127.0.0.1` alone, so the name reaches a
+listener or nothing depending on who dials it. The Recorder also opens a plain `ws://` gateway only
+at `127.0.0.1` or `[::1]`. Only the bare name is rewritten: a `*.localhost` name is a host name a
+service routes or keeps a session by, and `127.x.y.z`, `[::1]` and every other host are already
+what they say.
+*/
+pub fn numeric_loopback(address: &str) -> String {
+    let address = address.trim();
+    let Ok(mut url) = reqwest::Url::parse(address) else {
+        return address.to_string();
+    };
+    if url.host_str() != Some("localhost") || url.set_host(Some("127.0.0.1")).is_err() {
+        return address.to_string();
+    }
+    written_as_given(&url, address)
+}
+
+/// The parser writes an empty path as `/`; given without one, it is returned without one.
+fn written_as_given(url: &reqwest::Url, address: &str) -> String {
     let moved = url.to_string();
     match moved.strip_suffix('/') {
         Some(bare) if url.path() == "/" && !address.ends_with('/') => bare.to_string(),
@@ -286,7 +311,7 @@ agent-computer's `loopback-relay.ts`), as `<port>=<host>:<port>`, comma-separate
 
 The Recorder in a browser there reaches OpenBot only at https or at loopback, so it is handed the
 address the person's window uses, `http://127.0.0.1:<app port>`, and a local Intelligence gateway at
-`ws://localhost:<port>`. Inside the computer's container both are the container. The app's and the
+`ws://127.0.0.1:<port>`. Inside the computer's container both are the container. The app's and the
 server's ports go to the server's container on the Compose network, and a gateway on this machine's
 loopback goes to `host.docker.internal`, as the server's container reaches it. A gateway elsewhere
 is reached at its own address and is not relayed.
@@ -691,13 +716,18 @@ pub fn compose(
     // string, so a key copied from a provider's dashboard with the trailing space the selection
     // picked up arrives here intact. Compose keeps it, the provider rejects the key, and the Bot
     // reports that it cannot answer without ever naming the space.
+    //
+    // And at `127.0.0.1` where they say `localhost`, as the local Intelligence CLI reports its
+    // stack. The server and the person's browser both dial these (`docker-compose.yml` hands the
+    // gateway to the browser as `INTELLIGENCE_BROWSER_GATEWAY_WS_URL`), the stack publishes on
+    // `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway at no other name.
     env.insert(
         "INTELLIGENCE_API_URL".into(),
-        intelligence.api_url.trim().to_string(),
+        numeric_loopback(&intelligence.api_url),
     );
     env.insert(
         "INTELLIGENCE_GATEWAY_WS_URL".into(),
-        intelligence.gateway_ws_url.trim().to_string(),
+        numeric_loopback(&intelligence.gateway_ws_url),
     );
     /*
      * The same two addresses as the server's container reaches them.
@@ -2612,9 +2642,9 @@ HTTPS_PROXY=http://proxy:8080
             None,
             &BTreeMap::new(),
         );
-        // The host's own addresses stay as given: the browser reads the gateway's from these.
-        assert_eq!(env["INTELLIGENCE_API_URL"], "http://localhost:18082");
-        assert_eq!(env["INTELLIGENCE_GATEWAY_WS_URL"], "ws://localhost:14401");
+        // The host's own addresses, which the browser reads the gateway's from, at 127.0.0.1.
+        assert_eq!(env["INTELLIGENCE_API_URL"], "http://127.0.0.1:18082");
+        assert_eq!(env["INTELLIGENCE_GATEWAY_WS_URL"], "ws://127.0.0.1:14401");
         assert_eq!(
             env["INTELLIGENCE_CONTAINER_API_URL"],
             "http://host.docker.internal:18082"
@@ -2623,6 +2653,66 @@ HTTPS_PROXY=http://proxy:8080
             env["INTELLIGENCE_CONTAINER_GATEWAY_WS_URL"],
             "ws://host.docker.internal:14401"
         );
+    }
+
+    /// The local Intelligence CLI reports its stack at `localhost`, and `docker-compose.yml` hands
+    /// the gateway address to the browser as `INTELLIGENCE_BROWSER_GATEWAY_WS_URL`. The stack
+    /// publishes on `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway only at
+    /// `127.0.0.1` or `[::1]`, so `ws://localhost:51798` in the file left every recording unsaved.
+    #[test]
+    fn a_local_intelligence_is_written_at_127_0_0_1_and_nothing_written_dials_localhost() {
+        let env = compose(
+            &Intelligence {
+                api_url: "http://localhost:51796".into(),
+                gateway_ws_url: "ws://localhost:51798".into(),
+                api_key: "synthetic".into(),
+            },
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(env["INTELLIGENCE_API_URL"], "http://127.0.0.1:51796");
+        assert_eq!(env["INTELLIGENCE_GATEWAY_WS_URL"], "ws://127.0.0.1:51798");
+        assert_eq!(
+            env["COMPUTER_LOOPBACK_RELAYS"],
+            format!(
+                "{app}=server:3001,{server}=server:3001,51798=host.docker.internal:51798",
+                app = Ports::default().app,
+                server = Ports::default().server
+            )
+        );
+        for (key, value) in &env {
+            // An allowlist of origins a browser may send, compared rather than dialled.
+            if key == "TRUSTED_ORIGINS" {
+                continue;
+            }
+            assert!(!value.contains("//localhost"), "{key}={value}");
+        }
+
+        for (given, expected) in [
+            ("ws://localhost:51798", "ws://127.0.0.1:51798"),
+            ("ws://localhost:51798/", "ws://127.0.0.1:51798/"),
+            (" http://LOCALHOST:8082/api ", "http://127.0.0.1:8082/api"),
+            ("http://127.0.0.1:8082", "http://127.0.0.1:8082"),
+            ("http://[::1]:8082", "http://[::1]:8082"),
+            // A host name a service routes or keeps a session by, not a spelling of loopback.
+            ("http://cpk.localhost:8080", "http://cpk.localhost:8080"),
+            (
+                "http://localhost.evil.test:8082",
+                "http://localhost.evil.test:8082",
+            ),
+            (
+                "wss://realtime.intelligence.copilotkit.ai",
+                "wss://realtime.intelligence.copilotkit.ai",
+            ),
+            ("not a url", "not a url"),
+            ("", ""),
+        ] {
+            assert_eq!(numeric_loopback(given), expected, "{given}");
+        }
     }
 }
 
