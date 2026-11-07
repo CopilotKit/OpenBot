@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The private sign-in dialog in a conversation no longer leaves large empty gaps above "Use a
+  saved login" and "Enter your login". Its sections are spaced as a dialog's are, and the fields
+  sit a step below the sentence that introduces them, here and on the sign-in page.
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
