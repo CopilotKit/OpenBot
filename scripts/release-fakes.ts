@@ -191,7 +191,10 @@ export function feedFor(
     platforms: Object.fromEntries(
       platforms.map((platform) => [
         platform,
-        { url: `https://example.test/${platform}`, signature: `sig-${platform}` },
+        {
+          url: `https://example.test/${platform}`,
+          signature: `sig-${platform}`,
+        },
       ]),
     ),
   };

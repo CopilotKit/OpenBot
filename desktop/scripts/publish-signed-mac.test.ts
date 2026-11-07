@@ -88,7 +88,10 @@ function names(call: string) {
 
 /** What Windows signing leaves on the release when it ran first: its installer, listed. */
 function windowsSigned(fake: FakeRepo, version: string) {
-  fake.attach(`OpenBot_${version}_x64-setup.exe`, "OpenBot-windows-x64-setup.exe");
+  fake.attach(
+    `OpenBot_${version}_x64-setup.exe`,
+    "OpenBot-windows-x64-setup.exe",
+  );
   fake.attachFile(
     "latest.json",
     JSON.stringify(feedFor(version, ["windows-x86_64"])),

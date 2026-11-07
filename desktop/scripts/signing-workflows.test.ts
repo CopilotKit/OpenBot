@@ -120,7 +120,9 @@ test("the Mac and Windows attach jobs of one release never run at the same time"
 test("Windows signing signs its installer for the updater with the Mac's key, then attaches and lists it", () => {
   const windows = workflow(".github/workflows/desktop-signing.yml");
   const sign = windows.jobs.sign;
-  expect(sign?.outputs?.updater).toBe(expression("steps.build.outputs.updater"));
+  expect(sign?.outputs?.updater).toBe(
+    expression("steps.build.outputs.updater"),
+  );
   const build = sign?.steps?.find((step) => step.name === "Build and sign");
   expect(build?.id).toBe("build");
   expect(build?.run).toContain("src-tauri/tauri.windows-signing.conf.json");

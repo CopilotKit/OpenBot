@@ -165,9 +165,9 @@ test("a feed left from another version keeps none of its platforms", () => {
   const result = publish(fake, dir, "v0.3.0");
   expect(result.code).toBe(0);
   expect(result.out).toContain("describes version 0.2.9, not 0.3.0");
-  expect(
-    Object.keys(JSON.parse(fake.file("latest.json")).platforms),
-  ).toEqual(["windows-x86_64"]);
+  expect(Object.keys(JSON.parse(fake.file("latest.json")).platforms)).toEqual([
+    "windows-x86_64",
+  ]);
 });
 
 test("an installer the updater could not verify is not attached", () => {
@@ -228,7 +228,9 @@ test("Windows signing that finishes after Mac signing makes the release Latest, 
   expect(result.code).toBe(0);
   const calls = fake.calls();
   const feedUpload = calls.findLastIndex((call) =>
-    call.startsWith("gh release upload v0.3.0 -R CopilotKit/OpenBot latest.json"),
+    call.startsWith(
+      "gh release upload v0.3.0 -R CopilotKit/OpenBot latest.json",
+    ),
   );
   const promote = calls.indexOf(
     "gh release edit v0.3.0 -R CopilotKit/OpenBot --latest",

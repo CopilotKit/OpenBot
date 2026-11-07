@@ -141,7 +141,10 @@ test.skipIf(!minisign)(
     // The private key never reaches the log.
     expect(result.out).not.toContain(key.privateKey.trim());
     // Over these exact bytes: one byte more and it no longer verifies.
-    writeFileSync(installer, Buffer.concat([readFileSync(installer), Buffer.from([0])]));
+    writeFileSync(
+      installer,
+      Buffer.concat([readFileSync(installer), Buffer.from([0])]),
+    );
     expect(verifies(dir, installer, key.pubkey)).toBe(false);
   },
   30_000,

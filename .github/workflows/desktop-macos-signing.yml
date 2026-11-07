@@ -95,12 +95,6 @@ jobs:
       - name: Update offer regressions
         run: bun test src/UpdateOffer.test.tsx
         working-directory: desktop
-      # What a release signs and attaches: a candidate pinned to its own images with no updater,
-      # a stable release made Latest only once its signed Mac and Windows installers are both on
-      # it, every signed installer under its fixed download name too, and downloads.copilotkit.ai
-      # serving only the Latest stable release's signed installers. And every signed build carries
-      # the Intelligence CLI, its Mac binaries signed for notarization: an app without it cannot set
-      # up Intelligence, and the updater would put it on every Mac.
       # minisign checks the Windows installer's updater signature in Desktop Windows signing, and
       # the test of that script needs it here, where it must run rather than skip.
       - name: Install minisign
@@ -108,6 +102,14 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: brew install minisign
+      # What a release signs and attaches: a candidate pinned to its own images with no updater,
+      # a stable release made Latest only once its signed Mac and Windows installers are both on
+      # it and both listed in one latest.json, the Windows installer signed for the updater with
+      # the key its app trusts, every signed installer under its fixed download name too, and
+      # downloads.copilotkit.ai
+      # serving only the Latest stable release's signed installers. And every signed build carries
+      # the Intelligence CLI, its Mac binaries signed for notarization: an app without it cannot set
+      # up Intelligence, and the updater would put it on every Mac.
       - name: Signed release regressions
         env:
           OPENBOT_REQUIRE_MINISIGN: "1"

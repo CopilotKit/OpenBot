@@ -2,6 +2,8 @@
 
 OpenBot Desktop updates itself with its signed updater: OpenBot's own window shows a bar when a newer version is out, with **Update and restart**, and the setup window offers it too (`app_update`, read at launch and every six hours). The installation follows the app: on the next Start, an installation that is not on the app's own release is upgraded to it, and its data comes along.
 
+The app update itself replaces only the app, on a Mac and on Windows alike. On a Mac the new `OpenBot.app` is put in place of the old one, then OpenBot is stopped and the app restarts. On Windows OpenBot is stopped first, then the installer runs in update mode, which never runs the uninstaller, and starts the new version. Either way the installation, its `.env`, keys and database volumes, and the app's own settings and data stay as they are, and the restarted app's Start is what moves the installation forward. See [Windows updates](releasing.md#windows-updates).
+
 ## The upgrade
 
 The app's own release is the tag it was released as, or, for an internal or candidate build, the release it was pinned to. One rule for every build: when the installed version (`.openbot-deployment`) is not that release, Start (`desktop/src-tauri/src/upgrade.rs`):
