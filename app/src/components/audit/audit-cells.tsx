@@ -1,3 +1,4 @@
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
 
@@ -38,9 +39,14 @@ export function whenText(event: AuditEvent): string {
   return WHEN.format(new Date(event.createdAt));
 }
 
-/** Strip the internal computer tool namespace for display. */
+/**
+ * Strip the internal computer tool namespace for display. An approval row is about an action too, and
+ * names the tool it was asked about, so it reads as the same action its other rows are.
+ */
 export function whatText(event: AuditEvent): string {
-  const action = event.payload?.action;
+  const action =
+    event.payload?.action ??
+    (event.targetType === "approval" ? event.payload?.tool : undefined);
   return typeof action === "string"
     ? action.replace("computer_", "")
     : event.eventType;
@@ -66,6 +72,13 @@ export function subjectText(event: AuditEvent): string {
   if (typeof element === "object" && element?.name)
     return element.role ? `${element.name} (${element.role})` : element.name;
   if (typeof element === "string") return element;
+  // An app's tool or a folder: where an approval row's action would have acted, when it names no file or page.
+  if (
+    event.targetType === "approval" &&
+    typeof payload.page !== "string" &&
+    typeof payload.scope === "string"
+  )
+    return payload.scope;
   return "";
 }
 
@@ -115,7 +128,7 @@ export function startedByText(event: AuditEvent, nameFor: NameFor): string {
 
 export function decisionText(event: AuditEvent): string {
   const payload = event.payload ?? {};
-  const outcome = outcomeOf(event.eventType);
+  const outcome = outcomeOf(event);
   /*
    * Three different things, and the difference is what somebody comes to this row to find out.
    *
@@ -134,6 +147,7 @@ export function decisionText(event: AuditEvent): string {
       : null;
   return (
     routed ??
+    approvalText(event) ??
     DECISIONS[event.eventType] ??
     (outcome === "refused"
       ? "Blocked"
@@ -141,6 +155,53 @@ export function decisionText(event: AuditEvent): string {
         ? "Did not happen"
         : "Allowed")
   );
+}
+
+/**
+ * What an approval row says: the gate asking or deciding, or the person's answer. One event type
+ * covers every answer, so the answer is read from the row, and a denial never falls through to
+ * "Allowed".
+ */
+function approvalText(event: AuditEvent): string | undefined {
+  const payload = event.payload ?? {};
+  if (event.eventType === "approval.person_decided")
+    return typeof payload.decision === "string"
+      ? PERSON_DECISIONS[payload.decision]
+      : undefined;
+  if (event.eventType === "approval.evaluated") {
+    const behaviour = (payload.outcome as { behaviour?: unknown } | undefined)
+      ?.behaviour;
+    return typeof behaviour === "string"
+      ? GATE_DECISIONS[behaviour]
+      : undefined;
+  }
+  return undefined;
+}
+
+const PERSON_DECISIONS: Record<string, string> = {
+  allow_once: "Allowed once by a person",
+  allow_always: "Always allowed by a person",
+  deny: "Denied by a person",
+  handled: "Done by a person",
+};
+
+const GATE_DECISIONS: Record<string, string> = {
+  allow: "Allowed without asking",
+  ask: "Asked a person first",
+  hand_off: "Handed to a person",
+  deny: "Blocked",
+};
+
+/**
+ * Why an action the policy allowed was refused anyway, in a person's words. The Bot is told why in
+ * sentences written for it; the shared table turns them into the ones a person reads.
+ */
+function refusalLine(payload: Record<string, unknown>): string | undefined {
+  if (payload.refusal === "person_declined")
+    return "A person denied it when asked.";
+  if (payload.refusal === "approval" && typeof payload.reason === "string")
+    return outcomeForPerson(payload.reason);
+  return undefined;
 }
 
 /** Every reason line under the decision, in the order the cell draws them. */
@@ -152,16 +213,34 @@ export function decisionDetails(event: AuditEvent): string[] {
     rule?: string | null;
     carriedOut?: boolean;
   };
-  const failed = outcomeOf(event.eventType) === "did-not-happen";
+  const failed = outcomeOf(event) === "did-not-happen";
   const lines: string[] = [];
+  const refused =
+    event.eventType === "computer.action_refused" ||
+    event.eventType === "mcp.call_rejected"
+      ? refusalLine(payload)
+      : undefined;
+  if (refused) lines.push(refused);
   // Refusal reasons mirror the conversation-facing reason.
-  if (
+  else if (
     (event.eventType === "component.refused" ||
       event.eventType === "component.function_refused" ||
       event.eventType === "mcp.call_rejected") &&
     typeof payload.reason === "string"
   )
     lines.push(payload.reason);
+  // Why the gate asked, allowed or refused, and why a request stopped waiting.
+  const gate = (payload.outcome ?? {}) as { reason?: unknown };
+  if (
+    event.eventType === "approval.evaluated" &&
+    typeof gate.reason === "string"
+  )
+    lines.push(outcomeForPerson(gate.reason));
+  if (
+    event.eventType === "approval.withdrawn" &&
+    typeof payload.reason === "string"
+  )
+    lines.push(outcomeForPerson(payload.reason));
   /*
    * Why this run was offered what it was, which is the only part of a discovery row that cannot be
    * worked out from the numbers. "Nothing declared" and "selector unavailable" both offer everything
@@ -314,7 +393,7 @@ export function StartedByCell({
 }
 
 export function DecisionCell({ event }: { event: AuditEvent }) {
-  const outcome = outcomeOf(event.eventType);
+  const outcome = outcomeOf(event);
   return (
     <>
       <span
@@ -423,6 +502,9 @@ const DECISIONS: Record<string, string> = {
   "mcp.call_failed": "The server didn't answer",
   // Not "Blocked": nothing about the Bot was judged, because nothing proved which Bot it was.
   "mcp.callback_refused": "Couldn't confirm which Bot it was",
+
+  // A request closed without an answer: asking was turned off, or a rule now allows it.
+  "approval.withdrawn": "Withdrawn",
 
   "configuration.changed": "Configuration changed",
   "credential.created": "Credential saved",
