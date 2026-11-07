@@ -67,7 +67,7 @@ export function deploymentCapabilitiesQueryOptions() {
        */
       const body = (await (
         await client("/api/capabilities", {
-          fallback: "This deployment's capabilities could not be loaded.",
+          fallback: "Couldn't load what OpenBot can do.",
         })
       ).json()) as {
         generativeUi?: boolean;

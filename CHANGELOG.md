@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The personal edition calls the product OpenBot: Activity says "Started by OpenBot" where it said
+  "Started by this deployment", and Connections, Keys and Computer say what OpenBot does. Admin keeps
+  "this deployment".
 - Settings › This computer on an OpenBot Desktop build that doesn't update itself, such as an
   internal build, says so up front with no Check for updates button, in the same words as the
   setup window. It offered the check and then said the build doesn't update itself.

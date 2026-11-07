@@ -139,12 +139,12 @@ export async function callComponentFunction(
     }
     return {
       allowed: false,
-      reason: "This deployment could not be asked for that data.",
+      reason: "OpenBot couldn't be asked for that data.",
     };
   } catch {
     return {
       allowed: false,
-      reason: "This deployment could not be reached to read that data.",
+      reason: "OpenBot couldn't be reached to read that data.",
     };
   }
 }
@@ -169,7 +169,7 @@ export async function decideComponent(
       return {
         allowed: false,
         reason:
-          "This deployment could not be asked whether that component is allowed, so it was not shown.",
+          "OpenBot couldn't be asked whether that component is allowed, so it wasn't shown.",
       };
     }
     return await response.json();
@@ -177,7 +177,7 @@ export async function decideComponent(
     return {
       allowed: false,
       reason:
-        "This deployment could not be reached to check whether that component is allowed, so it was not shown.",
+        "OpenBot couldn't be reached to check whether that component is allowed, so it wasn't shown.",
     };
   }
 }

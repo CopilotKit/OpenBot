@@ -71,7 +71,7 @@ export function NewCredentialPage() {
   return (
     <PageShell
       backButton={back}
-      description="Save a credential for this deployment. You won’t be able to view the secret after saving it."
+      description={`Save a credential for ${paths.deploymentName}. You won’t be able to view the secret after saving it.`}
       title="Add credential"
     >
       <form

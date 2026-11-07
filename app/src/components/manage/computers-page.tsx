@@ -370,9 +370,9 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
               Update {confirmingUpdate ? titleOf(confirmingUpdate) : ""}?
             </DialogTitle>
             <DialogDescription>
-              It moves to the computer image this deployment now runs. Its files
-              and sign-ins are kept. If it's running, it restarts and stops what
-              it's doing.
+              It moves to the computer image {paths.deploymentName} now runs.
+              Its files and sign-ins are kept. If it's running, it restarts and
+              stops what it's doing.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
