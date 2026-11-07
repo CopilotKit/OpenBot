@@ -342,6 +342,31 @@ describe("Activity and attention", () => {
     expect(routine?.detail).toBe("Every day at 09:00 (UTC)");
   });
 
+  test("a routine's title is its whole instruction, never cut mid-word", async () => {
+    // Seen on the Bot page: "...releases) and post one l", the instruction cut at 120 characters.
+    const instruction =
+      "Check the latest release of CopilotKit/OpenBot on GitHub (https://github.com/CopilotKit/OpenBot/releases) and post one line in this conversation with its version number (tag) and release date.";
+    const id = `${prefix}-routine-long`;
+    await database.insert(routines).values({
+      id,
+      ownerUserId: owner,
+      agentId: bot,
+      channelId: direct,
+      instruction,
+      cron: "0 9 * * *",
+      nextRunAt: new Date(Date.now() + 3_600_000),
+    });
+    try {
+      const result = await activity.forBot(owner, bot);
+      const item = result.scheduled.find(
+        (candidate) => candidate.id === `routine:${id}`,
+      );
+      expect(item?.title).toBe(instruction);
+    } finally {
+      await database.delete(routines).where(eq(routines.id, id));
+    }
+  });
+
   test("attention counts what waits on this person", async () => {
     const [row] = (await activity.attention(owner)).filter(
       (entry) => entry.agentId === bot,
