@@ -773,10 +773,14 @@ pub fn compose(
     // arrives with an origin the other would not match, and the deployment refuses a request it
     // should have accepted. Naming all three costs nothing: they are the same machine, and the
     // question this setting answers is which origins are this deployment's own.
+    //
+    // 127.0.0.1 first, because the server also takes the first as the app's own address and sends
+    // the person's browser there after they approve an app; `localhost` may resolve to the address
+    // the engine did not publish.
     env.insert(
         "TRUSTED_ORIGINS".into(),
         format!(
-            "http://localhost:{app},http://127.0.0.1:{app},http://[::1]:{app}",
+            "http://127.0.0.1:{app},http://localhost:{app},http://[::1]:{app}",
             app = ports.app
         ),
     );
@@ -2482,6 +2486,20 @@ HTTPS_PROXY=http://proxy:8080
                 .count(),
             1
         );
+    }
+
+    /// After the person approves an app in their browser, Composio sends them back to the app's
+    /// own address, which the server takes from the first of `TRUSTED_ORIGINS` (`appUrl` in
+    /// server/src/config.ts). That was `http://localhost:3010`: `localhost` may resolve to the
+    /// address the engine did not publish, and OpenBot names this machine by number everywhere
+    /// else. The first is 127.0.0.1, and the other two names are still trusted.
+    #[test]
+    fn the_app_s_own_address_is_127_0_0_1_and_never_localhost() {
+        let env = fresh();
+        let origins: Vec<&str> = env["TRUSTED_ORIGINS"].split(',').collect();
+        assert_eq!(origins.first(), Some(&"http://127.0.0.1:3010"));
+        assert!(origins.contains(&"http://localhost:3010"));
+        assert!(origins.contains(&"http://[::1]:3010"));
     }
 
     #[test]
