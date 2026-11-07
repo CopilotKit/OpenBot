@@ -1,5 +1,12 @@
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
-import { auditActionWords, auditEventWords } from "@openbot/shared/audit-words";
+import {
+  appToolsWords,
+  auditActionWords,
+  auditChangeWords,
+  auditEventWords,
+} from "@openbot/shared/audit-words";
+import { isOpenBotActor } from "@openbot/shared/openbot-actor";
+import { connectorName } from "@openbot/shared/tool-name";
 import { Fragment, type ReactNode } from "react";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
@@ -90,7 +97,8 @@ function breakable(text: string): ReactNode {
  * Decision off the right edge of a 1000px window.
  *
  * In words. `storedName` puts the name the trail keeps it under on hover, for an admin matching a row
- * against the export or a collector; a page anybody can open leaves it off.
+ * against the export or a collector, and keeps a tool's or an app's stored name under it; a page
+ * anybody can open leaves both off and says the tool and the app in words.
  */
 export function WhatCell({
   event,
@@ -107,7 +115,7 @@ export function WhatCell({
       >
         {whatText(event)}
       </div>
-      <OnCell event={event} />
+      <OnCell event={event} storedNames={storedName} />
     </>
   );
 }
@@ -182,16 +190,66 @@ export function whatName(event: AuditEvent): string {
   return actionOf(event) ?? event.eventType;
 }
 
-/** What a row is about, in words: "Save a file", "Choose tools for a run". See `audit-words`. */
+/**
+ * What a row is about, in words: "Save a file", "Choose tools for a run", "Give a Bot tools". See
+ * `audit-words`. A configuration row says what changed when its change has words of its own.
+ */
 export function whatText(event: AuditEvent): string {
   const action = actionOf(event);
-  return action ? auditActionWords(action) : auditEventWords(event.eventType);
+  if (action) return auditActionWords(action);
+  const change =
+    event.eventType === "configuration.changed"
+      ? auditChangeWords(event.payload ?? {})
+      : undefined;
+  return change ?? auditEventWords(event.eventType);
 }
 
 type Element = { role?: string; name?: string } | string | undefined;
 
-/** The row's subject, the part of "On" that is not the page host. */
-export function subjectText(event: AuditEvent): string {
+/** The `app/tool` refs a row names: the tools one row gave a Bot, or an app's tools it no longer lists. */
+function refsOf(event: AuditEvent): string[] | undefined {
+  const refs = event.payload?.refs;
+  return Array.isArray(refs) &&
+    refs.length > 0 &&
+    refs.every((ref) => typeof ref === "string")
+    ? refs
+    : undefined;
+}
+
+/**
+ * An app's tool or an app, in words, for a page anybody can open: "Send email on Gmail" for a tool
+ * a row gave or took, the app alone ("Gmail") under a call whose What already says the action.
+ * Undefined for anything else, which reads as it does in Admin.
+ */
+function appSubjectWords(event: AuditEvent): string | undefined {
+  const payload = event.payload ?? {};
+  const target = event.targetId;
+  if (event.targetType === "mcp_tool" && target)
+    return event.eventType === "configuration.changed"
+      ? appToolsWords([target])
+      : connectorName(
+          target.slice(0, Math.max(target.indexOf("/"), 0)) || target,
+        );
+  if (event.targetType === "mcp_server" && target) {
+    const refs = refsOf(event);
+    return refs ? appToolsWords(refs) : connectorName(target);
+  }
+  // An approval asked about an app's tool names the app as where it would act.
+  if (
+    event.targetType === "approval" &&
+    typeof payload.scope === "string" &&
+    typeof payload.tool === "string" &&
+    payload.tool.startsWith(`${payload.scope}/`)
+  )
+    return connectorName(payload.scope);
+  return undefined;
+}
+
+/**
+ * The row's subject, the part of "On" that is not the page host. Admin (`storedNames`) reads a tool
+ * or an app by the name the trail stores it under; a page anybody can open reads it in words.
+ */
+export function subjectText(event: AuditEvent, storedNames = true): string {
   const payload = event.payload ?? {};
   const element = payload.element as Element;
   if (event.eventType === "mcp.tools_discovered")
@@ -199,6 +257,17 @@ export function subjectText(event: AuditEvent): string {
       typeof payload.granted === "number"
       ? `${payload.offered} of ${payload.granted} tools`
       : "";
+  if (!storedNames) {
+    const words = appSubjectWords(event);
+    if (words !== undefined) return words;
+  } else if (
+    event.eventType === "configuration.changed" &&
+    payload.change === "plugin_granted"
+  ) {
+    // Every tool one row gave a Bot, as Admin read them when each had a row of its own.
+    const refs = refsOf(event);
+    if (refs) return refs.join(", ");
+  }
   if (NAMED_TARGETS.has(event.targetType) && event.targetId)
     return typeof payload.function === "string"
       ? `${event.targetId} · ${payload.function}`
@@ -244,6 +313,24 @@ export function botText(event: AuditEvent, nameFor: NameFor): string {
 }
 
 /**
+ * What started a row. Two kinds of row are OpenBot's own change: a configuration row that names
+ * OpenBot as its actor (`openbot:always-on`), and a component a build brought, published on arrival
+ * (the only publish row with a `note`). Rows written before the server recorded that say a person
+ * started them, and the trail cannot be rewritten, so they are read that way here. A row the server
+ * says something other than a person started keeps what it says.
+ */
+function initiatorKindOf(event: AuditEvent): string | undefined {
+  if ((event.initiatorKind ?? "person") !== "person")
+    return event.initiatorKind;
+  const ownChange =
+    (event.eventType === "configuration.changed" &&
+      isOpenBotActor(event.payload?.actor)) ||
+    (event.eventType === "component.published" &&
+      typeof event.payload?.note === "string");
+  return ownChange ? "deployment" : event.initiatorKind;
+}
+
+/**
  * Who started a row, as the row's Started by filter and its line under the Bot both say it.
  * `deployment` is what OpenBot itself is called on this screen: "this deployment" in Admin, and
  * "OpenBot" in the personal edition's Activity, which is anybody's page.
@@ -253,7 +340,7 @@ export function startedByText(
   nameFor: NameFor,
   deployment = "this deployment",
 ): string {
-  switch (event.initiatorKind) {
+  switch (initiatorKindOf(event)) {
     case "routine":
       return "A routine";
     case "handoff":
@@ -454,7 +541,9 @@ export function searchTextOf(
     whatText(event),
     // The stored name too, so a row is found by what the export and a collector call it.
     whatName(event),
+    // Both ways a tool or an app is named, so either finds the row on either page.
     subjectText(event),
+    subjectText(event, false),
     hostText(event),
     botText(event, nameFor),
     startedByText(event, nameFor, deployment),
@@ -465,18 +554,26 @@ export function searchTextOf(
     .toLowerCase();
 }
 
-export function OnCell({ event }: { event: AuditEvent }) {
+export function OnCell({
+  event,
+  storedNames = true,
+}: {
+  event: AuditEvent;
+  /** Whether a tool or an app reads by its stored name, as Admin's do; see {@link subjectText}. */
+  storedNames?: boolean;
+}) {
   const payload = event.payload ?? {};
   const element = payload.element as Element;
-  const subject = subjectText(event);
+  const subject = subjectText(event, storedNames);
   const host = hostText(event);
   /*
    * Named targets, tool counts, files and commands are identifiers and read in mono; a page element
-   * is a label and does not.
+   * is a label and does not, and nor is a tool or an app said in words.
    */
+  const inWords = !storedNames && appSubjectWords(event) !== undefined;
   const mono =
     event.eventType === "mcp.tools_discovered" ||
-    (NAMED_TARGETS.has(event.targetType) && !!event.targetId) ||
+    (NAMED_TARGETS.has(event.targetType) && !!event.targetId && !inWords) ||
     typeof payload.file === "string" ||
     typeof payload.command === "string";
   // Under the action in the What column, so a row with nothing to name draws nothing.
@@ -491,6 +588,12 @@ export function OnCell({ event }: { event: AuditEvent }) {
             <span className="text-muted-foreground"> ({element.role})</span>
           ) : null}
         </div>
+      ) : inWords ? (
+        /*
+         * A cap, as on the Decision lines: a few tools and their app make a long line, and drawn at
+         * its own width it took the room Decision needs ("Boundary at start-up" broke at its hyphen).
+         */
+        <div className="mt-0.5 max-w-52 text-muted-foreground">{subject}</div>
       ) : (
         <div className="mt-0.5 text-muted-foreground">{breakable(subject)}</div>
       )}

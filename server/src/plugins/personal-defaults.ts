@@ -22,6 +22,12 @@ type Store = {
     by: string,
     as?: "admin" | "owner",
   ): Promise<void>;
+  grantTools(
+    app: string,
+    refs: string[],
+    agentId: string,
+    by: string,
+  ): Promise<void>;
   listForAgent(agentId: string): Promise<unknown>;
   installSkill(input: { slug: string; by: string }): Promise<void>;
 };
@@ -83,9 +89,13 @@ export const EVERY_BOT_ASKS_REFUSAL =
  * Gives Bots every tool of these apps they don't hold yet. Writes nothing when they hold them all,
  * so asking on every run costs reads and no trail rows. The trail names why: Routines' grants as
  * always on, any other app's as `by`.
+ *
+ * One trail row per Bot and app, naming every tool it was given, and started by OpenBot when `by`
+ * is OpenBot's own (see `initiatedBy`). An upgrade that added seven goal tools to Routines wrote one
+ * row per tool for every Bot, each saying a person had changed a setting.
  */
 async function grantEveryTool(
-  store: Pick<Store, "grant">,
+  store: Pick<Store, "grantTools">,
   deps: PersonalDefaultsDeps,
   apps: string[],
   bots: string[],
@@ -97,9 +107,12 @@ async function grantEveryTool(
     const grantedBy = isAlwaysOn(app) ? ALWAYS_ON_BY : by;
     for (const bot of bots) {
       const held = await deps.granted(bot, app);
-      for (const tool of tools)
-        if (!held.has(tool.ref))
-          await store.grant("mcp", tool.ref, bot, grantedBy);
+      const missing = tools
+        .map((tool) => tool.ref)
+        .filter((ref) => !held.has(ref))
+        .sort();
+      if (missing.length > 0)
+        await store.grantTools(app, missing, bot, grantedBy);
     }
   }
 }
@@ -156,7 +169,7 @@ async function everyBotApps(deps: PersonalDefaultsDeps): Promise<string[]> {
  * at the same start rather than the one after.
  */
 export async function ensureAlwaysOnApp(
-  store: Pick<Store, "grant"> & {
+  store: Pick<Store, "grantTools"> & {
     serverAddress(serverId: string): Promise<unknown>;
     addServer(input: { key: string; by: string }): Promise<unknown>;
     refreshOwnListings(): Promise<string[]>;

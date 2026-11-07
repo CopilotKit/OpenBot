@@ -1,12 +1,17 @@
+import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import { and, eq, sql } from "drizzle-orm";
 import type { ApprovalGate } from "../../approvals/types";
-import type { AuditStore } from "../../audit";
+import {
+  type AuditInitiator,
+  type AuditStore,
+  DEPLOYMENT_INITIATOR,
+} from "../../audit";
+import type { EntraTokens } from "../../auth/entra-refusal";
 import type { ActionPolicy } from "../../computer/policy";
 import type {
   CredentialSecretReader,
   CredentialStore,
 } from "../../credentials";
-import type { EntraTokens } from "../../auth/entra-refusal";
 import type { Database } from "../../db/client";
 import { isQueryFailure, withoutStatement } from "../../db/query-failure";
 import { pendingAuthorizations } from "../../db/schema";
@@ -937,6 +942,18 @@ export const iso = (value: Date | string | null): string | null =>
  */
 export const DEPLOYMENT_ACTOR = "deployment";
 export const UNATTRIBUTED_ACTOR = "unattributed";
+
+/**
+ * What started a configuration row, read from the actor it names, to spread into the row.
+ *
+ * A row OpenBot writes for a change nobody made names OpenBot as its actor ({@link DEPLOYMENT_ACTOR},
+ * or `openbot:always-on` and the personal edition's `openbot:personal-defaults`), and is started by
+ * OpenBot. Any other actor is a person, which is what a row with no initiator says. Without this an
+ * upgrade that gave every Bot the goal tools put a row per tool on Activity saying a person did it.
+ */
+export function initiatedBy(actor: string): { initiator?: AuditInitiator } {
+  return isOpenBotActor(actor) ? { initiator: DEPLOYMENT_INITIATOR } : {};
+}
 
 /**
  * Whose account this call went out as, for the trail.

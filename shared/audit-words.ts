@@ -221,6 +221,70 @@ export function auditActionWords(action: string): string {
 }
 
 /**
+ * A configuration row's change in words, read from the `change` its payload names: the plugin
+ * store's own changes, which OpenBot makes by itself as well as a person does (it gives every Bot
+ * Routines' tools at every start, and in the personal edition every app's tools). Any other change
+ * answers nothing, and the row keeps "Change a setting".
+ */
+export function auditChangeWords(
+  payload: Record<string, unknown>,
+): string | undefined {
+  const { change, kind } = payload;
+  if (change === "plugin_granted") {
+    if (kind === "skill") return "Give a Bot a skill";
+    if (kind === "bot") return "Let a Bot ask another Bot";
+    // One row names every tool a Bot was given at once; see `grantTools` on the server.
+    return Array.isArray(payload.refs) && payload.refs.length > 1
+      ? "Give a Bot tools"
+      : "Give a Bot a tool";
+  }
+  if (change === "plugin_revoked") {
+    if (kind === "skill") return "Take a skill from a Bot";
+    if (kind === "bot") return "Stop a Bot asking another Bot";
+    return "Take a tool from a Bot";
+  }
+  return typeof change === "string" && Object.hasOwn(CHANGES, change)
+    ? CHANGES[change]
+    : undefined;
+}
+
+const CHANGES: Readonly<Record<string, string>> = {
+  mcp_server_added: "Turn on an app",
+  mcp_server_removed: "Turn off an app",
+  skill_installed: "Save a skill",
+  skill_uninstalled: "Delete a skill",
+};
+
+/** How many of an app's tools a row names one by one before it says how many more. */
+const TOOLS_NAMED = 2;
+
+/**
+ * An app's tools, by their `app/tool` refs, in words with the app: "Send email on Gmail", "Create
+ * goal, list goals and 5 more on Routines". What a row gave or took, for a page anybody
+ * can open, where the refs themselves are never shown.
+ */
+export function appToolsWords(refs: readonly string[]): string {
+  const first = refs[0] ?? "";
+  const app = first.slice(0, Math.max(first.indexOf("/"), 0)) || first;
+  const named = refs
+    .slice(0, refs.length > TOOLS_NAMED + 1 ? TOOLS_NAMED : refs.length)
+    .map((ref, index) => {
+      const words = auditActionWords(ref);
+      return index === 0
+        ? words
+        : words.charAt(0).toLowerCase() + words.slice(1);
+    });
+  const more = refs.length - named.length;
+  const list =
+    more > 0
+      ? `${named.join(", ")} and ${more} more`
+      : named.length > 1
+        ? `${named.slice(0, -1).join(", ")} and ${named.at(-1)}`
+        : (named[0] ?? "");
+  return `${list} on ${connectorName(app)}`;
+}
+
+/**
  * An event in words: its own entry above, or, for a type older rows carry that no longer has one,
  * its stored name split into words. Never the stored name as it is.
  */

@@ -20,7 +20,6 @@ import {
   toolkitOfFor,
 } from "../access";
 import { ownerGrantsOf } from "../app-access";
-import { sharedAccountOnly } from "../deployment-clients";
 import {
   type BrokerConnection,
   BrokerUnconfiguredError,
@@ -36,6 +35,7 @@ import {
   serverCredentialKind,
   tokenHeaderFor,
 } from "../catalogue";
+import { sharedAccountOnly } from "../deployment-clients";
 import type { ListedTool } from "../mcp";
 import {
   type AccountMode,
@@ -51,6 +51,7 @@ import {
   CustomServerRefusedError,
   DEPLOYMENT_ACTOR,
   effectiveUrl,
+  initiatedBy,
   isDeploymentFault,
   iso,
   LISTING_REVISION,
@@ -213,6 +214,8 @@ export function serverMethods(context: StoreContext) {
         eventType: "configuration.changed",
         targetType: "mcp_server",
         targetId: resolved.entry.key,
+        // OpenBot adds Routines at its first start, and the personal edition's web search.
+        ...initiatedBy(input.by),
         payload: {
           actor: input.by,
           change: "mcp_server_added",
@@ -1932,6 +1935,7 @@ export function serverMethods(context: StoreContext) {
           eventType: "configuration.changed",
           targetType: "mcp_server",
           targetId: serverId,
+          ...initiatedBy(auditActor),
           payload: {
             actor: auditActor,
             change: "grants_not_advertised",
@@ -1962,6 +1966,7 @@ export function serverMethods(context: StoreContext) {
           eventType: "configuration.changed",
           targetType: "mcp_server",
           targetId: serverId,
+          ...initiatedBy(auditActor),
           payload: {
             actor: auditActor,
             change: "unlisted_tools_advertised",
