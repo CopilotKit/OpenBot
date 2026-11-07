@@ -257,7 +257,11 @@ function mapProfile(
     avatarSeed: row.avatarSeed,
     visibility: row.visibility,
     ownerUserId: row.ownerUserId,
-    systemOwned: row.packageId !== null,
+    // Fresh personal starters are editable defaults, even though the package seeded them.
+    systemOwned:
+      row.packageId !== null &&
+      (row.configuration as { personalStarter?: boolean } | null)
+        ?.personalStarter !== true,
     hasCallbackToken: row.callbackTokenHash !== null,
     hidden: row.hiddenAt !== null,
     pinned: row.pinnedAt !== null,
@@ -645,10 +649,9 @@ export function createAgentProfileStore(
            * Only for `built_in`, and that matters. A remote Bot has no `systemPrompt` and must not
            * acquire one — its instruction travels as the standing role message instead — and the
            * tenant package's Bots, whose `system_prompt` is deliberately not their
-           * `role_description`, cannot reach this code at all: `requireManageable` above throws
-           * `ProtectedAgentError` for anything the package owns.
+           * `role_description`, remain protected except for the editable personal starter.
            */
-          const configuration = {
+          const configuration: Record<string, unknown> = {
             ...previous,
             ...(row?.type === "built_in"
               ? { systemPrompt: input.roleDescription }
@@ -673,6 +676,13 @@ export function createAgentProfileStore(
                 }
               : {}),
           };
+
+          if (
+            row?.type !== "built_in" &&
+            input.roleDescription !== profile.roleDescription
+          ) {
+            delete configuration.standingInstructions;
+          }
 
           /*
            * The key this one replaces is already retired, by the rotation above.

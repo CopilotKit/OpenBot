@@ -861,8 +861,8 @@ function personalStarterSeed(
         : null
       : "CopilotKit";
     const title = harnessName
-      ? `${fallback.title}. Powered by ${harnessName}`
-      : fallback.title;
+      ? `Everyday life. Powered by ${harnessName}.`
+      : "Everyday life.";
     agents.unshift(
       picked
         ? {
@@ -876,7 +876,11 @@ function personalStarterSeed(
               personalStarter: true,
             },
           }
-        : { ...fallback, title },
+        : {
+            ...fallback,
+            title,
+            configuration: { ...fallback.configuration, personalStarter: true },
+          },
     );
   }
   const channels = tenantPackage.channels.flatMap((channel) => {
@@ -1007,9 +1011,41 @@ export async function synchronizeTenantPackage(
         then (${agentTable.configuration} #>> '{}')::jsonb
         else ${agentTable.configuration}
       end)`;
+      const [legacy] = await transaction
+        .select({ name: agentTable.name, title: agentProfiles.title })
+        .from(agentTable)
+        .innerJoin(agentProfiles, eq(agentTable.id, agentProfiles.agentId))
+        .where(
+          and(
+            eq(agentTable.id, PICKED_HARNESS),
+            eq(agentTable.packageId, deploymentPackage.id),
+            isNull(agentProfiles.ownerUserId),
+            isNull(agentProfiles.deletedAt),
+            sql`coalesce(${stored}->>'personalStarter', 'false') <> 'true'`,
+            sql`${stored}->>'endpoint' ~ '^http://agent-harness:[0-9]+([/?]|$)'`,
+          ),
+        );
+      const selected = HARNESSES.find(({ name }) => name === picked.name);
+      if (legacy && selected) {
+        const catalogueNames = HARNESSES.flatMap((harness) => [
+          harness.name,
+          displayNameFor(harness),
+        ]);
+        if (catalogueNames.includes(legacy.name)) {
+          await transaction
+            .update(agentTable)
+            .set({ name: displayNameFor(selected) })
+            .where(eq(agentTable.id, PICKED_HARNESS));
+        }
+        if (catalogueNames.includes(legacy.title)) {
+          await transaction
+            .update(agentProfiles)
+            .set({ title: displayNameFor(selected) })
+            .where(eq(agentProfiles.agentId, PICKED_HARNESS));
+        }
+      }
       const connection = JSON.stringify({
         ...picked.configuration,
-        personalStarter: true,
       });
       await transaction
         .update(agentTable)

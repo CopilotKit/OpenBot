@@ -128,10 +128,10 @@ type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
 function frameworkName(runtime: Runtime): string {
   if (runtime.kind === "builtin") return "Assistant";
   if (runtime.harness === "byo-url") return "AG-UI agent";
-  return (
-    WEB_HARNESSES.find((harness) => harness.id === runtime.harness)?.name ??
-    "AG-UI agent"
+  const harness = WEB_HARNESSES.find(
+    (harness) => harness.id === runtime.harness,
   );
+  return harness ? displayNameFor(harness) : "AG-UI agent";
 }
 
 /**

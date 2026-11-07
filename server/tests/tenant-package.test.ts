@@ -1732,7 +1732,7 @@ describe("bundled personal starter", () => {
       expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
       expect(await profiles.get(actor, "picked-harness")).toMatchObject({
         name: "Personal Assistant",
-        title: `Everyday Life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}`,
+        title: `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}.`,
         roleDescription:
           "Help with email, your calendar, research, planning and everyday errands.",
       });
@@ -1768,7 +1768,7 @@ describe("bundled personal starter", () => {
     expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       name: "Personal Assistant",
-      title: "Everyday Life. Powered by Claude Agent SDK",
+      title: "Everyday life. Powered by Claude Agent SDK.",
       endpoint: langchain,
     });
     await synchronizeTenantPackage(database, await loadStarter(tenantId, ""));
@@ -1789,10 +1789,14 @@ describe("bundled personal starter", () => {
       database,
       await loadStarter(tenantId, claude),
     );
-    await database
-      .update(agentProfiles)
-      .set({ title: "My everyday helper" })
-      .where(eq(agentProfiles.agentId, "picked-harness"));
+    const starter = await profiles.get(actor, "picked-harness");
+    expect(starter?.systemOwned).toBe(false);
+    await profiles.update(actor, "picked-harness", {
+      name: "Personal Assistant",
+      title: "My everyday helper",
+      roleDescription: "Only research public sources.",
+      visibility: "public",
+    });
     await synchronizeTenantPackage(
       database,
       await loadStarter(tenantId, claude),
@@ -1804,6 +1808,33 @@ describe("bundled personal starter", () => {
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       title: "My everyday helper",
       endpoint: langchain,
+    });
+  });
+
+  test("legacy catalogue names follow harness changes without renaming custom Bots", async () => {
+    const tenantId = starterTestTenant();
+    const legacy = await loadStarter(tenantId, langchain);
+    await synchronizeTenantPackage(database, {
+      ...legacy,
+      sourcePath: "/tmp/legacy-personal-package",
+    });
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, langchain),
+    );
+    expect(await profiles.get(actor, "picked-harness")).toMatchObject({
+      name: "LangChain",
+      title: "LangChain",
+    });
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    expect(await profiles.get(actor, "picked-harness")).toMatchObject({
+      name: "Claude Agent SDK",
+      title: "Claude Agent SDK",
+      endpoint: claude,
+      systemOwned: true,
     });
   });
 

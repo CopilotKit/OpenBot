@@ -15,7 +15,13 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -218,6 +224,13 @@ test("unavailable hosting still permits the custom path", async () => {
   await user.click(framework);
   expect(await view.findByLabelText("Agent address")).toBeTruthy();
   expect(view.getByText("LangChain")).toBeTruthy();
+  await user.type(
+    view.getByLabelText("Agent address"),
+    "https://agent.example.test/ag-ui",
+  );
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  await waitFor(() => expect(creates).toHaveLength(1));
+  expect(creates[0]?.roleDescription).toBe("Connected from LangChain.");
 });
 
 test("Create fills in what was left blank, then hands over", async () => {
