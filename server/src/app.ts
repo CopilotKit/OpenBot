@@ -1590,6 +1590,10 @@ export function createApp(
           : undefined,
         // Whether a Bot can have a computer of its own here: only where the provider makes computers.
         { available: deploymentCanIsolate(config.computer) },
+        // An agent on the person's own loopback, dialled from this server's container.
+        config.thisMachineHost
+          ? { thisMachineHost: config.thisMachineHost }
+          : undefined,
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the

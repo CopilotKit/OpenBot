@@ -844,6 +844,7 @@ is still the record.
 | `SUPERVISOR_TOKEN`                   | Bearer token required by the supervisor.                                                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. A deployment running with `NODE_ENV=production` refuses to start while it is set. Cloud metadata addresses are refused either way. |
 | `AGENT_ENDPOINT_ALLOWED_HOSTS`       | Private addresses an agent may be registered at, comma separated; unset (none) by default. Host, optionally with a port. Exact match; no wildcards. Never-allowed addresses cannot be named. |
+| `OPENBOT_THIS_MACHINE_HOST`          | For a server in a container on the person's own machine: the host name that container reaches the machine by. An agent registered at a loopback address (`localhost`, `127.x`, `[::1]`) is dialled through it; the address as typed is what is checked and stored. OpenBot Desktop sets `host.docker.internal`. Unset (the default) dials addresses as written. |
 | `AGENT_COMPUTER_POLICY`              | JSON action policy: `{"mode":"enforce","deny":[...],"allow":[...]}`.                      |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run supervised computers under gVisor.                                  |
 | `COMPUTER_SANDBOX`                   | Set to `on` to enable Chromium's own sandbox where the host permits user namespaces. Which way it went is printed at start-up. |

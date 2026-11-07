@@ -1868,6 +1868,10 @@ const agentFetch = createAgentFetch({
     config.managedAgent?.endpoint,
     config.managedAgent?.alsoRun,
   ].filter((url): url is URL => url !== undefined),
+  // An agent the person runs on their own loopback, reached from this server's container.
+  ...(config.thisMachineHost
+    ? { thisMachineHost: config.thisMachineHost }
+    : {}),
   // The refusal is what the run already knows; this is what the deployment knows. Written here
   // rather than in `endpoint.ts` so that file keeps deciding and nothing else, the way the
   // target check it reuses does.

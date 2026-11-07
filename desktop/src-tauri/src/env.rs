@@ -269,7 +269,7 @@ pub fn container_address(address: &str) -> String {
             .trim_end_matches(']')
             .parse::<std::net::IpAddr>()
             .is_ok_and(|ip| ip.is_loopback());
-    if !loopback || url.set_host(Some("host.docker.internal")).is_err() {
+    if !loopback || url.set_host(Some(CONTAINER_HOST)).is_err() {
         return String::new();
     }
     // The parser writes an empty path as `/`; given without one, it is returned without one.
@@ -716,6 +716,17 @@ pub fn compose(
         "INTELLIGENCE_CONTAINER_GATEWAY_WS_URL".into(),
         container_address(&intelligence.gateway_ws_url),
     );
+    /*
+     * And the same name for addresses a person types into the app.
+     *
+     * A person who runs their own agent at `http://127.0.0.1:8765/ag-ui` and registers it as a Bot
+     * means this machine, and the server dials from its container. Told this name, the server dials
+     * a loopback address through it, as `container_address` does for the addresses above.
+     */
+    env.insert(
+        THIS_MACHINE_CONTAINER_HOST_ENV.into(),
+        CONTAINER_HOST.into(),
+    );
     // Explicit desktop selection must override a CLI key left in the checkout's .env.
     // Supply both names for consumers that still read the legacy variable directly.
     for key in ["CPK_INTELLIGENCE_API_KEY", "INTELLIGENCE_API_KEY"] {
@@ -1141,6 +1152,15 @@ pub const REMOVED_WHEN_UNSET: [&str; 9] = [
 
 /// What `docker-compose.yml` maps `host.docker.internal` to, in place of `host-gateway`.
 pub const HOST_GATEWAY_ENV: &str = "OPENBOT_HOST_GATEWAY";
+
+/// The name OpenBot's containers reach this machine by. Every engine gets there through it: Docker
+/// Desktop and the Podman machines forward it, and under rootless Podman `docker-compose.yml` maps it
+/// to [`crate::engine::ROOTLESS_HOST_LOOPBACK`] through [`HOST_GATEWAY_ENV`].
+pub const CONTAINER_HOST: &str = "host.docker.internal";
+
+/// Where the server's container is told that name (`OPENBOT_THIS_MACHINE_HOST` inside it, in
+/// `docker-compose.yml`), so an agent a person registers on their own loopback is dialled here.
+pub const THIS_MACHINE_CONTAINER_HOST_ENV: &str = "OPENBOT_THIS_MACHINE_CONTAINER_HOST";
 
 const PUBLISHED: [&str; 4] = [
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -2083,6 +2103,34 @@ HTTPS_PROXY=http://proxy:8080
             Some(crate::engine::ROOTLESS_HOST_LOOPBACK)
         );
         assert!(REMOVED_WHEN_UNSET.contains(&HOST_GATEWAY_ENV));
+    }
+
+    /// The server's container is told how it reaches this machine, under every engine, so an agent
+    /// a person registers at `http://127.0.0.1:<port>` is dialled here and not at the container.
+    /// Under rootless Podman the name is the same and Compose maps it (test above).
+    #[test]
+    fn the_server_is_told_the_name_it_reaches_this_machine_by() {
+        for socket in [None, Some("/run/user/501/podman/podman.sock")] {
+            let env = compose(
+                &intelligence(),
+                &Model::default(),
+                &engine_status(socket),
+                &Ports::default(),
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            );
+            assert_eq!(
+                env.get(THIS_MACHINE_CONTAINER_HOST_ENV).map(String::as_str),
+                Some("host.docker.internal"),
+                "engine socket {socket:?}"
+            );
+        }
+        // The same name the Desktop moves its own loopback addresses to.
+        assert_eq!(
+            container_address("http://127.0.0.1:8765/ag-ui"),
+            format!("http://{CONTAINER_HOST}:8765/ag-ui")
+        );
     }
 
     #[test]

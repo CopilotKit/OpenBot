@@ -287,6 +287,14 @@ export type DeploymentConfig = {
    */
   agentEndpointAllowedHosts: ReadonlySet<string>;
   /**
+   * The name this server's container reaches the person's machine by, from
+   * `OPENBOT_THIS_MACHINE_HOST`. OpenBot Desktop sets it (`host.docker.internal`), because there the
+   * server runs in a container and `127.0.0.1` is the container, so an agent the person registers on
+   * their own loopback is dialled through this name (`onThisMachine` in agents/endpoint.ts). Absent
+   * wherever the server is a host process or hosted, and nothing is translated.
+   */
+  thisMachineHost?: string;
+  /**
    * What this deployment calls itself, when more than one shares an Intelligence project.
    *
    * Absent, the tenant package's id stands in, which separates deployments running different
@@ -1283,6 +1291,27 @@ function agentEndpointAllowedHosts(
 }
 
 /**
+ * `OPENBOT_THIS_MACHINE_HOST`, as one host name. See {@link DeploymentConfig.thisMachineHost}.
+ *
+ * A scheme, port or path is refused at boot, naming the value, rather than producing addresses that
+ * silently never connect.
+ */
+function thisMachineHost(environment: NodeJS.ProcessEnv): {
+  thisMachineHost?: string;
+} {
+  const host = optional(environment, "OPENBOT_THIS_MACHINE_HOST")
+    ?.trim()
+    .toLowerCase();
+  if (!host) return {};
+  if (!/^[a-z0-9.-]+$/.test(host)) {
+    throw new Error(
+      `OPENBOT_THIS_MACHINE_HOST "${host}" must be a host name, without a scheme, port or path.`,
+    );
+  }
+  return { thisMachineHost: host };
+}
+
+/**
  * An IPv6 entry, spelled the way the endpoint check will see it.
  *
  * `namedAsAllowed` compares against `URL.hostname`, which the parser canonicalises: compressed,
@@ -1630,6 +1659,7 @@ export function loadConfig(
     ...(managedAgent ? { managedAgent } : {}),
     ...(githubApp ? { githubApp } : {}),
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
+    ...thisMachineHost(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     composioApiKey: optional(environment, "COMPOSIO_API_KEY"),
     arcadeApiKey: optional(environment, "ARCADE_API_KEY"),

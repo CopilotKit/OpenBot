@@ -806,8 +806,11 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
       "http://host.docker.internal:3001/api/model-provider/v1",
     INTELLIGENCE_GATEWAY_WS_URL: "ws://localhost:14401",
     INTELLIGENCE_CONTAINER_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+    OPENBOT_THIS_MACHINE_CONTAINER_HOST: "host.docker.internal",
   });
   expect(withBots.services.server.environment).toMatchObject({
+    // How the server reaches an agent the person registered on their own loopback.
+    OPENBOT_THIS_MACHINE_HOST: "host.docker.internal",
     MANAGED_AGENT_AG_UI_URL: "http://agent-langgraph:4201/ag-ui",
     PICKED_HARNESS_URL: "http://agent-harness:4202/run",
     OPENAI_BASE_URL: "http://host.docker.internal:3001/api/model-provider/v1",
@@ -822,6 +825,7 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
     PICKED_HARNESS_URL: "https://agents.example/run",
   });
   expect(without.services.server.environment).toMatchObject({
+    OPENBOT_THIS_MACHINE_HOST: "",
     MANAGED_AGENT_AG_UI_URL: "",
     PICKED_HARNESS_URL: "https://agents.example/run",
   });

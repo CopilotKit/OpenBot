@@ -150,6 +150,11 @@ services:
       # edition), listening on the host's loopback, and its container address when one is given.
       # Unset, the person's browser runs on the computers the Bots run on and shows in the page.
       OPENBOT_BROWSER_URL: ${OPENBOT_BROWSER_CONTAINER_URL:-${OPENBOT_BROWSER_URL:-}}
+      # The name this container reaches the person's machine by, which OpenBot Desktop writes. With
+      # it, an agent a person registers on their own loopback (`http://127.0.0.1:8765/ag-ui`) is
+      # dialled there rather than at this container. A container name only, so a host server reading
+      # the same `.env` never translates its own loopback.
+      OPENBOT_THIS_MACHINE_HOST: ${OPENBOT_THIS_MACHINE_CONTAINER_HOST:-}
       # The deployment's secrets, from the environment Compose runs in and then from `.env`, which
       # Compose reads for these `${...}` and the host server reads for itself. OpenBot Desktop keeps
       # them out of that file and hands them to Compose in its environment, so they reach this
