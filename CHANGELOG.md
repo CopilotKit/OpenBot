@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A routine can have a title in the person's words, such as "Morning briefing", shown on the
+  Routines page and in a Bot page's Activity. A Bot asked for one said it couldn't, and Bots no
+  longer read a routine's internal id out to the person.
 - A renamed Bot's conversations go by its new name in the sidebar, the conversation header and
   routines, including conversations started before the rename. They kept the name it had then.
 - OpenBot Desktop's Updates section on a build that doesn't update itself, such as an internal

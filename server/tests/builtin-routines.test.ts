@@ -40,6 +40,7 @@ const ROUTINE: Routine = {
   agentId: "bot_helper",
   channelId: "channel_1",
   instruction: "Post the standup summary.",
+  title: null,
   cron: "0 9 * * 1-5",
   timezone: "Europe/Madrid",
   enabled: true,
@@ -52,6 +53,7 @@ const SUMMARY: RoutineSummary = {
   id: "routine_1",
   agentId: "bot_helper",
   instruction: "Post the standup summary.",
+  title: null,
   schedule: "Weekdays at 09:00",
   timezone: "Europe/Madrid",
   enabled: true,
@@ -475,7 +477,9 @@ describe("a write that landed but could not be read back", () => {
     });
 
     expect(result.isError).toBe(false);
-    expect(result.text).toBe("That routine is set. Its id is routine_1.");
+    expect(result.text).toBe(
+      "That routine is set. Its id, for your routine tools only and never shown to the person, is routine_1.",
+    );
   });
 
   test("update: a listFor that throws after a successful write is not reported as a failure", async () => {
@@ -491,7 +495,9 @@ describe("a write that landed but could not be read back", () => {
     });
 
     expect(result.isError).toBe(false);
-    expect(result.text).toBe("That routine is updated. Its id is routine_1.");
+    expect(result.text).toBe(
+      "That routine is updated. Its id, for your routine tools only and never shown to the person, is routine_1.",
+    );
   });
 
   test("create: the vanished-routine fallback reads as a sentence and names the id", async () => {
@@ -507,7 +513,9 @@ describe("a write that landed but could not be read back", () => {
     });
 
     expect(result.isError).toBe(false);
-    expect(result.text).toBe("That routine is set. Its id is routine_1.");
+    expect(result.text).toBe(
+      "That routine is set. Its id, for your routine tools only and never shown to the person, is routine_1.",
+    );
   });
 
   test("update: the vanished-routine fallback reads as a sentence and names the id", async () => {
@@ -523,7 +531,9 @@ describe("a write that landed but could not be read back", () => {
     });
 
     expect(result.isError).toBe(false);
-    expect(result.text).toBe("That routine is updated. Its id is routine_1.");
+    expect(result.text).toBe(
+      "That routine is updated. Its id, for your routine tools only and never shown to the person, is routine_1.",
+    );
   });
 
   test("the confirmation read is attributed to the connection's actor, not the routine's owner", async () => {

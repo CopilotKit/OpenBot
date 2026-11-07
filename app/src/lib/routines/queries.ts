@@ -17,6 +17,8 @@ export type RoutineRecord = {
   schedule: string;
   timezone: string;
   instruction: string;
+  /** What the person called it, or null when they named it nothing: then its schedule heads the row. */
+  title: string | null;
   /**
    * Where it posts. Name it by `title`, the conversation as the sidebar titles it: `name` is only its
    * Bots' names, so every conversation with General Assistant is called "General Assistant".

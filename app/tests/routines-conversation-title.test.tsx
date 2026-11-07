@@ -47,6 +47,7 @@ const PAGE: RoutinesPage = {
       timezone: "UTC",
       instruction:
         "Reply with the current UTC time and the words 'routine check from EKS'.",
+      title: null,
       channel: {
         id: "conversation-eks",
         name: "General Assistant",
@@ -63,6 +64,7 @@ const PAGE: RoutinesPage = {
       schedule: "Every day at 09:00",
       timezone: "UTC",
       instruction: "Post the morning summary.",
+      title: null,
       channel: {
         id: "conversation-new",
         name: "General Assistant",
