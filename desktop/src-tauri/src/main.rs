@@ -2690,6 +2690,13 @@ async fn start_stack_inner<R: tauri::Runtime>(
     // Named rather than inlined: the Bot choice below reads it, the store file is written from it,
     // and reading the model screen twice could not be relied on to give the same answer.
     let credential = start_stack_credential(&root, model)?;
+    let identity_app = app.clone();
+    if tauri::async_runtime::spawn_blocking(move || desktop_telemetry::link_account(&identity_app))
+        .await
+        .is_err()
+    {
+        eprintln!("[telemetry] account link worker did not complete");
+    }
 
     /*
      * A PLAN CHOOSES ITS OWN BOT, because only one Bot can spend it.
@@ -6386,7 +6393,11 @@ async fn sign_in_to_copilotkit(
     let root = selected_root_or_default(&app);
     tauri::async_runtime::spawn_blocking(move || {
         know_cli_engine(&root);
-        local_eval::account_sign_in_installed(&attempt)
+        let result = local_eval::account_sign_in_installed(&attempt)?;
+        if result.signed_in {
+            desktop_telemetry::link_account(&app);
+        }
+        Ok(result)
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)?
