@@ -142,7 +142,7 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
         ? `${person} · ${nameFor(computer.botId)}`
         : `${person}'s computer`;
     }
-    return nameFor(computer.botId ?? computer.computer);
+    return computer.botId ? nameFor(computer.botId) : computer.computer;
   };
 
   /** What a row carries, said once before its state. */
@@ -500,7 +500,7 @@ function HostFoldersSection({
             <StaggerItem index={index} key={botId}>
               <Item size="sm">
                 <ItemContent>
-                  <ItemTitle title={botId}>{nameFor(botId)}</ItemTitle>
+                  <ItemTitle>{nameFor(botId)}</ItemTitle>
                   <ItemDescription>
                     {summaryFor(botId, grants, pending)}
                   </ItemDescription>

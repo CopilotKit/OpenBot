@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   type ApprovalInboxData,
@@ -535,9 +536,7 @@ function RequestBoardRow({ request }: { request: WaitingRequest }) {
 /** The waiting questions and actions as rows, questions first, for a card that may hold more. */
 export function useWaitingRows(agentId: string | undefined) {
   const waiting = useWaiting(agentId);
-  const agents = useQuery(agentListQueryOptions());
-  const botName = (id: string) =>
-    agents.data?.find((agent) => agent.id === id)?.name ?? id;
+  const botName = useBotNames();
   return {
     error: waiting.error,
     rows: [
