@@ -43,7 +43,11 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import { browserStepDetails, isBrowserStep } from "./browser-activity";
+import {
+  awaitingFreshLook,
+  browserStepDetails,
+  isBrowserStep,
+} from "./browser-activity";
 import type { VisibleChatItem } from "./chat-messages";
 import { codingOutcome, lookStep } from "./coding-tool-cards";
 import { SubtaskStep } from "./subtask-step";
@@ -98,6 +102,8 @@ export function groupToolSteps(
     run = [];
   };
   for (const item of items) {
+    // Nothing happened, and the Bot looks and goes again: not a step to show (`awaitingFreshLook`).
+    if (item.kind === "tool" && awaitingFreshLook(item)) continue;
     if (item.kind === "tool" && foldable(item, isDrawn)) {
       run.push(item);
       continue;

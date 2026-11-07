@@ -30,6 +30,27 @@ function objectOf(value: string | undefined): Record<string, unknown> {
   }
 }
 
+/**
+ * Whether the computer turned a browser step away until the Bot looked at the page again.
+ *
+ * After a person hands the browser back, the computer asks the Bot for a fresh snapshot before it
+ * acts on the page. That answer is an instruction for the Bot: nothing happened on the page, and the
+ * Bot takes the snapshot and acts again on its own. Drawn, it put the instruction in red under a
+ * turn that went on to work, so the transcript leaves it out.
+ *
+ * Not a handback whose closing snapshot failed. That result also says `snapshotRequired`, carries
+ * the handoff's status, and is a real failure the person may need to resume.
+ */
+export function awaitingFreshLook(step: BrowserStep): boolean {
+  if (!isBrowserStep(step)) return false;
+  const result = objectOf(step.result);
+  return (
+    result.ok === false &&
+    result.snapshotRequired === true &&
+    result.handoffStatus === undefined
+  );
+}
+
 export function browserStepDetails(step: BrowserStep) {
   const result = objectOf(step.result);
   const args = objectOf(step.toolCall.function.arguments);
