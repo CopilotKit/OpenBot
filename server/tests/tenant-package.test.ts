@@ -1841,7 +1841,7 @@ describe("bundled personal starter", () => {
     expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       name: "Personal Assistant",
-      title: "Everyday life. Powered by Claude Agent SDK.",
+      title: "Everyday life. Powered by LangChain (LangGraph).",
       endpoint: langchain,
     });
     await synchronizeTenantPackage(database, await loadStarter(tenantId, ""));
@@ -2079,6 +2079,81 @@ describe("bundled personal starter", () => {
         expect(after?.configuration).not.toHaveProperty("personalConnection");
     },
   );
+
+  test("the starter's subtitle names the harness it runs on after a switch, around the person's own words", async () => {
+    const tenantId = starterTestTenant();
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    const starter = await profiles.get(actor, "picked-harness");
+    if (!starter) throw new Error("Missing starter");
+    await profiles.update(actor, starter.id, {
+      name: "Personal Assistant F5",
+      title: "Errands and research, edited on F5. Powered by Claude Agent SDK.",
+      roleDescription: starter.roleDescription,
+      visibility: starter.visibility,
+    });
+
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, langchain),
+    );
+    expect(await profiles.get(actor, starter.id)).toMatchObject({
+      name: "Personal Assistant F5",
+      title:
+        "Errands and research, edited on F5. Powered by LangChain (LangGraph).",
+      endpoint: langchain,
+    });
+
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    expect(await profiles.get(actor, starter.id)).toMatchObject({
+      title: "Errands and research, edited on F5. Powered by Claude Agent SDK.",
+      endpoint: claude,
+    });
+
+    // An agent the person already runs is not a framework the installer can name.
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(
+        tenantId,
+        "https://agents.example/run",
+        "An agent you already run",
+      ),
+    );
+    expect(await profiles.get(actor, starter.id)).toMatchObject({
+      title: "Errands and research, edited on F5.",
+      endpoint: "https://agents.example/run",
+    });
+  });
+
+  test("a connection the person set keeps its subtitle through a harness switch", async () => {
+    const tenantId = starterTestTenant();
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    const starter = await profiles.get(actor, "picked-harness");
+    if (!starter) throw new Error("Missing starter");
+    await profiles.update(actor, starter.id, {
+      name: starter.name,
+      title: starter.title,
+      roleDescription: starter.roleDescription,
+      visibility: starter.visibility,
+      endpoint: "https://agents.example/run",
+    });
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, langchain),
+    );
+    expect(await profiles.get(actor, starter.id)).toMatchObject({
+      title: "Everyday life. Powered by Claude Agent SDK.",
+      endpoint: "https://agents.example/run",
+    });
+  });
 
   test("legacy catalogue names follow harness changes without renaming custom Bots", async () => {
     const tenantId = starterTestTenant();
