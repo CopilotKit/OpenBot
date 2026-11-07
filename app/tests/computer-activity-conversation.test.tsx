@@ -190,6 +190,25 @@ function commandResult(
   };
 }
 
+/**
+ * What a run saves in the thread, as the runtime and the platform do: the input messages the thread
+ * does not hold yet (the id subtraction in the runtime's `persistedInputMessages`), where a tool
+ * message for a call that already has an answer takes that answer's place.
+ */
+function persisted(input: RunAgentInput): Message[] {
+  const held = new Set(stored.map((message) => message.id));
+  let thread = stored;
+  for (const message of input.messages.filter((m) => !held.has(m.id))) {
+    if (message.role === "tool")
+      thread = thread.filter(
+        (saved) =>
+          saved.role !== "tool" || saved.toolCallId !== message.toolCallId,
+      );
+    thread = [...thread, message];
+  }
+  return thread;
+}
+
 function runEvents(input: RunAgentInput): unknown[] {
   const started = {
     type: "RUN_STARTED",
@@ -205,7 +224,7 @@ function runEvents(input: RunAgentInput): unknown[] {
   if ("call" in turn) {
     const { id, name, args } = turn.call;
     const message = calling(id, name, args);
-    stored = [...input.messages, message];
+    stored = [...persisted(input), message];
     return [
       started,
       {
@@ -220,7 +239,10 @@ function runEvents(input: RunAgentInput): unknown[] {
     ];
   }
   const id = `reply-${input.runId}`;
-  stored = [...input.messages, { id, role: "assistant", content: turn.reply }];
+  stored = [
+    ...persisted(input),
+    { id, role: "assistant", content: turn.reply },
+  ];
   return [
     started,
     { type: "TEXT_MESSAGE_START", messageId: id, role: "assistant" },
@@ -1242,4 +1264,119 @@ test("a step held for the person before a reload, allowed on the opened page, sa
   expect(
     view.getByRole("region", { name: "Activity" }).querySelectorAll("time"),
   ).toHaveLength(1);
+});
+
+test("a file save the person declines says what was tried, live and when opened again after they wrote more", async () => {
+  turns = [
+    {
+      call: {
+        id: "call-save",
+        name: "computer_write_file",
+        args: { path: "notes.txt", contents: "this should not be written" },
+      },
+    },
+  ];
+  gate = (step) => {
+    inbox = [
+      {
+        id: "approval-save",
+        status: "pending",
+        action: {
+          botId: bot,
+          toolRef: "computer_write_file",
+          effect: "write",
+          scope: "workspace",
+          threadId: channel.threadId,
+          toolCallId: step.toolCallId,
+          args: step.args,
+          target: {},
+        },
+      },
+    ];
+    return NativeResponse.json(
+      {
+        waiting: true,
+        approvalId: "approval-save",
+        reason: "This action needs your approval.",
+      },
+      { status: 202 },
+    );
+  };
+  const reply = "I didn't save notes.txt, because you declined.";
+  onDecision = () => {
+    // The continuation answers the call with the decline, as the thread then holds it.
+    inbox = inbox.map((request) => ({ ...request, status: "completed" }));
+    stored = [
+      ...stored,
+      {
+        id: "call-save-result",
+        role: "tool",
+        toolCallId: "call-save",
+        content: DECLINED_BY_PERSON,
+      },
+      { id: "reply-after-decline", role: "assistant", content: reply },
+    ];
+  };
+  const saveLine = (view: ReturnType<typeof render>) =>
+    transcriptLines(view).find((text) => text.includes("notes.txt"));
+  const view = render(app());
+  const user = await ask(view, "Save notes.txt for me.");
+  await user.click(
+    await view.findByRole("radio", { name: "Deny" }, { timeout: 5000 }),
+  );
+  await user.click(view.getByRole("button", { name: "Deny" }));
+  act(() => {
+    queryClient.setQueryData<InfiniteData<ChannelPage>>(
+      channelKeys.list(),
+      (data) => {
+        if (!data) return data;
+        const next = applyChannelEvent(data, {
+          channelId: channel.id,
+          lastMessage: reply,
+          lastMessageAt: "2026-11-03T09:02:03.000Z",
+          lastMessageAgentId: bot,
+        });
+        return next === "unknown" ? data : next;
+      },
+    );
+  });
+  expect(await view.findByText(reply, {}, { timeout: 5000 })).toBeTruthy();
+
+  // Live: what was tried, what it was aimed at, and why it did not happen. Never "Saved file".
+  await waitFor(() =>
+    expect(saveLine(view)).toBe(
+      "Blocked: Save filenotes.txt · You declined it.",
+    ),
+  );
+
+  // The person writes again, in the same open conversation.
+  turns = [{ reply: "You're welcome." }];
+  await ask(view, "Thanks.");
+  expect(
+    await view.findByText("You're welcome.", {}, { timeout: 5000 }),
+  ).toBeTruthy();
+  // The browser's stand-in for the held step never went out as an answer.
+  expect(
+    runs
+      .at(-1)
+      ?.messages.some(
+        (message) =>
+          message.role === "tool" &&
+          message.toolCallId === "call-save" &&
+          message.content !== DECLINED_BY_PERSON,
+      ),
+  ).toBe(false);
+  expect(saveLine(view)).toBe("Blocked: Save filenotes.txt · You declined it.");
+  cleanup();
+
+  // Opened again from the thread: still declined, not drawn as a file that was saved.
+  const again = render(app());
+  expect(
+    await again.findByText("You're welcome.", {}, { timeout: 5000 }),
+  ).toBeTruthy();
+  await waitFor(() =>
+    expect(saveLine(again)).toBe(
+      "Blocked: Save filenotes.txt · You declined it.",
+    ),
+  );
 });
