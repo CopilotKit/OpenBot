@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The Audit table fits OpenBot Desktop's default window: what an action acted on sits under it
+  and who started it under the Bot, so Decision shows without scrolling sideways.
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
