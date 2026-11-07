@@ -1119,7 +1119,7 @@ describe("channel store integration", () => {
 
     // What the conversation header and the sidebar read.
     const app = appFor(persistentStore, async (context, next) => {
-      context.set("actor", actor);
+      context.set("actor", { ...actor, email: `${actor.id}@example.test` });
       await next();
     });
     const opened = await json(
