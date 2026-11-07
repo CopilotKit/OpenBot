@@ -334,3 +334,101 @@ describe.skipIf(!asked)("a Bot sending a form", () => {
     expect(clicked.body.unfinished).toBeUndefined();
   }, 30_000);
 });
+
+/** The sign-up form, filled in apart from its dropdown, with the dropdown clicked open as a Bot did. */
+async function formWithListOpen() {
+  const form = await open("/sign-up");
+  for (const [name, text] of [
+    ["Full name", "Dana Fresh"],
+    ["Email", "dana@example.com"],
+    ["Note", "Count me in"],
+  ]) {
+    const typed = await post("/type", {
+      ref: form.ref(name),
+      snapshotId: form.snapshotId,
+      text,
+    });
+    expect(typed.status).toBe(200);
+  }
+  const opened = await post("/click", {
+    ref: form.ref("Favourite plant"),
+    snapshotId: form.snapshotId,
+  });
+  expect(opened.status).toBe(200);
+  return form;
+}
+
+/** Send the form with its button, and return what arrived. */
+async function signUp() {
+  const page = await snapshot();
+  const sent = await post("/click", {
+    ref: page.ref("Sign up"),
+    snapshotId: page.snapshotId,
+  });
+  expect(sent.status).toBe(200);
+  return signUps.at(-1);
+}
+
+/**
+ * Enter after choosing from a dropdown that was clicked open.
+ *
+ * A Bot clicked a dropdown, which opened the browser's own list, then typed its choice, which picks it
+ * without the list knowing. The list still highlighted "Choose one", and the Enter the Bot pressed next
+ * went to the list, which accepted its highlight: the choice was gone before the form was sent.
+ */
+describe.skipIf(!asked)(
+  "Enter after choosing from a dropdown clicked open",
+  () => {
+    test("pressed on the page, it keeps the choice, and the form is sent with it", async () => {
+      const form = await formWithListOpen();
+      const chosen = await post("/type", {
+        ref: form.ref("Favourite plant"),
+        snapshotId: form.snapshotId,
+        text: "Basil",
+      });
+      expect(chosen.status).toBe(200);
+      expect((await post("/key", { key: "Enter" })).status).toBe(200);
+
+      expect((await snapshot()).value("Favourite plant")).toBe("Basil");
+      const arrived = await signUp();
+      expect(arrived?.get("full_name")).toBe("Dana Fresh");
+      expect(arrived?.get("plant")).toBe("Basil");
+      expect(arrived?.get("note")).toBe("Count me in");
+    }, 60_000);
+
+    test("pressed on the dropdown itself, or sent with the typed choice, it keeps the choice", async () => {
+      let form = await formWithListOpen();
+      await post("/type", {
+        ref: form.ref("Favourite plant"),
+        snapshotId: form.snapshotId,
+        text: "Basil",
+      });
+      const pressed = await post("/key", {
+        ref: form.ref("Favourite plant"),
+        snapshotId: form.snapshotId,
+        key: "Enter",
+      });
+      expect(pressed.status).toBe(200);
+      expect((await snapshot()).value("Favourite plant")).toBe("Basil");
+
+      form = await formWithListOpen();
+      const submitted = await post("/type", {
+        ref: form.ref("Favourite plant"),
+        snapshotId: form.snapshotId,
+        text: "Basil",
+        submit: true,
+      });
+      expect(submitted.status).toBe(200);
+      expect((await snapshot()).value("Favourite plant")).toBe("Basil");
+    }, 60_000);
+
+    test("choosing in the open list with the arrow keys and Enter still works as it does for a person", async () => {
+      await formWithListOpen();
+      for (const key of ["ArrowDown", "ArrowDown", "Enter"]) {
+        expect((await post("/key", { key })).status).toBe(200);
+      }
+      expect((await snapshot()).value("Favourite plant")).toBe("Basil");
+      expect((await signUp())?.get("plant")).toBe("Basil");
+    }, 60_000);
+  },
+);
