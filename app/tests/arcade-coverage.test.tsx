@@ -57,7 +57,9 @@ test("the curated toolkit Apollo (1/1 classified) shows no warning", () => {
 test("the generated toolkit AirtableApi (0/2 classified) renders the warning on its row", () => {
   const airtable = fromFixture("AirtableApi");
   expect([airtable.classifiedCount, airtable.actionCount]).toEqual([0, 2]);
-  expect(coverageWarning(airtable)).toMatch(/destructive write/);
+  // A change, which asks where changes ask: never "destructive", which Arcade didn't say.
+  expect(coverageWarning(airtable)).toMatch(/treated as a change/);
+  expect(coverageWarning(airtable)).not.toMatch(/destructive/);
   expect(renderToStaticMarkup(<CoverageNote app={airtable} />)).toContain(
     "approval",
   );

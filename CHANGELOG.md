@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- An Arcade action that publishes no behaviour flags, such as every AirtableApi and GithubApi action,
+  is an ordinary change again. It asks only when Ask before making changes or a rule says so, and
+  its Bot page no longer says "destroys things". It was recorded as destructive, so every call asked
+  with Allow once or Deny. A Composio action with no label is recorded the same way, and check-ins,
+  tasks and memory still never call either on their own. Actions Arcade does flag destructive, such
+  as `Attio.RemoveFromList`, still always ask. An app's existing actions are recorded this way on its
+  next refresh.
 - The personal edition calls the product OpenBot: Activity says "Started by OpenBot" where it said
   "Started by this deployment", and Connections, Keys and Computer say what OpenBot does. Admin keeps
   "this deployment".

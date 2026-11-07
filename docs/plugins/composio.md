@@ -221,9 +221,11 @@ and writes, with *turn on every read-only action* as the one bulk action, which 
 that Bot will then carry before it does it. Every call then checks the grant, evaluates the action
 policy, and writes an audit row.
 
-A destructive action renders as danger. Nothing renders as reassurance: an action that does not
-claim to be destructive is not claiming to be safe, so the absence of the marker is drawn plain,
-never as green.
+A destructive action renders as danger, and always asks with Allow once or Deny before it runs (see
+[Approvals](../approvals.md)). Nothing renders as reassurance: an action that does not claim to be
+destructive is not claiming to be safe, so the absence of the marker is drawn plain, never as green.
+An action Composio labels nothing about at all is recorded as an unclassified write, as Arcade's
+action with no flags is: it asks wherever changes ask, and no background read calls it.
 
 ## The four ways an app connects
 
@@ -700,12 +702,6 @@ account to the team's: anyone the approval admits acts as that account. The appr
 ask-before-write rule are the narrowing.
 
 ## Not built yet
-
-**The destructive marker gates nothing by itself.** It is recorded and visible, but a Bot granted a
-destructive action is not asked about it because of the marker. What can stop such a call is the
-same as for every other connector's write: the person's **Ask before making changes** switch, an
-approval rule on the **Approvals** page (a person's own, or a team rule), or a built-in safety
-requirement. With none of those matching, the action runs.
 
 **Every write through a Shared app asks alike.** Composio publishes no "write but not destructive"
 distinction, so the ask-before-write rule on a Shared app asks for every write alike.

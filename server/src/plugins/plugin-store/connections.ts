@@ -12,6 +12,7 @@ import {
   vendorNameOf,
 } from "../../db/schema";
 import { BROKERED_PROFILE, toolkitOfFor } from "../access";
+import { mightDestroy } from "../catalogue";
 import {
   BrokerRefusalError,
   BrokerUnconfiguredError,
@@ -860,6 +861,7 @@ export function connectionMethods(context: StoreContext) {
           inputSchema: mcpTools.inputSchema,
           effect: mcpTools.effect,
           destructive: mcpTools.destructive,
+          unclassified: mcpTools.unclassified,
           version: mcpTools.version,
         })
         .from(mcpTools)
@@ -870,7 +872,7 @@ export function connectionMethods(context: StoreContext) {
       // condition below has a version by definition, and building the answer here is what carries
       // that fact into the type instead of leaving the caller to re-check it.
       const safe = actions.flatMap((action) => {
-        if (action.effect !== "read" || action.destructive) return [];
+        if (action.effect !== "read" || mightDestroy(action)) return [];
         // Null in the column and blank in the data are the same nothing, and neither is a version
         // the transport can put on a call.
         const version = action.version?.trim();

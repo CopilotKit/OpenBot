@@ -158,7 +158,7 @@ test("the Arcade directory renders the coverage warning and the breadth line on 
 
   await waitFor(() => {
     expect(row.textContent).toContain(
-      "This provider has not said which of its actions only read, so every action is treated as a destructive write and every call will ask for approval.",
+      "This provider hasn't said which of its actions only read, so each one is treated as a change. Bots ask before using it wherever changes need approval, and check-ins can't use it.",
     );
   });
   expect(row.textContent).toContain(
