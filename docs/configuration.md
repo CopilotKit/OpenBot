@@ -287,16 +287,6 @@ model:
 
 Most gateways publish a model list, which is the way to check a name before configuring it.
 
-Unbiased AI is addressed the same way. OpenBot Desktop obtains the key by signing in (see
-[Model provider OAuth](../desktop/PROVIDER_OAUTH.md#unbiased-ai)); a deployment you configure yourself
-makes one at `https://platform.unbiased.ai` and sets:
-
-```sh
-OPENAI_BASE_URL=https://api.unbiased.ai/v1
-OPENAI_API_KEY=sk_...
-BOT_MODEL=pareto
-```
-
 Two things are worth knowing before pointing a deployment at any gateway. Not every catalogue entry accepts tools, and a Bot without tool calling cannot drive its computer; the model list says which do. And `BOT_RESPONSES_API=true` needs an endpoint that implements the Responses API, not only chat completions.
 
 The built-in Bots call a gateway's Chat Completions API (`/chat/completions`), which every OpenAI-compatible endpoint serves, unless their model takes tools only through the Responses API: `gpt-5.6` and later, the `-pro` models and `gpt-5.3-codex`, under a gateway's `openai/` name too. For those they call `/responses`, which a gateway or a proxy in front of OpenAI also serves. `COPILOTKIT_OPENAI_API=responses` or `chat` picks one API for every model instead. When OpenBot picks `/responses` itself, the server logs `openai-api` once at start-up, naming the model; a value you set is never changed, `chat` included, and any other value is an error when a built-in Bot runs.

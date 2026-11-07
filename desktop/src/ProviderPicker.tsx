@@ -21,8 +21,6 @@ export type Provider = {
   logins: Login[];
   mark: string | null;
   caution: { says: string; reads_more_at: string } | null;
-  /** A few words shown as a badge beside the name while the provider runs an offer. */
-  promotion?: string | null;
 };
 
 /** What the flow carries forward once this screen is done. */
@@ -710,16 +708,7 @@ export function ProviderPicker({
             ) : (
               <Mark id={r.mark} name={r.name} />
             )}
-            <span className="tile-name">
-              {r.name}
-              {/* A real space before the badge, so the row's accessible name reads "Unbiased AI 50% off". */}
-              {r.promotion ? (
-                <>
-                  {" "}
-                  <span className="tile-badge">{r.promotion}</span>
-                </>
-              ) : null}
-            </span>
+            <span className="tile-name">{r.name}</span>
             <span className="tile-summary">{r.summary}</span>
           </label>
         ))}
