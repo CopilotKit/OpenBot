@@ -106,8 +106,14 @@ const inListedTask = (ownerUserId: string, channelId: SQL, threadId: SQL) =>
       and ${listedTask}
       and (${botTasks.channelId} = ${channelId} or ${intelligenceChannelMappings.threadId} = ${threadId})
   )`;
-const clip = (text: string | null | undefined, max = 200) =>
-  text ? Array.from(text).slice(0, max).join("") : null;
+/** At most `max` characters, ending in an ellipsis when it was cut, so a cut never reads as the end. */
+const clip = (text: string | null | undefined, max = 200) => {
+  if (!text) return null;
+  const characters = Array.from(text);
+  return characters.length > max
+    ? `${characters.slice(0, max - 1).join("")}…`
+    : text;
+};
 const iso = (value: Date | string | null | undefined) =>
   value ? new Date(value).toISOString() : new Date(0).toISOString();
 
@@ -183,7 +189,9 @@ export function createActivityStore(database: Database) {
           activity.scheduled.push({
             id: `routine:${routine.id}`,
             kind: "routine",
-            title: clip(routine.instruction, 120) ?? "Routine",
+            // Whole: the page shortens it to fit and shows it all on hover. The store caps an
+            // instruction at 2,000 characters.
+            title: routine.instruction || "Routine",
             detail: `Repeats on ${routine.cron} (${routine.timezone})`,
             status: "scheduled",
             at: iso(routine.nextRunAt),
@@ -208,7 +216,7 @@ export function createActivityStore(database: Database) {
           const item: ActivityItem = {
             id: `routine-run:${run.id}`,
             kind: "routine",
-            title: clip(routine.instruction, 120) ?? "Routine",
+            title: routine.instruction || "Routine",
             detail: clip(run.error),
             status: run.status ?? "running",
             at: iso(run.finishedAt ?? run.startedAt),

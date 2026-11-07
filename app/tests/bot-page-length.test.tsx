@@ -170,6 +170,25 @@ test("with nothing running or scheduled, there is no Activity section, and For y
   expect(section.queryByRole("heading", { name: "Activity" })).toBeNull();
 });
 
+test("a long title is cut to one line with an ellipsis, and the whole of it shows on hover", async () => {
+  // Seen on the Bot page: "...releases) and post one l", cut mid-word with nothing to say so.
+  const long =
+    "Check the latest release of CopilotKit/OpenBot on GitHub (https://github.com/CopilotKit/OpenBot/releases) and post one line in this conversation with its version number (tag) and release date.";
+  const [scheduled] = items(1, "Scheduled");
+  const view = glance({
+    inProgress: [],
+    scheduled: [{ ...(scheduled as ActivityItem), title: long }],
+    completed: [],
+  });
+
+  const title = await view.findByText(long);
+  expect(title.getAttribute("data-slot")).toBe("item-title");
+  expect(title.getAttribute("title")).toBe(long);
+  expect(title.className).toContain("truncate");
+  // The row's content may shrink below its text, or the ellipsis never shows.
+  expect(title.parentElement?.className).toContain("min-w-0");
+});
+
 test("a goal's activity row says Goal and opens the Bot's goals", async () => {
   const [running] = items(1, "Close the month");
   const view = glance({

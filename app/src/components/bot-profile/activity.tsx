@@ -126,8 +126,11 @@ function ActivityRow({
           />
         ) : null}
       </ItemMedia>
-      <ItemContent>
-        <ItemTitle>{item.title}</ItemTitle>
+      {/* One line, cut with an ellipsis; the whole title shows on hover. */}
+      <ItemContent className="min-w-0">
+        <ItemTitle className="block w-auto truncate" title={item.title}>
+          {item.title}
+        </ItemTitle>
         <ItemDescription>
           {KIND_LABEL[item.kind]} · {item.needsYou ? "needs you" : item.status}
           {when ? ` · ${when}` : ""}
