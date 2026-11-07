@@ -421,7 +421,10 @@ function NewConversation({ composition }: { composition: string }) {
               {loadError ?? error}
             </p>
           ) : askedForBot && recipients.length === 0 ? (
-            <p className="px-3.5 pb-2 text-sm text-muted-foreground" role="status">
+            <p
+              className="px-3.5 pb-2 text-sm text-muted-foreground"
+              role="status"
+            >
               Choose a Bot first.
             </p>
           ) : null
