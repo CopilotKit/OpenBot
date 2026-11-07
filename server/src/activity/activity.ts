@@ -40,6 +40,7 @@ import {
   routines,
   workItems,
 } from "../db/schema";
+import { describeCron } from "../routines/schedule";
 import { listedTask } from "../tasks/store";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
@@ -191,7 +192,8 @@ export function createActivityStore(database: Database) {
             id: `routine:${routine.id}`,
             kind: "routine",
             title: clip(routine.instruction, 120) ?? "Routine",
-            detail: `Repeats on ${routine.cron} (${routine.timezone})`,
+            // In words, by the helper the Routines page uses, so the two screens say it the same way.
+            detail: `${describeCron(routine.cron)} (${routine.timezone})`,
             status: "scheduled",
             at: iso(routine.nextRunAt),
             channelId: routine.channelId,
