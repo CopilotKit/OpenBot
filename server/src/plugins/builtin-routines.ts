@@ -251,6 +251,9 @@ export async function listTools(): Promise<McpTool[]> {
 
 export const listNeedsCredential = false;
 
+/** This list is this file, so every start brings the saved copy up to date with it. */
+export const listIsThisCode = true;
+
 const failure = (message: string): McpCallResult => ({
   text: message,
   isError: true,
