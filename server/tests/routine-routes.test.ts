@@ -21,6 +21,7 @@ function summary(overrides: Partial<RoutineSummary> = {}): RoutineSummary {
     id: "routine-1",
     agentId: "agent-1",
     instruction: "Post the weather every weekday morning.",
+    title: null,
     schedule: "Weekdays at 09:00",
     timezone: "UTC",
     enabled: true,
@@ -142,6 +143,7 @@ describe("GET /", () => {
           schedule: "Weekdays at 09:00",
           timezone: "UTC",
           instruction: "Post the weather every weekday morning.",
+          title: null,
           channel: {
             id: "channel-1",
             name: "Assistant channel",

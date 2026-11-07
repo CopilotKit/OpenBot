@@ -114,6 +114,11 @@ const TOOLS: readonly McpTool[] = Object.freeze([
       "person, you are given them by title and id: ask the person which one, offering each by its title,",
       "and pass the id they choose.",
       "",
+      'When the person gives the routine a name ("call it Morning briefing", "a daily routine called Inbox',
+      'sweep"), pass that name as `title`, in their words. The Routines page and your own page in OpenBot',
+      "show the routine by it. Pass a title only when the person named the routine, and never make one up:",
+      "without one, the instruction names it.",
+      "",
       "It takes no owner and no Bot. The routine belongs to the person you are talking to and runs as you;",
       "both are taken from the run itself, and there is no field for either.",
     ].join("\n"),
@@ -124,6 +129,11 @@ const TOOLS: readonly McpTool[] = Object.freeze([
           type: "string",
           description:
             'The work of one firing, imperative, with no schedule restated in it: `Append the current UTC time to the page "Log"`.',
+        },
+        title: {
+          type: "string",
+          description:
+            "The name the person gave the routine, in their words, such as `Morning briefing`. At most 100 characters. Omit it unless they named it; never make one up.",
         },
         cron: {
           type: "string",
@@ -147,18 +157,20 @@ const TOOLS: readonly McpTool[] = Object.freeze([
   {
     name: "list_routines",
     description: [
-      "List the standing instructions this person has: each one's id, its schedule in words, its timezone,",
-      "the channel it posts into, when it next runs and how the last run went.",
+      "List the standing instructions this person has: each one's title when it has one, its schedule in",
+      "words, its timezone, the channel it posts into, when it next runs, how the last run went, and its id.",
       "",
-      "Take the id from here before changing or deleting one. It lists only this person's own routines.",
+      "Take the id from here before changing or deleting one. The id is for your routine tools only: never",
+      "show it to the person, who knows a routine by its title or its instruction. It lists only this",
+      "person's own routines.",
     ].join("\n"),
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "update_routine",
     description: [
-      "Change one of this person's routines: its instruction, its schedule, its timezone, the channel it",
-      "posts into, or whether it is switched on.",
+      "Change one of this person's routines: its title, its instruction, its schedule, its timezone, the",
+      "channel it posts into, or whether it is switched on.",
       "",
       "Give the id from `list_routines` and only the fields that change; anything left out stays as it is. A",
       "new `cron` follows exactly the same five-field rules as `create_routine`, and a routine switched back",
@@ -174,6 +186,11 @@ const TOOLS: readonly McpTool[] = Object.freeze([
         id: {
           type: "string",
           description: "The routine's id, from `list_routines`.",
+        },
+        title: {
+          type: "string",
+          description:
+            "A new name for the routine, in the person's words, such as `Morning briefing`. At most 100 characters.",
         },
         instruction: {
           type: "string",
@@ -386,6 +403,12 @@ function nextRunOf(summary: RoutineSummary, clock: Clock): string {
 }
 
 /**
+ * How a result labels a routine's id: for the tools that take it, and never for the person, who
+ * knows a routine by its title or its instruction.
+ */
+const ID_LABEL = "id for your routine tools only, never shown to the person";
+
+/**
  * One routine in words.
  *
  * `schedule` is OPAQUE DISPLAY TEXT from the store — prose for the shapes it can render, the raw
@@ -403,11 +426,15 @@ function inWords(summary: RoutineSummary, clock: Clock): string {
     // time that will never come until somebody switches it back on.
     summary.enabled ? nextRunOf(summary, clock) : "next when switched back on",
     lastRunOf(summary),
-    // The model needs this to change or delete the routine later, and it cannot derive it.
-    `id: ${summary.id}`,
+    // The model needs this to change or delete the routine later, and it cannot derive it. A Bot
+    // given a bare "id: routine_…" read it out to the person, so the label says who it is for.
+    `${ID_LABEL}: ${summary.id}`,
   ];
   if (!summary.enabled) parts.push("switched off");
-  return `"${summary.instruction}" — ${parts.join(" · ")}`;
+  const named = summary.title
+    ? `"${summary.title}", instruction "${summary.instruction}"`
+    : `"${summary.instruction}"`;
+  return `${named} — ${parts.join(" · ")}`;
 }
 
 /**
@@ -443,7 +470,7 @@ async function describeWritten(
   return asResult(
     summary
       ? `${opening} ${inWords(summary, clockOfRun())}`
-      : `${fallbackOpening} Its id is ${routine.id}.`,
+      : `${fallbackOpening} Its id, for your routine tools only and never shown to the person, is ${routine.id}.`,
   );
 }
 
@@ -543,6 +570,7 @@ export async function callTool(
         ownerUserId,
         agentId,
         instruction,
+        title: stringArg(args, "title"),
         cron,
         /*
          * The Bot's zone, else the person's own: the one their browser said for the run making this
@@ -587,6 +615,8 @@ export async function callTool(
         );
       }
       const patch: RoutinePatch = {};
+      const title = stringArg(args, "title");
+      if (title !== undefined) patch.title = title;
       const instruction = stringArg(args, "instruction");
       if (instruction !== undefined) patch.instruction = instruction;
       const cron = stringArg(args, "cron");
