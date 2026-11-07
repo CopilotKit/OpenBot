@@ -12049,6 +12049,9 @@ fn main() {
         while Instant::now()<deadline {
             match listener.accept() {
                 Ok((mut stream,_)) => {
+                    // macOS accepts inherit the listener's nonblocking mode. Only accept polls;
+                    // a connected fixture request uses the bounded blocking I/O below.
+                    stream.set_nonblocking(false).unwrap();
                     stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
                     stream.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
                     let mut request=Vec::new();

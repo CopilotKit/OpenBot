@@ -784,7 +784,7 @@ export function ProviderPicker({
                  */}
                 <p className="footnote">
                   Your Bot will use{" "}
-                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangGraph"}.
+                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangChain"}.
                   It’s the one that can use this plan.
                 </p>
               </>

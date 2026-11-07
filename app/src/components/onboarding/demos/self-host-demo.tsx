@@ -1,4 +1,4 @@
-import { WEB_HARNESSES } from "@openbot/shared/harnesses";
+import { displayNameFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
 import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
@@ -32,8 +32,8 @@ const PANELS: Array<{ id: string; caption: string; picture: () => ReactNode }> =
               className="text-xs flex items-center gap-2 rounded-full bg-card px-3 py-1.5 ring-1 ring-border shadow-sm"
               key={harness.id}
             >
-              <HarnessMark id={harness.mark} name={harness.name} />
-              {harness.name}
+              <HarnessMark id={harness.mark} name={displayNameFor(harness)} />
+              {displayNameFor(harness)}
             </span>
           ))}
         </div>
@@ -69,7 +69,7 @@ export function SelfHostDemo() {
       beatMs={3200}
       className="flex min-h-[22rem] flex-col justify-center gap-10 px-4 py-8 sm:px-6"
       kind="self-host"
-      label={`${PRODUCT} on a laptop; frameworks that work as Bots: ${FRAMEWORKS.map((harness) => harness.name).join(", ")}; and your organization signing in with Google, Microsoft or Okta`}
+      label={`${PRODUCT} on a laptop; frameworks that work as Bots: ${FRAMEWORKS.map((harness) => displayNameFor(harness)).join(", ")}; and your organization signing in with Google, Microsoft or Okta`}
       rest={-1}
     >
       {({ beat, reduced }) =>
