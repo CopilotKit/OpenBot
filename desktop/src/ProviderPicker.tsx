@@ -746,8 +746,10 @@ export function ProviderPicker({
                   onClick={beginOAuth}
                 >
                   <ButtonMark id={row.mark} />
+                  {/* Google's guidelines allow only "Sign in with Google" beside its G. The
+                      row above already says Gemini. */}
                   Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
-                  {row.name}
+                  {row.id === "google" ? "Google" : row.name}
                 </button>
               )}
               {busy && !signInUrl && (
