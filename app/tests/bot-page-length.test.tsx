@@ -67,7 +67,9 @@ test("the activity row counts what is running and what is lined up", () => {
   expect(activitySummary(activity(0, 0, 4))).toBe(
     "Nothing running or scheduled",
   );
-  expect(activitySummary(activity(0, 0, 0))).toBe("Nothing yet");
+  expect(activitySummary(activity(0, 0, 0))).toBe(
+    "No tasks, routines or goals yet",
+  );
 });
 
 test("the newest three suggestions show, and the rest open in place", async () => {

@@ -7,16 +7,16 @@ export const Route = createFileRoute("/_authed/_app/bots/$agentId/activity")({
 });
 
 /**
- * Everything this Bot is doing, has lined up and has finished, on a page of its own. On the Bot's
- * own page the three lists ran on for screens and pushed its settings out of reach; there, one row
- * counts them and opens this.
+ * The tasks, routines and goals this Bot is doing, has lined up and has finished, on a page of its
+ * own, and a row to every action it took. On the Bot's own page the three lists ran on for screens
+ * and pushed its settings out of reach; there, one row counts them and opens this.
  */
 function ActivityPage() {
   const { agentId } = Route.useParams();
   return (
     <BotSubpage
       agentId={agentId}
-      description="Review this Bot’s current work, scheduled tasks, and completed tasks."
+      description="Review the tasks, routines and goals this Bot is running, has scheduled and has finished."
       title="Activity"
     >
       {(agent) => <BotActivitySections agentId={agent.id} />}

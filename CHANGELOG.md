@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's Activity page says it lists the Bot's tasks, routines and goals, and links to every
+  action the Bot took, in Settings, Activity (Admin, Audit for an admin) narrowed to that Bot.
 - Settings, Activity and Admin, Audit show an action the person denied as Blocked, never as
   Allowed, and list it under Blocked; the person's answer reads "Denied by a person" or "Allowed
   once by a person", and an action that failed shows once, as "Did not happen".
