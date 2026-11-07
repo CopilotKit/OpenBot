@@ -1949,8 +1949,12 @@ function remoteAgentWithStandingRole(
         typeof tool.execute === "function" && tool.name !== "message_bot",
     );
     const clientNames = new Set(clientTools.map((tool) => tool.name));
+    // Callback-capable harnesses must retain their signed question route. The client
+    // fallback above only executes unanswered calls, so these lists may overlap.
     const deploymentTools = tools
-      .filter((tool) => !clientNames.has(tool.name))
+      .filter(
+        (tool) => tool.name === "ask_person" || !clientNames.has(tool.name),
+      )
       .map((tool) => tool.name);
     const forwardedProps = {
       ...(isPlainObject(input.forwardedProps) ? input.forwardedProps : {}),
