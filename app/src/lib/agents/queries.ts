@@ -75,6 +75,12 @@ export type AgentProfile = {
    * longer holds "Isolated Bots". `deployment`: this OpenBot cannot make a second computer.
    */
   isolationOffReason: "admin" | "deployment" | null;
+  /**
+   * What the starter Bot is told, kept apart from `roleDescription`, which says what it does and is
+   * what the conversation header shows. Only the starter has these. Every other Bot's instructions
+   * are its role description, and its profile leaves this out.
+   */
+  instructions?: string | null;
 };
 
 /**

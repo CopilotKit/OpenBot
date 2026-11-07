@@ -230,6 +230,11 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 - **A Bot names the app card's real button**: Turn on (then Connect, if the card offers it),
   Connect, Set up for an app that takes a key, or Set it up. It always said to press Connect, which
   the card doesn't show for an app that has to be turned on first.
+- **The Personal Assistant says what it does under its name**: "Help with email, your calendar,
+  research, planning and everyday errands." Its conversations and its page showed the instructions
+  written for the model ("You are a personal assistant for one person..."). Those are now their own
+  Instructions row on its Setup page. An existing one is put right at the next start and keeps the
+  instructions it runs on, edits included.
 
 ### The Bot's browser
 

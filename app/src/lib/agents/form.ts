@@ -40,6 +40,15 @@ export const agentFormSchema = z.object({
    * other form leaves it out, and the server reads absent as "leave it as it is".
    */
   isolated: z.boolean().optional(),
+  /**
+   * The starter Bot's instructions, which only its Setup page sends. Absent leaves them as they are.
+   */
+  instructions: z
+    .string()
+    .trim()
+    .min(1, "Instructions are required.")
+    .max(1000, "Instructions must be 1000 characters or fewer.")
+    .optional(),
 });
 
 export type AgentFormValues = z.infer<typeof agentFormSchema>;
@@ -65,6 +74,9 @@ export function agentInputFrom(values: AgentFormValues) {
       ? { auth: { header: "Authorization", value: values.authValue.trim() } }
       : {}),
     ...(values.isolated === undefined ? {} : { isolated: values.isolated }),
+    ...(values.instructions === undefined
+      ? {}
+      : { instructions: values.instructions }),
   };
 }
 
