@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- After a person hands a Bot's browser back, the Bot no longer has to take a snapshot before it
+  opens another page. Only clicking, typing, pressing keys and scrolling on the page the person
+  left still wait for one. The wait no longer survives a restart, so the first page a new
+  conversation opens after OpenBot was quit and reopened no longer fails with "Take a fresh browser
+  snapshot after handback before acting." A conversation never shows that instruction, which is
+  meant for the Bot.
 - OpenBot Desktop's menu bar and tray no longer have an item that opens the back end's own
   dashboard, which is branded as another product. The Status window and Settings, This computer
   list each part by what it does: "Front end and Bots", "Background jobs", "Database" and "Bot
