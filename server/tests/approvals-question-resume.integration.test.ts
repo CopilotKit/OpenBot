@@ -62,6 +62,7 @@ const responsibility: Responsibility = {
   instruction: "Ask what I want for lunch and record it.",
   successCriteria: "Lunch choice recorded",
   subscriptions: [],
+  recurring: false,
   status: "active",
   progress: "",
   lastResult: null,
@@ -114,6 +115,8 @@ test("an answer to a responsibility's question resumes it with its own tools, ru
       return responsibility;
     },
     listRuns: async () => [{ id: "run-latest" }, { id: "run-older" }],
+    // Done once: nothing runs it again, so its run may complete it.
+    repeats: async () => null,
     recordProgress: async (...args: unknown[]) => {
       recorded.push(args);
       return { ok: true };

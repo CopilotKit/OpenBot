@@ -8,10 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Three migrations each add one column: `0078_routine_title` adds a nullable
+**Before upgrading.** Four migrations each add one column: `0078_routine_title` adds a nullable
 `routines.title`, `0079_tool_unclassified` adds `mcp_tools.unclassified`, false on every existing
-row, and `0080_listing_revision` adds `mcp_servers.listing_revision`, 0 on every existing row. The
-database moves to `0080_listing_revision`. Seven things change for an existing
+row, `0080_listing_revision` adds `mcp_servers.listing_revision`, 0 on every existing row, and
+`0081_goal_recurring` adds `responsibilities.recurring`, false on every existing row. The database
+moves to `0081_goal_recurring`. Seven things change for an existing
 deployment:
 - A goal's tools are named for goals. `create_responsibility`, `list_responsibilities`,
   `update_responsibility`, `report_responsibility_progress`, `run_responsibility`,
@@ -79,6 +80,12 @@ deployment:
   responsibility complete". The tools are renamed (above), `create_trigger` sends you to the goal's
   card on the Bot's Goals page, and a goal's steps in a conversation read "Created a goal",
   "Checked goals", "Marked a goal complete" and so on, also in conversations from before.
+- **A goal that repeats stays active after its runs.** A goal a routine runs, an event wakes, or a
+  Bot sets up as recurring ("every morning") is no longer completed by one of its runs: each run
+  records its result, and only you end the goal. Its first run could complete it, and the Bot then
+  made a second goal. A routine that runs a goal you ended now tells you it is complete, where
+  `run_goal` ran nothing and said nothing. A Bot changing one thing about a goal no longer clears
+  the events that wake it.
 - **A goal's run waits for a busy conversation.** A run that starts while its conversation is in
   use, such as **Run now** while the Bot is still answering there, waits and then runs. After about
   9 minutes it gives up with "This goal's conversation was busy for about 9 minutes, so the run

@@ -28,23 +28,33 @@ export const subscriptionSchema = z.object({
   source: z.enum(responsibilitySources),
   eventType: text(128),
 });
+/** What a person or a Bot says about a goal, without the defaults a new one takes. */
+const goalFields = {
+  title: text(160),
+  instruction: text(6000),
+  successCriteria: text(3000),
+  subscriptions: z.array(subscriptionSchema).max(20),
+  /**
+   * Done again and again, every morning or each time something happens, and never finished by one
+   * run. A goal a routine runs or an event wakes repeats without it (`GoalRepeats`).
+   */
+  recurring: z.boolean(),
+};
 export const responsibilityInputSchema = z
   .object({
     agentId: text(128),
     channelId: text(128),
-    title: text(160),
-    instruction: text(6000),
-    successCriteria: text(3000),
-    subscriptions: z.array(subscriptionSchema).max(20).default([]),
+    ...goalFields,
+    subscriptions: goalFields.subscriptions.default([]),
+    recurring: goalFields.recurring.default(false),
   })
   .strict();
-export const responsibilityPatchSchema = responsibilityInputSchema
-  .pick({
-    title: true,
-    instruction: true,
-    successCriteria: true,
-    subscriptions: true,
-  })
+/**
+ * Only what changes. Built from the fields without their defaults: picked from the input schema, a
+ * patch of a title alone also set `subscriptions` to [] and would set `recurring` to false.
+ */
+export const responsibilityPatchSchema = z
+  .object(goalFields)
   .partial()
   .strict();
 export const responsibilityEventSchema = z
@@ -131,6 +141,30 @@ export type ResponsibilityContinuation = {
   waiting: HeadlessWaiting;
   response: unknown;
 };
+/**
+ * Why a goal runs again and again, so that no run of it is the last: it was made `recurring`, an
+ * enabled routine of its Bot names it, or an event wakes it (a subscription or an enabled trigger).
+ *
+ * FOUND ON WINDOWS: asked to "check the latest OpenBot release every morning and tell me what
+ * changed, and run it now", a Bot made a goal and a daily routine that runs it. The goal's first run
+ * met its success criteria, as every run of it would, and completed the goal. The next morning's
+ * routine would have found nothing to run. A goal that repeats is ended by the person, never by one
+ * of its runs.
+ */
+export type GoalRepeats = "recurring" | "routine" | "event";
+
+/** The reason, for a sentence the model reads: "This goal repeats because ...". */
+export function whyItRepeats(repeats: GoalRepeats): string {
+  switch (repeats) {
+    case "recurring":
+      return "it was set up to repeat";
+    case "routine":
+      return "a routine runs it";
+    case "event":
+      return "an event wakes it";
+  }
+}
+
 export type ResponsibilityRunContext = {
   runId: string;
   responsibilityId: string;
@@ -148,6 +182,8 @@ export type ResponsibilityRunContext = {
     payload: Record<string, unknown>;
   };
   continuation: ResponsibilityContinuation | null;
+  /** Why this goal runs again, or null when this run may complete it. Absent is null. */
+  repeats?: GoalRepeats | null;
 };
 export type ResponsibilityRunOutcome =
   | { status: "succeeded"; replyText: string }
@@ -191,6 +227,8 @@ export type ResponsibilityStore = {
     input: { summary: string; sourceRunId?: string; complete?: boolean },
     agentId?: string,
   ): Promise<Responsibility>;
+  /** Why this goal runs again and again, or null when its runs may complete it. */
+  repeats(ownerUserId: string, id: string): Promise<GoalRepeats | null>;
   listRuns(ownerUserId: string, id: string): Promise<ResponsibilityRun[]>;
   ingestEvent(input: unknown): Promise<ResponsibilityEventResult>;
   beginRun(
