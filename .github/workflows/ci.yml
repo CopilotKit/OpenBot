@@ -147,6 +147,12 @@ jobs:
         env:
           OPENBOT_COMPUTER_BROWSER: '1'
           COMPUTER_BROWSER_MODE: headless
+      # The app's real-browser test, here because this job has the browser: a running step's words
+      # under reduced motion, which only a browser's cascade resolves. The root playwright-core is the
+      # same version as agent-computer's playwright, so it finds the Chromium installed above.
+      - run: bun test app/tests/tool-line-reduced-motion.test.tsx
+        env:
+          OPENBOT_APP_BROWSER: '1'
       # Headed is the default for hosted computers, so it is tested as one: the computer starting its
       # own Xvfb, and the signing again with cross-site frames in processes of their own.
       - run: bun test tests/headed-browser.test.ts
