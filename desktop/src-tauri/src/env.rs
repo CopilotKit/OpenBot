@@ -769,6 +769,22 @@ pub fn compose(
             app = ports.app
         ),
     );
+    /*
+     * Where a vendor sends the person back after they approve an app connected over its own OAuth
+     * (`redirectUriFor` in server/src/plugins/oauth.ts). Unset, the server refuses every such
+     * connection and tells the person to ask an admin for this setting, which on their own computer
+     * is nobody.
+     *
+     * The app's own address on this machine, because the consent finishes in the person's default
+     * browser, which is on this machine too. 127.0.0.1 rather than either other name: `localhost`
+     * may resolve to the address the engine did not publish, and `[::1]` is the one the computer's
+     * container may not have, while the Recorder there is handed this same address. Replaced on
+     * every Start, so a Start that moved the app to another port moves this with it.
+     */
+    env.insert(
+        "OPENBOT_PUBLIC_URL".into(),
+        format!("http://127.0.0.1:{}", ports.app),
+    );
     env.insert(
         "AGENT_COMPUTER_URL".into(),
         format!("http://127.0.0.1:{}", ports.computer),
@@ -2368,6 +2384,55 @@ HTTPS_PROXY=http://proxy:8080
             value_of(&written, "OPENBOT_TOOL_URL"),
             "http://server:3001/api/agent-tools/call",
             "Bots call the server container by name, on its own port, whatever the host port"
+        );
+    }
+
+    /// Connecting an app over its own OAuth (Notion, and every other first-party one) refused with
+    /// "Ask an admin to set OPENBOT_PUBLIC_URL", because nothing wrote it: the vendor sends the
+    /// person's browser back to that address, and without one there is nowhere to come back to.
+    /// An installation that ran before this was written gets it on its next Start, and a Start that
+    /// moved the app to another port moves it too, rather than keeping the address of the last one.
+    #[test]
+    fn the_public_url_is_the_app_s_own_loopback_address_and_follows_its_port() {
+        let dir = tmp("public-url");
+        let path = env_at(&dir);
+        // What an earlier Desktop left behind: no public URL, and a line the person added.
+        std::fs::write(&path, "OPENBOT_EDITION=personal\nAPP_PORT=3010\n").unwrap();
+
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            value_of(&written, "OPENBOT_PUBLIC_URL"),
+            "http://127.0.0.1:3010"
+        );
+
+        let moved = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports {
+                app: 3011,
+                ..Ports::default()
+            },
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        write(&path, &moved, &BTreeMap::new()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(
+            value_of(&written, "OPENBOT_PUBLIC_URL"),
+            "http://127.0.0.1:3011",
+            "the public URL kept the port of an earlier Start"
+        );
+        assert_eq!(
+            written
+                .lines()
+                .filter(|line| line.starts_with("OPENBOT_PUBLIC_URL="))
+                .count(),
+            1
         );
     }
 
