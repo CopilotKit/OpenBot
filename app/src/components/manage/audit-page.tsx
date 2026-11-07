@@ -197,17 +197,6 @@ export function AuditPage({
                         );
                       })}
                     </fieldset>
-                    {bot ? (
-                      <Button
-                        aria-label={`Show every Bot, not only ${nameFor(bot)}`}
-                        onClick={onClearBot}
-                        size="xs"
-                        variant="outline"
-                      >
-                        Only {nameFor(bot)}
-                        <IconX />
-                      </Button>
-                    ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="relative w-64">
@@ -221,6 +210,18 @@ export function AuditPage({
                         value={query}
                       />
                     </div>
+                    {/* Beside the other filters, on the row that wraps: it narrows what is asked for. */}
+                    {bot ? (
+                      <Button
+                        aria-label={`Show every Bot, not only ${nameFor(bot)}`}
+                        onClick={onClearBot}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Only {nameFor(bot)}
+                        <IconX />
+                      </Button>
+                    ) : null}
                     {filters}
                     <span className="ml-1 text-muted-foreground text-xs tabular-nums">
                       {count}
