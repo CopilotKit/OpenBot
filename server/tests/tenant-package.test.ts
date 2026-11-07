@@ -1677,10 +1677,12 @@ describe("bundled personal starter", () => {
     endpoint: string,
     name?: string,
   ) {
+    // The name OpenBot Desktop sends is the catalogue's, from shared/harnesses.json.
     const env = {
       PICKED_HARNESS_URL: endpoint,
       PICKED_HARNESS_NAME:
-        name ?? (endpoint === claude ? "Claude Agent SDK" : "LangGraph"),
+        name ??
+        (endpoint === claude ? "Claude Agent SDK" : "LangChain (LangGraph)"),
       PICKED_HARNESS_KIND: "remote-ag-ui",
     };
     const previous = Object.fromEntries(
@@ -1743,7 +1745,7 @@ describe("bundled personal starter", () => {
       expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
       expect(await profiles.get(actor, "picked-harness")).toMatchObject({
         name: "Personal Assistant",
-        title: `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}.`,
+        title: `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain (LangGraph)"}.`,
         roleDescription: loaded.agents.find(
           ({ id }) => id === "personal-assistant",
         )?.configuration.systemPrompt,
@@ -1979,7 +1981,8 @@ describe("bundled personal starter", () => {
 
   test("legacy catalogue names follow harness changes without renaming custom Bots", async () => {
     const tenantId = starterTestTenant();
-    const legacy = await loadStarter(tenantId, langchain);
+    // Seeded by an earlier desktop, under the name the catalogue gave LangGraph then.
+    const legacy = await loadStarter(tenantId, langchain, "LangGraph");
     await synchronizeTenantPackage(database, {
       ...legacy,
       sourcePath: "/tmp/legacy-personal-package",
@@ -1989,8 +1992,8 @@ describe("bundled personal starter", () => {
       await loadStarter(tenantId, langchain),
     );
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
-      name: "LangChain",
-      title: "LangChain",
+      name: "LangChain (LangGraph)",
+      title: "Powered by LangChain (LangGraph)",
     });
     await synchronizeTenantPackage(
       database,
@@ -1998,7 +2001,7 @@ describe("bundled personal starter", () => {
     );
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       name: "Claude Agent SDK",
-      title: "Claude Agent SDK",
+      title: "Powered by Claude Agent SDK",
       endpoint: claude,
       systemOwned: true,
     });
@@ -2029,6 +2032,10 @@ describe("bundled personal starter", () => {
       database,
       await loadStarter(tenantId, ""),
     );
+    // It runs here, so it says it runs on OpenBot itself.
+    expect(await profiles.get(actor, "personal-assistant")).toMatchObject({
+      title: "Everyday life. Powered by OpenBot.",
+    });
     await synchronizeTenantPackage(
       database,
       await loadStarter(tenantId, langchain),

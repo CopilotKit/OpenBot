@@ -223,14 +223,16 @@ test("unavailable hosting still permits the custom path", async () => {
   expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
   await user.click(framework);
   expect(await view.findByLabelText("Agent address")).toBeTruthy();
-  expect(view.getByText("LangChain")).toBeTruthy();
+  expect(view.getByText("LangChain (LangGraph)")).toBeTruthy();
   await user.type(
     view.getByLabelText("Agent address"),
     "https://agent.example.test/ag-ui",
   );
   await user.click(view.getByRole("button", { name: "Create Bot" }));
   await waitFor(() => expect(creates).toHaveLength(1));
-  expect(creates[0]?.roleDescription).toBe("Connected from LangChain.");
+  expect(creates[0]?.roleDescription).toBe(
+    "Connected from LangChain (LangGraph).",
+  );
 });
 
 test("Create fills in what was left blank, then hands over", async () => {

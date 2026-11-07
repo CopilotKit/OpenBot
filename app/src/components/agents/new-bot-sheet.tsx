@@ -1,8 +1,4 @@
-import {
-  displayNameFor,
-  summaryFor,
-  WEB_HARNESSES,
-} from "@openbot/shared/harnesses";
+import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
 import {
   IconCheck,
   IconInfoCircle,
@@ -131,7 +127,7 @@ function frameworkName(runtime: Runtime): string {
   const harness = WEB_HARNESSES.find(
     (harness) => harness.id === runtime.harness,
   );
-  return harness ? displayNameFor(harness) : "AG-UI agent";
+  return harness ? harness.name : "AG-UI agent";
 }
 
 /**
@@ -879,11 +875,9 @@ function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
           onClick={() => onChoose({ kind: "managed", harness: harness.id })}
           type="button"
         >
-          <HarnessMark id={harness.mark} name={displayNameFor(harness)} />
+          <HarnessMark id={harness.mark} name={harness.name} />
           <span className="min-w-0">
-            <span className="block font-medium text-sm">
-              {displayNameFor(harness)}
-            </span>
+            <span className="block font-medium text-sm">{harness.name}</span>
             <span className="block text-pretty text-muted-foreground text-xs">
               {summaryFor(harness)}
             </span>
@@ -931,8 +925,8 @@ function EndpointStep({
       <div className="flex flex-col gap-3">
         {chosen ? (
           <span className="inline-flex w-fit items-center gap-2 rounded-lg bg-muted/50 py-1 pr-2.5 pl-1.5 text-sm">
-            <HarnessMark id={chosen.mark} name={displayNameFor(chosen)} />
-            {displayNameFor(chosen)}
+            <HarnessMark id={chosen.mark} name={chosen.name} />
+            {chosen.name}
           </span>
         ) : null}
         <h2 className="break-words font-semibold text-lg tracking-tight">
