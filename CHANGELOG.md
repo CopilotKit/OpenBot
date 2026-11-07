@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A routine's title in a Bot page's Activity list is its whole instruction, kept to one line with an
+  ellipsis and shown in full on hover. It was cut at 120 characters, mid-word and with nothing to
+  say so.
 - A Bot page's Activity list says a routine's schedule in words, as the Routines page does: "Every
   day at 09:00 (UTC)", where it showed "Repeats on 0 9 * * * (UTC)".
 - OpenBot Desktop's Check for updates says "OpenBot 0.3.2 is up to date." or offers the newer
