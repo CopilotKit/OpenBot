@@ -154,6 +154,10 @@ jobs:
       # The CLI and pin variables are exported here and nowhere else, so the Rust tests below
       # build unpinned. They are exported only when set, because build.rs reads any value of
       # OPENBOT_PINNED_DEPLOYMENT, even an empty one, as a path.
+      #
+      # `--locked` (after `--`, for cargo) builds from Cargo.lock as committed. Without it cargo may
+      # rewrite the file before build.rs reads the tree, and the app then says it was built from a
+      # `-dirty` commit.
       - name: Build the installer
         shell: bash
         working-directory: desktop
@@ -173,7 +177,16 @@ jobs:
           if [ -n "$PINNED_MANIFEST" ]; then
             export OPENBOT_PINNED_DEPLOYMENT="$PINNED_MANIFEST"
           fi
-          bun run tauri build "${args[@]}"
+          bun run tauri build "${args[@]}" -- --locked
+      # The label Settings > This computer shows. This checkout is clean, so the label must be too.
+      - name: Check the build label
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          binary=desktop/src-tauri/target/release/openbot-desktop
+          if [ "$PLATFORM" = windows ]; then binary="$binary.exe"; fi
+          bash desktop/scripts/check-build-label.sh "$binary"
       # Say what this installer is, on the run's page, so nobody has to unpack it to find out.
       - name: Summarize the build
         shell: bash

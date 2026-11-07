@@ -299,7 +299,9 @@ test("the CLI is bundled whenever the tree has the overlay for it, pinned or not
   }
 });
 
-test("the build command passes every overlay in order, then the caller's arguments", () => {
+// Cargo.lock as committed: an unlocked cargo rewrote it before build.rs read the tree, and every
+// release said it was built from a `-dirty` commit.
+test("the build command passes every overlay in order, the caller's arguments, then --locked to cargo", () => {
   const dir = desktop(candidate, true);
   const { run } = fakeRun({ version: "v0.3.0-rc.1", commit: SHA, images: {} });
   const result = plan(dir, run, "win32");
@@ -316,6 +318,8 @@ test("the build command passes every overlay in order, then the caller's argumen
     CLI_OVERLAY,
     "--bundles",
     "nsis",
+    "--",
+    "--locked",
   ]);
 });
 

@@ -212,7 +212,12 @@ export function planSignedBuild(options: {
   return plan;
 }
 
-/** The `bun run tauri build` command line for a plan. */
+/**
+ * The `bun run tauri build` command line for a plan.
+ *
+ * Cargo gets `--locked`, so the build uses Cargo.lock as committed. Without it cargo may rewrite the
+ * file before build.rs reads the tree, and the app then says it was built from a `-dirty` commit.
+ */
 export function buildCommand(
   bun: string,
   plan: Plan,
@@ -225,6 +230,8 @@ export function buildCommand(
     "build",
     ...plan.configs.flatMap((config) => ["--config", config]),
     ...extra,
+    "--",
+    "--locked",
   ];
 }
 
