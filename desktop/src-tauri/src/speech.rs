@@ -66,6 +66,46 @@ pub enum Problem {
     ServiceNotAllowed,
 }
 
+/// A step of opening Windows' SAPI recognizer that can fail (`sapi::listen`), in the order taken.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SapiStep {
+    /// Making the in-process recognizer and its context.
+    Recognizer,
+    /// Finding a microphone: SAPI lists the audio inputs this computer has.
+    Microphone,
+    /// Choosing the default microphone as the input.
+    Input,
+    /// Loading the dictation grammar for the language.
+    LoadDictation,
+    /// Turning dictation on.
+    ActivateDictation,
+    /// Turning the recognizer on.
+    ActivateRecognizer,
+}
+
+/// HRESULT `E_ACCESSDENIED`: the microphone is turned off for apps (Settings → Privacy → Microphone).
+const E_ACCESSDENIED: i32 = 0x8007_0005_u32 as i32;
+
+/// Why listening could not start, by the SAPI step that failed and the HRESULT it answered.
+pub fn sapi_step_problem(step: SapiStep, code: i32) -> Problem {
+    match step {
+        SapiStep::Recognizer => Problem::ServiceNotAllowed,
+        SapiStep::LoadDictation => Problem::LanguageNotSupported,
+        // SAPI opens the microphone when a rule goes active, not when the input is chosen, so a
+        // computer with none fails here (0x80070490, `ERROR_NOT_FOUND`).
+        SapiStep::Microphone
+        | SapiStep::Input
+        | SapiStep::ActivateDictation
+        | SapiStep::ActivateRecognizer => {
+            if code == E_ACCESSDENIED {
+                Problem::NotAllowed
+            } else {
+                Problem::AudioCapture
+            }
+        }
+    }
+}
+
 /// One thing the page hears from a listening session.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -632,6 +672,44 @@ mod tests {
 
     /// A language the system is never asked about ends at once, as the page expects: an error,
     /// then the end.
+    /// A computer with no microphone (an EC2 Windows box: SAPI lists no audio input) has the
+    /// recognizer for its language, so `available` answers yes. Starting failed when dictation went
+    /// active, which is when SAPI opens the microphone, with 0x80070490 (`ERROR_NOT_FOUND`), and was
+    /// reported as "language-not-supported": a language the same computer had just said it had.
+    #[test]
+    fn a_missing_microphone_is_an_audio_problem_and_never_the_language() {
+        const ERROR_NOT_FOUND: i32 = 0x8007_0490_u32 as i32;
+        const SPERR_NOT_FOUND: i32 = 0x8004_503A_u32 as i32;
+        for code in [ERROR_NOT_FOUND, SPERR_NOT_FOUND] {
+            for step in [
+                SapiStep::Microphone,
+                SapiStep::Input,
+                SapiStep::ActivateDictation,
+                SapiStep::ActivateRecognizer,
+            ] {
+                assert_eq!(
+                    sapi_step_problem(step, code),
+                    Problem::AudioCapture,
+                    "{step:?} {code:#x}"
+                );
+            }
+        }
+        // A microphone the person turned off for apps is theirs to turn on.
+        assert_eq!(
+            sapi_step_problem(SapiStep::ActivateDictation, E_ACCESSDENIED),
+            Problem::NotAllowed
+        );
+        // Only a dictation grammar that will not load says the language is missing.
+        assert_eq!(
+            sapi_step_problem(SapiStep::LoadDictation, ERROR_NOT_FOUND),
+            Problem::LanguageNotSupported
+        );
+        assert_eq!(
+            sapi_step_problem(SapiStep::Recognizer, ERROR_NOT_FOUND),
+            Problem::ServiceNotAllowed
+        );
+    }
+
     #[test]
     fn a_session_in_no_language_fails_and_ends() {
         let (tx, rx) = mpsc::channel();

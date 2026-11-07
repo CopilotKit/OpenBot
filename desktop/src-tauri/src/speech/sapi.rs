@@ -16,19 +16,18 @@ recognition is one phrase, numbered as the Web Speech API numbers its results.
 */
 
 use super::diagnostics::note;
-use super::{Availability, Control, Emitter, Problem, FLUSH};
+use super::{sapi_step_problem, Availability, Control, Emitter, Problem, SapiStep, FLUSH};
 use std::ffi::c_void;
 use std::sync::mpsc;
 use std::time::Instant;
 use windows::core::{IUnknown, Interface, HSTRING, PCWSTR, PWSTR};
-use windows::Win32::Foundation::E_ACCESSDENIED;
 use windows::Win32::Globalization::LocaleNameToLCID;
 use windows::Win32::Media::Speech::{
     IEnumSpObjectTokens, ISpObjectToken, ISpObjectTokenCategory, ISpRecoContext, ISpRecoResult,
-    ISpRecognizer, SpInprocRecognizer, SpMMAudioIn, SpObjectTokenCategory, SPCAT_RECOGNIZERS,
-    SPEI_FALSE_RECOGNITION, SPEI_HYPOTHESIS, SPEI_RECOGNITION, SPET_LPARAM_IS_OBJECT,
-    SPET_LPARAM_IS_POINTER, SPET_LPARAM_IS_STRING, SPEVENT, SPLO_STATIC, SPRST_ACTIVE,
-    SPRST_INACTIVE, SPRST_INACTIVE_WITH_PURGE, SPRS_ACTIVE,
+    ISpRecognizer, SpInprocRecognizer, SpMMAudioIn, SpObjectTokenCategory, SPCAT_AUDIOIN,
+    SPCAT_RECOGNIZERS, SPEI_FALSE_RECOGNITION, SPEI_HYPOTHESIS, SPEI_RECOGNITION,
+    SPET_LPARAM_IS_OBJECT, SPET_LPARAM_IS_POINTER, SPET_LPARAM_IS_STRING, SPEVENT, SPLO_STATIC,
+    SPRST_ACTIVE, SPRST_INACTIVE, SPRST_INACTIVE_WITH_PURGE, SPRS_ACTIVE,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
@@ -92,13 +91,21 @@ pub fn available(language: &str) -> Availability {
     }
 }
 
-/// A refusal is the person's (Settings → Privacy → Microphone); anything else is the device.
-fn audio_problem(error: &windows::core::Error) -> Problem {
-    if error.code() == E_ACCESSDENIED {
-        Problem::NotAllowed
-    } else {
-        Problem::AudioCapture
-    }
+/// How many microphones SAPI can listen to on this computer.
+fn microphones() -> windows::core::Result<u32> {
+    let category: ISpObjectTokenCategory =
+        unsafe { CoCreateInstance(&SpObjectTokenCategory, None, CLSCTX_ALL) }?;
+    unsafe { category.SetId(SPCAT_AUDIOIN, false) }?;
+    let tokens: IEnumSpObjectTokens =
+        unsafe { category.EnumTokens(PCWSTR::null(), PCWSTR::null()) }?;
+    let mut count = 0u32;
+    unsafe { tokens.GetCount(&mut count) }?;
+    Ok(count)
+}
+
+/// Why `step` failed, as the page reads it. See `sapi_step_problem`.
+fn failed(step: SapiStep, error: &windows::core::Error) -> Problem {
+    sapi_step_problem(step, error.code().0)
 }
 
 /// What the recognizer heard in `result`, or nothing.
@@ -154,10 +161,23 @@ pub fn listen(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Contro
                 "the recognizer would not open: {:?}",
                 error.code()
             ));
-            out.fail(Problem::ServiceNotAllowed);
+            out.fail(failed(SapiStep::Recognizer, &error));
             return;
         }
     };
+    // A computer with no microphone has the recognizer all the same; said as what it is.
+    match microphones() {
+        Ok(0) => {
+            note(format_args!("no microphone: SAPI lists no audio input"));
+            out.fail(Problem::AudioCapture);
+            return;
+        }
+        Ok(_) => {}
+        Err(error) => note(format_args!(
+            "the audio inputs could not be listed: {:?}",
+            error.code()
+        )),
+    }
     // The default microphone.
     let microphone = (|| -> windows::core::Result<()> {
         let audio: IUnknown = unsafe { CoCreateInstance(&SpMMAudioIn, None, CLSCTX_ALL) }?;
@@ -168,27 +188,37 @@ pub fn listen(language: &str, out: &mut Emitter, control: &mpsc::Receiver<Contro
             "the microphone would not open: {:?}",
             error.code()
         ));
-        out.fail(audio_problem(&error));
+        out.fail(failed(SapiStep::Input, &error));
         return;
     }
     let grammar = (|| -> windows::core::Result<_> {
         let grammar = unsafe { context.CreateGrammar(0) }?;
         unsafe { grammar.LoadDictation(PCWSTR::null(), SPLO_STATIC) }?;
-        unsafe { grammar.SetDictationState(SPRS_ACTIVE) }?;
         Ok(grammar)
     })();
-    let Ok(grammar) = grammar.inspect_err(|error| {
-        note(format_args!("dictation would not load: {:?}", error.code()));
-    }) else {
-        out.fail(Problem::LanguageNotSupported);
-        return;
+    let grammar = match grammar {
+        Ok(grammar) => grammar,
+        Err(error) => {
+            note(format_args!("dictation would not load: {:?}", error.code()));
+            out.fail(failed(SapiStep::LoadDictation, &error));
+            return;
+        }
     };
+    // Where SAPI opens the microphone: a missing or refused one fails here, not the language.
+    if let Err(error) = unsafe { grammar.SetDictationState(SPRS_ACTIVE) } {
+        note(format_args!(
+            "dictation would not turn on: {:?}",
+            error.code()
+        ));
+        out.fail(failed(SapiStep::ActivateDictation, &error));
+        return;
+    }
     if let Err(error) = unsafe { recognizer.SetRecoState(SPRST_ACTIVE) } {
         note(format_args!(
             "listening would not start: {:?}",
             error.code()
         ));
-        out.fail(audio_problem(&error));
+        out.fail(failed(SapiStep::ActivateRecognizer, &error));
         return;
     }
 
