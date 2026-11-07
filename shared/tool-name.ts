@@ -158,6 +158,35 @@ type OwnTool = {
   answersTheModel?: true;
 };
 
+/** A goal's tools, under the names they are offered as. */
+function goalTools(names: {
+  create: string;
+  list: string;
+  update: string;
+  report: string;
+  run: string;
+  pause: string;
+  resume: string;
+  complete: string;
+}): Record<string, OwnTool> {
+  return {
+    [names.create]: { running: "Creating a goal", done: "Created a goal" },
+    [names.list]: { running: "Checking goals", done: "Checked goals" },
+    [names.update]: { running: "Updating a goal", done: "Updated a goal" },
+    [names.report]: {
+      running: "Recording progress",
+      done: "Recorded progress",
+    },
+    [names.run]: { running: "Starting a goal", done: "Started a goal" },
+    [names.pause]: { running: "Pausing a goal", done: "Paused a goal" },
+    [names.resume]: { running: "Resuming a goal", done: "Resumed a goal" },
+    [names.complete]: {
+      running: "Marking a goal complete",
+      done: "Marked a goal complete",
+    },
+  };
+}
+
 /**
  * The tools OpenBot itself offers a Bot, named in words somebody chose.
  *
@@ -270,39 +299,28 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     done: "Cleared a next step",
   },
 
-  // Responsibilities.
-  create_responsibility: {
-    running: "Creating a responsibility",
-    done: "Created a responsibility",
-  },
-  list_responsibilities: {
-    running: "Checking responsibilities",
-    done: "Checked responsibilities",
-  },
-  update_responsibility: {
-    running: "Updating a responsibility",
-    done: "Updated a responsibility",
-  },
-  report_responsibility_progress: {
-    running: "Recording progress",
-    done: "Recorded progress",
-  },
-  run_responsibility: {
-    running: "Starting a responsibility",
-    done: "Started a responsibility",
-  },
-  pause_responsibility: {
-    running: "Pausing a responsibility",
-    done: "Paused a responsibility",
-  },
-  resume_responsibility: {
-    running: "Resuming a responsibility",
-    done: "Resumed a responsibility",
-  },
-  complete_responsibility: {
-    running: "Marking a responsibility complete",
-    done: "Marked a responsibility complete",
-  },
+  // Goals. The `*_responsibility` names are what a goal's tools were called before they said goal,
+  // kept so the steps in a conversation recorded then still read as words.
+  ...goalTools({
+    create: "create_goal",
+    list: "list_goals",
+    update: "update_goal",
+    report: "report_goal_progress",
+    run: "run_goal",
+    pause: "pause_goal",
+    resume: "resume_goal",
+    complete: "complete_goal",
+  }),
+  ...goalTools({
+    create: "create_responsibility",
+    list: "list_responsibilities",
+    update: "update_responsibility",
+    report: "report_responsibility_progress",
+    run: "run_responsibility",
+    pause: "pause_responsibility",
+    resume: "resume_responsibility",
+    complete: "complete_responsibility",
+  }),
 
   // The browser. A folded group names these steps in the same words (`browser-activity.ts`).
   computer_navigate: { running: "Opening page", done: "Opened page" },
