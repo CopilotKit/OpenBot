@@ -5679,7 +5679,36 @@ fn apps_unavailable() -> Problem {
 }
 
 /**
+What the window says when a folder containing `root` already has a stack of the CLI's, which the
+CLI would use as `root`'s own (see `local_eval::enclosing_reference`). Neither setup nor connect
+runs then: setup would resume that stack and OpenBot would record it as one it made, and connect
+would write that folder's settings, never the installation's.
+*/
+fn enclosing_stack_problem(found: &local_eval::EnclosingReference) -> Problem {
+    let delete = match &found.stack {
+        Some(stack) => format!(
+            "copilotkit local delete --stack {0} --confirm-delete {0}",
+            stack.as_str()
+        ),
+        None => "copilotkit local delete".to_owned(),
+    };
+    Problem::with(
+        format!(
+            "{} already has a back end that the CopilotKit CLI set up, and OpenBot's folder is inside it. OpenBot can't set up its own back end there. Delete that back end and its data with {delete}, then choose Retry.",
+            found.directory.display()
+        ),
+        found
+            .directory
+            .join(local_eval::LOCAL_REFERENCE)
+            .display()
+            .to_string(),
+    )
+}
+
+/**
 Run `setup` in `root` and record what it made.
+
+Not when a folder containing `root` already has a stack: see `enclosing_stack_problem`.
 
 A stack set up here was made for OpenBot, so it starts and stops with it. The one exception is a
 record that already calls the same stack shared: setting up again resumes that stack, it does not
@@ -5689,6 +5718,9 @@ fn set_up_local_eval_at<S>(root: &Path, setup: S) -> Result<local_eval::Report, 
 where
     S: FnOnce(&Path) -> Result<(local_eval::Report, String), local_eval::Failure>,
 {
+    if let Some(found) = local_eval::enclosing_reference(root) {
+        return Err(SetupError::Unrecorded(enclosing_stack_problem(&found)));
+    }
     let (report, cli_sha256) = setup(root).map_err(SetupError::Failure)?;
     let Some(stack) = report
         .stack
@@ -5772,6 +5804,9 @@ where
     let unconnected = |said: &str| ConnectError::Unconnected(Problem::plain(said));
     let recorded = local_eval_state::read(root, None)
         .ok_or_else(|| unconnected("Set up the back end before connecting OpenBot to it."))?;
+    if let Some(found) = local_eval::enclosing_reference(root) {
+        return Err(ConnectError::Unconnected(enclosing_stack_problem(&found)));
+    }
     let connection = connect(root).map_err(ConnectError::Failure)?;
     if connection.outcome != local_eval::Outcome::Completed || connection.conflicted {
         return Ok(connection);
@@ -11684,6 +11719,85 @@ mod tests {
         };
         assert!(problem.said.contains("local evaluation"), "{problem:?}");
         let _ = std::fs::remove_dir_all(parent);
+    }
+
+    /// A home folder where the CLI was tested before OpenBot Desktop was installed into it: the
+    /// CLI's reference for that earlier stack sits above the installation.
+    fn local_eval_under_an_earlier_stack(
+        label: &str,
+        ownership: Option<local_eval_state::Ownership>,
+    ) -> (PathBuf, PathBuf) {
+        let home = temp_root(label);
+        std::fs::create_dir_all(home.join(".copilotkit")).unwrap();
+        std::fs::write(
+            home.join(local_eval::LOCAL_REFERENCE),
+            serde_json::json!({ "stackId": "local-9e636d796eff89a28e631942", "appPath": home })
+                .to_string(),
+        )
+        .unwrap();
+        let root = home.join("OpenBot");
+        std::fs::create_dir_all(&root).unwrap();
+        if let Some(ownership) = ownership {
+            let stack = local_eval::StackId::parse("local-9e636d796eff89a28e631942").unwrap();
+            local_eval_state::begin(&root, &stack, ownership, LOCAL_EVAL_PIN).unwrap();
+        }
+        (home, root)
+    }
+
+    #[test]
+    fn setup_under_a_folder_with_its_own_stack_is_refused_before_the_cli_runs() {
+        let (home, root) =
+            local_eval_under_an_earlier_stack("openbot-local-eval-setup-enclosed", None);
+        let error = set_up_local_eval_at(&root, |_| {
+            panic!("the CLI would resume the home folder's stack as OpenBot's")
+        })
+        .expect_err("refused");
+        let SetupError::Unrecorded(problem) = error else {
+            panic!("{error:?}");
+        };
+        let home_shown = std::fs::canonicalize(&home).unwrap().display().to_string();
+        assert!(problem.said.starts_with(&home_shown), "{problem:?}");
+        assert!(
+            problem.said.contains(
+                "copilotkit local delete --stack local-9e636d796eff89a28e631942 --confirm-delete local-9e636d796eff89a28e631942"
+            ),
+            "{problem:?}"
+        );
+        assert!(!problem.said.contains("Intelligence"), "{problem:?}");
+        // Nothing recorded, so OpenBot never calls that stack its own.
+        assert_eq!(local_eval_state::read(&root, None), None);
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn connect_under_a_folder_with_its_own_stack_is_refused_before_the_cli_runs() {
+        let (home, root) = local_eval_under_an_earlier_stack(
+            "openbot-local-eval-connect-enclosed",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let vault = FakeVault::default();
+        let error = connect_local_eval_at(
+            &root,
+            |_| -> Result<local_eval::Connection, local_eval::Failure> {
+                panic!("the CLI would write the home folder's .env")
+            },
+            |_, name, value| {
+                vault.borrow_mut().insert(name.into(), value.into());
+                Ok(())
+            },
+            |_, name| Ok(vault.borrow().get(name).cloned()),
+        )
+        .expect_err("refused");
+        let ConnectError::Unconnected(problem) = error else {
+            panic!("{error:?}");
+        };
+        assert!(
+            problem.said.contains("OpenBot's folder is inside it"),
+            "{problem:?}"
+        );
+        assert!(vault.borrow().is_empty());
+        assert!(!local_eval_state::read(&root, None).unwrap().connected);
+        let _ = std::fs::remove_dir_all(home);
     }
 
     const LOCAL_KEY: &str = "cpk-synthetic-local-key";
