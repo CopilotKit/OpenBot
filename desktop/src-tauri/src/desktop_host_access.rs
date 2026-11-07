@@ -14,6 +14,10 @@ use tauri_plugin_dialog::{
 const ALLOW_ONCE: &str = "Allow once";
 const ALWAYS_HERE: &str = "Always allow in this folder";
 const DENY: &str = "Deny";
+/// What the server is told when the person presses Deny. It reaches the Bot, and the person reads it
+/// on the Computer page and under the step in the conversation, so it names no "owner": the person
+/// at this computer is the one reading it.
+const DECLINED: &str = "Declined in OpenBot Desktop.";
 
 pub struct NativeApproval<R: tauri::Runtime>(pub tauri::AppHandle<R>);
 
@@ -42,6 +46,41 @@ fn bot_label(name: Option<&str>, id: &str) -> String {
         .map(|ch| if ch.is_control() { ' ' } else { ch })
         .take(120)
         .collect()
+}
+
+/// The "Allow folder access?" dialog's text.
+///
+/// It names nobody as the requester. This app always runs the personal edition (`env.rs`), where the
+/// one person at this computer is the only one who can ask, so the line only ever named them to
+/// themselves, and by the server's internal id (`dev-local-user`) at that. Access is revoked on
+/// Settings → Computer, the page's name in that edition.
+fn folder_access_message(bot: &str, folder: &str) -> String {
+    format!(
+        "Bot: {bot}\n\nFolder: {folder}\n\nAllow this Bot to read this folder for this OpenBot session? Each edit and command asks separately. You can revoke access in Settings → Computer."
+    )
+}
+
+/// The "Allow this command?" dialog's text.
+///
+/// Every path is one on this computer. The command runs in a sandbox whose own paths
+/// (`/approved`, `/workspace`) mean nothing to the person, so none is shown: the approved folder,
+/// and the folder inside it the command runs in when that is not the approved folder itself.
+fn command_message(
+    bot: &str,
+    root: &Path,
+    working_directory: Option<&Path>,
+    command: &str,
+    access: &str,
+    setting: &str,
+) -> String {
+    let runs_in = working_directory
+        .filter(|directory| *directory != root)
+        .map(|directory| format!("\nRuns in: {}", folder(directory)))
+        .unwrap_or_default();
+    format!(
+        "Bot: {bot}\nFolder: {}{runs_in}\n\nCommand:\n{command}\n\n{access}\nNetwork access is disabled.\n\n{setting}",
+        folder(root)
+    )
 }
 
 /// What the person pressed on the three-button command dialog. The plugin reports custom buttons by
@@ -110,7 +149,7 @@ impl<R: tauri::Runtime> NativeApproval<R> {
         if allowed {
             Ok(())
         } else {
-            Err(refused("The local owner denied this operation."))
+            Err(refused(DECLINED))
         }
     }
 }
@@ -137,10 +176,10 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
         let root = picked
             .into_path()
             .map_err(|error| refused(error.to_string()))?;
-        self.confirm("Allow folder access?", format!(
-            "Bot: {bot}\nRequested by: {}\n\nFolder: {}\n\nAllow this Bot to read this folder for this OpenBot session? Each edit and command asks separately. You can revoke access in Computers.",
-            request.actor_id, root.display()
-        ))?;
+        self.confirm(
+            "Allow folder access?",
+            folder_access_message(&bot, &folder(&root)),
+        )?;
         Ok(ApprovedFolder { root })
     }
 
@@ -187,9 +226,13 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
                 request.command_policy.label()
             )
         };
-        let message = format!(
-            "Bot: {bot}\nFolder: {}\nWorking folder: {}\n\nCommand:\n{}\n\n{access}\nNetwork access is disabled.\n\n{setting}",
-            folder(&request.root), request.working_directory.as_deref().unwrap_or("/workspace"), request.command
+        let message = command_message(
+            &bot,
+            &request.root,
+            request.working_directory.as_deref(),
+            &request.command,
+            access,
+            &setting,
         );
         if !offer_always {
             return self.confirm("Allow this command?", message);
@@ -211,7 +254,7 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
         match command_choice(&result) {
             CommandChoice::Once => Ok(()),
             CommandChoice::Always => list.remember(&request.bot_id, &request.root),
-            CommandChoice::Deny => Err(refused("The local owner denied this operation.")),
+            CommandChoice::Deny => Err(refused(DECLINED)),
         }
     }
 }
@@ -261,6 +304,81 @@ mod tests {
             r"C:\Users\Administrator\Projects"
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Found on Windows: the dialog read "Requested by: dev-local-user", the server's internal id for
+    /// the one person, and sent them to "Computers", a page the personal edition calls Computer.
+    #[test]
+    fn folder_access_names_no_internal_requester_and_the_page_as_it_is_called() {
+        assert_eq!(
+            folder_access_message("Personal Assistant", r"C:\acc\share"),
+            "Bot: Personal Assistant\n\nFolder: C:\\acc\\share\n\nAllow this Bot to read this folder for this OpenBot session? Each edit and command asks separately. You can revoke access in Settings → Computer."
+        );
+    }
+
+    /// Found on Windows: "Folder: C:\acc\share" above "Working folder: /workspace", a path inside the
+    /// Bot's sandbox, and not even the one the command ran in (that is the approved folder).
+    #[test]
+    fn command_approval_shows_only_folders_on_this_computer() {
+        let root =
+            std::env::temp_dir().join(format!("openbot-command-folder-{}", std::process::id()));
+        let inner = root.join("reports");
+        std::fs::create_dir_all(&inner).unwrap();
+        let access = "The approved folder stays read-only. The command can write only to its temporary workspace.";
+        let setting = "Your OpenBot setting: ask every time. Change it in Settings → Approvals.";
+
+        assert_eq!(
+            command_message("Personal Assistant", &root, None, "dir", access, setting),
+            format!(
+                "Bot: Personal Assistant\nFolder: {}\n\nCommand:\ndir\n\n{access}\nNetwork access is disabled.\n\n{setting}",
+                folder(&root)
+            )
+        );
+        // Asked to run in the approved folder itself, which is where it runs anyway.
+        assert_eq!(
+            command_message(
+                "Personal Assistant",
+                &root,
+                Some(&root),
+                "dir",
+                access,
+                setting
+            ),
+            command_message("Personal Assistant", &root, None, "dir", access, setting)
+        );
+        let in_reports = command_message(
+            "Personal Assistant",
+            &root,
+            Some(&inner),
+            "dir",
+            access,
+            setting,
+        );
+        assert!(
+            in_reports.starts_with(&format!(
+                "Bot: Personal Assistant\nFolder: {}\nRuns in: {}\n\nCommand:\ndir\n\n",
+                folder(&root),
+                folder(&inner)
+            )),
+            "{in_reports}"
+        );
+        for message in [
+            command_message("Personal Assistant", &root, None, "dir", access, setting),
+            in_reports,
+        ] {
+            assert!(!message.contains("/workspace"), "{message}");
+            assert!(!message.contains("/approved"), "{message}");
+            assert!(!message.contains("Working folder"), "{message}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Pressing Deny answered "The local owner denied this operation.", which the person read on the
+    /// Computer page and under the step: about themselves, as somebody else.
+    #[test]
+    fn a_denial_says_where_it_was_declined_and_names_no_owner() {
+        assert_eq!(DECLINED, "Declined in OpenBot Desktop.");
+        assert!(!DECLINED.to_lowercase().contains("owner"));
     }
 
     #[test]

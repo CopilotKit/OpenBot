@@ -12,6 +12,7 @@ import {
 import {
   answersTheModel,
   connectorName,
+  ownToolAttempt,
   readToolName,
 } from "@openbot/shared/tool-name";
 import {
@@ -421,7 +422,10 @@ export function stepDetails(step: ToolItem): StepDetails {
     return {
       ...outcome,
       kind: "tool",
-      label: readToolName(name, outcome.pending).label,
+      // Beside "Blocked", what was tried: "Save a file", not "Saved a file", which did not happen.
+      label:
+        (refused ? ownToolAttempt(name) : null) ??
+        readToolName(name, outcome.pending).label,
       pages: 0,
     };
 

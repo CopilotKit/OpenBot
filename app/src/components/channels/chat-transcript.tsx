@@ -11,7 +11,11 @@ import {
 } from "@openbot/shared/connect-prompt";
 import { answeredBy } from "@openbot/shared/handoff-markers";
 import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
-import { readToolName } from "@openbot/shared/tool-name";
+import {
+  ownToolAttempt,
+  ownToolSubject,
+  readToolName,
+} from "@openbot/shared/tool-name";
 import {
   IconAlertTriangle,
   IconBox,
@@ -1570,6 +1574,7 @@ const ToolCallBody = memo(function ToolCallBody({
             toolCallId={toolCallId}
             fallback={
               <ServerToolLine
+                args={args}
                 name={name}
                 place={{ toolCallId, latest }}
                 result={result}
@@ -1673,16 +1678,22 @@ const ToolRow = memo(function ToolRow({
  */
 export function ServerToolLine({
   name,
+  args,
   result,
   place,
 }: {
   name: string;
+  /** What the call was given, as the model wrote it. Read only for what a step acted on. */
+  args?: string;
   result?: string;
   /** Where this call sits in the conversation, for an app card that may carry the task on. */
   place?: CardPlace;
 }) {
   const running = result === undefined;
-  const { label, detail } = readToolName(name, running);
+  const named = readToolName(name, running);
+  const { label } = named;
+  // The file a file step read or saved, as a computer's own file steps name it.
+  const detail = named.detail ?? ownToolSubject(name, args);
   /*
    * A refusal is not a result, and must not read like one.
    *
@@ -1753,6 +1764,8 @@ export function ServerToolLine({
   return (
     <ToolLine
       {...(detail ? { detail } : {})}
+      // A blocked step did not happen: "Blocked: Save a file", never "Blocked: Saved a file".
+      {...(refused ? { attempted: ownToolAttempt(name) ?? undefined } : {})}
       label={label}
       refused={refused}
       failed={failed}
