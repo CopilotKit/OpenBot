@@ -4,6 +4,8 @@ use openbot_desktop_lib::host_access::{
     CommandPrompt, HostAccessError, HostAccessResult, HostApprovalUi, LocalCommandAllowList,
     WritePrompt,
 };
+use openbot_desktop_lib::paths;
+use std::path::Path;
 use tauri::Manager;
 use tauri_plugin_dialog::{
     DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
@@ -17,6 +19,12 @@ pub struct NativeApproval<R: tauri::Runtime>(pub tauri::AppHandle<R>);
 
 fn refused(message: impl Into<String>) -> HostAccessError {
     HostAccessError::Denied(message.into())
+}
+
+/// The approved folder as a person reads it. The grant keeps it canonical, `\\?\C:\...` on Windows,
+/// for its containment checks; the dialog shows it plain.
+fn folder(root: &Path) -> String {
+    paths::plain(root.to_path_buf()).display().to_string()
 }
 
 // A native message dialog is deliberately small. Refuse content that cannot be reviewed here;
@@ -141,7 +149,7 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
         let bot = bot_label(request.bot_name.as_deref(), &request.bot_id);
         self.confirm("Allow this file change?", format!(
             "Bot: {bot}\nFolder: {}\nFile: {}\n\nNew content:\n{}\n\nAllow this exact change once? OpenBot keeps the previous contents when replacing a file.",
-            request.root.display(), request.relative_path, request.content
+            folder(&request.root), request.relative_path, request.content
         ))
     }
 
@@ -181,7 +189,7 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
         };
         let message = format!(
             "Bot: {bot}\nFolder: {}\nWorking folder: {}\n\nCommand:\n{}\n\n{access}\nNetwork access is disabled.\n\n{setting}",
-            request.root.display(), request.working_directory.as_deref().unwrap_or("/workspace"), request.command
+            folder(&request.root), request.working_directory.as_deref().unwrap_or("/workspace"), request.command
         );
         if !offer_always {
             return self.confirm("Allow this command?", message);
@@ -234,6 +242,25 @@ mod tests {
             command_choice(&MessageDialogResult::Custom("something else".into())),
             CommandChoice::Deny
         );
+    }
+
+    /// A grant's folder is canonical, which Windows answers as `\\?\C:\Users\...`. The approval
+    /// dialogs name it as a person reads it.
+    #[test]
+    fn approval_names_the_folder_without_the_windows_extended_length_prefix() {
+        let root =
+            std::env::temp_dir().join(format!("openbot-approval-folder-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let granted = std::fs::canonicalize(&root).unwrap();
+        let shown = folder(&granted);
+        assert!(!shown.starts_with(r"\\?\"), "{shown}");
+        assert_eq!(std::fs::canonicalize(&shown).unwrap(), granted);
+        #[cfg(windows)]
+        assert_eq!(
+            folder(Path::new(r"\\?\C:\Users\Administrator\Projects")),
+            r"C:\Users\Administrator\Projects"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
