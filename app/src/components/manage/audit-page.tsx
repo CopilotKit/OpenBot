@@ -26,6 +26,7 @@ import {
 } from "@/lib/audit/outcome";
 import { auditEventsQueryOptions, auditExportUrl } from "@/lib/audit/queries";
 import { client } from "@/lib/client";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -95,6 +96,8 @@ export function AuditPage({
   const events = useQuery(auditEventsQueryOptions(search));
   const rows = oneRowPerAction((events.data?.events ?? []) as AuditEvent[]);
   const nameFor = useBotNames();
+  // The stored event names are Admin's to read; the personal edition's Activity is anybody's page.
+  const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportCapped, setExportCapped] = useState<number | null>(null);
@@ -162,6 +165,7 @@ export function AuditPage({
               events={rows}
               nameFor={nameFor}
               query={query}
+              storedNames={edition !== "personal"}
               toolbar={({ count, filters }) => (
                 <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
                   {/*

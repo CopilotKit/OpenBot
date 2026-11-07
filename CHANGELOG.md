@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Activity and Audit say what each row was about in words, such as "Choose tools for a run" and "Save
+  a file", where they showed "mcp.tools_discovered" and "write_file". The export keeps those names.
 - Activity names a Bot and never shows its id: hovering a Bot showed "picked-harness", a Bot's
   avatar in a conversation was labelled with it, and a deleted Bot now reads "A Bot no longer here".
 - The first-use starter tasks step aside while a Bot waits on your answer, where they covered the

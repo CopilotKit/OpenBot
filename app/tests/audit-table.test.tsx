@@ -112,12 +112,20 @@ test("the page fills the shell's panel and only the table scrolls", async () => 
 
 test("newest first, and a press on When turns it oldest first", async () => {
   const view = await renderAudit();
-  expect(whats(view.container)).toEqual(["navigate", "click", "type"]);
+  expect(whats(view.container)).toEqual([
+    "Open a page",
+    "Click on a page",
+    "Fill in a field",
+  ]);
   await userEvent
     .setup({ document })
     .click(view.getByRole("button", { name: /When/ }));
   await waitFor(() =>
-    expect(whats(view.container)).toEqual(["type", "click", "navigate"]),
+    expect(whats(view.container)).toEqual([
+      "Fill in a field",
+      "Click on a page",
+      "Open a page",
+    ]),
   );
 });
 
@@ -126,7 +134,9 @@ test("search narrows the rows already loaded, and says how many match", async ()
   await userEvent
     .setup({ document })
     .type(view.getByRole("searchbox", { name: "Search events" }), "save deal");
-  await waitFor(() => expect(whats(view.container)).toEqual(["click"]));
+  await waitFor(() =>
+    expect(whats(view.container)).toEqual(["Click on a page"]),
+  );
   expect(view.getByText("1 of 3 events")).toBeDefined();
 });
 
@@ -161,7 +171,7 @@ test("the Outcome button narrows the rows to the outcomes ticked", async () => {
   await user.click(
     await view.findByRole("menuitemcheckbox", { name: /Blocked/ }),
   );
-  await waitFor(() => expect(whats(view.container)).toEqual(["navigate"]));
+  await waitFor(() => expect(whats(view.container)).toEqual(["Open a page"]));
   expect(view.getByText("1 of 3 events")).toBeTruthy();
 });
 
