@@ -149,6 +149,8 @@ function actionOf(event: AuditEvent): string | undefined {
     event.payload?.action ??
     (event.targetType === "approval" ? event.payload?.tool : undefined);
   if (typeof action === "string") return action;
+  const legacy = legacyFolderAction(event);
+  if (legacy) return `host/${legacy.operation}`;
   if (
     event.eventType.startsWith("mcp.call") &&
     event.targetType === "mcp_tool" &&
@@ -156,6 +158,23 @@ function actionOf(event: AuditEvent): string | undefined {
   )
     return event.targetId;
   return undefined;
+}
+
+/**
+ * A folder action recorded before folder actions were a computer's (`server/src/host-access/tools.ts`):
+ * a `configuration.changed` row naming the operation and how it went. Read in the same words, since
+ * the trail cannot be rewritten; it keeps its own event type, so the views by type leave it out.
+ */
+export function legacyFolderAction(
+  event: Pick<AuditEvent, "eventType" | "payload">,
+): { operation: string; outcome: string } | undefined {
+  const payload = event.payload ?? {};
+  return event.eventType === "configuration.changed" &&
+    payload.change === "host_access_tool_call" &&
+    typeof payload.operation === "string" &&
+    typeof payload.outcome === "string"
+    ? { operation: payload.operation, outcome: payload.outcome }
+    : undefined;
 }
 
 /** What a row is about, in the trail's own name for it: for search, and for Admin's hover. */
@@ -271,10 +290,12 @@ export function decisionText(event: AuditEvent): string {
           ? "Sent to the default Bot"
           : "Sent to the Bot it was meant for"
       : null;
+  const legacy = legacyFolderAction(event);
   return (
     routed ??
     approvalText(event) ??
-    DECISIONS[event.eventType] ??
+    (legacy?.outcome === "requested" ? "Asked for" : undefined) ??
+    (legacy ? undefined : DECISIONS[event.eventType]) ??
     (outcome === "refused"
       ? "Blocked"
       : outcome === "did-not-happen"
@@ -351,7 +372,9 @@ export function decisionDetails(event: AuditEvent): string[] {
   else if (
     (event.eventType === "component.refused" ||
       event.eventType === "component.function_refused" ||
-      event.eventType === "mcp.call_rejected") &&
+      event.eventType === "mcp.call_rejected" ||
+      // A folder action the desktop or its grant turned away says why; see host-access/tools.ts.
+      event.eventType === "computer.action_refused") &&
     typeof payload.reason === "string"
   )
     lines.push(payload.reason);

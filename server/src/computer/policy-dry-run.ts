@@ -101,6 +101,9 @@ export function contextFromAuditPayload(
   const action = payload.action;
   const bot = payload.bot;
   if (typeof action !== "string" || typeof bot !== "string") return null;
+  // A folder action on the person's own computer (`host/read_file`) is decided by its folder grant
+  // and the desktop's own asking, never by this policy, so replaying it here would invent a change.
+  if (action.startsWith("host/")) return null;
 
   const text = (value: unknown): string =>
     typeof value === "string" ? value : "";
