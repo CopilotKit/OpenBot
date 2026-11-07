@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- When a Bot's turn fails after it has used the browser, the conversation now says so under the
+  turn, as it does for a turn that fails at once.
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
