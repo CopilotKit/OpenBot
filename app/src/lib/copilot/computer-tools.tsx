@@ -128,6 +128,7 @@ function labelOf(result: string | undefined): string | undefined {
  */
 function ActionLine({
   label,
+  attempted,
   detail,
   running,
   refused,
@@ -136,6 +137,8 @@ function ActionLine({
   byYou,
 }: {
   label: string;
+  /** What was tried, said when the step was refused. See `ToolLine`. */
+  attempted?: string;
   detail?: string;
   running?: boolean;
   /** A policy or a boundary said no. Final: nothing the Bot does differently will help. */
@@ -149,6 +152,7 @@ function ActionLine({
 }) {
   return (
     <ToolLine
+      attempted={attempted}
       byYou={byYou}
       detail={notYet ? STILL_STARTING_DETAIL : detail}
       failed={failed}
@@ -162,6 +166,16 @@ function ActionLine({
 
 /** What a line says about a call that waited on a computer still starting. */
 const STILL_STARTING_DETAIL = "The computer is still starting.";
+
+/**
+ * What a refused step's line says after its words: what it was aimed at, then why it did not
+ * happen, as one phrase ("notes.txt · You declined it."). The target alone hid the reason; the reason
+ * alone hid which file or field it was.
+ */
+function refusedDetail(target: string | undefined, outcome: ComputerOutcome) {
+  const reason = outcomeForPerson(String(outcome.reason ?? ""));
+  return [target, reason].filter(Boolean).join(" · ");
+}
 
 /** Whether a result is an ordinary failure rather than a refusal, so the two can render differently. */
 function didNotWork(outcome: ComputerOutcome): boolean {
@@ -370,11 +384,16 @@ export function ComputerTools() {
       <ActionLine
         running={status !== "complete"}
         label="Filled in"
-        detail={
+        attempted="Fill in"
+        detail={(() => {
           // Never show typed values; identify only the target field.
-          labelOf(result) ??
-          (typeof args?.ref === "string" ? args.ref : undefined)
-        }
+          const field =
+            labelOf(result) ??
+            (typeof args?.ref === "string" ? args.ref : undefined);
+          return outcomeOf(result).refused === true
+            ? refusedDetail(field, outcomeOf(result))
+            : field;
+        })()}
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
         notYet={stillStarting(outcomeOf(result))}
@@ -415,10 +434,11 @@ export function ComputerTools() {
         <ActionLine
           running={status !== "complete"}
           label="Clicked"
+          attempted="Click"
           detail={
-            // Show refusal reason instead of an internal element ref.
+            // A refusal names the element only by the label the server resolved, never its ref.
             outcome.refused === true
-              ? outcomeForPerson(String(outcome.reason ?? ""))
+              ? refusedDetail(labelOf(result), outcome)
               : (labelOf(result) ??
                 (typeof args?.ref === "string" ? args.ref : undefined))
           }
@@ -465,7 +485,17 @@ export function ComputerTools() {
       <ActionLine
         running={status !== "complete"}
         label="Pressed"
-        detail={typeof args?.key === "string" ? args.key : undefined}
+        attempted="Press"
+        detail={
+          outcomeOf(result).refused === true
+            ? refusedDetail(
+                typeof args?.key === "string" ? args.key : undefined,
+                outcomeOf(result),
+              )
+            : typeof args?.key === "string"
+              ? args.key
+              : undefined
+        }
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
         notYet={stillStarting(outcomeOf(result))}
@@ -630,6 +660,7 @@ export function ComputerTools() {
         <ActionLine
           running={status !== "complete"}
           label="Listed files"
+          attempted="List files"
           detail={
             outcome.refused === true || didNotWork(outcome)
               ? outcomeForPerson(String(outcome.reason ?? ""))
@@ -670,9 +701,13 @@ export function ComputerTools() {
         <ActionLine
           running={status !== "complete"}
           label="Read file"
+          attempted="Read file"
           detail={
             outcome.refused === true
-              ? outcomeForPerson(String(outcome.reason ?? ""))
+              ? refusedDetail(
+                  typeof args?.path === "string" ? args.path : undefined,
+                  outcome,
+                )
               : typeof args?.path === "string"
                 ? args.path
                 : undefined
@@ -799,10 +834,14 @@ export function ComputerTools() {
         <ActionLine
           running={status !== "complete"}
           label={args?.append === true ? "Added to file" : "Saved file"}
+          attempted={args?.append === true ? "Add to file" : "Save file"}
           // Show the path, never file contents.
           detail={
             outcome.refused === true
-              ? outcomeForPerson(String(outcome.reason ?? ""))
+              ? refusedDetail(
+                  typeof args?.path === "string" ? args.path : undefined,
+                  outcome,
+                )
               : typeof args?.path === "string"
                 ? args.path
                 : undefined
@@ -843,6 +882,7 @@ export function ComputerTools() {
       <ActionLine
         running={status !== "complete"}
         label="Scrolled"
+        attempted="Scroll"
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
         notYet={stillStarting(outcomeOf(result))}

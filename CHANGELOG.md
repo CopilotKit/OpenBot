@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A goal's run is offered one tool for each goal job. It was also given Routines' copies, so it saw
+  `create_goal` beside `mcp__routines__create_goal` and the same for each goal tool.
 - A Bot that can't be reached says so in words: "Couldn't reach Personal Assistant. Check that
   it's running and that its address on its Setup page is right, then try again." A conversation
   showed "ECONNREFUSED: Unable to connect. Is the computer able to access the url?". The error itself
