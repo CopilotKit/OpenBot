@@ -294,7 +294,10 @@ import {
 import { createResponsibilityStore } from "./responsibilities/store";
 import { responsibilityTools } from "./responsibilities/tools";
 import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
-import { useGoalTools } from "./responsibilities/chat-tools";
+import {
+  useGoalTools,
+  withoutGoalCopiesInGoalRun,
+} from "./responsibilities/chat-tools";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
 import type { Responsibility } from "./responsibilities/types";
@@ -2058,7 +2061,11 @@ const actorAgentResolver = createActorAgentResolver({
     restrictToolsForRun(
       initiator,
       actorId,
-      loadToolsForActor(actorId, initiator),
+      // A goal's run holds the goal's own tools; the Routines copies would be a second set.
+      withoutGoalCopiesInGoalRun(
+        initiator,
+        loadToolsForActor(actorId, initiator),
+      ),
       checkInScope,
     ),
   signRunForActor,

@@ -23,8 +23,8 @@ while Ask before making changes is on, and before `delete_routine` always (see
 `update_goal`, `run_goal`, `pause_goal`, `resume_goal` and `complete_goal`, beside the trigger tools
 that wake a goal. Asked for a goal, a Bot makes one that reports into the conversation it was asked
 in, or into another the person names, and it shows on the Bot's Goals page. A goal has no schedule of
-its own: it runs when asked, or when an event wakes it. See
-`server/src/responsibilities/chat-tools.ts`.
+its own: it runs when asked, or when an event wakes it. A goal's own run is not given these copies,
+because it already holds the goal's own tools. See `server/src/responsibilities/chat-tools.ts`.
 
 Its tools are OpenBot's own code, so the server brings the saved list up to date with the running
 release at every start, before it gives them out: a tool a release renames, rewords or adds reaches an
