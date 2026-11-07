@@ -10,6 +10,7 @@ own repository:
 | `ag2.svg` | [`ag2ai/ag2`](https://github.com/ag2ai/ag2) `website/static/img/favicon-dark.svg`, verbatim apart from a `<title>` |
 | `agno.svg` | [`agno-agi/docs`](https://github.com/agno-agi/docs) `favicon.png`, embedded unchanged in an SVG |
 | `langroid.svg` | [`langroid/langroid`](https://github.com/langroid/langroid) `public/logo_light.png`, scaled to 128 px and embedded in an SVG |
+| `unbiased.svg` | Unbiased AI's own icon, as served at `platform.unbiased.ai/logos/unbiased-icon.svg` and supplied by Unbiased AI for this row, verbatim apart from a `<title>` and `1em` sizing |
 
 The two PNGs sit inside an SVG wrapper only so every mark is one file type: both apps resolve a
 mark by globbing `*.svg`, and a second extension would mean a second rule in each.

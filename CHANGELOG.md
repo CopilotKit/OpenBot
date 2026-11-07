@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop offers **Sign in with Unbiased AI** on the Connect your AI screen. Signing in opens
+  Unbiased AI's approval page in the browser, where a person signs in or creates an account, and
+  OpenBot receives an API key for the `pareto` model on Unbiased AI's OpenAI-compatible gateway. The
+  key is stored on this computer the way a typed endpoint key is, and an Unbiased AI API key can be
+  pasted instead. See [Model provider OAuth](desktop/PROVIDER_OAUTH.md#unbiased-ai).
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
