@@ -1066,18 +1066,32 @@ export async function synchronizeTenantPackage(
         ...picked.configuration,
         installerManaged: true,
       });
+      /*
+       * A starter marked as the person's own connection only because it was renamed.
+       *
+       * Up to this release, saving the starter's Setup page with nothing but a new name or title
+       * stored the installer's address back with a "/" added (`http://agent-harness:4212/`) and
+       * marked the connection as the person's, so a later provider change left it dialling a harness
+       * that no longer ran. That address on the installer's own container, with no key, is the mark
+       * of that save: the container only ever runs the harness the installer picked, so no agent of
+       * the person's can live there, and a person who set a key set something of their own and keeps
+       * it. Such a starter goes back to following the installer.
+       */
+      const renamedOnly = sql`(${stored}->'personalStarter' = 'true'::jsonb
+        and ${stored}->'auth' is null
+        and ${stored}->>'endpoint' ~ '^http://agent-harness:[0-9]+/$')`;
       await transaction
         .update(agentTable)
         .set({
           type: picked.type,
-          configuration: sql`(${stored} - 'remoteAgentId') || ${connection}::text::jsonb`,
+          configuration: sql`(${stored} - 'remoteAgentId' - 'personalConnection') || ${connection}::text::jsonb`,
           updatedAt: new Date(),
         })
         .where(
           and(
             eq(agentTable.id, PICKED_HARNESS),
             ne(agentTable.type, "built_in"),
-            sql`coalesce(${stored}->>'personalConnection', 'false') <> 'true'`,
+            sql`(coalesce(${stored}->>'personalConnection', 'false') <> 'true' or ${renamedOnly})`,
             sql`(${stored}->'personalStarter' = 'true'::jsonb
               or ${stored}->'installerManaged' = 'true'::jsonb
               or ${stored}->>'endpoint' ~ '^http://agent-harness:[0-9]+([/?]|$)')`,

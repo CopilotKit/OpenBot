@@ -1979,6 +1979,107 @@ describe("bundled personal starter", () => {
     });
   });
 
+  test("renaming the starter on its Setup page keeps it on the installer's harness", async () => {
+    const tenantId = starterTestTenant();
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    const userId = await createUser();
+    const signedIn = {
+      id: userId,
+      email: `${userId}@example.test`,
+      role: "admin" as const,
+    };
+    const starter = await profiles.get(signedIn, "picked-harness");
+    if (!starter) throw new Error("Missing starter");
+    const requireUser: MiddlewareHandler<{
+      Variables: AppVariables;
+    }> = async (context, next) => {
+      context.set("actor", signedIn);
+      await next();
+    };
+    const app = new Hono<{ Variables: AppVariables }>();
+    // A laptop's deployment, as OpenBot Desktop runs one.
+    app.route("/api/agents", createAgentRoutes(profiles, requireUser, true));
+    // What the Setup page sends for a new name and title: everything else as it showed it.
+    const response = await app.request("/api/agents/picked-harness", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Personal Assistant F5",
+        title: "Errands and research. Powered by Claude Agent SDK.",
+        roleDescription: starter.roleDescription,
+        visibility: starter.visibility,
+        endpoint: starter.endpoint,
+      }),
+    });
+    expect(response.status).toBe(200);
+    const [edited] = await database
+      .select({ configuration: agents.configuration })
+      .from(agents)
+      .where(eq(agents.id, "picked-harness"));
+    expect(edited?.configuration).toMatchObject({ endpoint: claude });
+    expect(edited?.configuration).not.toHaveProperty("personalConnection");
+
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, langchain),
+    );
+    expect(await profiles.get(signedIn, "picked-harness")).toMatchObject({
+      name: "Personal Assistant F5",
+      endpoint: langchain,
+    });
+  });
+
+  test.each([
+    ["follows the installer again", false, langchain],
+    ["with a key of its own stays where it is", true, `${claude}/`],
+  ])(
+    "a starter renamed before this release %s",
+    async (_case, keyed, endpoint) => {
+      const tenantId = starterTestTenant();
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(tenantId, claude),
+      );
+      const [seeded] = await database
+        .select({ configuration: agents.configuration })
+        .from(agents)
+        .where(eq(agents.id, "picked-harness"));
+      // What a rename on the Setup page stored until this release.
+      await database
+        .update(agents)
+        .set({
+          configuration: {
+            ...(seeded?.configuration as Record<string, unknown>),
+            endpoint: `${claude}/`,
+            personalConnection: true,
+            ...(keyed
+              ? { auth: { header: "Authorization", credentialId: "key-1" } }
+              : {}),
+          },
+        })
+        .where(eq(agents.id, "picked-harness"));
+
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(tenantId, langchain),
+      );
+      const [after] = await database
+        .select({ configuration: agents.configuration })
+        .from(agents)
+        .where(eq(agents.id, "picked-harness"));
+      expect(after?.configuration).toMatchObject({ endpoint });
+      if (keyed)
+        expect(after?.configuration).toMatchObject({
+          personalConnection: true,
+        });
+      else
+        expect(after?.configuration).not.toHaveProperty("personalConnection");
+    },
+  );
+
   test("legacy catalogue names follow harness changes without renaming custom Bots", async () => {
     const tenantId = starterTestTenant();
     // Seeded by an earlier desktop, under the name the catalogue gave LangGraph then.
