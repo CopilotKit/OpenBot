@@ -32,6 +32,11 @@ export type DesktopStatus = {
   appPort: number | null;
   version: string;
   build: string;
+  /**
+   * The folder the desktop app writes its log file to. Absent from a desktop app older than the
+   * log, which has no Open log folder to offer.
+   */
+  logFolder?: string | null;
 };
 
 /** The Intelligence CLI's own end-to-end readiness. */

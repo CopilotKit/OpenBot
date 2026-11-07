@@ -202,6 +202,17 @@ pub fn pull_image(
     on_progress: impl FnMut(ImageBytes),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
+    crate::logging::timed(&format!("pull {image}"), || {
+        pull_image_now(engine, image, on_progress, on_complete)
+    })
+}
+
+fn pull_image_now(
+    engine: &Address,
+    image: &str,
+    on_progress: impl FnMut(ImageBytes),
+    on_complete: impl FnOnce(PullMetrics),
+) -> Result<(), Problem> {
     if crate::preparation::image_present(engine, image)? {
         return Ok(());
     }

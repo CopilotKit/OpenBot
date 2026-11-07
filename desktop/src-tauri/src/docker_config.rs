@@ -72,8 +72,8 @@ pub fn for_commands_in(owned: &Path, var: impl Fn(&str) -> Option<OsString>) -> 
         Ok(dir) => Some(dir),
         // The command runs as it always did, with the configuration it inherits.
         Err(error) => {
-            eprintln!(
-                "OpenBot could not prepare its Docker configuration at {}: {error}",
+            log::warn!(
+                "[docker config] could not prepare OpenBot's Docker configuration at {}: {error}",
                 owned.display()
             );
             None

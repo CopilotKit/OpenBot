@@ -997,6 +997,15 @@ pub fn up(
     harness: bool,
     secrets: &Secrets,
 ) -> Result<Vec<&'static str>, crate::problem::Problem> {
+    crate::logging::timed("compose up", || up_now(engine, root, harness, secrets))
+}
+
+fn up_now(
+    engine: &Address,
+    root: &Path,
+    harness: bool,
+    secrets: &Secrets,
+) -> Result<Vec<&'static str>, crate::problem::Problem> {
     /*
      * The picked harness rides in on its profile.
      *
@@ -1090,6 +1099,10 @@ fn computer_namespace(engine: &Address, root: &Path) -> Result<Option<String>, S
 /// Quiesce the supervisor before listing so in-flight creates and restarts are included.
 /// Returns false only when the selected root has no installed deployment to take down.
 pub fn stop_computers(engine: &Address, root: &Path) -> Result<bool, String> {
+    crate::logging::timed("stop Bots' computers", || stop_computers_now(engine, root))
+}
+
+fn stop_computers_now(engine: &Address, root: &Path) -> Result<bool, String> {
     let Some(namespace) = computer_namespace(engine, root)? else {
         return Ok(false);
     };
@@ -1145,42 +1158,44 @@ pub fn stop_computers(engine: &Address, root: &Path) -> Result<bool, String> {
 }
 
 pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
-    // Stop the supervisor and its runtime-created computers before removing the Compose stack.
-    if !stop_computers(engine, root)? {
-        return Ok(());
-    }
+    crate::logging::timed("compose down", || {
+        // Stop the supervisor and its runtime-created computers before removing the Compose stack.
+        if !stop_computers(engine, root)? {
+            return Ok(());
+        }
 
-    /*
-     * WITH THE PROFILE, OR THE PICKED BOT KEEPS RUNNING.
-     *
-     * Measured: after pressing Stop, `compose ps` still listed `agent-harness`. Compose only acts
-     * on a profiled service when the profile is named, so Stop was leaving the one container the
-     * person actually chose running on their laptop, still holding its port. The next Start then
-     * refused because something was listening on it.
-     *
-     * Named unconditionally rather than only when a harness was picked: this has to stop what an
-     * earlier run started, and whether that run picked one is not something a Stop can know.
-     *
-     * `openbot` for the same reason: `server` and `worker` sit behind it, and a Stop that left them
-     * running would leave the app answering a window that says OpenBot is stopped.
-     */
-    let output = compose_command(engine, root, &Secrets::new())
-        .args([
-            "-f",
-            "docker-compose.yml",
-            "--profile",
-            "harness",
-            "--profile",
-            OPENBOT_PROFILE,
-            "down",
-        ])
-        .output()
-        .map_err(|error| format!("could not stop the stack: {error}"))?;
+        /*
+         * WITH THE PROFILE, OR THE PICKED BOT KEEPS RUNNING.
+         *
+         * Measured: after pressing Stop, `compose ps` still listed `agent-harness`. Compose only acts
+         * on a profiled service when the profile is named, so Stop was leaving the one container the
+         * person actually chose running on their laptop, still holding its port. The next Start then
+         * refused because something was listening on it.
+         *
+         * Named unconditionally rather than only when a harness was picked: this has to stop what an
+         * earlier run started, and whether that run picked one is not something a Stop can know.
+         *
+         * `openbot` for the same reason: `server` and `worker` sit behind it, and a Stop that left them
+         * running would leave the app answering a window that says OpenBot is stopped.
+         */
+        let output = compose_command(engine, root, &Secrets::new())
+            .args([
+                "-f",
+                "docker-compose.yml",
+                "--profile",
+                "harness",
+                "--profile",
+                OPENBOT_PROFILE,
+                "down",
+            ])
+            .output()
+            .map_err(|error| format!("could not stop the stack: {error}"))?;
 
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(command_said(&output.stderr))
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(command_said(&output.stderr))
+    })
 }
 
 /// Where the pids of the host processes are written, so a later window can stop them.
@@ -2938,6 +2953,10 @@ the database and the Bots stay up, so nothing is lost and it takes seconds. The 
 because both services sit behind it, and Compose refuses to restart a service it cannot see.
 */
 pub fn restart_openbot(engine: &Address, root: &Path) -> Result<(), String> {
+    crate::logging::timed("compose restart", || restart_openbot_now(engine, root))
+}
+
+fn restart_openbot_now(engine: &Address, root: &Path) -> Result<(), String> {
     let output = compose_command(engine, root, &Secrets::new())
         .args(["--profile", OPENBOT_PROFILE, "restart", "server", "worker"])
         .output()

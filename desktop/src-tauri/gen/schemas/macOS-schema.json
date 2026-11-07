@@ -2661,6 +2661,24 @@
           "markdownDescription": "Denies the save command without any pre-configured scope."
         },
         {
+          "description": "Allows the log command\n#### This default permission set includes:\n\n- `allow-log`",
+          "type": "string",
+          "const": "log:default",
+          "markdownDescription": "Allows the log command\n#### This default permission set includes:\n\n- `allow-log`"
+        },
+        {
+          "description": "Enables the log command without any pre-configured scope.",
+          "type": "string",
+          "const": "log:allow-log",
+          "markdownDescription": "Enables the log command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the log command without any pre-configured scope.",
+          "type": "string",
+          "const": "log:deny-log",
+          "markdownDescription": "Denies the log command without any pre-configured scope."
+        },
+        {
           "description": "Enables the appearance command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-appearance",
@@ -2689,6 +2707,12 @@
           "type": "string",
           "const": "openbot-desktop:allow-intelligence",
           "markdownDescription": "Enables the intelligence command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-open-logs",
+          "markdownDescription": "Enables the open_logs command without any pre-configured scope."
         },
         {
           "description": "Enables the restart command without any pre-configured scope.",
@@ -2767,6 +2791,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-intelligence",
           "markdownDescription": "Denies the intelligence command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-open-logs",
+          "markdownDescription": "Denies the open_logs command without any pre-configured scope."
         },
         {
           "description": "Denies the restart command without any pre-configured scope.",

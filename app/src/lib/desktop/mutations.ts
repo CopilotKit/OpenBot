@@ -67,6 +67,16 @@ export function installAppUpdateMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/**
+ * Open the desktop app's log folder in the system's file manager. The desktop app opens its own
+ * folder; the page never names a path. Rejects with the app's reason as a plain string.
+ */
+export function openLogFolderMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("open_logs"),
+  });
+}
+
 /** Start or stop the local Intelligence stack. */
 export function intelligenceMutationOptions(queryClient: QueryClient) {
   return mutationOptions({

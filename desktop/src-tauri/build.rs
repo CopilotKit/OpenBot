@@ -61,6 +61,8 @@ fn main() {
                     "speech_start",
                     "speech_stop",
                     "speech_abort",
+                    // Open log folder: the shell's own log folder. See `src/logging.rs`.
+                    "open_logs",
                 ]),
             ),
     )

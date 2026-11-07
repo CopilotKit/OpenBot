@@ -435,7 +435,7 @@ where
             Err(problem) => {
                 let said = format!("{} {}", problem.said, problem.detail.unwrap_or_default());
                 if last_failure.as_ref() != Some(&said) {
-                    eprintln!("[recorder] host install failed: {said}");
+                    log::warn!("[recorder] host install failed: {said}");
                     last_failure = Some(said);
                 }
             }
