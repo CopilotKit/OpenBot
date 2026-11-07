@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
+import { EndpointMark } from "./EndpointMark";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { ButtonMark, Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
@@ -662,7 +663,11 @@ export function ProviderPicker({
                 }
               }}
             />
-            <Mark id={r.mark} name={r.name} />
+            {r.id === "openai-compatible" ? (
+              <EndpointMark />
+            ) : (
+              <Mark id={r.mark} name={r.name} />
+            )}
             <span className="tile-name">{r.name}</span>
             <span className="tile-summary">{r.summary}</span>
           </label>

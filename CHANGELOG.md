@@ -11,6 +11,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - OpenBot Desktop's sign-ins show whose account they are: CopilotKit's logo on the CopilotKit
   sign-in, Google's and xAI's marks in the AI provider list, and each provider's mark on its
   "Sign in with" button. Google's button reads "Sign in with Google".
+- OpenBot Desktop's "Connect your AI" list shows a plain cloud icon beside "Any OpenAI-compatible
+  endpoint", the one row that had nothing beside its name. It is the icon OpenBot's admin page uses
+  for the same choice.
 - The private sign-in dialog in a conversation no longer leaves large empty gaps above "Use a
   saved login" and "Enter your login". Its sections are spaced as a dialog's are, and the fields
   sit a step below the sentence that introduces them, here and on the sign-in page.
