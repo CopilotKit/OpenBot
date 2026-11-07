@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Claude Agent SDK Bot answers after you decide a step it asked about (Don't do it, I did it
+  myself, Deny or Allow once), also when it asked for several steps at once or you decided after
+  five minutes. A long browser task is no longer cut off after five minutes with no reply.
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
