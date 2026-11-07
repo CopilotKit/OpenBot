@@ -294,9 +294,22 @@ export function useLocalSequence({
     for (let tries = 0; ; tries += 1) {
       const found = await report("status");
       if (!found) return null;
-      // A stack an older app set up runs an older release than this app installs: updated first,
-      // once, so OpenBot starts on the release it was built with.
-      if (found.updateTo && found.stack && !updatedIntelligence) {
+      /*
+       * A stack an older app set up runs an older release than this app installs: updated once,
+       * before OpenBot starts on it, so OpenBot runs on the release it was built with.
+       *
+       * ONLY ONCE IT IS UP. The CLI's update rolls the running stack forward and waits for each
+       * service to come back (`kubectl rollout status`, three minutes). On a stack Quit had stopped
+       * there is nothing running to roll, the wait ran out, and the update failed every time; on the
+       * same stack started first it finished in 86 seconds. So a stopped stack is started below as
+       * usual, and the update runs on the next answer, when it reports ready.
+       */
+      if (
+        found.updateTo &&
+        found.stack &&
+        !updatedIntelligence &&
+        found.readiness === "ready"
+      ) {
         updatedIntelligence = true;
         const going = await updateIntelligence(
           id,
