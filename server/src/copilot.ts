@@ -310,6 +310,41 @@ export function onOpenBotRunner(agent: RegisteredAgent): RegisteredAgent {
   };
 }
 
+/**
+ * Whether this deployment runs the agent behind a remote Bot: a harness it installed, which holds the
+ * deployment's own token. Any other address is somebody's own agent, run for their own purposes.
+ */
+function runByThisDeployment(agent: RegisteredAgent): boolean {
+  const token = process.env.MANAGED_AGENT_TOKEN;
+  return (
+    (agent.type === "remote_ag_ui" || agent.type === "remote_mastra") &&
+    !!token &&
+    agent.headers?.["x-openbot-agent-token"] === token
+  );
+}
+
+/**
+ * Whether the runtime's own runs on this Bot are answered here rather than at its endpoint.
+ *
+ * The runtime names a new conversation by running the conversation's Bot on a title prompt, and
+ * retries up to three times when the answer is not a short title. On an agent somebody registered
+ * by its address, that was three runs nobody asked for: answered as if the person had said it,
+ * spending their model and written into their agent's own history. So those runs are answered on
+ * OpenBot's own runner instead, as the Bot (`onOpenBotRunner`) on the deployment's model, the way a
+ * built-in Bot names its conversations and a check-in runs. A harness this deployment runs is its
+ * own, and keeps naming on its own model.
+ */
+function answersOwnRunsHere(
+  agent: RegisteredAgent,
+  holdsTools: HoldsTools | undefined,
+): boolean {
+  return (
+    !!holdsTools &&
+    (agent.type === "remote_ag_ui" || agent.type === "remote_mastra") &&
+    !runByThisDeployment(agent)
+  );
+}
+
 export type RuntimeModel = {
   provider: "openai" | "anthropic";
   defaultModel: string;
@@ -1273,6 +1308,20 @@ async function buildAgent(
           }
         : undefined,
       botNames,
+      /*
+       * Built per run and holding nothing: a run the runtime makes for itself offers the Bot no tool
+       * on either path. See `answersOwnRunsHere`.
+       */
+      answersOwnRunsHere(agent, holdsTools)
+        ? () =>
+            buildAgent(
+              onOpenBotRunner(agent),
+              model,
+              apiKey,
+              stallGuard,
+              async () => [],
+            )
+        : undefined,
     );
   }
 
@@ -1604,14 +1653,16 @@ async function remoteTransport(
     : agentFetch;
 
   if (agent.type === "remote_ag_ui") {
-    return new HttpAgent({
-      url: agent.endpoint,
-      agentId: agent.id,
-      // The customer's own key, if their agent sits behind one. `HttpAgentConfig` is
-      // `{ url, headers?, fetch? }`, verified against @ag-ui/client 0.0.57.
-      ...(agent.headers ? { headers: agent.headers } : {}),
-      ...(dial ? { fetch: dial } : {}),
-    });
+    return withoutGenerativeUIEnvelope(
+      new HttpAgent({
+        url: agent.endpoint,
+        agentId: agent.id,
+        // The customer's own key, if their agent sits behind one. `HttpAgentConfig` is
+        // `{ url, headers?, fetch? }`, verified against @ag-ui/client 0.0.57.
+        ...(agent.headers ? { headers: agent.headers } : {}),
+        ...(dial ? { fetch: dial } : {}),
+      }),
+    );
   }
 
   const [{ MastraClient }, { getRemoteAgents }] = await Promise.all([
@@ -1653,7 +1704,43 @@ async function remoteTransport(
   });
 
   const picked = pickFromRoster(Object.keys(roster), agent);
-  return quotingConversationSystemRows(roster[picked] as AbstractAgent);
+  return withoutGenerativeUIEnvelope(
+    quotingConversationSystemRows(roster[picked] as AbstractAgent),
+  );
+}
+
+/**
+ * A run as an endpoint is sent it, without the browser's generative UI envelope.
+ *
+ * The browser declares the interface it can draw as `forwardedProps.copilotkit.ui`: the whole
+ * component catalog, about 100 KB. It is addressed to the runtime, whose middleware reads it before
+ * the run reaches this transport, turns it into the `render_ui` tool and the generative UI guide in
+ * `context`, and checks every `render_ui` call against it on the way back. The endpoint gets that
+ * tool and that guide either way, so the envelope was the same catalog a second time, on every turn,
+ * and was most of what a turn sent. No agent OpenBot runs reads it. The rest of `copilotkit` stays.
+ */
+function withoutGenerativeUIEnvelope(transport: AbstractAgent): AbstractAgent {
+  const run = transport.run.bind(transport);
+  const clone = transport.clone.bind(transport);
+  return Object.assign(transport, {
+    run: (input: RunAgentInput) => {
+      const props = input.forwardedProps;
+      if (
+        !isPlainObject(props) ||
+        !isPlainObject(props.copilotkit) ||
+        !Object.hasOwn(props.copilotkit, "ui")
+      )
+        return run(input);
+      const { ui: _envelope, ...copilotkit } = props.copilotkit;
+      const { copilotkit: _namespace, ...rest } = props;
+      return run({
+        ...input,
+        forwardedProps:
+          Object.keys(copilotkit).length > 0 ? { ...rest, copilotkit } : rest,
+      });
+    },
+    clone: () => withoutGenerativeUIEnvelope(clone() as AbstractAgent),
+  });
 }
 
 /** What a quoted row says it is. The Claude Agent SDK harness labels its replay the same way. */
@@ -1800,6 +1887,11 @@ function remoteAgentWithStandingRole(
   ) => Promise<{ model: string; reasoningEffort?: string } | undefined>,
   /** Who answered, by Bot id, for another Bot's answer in this one's thread. See {@link buildAgents}. */
   botNames: ReadonlyMap<string, string> = new Map(),
+  /**
+   * The Bot on OpenBot's own runner, which answers every run the runtime makes for itself instead of
+   * the endpoint. Absent, those runs go to the endpoint holding nothing. See `answersOwnRunsHere`.
+   */
+  answerOwnRuns?: () => Promise<AbstractAgent>,
 ) {
   const holds = (input: RunAgentInput) => !holdsTools || holdsTools(input);
   /*
@@ -2033,6 +2125,12 @@ function remoteAgentWithStandingRole(
    */
   return new CloningRemoteAgent(remote, (target) => {
     target.use((input, next) => {
+      // First, so the endpoint is never dialled for it. The middleware the runtime adds after this
+      // one serves the endpoint's run and is skipped with it.
+      if (answerOwnRuns && !holds(input))
+        return defer(() => from(answerOwnRuns())).pipe(
+          switchMap((own) => own.run(input)),
+        );
       const stream = defer(() =>
         from(
           holds(input)
@@ -2204,7 +2302,10 @@ export async function resolveRuntimeAgents(
   // what that means, exactly as it would have from a roster that did not contain it.
   if (registered.length === 0) return {};
 
-  const apiKey = registered.some((agent) => agent.type === "built_in")
+  const apiKey = registered.some(
+    (agent) =>
+      agent.type === "built_in" || answersOwnRunsHere(agent, holdsTools),
+  )
     ? await resolveModelApiKey()
     : null;
   return buildAgents(

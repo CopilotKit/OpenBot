@@ -22,6 +22,7 @@ import { MAX_INLINED_BYTES_PER_RUN } from "../src/channels/attachment-parts";
 import { loadConfig } from "../src/config";
 import type { LoadAttachment } from "../src/copilot";
 import {
+  ASKED_RUN,
   buildAgents,
   builtInAgentConfiguration,
   createRequestAgents,
@@ -924,7 +925,8 @@ describe("standing agent roles", () => {
     if (!rebuilt)
       throw new Error("createRequestAgents returned no agent_expense");
     rebuilt.setMessages([userMessage("Sort these.")]);
-    await rebuilt.runAgent();
+    // A person's run, as the runtime's run route marks it: only that one reaches somebody's agent.
+    await rebuilt.runAgent({ forwardedProps: { [ASKED_RUN]: true } });
 
     const sent = endpoint.requests.at(-1) as
       | { messages?: { content?: string }[] }

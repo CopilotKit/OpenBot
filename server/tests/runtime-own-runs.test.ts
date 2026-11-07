@@ -44,7 +44,11 @@ import { testEnvironment } from "./support/environment";
 const TITLE_PROMPT = "Generate a short title for the conversation above.";
 const person = { id: "colleague", name: "Colleague" };
 const BUILT_IN = "planner";
+/** Somebody's own agent, registered by its address. */
 const REMOTE = "remote-planner";
+/** A harness this deployment runs itself, holding the deployment's token. */
+const HARNESS = "harness-planner";
+const MANAGED_AGENT_TOKEN = "deployment-token";
 
 const realFetch = globalThis.fetch;
 let environmentBefore: Record<string, string | undefined> = {};
@@ -59,6 +63,8 @@ const subagentsStarted: { agentId: string; depth?: number }[] = [];
 const posted: unknown[] = [];
 const modelRequests: ChatCompletionRequest[] = [];
 const remoteRequests: RunAgentInput[] = [];
+/** Each request the endpoint received, as the bytes it was sent. */
+const remoteBodies: string[] = [];
 const named = new Map<string, string>();
 const created = new Set<string>();
 const delivered: { runId?: string; type?: string }[] = [];
@@ -231,7 +237,11 @@ async function until(done: () => boolean, what: string) {
 }
 
 /** A person's message to a Bot in a new conversation, through the runtime's run route. */
-async function personAsks(botId: string, said: string) {
+async function personAsks(
+  botId: string,
+  said: string,
+  forwardedProps: Record<string, unknown> = {},
+) {
   const threadId = `thread-${randomUUID()}`;
   const runId = `run-${randomUUID()}`;
   const response = await runtime.handler.fetch(
@@ -245,7 +255,7 @@ async function personAsks(botId: string, said: string) {
         messages: [{ id: randomUUID(), role: "user", content: said }],
         tools: [],
         context: [],
-        forwardedProps: {},
+        forwardedProps,
       } satisfies RunAgentInput),
     }),
   );
@@ -316,8 +326,10 @@ beforeAll(async () => {
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
-      const input = (await request.json()) as RunAgentInput;
+      const body = await request.text();
+      const input = JSON.parse(body) as RunAgentInput;
       remoteRequests.push(input);
+      remoteBodies.push(body);
       const { messages } = input;
       if (isSubagent(messages)) return saying(input, "A remote essay.");
       if (isNaming(messages)) {
@@ -409,7 +421,9 @@ beforeAll(async () => {
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     COPILOTKIT_TELEMETRY_DISABLED: process.env.COPILOTKIT_TELEMETRY_DISABLED,
+    MANAGED_AGENT_TOKEN: process.env.MANAGED_AGENT_TOKEN,
   };
+  process.env.MANAGED_AGENT_TOKEN = MANAGED_AGENT_TOKEN;
   process.env.OPENAI_BASE_URL = `http://127.0.0.1:${relay.port}/v1`;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.COPILOTKIT_TELEMETRY_DISABLED = "true";
@@ -430,6 +444,19 @@ beforeAll(async () => {
   });
   if (!remote) throw new Error("The remote Bot did not register.");
   roster.push(remote);
+  const harness = registeredAgentFromRow({
+    id: HARNESS,
+    name: "Harness Planner",
+    type: "remote_ag_ui",
+    configuration: { endpoint: `http://127.0.0.1:${endpoint.port}/ag-ui` },
+    title: "Planner",
+    roleDescription: "Plan the team's work.",
+  });
+  if (harness?.type !== "remote_ag_ui")
+    throw new Error("The harness Bot did not register.");
+  // What `runtime-agents.ts` attaches to an endpoint this deployment runs.
+  harness.headers = { "x-openbot-agent-token": MANAGED_AGENT_TOKEN };
+  roster.push(harness);
 
   runtime = mountCopilotRuntime(
     loadConfig(
@@ -449,6 +476,7 @@ beforeEach(() => {
   posted.length = 0;
   modelRequests.length = 0;
   remoteRequests.length = 0;
+  remoteBodies.length = 0;
   namingCalls.model = 0;
   namingCalls.remote = 0;
   namingAsks = true;
@@ -486,22 +514,97 @@ test("naming a new conversation holds none of a built-in Bot's tools, so it star
   expect(named.get(threadId)).toBe("Offsite plan");
 });
 
-test("naming a new conversation holds none of a remote Bot's tools and carries no signed run, so nothing it calls is run", async () => {
+test("naming a new conversation never runs somebody's own agent: no title run reaches it, and the conversation is named on the deployment's model", async () => {
   const { threadId } = await personAsks(REMOTE, "Plan the team offsite.");
 
-  expect(subagentsStarted).toEqual([]);
-  expect(remoteRequests.filter((input) => isSubagent(input.messages))).toEqual(
+  // The person's one run, and nothing else: the runtime's title prompt never reaches the endpoint.
+  expect(remoteRequests.filter((input) => isNaming(input.messages))).toEqual(
     [],
   );
-  const naming = remoteRequests.filter((input) => isNaming(input.messages));
+  expect(remoteRequests).toHaveLength(1);
+  // Named on the deployment's model, holding none of the Bot's tools, so it starts no subagent.
+  const naming = modelRequests.filter((request) => isNaming(request.messages));
   expect(naming.length).toBeGreaterThan(0);
+  for (const request of naming)
+    expect(
+      offered(request).filter(
+        (name) => !(RUNTIME_STATE_TOOLS as readonly string[]).includes(name),
+      ),
+    ).toEqual([]);
+  expect(subagentsStarted).toEqual([]);
+  expect(named.get(threadId)).toBe("Offsite plan");
+});
+
+test("a harness this deployment runs still names its own conversations, holding none of its tools and no signed run", async () => {
+  namingAsks = false;
+  const { threadId } = await personAsks(HARNESS, "Plan the team offsite.");
+
+  const naming = remoteRequests.filter((input) => isNaming(input.messages));
+  expect(naming).toHaveLength(1);
   for (const input of naming) {
     expect(input.tools.map((tool) => tool.name)).toEqual([]);
     // Without the deployment's signed statement of the run, no callback of the Bot's is accepted.
-    expect(input.forwardedProps).toMatchObject({ openbotBotId: REMOTE });
+    expect(input.forwardedProps).toMatchObject({ openbotBotId: HARNESS });
     expect(Object.hasOwn(input.forwardedProps, "openbotRun")).toBe(false);
   }
   expect(named.get(threadId)).toBe("Remote offsite");
+});
+
+test("a turn sends the endpoint the component catalog once, as the guide, and not the browser's envelope as well", async () => {
+  namingAsks = false;
+  // The envelope the browser sends with every run, cut to one component that says where it went.
+  const marker = "CATALOG-MARKER: one line of text.";
+  const envelope = {
+    "1.0": {
+      supportedCatalogIds: ["openbot/ui@1"],
+      inlineCatalogs: [
+        {
+          catalogId: "openbot/ui@1",
+          protocolVersion: "1.0",
+          components: {
+            Text: {
+              description: marker,
+              props: {
+                type: "object",
+                properties: { text: { type: "string" } },
+                required: ["text"],
+              },
+            },
+          },
+          functions: {},
+        },
+      ],
+    },
+    metadata: {
+      extensions: {
+        copilotkit_format: 3,
+        copilotkit_transport: "tool",
+        copilotkit_targets: [{ id: "chat", kind: "chat" }],
+        copilotkit_surfaces: {},
+        copilotkit_contextSent: false,
+      },
+    },
+  };
+  await personAsks(REMOTE, "Plan the team offsite.", {
+    copilotkit: { ui: envelope },
+  });
+
+  const index = remoteRequests.findIndex((input) => !isNaming(input.messages));
+  const turn = remoteRequests[index];
+  const body = remoteBodies[index];
+  if (!turn || body === undefined) throw new Error("No turn reached the Bot.");
+  // What the Bot needs to draw: the render tool, and the guide naming the component.
+  expect(turn.tools.map((tool) => tool.name)).toContain("render_ui");
+  expect(
+    turn.context.some(
+      (entry) =>
+        entry.description.startsWith("Generative UI guide") &&
+        entry.value.includes(marker),
+    ),
+  ).toBe(true);
+  // And the catalog only that once: the envelope it was built from stays with the runtime.
+  expect(Object.hasOwn(turn.forwardedProps, "copilotkit")).toBe(false);
+  expect(body.split(marker).length - 1).toBe(1);
 });
 
 test("a suggestion holds none of the Bot's tools, even when it carries everything a person's run was given", async () => {
@@ -556,14 +659,10 @@ test("a suggestion holds none of the Bot's tools, even when it carries everythin
         (name) => !(RUNTIME_STATE_TOOLS as readonly string[]).includes(name),
       ),
     ).toEqual([]);
-  const remote = remoteRequests.filter((input) => isSuggestion(input.messages));
-  expect(remote.length).toBeGreaterThan(0);
-  for (const input of remote) {
-    expect(input.tools.map((tool) => tool.name)).toEqual([]);
-    // Not even the signed run it carried in from the person's run.
-    expect(input.forwardedProps).toMatchObject({ openbotBotId: REMOTE });
-    expect(Object.hasOwn(input.forwardedProps, "openbotRun")).toBe(false);
-  }
+  // Somebody's own agent is not run for one at all: the deployment's model answered both.
+  expect(
+    remoteRequests.filter((input) => isSuggestion(input.messages)),
+  ).toEqual([]);
 });
 
 test("a person's own run still holds its grants and the subagent tool, and can start a subagent", async () => {
