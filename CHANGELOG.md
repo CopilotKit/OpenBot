@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The personal edition calls the product OpenBot: Activity says "Started by OpenBot" where it said
+  "Started by this deployment", and Connections, Keys and Computer say what OpenBot does. Admin keeps
+  "this deployment".
 - OpenBot Desktop's Updates section on a build that doesn't update itself, such as an internal
   build, says so up front. It promised signed updates and then said the opposite after Check for
   updates.

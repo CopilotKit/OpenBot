@@ -722,10 +722,13 @@ function accountSentence(input: {
   disconnectedDescription: string;
   disconnectedReassurance: string | undefined;
   provider: PluginsProvider;
+  /** What OpenBot itself is called on this screen (`managePaths().deploymentName`). */
+  deployment: string;
 }): string {
   const {
     account,
     connectedDescription,
+    deployment,
     disconnectedDescription,
     disconnectedReassurance,
     provider,
@@ -733,7 +736,7 @@ function accountSentence(input: {
   } = input;
 
   if (!account.configured) {
-    return brokeredKeyMissing(provider);
+    return brokeredKeyMissing(provider, deployment);
   }
 
   if (account.kind === "no-auth") {
@@ -852,6 +855,7 @@ function accountSentence(input: {
 export function BrokeredAccountRow({
   account,
   connectedDescription,
+  deployment = "this deployment",
   disconnectedDescription,
   disconnectedReassurance,
   heading,
@@ -859,6 +863,8 @@ export function BrokeredAccountRow({
   provider,
   title,
 }: {
+  /** What OpenBot itself is called on this screen (`managePaths().deploymentName`). */
+  deployment?: string;
   account: BrokeredAccount;
   /** What being connected means on this screen, said beside the button rather than after it. */
   connectedDescription: string;
@@ -940,6 +946,7 @@ export function BrokeredAccountRow({
             {accountSentence({
               account,
               connectedDescription,
+              deployment,
               disconnectedDescription,
               disconnectedReassurance,
               provider,

@@ -3,6 +3,7 @@ import { auditActionWords, auditEventWords } from "@openbot/shared/audit-words";
 import { Fragment, type ReactNode } from "react";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
+import { atStart } from "@/lib/manage-paths";
 
 /** One row as the API returns it. */
 export type AuditEvent = {
@@ -113,9 +114,12 @@ export function WhatCell({
 
 /** The Bot, with what started it beneath it, for the same reason as {@link WhatCell}. */
 export function WhoCell({
+  deployment,
   event,
   nameFor,
 }: {
+  /** What OpenBot itself is called here; see {@link startedByText}. */
+  deployment?: string;
   event: AuditEvent;
   nameFor: NameFor;
 }) {
@@ -125,7 +129,11 @@ export function WhoCell({
         <BotCell event={event} nameFor={nameFor} />
       </div>
       <div className="text-xs">
-        <StartedByCell event={event} nameFor={nameFor} />
+        <StartedByCell
+          deployment={deployment}
+          event={event}
+          nameFor={nameFor}
+        />
       </div>
     </>
   );
@@ -216,7 +224,16 @@ export function botText(event: AuditEvent, nameFor: NameFor): string {
   return bot ? nameFor(bot) : "";
 }
 
-export function startedByText(event: AuditEvent, nameFor: NameFor): string {
+/**
+ * Who started a row, as the row's Started by filter and its line under the Bot both say it.
+ * `deployment` is what OpenBot itself is called on this screen: "this deployment" in Admin, and
+ * "OpenBot" in the personal edition's Activity, which is anybody's page.
+ */
+export function startedByText(
+  event: AuditEvent,
+  nameFor: NameFor,
+  deployment = "this deployment",
+): string {
   switch (event.initiatorKind) {
     case "routine":
       return "A routine";
@@ -229,7 +246,7 @@ export function startedByText(event: AuditEvent, nameFor: NameFor): string {
     case "responsibility":
       return "A goal";
     case "deployment":
-      return "This deployment";
+      return atStart(deployment);
     default:
       return "A person";
   }
@@ -405,7 +422,11 @@ export function decisionDetails(event: AuditEvent): string[] {
 }
 
 /** Everything on a row as one lower-cased string, for the search box. */
-export function searchTextOf(event: AuditEvent, nameFor: NameFor): string {
+export function searchTextOf(
+  event: AuditEvent,
+  nameFor: NameFor,
+  deployment?: string,
+): string {
   return [
     whatText(event),
     // The stored name too, so a row is found by what the export and a collector call it.
@@ -413,7 +434,7 @@ export function searchTextOf(event: AuditEvent, nameFor: NameFor): string {
     subjectText(event),
     hostText(event),
     botText(event, nameFor),
-    startedByText(event, nameFor),
+    startedByText(event, nameFor, deployment),
     decisionText(event),
     ...decisionDetails(event),
   ]
@@ -474,9 +495,11 @@ export function BotCell({
 }
 
 export function StartedByCell({
+  deployment,
   event,
   nameFor,
 }: {
+  deployment?: string;
   event: AuditEvent;
   nameFor: NameFor;
 }) {
@@ -494,16 +517,19 @@ export function StartedByCell({
           : "text-muted-foreground"
       }
     >
-      {startedByLine(startedByText(event, nameFor))}
+      {startedByLine(startedByText(event, nameFor, deployment))}
     </span>
   );
 }
 
-/** Under the Bot's name, so it says what it is: "Started by a routine", "Handed on by Scout". */
+/**
+ * Under the Bot's name, so it says what it is: "Started by a routine", "Handed on by Scout",
+ * "Started by OpenBot". Only a leading "A" or "This" is lowered; a name keeps its capitals.
+ */
 export function startedByLine(text: string): string {
   return text.startsWith("Handed on")
     ? text
-    : `Started by ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+    : `Started by ${text.replace(/^(A|This) /, (word) => word.toLowerCase())}`;
 }
 
 export function DecisionCell({ event }: { event: AuditEvent }) {
