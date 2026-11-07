@@ -11,8 +11,13 @@ There are two supported paths, and they are different jobs:
   B. They want to try OpenBot on their own machine, change OpenBot itself, or edit a tenant package
      from source. Use the clone.
 
-There is no released desktop app yet: no OpenBot release carries a desktop installer, only the
-container image list. Do not send anybody to a desktop app.
+There is also a desktop app, OpenBot Personal Edition, for somebody who only wants to use OpenBot
+on their own computer, not deploy it or change it. It runs the workspace and CopilotKit
+Intelligence locally. Send them to its installer instead of either path below:
+
+  Mac (Apple silicon)  https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg
+  Mac (Intel)          https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg
+  Windows (x64)        https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe
 
 OpenBot is a template to make your own and white-label, not a hosted product somebody signs up for.
 The container runs it as released; the clone is for running it locally and for changing the
