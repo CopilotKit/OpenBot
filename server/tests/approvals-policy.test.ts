@@ -227,6 +227,75 @@ describe("built-in safety requirements", () => {
     ).toBeUndefined();
   });
 
+  test("archive as an app tool's action deletes, and so does a tool its app marks destructive", async () => {
+    const asked = (toolRef: string, over: Partial<ApprovalCandidate> = {}) =>
+      safetyRequirement(candidate({ toolRef, args: { id: "51" }, ...over }));
+    for (const toolRef of [
+      // HubSpot's delete is called archive. Seen on a Mac: "delete that HubSpot contact" ran unasked.
+      "composio-hubspot/HUBSPOT_ARCHIVE_CONTACT",
+      "composio-hubspot/HUBSPOT_ARCHIVE_BATCH_OF_FEEDBACK_SUBMISSIONS",
+      "composio-hubspot/HUBSPOT_BATCH_ARCHIVE_ASSOCIATION_LABELS",
+      "composio-slack/SLACK_ARCHIVE_CONVERSATION",
+      // Gmail's archive, as Gmail MCP servers name it, and in a broker's CamelCase.
+      "mcp/gmail/gmail_archive",
+      "mcp/gmail/archive-email",
+      "mcp/gmail/archive",
+      "arcade-Gmail/ArchiveEmail",
+      // The delete words, as before.
+      "composio-googledrive/GOOGLEDRIVE_DELETE_FILE",
+      "composio-gmail/GMAIL_MOVE_TO_TRASH",
+      "arcade-Linear/RemoveAttachment",
+    ])
+      expect({ toolRef, asked: asked(toolRef) }).toEqual({
+        toolRef,
+        asked: {
+          id: "deleting",
+          reason: "Deleting something always asks you first.",
+          behaviour: "ask",
+        },
+      });
+    // Archive counts only as the action, the name's first verb.
+    for (const toolRef of [
+      "mcp/gmail/list_archived_emails",
+      "mcp/gmail/get_archive_settings",
+      "composio-slack/SLACK_UNARCHIVE_CHANNEL",
+      "composio-github/GITHUB_DOWNLOAD_A_REPOSITORY_ARCHIVE_ZIP",
+      "composio-hubspot/HUBSPOT_SEARCH_ARCHIVED_CONTACTS",
+    ])
+      expect({ toolRef, asked: asked(toolRef) ?? "nothing" }).toEqual({
+        toolRef,
+        asked: "nothing",
+      });
+
+    // A name that says nothing, from an app that marks the tool destructive.
+    const destructive = candidate({
+      toolRef: "mcp/acme/reset_workspace",
+      args: { workspace: "w1" },
+      destructive: true,
+    });
+    expect(safetyRequirement(destructive)).toEqual({
+      id: "deleting",
+      reason:
+        "The app marks this as deleting or overwriting something, so it always asks you first.",
+      behaviour: "ask",
+    });
+    // Before any rule: an allow rule, the person's or the team's, doesn't answer it.
+    expect(
+      await decideAction({
+        ...base,
+        candidate: destructive,
+        team: [team("allow", { toolRef: "*" })],
+        personal: [rule("allow", { toolRef: "*" })],
+      }),
+    ).toMatchObject({ behaviour: "ask", source: "safety" });
+    // The same tool unmarked is an ordinary change; a read is never asked about here.
+    const { destructive: _marked, ...unmarked } = destructive;
+    expect(safetyRequirement(unmarked)).toBeUndefined();
+    expect(
+      safetyRequirement({ ...destructive, effect: "read" }),
+    ).toBeUndefined();
+  });
+
   test("what a Bot types into a field is content: the field and the page say what the action is", () => {
     // As the computer describes a typing action: the field it types into and the page it is on.
     const typing = (text: string, field: string, pageUrl: string) =>
