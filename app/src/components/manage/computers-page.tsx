@@ -197,6 +197,7 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
 
       <HostFoldersSection
         connected={hostAccess.data?.connected ?? false}
+        desktop={hostAccess.data?.desktop !== false}
         grants={hostAccess.data?.grants ?? []}
         botIds={(agents.data ?? []).map((agent) => agent.id)}
         loading={hostAccess.isPending || agents.isPending}
@@ -432,6 +433,8 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
 type HostFoldersSectionProps = {
   botIds: string[];
   connected: boolean;
+  /** This OpenBot runs in OpenBot Desktop. Without it no folder can ever be chosen here. */
+  desktop: boolean;
   grants: HostFolderGrant[];
   loading: boolean;
   nameFor: (botId: string) => string;
@@ -448,6 +451,7 @@ type HostFoldersSectionProps = {
 function HostFoldersSection({
   botIds: knownBotIds,
   connected,
+  desktop,
   grants,
   loading,
   nameFor,
@@ -483,14 +487,19 @@ function HostFoldersSection({
         </p>
       ) : null}
 
-      {!connected && !loading ? (
+      {desktop && !connected && !loading ? (
         <p className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
           The desktop app is offline. Open it to approve folders or run
           commands.
         </p>
       ) : null}
 
-      {loading ? null : botIds.length === 0 ? (
+      {loading ? null : !desktop ? (
+        <PageEmpty icon={IconDeviceDesktop} title="Needs OpenBot Desktop">
+          This OpenBot isn't running in the desktop app. Use OpenBot Desktop to
+          let Bots read folders on this computer.
+        </PageEmpty>
+      ) : botIds.length === 0 ? (
         <PageEmpty icon={IconBolt} title="No Bots yet">
           Create one, then choose its folders.
         </PageEmpty>
@@ -529,25 +538,27 @@ function HostFoldersSection({
         </PageRows>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-muted-foreground text-sm">
-        <p>
-          Folders are read-only. When a Bot needs to write, the desktop app asks
-          you first.
-        </p>
-        <div className="flex items-center gap-3">
-          <Button
-            disabled={!connected || stopping}
-            onClick={onStop}
-            size="sm"
-            variant="outline"
-          >
-            {stopping ? "Stopping…" : "Stop folder access"}
-          </Button>
-          <Link className="underline" {...paths.audit()}>
-            Open {paths.auditLabel}
-          </Link>
+      {desktop ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-muted-foreground text-sm">
+          <p>
+            Folders are read-only. When a Bot needs to write, the desktop app
+            asks you first.
+          </p>
+          <div className="flex items-center gap-3">
+            <Button
+              disabled={!connected || stopping}
+              onClick={onStop}
+              size="sm"
+              variant="outline"
+            >
+              {stopping ? "Stopping…" : "Stop folder access"}
+            </Button>
+            <Link className="underline" {...paths.audit()}>
+              Open {paths.auditLabel}
+            </Link>
+          </div>
         </div>
-      </div>
+      ) : null}
     </PageSection>
   );
 }

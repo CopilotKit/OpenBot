@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop lets a Bot use folders on your computer: choose one for a Bot in Settings >
+  Computer. A folder is read-only, the desktop app asks before each change or command, every call
+  is in Activity, and access ends when OpenBot stops. Choose folder was refused with "Local computer
+  access" isn't part of OpenBot Personal. A personal edition started with `scripts/start.sh` says
+  the folders need OpenBot Desktop, where it said the desktop app was offline.
 - Deleting always asks, with Allow once or Deny, when an app calls its delete "archive", such as
   HubSpot's `HUBSPOT_ARCHIVE_CONTACT` or a Gmail archive, and for any app tool its app marks
   destructive (MCP's `destructiveHint`, or Composio's and Arcade's own flag), whatever the tool is

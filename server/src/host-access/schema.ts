@@ -56,6 +56,13 @@ export type HostAccessStatus = {
   connected: boolean;
 };
 
+/**
+ * What `GET /api/host-access` answers: the broker's status, and whether this OpenBot has a desktop
+ * host at all. Only OpenBot Desktop gives the server one (`OPENBOT_DESKTOP_HOST_TOKEN`), so a server
+ * started any other way can never reach a folder, and the page says so instead of waiting for it.
+ */
+export type HostAccessRouteStatus = HostAccessStatus & { desktop: boolean };
+
 export function asHostAccessDesktopResult(
   value: unknown,
 ): HostAccessDesktopResult | null {

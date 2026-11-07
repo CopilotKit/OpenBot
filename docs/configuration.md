@@ -434,7 +434,10 @@ its own deployment's `.env` and owns their values: `OPENBOT_MODEL_OAUTH_FILE`, `
 `PICKED_HARNESS_*` names that describe the Bot picked during setup
 (`PICKED_HARNESS_IMAGE`, `PICKED_HARNESS_URL`, `PICKED_HARNESS_PORT` and the rest). The server reads
 `PICKED_HARNESS_IMAGE` and `PICKED_HARNESS_URL` to hand that Bot `MANAGED_AGENT_TOKEN`, and refuses to
-start when they are set without it. When a model provider is connected by OAuth rather than by key, the
+start when they are set without it. It hands the server `OPENBOT_DESKTOP_HOST_TOKEN` too, minted on every
+Start and never written to `.env`: its folder worker answers the server with it, and without it the
+server has no desktop host, so Settings → Computer says folders need OpenBot Desktop (see
+[Folders on this computer](personal-edition.md#folders-on-this-computer)). When a model provider is connected by OAuth rather than by key, the
 desktop also points `OPENAI_BASE_URL` at OpenBot's own loopback route and sets `OPENAI_API_KEY` to a
 local proxy credential rather than a provider key, so those two do not mean what the table above says
 in that mode. A server you configure yourself is unaffected by all of this.
