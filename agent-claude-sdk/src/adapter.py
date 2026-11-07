@@ -8,13 +8,15 @@ replaces that placeholder before Claude sees it. AG-UI requests consume
 segments of the same running SDK query, resolving hooks by tool-use ID.
 
 It also keeps a failed tool call failed in the history that ends the turn; see
-`_keep_failures`.
+`_keep_failures`, and passes a reply Claude Code recovered from a broken stream on once; see
+`_OneReply`.
 """
 
 import asyncio
+import json
 import logging
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import get_args
 
 from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, RunStartedEvent
@@ -25,8 +27,11 @@ from claude_agent_sdk import (
     CLINotFoundError,
     EffortLevel,
     HookMatcher,
+    ResultMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
+    ToolUseBlock,
     UserMessage,
 )
 from claude_agent_sdk.types import StreamEvent
@@ -140,6 +145,228 @@ class _Turn:
         if tool_id not in self.results:
             self.results[tool_id] = asyncio.get_running_loop().create_future()
         return self.results[tool_id]
+
+
+@dataclass
+class _OneReply:
+    """Claude Code's recovery from a broken model stream, passed on as the one reply it is.
+
+    Claude Code recovers a model stream that breaks partway (a server error, a lost connection, a
+    stall) by itself, in the same query, and the SDK passes on everything it streamed on the way.
+    Passed on as it came, the person saw the Bot answer twice:
+
+    - The break came after the reply's text was whole. Claude Code keeps the text, closes the
+      message with no stop reason, and asks the model to resume "directly from where it stops - no
+      apology, no recap". The model had nothing left to say and said its answer again, in other
+      words, as a second message under the first. The end of the broken message and the start of
+      the next are held back, so upstream reads the two as one message, and the model's words in
+      the second are not passed on. A call it makes there still is.
+    - The break came inside the text. Claude Code drops the fragment and the model answers from the
+      start: in a new streamed message, or, when no block of the broken one was whole, in one it
+      fetches again without streaming and hands over while the broken one is still open. Upstream
+      kept that answer under the fragment's id and then wrote the fragment over it, so the person
+      was left with the fragment alone. The fragment has already streamed; it is left out of the
+      history the turn ends with, which is what the conversation keeps, and the answer is passed on
+      as a reply of its own.
+    - The stream never started. Claude Code asks again without streaming and hands each block over
+      whole, with no stream events. Upstream streams text only from those: it said the reply from
+      the turn's result under one id and kept the message itself in the history under another, so
+      the reply was drawn twice. A message fetched without streaming is passed on as the stream it
+      would have been, its text and calls one message as they are when streamed, ended at its call
+      so the client-tool hand-over (`_hand_to_browser`) is not left waiting on it.
+
+    A streamed message with a tool call in it is passed on as it came: the hand-over reads its
+    boundaries.
+    """
+
+    # The assistant message streaming now: open, its API id, its blocks by index, whether it calls
+    # a tool, and whether its last word was a stop with no reason, which is how Claude Code ends a
+    # broken one.
+    open: bool = False
+    stream: str | None = None
+    blocks: dict = field(default_factory=dict)
+    calls: bool = False
+    cut: bool = False
+    # Text in it that Claude Code has handed over whole, and text that has streamed and not yet.
+    whole: bool = False
+    partial: bool = False
+    # The reply was whole when its stream broke: the message's end and the next one's start are
+    # held back, and the next one is the model saying it again.
+    joining: bool = False
+    restating: bool = False
+    # The text message upstream has open, and the fragments left out of the turn's history.
+    speaking: str | None = None
+    dropped: set = field(default_factory=set)
+    # A message fetched without streaming, being passed on as a stream: open, its API id, and the
+    # index of its next block.
+    replaying: bool = False
+    replay_id: str | None = None
+    replay_index: int = 0
+
+    def feed(self, message):
+        """What to hand upstream for one SDK message: it, nothing, or it with what it implies."""
+        if getattr(message, "parent_tool_use_id", None):
+            return [message]
+        if isinstance(message, AssistantMessage) and not message.error:
+            return self._assistant(message)
+        if not isinstance(message, (StreamEvent, UserMessage, ResultMessage)):
+            return [message]
+        ended = self._end_replay()
+        if isinstance(message, StreamEvent):
+            return [*ended, *self._event(message)]
+        return [*ended, message]
+
+    def mend(self, event):
+        """The AG-UI event to pass on for one upstream event."""
+        if event.type == EventType.TEXT_MESSAGE_START:
+            self.speaking = event.message_id
+        if event.type == EventType.TEXT_MESSAGE_END:
+            self.speaking = None
+        if event.type == EventType.MESSAGES_SNAPSHOT and self.dropped:
+            return event.model_copy(
+                update={
+                    "messages": [
+                        message
+                        for message in event.messages
+                        if message.id not in self.dropped
+                    ]
+                }
+            )
+        return event
+
+    def _event(self, message):
+        event = message.event
+        kind = event.get("type")
+        if kind == "message_start":
+            self.open, self.blocks, self.calls, self.cut = True, {}, False, False
+            self.stream = (event.get("message") or {}).get("id")
+            if self.joining:
+                self.joining, self.restating = False, True
+                return []
+            self.restating = self.whole = self.partial = False
+            return [message]
+        if kind == "content_block_start":
+            block = (event.get("content_block") or {}).get("type")
+            self.blocks[event.get("index")] = block
+            self.calls = self.calls or block == "tool_use"
+            self.cut = False
+        if kind in ("content_block_start", "content_block_delta", "content_block_stop"):
+            if self.restating and self.blocks.get(event.get("index")) in (
+                "text",
+                "thinking",
+                "redacted_thinking",
+            ):
+                return []
+            if (event.get("delta") or {}).get("type") == "text_delta":
+                self.partial = True
+        if kind == "message_delta":
+            self.cut = (event.get("delta") or {}).get("stop_reason") is None
+        if kind == "message_stop":
+            self.open = False
+            if self.cut:
+                return self._broke(message)
+        return [message]
+
+    def _broke(self, message):
+        """The end of a message Claude Code closed with no stop reason: its stream broke, and Claude
+        Code goes on with another request in the same query."""
+        if self.calls:
+            return [message]
+        if self.restating or (self.whole and not self.partial):
+            # Upstream keeps the message open, and reads the next one as more of it.
+            self.open, self.joining = True, True
+            return []
+        self._drop_fragment()
+        return [message]
+
+    def _drop_fragment(self):
+        """Leave the text that streamed in this message out of the turn's history, when Claude Code
+        never had it whole: the model was not given it, and answers without it."""
+        if self.partial and not self.whole and self.speaking:
+            self.dropped.add(self.speaking)
+
+    def _assistant(self, message):
+        if self.replaying and message.message_id == self.replay_id:
+            return self._unstreamed(message)
+        # Claude Code names the API message each block came from; one not streamed has its own.
+        unstreamed = bool(message.message_id) and message.message_id != self.stream
+        if not self.open:
+            return self._unstreamed(message) if unstreamed else [*self._end_replay(), message]
+        if unstreamed and not self.calls:
+            # Fetched again without streaming, while the broken message is still open.
+            self._drop_fragment()
+            self.open = False
+            return [
+                self._stream({"type": "message_stop"}),
+                *self._unstreamed(message),
+            ]
+        if self.restating:
+            kept = [
+                block
+                for block in message.content
+                if not isinstance(block, (TextBlock, ThinkingBlock))
+            ]
+            if not kept:
+                return []
+            return [replace(message, content=kept)]
+        if any(isinstance(block, TextBlock) for block in message.content):
+            self.whole, self.partial = True, False
+        return [message]
+
+    def _unstreamed(self, message):
+        """A message Claude Code fetched without streaming, passed on as the stream it would be.
+
+        Claude Code hands such a message over a block at a time, each as its own AssistantMessage
+        under the one API id, so blocks under the same id continue the message already open.
+        """
+        if not any(isinstance(block, (TextBlock, ToolUseBlock)) for block in message.content):
+            return [message]
+        events = []
+        if not (self.replaying and message.message_id == self.replay_id):
+            events = self._end_replay()
+            events.append(
+                self._stream(
+                    {"type": "message_start", "message": {"role": "assistant", "content": []}}
+                )
+            )
+            self.replaying, self.replay_id, self.replay_index = True, message.message_id, 0
+        called = False
+        for block in message.content:
+            if isinstance(block, TextBlock):
+                start = {"type": "text", "text": ""}
+                delta = {"type": "text_delta", "text": block.text}
+            elif isinstance(block, ToolUseBlock):
+                start = {"type": "tool_use", "id": block.id, "name": block.name}
+                delta = {
+                    "type": "input_json_delta",
+                    "partial_json": json.dumps(block.input),
+                }
+                called = True
+            else:
+                continue
+            index = self.replay_index
+            self.replay_index += 1
+            events += [
+                self._stream(
+                    {"type": "content_block_start", "index": index, "content_block": start}
+                ),
+                self._stream(
+                    {"type": "content_block_delta", "index": index, "delta": delta}
+                ),
+                self._stream({"type": "content_block_stop", "index": index}),
+            ]
+        # A call is the last block of its message, and Claude Code runs it now.
+        return [*events, message, *(self._end_replay() if called else [])]
+
+    def _end_replay(self):
+        if not self.replaying:
+            return []
+        self.replaying = False
+        return [self._stream({"type": "message_stop"})]
+
+    @staticmethod
+    def _stream(event):
+        return StreamEvent(uuid="openbot-unstreamed", session_id="", event=event)
 
 
 def _with_instructions(system_prompt, instructions):
@@ -275,11 +502,20 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
     async def _stream_claude_sdk(
         self, message_stream, thread_id, run_id, input_data, frontend_tool_names
     ):
+        # Claude Code's own recovery from a broken model stream, passed on as one reply. See
+        # `_OneReply`.
+        reply = _OneReply()
+
+        async def repaired():
+            async for sent in message_stream:
+                for message in reply.feed(sent):
+                    yield message
+
         # Preserve upstream text, reasoning, state, tool and snapshot translation,
         # but do not abandon the SDK stream when a client tool is emitted.
         async def messages():
             streaming = False
-            async for message in message_stream:
+            async for message in repaired():
                 if (
                     isinstance(message, AssistantMessage)
                     and message.error == "authentication_failed"
@@ -328,7 +564,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         async for event in super()._stream_claude_sdk(
             messages(), thread_id, run_id, input_data, set()
         ):
-            yield event
+            yield reply.mend(event)
 
     @staticmethod
     def _hand_to_browser(turn):
