@@ -10,6 +10,7 @@ import { userPreferencesRoutes } from "../src/user-preferences-routes";
 function fixture() {
   const state = new Map<string, UserPreferences>();
   const store: UserPreferencesStore = {
+    claimStarterTour: async () => {},
     read: async (id) => state.get(id) ?? DEFAULT_USER_PREFERENCES,
     patch: async (id, patch) => {
       const saved = { ...DEFAULT_USER_PREFERENCES, ...state.get(id), ...patch };
@@ -97,6 +98,9 @@ test.each([
   { proactive: "sometimes" },
   { proactive: true },
   { proactive: null },
+  { starterTourDismissed: false },
+  { starterTourDismissed: null },
+  { starterTourChannelId: "replacement" },
 ])("rejects invalid or extra preference fields: %j", async (body) => {
   const { appFor, state } = fixture();
   expect((await appFor("alice").request(path, patch(body))).status).toBe(400);
@@ -247,4 +251,28 @@ test("check-ins start on, and a person's off is kept without touching the others
   expect(
     (await (await appFor("alice").request(path)).json()).preferences.proactive,
   ).toBe("on");
+});
+
+test("tour dismissal is account scoped and preserves the server-owned conversation", async () => {
+  const { state, appFor } = fixture();
+  state.set("alice", {
+    ...DEFAULT_USER_PREFERENCES,
+    starterTourChannelId: "first",
+    skin: "openduet",
+  });
+  expect(
+    (await appFor("alice").request(path, patch({ starterTourDismissed: true })))
+      .status,
+  ).toBe(200);
+  expect(
+    (await (await appFor("alice").request(path)).json()).preferences,
+  ).toMatchObject({
+    starterTourChannelId: "first",
+    starterTourDismissed: true,
+    skin: "openduet",
+  });
+  expect(
+    (await (await appFor("bob").request(path)).json()).preferences
+      .starterTourDismissed,
+  ).toBeUndefined();
 });

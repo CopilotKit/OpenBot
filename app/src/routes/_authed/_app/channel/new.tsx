@@ -12,6 +12,8 @@ import {
   toFieldChange,
 } from "@/components/channels/compose-state";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
+import type { ComposerDraft } from "@/components/channels/composer";
+import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
@@ -176,6 +178,53 @@ function NewConversation({ composition }: { composition: string }) {
     group ? "" : (recipients[0]?.id ?? ""),
   );
 
+  const submit = async (draft: ComposerDraft) => {
+    const recipient = recipients[0];
+    if (!recipient || !canSend(recipients, draft.text)) return;
+    if (group) {
+      setError(null);
+      try {
+        await startGroup(
+          recipients.map((entry) => entry.id),
+          draft.text,
+        );
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Couldn't start the group. Try again.",
+        );
+        throw caught;
+      }
+      return;
+    }
+
+    setError(null);
+    setSent(seedMessage(draft.text, newId()));
+
+    try {
+      // Recorded, then started: a coworker picked here is as much a choice as an `@` on the
+      // home screen, and the trail has to say so for both.
+      // With its `/` skills, which the conversation puts in front of it as it does for every
+      // later message; handing over only the text sent the chip and dropped the skill.
+      await startChosen(
+        recipient.id,
+        draft.text,
+        skillInstructionsFor(draft.commandIds, skillCommands),
+        draftModel.requested,
+      );
+    } catch (caught) {
+      // Preserve the unsent draft when channel creation fails.
+      setSent(null);
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Couldn't start the conversation. Try again.",
+      );
+      throw caught;
+    }
+  };
+
   if (profiles === undefined && !rosterError) return null;
 
   return (
@@ -317,6 +366,23 @@ function NewConversation({ composition }: { composition: string }) {
           Boolean(loadError) || waitingForUrlAgent || recipients.length === 0
         }
         messages={sent ? [sent] : []}
+        starterSuggestions={
+          !group && !sent ? (
+            <StarterSuggestions
+              agentId={recipients[0]?.id}
+              disabled={pending || Boolean(loadError) || waitingForUrlAgent}
+              onSelect={(text) =>
+                submit({
+                  text,
+                  commandIds: [],
+                  attachments: [],
+                  agentId: recipients[0]?.id ?? null,
+                  isEmpty: false,
+                })
+              }
+            />
+          ) : undefined
+        }
         notice={
           loadError || error ? (
             <p className="pb-2 text-sm text-destructive" role="alert">
@@ -324,52 +390,7 @@ function NewConversation({ composition }: { composition: string }) {
             </p>
           ) : null
         }
-        onSubmit={async (draft) => {
-          const recipient = recipients[0];
-          if (!recipient || !canSend(recipients, draft.text)) return;
-          if (group) {
-            setError(null);
-            try {
-              await startGroup(
-                recipients.map((entry) => entry.id),
-                draft.text,
-              );
-            } catch (caught) {
-              setError(
-                caught instanceof Error
-                  ? caught.message
-                  : "Couldn't start the group. Try again.",
-              );
-              throw caught;
-            }
-            return;
-          }
-
-          setError(null);
-          setSent(seedMessage(draft.text, newId()));
-
-          try {
-            // Recorded, then started: a coworker picked here is as much a choice as an `@` on the
-            // home screen, and the trail has to say so for both.
-            // With its `/` skills, which the conversation puts in front of it as it does for every
-            // later message; handing over only the text sent the chip and dropped the skill.
-            await startChosen(
-              recipient.id,
-              draft.text,
-              skillInstructionsFor(draft.commandIds, skillCommands),
-              draftModel.requested,
-            );
-          } catch (caught) {
-            // Preserve the unsent draft when channel creation fails.
-            setSent(null);
-            setError(
-              caught instanceof Error
-                ? caught.message
-                : "Couldn't start the conversation. Try again.",
-            );
-            throw caught;
-          }
-        }}
+        onSubmit={submit}
         pending={pending}
       />
     </div>

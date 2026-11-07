@@ -4,6 +4,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
+import { settingsKeys } from "@/lib/settings/queries";
 import { client, tryClient } from "@/lib/client";
 import { type AgentChannel, type ChannelPage, channelKeys } from "./queries";
 
@@ -23,7 +24,13 @@ export function createChannelMutationOptions(queryClient: QueryClient) {
       return ((await response.json()) as { channel: AgentChannel }).channel;
     },
     onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+        // Creating the first starter-Bot conversation claims this person's tour on the server.
+        queryClient.invalidateQueries({
+          queryKey: [...settingsKeys.all, "preferences"],
+        }),
+      ]),
   });
 }
 

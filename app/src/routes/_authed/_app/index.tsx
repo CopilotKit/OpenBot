@@ -12,6 +12,7 @@ import {
   type ComposerDraft,
   toAgentOptions,
 } from "@/components/channels/composer";
+import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { BusinessLink } from "@/components/edition/business-link";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -56,7 +57,7 @@ function RouteComponent() {
     isError: failed,
   } = useQuery(agentListQueryOptions());
   const explore = agents?.filter(isSharedWithYou);
-  const { start, startChosen } = useStartChannel();
+  const { start, startChosen, pending } = useStartChannel();
   const router = useRouter();
   const navigate = useNavigate();
   // A start that failed behind its placeholder comes back here: its words in the box, its reason
@@ -212,6 +213,16 @@ function RouteComponent() {
               void startBehind(pendingId, draft);
             }}
           />
+          <div className="mt-4 w-full max-w-2xl">
+            <StarterSuggestions
+              agentId={fallback?.id}
+              disabled={pending}
+              onSelect={async (message) => {
+                if (!fallback) return;
+                await startChosen(fallback.id, message);
+              }}
+            />
+          </div>
           {fallback ? (
             // Said out loud: a message that silently reaches somebody you did not choose is the
             // kind of surprise that costs trust the first time it happens.

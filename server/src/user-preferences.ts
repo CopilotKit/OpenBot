@@ -3,7 +3,7 @@ import {
   isSkinId,
   type UserPreferences,
 } from "@openbot/shared/user-preferences";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "./db/client";
 import { users } from "./db/schema";
 
@@ -19,6 +19,7 @@ function withDefaults(stored: Partial<UserPreferences>): UserPreferences {
 }
 
 export type UserPreferencesStore = {
+  claimStarterTour: (userId: string, channelId: string) => Promise<void>;
   read: (userId: string) => Promise<UserPreferences>;
   patch: (
     userId: string,
@@ -30,6 +31,23 @@ export function createUserPreferencesStore(
   database: Database,
 ): UserPreferencesStore {
   return {
+    async claimStarterTour(userId, channelId) {
+      // PostgreSQL rechecks the condition after a concurrent row update. Only one
+      // new conversation can win, even across server processes; merge keeps other preferences.
+      await database
+        .update(users)
+        .set({
+          preferences: sql`${users.preferences} || ${{ starterTourChannelId: channelId }}::jsonb`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(users.id, userId),
+            sql`NOT (${users.preferences} ? 'starterTourChannelId')`,
+            sql`(${users.preferences}->>'starterTourDismissed') IS DISTINCT FROM 'true'`,
+          ),
+        );
+    },
     async read(userId) {
       const [user] = await database
         .select({ preferences: users.preferences })

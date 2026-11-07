@@ -2,12 +2,20 @@ import { afterAll, afterEach, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { users } from "../src/db/schema";
+import { channelMemberships, channels, users } from "../src/db/schema";
+import { createAgentProfileStore } from "../src/agents/profile-store";
+import { createThreadIdentity } from "../src/channels/thread-identity";
+import { createChannelStore } from "../src/channels/routes";
 import { createUserPreferencesStore } from "../src/user-preferences";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const store = createUserPreferencesStore(database);
+const channelStore = createChannelStore(
+  database,
+  createAgentProfileStore(database, undefined),
+  createThreadIdentity("tour-test"),
+);
 const ids: string[] = [];
 async function person() {
   const id = `preferences-${randomUUID()}`;
@@ -140,3 +148,99 @@ test("check-ins are on for a person who never chose, and their off is kept in th
     .where(eq(users.id, id));
   expect(row?.proactive).toBe("off");
 });
+
+test("concurrent starter claims across pools keep one winner and unrelated preferences", async () => {
+  const id = await person();
+  const other = await person();
+  await database
+    .update(users)
+    .set({
+      preferences: sql`'{"futurePreference":true,"skin":"openduet"}'::jsonb`,
+    })
+    .where(eq(users.id, id));
+  const secondDatabase = createDatabase(testDatabaseUrl(), TEST_POOL);
+  try {
+    const secondStore = createUserPreferencesStore(secondDatabase);
+    await Promise.all([
+      store.claimStarterTour(id, "first"),
+      secondStore.claimStarterTour(id, "second"),
+      store.patch(id, { narration: "on" }),
+    ]);
+    const saved = await secondStore.read(id);
+    expect(["first", "second"]).toContain(saved.starterTourChannelId ?? "");
+    expect(saved).toMatchObject({
+      skin: "openduet",
+      narration: "on",
+    });
+    expect(saved).toHaveProperty("futurePreference", true);
+    await secondStore.claimStarterTour(id, "later");
+    expect((await store.read(id)).starterTourChannelId).toBe(
+      saved.starterTourChannelId,
+    );
+    expect((await store.read(other)).starterTourChannelId).toBeUndefined();
+    await store.patch(id, { starterTourDismissed: true });
+    expect(await secondStore.read(id)).toMatchObject({
+      starterTourChannelId: saved.starterTourChannelId,
+      starterTourDismissed: true,
+    });
+  } finally {
+    await secondDatabase.$client.close();
+  }
+});
+
+test("dismissal before a claim prevents later conversations consuming the tour", async () => {
+  const id = await person();
+  await store.patch(id, { starterTourDismissed: true });
+  await store.claimStarterTour(id, "later");
+  expect((await store.read(id)).starterTourChannelId).toBeUndefined();
+});
+
+test.each([
+  { used: false, dismissed: false, matching: true, released: true },
+  { used: true, dismissed: false, matching: true, released: false },
+  { used: false, dismissed: true, matching: true, released: false },
+  { used: false, dismissed: false, matching: false, released: false },
+])(
+  "deletion releases only the matching empty, undismissed tour: %j",
+  async ({ used, dismissed, matching, released }) => {
+    const id = await person();
+    const other = await person();
+    const channelId = `tour-${randomUUID()}`;
+    await database.insert(channels).values({
+      id: channelId,
+      name: "Starter",
+      description: "",
+      lastMessageAt: used ? new Date() : null,
+    });
+    try {
+      await database
+        .insert(channelMemberships)
+        .values({ channelId, userId: id });
+      await store.claimStarterTour(id, matching ? channelId : "different");
+      await store.claimStarterTour(other, channelId);
+      await store.patch(id, {
+        skin: "openduet",
+        ...(dismissed ? { starterTourDismissed: true } : {}),
+      });
+      await channelStore.softDelete({ id, role: "user" }, channelId);
+      const saved = await store.read(id);
+      expect(saved.starterTourChannelId).toBe(
+        released ? undefined : matching ? channelId : "different",
+      );
+      expect(saved.skin).toBe("openduet");
+      expect(saved.starterTourDismissed).toBe(dismissed ? true : undefined);
+      expect((await store.read(other)).starterTourChannelId).toBe(channelId);
+      await store.claimStarterTour(id, "retry");
+      expect((await store.read(id)).starterTourChannelId).toBe(
+        released ? "retry" : saved.starterTourChannelId,
+      );
+      // A duplicate delete must never release a subsequent claim.
+      await channelStore.softDelete({ id, role: "user" }, channelId);
+      expect((await store.read(id)).starterTourChannelId).toBe(
+        released ? "retry" : saved.starterTourChannelId,
+      );
+    } finally {
+      await database.delete(channels).where(eq(channels.id, channelId));
+    }
+  },
+);

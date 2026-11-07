@@ -44,6 +44,7 @@ export function ConversationView({
   queueWhileBusy = false,
   restoring = false,
   intro,
+  starterSuggestions,
   onSubmit,
   onStop,
   voiceCall,
@@ -113,6 +114,8 @@ export function ConversationView({
    * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
    */
   intro?: ReactNode;
+  /** One-time starter tasks, separate from the Bot introduction and its attribution. */
+  starterSuggestions?: ReactNode;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
   /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
@@ -482,6 +485,7 @@ export function ConversationView({
         {messages.some((message) => message.role === "user") ? (
           <NotifyPrompt />
         ) : null}
+        {starterSuggestions}
         <Composer
           modelPicker={modelPicker}
           agents={agents}

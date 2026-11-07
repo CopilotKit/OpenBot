@@ -20,6 +20,7 @@ import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
+import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { ProgressRow } from "@/components/channels/progress-row";
 import {
@@ -1219,6 +1220,23 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            starterSuggestions={
+              channel.agentIds.length === 1 ? (
+                <StarterSuggestions
+                  agentId={runtimeAgentId}
+                  channelId={channel.id}
+                  disabled={
+                    !channel.active ||
+                    historyLoading ||
+                    agent.isRunning ||
+                    turnsInFlight > 0 ||
+                    Boolean(question) ||
+                    call.active
+                  }
+                  onSelect={(text) => sayRef.current(text)}
+                />
+              ) : undefined
+            }
             intro={
               /* From the roster this screen already reads; nothing while it loads. */
               botProfile ? <ConversationIntro agent={botProfile} /> : undefined
