@@ -110,8 +110,13 @@ test("Auto-review on a plan gives a real verdict, and lets through what it judge
     askBeforeChanges: false,
     model: complete,
   });
-  expect(outcome.review?.failedClosed).toBeUndefined();
-  expect(outcome.review?.verdict).toBe("proceed");
+  // The reviewer's own answer, whole: a verdict that failed closed would carry `failedClosed`.
+  expect(outcome.review).toEqual({
+    verdict: "proceed",
+    preApproved: false,
+    safety: "none",
+    reason: "The person asked to draft this reply.",
+  });
   expect(outcome).toMatchObject({ behaviour: "allow", source: "auto_review" });
   // Asked of the plan's model endpoint, as a model call.
   expect(requests).toHaveLength(1);
