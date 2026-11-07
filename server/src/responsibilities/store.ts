@@ -433,6 +433,19 @@ export function createResponsibilityStore(
             .where(eq(responsibilities.id, run.responsibilityId));
       });
     },
+    async requeueRun(runId) {
+      const [requeued] = await database
+        .update(responsibilityRuns)
+        .set({ status: "queued", startedAt: null, finishedAt: null })
+        .where(
+          and(
+            eq(responsibilityRuns.id, runId),
+            eq(responsibilityRuns.status, "running"),
+          ),
+        )
+        .returning({ id: responsibilityRuns.id });
+      return Boolean(requeued);
+    },
     async resumeWaiting(ownerUserId, runId, response) {
       if (JSON.stringify(response)?.length > 32_768)
         throw new ResponsibilityRefusedError(

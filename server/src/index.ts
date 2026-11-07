@@ -2202,7 +2202,8 @@ const responsibilitySweep = repeatAfterEach(async () => {
     if (
       report.succeeded.length ||
       report.failed.length ||
-      report.waiting.length
+      report.waiting.length ||
+      report.busy.length
     )
       console.info(
         JSON.stringify({ type: "responsibility-dispatch", ...report }),

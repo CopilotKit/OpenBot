@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A goal's run started while its conversation is busy, such as "create a goal, then run it now",
+  waits for the conversation and then runs. It failed with the platform's 409 response as its reason.
 - An Arcade action that publishes no behaviour flags, such as every AirtableApi and GithubApi action,
   is an ordinary change again. It asks only when Ask before making changes or a rule says so, and
   its Bot page no longer says "destroys things". It was recorded as destructive, so every call asked
