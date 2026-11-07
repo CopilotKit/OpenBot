@@ -20,6 +20,7 @@ import type { AppVariables } from "../src/auth/guards";
 import { createAuditStore } from "../src/audit";
 import { botSeat } from "../src/computer/computer-key";
 import { createComputerGateway } from "../src/computer/gateway";
+import { dataFunction } from "../src/components/functions";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import { dryRunAgainstHistory } from "../src/computer/policy-dry-run";
 import { createCredentialStore } from "../src/credentials";
@@ -250,6 +251,16 @@ test("a write the person denies is on the trail as refused, never as allowed or 
     // The policy's own verdict is kept as it was; what did not happen is said beside it.
     decision: { allowed: true, carriedOut: false },
   });
+
+  // A component listing recent refusals shows it in a person's words, not the Bot's instruction.
+  const refusals = await dataFunction("recentRefusals")?.run(database, {
+    limit: 50,
+  });
+  expect(
+    (refusals as { rows: { bot: string; reason: string | null }[] }).rows.find(
+      (entry) => entry.bot === bot,
+    ),
+  ).toMatchObject({ reason: "You declined it." });
 });
 
 test("a write the person allows is recorded once, when it runs, after the decision", async () => {
