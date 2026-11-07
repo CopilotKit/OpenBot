@@ -105,7 +105,7 @@ export function startedByText(event: AuditEvent, nameFor: NameFor): string {
     case "memory":
       return "A memory source";
     case "responsibility":
-      return "A responsibility";
+      return "A goal";
     case "deployment":
       return "This deployment";
     default:

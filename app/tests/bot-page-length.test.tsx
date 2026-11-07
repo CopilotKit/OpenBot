@@ -169,3 +169,17 @@ test("with nothing running or scheduled, there is no Activity section, and For y
   expect(section.container.querySelector("[data-slot=item]")).toBeNull();
   expect(section.queryByRole("heading", { name: "Activity" })).toBeNull();
 });
+
+test("a goal's activity row says Goal and opens the Bot's goals", async () => {
+  const [running] = items(1, "Close the month");
+  const view = glance({
+    inProgress: [{ ...(running as ActivityItem), kind: "responsibility" }],
+    scheduled: [],
+    completed: [],
+  });
+  const title = await view.findByText("Close the month 1");
+  const row = title.closest("a");
+  expect(row?.getAttribute("href")).toBe("/bots/scout/responsibilities");
+  expect(row?.textContent).toContain("Goal · running");
+  expect(row?.textContent).not.toMatch(/responsibilit/i);
+});

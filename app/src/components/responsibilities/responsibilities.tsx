@@ -51,7 +51,7 @@ export function BotResponsibilities({ agentId }: { agentId?: string }) {
       action={
         <Button onClick={() => setCreating(true)} size="sm" variant="ghost">
           <IconPlus />
-          New responsibility
+          New goal
         </Button>
       }
       title="Goals"
@@ -70,11 +70,11 @@ export function BotResponsibilities({ agentId }: { agentId?: string }) {
               variant="outline"
             >
               <IconPlus />
-              New responsibility
+              New goal
             </Button>
           }
           icon={IconChecklist}
-          title="No responsibilities yet"
+          title="No goals yet"
         >
           {agentId
             ? "Work you give this Bot to keep doing shows up here."

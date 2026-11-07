@@ -52,7 +52,7 @@ const ICONS: Record<ActivityKind, typeof IconBell> = {
 
 const KIND_LABEL: Record<ActivityKind, string> = {
   routine: "Routine",
-  responsibility: "Responsibility",
+  responsibility: "Goal",
   handoff: "Delegated task",
   approval: "Approval",
   question: "Question",

@@ -50,7 +50,7 @@ function resetLines(plan: ResetPlan): string[] {
     [plan.memorySources, "memory source", "memory sources"],
     [plan.memories, "imported memory", "imported memories"],
     [plan.routines, "routine", "routines"],
-    [plan.responsibilities, "responsibility", "responsibilities"],
+    [plan.responsibilities, "goal", "goals"],
     [plan.followUps, "scheduled follow-up", "scheduled follow-ups"],
     [plan.formedMemories, "memory it formed", "memories it formed"],
     [plan.backgroundResearch, "background research", "background research"],

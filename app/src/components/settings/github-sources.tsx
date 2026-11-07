@@ -54,7 +54,7 @@ export function GithubSources() {
           Add a repository
         </Button>
       }
-      description="Add a repository here, then add a webhook in GitHub with the address below and the same secret. Its events, like issues.opened, can then start a responsibility."
+      description="Add a repository here, then add a webhook in GitHub with the address below and the same secret. Its events, like issues.opened, can then start work on a goal."
       title="Repositories"
     >
       {error ? (
