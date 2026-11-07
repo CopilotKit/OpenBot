@@ -112,7 +112,8 @@ pub fn catalogue() -> Vec<Provider> {
             summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.".into(),
             logins: vec![Login::Endpoint],
             // Deliberately unmarked: it stands for every provider rather than one, so any single
-            // vendor's logo here would be a lie about what the row does.
+            // vendor's logo here would be a lie about what the row does. The window draws a plain
+            // cloud in its tile instead (EndpointMark.tsx), as the web app does for this source.
             mark: None,
             caution: None,
         },
