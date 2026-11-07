@@ -3,6 +3,7 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
+import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { client } from "@/lib/client";
 export type ApprovalDecision =
   | "allow_once"
@@ -158,12 +159,25 @@ export const revokeTeamApprovalRule = (id: string) =>
     method: "DELETE",
     fallback: "The team rule could not be removed.",
   });
-export const answerPersonQuestion = (id: string, response: string) =>
-  client(`/api/approvals/questions/${encodeURIComponent(id)}/respond`, {
-    method: "POST",
-    body: { response },
-    fallback: "Your answer could not be saved.",
-  });
+/**
+ * Answer a question a Bot asked. Given in the open conversation (`inConversation`), it may be that
+ * conversation's to carry on: true means the question is closed and the conversation runs the answer
+ * as its own next turn; false means the server resumes the run that asked.
+ */
+export const answerPersonQuestion = async (
+  id: string,
+  response: string,
+  inConversation = false,
+) =>
+  (await client<boolean | undefined>(
+    `/api/approvals/questions/${encodeURIComponent(id)}/respond`,
+    "continueHere",
+    {
+      method: "POST",
+      body: inConversation ? { response, inConversation } : { response },
+      fallback: "Your answer could not be saved.",
+    },
+  )) === true;
 export const dismissPersonQuestion = (id: string) =>
   client(`/api/approvals/questions/${encodeURIComponent(id)}/dismiss`, {
     method: "POST",
@@ -250,9 +264,35 @@ export const decideApprovalMutationOptions = (queryClient: QueryClient) =>
 /** Answer a question a Bot asked mid-run; the run resumes with the answer. */
 export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
-    mutationFn: ({ id, response }: { id: string; response: string }) =>
-      answerPersonQuestion(id, response),
-    onSuccess: settle(queryClient),
+    mutationFn: ({
+      id,
+      response,
+      inConversation,
+    }: {
+      id: string;
+      response: string;
+      inConversation?: boolean;
+    }) => answerPersonQuestion(id, response, inConversation),
+    /*
+     * Answered is answered, whatever the turn that carries the answer comes to: the question's card
+     * goes at once, and the badge that counted it is read again rather than on its next poll.
+     */
+    onSuccess: (_continueHere, { id }) => {
+      queryClient.setQueryData<ApprovalInboxData>(approvalsKey, (inbox) =>
+        inbox
+          ? {
+              ...inbox,
+              questions: inbox.questions.filter(
+                (question) => question.id !== id,
+              ),
+            }
+          : inbox,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: botLifecycleKeys.attention,
+      });
+      return settle(queryClient)();
+    },
   });
 
 /** Put a question down unanswered. Everything is read again: a task waiting on it moves on too. */
