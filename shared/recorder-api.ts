@@ -162,6 +162,32 @@ export function normaliseOpenBotOrigin(raw: string): OriginCheck {
   return { ok: true, origin: url.origin };
 }
 
+/** The Recorder's rule for the Intelligence gateway a capture pass names: wss:// any host; ws:// only on a loopback
+ * address, 127.0.0.1 or [::1] (Decision 21; never a name such as localhost); and when `allowed` is not null, the origin of
+ * one of the allowed URLs. Here so the server never hands the Recorder a gateway it would refuse. */
+export function isAllowedGatewayUrl(
+  clientUrl: string,
+  allowed: readonly string[] | null,
+): boolean {
+  let url: URL;
+  try {
+    url = new URL(clientUrl);
+  } catch {
+    return false;
+  }
+  const secure = url.protocol === "wss:";
+  if (!secure && !(url.protocol === "ws:" && LOOPBACK_HOSTS.has(url.hostname)))
+    return false;
+  if (allowed === null) return true;
+  return allowed.some((entry) => {
+    try {
+      return new URL(entry).origin === url.origin;
+    } catch {
+      return false;
+    }
+  });
+}
+
 const id = (value: string) => encodeURIComponent(value);
 export const recorderPaths = {
   connectCodes: "/api/recorder/connect-codes",
