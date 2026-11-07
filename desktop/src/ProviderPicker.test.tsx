@@ -55,6 +55,7 @@ const cloudProviders = [
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     model: "gemini-3.8-flash",
     keyUrl: "https://aistudio.google.com/apikey",
+    keyLink: "Get a Google Gemini API key",
   },
   {
     id: "xai",
@@ -63,6 +64,8 @@ const cloudProviders = [
     baseUrl: "https://api.x.ai/v1",
     model: "grok-4.7",
     keyUrl: "https://console.x.ai/",
+    // "an", by the sound of the name: the link read "Get a xAI API key".
+    keyLink: "Get an xAI API key",
   },
 ];
 
@@ -1146,9 +1149,7 @@ for (const provider of cloudProviders) {
       "synthetic-private-api-key",
     );
     expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
-    await user.click(
-      view.getByRole("link", { name: `Get a ${provider.name} API key` }),
-    );
+    await user.click(view.getByRole("link", { name: provider.keyLink }));
     expect(invokeCalls).toEqual([
       { command: "providers", args: undefined },
       { command: "plugin:opener|open_url", args: { url: provider.keyUrl } },
