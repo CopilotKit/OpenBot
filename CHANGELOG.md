@@ -66,7 +66,7 @@ Fourteen things change for an existing deployment:
 - Your starter Bot offers five tasks to try: connect an app, build an interactive answer, search
   the web, read a page in its browser, and add a task to a demo checklist. The suggestions stay in
   your first new starter-Bot conversation, including after an upgrade, and never appear in later
-  conversations. Hide starter tasks dismisses them for your account.
+  conversations.
 
 ### OpenBot Desktop starts on Windows
 

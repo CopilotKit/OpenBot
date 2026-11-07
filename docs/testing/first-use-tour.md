@@ -12,7 +12,7 @@ unchanged. The conversation introduction is unchanged. The tour is a separate co
 
 ## Automated and browser checks
 
-Development base: `d723df099bbfce81ae73136015889edfd8db8f29`, with the starter-tour change.
+Development base: `a1dfffcd227bfa4450f06e09395200d8a1f9b912`, with the starter-tour change.
 Host: macOS Apple silicon. Bun 1.4.2. App build uses CopilotKit React Core 1.85.0.
 
 - PostgreSQL integration tests exercise simultaneous claims from separate connections, preservation
