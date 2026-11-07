@@ -155,14 +155,20 @@ async function renderActivity() {
   return view;
 }
 
-/** Each drawn row as what, on, decision, and the outcome it is coloured by. Newest first. */
+/**
+ * Each drawn row as what, on, decision, and the outcome it is coloured by. Newest first. The What
+ * cell holds the action on its first line and what it acted on in the lines beneath.
+ */
 function drawn(container: HTMLElement) {
   return [...container.querySelectorAll("tbody tr")].map((tr) => {
     const cell = (column: string) =>
       tr.querySelector(`[data-column=${column}]`)?.textContent ?? "";
+    const [what = "", ...on] = [
+      ...tr.querySelectorAll("[data-column=what] > div"),
+    ].map((line) => line.textContent ?? "");
     return {
-      what: cell("what"),
-      on: cell("on"),
+      what,
+      on: on.join(""),
       decision: cell("decision"),
       outcome: tr.getAttribute("data-outcome"),
     };
