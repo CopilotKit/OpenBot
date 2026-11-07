@@ -47,6 +47,40 @@ Start the stack:
 bash scripts/start.sh
 ```
 
+## Windows (WSL 2)
+
+On Windows, run the clone inside WSL 2 with Ubuntu. This was checked on Windows Server 2022 with
+Ubuntu 26.04.
+
+1. Install WSL 2 and Ubuntu with [Microsoft's instructions](https://learn.microsoft.com/windows/wsl/install)
+   (`wsl --install` in an administrator PowerShell), and restart Windows when it asks.
+
+2. In an Ubuntu terminal, install the tools from [Setup](#setup). A new Ubuntu 26.04 had none of them,
+   and Bun's installer stops without `unzip`:
+
+   ```sh
+   sudo apt-get update
+   sudo apt-get install -y ca-certificates curl git lsof openssl unzip nodejs npm
+   curl -fsSL https://bun.sh/install | bash
+   ```
+
+3. Install Docker Engine and its Compose plugin inside Ubuntu with
+   [Docker's Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/), then let your
+   user run it and open a new Ubuntu terminal:
+
+   ```sh
+   sudo usermod -aG docker $USER
+   ```
+
+4. Clone into your Ubuntu home directory, for example `~/OpenBot`, and follow [Setup](#setup) from
+   there. `npx --yes copilotkit@latest login` opens the sign-in page in your Windows browser.
+
+5. Keep an Ubuntu terminal open while you use OpenBot. WSL stops Ubuntu shortly after its last
+   terminal closes, and the app, the API server and Docker stop with it.
+
+6. Open the app from your Windows browser at <http://127.0.0.1:3010>. WSL forwards the port, and
+   <http://localhost:3010> works too.
+
 ## Running services
 
 Use `bash scripts/start.sh` for the full local stack. It starts Docker services, applies migrations, starts the API server, the app, and the routine worker, and verifies health routes.
