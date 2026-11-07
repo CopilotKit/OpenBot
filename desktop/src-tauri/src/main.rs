@@ -5258,6 +5258,19 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
         (file_present || intent.categories.contains(&category)).then_some(true)
     };
     let claude_plan = values.remove("CLAUDE_CODE_OAUTH_TOKEN").is_some();
+    /*
+     * A provider's API key, known either way: in the `.env`, or in the vault (read for the file's
+     * presence alone) when the choice recorded beside it says it is that provider's. A compatible
+     * endpoint keeps its key in the same OPENAI_API_KEY slot and takes the OpenAI record away, so
+     * the vault alone would offer an endpoint's key as OpenAI's.
+     */
+    let api_key = |key: &str, category| {
+        Some(
+            values.contains_key(key)
+                || (intent.categories.contains(&category)
+                    && openbot_desktop_lib::vault::stored(&root, key)),
+        )
+    };
     let local_eval = local_eval_state::read(&root, None);
     AlreadyConfigured {
         /*
@@ -5274,24 +5287,17 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
         local_eval,
         saved: SavedConfiguration {
             model_api_keys: SavedModelApiKeys {
-                openai: hint(
-                    Category::OpenAiApiKey,
-                    values.contains_key("OPENAI_API_KEY"),
-                ),
-                anthropic: hint(
-                    Category::AnthropicApiKey,
-                    values.contains_key("ANTHROPIC_API_KEY"),
-                ),
+                openai: api_key("OPENAI_API_KEY", Category::OpenAiApiKey),
+                anthropic: api_key("ANTHROPIC_API_KEY", Category::AnthropicApiKey),
                 compatible: values
                     .get("OPENAI_BASE_URL")
                     .is_some_and(|url| intent.has_compatible_key_for(url))
                     .then_some(true),
             },
             model_sessions: SavedModelSessions {
-                openai: hint(
-                    Category::ChatGptPlan,
-                    openbot_env::saved_chatgpt_plan_store(&root),
-                ),
+                // Known either way, from the token store the sign-in wrote: Start reads that file
+                // and nothing else, and a choice recorded without it is not a saved sign-in.
+                openai: Some(openbot_env::saved_chatgpt_plan_store(&root)),
                 // Known either way, never guessed from a choice recorded before it was saved: the
                 // token is in the vault (a file, read here for its presence alone) or the `.env`.
                 anthropic: Some(
@@ -8557,6 +8563,57 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// "Use a saved ChatGPT sign-in", and "Use a saved OpenAI API key" or "Use a saved Anthropic
+    /// API key", are offered only for what is saved. The window offers each one unless the shell
+    /// says there is none, and on a freshly reset Windows machine the shell said nothing: the offer
+    /// was made, it lit Continue, and Start answered "That ChatGPT plan was not signed in to."
+    #[test]
+    fn a_chatgpt_sign_in_or_an_api_key_is_offered_as_saved_only_when_it_is() {
+        let root = temp_root("openbot-saved-only-when-stored");
+        std::fs::create_dir_all(&root).unwrap();
+        // (ChatGPT sign-in, OpenAI API key, Anthropic API key)
+        let saved = |root: &Path| {
+            let saved = already_configured_for_root(root.to_string_lossy().into_owned()).saved;
+            (
+                saved.model_sessions.openai,
+                saved.model_api_keys.openai,
+                saved.model_api_keys.anthropic,
+            )
+        };
+        let none = (Some(false), Some(false), Some(false));
+        assert_eq!(saved(&root), none, "nothing saved");
+        std::fs::write(
+            root.join(openbot_desktop_lib::saved_intent::FILE),
+            r#"{"version":1,"categories":["intelligence","chat-gpt-plan","open-ai-api-key","anthropic-api-key"],"model":"chat-gpt-plan"}"#,
+        )
+        .unwrap();
+        assert_eq!(saved(&root), none, "chosen, never saved");
+
+        // Saved by Start, each in turn. Choosing one clears the one before it.
+        persist_endpoint_fixture(
+            &root,
+            &openbot_env::ModelCredential::ChatGptPlan {
+                store: r#"{"refresh_token":"synthetic-refresh"}"#.into(),
+            },
+        );
+        assert_eq!(saved(&root), (Some(true), Some(false), Some(false)));
+        persist_endpoint_fixture(
+            &root,
+            &openbot_env::ModelCredential::OpenAi {
+                api_key: "synthetic-openai".into(),
+            },
+        );
+        assert_eq!(saved(&root), (Some(false), Some(true), Some(false)));
+        persist_endpoint_fixture(
+            &root,
+            &openbot_env::ModelCredential::Anthropic {
+                api_key: "synthetic-anthropic".into(),
+            },
+        );
+        assert_eq!(saved(&root), (Some(false), Some(false), Some(true)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn passive_metadata_and_legacy_hints_are_root_and_provider_scoped() {
         let root = temp_root("public-intent-cases");
@@ -8580,8 +8637,8 @@ mod tests {
         let recorded = already_configured_for_root(root.to_string_lossy().into_owned());
         // A recorded choice is not a saved sign-in.
         assert_eq!(recorded.saved.model_sessions.anthropic, Some(false));
-        assert_eq!(recorded.saved.model_api_keys.anthropic, None);
-        assert_eq!(recorded.saved.model_sessions.openai, None);
+        assert_eq!(recorded.saved.model_api_keys.anthropic, Some(false));
+        assert_eq!(recorded.saved.model_sessions.openai, Some(false));
         assert!(recorded.values.is_empty());
         let fresh = already_configured_for_root(
             temp_root("different-public-root")
@@ -9752,7 +9809,8 @@ mod tests {
             Some("local-model")
         );
         assert_eq!(configured.saved.model_api_keys.compatible, Some(true));
-        assert_eq!(configured.saved.model_api_keys.openai, None);
+        // The endpoint's key shares the OPENAI_API_KEY slot, and is never offered as OpenAI's.
+        assert_eq!(configured.saved.model_api_keys.openai, Some(false));
         assert!(!serde_json::to_string(&configured)
             .unwrap()
             .contains("synthetic-endpoint-key"));

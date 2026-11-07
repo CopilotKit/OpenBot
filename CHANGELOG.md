@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop offers "Use a saved ChatGPT sign-in", "Use a saved OpenAI API key" and "Use a
+  saved Anthropic API key" only when one is saved. On a computer with nothing saved, choosing one
+  lit Continue and Start then said the plan was not signed in to.
 - OpenBot Desktop's link under xAI's API key field reads "Get an xAI API key", where it read "Get a
   xAI API key".
 - A Claude Agent SDK Bot whose step was refused by Claude Code before it ran, such as a table sent
