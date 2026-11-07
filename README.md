@@ -141,6 +141,13 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
 
 `scripts/stop.sh` takes the same things down, including each Bot's computer, which compose does not own; `--keep-computers` leaves the computers running. Nothing is deleted: the database, the Bots' files and their browser profiles are volumes.
 
+### On Windows
+
+Run the clone inside WSL 2 with Ubuntu, and run every step above from an Ubuntu terminal.
+[Windows (WSL 2)](docs/development.md#windows-wsl-2) lists what to install in Ubuntu first. Keep an
+Ubuntu terminal open while you use OpenBot, and open the app from your Windows browser at
+<http://127.0.0.1:3010>.
+
 ### Intelligence on your own machine
 
 To try Intelligence on one Mac instead of the managed service, follow
