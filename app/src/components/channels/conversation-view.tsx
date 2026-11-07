@@ -117,7 +117,10 @@ export function ConversationView({
    * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
    */
   intro?: ReactNode;
-  /** One-time starter tasks, separate from the Bot introduction and its attribution. */
+  /**
+   * One-time starter tasks, separate from the Bot introduction and its attribution. Directly above
+   * the composer, and not drawn while `attached` is out.
+   */
   starterSuggestions?: ReactNode;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
   /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
@@ -472,14 +475,6 @@ export function ConversationView({
         data-slot="composer-column"
       >
         {notice}
-        {attached ? (
-          <div
-            className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
-            data-slot="composer-drawer"
-          >
-            {attached}
-          </div>
-        ) : null}
         {/*
          * Notifications are offered once this person has started a task: a Bot is working for them,
          * so what a notification is for is plain. Read off the transcript, so the conversation a
@@ -488,7 +483,28 @@ export function ConversationView({
         {messages.some((message) => message.role === "user") ? (
           <NotifyPrompt />
         ) : null}
-        {starterSuggestions}
+        {/*
+         * THE DRAWER IS THE LAST THING ABOVE THE COMPOSER, AND THE STARTER TASKS STEP ASIDE FOR IT.
+         *
+         * It is tucked under the composer (`-mb-4`, no bottom border), so anything drawn between the
+         * two lands on its open bottom edge. The starter tasks and the notifications offer used to
+         * sit there, and the question the Bot was waiting on read as cut off behind them.
+         *
+         * The starter tasks give way rather than move above the drawer: while the Bot waits on an
+         * answer they cannot start anything (`channel-chat.tsx` disables them), they look the same
+         * disabled, and in the Desktop's default window the room belongs to the question. They come
+         * back when it is answered or dismissed.
+         */}
+        {attached ? (
+          <div
+            className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
+            data-slot="composer-drawer"
+          >
+            {attached}
+          </div>
+        ) : (
+          starterSuggestions
+        )}
         <Composer
           modelPicker={modelPicker}
           agents={agents}
