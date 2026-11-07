@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's Activity page says it lists the Bot's tasks, routines and goals, and links to every
+  action the Bot took, in Settings, Activity (Admin, Audit for an admin) narrowed to that Bot.
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
