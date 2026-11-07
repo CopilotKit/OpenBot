@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop's Updates section on a build that doesn't update itself, such as an internal
+  build, says so up front. It promised signed updates and then said the opposite after Check for
+  updates.
 - When OpenBot Desktop changes AI provider, the personal starter Bot's subtitle names the new one
   ("Powered by LangChain (LangGraph)"), keeping the rest of a subtitle the person wrote. It went on
   naming the provider it was moved off.

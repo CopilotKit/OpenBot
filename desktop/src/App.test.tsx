@@ -1154,6 +1154,13 @@ test("the stopped window's update check asks the update feed and says this versi
   );
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "0.3.2",
+        installing: null,
+        updatesItself: true,
+      };
     if (command === "check_app_update")
       return { found: "upToDate", current: "0.3.2" };
     if (command === "check_shell_update")
@@ -1175,9 +1182,51 @@ test("the stopped window's update check asks the update feed and says this versi
     expect(view.getByText("OpenBot 0.3.2 is up to date.")).toBeTruthy(),
   );
   expect(view.queryByText(/not configured/)).toBeNull();
-  expect(invokeCalls.filter((call) => call.command.includes("update"))).toEqual(
-    [{ command: "check_app_update", args: undefined }],
+  expect(view.getByText(/^OpenBot updates itself/)).toBeTruthy();
+  expect(
+    invokeCalls.filter(
+      (call) =>
+        call.command.includes("update") && call.command !== "app_update_offer",
+    ),
+  ).toEqual([{ command: "check_app_update", args: undefined }]);
+});
+
+/*
+ * The bug, on an internal build on Windows: the stopped window's Updates section opened with
+ * "OpenBot updates itself with signed updates from its publisher", and Check for updates then said
+ * "This version of OpenBot doesn't update itself" in the same box. A build that never updates
+ * itself now says so up front, with no promise and nothing to check.
+ */
+test("the stopped window on a build that never updates itself says so and promises no updates", async () => {
+  setupConnectedLocalStack(
+    "/tmp/check-for-updates-internal",
+    localStatus("ready", "valid"),
   );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "0.3.2-internal.731.gabc1234",
+        installing: null,
+        updatesItself: false,
+      };
+    if (command === "check_app_update")
+      return { found: "notOffered", current: "0.3.2-internal.731.gabc1234" };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  await view.findByText(
+    "This version of OpenBot doesn't update itself. Install a released version of OpenBot to get updates.",
+  );
+  expect(view.queryByText(/updates itself with|signed updates/)).toBeNull();
+  expect(view.queryByRole("button", { name: /^Check/ })).toBeNull();
+  expect(
+    invokeCalls.filter((call) => call.command === "check_app_update"),
+  ).toEqual([]);
 });
 
 test("Quit shows Shutting down with each part's row as it starts and ends", async () => {

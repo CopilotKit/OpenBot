@@ -13,6 +13,7 @@ let checked: Checked | null = null;
 let checkFailure: unknown = null;
 let installFailure: unknown = null;
 let progress: AppUpdate["installing"] = null;
+let updatesItself = true;
 let installRelease: (() => void) | null = null;
 const calls: string[] = [];
 
@@ -23,7 +24,12 @@ async function handle(command: string) {
     return checked;
   }
   if (command === "app_update_offer") {
-    return { version: "0.3.3", current: "0.3.2", installing: progress };
+    return {
+      version: "0.3.3",
+      current: "0.3.2",
+      installing: progress,
+      updatesItself,
+    };
   }
   if (command === "install_app_update") {
     if (installFailure) throw installFailure;
@@ -50,6 +56,7 @@ afterEach(() => {
   checkFailure = null;
   installFailure = null;
   progress = null;
+  updatesItself = true;
   installRelease?.();
   installRelease = null;
   calls.length = 0;
@@ -59,14 +66,44 @@ afterAll(() => GlobalRegistrator.unregister());
 
 async function check() {
   const view = render(<CheckForUpdates />);
+  // The shell has said this build updates itself before anybody clicks.
+  await view.findByText(/^OpenBot updates itself/);
   fireEvent.click(view.getByRole("button", { name: "Check for updates" }));
   return view;
 }
 
-test("nothing is asked until somebody checks", async () => {
-  render(<CheckForUpdates />);
+test("the feed isn't read until somebody checks", async () => {
+  const view = render(<CheckForUpdates />);
+  await view.findByText(/^OpenBot updates itself/);
   await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(calls).toEqual([]);
+  expect(calls).toEqual(["app_update_offer"]);
+});
+
+test("a build that updates itself says so up front and offers the check", async () => {
+  const view = render(<CheckForUpdates />);
+  await view.findByText(
+    "OpenBot updates itself with signed updates from its publisher. The next Start after an update brings this installation to the same version and keeps your data.",
+  );
+  expect(view.getByRole("button", { name: "Check for updates" })).toBeTruthy();
+  expect(view.container.textContent).not.toMatch(/doesn't update itself/);
+});
+
+/*
+ * The bug, on an internal build on Windows: the section opened with "OpenBot updates itself with
+ * signed updates from its publisher", and Check for updates then said "This version of OpenBot
+ * doesn't update itself" in the same box.
+ */
+test("a build that never updates itself says so up front and promises no updates", async () => {
+  updatesItself = false;
+  const view = render(<CheckForUpdates />);
+  await view.findByText(
+    "This version of OpenBot doesn't update itself. Install a released version of OpenBot to get updates.",
+  );
+  expect(view.container.textContent).not.toMatch(
+    /updates itself with|signed updates|after an update/,
+  );
+  expect(view.queryByRole("button", { name: "Check for updates" })).toBeNull();
+  expect(calls).toEqual(["app_update_offer"]);
 });
 
 test("on the newest release it says this version is up to date", async () => {
@@ -75,7 +112,7 @@ test("on the newest release it says this version is up to date", async () => {
   expect((await view.findByRole("status")).textContent).toBe(
     "OpenBot 0.3.2 is up to date.",
   );
-  expect(calls).toEqual(["check_app_update"]);
+  expect(calls).toEqual(["app_update_offer", "check_app_update"]);
   expect(view.container.textContent).not.toMatch(/configured|shell/i);
 });
 

@@ -16,6 +16,8 @@ export type AppUpdate = {
     total: number | null;
     restarting: boolean;
   } | null;
+  /** False on a build that never updates itself: an internal or candidate build, or one without the updater. */
+  updatesItself: boolean;
 };
 
 /**

@@ -1135,6 +1135,7 @@ fn app_update_status<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> app_update
         &app.state::<Shell>().app_update,
         &app.package_info().version,
         config.as_deref(),
+        app_update_feed(app).is_some(),
     )
 }
 

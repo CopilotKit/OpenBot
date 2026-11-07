@@ -14,20 +14,50 @@ export type Checked =
 const PROGRESS_EVERY_MS = 500;
 
 /**
+ * Whether this build updates itself, as the shell's offer says: `null` while asking, `"unknown"` if
+ * the shell didn't answer (the check still says what it finds).
+ */
+type UpdatesItself = boolean | "unknown" | null;
+
+/**
  * Check for updates, in the setup window. The shell reads the update feed at once and says what it
  * found: up to date, or the newer version with Update and restart.
  *
  * The same feed and the same install as the offer at the top of this window, the banner in
  * OpenBot's own page, and Check for Updates… in the menus. Asked for, a newer version is named even
  * if this person closed the offer on it before.
+ *
+ * A build that never updates itself (internal, candidate, or without the updater) says so up front,
+ * with nothing to check: it never promises updates it can't install.
  */
 export function CheckForUpdates() {
+  const [updatesItself, setUpdatesItself] = useState<UpdatesItself>(null);
   const [checked, setChecked] = useState<Checked | null>(null);
   const [checking, setChecking] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<AppUpdate["installing"]>(null);
   const [installFailure, setInstallFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    // A read of the shell's memory, not of the feed: the feed is read only when somebody checks.
+    invoke<AppUpdate>("app_update_offer")
+      .then((offer) => {
+        if (current)
+          setUpdatesItself(
+            typeof offer.updatesItself === "boolean"
+              ? offer.updatesItself
+              : "unknown",
+          );
+      })
+      .catch(() => {
+        if (current) setUpdatesItself("unknown");
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!installing) return;
@@ -73,14 +103,28 @@ export function CheckForUpdates() {
     }
   }
 
+  if (updatesItself === false) {
+    return (
+      <details>
+        <summary>Updates</summary>
+        <p>
+          This version of OpenBot doesn't update itself. Install a released
+          version of OpenBot to get updates.
+        </p>
+      </details>
+    );
+  }
+
   return (
     <details>
       <summary>Updates</summary>
-      <p>
-        OpenBot updates itself with signed updates from its publisher. The next
-        Start after an update brings this installation to the same version and
-        keeps your data.
-      </p>
+      {updatesItself === true && (
+        <p>
+          OpenBot updates itself with signed updates from its publisher. The
+          next Start after an update brings this installation to the same
+          version and keeps your data.
+        </p>
+      )}
       <button
         type="button"
         className="quiet"
