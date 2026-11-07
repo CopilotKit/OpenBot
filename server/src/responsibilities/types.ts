@@ -153,6 +153,22 @@ export type ResponsibilityContinuation = {
  */
 export type GoalRepeats = "recurring" | "routine" | "event";
 
+/**
+ * Whether a routine's instruction runs this goal: it names the goal by id, which `run_goal` takes,
+ * or by title. FOUND LIVE: Bots wrote `Run the goal "Daily CopilotKit/OpenBot release check"` into
+ * the routine they made for a goal. One rule, read by the goal store (`GoalRepeats`) and by a Bot's
+ * Activity, so a goal a run is told repeats is the goal Activity lists with its routine's schedule.
+ */
+export function routineRunsGoal(
+  instruction: string,
+  goal: { id: string; title: string },
+): boolean {
+  return (
+    instruction.includes(goal.id) ||
+    instruction.toLowerCase().includes(goal.title.toLowerCase())
+  );
+}
+
 /** The reason, for a sentence the model reads: "This goal repeats because ...". */
 export function whyItRepeats(repeats: GoalRepeats): string {
   switch (repeats) {

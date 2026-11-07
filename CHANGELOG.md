@@ -94,6 +94,10 @@ deployment:
 - **A goal that runs only when asked** is counted "on demand" on a Bot's page and listed under On
   demand on its Activity page, where it was counted and listed as scheduled. A goal a trigger wakes
   says so ("Wakes on webhook"), where it said "Runs when asked".
+- **A goal a routine runs is listed with it.** On a Bot's Activity page it sits under Scheduled and
+  says when it runs ("Every day at 08:00 (UTC), from its routine"), where it was under On demand as
+  "Runs when asked". A goal's run is named "Run of" its goal, where it carried the goal's own name
+  and read as a second goal that had finished.
 - **A routine can have a title.** A Bot asked to name a routine ("call it Morning briefing") gives
   it that title, up to 100 characters, where it said it couldn't. The title heads the routine's row
   on the Routines page, with its schedule under it, and names it in a Bot's Activity. Bots are told
