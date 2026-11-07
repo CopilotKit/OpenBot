@@ -145,6 +145,45 @@ test("drawing an interface reads as what the Bot did, not the tool's identifier"
   expect(view.queryByText("render_ui")).toBeNull();
 });
 
+/*
+ * A NAME NOBODY LABELLED IS STILL A STEP. Seen on a live install: a Bot asked to search the web
+ * first called `web_search`, a name it was never offered, and for its first seconds the line read
+ * "web_search" and then "▸ web_search" before the real search joined it as "Search the web…". The
+ * line is drawn the moment the call starts, before any of its arguments arrive, so its words have to
+ * come from the name alone.
+ */
+test("a call to a name with no label reads in words from its first frame", async () => {
+  const view = draw(
+    [
+      { id: "u1", role: "user", content: "Search the web for OpenBot." },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call-1",
+            type: "function",
+            function: { name: "web_search", arguments: "" },
+          },
+        ],
+      },
+    ],
+    true,
+  );
+  expect(await view.findByText("Web search")).toBeTruthy();
+  expect(view.queryByText("web_search")).toBeNull();
+});
+
+test("once a call to a name with no label is answered, it still reads in words", async () => {
+  const view = draw([
+    { id: "u1", role: "user", content: "Search the web for OpenBot." },
+    ...step("web_search", "Error: no tool by that name."),
+  ]);
+  expect(await view.findByText("Web search")).toBeTruthy();
+  expect(view.queryByText("web_search")).toBeNull();
+});
+
 test("while the interface is still being drawn, its line says so in words", async () => {
   const view = draw(
     [

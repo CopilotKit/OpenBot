@@ -12,8 +12,6 @@ import {
 import {
   answersTheModel,
   connectorName,
-  humanise,
-  ownToolLabel,
   readToolName,
 } from "@openbot/shared/tool-name";
 import {
@@ -417,7 +415,7 @@ export function stepDetails(step: ToolItem): StepDetails {
     return {
       ...outcome,
       kind: "tool",
-      label: ownToolLabel(name, outcome.pending) ?? humanise(name),
+      label: readToolName(name, outcome.pending).label,
       pages: 0,
     };
 

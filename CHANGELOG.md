@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's step reads in words from the moment it starts, even for a tool with no label of its own:
+  "Web search", where it showed "web_search" until the Bot's next step joined it.
 - OpenBot Desktop offers "Use a saved ChatGPT sign-in", "Use a saved OpenAI API key" and "Use a
   saved Anthropic API key" only when one is saved. On a computer with nothing saved, choosing one
   lit Continue and Start then said the plan was not signed in to.
