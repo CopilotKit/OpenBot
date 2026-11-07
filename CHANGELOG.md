@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A goal's summary on a Bot's Activity page is plain text. The Bot's reply showed there with its
+  Markdown marks ("Saved `heading.txt` with **Example Domain**"); it now reads "Saved heading.txt
+  with Example Domain.", the way the sidebar shows a conversation's last message.
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
