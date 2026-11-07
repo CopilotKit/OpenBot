@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop on Windows names its folder `C:\Users\you\OpenBot` under Installed in, where it
+  said `\\?\C:\Users\you\OpenBot`, and its folder-access approvals name folders the same way.
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
