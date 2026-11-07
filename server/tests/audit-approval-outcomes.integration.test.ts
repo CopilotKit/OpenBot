@@ -390,14 +390,12 @@ test("an app write the person denies is on the trail as a refused call, and so i
     inputSchema: {},
     effect: "write",
   });
-  await database
-    .insert(agents)
-    .values({
-      id: APP_BOT,
-      name: "Notes",
-      type: "built_in",
-      configuration: {},
-    });
+  await database.insert(agents).values({
+    id: APP_BOT,
+    name: "Notes",
+    type: "built_in",
+    configuration: {},
+  });
   await database
     .insert(pluginGrants)
     .values({ kind: "mcp", ref: APP_TOOL, agentId: APP_BOT });
