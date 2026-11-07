@@ -198,7 +198,8 @@ pub struct CommandPrompt {
     pub bot_id: String,
     pub bot_name: Option<String>,
     pub root: PathBuf,
-    pub working_directory: Option<String>,
+    /// The folder on this computer the command runs in, when it is not the approved folder itself.
+    pub working_directory: Option<PathBuf>,
     pub command: String,
     pub writable: bool,
     /// The member's OpenBot setting after the team cap, as the server sent it.
@@ -927,7 +928,7 @@ impl Inner {
             bot_id: operation.bot_id.clone(),
             bot_name: grant.bot_name.clone(),
             root: grant.root.clone(),
-            working_directory: operation.relative_path.clone(),
+            working_directory: working_directory.clone(),
             command: command.into(),
             writable,
             command_policy,

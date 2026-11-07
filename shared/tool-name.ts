@@ -176,6 +176,13 @@ type OwnTool = {
   running: string;
   done: string;
   /**
+   * What was asked for, for a step that was blocked: "Save a file", not "Saved a file". A blocked
+   * step did not happen, so its line says what was tried. Without it the line keeps `done`.
+   */
+  attempted?: string;
+  /** The argument naming what the step acted on, said beside its words: a file's path. */
+  subject?: "path";
+  /**
    * What it was given and what it answered were both written for the model (a tool search's query
    * and limit), so its step in a folded group says what it did and does not open.
    */
@@ -366,18 +373,55 @@ const OWN_TOOLS: Record<string, OwnTool> = {
   },
 
   // The Bot's computer, and folders on yours. The same action reads the same on either.
-  computer_list_files: { running: "Listing files", done: "Listed files" },
-  computer_read_file: { running: "Reading a file", done: "Read a file" },
-  computer_write_file: { running: "Saving a file", done: "Saved a file" },
-  computer_run_command: { running: "Running a command", done: "Ran a command" },
+  computer_list_files: {
+    running: "Listing files",
+    done: "Listed files",
+    attempted: "List files",
+  },
+  computer_read_file: {
+    running: "Reading a file",
+    done: "Read a file",
+    attempted: "Read a file",
+    subject: "path",
+  },
+  computer_write_file: {
+    running: "Saving a file",
+    done: "Saved a file",
+    attempted: "Save a file",
+    subject: "path",
+  },
+  computer_run_command: {
+    running: "Running a command",
+    done: "Ran a command",
+    attempted: "Run a command",
+  },
   host_list_folders: {
     running: "Checking your folders",
     done: "Checked your folders",
+    attempted: "Check your folders",
   },
-  host_list_files: { running: "Listing files", done: "Listed files" },
-  host_read_file: { running: "Reading a file", done: "Read a file" },
-  host_write_file: { running: "Saving a file", done: "Saved a file" },
-  host_run_command: { running: "Running a command", done: "Ran a command" },
+  host_list_files: {
+    running: "Listing files",
+    done: "Listed files",
+    attempted: "List files",
+  },
+  host_read_file: {
+    running: "Reading a file",
+    done: "Read a file",
+    attempted: "Read a file",
+    subject: "path",
+  },
+  host_write_file: {
+    running: "Saving a file",
+    done: "Saved a file",
+    attempted: "Save a file",
+    subject: "path",
+  },
+  host_run_command: {
+    running: "Running a command",
+    done: "Ran a command",
+    attempted: "Run a command",
+  },
 
   // Asking the person, from the computer.
   computer_request_help: {
@@ -403,6 +447,41 @@ export function ownToolLabel(name: string, running = false): string | null {
   const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
   if (!own) return null;
   return running ? own.running : own.done;
+}
+
+/**
+ * What one of OpenBot's own steps asked for, for a step that was blocked and so did not happen, or
+ * null when it has no words of its own for that.
+ */
+export function ownToolAttempt(name: string): string | null {
+  const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
+  return own?.attempted ?? null;
+}
+
+/**
+ * What one of OpenBot's own steps acted on, read from its arguments (a JSON string while it streams,
+ * or already parsed): the file a file step read or saved. Undefined for any other step, and for
+ * arguments not yet complete.
+ */
+export function ownToolSubject(
+  name: string,
+  args: unknown,
+): string | undefined {
+  const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
+  if (!own?.subject) return undefined;
+  let value = args;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const subject = (value as Record<string, unknown>)[own.subject];
+  return typeof subject === "string" && subject.trim()
+    ? subject.trim()
+    : undefined;
 }
 
 /** Whether a step's arguments and answer were written for the model and are not shown to the person. */

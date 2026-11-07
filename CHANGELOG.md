@@ -292,6 +292,10 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   have been doing and what was refused, read from OpenBot's own records." It showed the text
   written for the model ("Show what this deployment has actually been doing..."). In the personal
   edition its intro says every Bot can use all of them, where it said an admin controls them.
+- Folder access on your computer speaks to you: "Allow folder access?" no longer shows "Requested
+  by: dev-local-user", "Allow this command?" no longer shows "Working folder: /workspace",
+  Settings → Computer says OpenBot Desktop is asking you in a window, and a file change you deny
+  reads "Blocked: Save a file todo.txt", where it read "Blocked: Saved a file".
 
 ## 0.3.2
 

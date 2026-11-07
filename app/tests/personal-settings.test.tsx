@@ -343,6 +343,119 @@ describe("the Computer page", () => {
     expect(folders.textContent).not.toContain("The desktop app is offline");
   });
 
+  /** A folder request still open, as `GET /api/host-access` lists it. */
+  function waiting(
+    kind: NonNullable<HostAccessStatus["pending"][number]["kind"]>,
+    botId = "personal-assistant",
+  ): HostAccessStatus["pending"][number] {
+    return {
+      operationId: `op-${kind}`,
+      kind,
+      botId,
+      actorId: "dev-local-user",
+    };
+  }
+
+  const granted: HostAccessStatus = {
+    ...hostAccess,
+    desktop: true,
+    connected: true,
+    grants: [
+      {
+        id: "host-grant-1",
+        botId: "personal-assistant",
+        actorId: "dev-local-user",
+        displayName: "share",
+        revoked: false,
+      },
+    ],
+  };
+
+  // FOUND ON WINDOWS: behind OpenBot Desktop's own dialog the row read "Folder access waiting for
+  // approval from the desktop owner." The desktop owner is the person reading it.
+  test("in the personal edition a waiting folder says OpenBot Desktop is asking you", async () => {
+    const view = await renderPage("personal", {
+      ...hostAccess,
+      desktop: true,
+      connected: true,
+      pending: [waiting("choose_folder")],
+    });
+    const text = foldersSection(view).textContent ?? "";
+    expect(text).toContain("1 pending request");
+    expect(text).toContain(
+      "Folder access is waiting for you. OpenBot Desktop is asking you in a window.",
+    );
+    expect(text).not.toContain("desktop owner");
+  });
+
+  test("in the personal edition a file change or command waits on you, and reading waits on nobody", async () => {
+    const view = await renderPage("personal", {
+      ...granted,
+      pending: [
+        waiting("write_file"),
+        waiting("run_command"),
+        waiting("list_files"),
+        waiting("read_file"),
+      ],
+    });
+    const text = foldersSection(view).textContent ?? "";
+    expect(text).toContain(
+      "A file change is waiting for you. OpenBot Desktop is asking you in a window.",
+    );
+    expect(text).toContain(
+      "A command is waiting for you or still running. OpenBot Desktop asks you in a window.",
+    );
+    expect(text).toContain("Listing files.");
+    expect(text).toContain("Reading a file.");
+    expect(text).not.toContain("from the desktop owner");
+    expect(text).not.toContain("desktop owner");
+  });
+
+  // A granted folder's line began "the desktop owner · Read-only".
+  test("in the personal edition a granted folder reads as read-only, naming no owner", async () => {
+    const view = await renderPage("personal", granted);
+    const folders = foldersSection(view);
+    expect(within(folders).getByText("share")).toBeTruthy();
+    expect(within(folders).getByText("Read-only")).toBeTruthy();
+    expect(folders.textContent).not.toContain("desktop owner");
+  });
+
+  // Stop folder access is queued for every Bot ("*"). It drew a row of its own, "A Bot no longer
+  // here", until the desktop picked it up.
+  test("stopping folder access draws no row for a Bot that isn't there", async () => {
+    const view = await renderPage("personal", {
+      ...granted,
+      pending: [waiting("stop", "*")],
+    });
+    const folders = foldersSection(view);
+    expect(folders.textContent).not.toContain("A Bot no longer here");
+    expect(folders.textContent).not.toContain("1 pending request");
+  });
+
+  // In the team edition the desktop's owner may be somebody other than the admin reading, so a
+  // request waiting on them still says so. Listing and reading wait on nobody.
+  test("in the team edition a waiting request names the desktop owner, and reading names nobody", async () => {
+    const view = await renderPage("team", {
+      ...granted,
+      pending: [
+        waiting("choose_folder"),
+        waiting("write_file"),
+        waiting("list_files"),
+      ],
+    });
+    const text = foldersSection(view).textContent ?? "";
+    expect(text).toContain(
+      "Folder access waiting for approval from the desktop owner.",
+    );
+    expect(text).toContain(
+      "File change waiting for approval from the desktop owner, or to finish.",
+    );
+    expect(text).toContain("Listing files.");
+    expect(text).not.toContain("Listing files from");
+    expect(text).toContain("Approved by the desktop owner · Read-only");
+    expect(text).not.toContain("OpenBot Desktop is asking you");
+  });
+
   test("in the team edition still tells an admin how to give each person a computer", async () => {
     const view = await renderPage("team");
     const text = view.container.textContent ?? "";

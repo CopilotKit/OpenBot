@@ -87,7 +87,7 @@ export function revokeHostFolderGrantMutationOptions(queryClient: QueryClient) {
         `/api/host-access/grants/${encodeURIComponent(variables.grantId)}`,
         {
           method: "DELETE",
-          fallback: "The host folder grant could not be revoked.",
+          fallback: "Access to that folder could not be revoked.",
         },
       );
     },
@@ -100,7 +100,7 @@ export function stopHostAccessMutationOptions(queryClient: QueryClient) {
     mutationFn: async () => {
       await client("/api/host-access/stop", {
         method: "POST",
-        fallback: "Host folder access could not be stopped.",
+        fallback: "Folder access could not be stopped.",
       });
     },
     onSuccess: () => invalidateHostAccess(queryClient),
