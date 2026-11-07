@@ -307,23 +307,38 @@ export const ORCHESTRATION_GUIDANCE = asParagraphs(
 /**
  * Who asks the person before an action: OpenBot, not the Bot.
  *
- * OpenBot puts a card in front of the person before any delete, send, share or post, and hands any
- * payment or purchase to them, whatever their settings (`server/src/approvals/policy.ts`). A Bot told
- * by its approval card's description to ask "before sending a message" asked too, so the person was
- * asked twice for one delete. The card OpenBot shows names the exact action, so it is the one that
- * stays. Only for a Bot OpenBot runs, whose every tool goes through that gate: a remote Bot's own
- * tools do not, and nothing here is said to one.
+ * OpenBot puts a card in front of the person before any delete, archive, send, share or post, and
+ * before any app tool its app marks destructive, and hands any payment or purchase to them, whatever
+ * their settings (`server/src/approvals/policy.ts`). A Bot told by its approval card's description to
+ * ask "before sending a message" asked too, so the person was asked twice for one delete. The card
+ * OpenBot shows names the exact action, so it is the one that stays. Only for a Bot OpenBot runs,
+ * whose every tool goes through that gate: a remote Bot's own tools do not, and nothing here is said
+ * to one.
+ *
+ * A tool marked destructive can be called anything ("reset pipeline"), so the Bot can't tell it from
+ * its name. Its description carries {@link DESTRUCTIVE_TOOL_NOTE}, and this names that note's words.
+ * Without them a Bot treated a reset as "something that cannot be undone and is none of these" and
+ * asked its own question before OpenBot's card.
  */
 const APPROVAL_GUIDANCE_LINES = [
-  "OpenBot asks the person itself before you delete, send, share or post anything, and before you",
-  "pay for or buy anything, on a card that shows exactly what you are about to do. It also asks before",
-  "every change when the person has turned that on. So do not ask them first, in words or with an",
-  "approval card: say what you are going to do and do it, and they are asked once, by OpenBot. Ask",
-  "for their decision yourself only when the choice is theirs to make, or before something that",
-  "cannot be undone and is none of these.",
+  "OpenBot asks the person itself before you delete, archive, send, share or post anything, before",
+  "you use a tool that says it deletes or overwrites something, and before you pay for or buy",
+  "anything, on a card that shows exactly what you are about to do. It also asks before every change",
+  "when the person has turned that on. So do not ask them first, in words or with an approval card:",
+  "say what you are going to do and do it, and they are asked once, by OpenBot. Ask for their decision",
+  "yourself only when the choice is theirs to make, or before something that cannot be undone and is",
+  "none of these.",
 ];
 
 export const APPROVAL_GUIDANCE = asParagraphs(APPROVAL_GUIDANCE_LINES);
+
+/**
+ * Added to the description of an app tool its app marks destructive (MCP's `destructiveHint`, a
+ * broker's destructive flag), where the Bot is offered it. OpenBot always asks before one runs, so
+ * the Bot is told so on the tool itself, in the words {@link APPROVAL_GUIDANCE} names.
+ */
+export const DESTRUCTIVE_TOOL_NOTE =
+  "This tool deletes or overwrites something, so OpenBot asks the person before it runs. Don't ask them first.";
 
 const WEEKDAYS = [
   "Sunday",

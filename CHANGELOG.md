@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- You're asked once before a Bot uses an app tool its app marks destructive, on OpenBot's Allow once
+  or Deny card. A Bot asked to reset a CRM pipeline put its own question in front of OpenBot's card,
+  because nothing told it OpenBot asks about a tool whose name doesn't say it deletes. Bots are now
+  told so, and such a tool's description says it.
 - A goal's run started while its conversation is busy, such as "create a goal, then run it now",
   waits for the conversation and then runs. It failed with the platform's 409 response as its reason.
 - An Arcade action that publishes no behaviour flags, such as every AirtableApi and GithubApi action,

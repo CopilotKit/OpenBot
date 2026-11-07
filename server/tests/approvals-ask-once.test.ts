@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { APPROVAL_GUIDANCE } from "@openbot/shared/bot-prompt";
+import {
+  APPROVAL_GUIDANCE,
+  DESTRUCTIVE_TOOL_NOTE,
+} from "@openbot/shared/bot-prompt";
 import { safetyRequirement } from "../src/approvals/policy";
 import type { ApprovalCandidate } from "../src/approvals/types";
 import { builtInAgentConfiguration, standingRoleMessage } from "../src/copilot";
@@ -72,6 +75,40 @@ describe("a Bot OpenBot runs leaves the asking to OpenBot", () => {
       expect(safetyRequirement(click(button))?.behaviour).toBe(behaviour);
     },
   );
+
+  // An app tool, as the plugin store puts it to the gate.
+  const app = (name: string, destructive?: true): ApprovalCandidate => ({
+    actorId: "owner",
+    botId: "assistant",
+    toolRef: `acme-crm/${name}`,
+    effect: "write",
+    scope: "acme-crm",
+    args: { id: "51" },
+    ...(destructive ? { destructive } : {}),
+  });
+
+  test("the guidance says OpenBot asks before you archive, and it does", () => {
+    expect(APPROVAL_GUIDANCE.replace(/\s+/g, " ")).toContain(
+      "delete, archive, send",
+    );
+    expect(safetyRequirement(app("HUBSPOT_ARCHIVE_CONTACT"))?.behaviour).toBe(
+      "ask",
+    );
+  });
+
+  test("a tool its app marks destructive says so on itself, in the words the guidance names, and OpenBot asks", () => {
+    const guidance = APPROVAL_GUIDANCE.replace(/\s+/g, " ");
+    expect(guidance).toContain(
+      "before you use a tool that says it deletes or overwrites something",
+    );
+    expect(DESTRUCTIVE_TOOL_NOTE).toContain("deletes or overwrites something");
+    expect(DESTRUCTIVE_TOOL_NOTE).toContain("Don't ask them first.");
+    // Named like nothing, so only the mark can tell the Bot.
+    expect(safetyRequirement(app("reset_pipeline"))).toBeUndefined();
+    expect(safetyRequirement(app("reset_pipeline", true))?.behaviour).toBe(
+      "ask",
+    );
+  });
 });
 
 describe("a send by keyboard asks, as a Send button does", () => {

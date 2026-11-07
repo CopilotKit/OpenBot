@@ -27,8 +27,10 @@ None of these offers **Always allow here**: each one asks every time. A saved al
 reach them, because they are decided before any rule is read.
 
 You are asked once. A Bot OpenBot runs is told that OpenBot asks before these, so it doesn't put
-its own approval card in front of OpenBot's (`APPROVAL_GUIDANCE` in `shared/bot-prompt.ts`). A remote
-Bot is not told so, because its own tools don't go through this policy.
+its own approval card in front of OpenBot's (`APPROVAL_GUIDANCE` in `shared/bot-prompt.ts`). A tool
+its app marks destructive can be called anything, so its description, as the Bot is offered it, also
+says that OpenBot asks before it runs (`DESTRUCTIVE_TOOL_NOTE`). A remote Bot is not told so, because
+its own tools don't go through this policy.
 
 They are recognised by what the action is called, never by what it carries. A document that says
 "delete the old draft", a note about a purchase, or an email draft addressed to someone is an
