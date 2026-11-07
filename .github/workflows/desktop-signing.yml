@@ -79,6 +79,8 @@ jobs:
       # The artifact of the attempt that signed, so a re-run of `publish` alone attaches the
       # installer that attempt verified, not one from an earlier attempt.
       artifact: openbot-windows-signed-${{ github.run_id }}-${{ github.run_attempt }}
+      # Whether the build carries the updater: every build but a pinned candidate or beta.
+      updater: ${{ steps.build.outputs.updater }}
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.signing-mode == 'keyvault') ||
       (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
@@ -163,7 +165,12 @@ jobs:
       # beta pinned to its release's images, and the CLI whenever the tree can bundle one. On a
       # release this signed installer replaces the unsigned one, so it must be the same product.
       # Anything else (a pull request, a branch) is an ordinary internal build, as before.
+      # The overlay also carries the updater, `plugins.updater` with the same public key and
+      # endpoints as the Mac's, so a signed Windows app is offered and installs updates the way a
+      # Mac does. Not `createUpdaterArtifacts`: the updater key is not in this environment, and the
+      # file the Windows updater installs is this installer itself, signed for it by `sign-update`.
       - name: Build and sign
+        id: build
         env:
           WINDOWS_SIGNING: keyvault
           # To read the release's container-images.json when this build is a candidate.
@@ -213,15 +220,66 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # The updater's signature over the installer. On Windows the updater installs the NSIS installer
+  # itself, so it is signed here, after Authenticode signing, over exactly the bytes the signing job
+  # verified and people download. The updater key is the one Desktop macOS signing signs with, and
+  # it lives in the `macos-signing` environment only, so this job runs there: its reviewers approve
+  # it as they approve the Mac build, and the key is never in `windows-signing`. It needs no
+  # repository write access and no Azure access. Only a run that attaches to a release signs for
+  # the updater; a pinned candidate or beta has no updater.
+  sign-update:
+    name: Sign the installer for the updater
+    needs: sign
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.release-tag != '' &&
+      needs.sign.outputs.updater == 'true'
+    environment: macos-signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      artifact: openbot-windows-updater-signature-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      # The Tauri CLI the build used, from the lockfile, to sign as `tauri build` signs.
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - name: Install minisign
+        run: sudo apt-get install -y --no-install-recommends minisign
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.sign.outputs.artifact }}
+          path: artifacts
+      - name: Sign and verify against the app's public key
+        env:
+          ARTIFACTS: artifacts
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: desktop/scripts/sign-windows-update.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: openbot-windows-updater-signature-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+          if-no-files-found: error
+          retention-days: 14
+
   # The signed installer onto the release, from a job of its own so the signing job never holds a
   # token that can write to the repository. It replaces the unsigned installer the release was
   # published with, under the name Tauri gave it and under the fixed name a web page links to
   # (scripts/release-download-names.sh). Both, or the stable link keeps serving the unsigned build.
-  # `--clobber` makes a re-run replace them again. The details are in
-  # desktop/scripts/publish-signed-windows.sh.
+  # For a build with the updater it attaches the updater signature too, and lists the installer in
+  # latest.json as `windows-x86_64`, beside the Mac archives. `--clobber` makes a re-run replace
+  # them again. The details are in desktop/scripts/publish-signed-windows.sh.
   publish:
     name: Attach to the release
-    needs: sign
+    needs: [sign, sign-update]
     # One attach job at a time per release, across Desktop macOS signing and Desktop Windows
     # signing: each ends by asking whether every signed installer is on the release, and the one
     # that runs second must see what the first attached, or neither would make it Latest. Same
@@ -229,7 +287,11 @@ jobs:
     concurrency:
       group: release-attach-${{ inputs.release-tag || github.ref_name }}
       cancel-in-progress: false
-    if: github.event_name == 'workflow_dispatch' && inputs.release-tag != ''
+    # After sign-update, or without it for a pinned build, which it skips.
+    if: >-
+      !cancelled() && needs.sign.result == 'success' &&
+      (needs.sign-update.result == 'success' || needs.sign-update.result == 'skipped') &&
+      github.event_name == 'workflow_dispatch' && inputs.release-tag != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # `actions: write` to start Downloads sync when this run makes the release Latest
@@ -249,6 +311,11 @@ jobs:
         with:
           name: ${{ needs.sign.outputs.artifact }}
           path: artifacts
+      - if: needs.sign-update.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.sign-update.outputs.artifact }}
+          path: artifacts/updater-signature
       - name: Attach to the release
         env:
           ARTIFACTS: artifacts

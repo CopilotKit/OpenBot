@@ -13,7 +13,7 @@ import {
   type FakeDownloads,
   fakeDownloads,
 } from "./downloads-fakes";
-import { type FakeRepo, fakeRepo, runScript } from "./release-fakes";
+import { type FakeRepo, fakeRepo, feedFor, runScript } from "./release-fakes";
 
 const root = join(import.meta.dir, "..");
 const sync = join(root, "scripts/downloads-sync.sh");
@@ -404,13 +404,14 @@ test("an S3 error other than a missing object stops the sync before anything is 
 // Making a stable release Latest edits the release with the workflow's token, and an edit made
 // with that token starts no workflow. The sync is dispatched instead, which does.
 test("making a stable release Latest dispatches the sync, and nothing else does", () => {
-  const complete = (fake: FakeRepo) =>
+  const complete = (fake: FakeRepo) => {
+    fake.attachFile("latest.json", JSON.stringify(feedFor("0.3.0")));
     fake.attach(
-      "latest.json",
       "OpenBot-mac-arm64.dmg",
       "OpenBot-mac-x64.dmg",
       "OpenBot-windows-x64-setup.exe",
     );
+  };
   const promote = (fake: FakeRepo, makeLatestFlag = "true") =>
     runScript(
       makeLatest,
@@ -430,12 +431,6 @@ test("making a stable release Latest dispatches the sync, and nothing else does"
   const fake = fakeRepo("v0.2.0");
   cleanups.push(fake.cleanup);
   complete(fake);
-  fake.feed("v0.3.0", {
-    version: "0.3.0",
-    platforms: {
-      "darwin-aarch64": { url: "https://example.test/a", signature: "s" },
-    },
-  });
   const result = promote(fake);
   expect(result.code).toBe(0);
   const calls = fake.calls();

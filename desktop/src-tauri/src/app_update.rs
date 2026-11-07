@@ -6,7 +6,7 @@
 //! OpenBot has no shell to ask, so it never asks the feed anything.
 //!
 //! Offered only where the updater can install it: a stable, unpinned build whose configuration
-//! carries `plugins.updater` (today the signed Mac release). The feed is that block's own
+//! carries `plugins.updater` (the signed Mac and Windows releases). The feed is that block's own
 //! `endpoints`, read in the updater's order, so the banner and the install read the same file.
 //!
 //! The person can close the banner. That is kept per version in the app's config directory, and

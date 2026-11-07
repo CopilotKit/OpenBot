@@ -1153,6 +1153,12 @@ restart starts OpenBot again, and that Start upgrades the installation to the ne
 (`upgrade_due`, then `upgrade_and_start`: `upgrade::run`, with its backup and its way back). Not
 while an upgrade or a Start is under way (`RuntimeUpdateGuard`).
 
+On Windows the order differs, because Windows will not replace a running app: the updater starts
+the downloaded NSIS installer in update mode and exits this process at once, and the installer
+starts the new version when it is done. Nothing after `install` runs there, so OpenBot is stopped
+just before the installer starts (`stop_before_installer`), once the download is verified and
+written out. A download that fails still leaves everything as it was.
+
 Nothing here decides whether the download is genuine: the updater refuses an archive whose
 minisign signature does not match the public key compiled into this build.
 */
@@ -1165,8 +1171,17 @@ async fn install_app_update_now<R: tauri::Runtime>(
         return Err(Problem::plain("This build of OpenBot can't update itself."));
     }
     let _update = RuntimeUpdateGuard::begin(&app)?;
+    let handle = app.clone();
+    let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopped_by_installer = stopped.clone();
     let update = app
-        .updater()
+        .updater_builder()
+        // Runs on Windows only, in place of the updater's own cleanup, which this ends with.
+        .on_before_exit(move || {
+            stopped_by_installer.store(true, std::sync::atomic::Ordering::SeqCst);
+            stop_before_installer(&handle);
+        })
+        .build()
         .map_err(|e| Problem::from(e.to_string()))?
         .check()
         .await
@@ -1198,6 +1213,17 @@ async fn install_app_update_now<R: tauri::Runtime>(
     }
     .await;
     if let Err(problem) = installed {
+        if stopped.load(std::sync::atomic::Ordering::SeqCst) {
+            // Windows could not start the installer after OpenBot was stopped and the app's
+            // windows and tray were taken down for the exit. Tauri allows nothing after that but
+            // an exit, so start this same version again; its Start brings OpenBot back, and the
+            // offer stays.
+            eprintln!(
+                "[app update] the installer did not start: {}",
+                problem.detail.as_deref().unwrap_or(&problem.said)
+            );
+            restart_into_update(&app);
+        }
         app.state::<Shell>().app_update.end_install();
         return Err(problem);
     }
@@ -1214,6 +1240,23 @@ async fn install_app_update_now<R: tauri::Runtime>(
         Err(error) => eprintln!("[app update] stopping OpenBot before the restart: {error}"),
     }
     restart_into_update(&app)
+}
+
+/**
+What Windows needs done before the updater starts the installer and exits the process: OpenBot
+stopped, as on a Mac after the install (the local Intelligence keeps running), then the cleanup the
+updater does by default, which takes down the windows and the tray icon so none is left behind.
+
+The exit that follows runs no exit handler, so Quit's cleanup never starts. The installer then
+stops anything still running from the bundled CLI (`windows/hooks.nsh`), replaces the app, and
+starts the new version, whose Start moves the installation to its release (`follow`).
+*/
+fn stop_before_installer<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Err(error) = stop_for_update(app, &stack::default_root()) {
+        // The installer runs either way: the new version's Start finds whatever is left running.
+        eprintln!("[app update] stopping OpenBot before the installer: {error}");
+    }
+    app.cleanup_before_exit();
 }
 
 /**
@@ -7211,10 +7254,11 @@ fn main() {
             _ => {}
         })
         .setup(|app| {
-            // A signed Mac build updates itself. The window asks once at launch and installs only
-            // if the person says yes; the plugin refuses anything whose minisign signature does not
-            // match the public key compiled in from `tauri.macos-signing.conf.json`, so the
-            // endpoint is a place to look rather than something to trust. Only that overlay carries
+            // A signed Mac or Windows build updates itself. The window asks once at launch and
+            // installs only if the person says yes; the plugin refuses anything whose minisign
+            // signature does not match the public key compiled in from the signing overlay
+            // (`tauri.macos-signing.conf.json`, `tauri.windows-signing.conf.json`), so the
+            // endpoint is a place to look rather than something to trust. Only those overlays carry
             // `plugins.updater`, so every other build (desktop CI, local, the unsigned release
             // installers) has no updater: it cannot verify anything, and offering an update it
             // would then refuse is worse than offering none. The window's check finds no plugin
