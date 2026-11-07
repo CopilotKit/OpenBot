@@ -417,11 +417,11 @@ function NewConversation({ composition }: { composition: string }) {
         }
         notice={
           loadError || error ? (
-            <p className="pb-2 text-sm text-destructive" role="alert">
+            <p className="px-3.5 pb-2 text-sm text-destructive" role="alert">
               {loadError ?? error}
             </p>
           ) : askedForBot && recipients.length === 0 ? (
-            <p className="pb-2 text-sm text-muted-foreground" role="status">
+            <p className="px-3.5 pb-2 text-sm text-muted-foreground" role="status">
               Choose a Bot first.
             </p>
           ) : null
