@@ -119,6 +119,11 @@ export const routines = pgTable(
      */
     channelId: text("channel_id").notNull(),
     instruction: text("instruction").notNull(),
+    /**
+     * What the person called it, in their own words: "Morning briefing". Null when they named it
+     * nothing, and then the instruction stands in for it wherever a routine is named.
+     */
+    title: text("title"),
     /** Five-field cron. Validated at the tool boundary; never parsed by the client. */
     cron: text("cron").notNull(),
     /** IANA zone the cron is read in. UTC when the person never said otherwise. */
