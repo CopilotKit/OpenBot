@@ -99,3 +99,31 @@ export const WEB_HARNESSES: readonly Harness[] = HARNESSES.filter(
 export function summaryFor(harness: Harness): string {
   return harness.webSummary ?? harness.summary;
 }
+
+/**
+ * What a Bot that runs inside OpenBot is powered by: its subtitle's "Powered by OpenBot", and the
+ * framework it is told it runs on.
+ */
+export const OPENBOT_HARNESS_NAME = "OpenBot";
+
+/**
+ * A framework a person may declare for an agent they run themselves, by id: any named harness, never
+ * "An agent you already run", which names none.
+ */
+export function declaredHarness(id: unknown): Harness | undefined {
+  if (typeof id !== "string" || id === "byo-url") return undefined;
+  return HARNESSES.find((harness) => harness.id === id);
+}
+
+/**
+ * The harness an image reference runs, by the directory a release builds it from:
+ * `ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:…` is LangChain (LangGraph). Undefined for
+ * an image OpenBot does not publish.
+ */
+export function harnessForImage(reference: string): Harness | undefined {
+  const name = /(?:^|\/)(?:openbot-)?(agent-[a-z0-9-]+)(?::|@|$)/.exec(
+    reference.trim(),
+  )?.[1];
+  if (!name) return undefined;
+  return HARNESSES.find((harness) => harness.image === name);
+}

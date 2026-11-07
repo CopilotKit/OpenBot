@@ -1,4 +1,8 @@
-import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
+import {
+  OPENBOT_HARNESS_NAME,
+  summaryFor,
+  WEB_HARNESSES,
+} from "@openbot/shared/harnesses";
 import {
   IconCheck,
   IconInfoCircle,
@@ -136,7 +140,7 @@ function frameworkName(runtime: Runtime): string {
  * cannot know what is behind its address.
  */
 function poweredBy(runtime: Runtime): string {
-  if (runtime.kind === "builtin") return "Powered by OpenBot";
+  if (runtime.kind === "builtin") return `Powered by ${OPENBOT_HARNESS_NAME}`;
   if (runtime.harness === "byo-url") return "";
   const framework = WEB_HARNESSES.find(
     (harness) => harness.id === runtime.harness,
@@ -266,8 +270,8 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const create = async (chosen: Runtime) => {
     const managed = chosen.kind === "managed";
-    const agent = await createAgent.mutateAsync(
-      agentInputFrom({
+    const agent = await createAgent.mutateAsync({
+      ...agentInputFrom({
         name: name.trim(),
         title: poweredBy(chosen),
         roleDescription:
@@ -280,7 +284,12 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         isolated:
           !personal && isolated && isolationAvailable && isolationAllowed,
       }),
-    );
+      // The framework picked from the list, so the Bot is told what runs it. None for an agent
+      // somebody already runs, since nobody said what is behind its address.
+      ...(managed && chosen.harness !== "byo-url"
+        ? { harness: chosen.harness }
+        : {}),
+    });
     /*
      * The ticked apps, given once the Bot exists. A refusal is not a failed create: the Bot is made,
      * and its page lists every app it could be given with a switch each. So each is tried, none

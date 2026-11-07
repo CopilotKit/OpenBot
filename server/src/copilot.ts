@@ -15,6 +15,7 @@ import {
   APPROVAL_GUIDANCE,
   COMPONENT_GUIDANCE,
   type ComputerGuidance,
+  frameworkGuidance,
   modelGuidance,
   ORCHESTRATION_GUIDANCE,
   PROVENANCE_GUIDANCE,
@@ -53,6 +54,7 @@ import {
   CoworkerUnavailableError,
 } from "./agents/agent-resolver";
 import { attributeBotAnswers } from "./agents/bot-answers";
+import { frameworkOf } from "./agents/framework";
 import {
   PlanModel,
   type PlanModelConfig,
@@ -150,10 +152,12 @@ type RegisteredBuiltInAgent = {
   type: "built_in";
   systemPrompt: string;
   /**
-   * The subtitle under its name, which says what runs it ("Everyday life. Powered by OpenBot.").
-   * Told to the Bot with its name (`identityGuidance`), as a remote Bot's standing role tells it.
+   * The subtitle under its name ("Everyday life. Powered by OpenBot."). Told to the Bot with its
+   * name (`identityGuidance`), as a remote Bot's standing role tells it.
    */
   title?: string;
+  /** What runs it, which for a Bot here is OpenBot (`frameworkOf`). Told with its name too. */
+  framework?: string;
 };
 
 type RegisteredRemoteAgentFacts = {
@@ -250,16 +254,21 @@ export function selfAddressGuidance(name: string): string {
  * whatever somebody wrote about its job, and the package's own Knowledge prompt never says what it
  * is called.
  *
- * The subtitle says what runs it ("Everyday life. Powered by OpenBot."), the way a remote Bot's
- * standing role says it (`standingRoleMessage`), so asked which framework it runs on, a Bot here
- * answers as one on LangGraph does. Absent, it is told its name only.
+ * Then the subtitle under its name, the way a remote Bot's standing role says it
+ * (`standingRoleMessage`), and the framework it runs on, which is OpenBot's own whatever the
+ * subtitle says (`frameworkOf`).
  */
-function identityGuidance(name: string, title?: string): string {
+function identityGuidance(
+  name: string,
+  title?: string,
+  framework?: string,
+): string {
   const subtitle = title?.trim();
   return [
     `You are ${name}, a Bot in OpenBot.`,
     ...(subtitle ? [/[.!?]$/.test(subtitle) ? subtitle : `${subtitle}.`] : []),
     selfAddressGuidance(name),
+    ...(framework ? [frameworkGuidance(framework)] : []),
   ].join(" ");
 }
 
@@ -274,6 +283,8 @@ function identityGuidance(name: string, title?: string): string {
 export function standingRoleMessage(
   profile: AgentStandingProfile,
   instructions?: string,
+  /** What runs it, when this deployment knows (`frameworkOf`). Its subtitle may say anything. */
+  framework?: string,
 ): StandingRoleMessage {
   const title = profile.title.trimEnd();
   const titleEnd = /[.!?]$/.test(title) ? "" : ".";
@@ -281,7 +292,10 @@ export function standingRoleMessage(
     id: `${STANDING_ROLE_ID_PREFIX}${profile.id}`,
     role: "system",
     content: [
-      `You are ${profile.name}, ${title}${titleEnd} ${selfAddressGuidance(profile.name)}`,
+      [
+        `You are ${profile.name}, ${title}${titleEnd} ${selfAddressGuidance(profile.name)}`,
+        ...(framework ? [frameworkGuidance(framework)] : []),
+      ].join(" "),
       profile.roleDescription,
       ...(instructions ? [instructions] : []),
       "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
@@ -516,6 +530,7 @@ export function registeredAgentFromRow(
           type: "built_in",
           systemPrompt: trimmedSystemPrompt,
           ...(row.title.trim() ? { title: row.title.trim() } : {}),
+          framework: frameworkOf(row),
         }
       : null;
   }
@@ -543,6 +558,7 @@ export function registeredAgentFromRow(
           typeof configuration.standingInstructions === "string"
             ? configuration.standingInstructions.trim()
             : undefined,
+          frameworkOf(row),
         ),
       }
     : null;
@@ -720,7 +736,7 @@ export function builtInAgentConfiguration(
        */
       ...(agent.systemPrompt.includes(selfAddressGuidance(agent.name))
         ? []
-        : [identityGuidance(agent.name, agent.title)]),
+        : [identityGuidance(agent.name, agent.title, agent.framework)]),
       agent.systemPrompt,
       ...(standing ? [standing] : []),
       /*

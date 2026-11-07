@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { HARNESSES, type Harness } from "@openbot/shared/harnesses";
+import {
+  HARNESSES,
+  type Harness,
+  OPENBOT_HARNESS_NAME,
+} from "@openbot/shared/harnesses";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { parse } from "yaml";
@@ -918,7 +922,11 @@ function personalStarterSeed(
       );
     // Starter copy is ordinary editable profile text, written only on the first seed.
     // A Bot that runs here is powered by OpenBot itself, as examples/personal/agents.yaml says.
-    const harnessName = picked ? (harness ? harness.name : null) : "OpenBot";
+    const harnessName = picked
+      ? harness
+        ? harness.name
+        : null
+      : OPENBOT_HARNESS_NAME;
     const title = harnessName
       ? `Everyday life. Powered by ${harnessName}.`
       : "Everyday life.";

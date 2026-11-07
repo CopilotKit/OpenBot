@@ -384,4 +384,39 @@ describe("runtime agent loading", () => {
       reloaded?.type === "remote_ag_ui" && reloaded.standingMessage.content,
     ).toContain("Reconcile corporate card statements.");
   });
+
+  /*
+   * The framework a person names in New Bot for an agent they run is what that Bot is told it runs
+   * on, whatever its subtitle says, and an edit that does not send it keeps it.
+   */
+  test("tells an agent somebody runs the framework they named, after an edit too", async () => {
+    const owner = await createUser();
+    const profile = await profileStore.create(owner, {
+      name: "Research",
+      title: "Finance Operations",
+      roleDescription: "Research filings.",
+      visibility: "private",
+      endpoint: "https://their-agent.example.test/ag-ui",
+      harness: "crewai",
+    });
+    createdAgentIds.push(profile.id);
+    const told = "The agent framework you run on is CrewAI.";
+    const role = async () => {
+      const loaded = (await loadAgents(owner)).find(
+        (agent) => agent.id === profile.id,
+      );
+      return loaded?.type === "remote_ag_ui"
+        ? loaded.standingMessage.content
+        : "";
+    };
+    expect(await role()).toContain(told);
+
+    await profileStore.update(owner, profile.id, {
+      name: "Research",
+      title: "Filings",
+      roleDescription: "Research filings and summarise them.",
+      visibility: "private",
+    });
+    expect(await role()).toContain(told);
+  });
 });

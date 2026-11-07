@@ -280,6 +280,8 @@ describe("registered Copilot agents", () => {
       type: "built_in",
       systemPrompt: "Be helpful.",
       title: "Everyday Work",
+      // What runs it, whatever its subtitle says.
+      framework: "OpenBot",
     });
     expect(
       registeredAgentFromRow({

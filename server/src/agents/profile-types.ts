@@ -81,4 +81,10 @@ export type CreateAgentInput = Pick<
    * ignores it: its instructions are its role description.
    */
   instructions?: string;
+  /**
+   * The framework a person named for an agent they run themselves, by its id in
+   * `shared/harnesses.json`. Read at creation only, and kept in its configuration so the Bot is told
+   * what runs it whatever its subtitle says (`frameworkOf`).
+   */
+  harness?: string;
 };

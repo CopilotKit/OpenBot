@@ -22,6 +22,11 @@ export type AgentInput = {
    * Bot between computers; only the Isolated control sends it.
    */
   isolated?: boolean;
+  /**
+   * The framework picked for an agent somebody runs themselves, by its id in the harness list, so
+   * the Bot is told what runs it whatever its subtitle says. Only New Bot sends it.
+   */
+  harness?: string;
 };
 
 /** The sentence for every write here, since they all fail the same way to a reader. */
