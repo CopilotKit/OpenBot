@@ -24,6 +24,9 @@ import { approvalRequests } from "../src/db/schema/approvals";
 import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
 import { type Edition, setEdition } from "../src/edition";
+import { classify } from "../src/plugins/arcade";
+import { effectOf } from "../src/plugins/composio";
+import { storableTools } from "../src/plugins/plugin-store/model";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -834,10 +837,38 @@ describe("a tool its app marks destructive, called through the app", () => {
       type: "built_in",
       configuration: {},
     });
-    await database.insert(pluginGrants).values([
-      { kind: "mcp", ref: `${APP}/reset_workspace`, agentId: BOT },
-      { kind: "mcp", ref: `${APP}/rename_workspace`, agentId: BOT },
-    ]);
+    /*
+     * As each broker's own listing records an action: Arcade's from its behaviour flags, Composio's
+     * from its labels, through the same mapping a refresh writes with.
+     */
+    const listed = (name: string, said: ReturnType<typeof classify>) => ({
+      name,
+      description: "",
+      inputSchema: {},
+      ...said,
+    });
+    await database
+      .insert(mcpTools)
+      .values(
+        storableTools(APP, [
+          listed("arcade_unflagged", classify({ behavior: {} })),
+          listed(
+            "arcade_flagged",
+            classify({ behavior: { destructive: true } }),
+          ),
+          listed("composio_unlabelled", effectOf(["openWorldHint"])),
+          listed("composio_labelled", effectOf(["destructiveHint"])),
+        ]).rows,
+      );
+    await database
+      .insert(pluginGrants)
+      .values(
+        [
+          "reset_workspace",
+          "rename_workspace",
+          ...BROKERED.flatMap(({ unsaid, flagged }) => [unsaid, flagged]),
+        ].map((name) => ({ kind: "mcp", ref: `${APP}/${name}`, agentId: BOT })),
+      );
   });
   afterAll(async () => {
     await database.delete(mcpServers).where(eq(mcpServers.id, APP));
@@ -895,4 +926,40 @@ describe("a tool its app marks destructive, called through the app", () => {
     expect((await call("rename_workspace")).asked).toBeFalse();
     expect(vendorCalls).toEqual(["rename_workspace"]);
   });
+
+  test("the same kind of tool is asked about the same way whichever broker listed it", async () => {
+    setEdition("personal");
+    for (const { broker, unsaid, flagged } of BROKERED) {
+      // Said nothing: an ordinary change, which runs with Ask before making changes off.
+      expect({ broker, asked: (await call(unsaid)).asked }).toEqual({
+        broker,
+        asked: false,
+      });
+      expect(vendorCalls).toContain(unsaid);
+      // Said it destroys something: always asks.
+      const destroys = await call(flagged);
+      expect({ broker, asked: destroys.asked }).toEqual({
+        broker,
+        asked: true,
+      });
+      const [request] = (await store.list(owner)).filter(
+        (row) => row.action.toolCallId === destroys.toolCallId,
+      );
+      expect(request?.action.policy).toMatchObject({
+        behaviour: "ask",
+        source: "safety",
+      });
+      expect(vendorCalls).not.toContain(flagged);
+    }
+  });
 });
+
+/** One tool each broker said nothing about, and one it flagged destructive. */
+const BROKERED = [
+  { broker: "arcade", unsaid: "arcade_unflagged", flagged: "arcade_flagged" },
+  {
+    broker: "composio",
+    unsaid: "composio_unlabelled",
+    flagged: "composio_labelled",
+  },
+] as const;

@@ -45,8 +45,9 @@ Archive asks as deleting because some apps call their delete that: HubSpot delet
 An app can also say a tool destroys something, whatever it is named: an MCP server with the tool's
 `destructiveHint` annotation, Composio with the same tag, and Arcade with its `destructive` flag.
 OpenBot records that when it lists the app's tools (`destructive` on `mcp_tools`), and such a tool
-asks as deleting does. Composio tags `HUBSPOT_ARCHIVE_CONTACT` this way. An Arcade action that says
-nothing about itself is recorded as destructive too, so it asks the same way.
+asks as deleting does. Composio tags `HUBSPOT_ARCHIVE_CONTACT` this way. An action a broker says
+nothing about (no flag from Arcade, no label from Composio) is not destructive: it is an ordinary
+change, which asks only when Ask before making changes or a rule says so.
 
 ## What doesn't ask
 

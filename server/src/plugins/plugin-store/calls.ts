@@ -165,6 +165,7 @@ export function callMethods(context: StoreContext) {
           inputSchema: mcpTools.inputSchema,
           effect: mcpTools.effect,
           destructive: mcpTools.destructive,
+          unclassified: mcpTools.unclassified,
           declaredRead: mcpTools.declaredRead,
           version: mcpTools.version,
         })

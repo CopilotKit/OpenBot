@@ -2430,6 +2430,7 @@ function sameListing(
       sortedJson(was.inputSchema) === sortedJson(tool.inputSchema) &&
       was.effect === tool.effect &&
       was.destructive === tool.destructive &&
+      was.unclassified === tool.unclassified &&
       was.declaredRead === tool.declaredRead &&
       was.version === tool.version
     );

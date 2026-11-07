@@ -537,6 +537,7 @@ async function toolRows(serverId: string) {
         vendorName: mcpTools.vendorName,
         effect: mcpTools.effect,
         destructive: mcpTools.destructive,
+        unclassified: mcpTools.unclassified,
       })
       .from(mcpTools)
       .where(eq(mcpTools.serverId, serverId))
@@ -737,30 +738,35 @@ describe("an Arcade deployment, from the picker to the disconnect", () => {
     expect(again.status).toBe(200);
 
     expect(await toolRows(MAIL_ROW)).toEqual([
-      // NOTHING SAID, SO IT FAILS CLOSED: an unannotated action is approved like a deletion.
+      // NOTHING SAID: a write, and unclassified rather than destructive, because Arcade never
+      // said it destroys anything. It doesn't always ask; a background read still keeps away.
       {
         name: "DraftEmail",
         vendorName: `${MAIL}.DraftEmail`,
         effect: "write",
-        destructive: true,
+        destructive: false,
+        unclassified: true,
       },
       {
         name: "ListEmails",
         vendorName: `${MAIL}.ListEmails`,
         effect: "read",
         destructive: false,
+        unclassified: false,
       },
       {
         name: "SendEmail",
         vendorName: `${MAIL}.SendEmail`,
         effect: "write",
         destructive: false,
+        unclassified: false,
       },
       {
         name: "TrashEmail",
         vendorName: `${MAIL}.TrashEmail`,
         effect: "write",
         destructive: true,
+        unclassified: false,
       },
     ]);
     expect(await toolRows(DIARY_ROW)).toEqual([
@@ -769,12 +775,14 @@ describe("an Arcade deployment, from the picker to the disconnect", () => {
         vendorName: `${DIARY}.DeleteEvent`,
         effect: "write",
         destructive: true,
+        unclassified: false,
       },
       {
         name: "ListEvents",
         vendorName: `${DIARY}.ListEvents`,
         effect: "read",
         destructive: false,
+        unclassified: false,
       },
     ]);
   });

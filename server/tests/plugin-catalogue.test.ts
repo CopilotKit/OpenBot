@@ -7,6 +7,7 @@ import {
   customUrlRefusal,
   hostAdmissible,
   labelledRead,
+  mightDestroy,
   resolveServerUrl,
   reviewedRead,
   serverCredentialKind,
@@ -371,6 +372,25 @@ describe("what a task runs without asking: a read a reviewed list names", () => 
     expect(reviewedRead(notion, "notion-update-page", nothing)).toBe(false);
     expect(reviewedRead(drive, "create_file", nothing)).toBe(false);
     expect(reviewedRead(notion, "notion-fetch", { destructive: true })).toBe(
+      false,
+    );
+  });
+
+  test("a tool a broker said nothing about is kept away from as a destructive one is", () => {
+    // Recorded as Arcade records an action with no flags, and Composio one with no label: a write,
+    // not destructive, unclassified. Named on a reviewed read list, it still doesn't run unasked.
+    const silent = { destructive: false, unclassified: true };
+    expect(reviewedRead(notion, "notion-fetch", silent)).toBe(false);
+    expect(
+      labelledRead(notion, "notion-search", {
+        effect: null,
+        declaredRead: true,
+        ...silent,
+      }),
+    ).toBe(false);
+    expect(mightDestroy(silent)).toBe(true);
+    expect(mightDestroy({ destructive: true })).toBe(true);
+    expect(mightDestroy({ destructive: false, unclassified: false })).toBe(
       false,
     );
   });

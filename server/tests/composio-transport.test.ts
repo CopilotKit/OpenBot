@@ -293,24 +293,26 @@ describe("what a label means", () => {
   });
 
   test("idempotent is not a read, because deleting is idempotent", () => {
+    // Nor does it say what the action does, so it is unclassified, as Arcade's silence is.
     expect(effectOf(["idempotentHint", "openWorldHint"])).toEqual({
       effect: "write",
       destructive: false,
+      unclassified: true,
     });
   });
 
-  test("no label at all is a write", () => {
+  test("no label at all is an unclassified write, not a destructive one", () => {
     // Measured across five apps and never seen, so this branch guards the future rather than the
-    // present: an app that labels nothing, or a label added later, must land on write.
-    expect(effectOf([])).toEqual({ effect: "write", destructive: false });
-    expect(effectOf(undefined)).toEqual({
+    // present: an app that labels nothing, or a label added later, must land on write. It is
+    // recorded as Arcade's action with no flags is: unclassified, which doesn't always ask.
+    const unlabelled = {
       effect: "write",
       destructive: false,
-    });
-    expect(effectOf(["gmail", "inbox"])).toEqual({
-      effect: "write",
-      destructive: false,
-    });
+      unclassified: true,
+    } as const;
+    expect(effectOf([])).toEqual(unlabelled);
+    expect(effectOf(undefined)).toEqual(unlabelled);
+    expect(effectOf(["gmail", "inbox"])).toEqual(unlabelled);
   });
 
   test("destructive wins over read-only when both are present", () => {

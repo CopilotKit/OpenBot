@@ -211,6 +211,13 @@ export type ListedTool = McpTool & {
   /** Whether the vendor marked it as destroying something. */
   destructive?: boolean;
   /**
+   * A broker listed it and said nothing about what it does: no read-only, destructive, create or
+   * update label from Composio, no behaviour flag from Arcade. Recorded as a write that is not
+   * destructive, and kept apart so a background read treats it as cautiously as a destructive one.
+   * An MCP server's silence is a null `effect` instead, which its reviewed lists decide.
+   */
+  unclassified?: boolean;
+  /**
    * Whether the server marked it read-only (`annotations.readOnlyHint`), recorded as said.
    *
    * NOT AN EFFECT, and never folded into `effect`: that field decides whether chat asks first, and
