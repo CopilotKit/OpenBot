@@ -72,7 +72,7 @@ afterAll(async () => {
 });
 
 test("the deployment has no Bot in the box", () => {
-  expect(config.managedAgent?.endpoint).toBeUndefined();
+  expect(config.managedAgent).toBeUndefined();
 });
 
 test("the New Bot sheet is told a Bot can run here", async () => {
