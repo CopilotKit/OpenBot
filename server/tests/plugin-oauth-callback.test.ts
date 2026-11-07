@@ -75,6 +75,9 @@ function app(input: {
       (async (connection: Recorded) => {
         input.recorded.push(connection);
       }),
+    // What the app offers is asked for once the connection is written. Nothing is listed here: the
+    // integration suite `plugin-connect-lists-tools` covers that against a real store.
+    discoverToolsOnConnect: async () => null,
   };
   const routes = createPluginRoutes(
     store as never,

@@ -151,6 +151,30 @@ export function mountOAuthCallbackRoute({
         return context.redirect(failed);
       }
 
+      /*
+       * WHAT THE APP OFFERS, asked as the person who just connected it.
+       *
+       * An app whose tools can only be listed as a person holds none until somebody has connected,
+       * and this is the first moment anybody has. Awaited, so the page the person lands on already
+       * lists them and the next Bot run is offered them. See `discoverToolsOnConnect`.
+       *
+       * The connection is already recorded, so nothing here turns it into a failure. A vendor that
+       * would not answer lands in the app's `lastError` inside the refresh; a fault of ours is
+       * logged, and Refresh tools is still there to ask again.
+       */
+      try {
+        await store.discoverToolsOnConnect(state.serverId, state.userId);
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "oauth-connection-tools-not-listed",
+            serverId: state.serverId,
+            note: "A person connected and their account was recorded, but asking the app what it offers failed. Refresh tools on the app's page asks again.",
+            error: reasonWithoutStatement(error),
+          }),
+        );
+      }
+
       return context.redirect(
         connectedAccountsUrlFor(
           connect.appUrl,

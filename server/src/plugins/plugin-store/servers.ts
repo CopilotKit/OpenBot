@@ -1975,6 +1975,38 @@ export function serverMethods(context: StoreContext) {
       return { tools: storable.length };
     },
 
+    /**
+     * Ask a per-person app what it offers as the person who just connected it, when nothing is held.
+     *
+     * CRITERION. Connecting the first account to an app whose tools can only be listed as a person
+     * leaves its tools listed, and offered to Bots, without anybody pressing Refresh.
+     *
+     * REASON. The refresh that runs when such an app is added has nobody to ask as, so it records a
+     * refusal and stores no tools — the honest state, as {@link refreshTools} says, until somebody
+     * has connected. Connecting is that moment, and nothing used to act on it: the app read
+     * "Connected" while every Bot was told it held none of its tools, until somebody happened to
+     * press Refresh tools.
+     *
+     * ONLY WHEN NOTHING IS HELD. Refreshing replaces the tools every Bot is offered, which is an
+     * administrator's button. Filling an empty list takes nothing from anybody; replacing a full one
+     * on every member's connect would make each of them its author.
+     *
+     * Through `this`, so the personal edition's wrapper gives every Bot the tools exactly as a
+     * Refresh would.
+     */
+    async discoverToolsOnConnect(
+      serverId: string,
+      userId: string,
+    ): Promise<{ tools: number } | null> {
+      const [held] = await database
+        .select({ name: mcpTools.name })
+        .from(mcpTools)
+        .where(eq(mcpTools.serverId, serverId))
+        .limit(1);
+      if (held) return null;
+      return this.refreshTools(serverId, userId);
+    },
+
     async listServers(): Promise<ServerRecord[]> {
       const rows = await database
         .select()
