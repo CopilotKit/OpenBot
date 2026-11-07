@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { displayNameFor, HARNESSES } from "@openbot/shared/harnesses";
+import { HARNESSES, type Harness } from "@openbot/shared/harnesses";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { parse } from "yaml";
@@ -840,6 +840,19 @@ const PERSONAL_PACKAGE_PATH = fileURLToPath(
 const PERSONAL_ASSISTANT = "personal-assistant";
 const PICKED_HARNESS = "picked-harness";
 
+/**
+ * Names the catalogue gave a framework before its current one. A Bot an earlier version seeded under
+ * one of these is still named after its framework, so it follows a change of harness like one under
+ * the current name.
+ */
+const EARLIER_HARNESS_NAMES: Readonly<Record<string, readonly string[]>> = {
+  langgraph: ["LangGraph", "LangChain"],
+};
+
+function catalogueNamesOf(harness: Harness): string[] {
+  return [harness.name, ...(EARLIER_HARNESS_NAMES[harness.id] ?? [])];
+}
+
 function personalStarterSeed(
   tenantPackage: LoadedTenantPackage,
   fresh: boolean,
@@ -858,11 +871,8 @@ function personalStarterSeed(
         ({ name, image }) => image !== null && name === picked.name,
       );
     // Starter copy is ordinary editable profile text, written only on the first seed.
-    const harnessName = picked
-      ? harness
-        ? displayNameFor(harness)
-        : null
-      : "CopilotKit";
+    // A Bot that runs here is powered by OpenBot itself, as examples/personal/agents.yaml says.
+    const harnessName = picked ? (harness ? harness.name : null) : "OpenBot";
     const title = harnessName
       ? `Everyday life. Powered by ${harnessName}.`
       : "Everyday life.";
@@ -1033,20 +1043,22 @@ export async function synchronizeTenantPackage(
         ({ name, image }) => image !== null && name === picked.name,
       );
       if (legacy && selected) {
-        const catalogueNames = HARNESSES.flatMap((harness) => [
-          harness.name,
-          displayNameFor(harness),
+        const catalogueNames = HARNESSES.flatMap(catalogueNamesOf);
+        // The subtitle says what runs the Bot. Earlier seeds repeated the framework's name there.
+        const catalogueTitles = catalogueNames.flatMap((name) => [
+          name,
+          `Powered by ${name}`,
         ]);
         if (catalogueNames.includes(legacy.name)) {
           await transaction
             .update(agentTable)
-            .set({ name: displayNameFor(selected) })
+            .set({ name: selected.name })
             .where(eq(agentTable.id, PICKED_HARNESS));
         }
-        if (catalogueNames.includes(legacy.title)) {
+        if (catalogueTitles.includes(legacy.title)) {
           await transaction
             .update(agentProfiles)
-            .set({ title: displayNameFor(selected) })
+            .set({ title: `Powered by ${selected.name}` })
             .where(eq(agentProfiles.agentId, PICKED_HARNESS));
         }
       }

@@ -7,7 +7,6 @@ import {
 import { SERIES_COLOURS } from "@/components/gallery/palette";
 import { A2UITextField } from "./a2ui-text-field";
 import { A2UICode, A2UIMarkdown } from "./a2ui-markdown";
-import { A2UITextField } from "./a2ui-number-field";
 
 /**
  * The standard components a Bot is not given.
@@ -35,13 +34,12 @@ export const OMITTED_STANDARD_COMPONENTS = [
  * their descriptions and props unchanged, so what a Bot already writes keeps drawing.
  *
  * `TextField` is the standard one, except that a number field writes a number into the data model,
- * so a total a Bot computes from the fields adds rather than joins text; see a2ui-number-field.tsx.
+ * so a total a Bot computes from the fields adds rather than joins text; see a2ui-text-field.tsx.
  */
 export const OPENBOT_UI = createGenerativeUI({
   id: "openbot/ui@1",
   extends: [standardUI.omit([...OMITTED_STANDARD_COMPONENTS])],
   overrides: {
-    TextField: { component: A2UITextField },
     Code: { component: A2UICode },
     Markdown: { component: A2UIMarkdown },
     TextField: { component: A2UITextField },
