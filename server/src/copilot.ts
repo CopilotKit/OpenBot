@@ -24,6 +24,7 @@ import {
   requiresResponsesApi,
 } from "@openbot/shared/model-providers";
 import { MODEL_TOOL_LIMIT } from "@openbot/shared/model-tool-limit";
+import { runTimeZone } from "@openbot/shared/person-time-zone";
 import {
   BuiltInAgentWithSaneHistory,
   CloningRemoteAgent,
@@ -569,6 +570,11 @@ export function builtInAgentConfiguration(
   waiting: ReadonlySet<string> = new Set(),
   /** When this run is, for the date the prompt ends with. A test pins it. */
   now: Date = new Date(),
+  /**
+   * The person's IANA time zone, already checked (`runTimeZone`), so the date is theirs. Absent: the
+   * date is given in UTC, and said to be.
+   */
+  timeZone?: string,
 ): BuiltInAgentConfiguration {
   if (!apiKey && !planModel) {
     return {
@@ -665,7 +671,7 @@ export function builtInAgentConfiguration(
         : []),
       ...(learnedSkills?.catalog ? [learnedSkills.catalog] : []),
       // Last, so everything above stays one prefix a provider can cache. See `todayGuidance`.
-      todayGuidance(now),
+      todayGuidance(now, timeZone),
     ].join("\n\n"),
     ...(planModel ? {} : { apiKey: apiKey ?? undefined }),
     // The run's thinking effort, when the person picked one the model takes. A plan's harness is
@@ -1335,6 +1341,8 @@ async function buildAgent(
     pinned?: ReadonlySet<string>,
     /** The model this run asked for and was allowed, or the deployment's. */
     runModel: RuntimeModel = model,
+    /** The person's time zone this run carries, for the date its prompt ends with. */
+    timeZone?: string,
   ) => {
     /*
      * What waits behind a search, decided where the run's tools are final. The count includes what
@@ -1368,6 +1376,8 @@ async function buildAgent(
         : undefined,
       learnedSkills,
       waiting,
+      undefined,
+      timeZone,
     );
     // What really waits: nothing, when the model could not be wrapped and is sent every tool.
     const held = searchesTools(
@@ -1439,13 +1449,26 @@ async function buildAgent(
         plan: runModel.plan?.provider,
       });
       /*
+       * The person's own time zone, when the browser that started this run said it, so the date the
+       * prompt ends with is theirs. See `person-time-zone.ts`.
+       */
+      const timeZone = runTimeZone(input.forwardedProps);
+      /*
        * A run the runtime makes for itself holds nothing of the Bot's: no grant, no subagent, no
        * handoff, no learned Skill. Built again with none, rather than told not to call them, so a
        * model that asks for one anyway asks for a tool this run does not have. See `isAskedRun`.
        * It still answers on the conversation's model, which is the one the gate judged and recorded.
        */
       if (holdsTools && !holdsTools(input))
-        return withTools([], input, signal, undefined, undefined, runModel);
+        return withTools(
+          [],
+          input,
+          signal,
+          undefined,
+          undefined,
+          runModel,
+          timeZone,
+        );
       const learnedSkills = await acquireLearnedSkills?.(agent.id, signal);
       signal.throwIfAborted();
       if (
@@ -1481,9 +1504,18 @@ async function buildAgent(
         tools.length === granted.length &&
         passing.length === 0 &&
         pinned.size === 0 &&
-        input.tools.length === 0
+        input.tools.length === 0 &&
+        !timeZone
         ? whole
-        : withTools(tools, input, signal, learnedSkills, pinned, runModel);
+        : withTools(
+            tools,
+            input,
+            signal,
+            learnedSkills,
+            pinned,
+            runModel,
+            timeZone,
+          );
     },
   );
 }
@@ -1913,10 +1945,24 @@ function remoteAgentWithStandingRole(
       ]),
     ).pipe(
       switchMap(([messages, chosenModel]) => {
+        /*
+         * The standing role with what day it is, in the person's time zone when this run carries it,
+         * as the last paragraph. A Bot at another endpoint is told the date the way a built-in one
+         * is (`todayGuidance`), and in the one message every framework reads as its instructions:
+         * told nothing, the Claude Agent SDK harness answered "tomorrow" for the day after the
+         * person's. Only the day, so the role still changes once a day at most.
+         */
+        const standingMessage = {
+          ...agent.standingMessage,
+          content: `${agent.standingMessage.content}\n\n${todayGuidance(
+            new Date(),
+            runTimeZone(input.forwardedProps),
+          )}`,
+        };
         const prepared: RunAgentInput = {
           ...input,
           messages: [
-            agent.standingMessage,
+            standingMessage,
             ...(holdingsMessage ? [holdingsMessage] : []),
             /*
              * Another Bot's answer as that Bot's words, after the sanitiser and the attachments as
@@ -1947,7 +1993,7 @@ function remoteAgentWithStandingRole(
               ? [
                   ...callerMastraContext(input.context ?? []),
                   ...mastraOpenBotContext({
-                    standingMessage: agent.standingMessage,
+                    standingMessage,
                     holdingsMessage,
                     botId: agent.id,
                     deploymentTools,

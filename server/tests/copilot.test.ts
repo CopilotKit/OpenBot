@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, setSystemTime, spyOn, test } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AbstractAgent, RunAgentInput } from "@ag-ui/client";
@@ -699,7 +699,7 @@ describe("standing agent roles", () => {
 
     const sent = endpoint.requests.at(-1);
     expect(sent?.messages).toEqual([
-      standingRoleMessage(profile),
+      onTheWire(standingRoleMessage(profile)),
       userMessage("Sort these."),
     ]);
     expect(result?.newMessages?.at(-1)?.content).toBe("Categorized.");
@@ -750,7 +750,7 @@ describe("standing agent roles", () => {
     expect(endpoint.requests).toHaveLength(1);
     // The server's own role first, and the skill's instructions still reach the Bot.
     expect(endpoint.requests[0]?.messages).toEqual([
-      standingRoleMessage(profile),
+      onTheWire(standingRoleMessage(profile)),
       skill,
       userMessage("Sort these."),
     ]);
@@ -938,9 +938,22 @@ describe("standing agent roles", () => {
         COMPONENT_GUIDANCE,
         ORCHESTRATION_GUIDANCE,
         UNTRUSTED_GUIDANCE,
+        // And what day it is, last, as every Bot is told. In UTC: no browser said a zone.
+        todayGuidance(new Date()),
       ].join("\n\n"),
     );
   });
+
+  /**
+   * A standing role as the endpoint receives it: with the day appended for the run, in UTC here
+   * because these runs carry no zone. See "what day it is".
+   */
+  function onTheWire(message: ReturnType<typeof standingRoleMessage>) {
+    return {
+      ...message,
+      content: `${message.content}\n\n${todayGuidance(new Date())}`,
+    };
+  }
 
   function remoteAgent(
     endpoint: string,
@@ -1622,6 +1635,154 @@ describe("what day it is", () => {
     const prompt = "prompt" in configuration ? configuration.prompt : "";
     expect(prompt).toEndWith(`\n\n${todayGuidance(now)}`);
   });
+
+  /*
+   * Seen on Desktop: a Mac in California on Friday 2026-11-06 at 16:20, which is 00:20 on Saturday
+   * in UTC. Asked "what's on my Google Calendar tomorrow?", the harness Bot answered for Sunday,
+   * November 8. The browser now says the person's IANA zone on every run (`openbotTimeZone`), and
+   * every Bot is told the date in it.
+   */
+  const FRIDAY_EVENING_IN_CALIFORNIA = new Date("2026-11-07T00:20:00Z");
+  const LOCAL_DAY =
+    "Today is Friday, 2026-11-06 in the person's time zone, America/Los_Angeles.";
+  const UTC_DAY = "Today is Saturday, 2026-11-07 (UTC).";
+
+  test("in the person's time zone when the run carries it", () => {
+    expect(
+      todayGuidance(FRIDAY_EVENING_IN_CALIFORNIA, "America/Los_Angeles"),
+    ).toStartWith(LOCAL_DAY);
+    expect(todayGuidance(FRIDAY_EVENING_IN_CALIFORNIA)).toStartWith(UTC_DAY);
+    // East of UTC the same instant is already Saturday, and said to be.
+    expect(
+      todayGuidance(FRIDAY_EVENING_IN_CALIFORNIA, "Asia/Tokyo"),
+    ).toStartWith(
+      "Today is Saturday, 2026-11-07 in the person's time zone, Asia/Tokyo.",
+    );
+  });
+
+  test.each([
+    ["America/Los_Angeles", LOCAL_DAY],
+    ["Mars/Olympus_Mons", UTC_DAY],
+    ["+05:00", UTC_DAY],
+    [42, UTC_DAY],
+    [undefined, UTC_DAY],
+  ])(
+    "every Bot a browser run reaches is told the day in zone %p",
+    async (zone, expected) => {
+      setSystemTime(FRIDAY_EVENING_IN_CALIFORNIA);
+      const recorder = new LLMock();
+      await using harness = fakeAgUiEndpoint();
+      await using plan = fakeAgUiEndpoint();
+      const originalBase = process.env.OPENAI_BASE_URL;
+      try {
+        process.env.OPENAI_BASE_URL = await recorder.start();
+        recorder.onMessage(/.*/, { content: "Your calendar is clear." });
+        const registered = [
+          {
+            id: "general-assistant",
+            name: "General Assistant",
+            type: "built_in" as const,
+            systemPrompt: "Be helpful.",
+          },
+          // The harness picked in setup, which runs its own loop at its own endpoint.
+          {
+            ...riskRow,
+            type: "remote_ag_ui" as const,
+            endpoint: harness.url,
+            standingMessage: standingRoleMessage(riskRow),
+          },
+        ];
+        const forwardedProps = {
+          openbotAskedRun: true,
+          ...(zone === undefined ? {} : { openbotTimeZone: zone }),
+        };
+        const ask = async (
+          agents: Record<string, AbstractAgent>,
+          id: string,
+        ) => {
+          const agent = built(agents, id).clone();
+          agent.setMessages([
+            {
+              id: "tomorrow",
+              role: "user",
+              content: "What's on my Google Calendar tomorrow?",
+            },
+          ]);
+          await agent.runAgent({ forwardedProps });
+        };
+
+        // The runtime's own map, as a browser request builds it.
+        const onApiKey = createRequestAgents(
+          async () => ({ id: "owner", role: "user" }),
+          createActorAgentResolver({
+            loadAgents: async () => registered,
+            model: { provider: "openai", defaultModel: "gpt-5.6-terra" },
+            resolveModelApiKey: async () => "openai-secret",
+          }),
+        );
+        const agents = await onApiKey({
+          request: new Request("http://127.0.0.1/api/copilotkit"),
+        });
+        await ask(agents, "general-assistant");
+        await ask(agents, riskRow.id);
+
+        // And a built-in Bot on the Claude plan, whose model is the harness's model endpoint.
+        const onPlan = createRequestAgents(
+          async () => ({ id: "owner", role: "user" }),
+          createActorAgentResolver({
+            loadAgents: async () => registered.slice(0, 1),
+            model: {
+              provider: "anthropic",
+              defaultModel: "claude-fixture",
+              plan: {
+                provider: "claude",
+                endpoint: new URL(`${plan.url}/model`),
+                token: "managed-token",
+              },
+            },
+            resolveModelApiKey: async () => null,
+          }),
+        );
+        await ask(
+          await onPlan({
+            request: new Request("http://127.0.0.1/api/copilotkit"),
+          }),
+          "general-assistant",
+        );
+
+        // The built-in Bot's prompt, as the model is sent it, ends with it.
+        const sent = recorder.getRequests()[0]?.body as {
+          messages?: { role?: string; content?: unknown }[];
+        };
+        const prompt = String(
+          sent?.messages?.find((message) => message.role === "developer")
+            ?.content,
+        );
+        expect(prompt.split("\n\n").at(-1)).toStartWith(expected);
+        expect(prompt).not.toContain(
+          expected === LOCAL_DAY ? UTC_DAY : LOCAL_DAY,
+        );
+
+        // The harness's standing role, which it makes its system prompt, ends with it.
+        const role = (
+          harness.requests[0] as { messages?: { content?: string }[] }
+        )?.messages?.[0]?.content;
+        expect(role).toStartWith(standingRoleMessage(riskRow).content);
+        const lastParagraph = role?.split("\n\n").at(-1);
+        expect(lastParagraph).toStartWith(expected);
+
+        // And the plan's harness is handed the built-in prompt with it.
+        expect(JSON.stringify(plan.requests[0])).toContain(
+          JSON.stringify(expected).slice(1, -1),
+        );
+      } finally {
+        setSystemTime();
+        if (originalBase === undefined) delete process.env.OPENAI_BASE_URL;
+        else process.env.OPENAI_BASE_URL = originalBase;
+        await recorder.stop();
+      }
+    },
+  );
 });
 
 /**

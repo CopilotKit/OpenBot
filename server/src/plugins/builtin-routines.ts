@@ -1,3 +1,5 @@
+import { runTimeZone } from "@openbot/shared/person-time-zone";
+import { currentApprovalContext } from "@openbot/toolkit/continuation";
 import { cutAtCodeUnits } from "../channels/text";
 import {
   callTriggerTool,
@@ -97,8 +99,9 @@ const TOOLS: readonly McpTool[] = Object.freeze([
       "anything more frequent is refused.",
       "",
       "Pass the person's IANA timezone (`America/New_York`, `Europe/Madrid`) whenever they speak in local",
-      "time — the default is UTC and there is no deployment timezone to inherit, so a schedule set without",
-      "one fires at a UTC hour rather than at theirs.",
+      "time, and `UTC` when they mean UTC. Left out, it is the person's own time zone when their browser",
+      "said it for this conversation and UTC otherwise, so a schedule set without one may fire at a UTC hour",
+      "rather than at theirs.",
       "",
       "The routine posts its reply into a conversation. Leave `channelId` out and it posts into this",
       "conversation, the one you are being asked in. Pass a `channelId` only when the person asks for a",
@@ -125,7 +128,7 @@ const TOOLS: readonly McpTool[] = Object.freeze([
         timezone: {
           type: "string",
           description:
-            "The person's IANA timezone, such as `Europe/Madrid`. Omit only when they meant UTC; the default is UTC.",
+            "The person's IANA timezone, such as `Europe/Madrid`, or `UTC`. Omitted: the person's own time zone when known, UTC otherwise.",
         },
         channelId: {
           type: "string",
@@ -431,9 +434,15 @@ export async function callTool(
         agentId,
         instruction,
         cron,
-        // Absent means absent. The store owns the UTC default, so guessing a zone here would put a
-        // zone nobody chose on a routine that then fires at the wrong hour for ever.
-        timezone: stringArg(args, "timezone"),
+        /*
+         * The Bot's zone, else the person's own: the one their browser said for the run making this
+         * call (`person-time-zone.ts`), which a run's tool calls carry in their continuation. With
+         * neither, absent means absent: the store owns the UTC default, and guessing a zone here
+         * would put a zone nobody chose on a routine that then fires at the wrong hour for ever.
+         */
+        timezone:
+          stringArg(args, "timezone") ??
+          runTimeZone(currentApprovalContext()?.forwardedProps),
         channelId: stringArg(args, "channelId"),
         // From the run, like the owner and the Bot: the conversation it was asked in.
         threadId: connection.threadId?.trim() || undefined,

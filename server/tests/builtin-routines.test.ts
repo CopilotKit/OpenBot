@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { withApprovalContext } from "@openbot/toolkit/continuation";
 import {
   callTool,
   listTools,
@@ -241,6 +242,66 @@ describe("dispatch", () => {
     expect(created?.method === "create" && created.input.timezone).toBe(
       undefined,
     );
+  });
+
+  test("create_routine without a timezone takes the person's own from the run asking", async () => {
+    // "Every weekday at 9am", asked from a browser in California: the run carries the person's zone
+    // (`openbotTimeZone`), and a tool call is made inside that run's continuation.
+    const inRun = (forwardedProps: unknown) =>
+      withApprovalContext(
+        {
+          runId: "run_1",
+          threadId: "thread_1",
+          toolCallId: "call_1",
+          toolName: "create_routine",
+          args: {},
+          messages: [],
+          state: {},
+          context: [],
+          forwardedProps,
+        },
+        () =>
+          callTool(CONNECTION, "create_routine", {
+            instruction: "Post the standup summary.",
+            cron: "0 9 * * 1-5",
+          }),
+      );
+    const zoneOf = (calls: Recorded[]) => {
+      const created = calls.find((call) => call.method === "create");
+      return created?.method === "create" ? created.input.timezone : null;
+    };
+
+    const local = recordingTools();
+    await inRun({ openbotTimeZone: "America/Los_Angeles" });
+    expect(zoneOf(local)).toBe("America/Los_Angeles");
+
+    // A zone the run carries that is not one stays absent: the store's UTC default applies.
+    const bogus = recordingTools();
+    await inRun({ openbotTimeZone: "Mars/Olympus_Mons" });
+    expect(zoneOf(bogus)).toBe(undefined);
+
+    // And the Bot's own zone always wins over the person's.
+    const named = recordingTools();
+    await withApprovalContext(
+      {
+        runId: "run_1",
+        threadId: "thread_1",
+        toolCallId: "call_1",
+        toolName: "create_routine",
+        args: {},
+        messages: [],
+        state: {},
+        context: [],
+        forwardedProps: { openbotTimeZone: "America/Los_Angeles" },
+      },
+      () =>
+        callTool(CONNECTION, "create_routine", {
+          instruction: "Post the standup summary.",
+          cron: "0 9 * * 1-5",
+          timezone: "UTC",
+        }),
+    );
+    expect(zoneOf(named)).toBe("UTC");
   });
 
   test("list_routines reaches listFor, and renders id, words, channel and last run", async () => {
