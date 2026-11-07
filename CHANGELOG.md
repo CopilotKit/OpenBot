@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Settings, Activity and Admin, Audit show an action the person denied as Blocked, never as
+  Allowed, and list it under Blocked; the person's answer reads "Denied by a person" or "Allowed
+  once by a person", and an action that failed shows once, as "Did not happen".
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
