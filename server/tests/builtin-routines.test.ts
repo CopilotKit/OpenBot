@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { withApprovalContext } from "@openbot/toolkit/continuation";
 import {
   callTool,
@@ -548,6 +548,45 @@ describe("a disabled routine's rendered next-run", () => {
     expect(result.text).not.toContain(SUMMARY.nextRunAt.toISOString());
     expect(result.text).toContain("switched off");
     expect(result.text).toMatch(/next when switched back on/);
+  });
+});
+
+describe("a routine's next run, as the model is told it", () => {
+  afterEach(() => setSystemTime());
+
+  test("is on the routine's clock when the run names no zone, and says how far away it is", async () => {
+    setSystemTime(new Date("2026-01-05T06:54:00.000Z"));
+    recordingTools({
+      async listFor() {
+        return [
+          SUMMARY,
+          {
+            ...SUMMARY,
+            id: "routine_2",
+            timezone: "UTC",
+            nextRunAt: new Date("2026-01-07T09:30:00.000Z"),
+          },
+          {
+            ...SUMMARY,
+            id: "routine_3",
+            timezone: "UTC",
+            nextRunAt: new Date("2026-01-05T06:50:00.000Z"),
+          },
+        ];
+      },
+    });
+    const result = await callTool(CONNECTION, "list_routines", {});
+
+    expect(result.text).toContain(
+      "next run Monday, January 5, 2026 at 9:00 AM GMT+1 (Europe/Madrid), 1 hour and 6 minutes from now",
+    );
+    expect(result.text).toContain(
+      "next run Wednesday, January 7, 2026 at 9:30 AM UTC, 2 days and 2 hours from now",
+    );
+    // Overdue until the next sweep picks it up: it is about to run, not in the past.
+    expect(result.text).toContain(
+      "next run Monday, January 5, 2026 at 6:50 AM UTC, due now",
+    );
   });
 });
 

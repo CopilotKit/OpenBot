@@ -304,6 +304,80 @@ function lastRunOf(summary: RoutineSummary): string {
   return `last ran ${run.finishedAt.toISOString()}${run.status ? ` (${run.status})` : ""}`;
 }
 
+/** The moment a result is written, and the person's own time zone when the run asking says it. */
+type Clock = { now: Date; timeZone: string | undefined };
+
+/** Now, and the time zone the person's browser said for the run making this call (`person-time-zone.ts`). */
+function clockOfRun(): Clock {
+  return {
+    now: new Date(),
+    timeZone: runTimeZone(currentApprovalContext()?.forwardedProps),
+  };
+}
+
+/**
+ * `at` on the person's clock: "Saturday, November 7, 2026 at 9:00 AM UTC", or "... at 9:00 AM PST
+ * (America/Los_Angeles)" for a zone whose short name is not its name, which is every zone but UTC.
+ *
+ * Built from parts, because the engine's own formatting joins the time and "AM" with a narrow
+ * no-break space on newer ICU versions, and the wording would then change under the model with the
+ * runtime. The ISO instant when Intl cannot say.
+ */
+function onClock(at: Date, timeZone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    }).formatToParts(at);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((entry) => entry.type === type)?.value ?? "";
+    const zone = part("timeZoneName");
+    return `${part("weekday")}, ${part("month")} ${part("day")}, ${part("year")} at ${part("hour")}:${part("minute")} ${part("dayPeriod")} ${zone === timeZone ? zone : `${zone} (${timeZone})`}`;
+  } catch {
+    return at.toISOString();
+  }
+}
+
+const plural = (count: number, unit: string) =>
+  `${count} ${unit}${count === 1 ? "" : "s"}`;
+
+/** How far `at` is from `now`, in the two largest units: "6 minutes", "1 hour and 6 minutes". */
+function fromNow(at: Date, now: Date): string {
+  const minutes = Math.round((at.getTime() - now.getTime()) / 60_000);
+  if (minutes <= 0) return "due now";
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const rest = minutes % 60;
+  const [larger, smaller] =
+    days > 0
+      ? [plural(days, "day"), hours > 0 ? plural(hours, "hour") : null]
+      : hours > 0
+        ? [plural(hours, "hour"), rest > 0 ? plural(rest, "minute") : null]
+        : [plural(rest, "minute"), null];
+  return `${smaller ? `${larger} and ${smaller}` : larger} from now`;
+}
+
+/**
+ * When it next fires, on the person's clock, and how long that is from now.
+ *
+ * A Bot is told only today's date (`todayGuidance`), never the time. Given "next
+ * 2026-11-07T09:00:00.000Z" at 08:54 UTC, a Bot told the person the first run was tomorrow, "since
+ * it's already past that time", six minutes before it ran. So the answer says the time in the
+ * person's own zone (the routine's when the run does not carry one) and how far away it is, and
+ * leaves the Bot nothing to work out.
+ */
+function nextRunOf(summary: RoutineSummary, clock: Clock): string {
+  const at = summary.nextRunAt;
+  return `next run ${onClock(at, clock.timeZone ?? summary.timezone)}, ${fromNow(at, clock.now)}`;
+}
+
 /**
  * One routine in words.
  *
@@ -313,16 +387,14 @@ function lastRunOf(summary: RoutineSummary): string {
  * answering in words is that the model confirms a schedule in language a person can check, rather
  * than reading five fields back to somebody who did not write them.
  */
-function inWords(summary: RoutineSummary): string {
+function inWords(summary: RoutineSummary, clock: Clock): string {
   const parts = [
     `${summary.schedule} (${summary.timezone})`,
     `in ${channelOf(summary)}`,
     // The store does not recompute `nextRunAt` on disable, so a switched-off routine's stored
     // value is a stale firing time, not a fact — stating it as "next" would let a model repeat a
     // time that will never come until somebody switches it back on.
-    summary.enabled
-      ? `next ${summary.nextRunAt.toISOString()}`
-      : "next when switched back on",
+    summary.enabled ? nextRunOf(summary, clock) : "next when switched back on",
     lastRunOf(summary),
     // The model needs this to change or delete the routine later, and it cannot derive it.
     `id: ${summary.id}`,
@@ -363,7 +435,7 @@ async function describeWritten(
   }
   return asResult(
     summary
-      ? `${opening} ${inWords(summary)}`
+      ? `${opening} ${inWords(summary, clockOfRun())}`
       : `${fallbackOpening} Its id is ${routine.id}.`,
   );
 }
@@ -466,7 +538,10 @@ export async function callTool(
         // tool had nothing to say" and gets filled in from memory.
         return asResult("You have no routines set up.");
       }
-      return asResult(summaries.map((one) => `- ${inWords(one)}`).join("\n"));
+      const clock = clockOfRun();
+      return asResult(
+        summaries.map((one) => `- ${inWords(one, clock)}`).join("\n"),
+      );
     }
 
     if (toolName === "update_routine") {
