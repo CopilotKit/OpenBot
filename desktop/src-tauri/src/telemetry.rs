@@ -10,6 +10,14 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// Opaque fingerprint of the account verified by Ops, never an email or credential.
+pub fn is_account_id(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 pub const STATE_SCHEMA_VERSION: u8 = 1;
 const STATE_FILE: &str = "telemetry-state.json";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
@@ -161,6 +169,53 @@ impl Telemetry {
             .and_then(|guard| guard.as_ref().map(|state| state.install_id.clone()))
     }
 
+    /// The account binding is saved before requesting a permanent PostHog alias.
+    pub fn bound_account(&self) -> Option<String> {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| state.as_ref().and_then(|state| state.account_id.clone()))
+    }
+
+    /// Keep the anonymous trail on first sign-in; rotate before a different account is linked.
+    /// Queued events retain their original installation, including queues from older versions.
+    pub fn bind_account(&self, account: &str) -> Result<()> {
+        if !is_account_id(account) {
+            return Err(TelemetryError::InvalidState(
+                "invalid account binding".into(),
+            ));
+        }
+        self.change_account(Some(account))
+    }
+
+    /// Rotate a previously linked installation on sign-out, retaining queued attribution.
+    pub fn clear_account(&self) -> Result<()> {
+        self.change_account(None)
+    }
+
+    fn change_account(&self, account: Option<&str>) -> Result<()> {
+        let mut guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
+        let Some(current) = guard.as_ref() else {
+            return Ok(());
+        };
+        if current.account_id.as_deref() == account {
+            return Ok(());
+        }
+        let mut next = current.clone();
+        if current.account_id.is_some() {
+            for event in &mut next.queue {
+                if event.installation_id.is_none() {
+                    event.installation_id = Some(current.install_id.clone());
+                }
+            }
+            next.install_id = new_uuid();
+        }
+        next.account_id = account.map(str::to_owned);
+        write_state(&self.state_path, &next)?;
+        *guard = Some(next);
+        Ok(())
+    }
+
     pub fn update_engine(&self, engine: Engine) -> Result<()> {
         let mut context = self.context.lock().map_err(|_| TelemetryError::Poisoned)?;
         context.engine = engine;
@@ -283,7 +338,13 @@ impl Telemetry {
                 let Some(event) = state.queue.first().cloned() else {
                     return Ok(());
                 };
-                (state.install_id.clone(), event)
+                (
+                    event
+                        .installation_id
+                        .clone()
+                        .unwrap_or_else(|| state.install_id.clone()),
+                    event,
+                )
             };
 
             let response = self
@@ -468,6 +529,8 @@ impl Context {
 pub struct PersistedState {
     pub schema_version: u8,
     pub install_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
     pub activated: bool,
     pub last_step: Option<Step>,
     pub queue: Vec<Event>,
@@ -478,13 +541,15 @@ impl PersistedState {
         Self {
             schema_version: STATE_SCHEMA_VERSION,
             install_id,
+            account_id: None,
             activated: false,
             last_step: None,
             queue: Vec::new(),
         }
     }
 
-    fn push_bounded(&mut self, event: Event, max_queue: usize) {
+    fn push_bounded(&mut self, mut event: Event, max_queue: usize) {
+        event.installation_id = Some(self.install_id.clone());
         self.queue.push(event);
         while self.queue.len() > max_queue {
             self.queue.remove(0);
@@ -503,6 +568,15 @@ impl PersistedState {
                 "install_id is not a UUID".to_string(),
             ));
         }
+        if self
+            .account_id
+            .as_deref()
+            .is_some_and(|id| !is_account_id(id))
+        {
+            return Err(TelemetryError::InvalidState(
+                "invalid account binding".into(),
+            ));
+        }
         for event in &self.queue {
             event.validate()?;
         }
@@ -514,6 +588,9 @@ impl PersistedState {
 #[serde(deny_unknown_fields)]
 pub struct Event {
     pub event_id: String,
+    /// Local queue metadata only; never part of the event payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation_id: Option<String>,
     pub occurred_at_ms: u64,
     pub event_name: String,
     pub context: Context,
@@ -525,6 +602,7 @@ impl Event {
         let event_name = data.event_name().to_string();
         Self {
             event_id: new_uuid(),
+            installation_id: None,
             occurred_at_ms: now_ms(),
             event_name,
             context,
@@ -537,6 +615,15 @@ impl Event {
     }
 
     fn validate(&self) -> Result<()> {
+        if self
+            .installation_id
+            .as_deref()
+            .is_some_and(|id| !is_uuid(id))
+        {
+            return Err(TelemetryError::InvalidState(
+                "invalid queued installation id".into(),
+            ));
+        }
         if !is_uuid(&self.event_id) {
             return Err(TelemetryError::InvalidState(
                 "event_id is not a UUID".to_string(),
@@ -939,6 +1026,181 @@ mod tests {
     }
 
     #[test]
+    fn persisted_queue_accepts_account_binding_and_record_time_identity() {
+        let mut state = serde_json::to_value(PersistedState::new(new_uuid())).unwrap();
+        state["account_id"] = serde_json::json!("a".repeat(64));
+        let mut event = serde_json::to_value(Event::new(
+            EventData::Activated,
+            context("1.2.3", Engine::None),
+        ))
+        .unwrap();
+        event["installation_id"] = serde_json::json!(new_uuid());
+        state["queue"] = serde_json::json!([event]);
+        assert!(serde_json::from_value::<PersistedState>(state).is_ok(), "account binding must survive a restart alongside each queued event's original identity");
+    }
+
+    #[test]
+    fn account_binding_survives_restart_and_same_account_keeps_anonymous_trail() {
+        let dir = temp_dir("account-binding");
+        let first = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let id = first.install_id().unwrap();
+        first.record(EventData::Activated).unwrap();
+        first.bind_account(&"a".repeat(64)).unwrap();
+        assert_eq!(first.install_id().as_deref(), Some(id.as_str()));
+        drop(first);
+        let reopened = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        assert_eq!(reopened.bound_account(), Some("a".repeat(64)));
+        reopened.bind_account(&"a".repeat(64)).unwrap();
+        assert_eq!(reopened.install_id().as_deref(), Some(id.as_str()));
+        assert_eq!(reopened.snapshot().unwrap().queue.len(), 1);
+    }
+
+    #[test]
+    fn switching_accounts_sends_queued_events_under_their_original_identity() {
+        let _ports = crate::test_support::hold_ports();
+        let dir = temp_dir("account-switch");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let old_id = telemetry.install_id().unwrap();
+        telemetry.bind_account(&"a".repeat(64)).unwrap();
+        telemetry.record(EventData::Activated).unwrap();
+        // An old on-disk queue did not carry per-event installation IDs.
+        telemetry.state.lock().unwrap().as_mut().unwrap().queue[0].installation_id = None;
+        telemetry.bind_account(&"b".repeat(64)).unwrap();
+        let new_id = telemetry.install_id().unwrap();
+        assert_ne!(old_id, new_id);
+        assert_eq!(
+            telemetry.runtime_env().get("CPK_TELEMETRY_ID"),
+            Some(&new_id)
+        );
+        telemetry
+            .record(EventData::HarnessChosen {
+                harness: Harness::ByoUrl,
+            })
+            .unwrap();
+        let server = thread::spawn(move || {
+            [
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        telemetry.flush().unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains(&old_id));
+        assert!(!requests[0].contains(&new_id));
+        assert!(requests[1].contains(&new_id));
+        for request in requests {
+            assert!(!request.contains("account_id"));
+        }
+        assert!(telemetry.snapshot().unwrap().queue.is_empty());
+    }
+
+    #[test]
+    fn sign_out_sends_later_events_under_a_fresh_anonymous_identity() {
+        let _ports = crate::test_support::hold_ports();
+        let dir = temp_dir("account-sign-out");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let old_id = telemetry.install_id().unwrap();
+        telemetry.bind_account(&"a".repeat(64)).unwrap();
+        telemetry.record(EventData::Activated).unwrap();
+        // An old on-disk queue did not carry per-event installation IDs.
+        telemetry.state.lock().unwrap().as_mut().unwrap().queue[0].installation_id = None;
+        telemetry.clear_account().unwrap();
+        assert_eq!(telemetry.bound_account(), None);
+        let signed_out_id = telemetry.install_id();
+        telemetry.clear_account().unwrap();
+        assert_eq!(telemetry.install_id(), signed_out_id);
+        let new_id = telemetry.install_id().unwrap();
+        assert_ne!(old_id, new_id);
+        assert_eq!(
+            telemetry.runtime_env().get("CPK_TELEMETRY_ID"),
+            Some(&new_id)
+        );
+        telemetry
+            .record(EventData::HarnessChosen {
+                harness: Harness::ByoUrl,
+            })
+            .unwrap();
+        let server = thread::spawn(move || {
+            [
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        telemetry.flush().unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains(&old_id));
+        assert!(!requests[0].contains(&new_id));
+        assert!(requests[1].contains(&new_id));
+        for request in requests {
+            assert!(!request.contains("account_id"));
+        }
+        assert!(telemetry.snapshot().unwrap().queue.is_empty());
+    }
+
+    #[test]
+    fn opt_out_does_not_create_an_account_binding() {
+        let dir = temp_dir("account-opt-out");
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Disabled,
+        )
+        .unwrap();
+        telemetry.bind_account(&"a".repeat(64)).unwrap();
+        assert!(telemetry.install_id().is_none());
+        assert!(telemetry.bound_account().is_none());
+        assert!(!state_path(&dir).exists());
+    }
+
+    #[test]
+    fn failed_binding_write_leaves_in_memory_identity_unchanged() {
+        let dir = temp_dir("account-write-failure");
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        telemetry.bind_account(&"a".repeat(64)).unwrap();
+        let id = telemetry.install_id();
+        fs::remove_file(state_path(&dir)).unwrap();
+        fs::create_dir(state_path(&dir)).unwrap();
+        assert!(telemetry.bind_account(&"b".repeat(64)).is_err());
+        assert_eq!(telemetry.install_id(), id);
+        assert_eq!(telemetry.bound_account(), Some("a".repeat(64)));
+    }
+
+    #[test]
     fn numeric_version_accepts_only_normalized_numeric_versions() {
         let version = NumericVersion::parse("1.2").unwrap();
         assert_eq!(version.to_string(), "1.2");
@@ -1131,6 +1393,7 @@ mod tests {
         let state = PersistedState {
             schema_version: STATE_SCHEMA_VERSION,
             install_id: "11111111-1111-4111-8111-111111111111".to_string(),
+            account_id: None,
             activated: false,
             last_step: None,
             queue: vec![Event::new(

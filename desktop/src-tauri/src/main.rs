@@ -2326,6 +2326,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
     // Named rather than inlined: the Bot choice below reads it, the store file is written from it,
     // and reading the model screen twice could not be relied on to give the same answer.
     let credential = start_stack_credential(&root, model)?;
+    let identity_app = app.clone();
+    // Run alongside engine and image preparation. Only the runtime environment needs the
+    // resulting identity, so optional telemetry does not delay the preceding setup work.
+    let identity_link = std::thread::Builder::new()
+        .name("openbot-account-link".into())
+        .spawn(move || desktop_telemetry::link_account(&identity_app));
 
     /*
      * A PLAN CHOOSES ITS OWN BOT, because only one Bot can spend it.
@@ -2628,6 +2634,13 @@ async fn start_stack_inner<R: tauri::Runtime>(
             if let Some(value) = settings.get(key) {
                 secrets.insert(key.into(), value.clone());
             }
+        }
+        // Join only at the identity handoff, after vault, port and image preparation.
+        if identity_link
+            .map(|worker| worker.join().is_err())
+            .unwrap_or(true)
+        {
+            eprintln!("[telemetry] account link worker did not complete");
         }
         // Handed to Compose with the rest; a service receives only what the Compose file names.
         secrets.extend(desktop_telemetry::runtime_env(&app));

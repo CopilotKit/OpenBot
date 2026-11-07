@@ -63,6 +63,40 @@ A return visit with a recorded local stack goes straight to Start. Any other sav
 including an installation that an earlier app connected to a hosted Intelligence, starts at the
 first screen and keeps its finished install.
 
+## Account attribution in telemetry
+
+After CopilotKit sign-in and before starting OpenBot, the native shell calls the bundled
+CLI's `telemetry link --installation-id <UUID> --json` command. The CLI uses its verified
+Ops session to return an opaque account fingerprint. Desktop saves that binding before
+calling again with `--account-id <hash>`. Ops emits the existing identity-link event;
+the telemetry sink aliases the desktop UUID to the Clerk person in PostHog. The desktop
+never reads CLI credential files or adds email addresses to product events.
+
+The first account keeps the existing installation UUID, so its anonymous setup history
+can join the account. A different account gets a new UUID before linking. A signed-out CLI result clears a
+previous binding and rotates the UUID. Queued events
+keep the UUID they were recorded under, including queues written by older desktop versions.
+The runtime receives the current UUID through `CPK_TELEMETRY_ID` before it starts.
+
+Desktop opt-out suppresses the call. CLI opt-out, CI and development-build rules still apply.
+An offline, signed-out or old CLI cannot prevent opening OpenBot. Sign-in does not wait
+for telemetry. Start overlaps linking with preparation and joins before handing the UUID
+to the runtime. Each of at most two CLI calls has an eight-second budget plus 250 ms kill
+grace; failure logs a fixed deferred message and retries on the next Start.
+A successful CLI response means Ops accepted the authenticated verify request. Aliases
+are best-effort and require the Ops telemetry sink to be enabled. Terminal logout takes
+effect at the next Start handshake, not inside an already-running runtime.
+
+Release dependency: the bundled CLI must include `telemetry link`. The current
+`desktop/intelligence-cli.json` pin predates that command; update it to the companion
+Intelligence change, built with `CLI_ENV=production`, before releasing this feature.
+Until then, linking is deferred. See [Desktop telemetry](../desktop/TELEMETRY.md) for
+the account state, downgrade behavior and outstanding disclosure review.
+Validate a real sign-in, task and restart under one PostHog person, then switch accounts
+and verify that the second person's activity remains separate. Production delivery has
+not been established by the local tests.
+
+
 ## Who owns what
 
 | Owner | Owns |

@@ -2,12 +2,13 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use openbot_desktop_lib::{engine, quiet, telemetry};
+use openbot_desktop_lib::{engine, local_eval, quiet, telemetry};
 use tauri::Manager;
 
 pub struct DesktopTelemetry {
     emitter: Arc<telemetry::Telemetry>,
     runtime_env: Mutex<BTreeMap<String, String>>,
+    identity_link: Mutex<()>,
 }
 
 pub fn initialize<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -42,6 +43,7 @@ pub fn initialize<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         app.manage(DesktopTelemetry {
             emitter,
             runtime_env: Mutex::new(runtime_env),
+            identity_link: Mutex::new(()),
         });
         Some(())
     })();
@@ -108,6 +110,61 @@ fn context(version: &str) -> Option<telemetry::Context> {
             RuntimeEnv::Production
         },
     })
+}
+
+/// Run on a worker alongside startup preparation, before the runtime reads its identity.
+/// Alias failures never prevent opening OpenBot; the next launch retries the same binding.
+pub fn link_account<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(state) = app.try_state::<DesktopTelemetry>() else {
+        return;
+    };
+    let Ok(_link) = state.identity_link.lock() else {
+        return;
+    };
+    if link_account_with(&state, local_eval::link_telemetry_installed).is_err() {
+        eprintln!("[telemetry] account link deferred until the next launch");
+    }
+}
+
+/// Keep the binding durable before invoking the CLI's permanent alias operation.
+fn link_account_with(
+    state: &DesktopTelemetry,
+    mut link: impl FnMut(
+        &local_eval::Installation,
+        Option<&str>,
+    ) -> Result<local_eval::TelemetryIdentity, local_eval::Failure>,
+) -> Result<(), ()> {
+    for _ in 0..2 {
+        let Some(id) = state.emitter.install_id() else {
+            return Ok(());
+        };
+        let installation = local_eval::Installation::parse(&id).map_err(|_| ())?;
+        let account = state.emitter.bound_account();
+        match link(&installation, account.as_deref()).map_err(|_| ())? {
+            local_eval::TelemetryIdentity::Skipped => return Ok(()),
+            local_eval::TelemetryIdentity::SignedOut => {
+                state.emitter.clear_account().map_err(|_| ())?;
+                state
+                    .runtime_env
+                    .lock()
+                    .map_err(|_| ())?
+                    .extend(state.emitter.runtime_env());
+                return Ok(());
+            }
+            local_eval::TelemetryIdentity::Linked { account_id }
+                if account.as_deref() == Some(&account_id) =>
+            {
+                return Ok(())
+            }
+            local_eval::TelemetryIdentity::Account { account_id } => {
+                state.emitter.bind_account(&account_id).map_err(|_| ())?;
+                let mut environment = state.runtime_env.lock().map_err(|_| ())?;
+                environment.extend(state.emitter.runtime_env());
+            }
+            _ => return Err(()),
+        }
+    }
+    Err(())
 }
 
 pub fn record<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event: telemetry::EventData) {
@@ -207,6 +264,145 @@ mod tests {
     use crate::test_support::temp_root;
     use tauri::Manager;
 
+    fn identity_state(enabled: bool) -> DesktopTelemetry {
+        let emitter = telemetry::Telemetry::open_with_env(
+            temp_root("account-link"),
+            context(),
+            telemetry::Config::disabled_for_tests(),
+            if enabled {
+                telemetry::EnvOverride::Enabled
+            } else {
+                telemetry::EnvOverride::Disabled
+            },
+        )
+        .unwrap();
+        DesktopTelemetry {
+            runtime_env: Mutex::new(emitter.runtime_env()),
+            emitter,
+            identity_link: Mutex::new(()),
+        }
+    }
+
+    #[test]
+    fn account_link_saves_binding_before_alias_and_retries_after_failure() {
+        let state = identity_state(true);
+        let id = state.emitter.install_id().unwrap();
+        let account = "a".repeat(64);
+        let mut calls = 0;
+        assert!(link_account_with(&state, |installation, bound| {
+            calls += 1;
+            assert_eq!(installation.as_str(), id);
+            if calls == 1 {
+                assert_eq!(bound, None);
+                Ok(local_eval::TelemetryIdentity::Account {
+                    account_id: account.clone(),
+                })
+            } else {
+                assert_eq!(bound, Some(account.as_str()));
+                assert_eq!(
+                    state.emitter.snapshot().unwrap().account_id.as_deref(),
+                    bound
+                );
+                Err(local_eval::Failure::UnexpectedExit)
+            }
+        })
+        .is_err());
+        assert_eq!(calls, 2);
+        assert!(link_account_with(&state, |installation, bound| {
+            assert_eq!(installation.as_str(), id);
+            assert_eq!(bound, Some(account.as_str()));
+            Ok(local_eval::TelemetryIdentity::Linked {
+                account_id: account.clone(),
+            })
+        })
+        .is_ok());
+    }
+
+    #[test]
+    fn account_change_rotates_before_linking_and_updates_runtime_environment() {
+        let state = identity_state(true);
+        state.emitter.bind_account(&"a".repeat(64)).unwrap();
+        let old = state.emitter.install_id().unwrap();
+        let account = "b".repeat(64);
+        let mut calls = 0;
+        assert!(link_account_with(&state, |installation, bound| {
+            calls += 1;
+            if calls == 1 {
+                assert_eq!(installation.as_str(), old);
+                Ok(local_eval::TelemetryIdentity::Account {
+                    account_id: account.clone(),
+                })
+            } else {
+                assert_ne!(installation.as_str(), old);
+                assert_eq!(bound, Some(account.as_str()));
+                assert_eq!(
+                    state
+                        .runtime_env
+                        .lock()
+                        .unwrap()
+                        .get("CPK_TELEMETRY_ID")
+                        .map(String::as_str),
+                    Some(installation.as_str())
+                );
+                Ok(local_eval::TelemetryIdentity::Linked {
+                    account_id: account.clone(),
+                })
+            }
+        })
+        .is_ok());
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn signed_out_receipt_clears_binding_and_updates_runtime_environment() {
+        let state = identity_state(true);
+        state.emitter.bind_account(&"a".repeat(64)).unwrap();
+        let old = state.emitter.install_id();
+        assert!(link_account_with(&state, |_, _| {
+            local_eval::normalize_telemetry_identity(0, br#"{"type":"signed_out"}"#)
+        })
+        .is_ok());
+        assert_eq!(state.emitter.bound_account(), None);
+        assert_ne!(state.emitter.install_id(), old);
+        assert_eq!(
+            state.runtime_env.lock().unwrap().get("CPK_TELEMETRY_ID"),
+            state.emitter.install_id().as_ref()
+        );
+    }
+
+    #[test]
+    fn disabled_telemetry_never_calls_the_account_linker() {
+        let state = identity_state(false);
+        assert!(link_account_with(&state, |_, _| panic!(
+            "opted-out desktop must not call the CLI"
+        ))
+        .is_ok());
+    }
+
+    #[test]
+    fn account_link_refuses_an_unexpected_alias_receipt_and_bounds_account_changes() {
+        let state = identity_state(true);
+        assert!(
+            link_account_with(&state, |_, _| Ok(local_eval::TelemetryIdentity::Linked {
+                account_id: "a".repeat(64)
+            }))
+            .is_err()
+        );
+        let mut calls = 0;
+        assert!(link_account_with(&state, |_, _| {
+            calls += 1;
+            Ok(local_eval::TelemetryIdentity::Account {
+                account_id: if calls == 1 {
+                    "a".repeat(64)
+                } else {
+                    "b".repeat(64)
+                },
+            })
+        })
+        .is_err());
+        assert_eq!(calls, 2);
+    }
+
     fn context() -> telemetry::Context {
         telemetry::Context {
             distribution: telemetry::Distribution::Desktop,
@@ -242,6 +438,7 @@ mod tests {
                 .manage(DesktopTelemetry {
                     emitter,
                     runtime_env: Mutex::new(BTreeMap::new()),
+                    identity_link: Mutex::new(()),
                 })
                 .invoke_handler(tauri::generate_handler![crate::record_setup_event])
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
