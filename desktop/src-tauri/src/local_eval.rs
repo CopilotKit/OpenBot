@@ -2286,6 +2286,7 @@ pub fn account_sign_in_installed(attempt: &str) -> Result<AccountSignIn, Failure
 pub enum TelemetryIdentity {
     Account { account_id: String },
     Linked { account_id: String },
+    SignedOut,
     Skipped,
 }
 
@@ -2295,29 +2296,45 @@ pub fn link_telemetry_installed(
     installation: &Installation,
     account: Option<&str>,
 ) -> Result<TelemetryIdentity, Failure> {
+    let cancel = Cancel::default();
+    one_at_a_time(&cancel, telemetry_link_limits(), |limits| {
+        let cli = installed()?;
+        link_telemetry(&cli, installation, account, limits, &cancel)
+    })
+}
+
+/// Bound the optional handshake separately from product CLI operations.
+fn telemetry_link_limits() -> Limits {
+    Limits {
+        timeout: Duration::from_secs(2),
+        grace: Duration::from_millis(250),
+        output: MAX_OUTPUT,
+    }
+}
+
+/// Execute the fixed identity command through the same bounded process boundary as setup.
+fn link_telemetry(
+    cli: &PinnedCli,
+    installation: &Installation,
+    account: Option<&str>,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<TelemetryIdentity, Failure> {
     if account.is_some_and(|value| !crate::telemetry::is_account_id(value)) {
         return Err(Failure::ContractMismatch);
     }
-    let cancel = Cancel::default();
-    let limits = Limits {
-        timeout: Duration::from_secs(10),
-        ..Limits::for_action(Action::Status)
-    };
-    one_at_a_time(&cancel, limits, |limits| {
-        let cli = installed()?;
-        let mut arguments = vec![
-            "telemetry",
-            "link",
-            "--installation-id",
-            installation.as_str(),
-            "--json",
-        ];
-        if let Some(account) = account {
-            arguments.extend(["--account-id", account]);
-        }
-        let (code, bytes) = execute(&cli, &arguments, None, limits, &cancel)?;
-        normalize_telemetry_identity(code, &bytes)
-    })
+    let mut arguments = vec![
+        "telemetry",
+        "link",
+        "--installation-id",
+        installation.as_str(),
+        "--json",
+    ];
+    if let Some(account) = account {
+        arguments.extend(["--account-id", account]);
+    }
+    let (code, bytes) = execute(cli, &arguments, None, limits, cancel)?;
+    normalize_telemetry_identity(code, &bytes)
 }
 
 /// Refuse unexpected or private fields before returning anything to the shell.
@@ -4551,6 +4568,75 @@ fn main() {
             grace: Duration::from_millis(500),
             output: MAX_OUTPUT,
         }
+    }
+
+    #[test]
+    fn telemetry_process_uses_fixed_arguments_and_ignores_stderr() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let account = "a".repeat(64);
+        for bound in [None, Some(account.as_str())] {
+            let fixture = Fixture::new(
+                "telemetry-process",
+                &format!("0\n{{\"type\":\"account\",\"account_id\":\"{account}\"}}\n"),
+            );
+            assert_eq!(
+                link_telemetry(
+                    &fixture.cli(),
+                    &installation,
+                    bound,
+                    telemetry_link_limits(),
+                    &Cancel::default()
+                ),
+                Ok(TelemetryIdentity::Account {
+                    account_id: account.clone()
+                })
+            );
+            let mut expected = format!(
+                "telemetry\nlink\n--installation-id\n{}\n--json",
+                installation.as_str()
+            );
+            if let Some(bound) = bound {
+                expected.push_str(&format!("\n--account-id\n{bound}"));
+            }
+            assert_eq!(fixture.argv(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn telemetry_process_refuses_failed_and_old_cli_without_exposing_output() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        for body in ["private upstream failure", "Unknown telemetry subcommand"] {
+            let fixture = Fixture::new("telemetry-old-cli", &format!("1\n{body}"));
+            assert_eq!(
+                link_telemetry(
+                    &fixture.cli(),
+                    &installation,
+                    None,
+                    telemetry_link_limits(),
+                    &Cancel::default()
+                ),
+                Err(Failure::UnexpectedExit)
+            );
+        }
+    }
+
+    #[test]
+    fn telemetry_process_has_a_short_startup_budget_and_kills_a_hung_cli() {
+        let limits = telemetry_link_limits();
+        // Two account-handshake calls add at most 4.5 seconds, including kill grace.
+        assert!(limits.timeout + limits.grace <= Duration::from_millis(2250));
+        let fixture = Fixture::new("telemetry-timeout", "stubborn");
+        let cli = fixture.cli();
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            link_telemetry(&cli, &installation, None, limits, &Cancel::default()),
+            Err(Failure::Timeout)
+        );
+        // Allow scheduler overhead, but not the previous 10-second request budget.
+        assert!(started.elapsed() < Duration::from_secs(4));
+        #[cfg(unix)]
+        assert!(fixture.grandchild_stops());
     }
 
     #[test]

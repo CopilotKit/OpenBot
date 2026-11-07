@@ -1,8 +1,20 @@
 # Desktop telemetry
 
-Telemetry is enabled by default. Welcome discloses it without an opt-in gate. Launch OpenBot with either `COPILOTKIT_TELEMETRY_DISABLED=true` or `DO_NOT_TRACK=1` to disable both the desktop emitter and the runtime. Both variables accept `true` or `1`. Quit and relaunch after changing the environment. Opting out removes pending desktop events and prevents recording or replay.
+Telemetry is enabled by default. The current Welcome screen does not display a telemetry notice. Launch OpenBot with either `COPILOTKIT_TELEMETRY_DISABLED=true` or `DO_NOT_TRACK=1` to disable both the desktop emitter and the runtime. Both variables accept `true` or `1`. Quit and relaunch after changing the environment. Opting out removes pending desktop events and prevents recording or replay.
 
 The native emitter starts before credentials are available. It persists a random installation UUID and a bounded queue in the app's local data directory. It does not derive identity from the machine. The runtime receives the same UUID through `CPK_TELEMETRY_ID` and uses sampling rate 1; opt-out still takes precedence.
+
+## Account attribution
+
+When Start runs, the desktop asks the bundled CopilotKit CLI to verify its signed-in account. The desktop saves an opaque SHA-256 account fingerprint before requesting the alias through authenticated Ops. Credentials, email and Clerk identifiers stay outside the desktop event payload. The telemetry sink can then associate the installation UUID, including its earlier anonymous activity, with the signed-in PostHog person.
+
+A different account rotates the UUID before linking. A CLI `signed_out` result rotates a previously bound UUID and clears the binding. Queued events keep the UUID they were recorded under. The runtime receives the resulting UUID before it starts. Terminal logout is observed at the next Start handshake; it does not change an already-running runtime's environment. Opt-out deletes the local binding along with the UUID and queue. Suppressed CLI telemetry returns `skipped` and leaves the desktop binding unchanged.
+
+Sign-in does not wait for attribution. Start runs the handshake alongside preparation and joins it before passing the runtime environment. Each of at most two CLI calls has a two-second budget, including waiting for the CLI lock, plus up to 250 ms for termination. Failures defer linking to the next Start. A `linked` response means Ops accepted the authenticated request; alias delivery is best-effort and requires an enabled Ops telemetry sink.
+
+Release requires a bundled CLI with `telemetry link` and `signed_out` support, built with `CLI_ENV=production`, followed by live PostHog checks for sign-in, task use, restart and account switching. The existing pin predates this command. Product/privacy review of the desktop disclosure and account-attribution copy remains a release follow-up; this document does not establish that approval.
+
+The added state fields are not readable by older desktop releases because their parsers reject unknown fields. After a downgrade, those releases disable native telemetry until a compatible version reads the state again. Do not treat a downgrade as proof that telemetry is still active.
 
 ## Event allowlist
 
