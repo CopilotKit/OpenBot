@@ -81,6 +81,8 @@ import {
   forDisplay,
   REFUSAL_MARKER,
   toolResultFailed,
+  UNOFFERED_TOOL_SENTENCE,
+  unofferedTool,
 } from "@/lib/plugins/tool-result";
 import {
   RESEARCH_RESULTS_LABELS,
@@ -1690,7 +1692,9 @@ export function ServerToolLine({
    */
   const answer = result === undefined ? undefined : asText(result);
   const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
-  const failed = !refused && toolResultFailed(result);
+  // Asked for a tool it was never offered: it didn't work, and what the runtime said was for the model.
+  const unoffered = unofferedTool(result);
+  const failed = !refused && (unoffered || toolResultFailed(result));
   /*
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
    * label and then "Refused." again in the first two words of the body, which is the same fact three
@@ -1719,7 +1723,12 @@ export function ServerToolLine({
    * person looks like the Bot being told off in front of them. The line still says the check
    * happened; the Bot's own reply says what it found.
    */
-  const shown = name === SHOW_APP_ACCESS_TOOL ? undefined : body;
+  const shown =
+    name === SHOW_APP_ACCESS_TOOL
+      ? undefined
+      : unoffered
+        ? UNOFFERED_TOOL_SENTENCE
+        : body;
   /*
    * A web search or a page read opens to the pages it found, not to the provider's JSON. The list
    * bounds itself (a few results, each cut to a few lines), so the line does not scroll around it.

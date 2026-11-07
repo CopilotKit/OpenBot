@@ -170,6 +170,31 @@ export function browserCallFailed(result: string | undefined): boolean {
   );
 }
 
+/** What a step says, opened, when its Bot asked for a tool it doesn't have. */
+export const UNOFFERED_TOOL_SENTENCE =
+  "This Bot asked for a tool it doesn't have, so it carried on without it.";
+
+/**
+ * Whether a call's answer is its runtime saying the Bot was never offered that tool.
+ *
+ * The answer is written for the model: it names every tool the Bot does have, by identifier, so the
+ * model can pick one of them next time. Drawn as it came, a person opening the step reads a wall of
+ * `computer_navigate, computer_read, …` under "Web search". Two wordings, each the library's own
+ * and each checked against its source: the AI SDK's `NoSuchToolError` ("Model tried to call
+ * unavailable tool 'web_search'. Available tools: …"), which the runtime hands back with `Error: `
+ * in front, and LangGraph's prebuilt `ToolNode` ("Error: web_search is not a valid tool, try one of
+ * […]."). Claude Code's wrapper is read through, as {@link browserCallFailed} reads it.
+ */
+export function unofferedTool(result: string | undefined): boolean {
+  if (result === undefined) return false;
+  const answer = asText(result);
+  const text = (flaggedFailure(answer) ?? answer).trim();
+  return (
+    /^(Error: )?Model tried to call unavailable tool '[^']*'\./.test(text) ||
+    /^Error: \S+ is not a valid tool, try one of \[/.test(text)
+  );
+}
+
 /**
  * Whether a server-side tool reached a terminal failure rather than returning a result.
  *
