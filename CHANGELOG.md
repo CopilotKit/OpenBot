@@ -102,6 +102,10 @@ deployment:
   it that title, up to 100 characters, where it said it couldn't. The title heads the routine's row
   on the Routines page, with its schedule under it, and names it in a Bot's Activity. Bots are told
   a routine's id is for their tools only, and not to read it out.
+- **A routine a Bot makes to run one of your goals carries the goal's title**, such as "Track
+  OpenBot releases", on the Routines page and in a Bot's Activity, where it was named by the
+  instruction the Bot wrote for it ("Run the existing goal ... and report its result in this
+  conversation."). A title you give it is kept.
 - **Bots tell you a routine's next run on your clock**: a Bot that creates, changes or lists a
   routine is told "Saturday, November 7, 2026 at 9:00 AM UTC, 6 minutes from now", where it was told
   "2026-11-07T09:00:00.000Z", so it no longer says a run due in minutes is tomorrow.
