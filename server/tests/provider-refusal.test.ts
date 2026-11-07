@@ -3,6 +3,7 @@ import type { RunAgentInput } from "@ag-ui/client";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { createAgentFetch } from "../src/agents/endpoint";
 import { loadConfig } from "../src/config";
+import { currentEdition, setEdition } from "../src/edition";
 import {
   mountCopilotRuntime,
   type RegisteredAgent,
@@ -172,6 +173,9 @@ const said = {
     `${p} is having problems right now. Wait a few minutes, then try again.`,
   other: (p: string) =>
     `${p} turned down the request. Try again, or ask an admin if it keeps happening.`,
+  // The personal edition has nobody else to ask.
+  otherPersonal: (p: string) =>
+    `${p} turned down the request. Try again, or choose another model if it keeps happening.`,
 };
 
 /** AG-UI events the runner delivered to the platform. */
@@ -612,3 +616,29 @@ test("a Bot's own failure is not a provider's refusal, and keeps its words", asy
     expect(failure.logged).toHaveLength(0);
   }
 }, 20_000);
+
+test("a refusal with no particular reason says what the person can do, in each edition", async () => {
+  const before = currentEdition();
+  const words =
+    "Error code: 400 - Invalid value for 'temperature': expected a number between 0 and 2.";
+  /** The harness Bot's sentence, then the built-in Bot's, which stands its provider behind the stub. */
+  const both = async () => {
+    delete process.env.OPENAI_BASE_URL;
+    const harness = await harnessRefusedWith({ message: words, code: REFUSED });
+    const builtIn = await builtInRefusedWith(OPENAI.other);
+    return [harness.message, builtIn.message];
+  };
+  try {
+    // A team has an admin who runs OpenBot for everybody.
+    setEdition("team");
+    expect(await both()).toEqual([said.other("OpenAI"), said.other(UNNAMED)]);
+    // The personal edition is one person on their own machine: no admin to ask.
+    setEdition("personal");
+    expect(await both()).toEqual([
+      said.otherPersonal("OpenAI"),
+      said.otherPersonal(UNNAMED),
+    ]);
+  } finally {
+    setEdition(before);
+  }
+}, 30_000);
