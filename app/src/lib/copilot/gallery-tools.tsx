@@ -11,6 +11,11 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import {
+  FailedCard,
+  UNREADABLE,
+  WENT_WRONG,
+} from "@/components/gallery/failed";
 import { RefusedCard } from "@/components/gallery/refused";
 import {
   ArgumentsArrivingContext,
@@ -42,6 +47,7 @@ import {
   grantsFrom,
 } from "@/lib/copilot/grant-store";
 import { settledArgs } from "@/lib/copilot/settled-args";
+import { browserCallFailed } from "@/lib/plugins/tool-result";
 
 /**
  * Register compiled gallery components once per name. Which run is offered which is decided per run,
@@ -211,6 +217,22 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
       ).replace(NOT_SHOWN_TAIL, "");
       return <RefusedCard reason={reason} title={spec.title} />;
     }
+    /*
+     * A call that failed drew nothing, and what failed is often its arguments: Claude Code refuses
+     * arguments that aren't JSON before the browser ever runs the call. Drawn from those arguments,
+     * a table waited "for complete table data" for good, and again after a reload. The result says
+     * it failed, and the result is what a reload keeps.
+     */
+    if (props.status === "complete" && browserCallFailed(props.result)) {
+      return (
+        <FailedCard
+          reason={
+            argumentsFit(spec, props.args) === false ? UNREADABLE : WENT_WRONG
+          }
+          title={spec.title}
+        />
+      );
+    }
     // From the polled grants, so a revocation shows before a new call starts. Unknown draws.
     const state = cardState(snapshot, spec.name, spec.title, props.toolCallId);
     if (typeof state === "object") {
@@ -227,6 +249,19 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
       </GalleryStreamingContext.Provider>
     );
   };
+}
+
+/**
+ * Whether a call's arguments are what the component takes, or `undefined` when its schema can't say
+ * at once. Asked only of a call that is over, to say why it drew nothing.
+ */
+function argumentsFit(
+  spec: GalleryComponent,
+  args: unknown,
+): boolean | undefined {
+  const verdict = spec.parameters?.["~standard"]?.validate(args ?? {});
+  if (!verdict || verdict instanceof Promise) return undefined;
+  return !verdict.issues;
 }
 
 function GrantedDecision({
@@ -369,6 +404,20 @@ export function makeDecisionRender(
       [toolCallId],
     );
     const answer = props.status === "executing" ? answerThisCall : undefined;
+    /*
+     * Failed on arguments it can't be drawn from: an empty question with its buttons off, for good.
+     * Only then. A decision stopped while it waited also ends in a failed result, and its card,
+     * drawn from arguments that were fine, is still what the person was asked.
+     */
+    if (
+      props.status === "complete" &&
+      browserCallFailed(
+        typeof props.result === "string" ? props.result : undefined,
+      ) &&
+      argumentsFit(spec, props.args) === false
+    ) {
+      return <FailedCard reason={UNREADABLE} title={spec.title} />;
+    }
     const state = cardState(snapshot, spec.name, spec.title);
     if (state === "draw") return <Component {...props} respond={answer} />;
     if (state === "wait-for-grant") {

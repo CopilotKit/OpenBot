@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { callComponentFunction } from "@/lib/components/queries";
@@ -6,13 +6,17 @@ import { useActiveBotId } from "@/lib/copilot/active-bot";
 import { useConversation } from "@/lib/copilot/conversation";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { keyedLookup } from "@/lib/lookup";
+import { FailedCard, UNREADABLE } from "./failed";
 import { GalleryFrame } from "./frame";
 import { seriesColour } from "./palette";
+import { GalleryStreamingContext } from "./streaming";
 
 /**
  * Server-filled report component. The model chooses report arguments; data and permissions come
  * from the deployment.
  */
+
+const TITLE = "Activity report";
 
 export const ActivityReportProps = z.object({
   report: z
@@ -69,6 +73,7 @@ export function ActivityReportCard({
   const botId = useActiveBotId();
   const conversation = useConversation();
   const [state, setState] = useState<State>({ status: "reading" });
+  const streaming = useContext(GalleryStreamingContext);
 
   const functionName = report ? keyedLookup(FUNCTION_FOR, report) : undefined;
 
@@ -100,7 +105,12 @@ export function ActivityReportCard({
     };
   }, [functionName, days, botId]);
 
-  if (!report) {
+  /*
+   * No report it can read. While the call streams, the name is still arriving. Once its arguments
+   * are final there is nothing to read, and "Choosing" or "Reading" would stay on screen for good.
+   */
+  if (!functionName) {
+    if (!streaming) return <FailedCard reason={UNREADABLE} title={TITLE} />;
     return (
       <GalleryFrame title="Report">
         <p className="text-sm text-muted-foreground">Choosing a report…</p>
@@ -280,7 +290,7 @@ export const GALLERY: GalleryComponent[] = [
      * only means to show what the component looks like. Admin draws it as unpreviewable instead.
      */
     name: "showActivityReport",
-    title: "Activity report",
+    title: TITLE,
     kind: "card",
     description:
       "Show what this deployment has actually been doing, read from its own records rather than from anything you know. Use for 'what have the Bots been up to' and 'what has been refused'. You choose the report and the period; the figures are read for you and you will not see them.",

@@ -15,7 +15,7 @@ import { byPosition } from "@/components/gallery/positions";
 import { Badge, GalleryFrame } from "@/components/gallery/frame";
 import { Button } from "@/components/ui/button";
 import type { Look } from "@/lib/copilot/coding-calls";
-import { asText } from "@/lib/plugins/tool-result";
+import { asText, flaggedFailure } from "@/lib/plugins/tool-result";
 import { cn } from "@/lib/utils";
 import { ToolLine } from "./tool-line";
 
@@ -68,32 +68,6 @@ export function codingOutcome(
   if (flagged !== undefined || tagged !== undefined)
     return { state: "failed", text };
   return { state: "done", text };
-}
-
-/**
- * The text of a failure wrapped as the harness wraps one, or undefined.
- *
- * ONLY THAT EXACT SHAPE: `error: true` and a string `content`, and nothing else. The harness also
- * parses a result that is JSON text and sends it on re-serialised, so a command that printed an
- * API's `{"error": true, "message": "..."}` arrives looking like a flagged failure, and reading any
- * `error: true` as one drew a request that worked as "Didn't work". The harness adds `error: true`
- * to a failed result that was a JSON object too, but Claude Code's own tools answer in text, and a
- * failed one starts with its exit code or `<tool_use_error>`, so none of the calls drawn here fails
- * that way. What stays ambiguous is output that is itself exactly `{"error": true, "content": "..."}`:
- * the two are the same string, and nothing else in the stream tells them apart.
- */
-function flaggedFailure(answer: string): string | undefined {
-  if (!answer.trimStart().startsWith("{")) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(answer);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return undefined;
-    const { error, content, ...rest } = parsed as Record<string, unknown>;
-    if (error !== true || typeof content !== "string") return undefined;
-    return Object.keys(rest).length === 0 ? content : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function linesOf(text: string): string[] {
