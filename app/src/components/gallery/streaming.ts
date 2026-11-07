@@ -10,6 +10,17 @@ import { createContext } from "react";
 export const GalleryStreamingContext = createContext(false);
 
 /**
+ * Whether the call's own decision is in: its handler has answered, or the row is not part of a turn
+ * still running. A component that reads data waits for it, so a call that is refused reads nothing
+ * and a call that is allowed reads once.
+ *
+ * Read early, the Activity report asked for its data with half its arguments while they streamed,
+ * then again with all of them while the call was being decided: one refused try wrote three refused
+ * rows. Outside a conversation nothing is being decided, which is the default.
+ */
+export const GalleryDecidedContext = createContext(true);
+
+/**
  * Whether a call's arguments may still be arriving at all: its row is the newest of a turn that is
  * still running. The SDK's own status cannot say this on its own. It reports `inProgress` for any
  * call with no result, so a call whose run was stopped, or whose page closed before it answered,
