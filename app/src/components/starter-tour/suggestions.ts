@@ -37,7 +37,6 @@ export const STARTER_SUGGESTIONS: CopilotChatSuggestionViewProps["suggestions"] 
 
 export type StarterTourState = {
   starterTourChannelId?: string;
-  starterTourDismissed?: boolean;
 };
 
 /** Before a conversation exists, offer the unclaimed tour. Afterwards, only its saved conversation. */
@@ -45,7 +44,6 @@ export function showStarterTour(
   state: StarterTourState,
   channelId?: string,
 ): boolean {
-  if (state.starterTourDismissed) return false;
   return channelId
     ? state.starterTourChannelId === channelId
     : state.starterTourChannelId === undefined;

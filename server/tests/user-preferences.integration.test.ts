@@ -1,11 +1,11 @@
 import { afterAll, afterEach, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
+import { createAgentProfileStore } from "../src/agents/profile-store";
+import { createChannelStore } from "../src/channels/routes";
+import { createThreadIdentity } from "../src/channels/thread-identity";
 import { createDatabase } from "../src/db/client";
 import { channelMemberships, channels, users } from "../src/db/schema";
-import { createAgentProfileStore } from "../src/agents/profile-store";
-import { createThreadIdentity } from "../src/channels/thread-identity";
-import { createChannelStore } from "../src/channels/routes";
 import { createUserPreferencesStore } from "../src/user-preferences";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -178,31 +178,19 @@ test("concurrent starter claims across pools keep one winner and unrelated prefe
       saved.starterTourChannelId,
     );
     expect((await store.read(other)).starterTourChannelId).toBeUndefined();
-    await store.patch(id, { starterTourDismissed: true });
-    expect(await secondStore.read(id)).toMatchObject({
-      starterTourChannelId: saved.starterTourChannelId,
-      starterTourDismissed: true,
-    });
   } finally {
     await secondDatabase.$client.close();
   }
 });
 
-test("dismissal before a claim prevents later conversations consuming the tour", async () => {
-  const id = await person();
-  await store.patch(id, { starterTourDismissed: true });
-  await store.claimStarterTour(id, "later");
-  expect((await store.read(id)).starterTourChannelId).toBeUndefined();
-});
-
 test.each([
-  { used: false, dismissed: false, matching: true, released: true },
-  { used: true, dismissed: false, matching: true, released: false },
-  { used: false, dismissed: true, matching: true, released: false },
-  { used: false, dismissed: false, matching: false, released: false },
+  { used: false, discard: true, matching: true, released: true },
+  { used: true, discard: true, matching: true, released: false },
+  { used: false, discard: false, matching: true, released: false },
+  { used: false, discard: true, matching: false, released: false },
 ])(
-  "deletion releases only the matching empty, undismissed tour: %j",
-  async ({ used, dismissed, matching, released }) => {
+  "only explicit failed-start deletion releases a matching empty tour: %j",
+  async ({ used, discard, matching, released }) => {
     const id = await person();
     const other = await person();
     const channelId = `tour-${randomUUID()}`;
@@ -220,22 +208,20 @@ test.each([
       await store.claimStarterTour(other, channelId);
       await store.patch(id, {
         skin: "openduet",
-        ...(dismissed ? { starterTourDismissed: true } : {}),
       });
-      await channelStore.softDelete({ id, role: "user" }, channelId);
+      await channelStore.softDelete({ id, role: "user" }, channelId, discard);
       const saved = await store.read(id);
       expect(saved.starterTourChannelId).toBe(
         released ? undefined : matching ? channelId : "different",
       );
       expect(saved.skin).toBe("openduet");
-      expect(saved.starterTourDismissed).toBe(dismissed ? true : undefined);
       expect((await store.read(other)).starterTourChannelId).toBe(channelId);
       await store.claimStarterTour(id, "retry");
       expect((await store.read(id)).starterTourChannelId).toBe(
         released ? "retry" : saved.starterTourChannelId,
       );
       // A duplicate delete must never release a subsequent claim.
-      await channelStore.softDelete({ id, role: "user" }, channelId);
+      await channelStore.softDelete({ id, role: "user" }, channelId, discard);
       expect((await store.read(id)).starterTourChannelId).toBe(
         released ? "retry" : saved.starterTourChannelId,
       );

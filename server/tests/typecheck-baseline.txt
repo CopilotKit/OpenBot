@@ -56,7 +56,6 @@ server/tests/bot-lifecycle-audit.test.ts: error TS2345: Argument of type '{ revo
 server/tests/bot-lifecycle-audit.test.ts: error TS2345: Argument of type '{ revoke: (id: string) => Promise<undefined>; }' is not assignable to parameter of type 'Pick<CredentialStore, "revoke">'.
 server/tests/bot-lifecycle-audit.test.ts: error TS2345: Argument of type '{ revoke: (id: string) => Promise<undefined>; }' is not assignable to parameter of type 'Pick<CredentialStore, "revoke">'.
 server/tests/bot-lifecycle-audit.test.ts: error TS2769: No overload matches this call.
-server/tests/channel-routes.test.ts: error TS2322: Type '(receivedActor: AgentActor, id: string) => Promise<void>' is not assignable to type '(actor: AgentActor, channelId: string) => Promise<boolean>'.
 server/tests/channel-routes.test.ts: error TS2769: No overload matches this call.
 server/tests/channel-routes.test.ts: error TS2769: No overload matches this call.
 server/tests/channel-summary.integration.test.ts: error TS2769: No overload matches this call.

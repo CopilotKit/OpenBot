@@ -72,6 +72,9 @@ let creates: { agentIds: string[] }[] = [];
 let chosen: { agentId?: string; text?: string }[] = [];
 let preferences: { starterTourChannelId?: string } = {};
 let failModel = false;
+let modelSaveGate: Promise<void> | undefined;
+let failRun = false;
+let runModels: (string | null)[] = [];
 let deletes = 0;
 let saved = { model: null as string | null, effort: null as string | null };
 
@@ -165,6 +168,7 @@ beforeAll(() => {
         });
       if (url.pathname.endsWith("/model")) {
         if (method === "PUT") {
+          await modelSaveGate;
           if (failModel)
             return NativeResponse.json(
               { error: "Model save failed. Try again." },
@@ -179,7 +183,11 @@ beforeAll(() => {
         method === "DELETE"
       ) {
         deletes++;
-        if (preferences.starterTourChannelId === channel.id) preferences = {};
+        if (
+          url.searchParams.get("discardFailedStart") === "true" &&
+          preferences.starterTourChannelId === channel.id
+        )
+          preferences = {};
         return new NativeResponse(null, { status: 204 });
       }
       if (url.pathname === "/api/agents")
@@ -216,6 +224,16 @@ beforeAll(() => {
         const body = RunAgentInputSchema.parse(await request.json());
         runs.push(body);
         runPaths.push(url.pathname);
+        runModels.push(saved.model);
+        if (failRun)
+          return sse([
+            { type: "RUN_STARTED", threadId: body.threadId, runId: body.runId },
+            {
+              type: "RUN_ERROR",
+              message: "Starter task failed once",
+              code: "agent_error",
+            },
+          ]);
         return sse([
           { type: "RUN_STARTED", threadId: body.threadId, runId: body.runId },
           { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId },
@@ -246,6 +264,9 @@ afterEach(() => {
   chosen = [];
   preferences = {};
   failModel = false;
+  modelSaveGate = undefined;
+  failRun = false;
+  runModels = [];
   deletes = 0;
   saved = { model: null, effort: null };
 });
@@ -404,4 +425,69 @@ test("new conversation model save failure discards the claim and lets the starte
   expect(
     runs[0]?.messages.find((message) => message.role === "user")?.content,
   ).toBe(STARTER_SUGGESTIONS[0].message);
+});
+
+for (const failed of [false, true]) {
+  test(`in-conversation suggestions wait for model saving (failure: ${failed})`, async () => {
+    const view = draw("/");
+    fireEvent.click(
+      await view.findByRole("button", { name: STARTER_SUGGESTIONS[0].title }),
+    );
+    await waitFor(() => expect(runs).toHaveLength(1));
+    const suggestion = (await view.findByRole("button", {
+      name: STARTER_SUGGESTIONS[2].title,
+    })) as HTMLButtonElement;
+    await waitFor(() => expect(suggestion.disabled).toBe(false));
+    let release = () => {};
+    modelSaveGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    failModel = failed;
+    const user = userEvent.setup({ document });
+    await user.click(
+      await view.findByRole("combobox", { name: /Model: Default model/ }),
+    );
+    await user.click(
+      within(await view.findByRole("dialog")).getByRole("option", {
+        name: "Alternate model",
+      }),
+    );
+    await waitFor(() => expect(suggestion.disabled).toBe(true));
+    fireEvent.click(suggestion);
+    expect(runs).toHaveLength(1);
+    await act(async () => {
+      release();
+    });
+    await waitFor(() => expect(suggestion.disabled).toBe(false));
+    expect(runs).toHaveLength(1);
+    if (!failed) {
+      fireEvent.click(suggestion);
+      await waitFor(() => expect(runs).toHaveLength(2));
+      expect(runModels[1]).toBe("alternate-model");
+    } else {
+      expect(saved.model).toBeNull();
+    }
+  });
+}
+
+test("a failed in-conversation starter turn reports its error only in the transcript", async () => {
+  const view = draw("/");
+  fireEvent.click(
+    await view.findByRole("button", { name: STARTER_SUGGESTIONS[0].title }),
+  );
+  await waitFor(() => expect(runs).toHaveLength(1));
+  const suggestion = (await view.findByRole("button", {
+    name: STARTER_SUGGESTIONS[2].title,
+  })) as HTMLButtonElement;
+  await waitFor(() => expect(suggestion.disabled).toBe(false));
+  failRun = true;
+  fireEvent.click(suggestion);
+  await view.findByText("Starter task failed once");
+  await waitFor(() => expect(suggestion.disabled).toBe(false));
+  expect(view.getAllByText("Starter task failed once")).toHaveLength(1);
+  expect(
+    within(view.getByRole("region", { name: "Starter tasks" })).queryByRole(
+      "alert",
+    ),
+  ).toBeNull();
 });

@@ -34,7 +34,6 @@ afterAll(async () => {
 
 type Preferences = {
   starterTourChannelId?: string;
-  starterTourDismissed?: boolean;
 };
 function server(initial: Preferences = {}, available = true) {
   const users: Record<string, Preferences> = { first: initial, second: {} };
@@ -158,35 +157,16 @@ test("a claimed tour is shown only in its saved channel, never home or a later c
   }
 });
 
-test("Hide PATCHes the shared account preference and remains hidden for both IDs after remount", async () => {
-  const state = server();
+test("starter tasks have no dismiss control", async () => {
+  server();
   const view = draw({ agentId: "picked-harness" });
-  fireEvent.click(
-    await view.findByRole("button", { name: "Hide starter tasks" }),
-  );
-  await waitFor(() =>
-    expect(view.queryByRole("region", { name: "Starter tasks" })).toBeNull(),
-  );
-  expect(state.patches).toEqual([{ starterTourDismissed: true }]);
-  view.unmount();
-  for (const agentId of ["picked-harness", "personal-assistant"]) {
-    const remount = draw({ agentId });
-    await waitFor(() =>
-      expect(
-        remount.client.getQueryData<Preferences>([
-          "settings",
-          "preferences",
-          "first",
-        ]),
-      ).toEqual({ starterTourDismissed: true }),
-    );
-    expect(remount.queryByRole("region", { name: "Starter tasks" })).toBeNull();
-    remount.unmount();
-  }
+  await view.findByRole("region", { name: "Starter tasks" });
+  expect(view.queryByRole("button", { name: "Hide starter tasks" })).toBeNull();
+  expect(view.getAllByRole("button")).toHaveLength(5);
 });
 
-test("a dismissed user's preference does not hide tasks for a second user in the same cache", async () => {
-  const state = server({ starterTourDismissed: true });
+test("one user's claimed conversation does not hide tasks for a second user in the same cache", async () => {
+  const state = server({ starterTourChannelId: "first-channel" });
   const first = draw({ agentId: "picked-harness" });
   await waitFor(() =>
     expect(
@@ -257,76 +237,58 @@ test("a failed selection leaves an error and permits retry", async () => {
   await waitFor(() => expect(view.queryByRole("alert")).toBeNull());
 });
 
-test("a failed dismissal keeps the choices visible and can be retried", async () => {
-  const state = server();
-  state.failSave = true;
-  const view = draw({ agentId: "personal-assistant" });
-  fireEvent.click(
-    await view.findByRole("button", { name: "Hide starter tasks" }),
-  );
-  expect((await view.findByRole("alert")).textContent).toContain(
-    "Could not save starter tasks",
-  );
-  expect(view.getByRole("region", { name: "Starter tasks" })).toBeTruthy();
-  state.failSave = false;
-  fireEvent.click(view.getByRole("button", { name: "Hide starter tasks" }));
+test("disabled interactive answers explain the limitation without an irrelevant setup link", async () => {
+  server({}, false);
+  const sent: string[] = [];
+  const view = draw({
+    agentId: "picked-harness",
+    onSelect: (message) => sent.push(message),
+  });
+  const button = await view.findByRole("button", {
+    name: STARTER_SUGGESTIONS[1].title,
+  });
   await waitFor(() =>
-    expect(view.queryByRole("region", { name: "Starter tasks" })).toBeNull(),
+    expect(
+      view.client.getQueryData(["deployment", "capabilities"]),
+    ).toBeTruthy(),
   );
+  fireEvent.click(button);
+  expect((await view.findByRole("alert")).textContent).toContain(
+    "disabled for this installation",
+  );
+  expect(view.queryByRole("link", { name: "Check setup" })).toBeNull();
+  expect(sent).toEqual([]);
 });
 
-for (const index of [1, 3, 4]) {
-  test(`unavailable capability for task ${index} shows setup without sending a message`, async () => {
-    server({}, false);
-    const sent: string[] = [];
-    const view = draw({
-      agentId: "picked-harness",
-      onSelect: (message) => {
-        sent.push(message);
-      },
-    });
-    const button = await view.findByRole("button", {
-      name: STARTER_SUGGESTIONS[index].title,
-    });
-    await waitFor(() =>
-      expect(view.client.getQueryData(["setup", "checklist"])).toBeTruthy(),
-    );
-    fireEvent.click(button);
-    expect(
-      (await view.findByRole("link", { name: "Check setup" })).getAttribute(
-        "href",
-      ),
-    ).toBe("/settings/setup");
-    expect(sent).toEqual([]);
-  });
-}
-
-for (const index of [3, 4]) {
-  test(`browser task ${index} can start a configured computer that has never run`, async () => {
-    server();
-    const sent: string[] = [];
-    const view = draw({
-      agentId: "personal-assistant",
-      onSelect: (message) => {
-        sent.push(message);
-      },
-    });
-    const button = await view.findByRole("button", {
-      name: STARTER_SUGGESTIONS[index].title,
-    });
-    await waitFor(() =>
-      expect(view.client.getQueryData(["setup", "checklist"])).toBeTruthy(),
-    );
-    await act(async () => {
-      view.client.setQueryData(["setup", "checklist"], {
-        audience: "admin",
-        rows: [{ id: "computer", status: "not_checked", ready: false }],
+for (const status of ["not_checked", "needs_setup", "request_failed"]) {
+  for (const index of [3, 4]) {
+    test(`browser task ${index} sends despite stale or failed checklist: ${status}`, async () => {
+      server({}, false);
+      const sent: string[] = [];
+      const view = draw({
+        agentId: "personal-assistant",
+        onSelect: (message) => sent.push(message),
       });
+      await act(async () => {
+        view.client.setQueryData(
+          ["setup", "checklist"],
+          status === "request_failed"
+            ? undefined
+            : {
+                audience: "admin",
+                rows: [{ id: "computer", status, ready: false }],
+              },
+        );
+      });
+      fireEvent.click(
+        await view.findByRole("button", {
+          name: STARTER_SUGGESTIONS[index].title,
+        }),
+      );
+      await waitFor(() =>
+        expect(sent).toEqual([STARTER_SUGGESTIONS[index].message]),
+      );
+      expect(view.queryByRole("alert")).toBeNull();
     });
-    fireEvent.click(button);
-    await waitFor(() =>
-      expect(sent).toEqual([STARTER_SUGGESTIONS[index].message]),
-    );
-    expect(view.queryByRole("alert")).toBeNull();
-  });
+  }
 }

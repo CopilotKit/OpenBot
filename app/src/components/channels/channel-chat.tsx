@@ -20,7 +20,6 @@ import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
-import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { ProgressRow } from "@/components/channels/progress-row";
 import {
@@ -30,6 +29,7 @@ import {
 } from "@/components/channels/transcript-messages";
 import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
+import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { answerPersonQuestionMutationOptions } from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
@@ -1231,9 +1231,14 @@ export function ChannelChat({
                     agent.isRunning ||
                     turnsInFlight > 0 ||
                     Boolean(question) ||
-                    call.active
+                    call.active ||
+                    runModel.saving
                   }
-                  onSelect={(text) => sayRef.current(text)}
+                  onSelect={async (text) => {
+                    await runModel.beforeSend();
+                    // The transcript already reports a failed turn through runError.
+                    await sayRef.current(text).catch(() => undefined);
+                  }}
                 />
               ) : undefined
             }

@@ -1,3 +1,4 @@
+import { readFiring } from "@openbot/shared/routine-firing";
 import { isStarterTourAgent } from "@openbot/shared/starter-tour";
 import {
   and,
@@ -12,7 +13,6 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { readFiring } from "@openbot/shared/routine-firing";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -226,7 +226,11 @@ export type ChannelStore = {
    * True when this call deleted the channel; false when it was already deleted. A repeat is a
    * no-op, so it announces nothing and its route records nothing.
    */
-  softDelete(actor: AgentActor, channelId: string): Promise<boolean>;
+  softDelete(
+    actor: AgentActor,
+    channelId: string,
+    discardFailedStart?: boolean,
+  ): Promise<boolean>;
   recordActivity(
     actor: AgentActor,
     channelId: string,
@@ -793,7 +797,7 @@ export function createChannelStore(
       if (updated.length === 0) throw new ChannelNotFoundError(channelId);
     },
 
-    async softDelete(actor, channelId) {
+    async softDelete(actor, channelId, discardFailedStart = false) {
       return await database.transaction(
         async (transaction) => {
           const [row] = await transaction
@@ -830,8 +834,8 @@ export function createChannelStore(
           if (stamped.length === 0) return false;
 
           // A failed start can delete its newly created, still-empty conversation.
-          // Release only that account's matching claim, never a used or dismissed tour.
-          if (stamped[0]?.lastMessageAt === null) {
+          // Release only that account's matching claim, never a used tour.
+          if (discardFailedStart && stamped[0]?.lastMessageAt === null) {
             await transaction
               .update(users)
               .set({
@@ -842,7 +846,6 @@ export function createChannelStore(
                 and(
                   eq(users.id, actor.id),
                   sql`${users.preferences}->>'starterTourChannelId' = ${channelId}`,
-                  sql`(${users.preferences}->>'starterTourDismissed') IS DISTINCT FROM 'true'`,
                 ),
               );
           }
@@ -1443,7 +1446,11 @@ export function createChannelRoutes(
   routes.delete("/:channelId", requireUser, async (context) => {
     const channelId = context.req.param("channelId");
     try {
-      const deleted = await store.softDelete(context.var.actor, channelId);
+      const deleted = await store.softDelete(
+        context.var.actor,
+        channelId,
+        context.req.query("discardFailedStart") === "true",
+      );
       // A repeat is still 204, but it deleted nothing, and the trail records acts, not attempts.
       if (deleted !== false) await recordDeleted(context, channelId);
       return context.body(null, 204);

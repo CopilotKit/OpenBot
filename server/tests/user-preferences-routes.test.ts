@@ -98,6 +98,7 @@ test.each([
   { proactive: "sometimes" },
   { proactive: true },
   { proactive: null },
+  { starterTourDismissed: true },
   { starterTourDismissed: false },
   { starterTourDismissed: null },
   { starterTourChannelId: "replacement" },
@@ -251,28 +252,4 @@ test("check-ins start on, and a person's off is kept without touching the others
   expect(
     (await (await appFor("alice").request(path)).json()).preferences.proactive,
   ).toBe("on");
-});
-
-test("tour dismissal is account scoped and preserves the server-owned conversation", async () => {
-  const { state, appFor } = fixture();
-  state.set("alice", {
-    ...DEFAULT_USER_PREFERENCES,
-    starterTourChannelId: "first",
-    skin: "openduet",
-  });
-  expect(
-    (await appFor("alice").request(path, patch({ starterTourDismissed: true })))
-      .status,
-  ).toBe(200);
-  expect(
-    (await (await appFor("alice").request(path)).json()).preferences,
-  ).toMatchObject({
-    starterTourChannelId: "first",
-    starterTourDismissed: true,
-    skin: "openduet",
-  });
-  expect(
-    (await (await appFor("bob").request(path)).json()).preferences
-      .starterTourDismissed,
-  ).toBeUndefined();
 });

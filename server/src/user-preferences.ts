@@ -44,7 +44,6 @@ export function createUserPreferencesStore(
           and(
             eq(users.id, userId),
             sql`NOT (${users.preferences} ? 'starterTourChannelId')`,
-            sql`(${users.preferences}->>'starterTourDismissed') IS DISTINCT FROM 'true'`,
           ),
         );
     },

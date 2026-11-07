@@ -1,17 +1,10 @@
 import { CopilotChatSuggestionView } from "@copilotkit/react-core/v2";
 import { isStarterTourAgent } from "@openbot/shared/starter-tour";
-import { IconX } from "@tabler/icons-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import {
-  saveUserPreferencesMutationOptions,
-  userPreferencesQueryOptions,
-} from "@/lib/settings/message-list";
-import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
+import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import { STARTER_SUGGESTIONS, showStarterTour } from "./suggestions";
 
 type Props = {
@@ -31,7 +24,7 @@ function EligibleStarterSuggestions(props: Props) {
   const { data: user } = useQuery(currentUserQueryOptions());
   const preferences = useQuery({
     ...userPreferencesQueryOptions(user?.id),
-    // A tour dismissed or claimed in another window must not repeat on return.
+    // A tour claimed in another window must not repeat on return.
     refetchOnWindowFocus: true,
   });
   if (
@@ -40,52 +33,25 @@ function EligibleStarterSuggestions(props: Props) {
     !showStarterTour(preferences.data, props.channelId)
   )
     return null;
-  return <StarterSuggestionChoices {...props} userId={user.id} />;
+  return <StarterSuggestionChoices {...props} />;
 }
 
-function StarterSuggestionChoices({
-  onSelect,
-  disabled = false,
-  userId,
-}: Props & { userId: string }) {
-  const client = useQueryClient();
-  const dismiss = useMutation(
-    saveUserPreferencesMutationOptions(client, userId),
-  );
-  const { data: user } = useQuery(currentUserQueryOptions());
+function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
-  const setup = useQuery(setupChecklistQueryOptions());
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const [needsSetup, setNeedsSetup] = useState(false);
 
   const choose = async (index: number) => {
-    if (disabled || sendingRef.current || dismiss.isPending) return;
+    if (disabled || sendingRef.current) return;
     setError(null);
-    setNeedsSetup(false);
     if (index === 1 && capabilities.data?.generativeUi !== true) {
       setError(
         capabilities.isPending
           ? "Still checking whether interactive answers are available. Try again in a moment."
-          : "Interactive answers aren't available right now. Check your setup before trying this task.",
+          : "Interactive answers are disabled for this installation. Try another starter task.",
       );
-      setNeedsSetup(!capabilities.isPending);
       return;
-    }
-    if (index === 3 || index === 4) {
-      const computer = setup.data?.rows.find((row) => row.id === "computer");
-      // A configured but unused computer starts on the first browser request.
-      // "not_checked" is not a setup failure; blocking it prevents that first use.
-      if (computer?.ready !== true && computer?.status !== "not_checked") {
-        setError(
-          setup.isPending
-            ? "Still checking the Bot's browser. Try again in a moment."
-            : "The Bot's browser isn't ready. Check your setup before trying this task.",
-        );
-        setNeedsSetup(!setup.isPending);
-        return;
-      }
     }
     const suggestion = STARTER_SUGGESTIONS[index];
     if (!suggestion) return;
@@ -108,23 +74,12 @@ function StarterSuggestionChoices({
   return (
     <section
       aria-label="Starter tasks"
-      className="relative mb-2 w-full max-w-2xl pr-6 [&>div]:gap-1 [&>div]:bg-transparent"
+      className="relative mb-2 w-full max-w-2xl [&>div]:gap-1 [&>div]:bg-transparent"
     >
-      <Button
-        variant="ghost"
-        size="icon"
-        className="absolute right-0 top-0 size-6 text-muted-foreground"
-        aria-label="Hide starter tasks"
-        title="Hide starter tasks"
-        disabled={dismiss.isPending}
-        onClick={() => dismiss.mutate({ starterTourDismissed: true })}
-      >
-        <IconX className="size-3" />
-      </Button>
       <CopilotChatSuggestionView
         suggestions={STARTER_SUGGESTIONS}
         suggestion={{
-          disabled: disabled || sending || dismiss.isPending,
+          disabled: disabled || sending,
           className:
             "px-2 py-1 text-xs leading-4 text-muted-foreground bg-transparent",
         }}
@@ -132,21 +87,9 @@ function StarterSuggestionChoices({
           void choose(index);
         }}
       />
-      {error || dismiss.error ? (
+      {error ? (
         <p role="alert" className="mt-2 text-sm text-destructive">
-          {error ?? dismiss.error?.message}
-          {needsSetup ? (
-            mayOpenSetup(user ?? undefined, capabilities.data) ? (
-              <>
-                {" "}
-                <Link className="underline" to="/settings/setup">
-                  Check setup
-                </Link>
-              </>
-            ) : (
-              " Ask your admin to check the setup."
-            )
-          ) : null}
+          {error}
         </p>
       ) : null}
     </section>
