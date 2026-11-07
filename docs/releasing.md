@@ -232,8 +232,8 @@ uploads `OpenBot_<version>_x64-setup.exe.sig` and lists the installer in `latest
 
 The Windows app installs per user, so the update needs no administrator prompt. It runs the
 installer in update mode (`installMode: passive`), which never runs the uninstaller: the
-installation in `~/OpenBot`, the app's settings and data under `%APPDATA%` and `%LOCALAPPDATA%`, the
-person's browser profile and the Recorder's registration all stay as they were. Windows apps from
+installation in `~/OpenBot`, the app's settings and data under `%APPDATA%` and `%LOCALAPPDATA%`, and
+the Recorder's registration all stay as they were. Windows apps from
 before this have no updater, so each Windows installation updates by hand once, to the first
 release that has it.
 
