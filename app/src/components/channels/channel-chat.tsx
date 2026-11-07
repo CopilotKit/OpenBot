@@ -814,6 +814,7 @@ export function ChannelChat({
     trimmed: string,
     skillInstructions: string[],
     attachments: Attachment[],
+    sent?: Message,
   ) => {
     // Wait briefly for the runtime agent instance before adding the message.
     if (!isReadyRef.current) {
@@ -901,11 +902,13 @@ export function ChannelChat({
         ),
       );
 
-    target.addMessage({
-      content: toMessageContent(trimmed, attachments),
-      id: newId(),
-      role: "user",
-    });
+    target.addMessage(
+      sent ?? {
+        content: toMessageContent(trimmed, attachments),
+        id: newId(),
+        role: "user",
+      },
+    );
     report(trimmed || describeAttachments(attachments), null);
 
     // Providers reject later turns if prior tool calls have no result; repair before sending.
@@ -992,6 +995,8 @@ export function ChannelChat({
     text: string,
     skillInstructions: string[] = [],
     attachments: Attachment[] = [],
+    /** The message to send for `text`, when it is more than the words: an answer to a question. */
+    sent?: Message,
   ) => {
     const trimmed = text.trim();
     // A pasted screenshot with no caption is still a message to send: `canSendDraft` already
@@ -1012,7 +1017,12 @@ export function ChannelChat({
       void setChannelBusy({ channelId: channel.id, busy: true });
     }
     try {
-      const reply = await deliver(trimmed, skillInstructions, attachments);
+      const reply = await deliver(
+        trimmed,
+        skillInstructions,
+        attachments,
+        sent,
+      );
       /*
        * The person left while this turn was running (holding control of the Bot's browser, say) and the turn went on
        * without this screen. The run-finished subscription that tells the roster what the Bot said went with it, so the
@@ -1095,18 +1105,36 @@ export function ChannelChat({
   /** Stable reference for effects and component callbacks. */
   /*
    * A question the Bot is waiting on in this conversation. While there is one, what the person sends
-   * is their answer to it: it goes through the answer path, which resumes the turn that asked (a
-   * routine's, with the routine's tools) and closes the question, rather than starting a new turn
-   * that leaves it open. Their words are drawn at once under the id the server stores them under;
-   * the Bot's reply arrives as any turn run away from this tab does, through the history read above.
+   * is their answer to it: it goes through the answer path, which closes the question rather than
+   * starting a new turn that leaves it open.
+   *
+   * A question this conversation's own turn asked is answered by its next turn, run HERE like any
+   * other: its steps stream as they happen and Stop stops it. It used to be resumed on the server
+   * with nothing here attached to it, so the screen said "reading your answer" with no steps and no
+   * Stop until the whole turn was over, and then drew every step at once.
+   *
+   * A question a routine or a goal asked still goes back to the server, which resumes that run's work
+   * with its own tools. Then their words are drawn at once under the id the server stores them under,
+   * and the Bot's reply arrives as any turn run away from this tab does, through the history read
+   * above. So does an answer given while a turn is still going here, which a turn of its own would
+   * race.
    */
   const question = useConversationQuestion(channel.id, channel.threadId);
   const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
   const [answeredId, setAnsweredId] = useState<string | null>(null);
   const answerTo = async (text: string) => {
     if (!question) return;
-    await answer.mutateAsync({ id: question.id, response: text });
     const sent = answerMessage(question, text);
+    const idle = turnsRef.current === 0 && !agentRef.current.isRunning;
+    const continueHere = await answer.mutateAsync({
+      id: question.id,
+      response: text,
+      inConversation: idle,
+    });
+    if (continueHere) {
+      await say(text, [], [], sent);
+      return;
+    }
     setAnsweredId(sent.id);
     agent.setMessages([...agent.messages, sent]);
   };
