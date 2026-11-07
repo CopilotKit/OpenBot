@@ -1272,6 +1272,20 @@ tenant:
   product_name: OpenBot
 ```
 
+`tenant.id` owns the Bots and channels the package seeds, and names the deployment when
+`DEPLOYMENT_ID` is unset. A package that changes its id lists the ids it had before:
+
+```yaml
+tenant:
+  id: openbot
+  former_ids: [personal]
+  product_name: OpenBot
+```
+
+A deployment set up under a former id keeps that name, and its Bots and channels move to the new id
+on the next start. Without it, the server refuses the package's own Bots as another package's and
+does not start.
+
 Optional theme:
 
 ```yaml
