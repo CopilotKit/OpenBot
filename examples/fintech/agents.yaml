@@ -83,7 +83,7 @@ agents:
   # unless somebody actually picks Mastra.
   - id: picked-harness
     name: ${PICKED_HARNESS_NAME:-Your Bot}
-    title: ${PICKED_HARNESS_NAME:-Your Bot}
+    title: Powered by ${PICKED_HARNESS_NAME:-Your Bot}
     role_description: Answer questions and do work, using the tools it has been granted.
     avatar_seed: picked-harness
     type: ${PICKED_HARNESS_KIND:-remote-ag-ui}
