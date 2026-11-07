@@ -50,6 +50,8 @@ const cloudProviders = [
   {
     id: "google",
     name: "Google Gemini",
+    // Google's guidelines allow only "Sign in with Google" beside its G.
+    signsInWith: "Google",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     model: "gemini-3.8-flash",
     keyUrl: "https://aistudio.google.com/apikey",
@@ -57,6 +59,7 @@ const cloudProviders = [
   {
     id: "xai",
     name: "xAI",
+    signsInWith: "xAI",
     baseUrl: "https://api.x.ai/v1",
     model: "grok-4.7",
     keyUrl: "https://console.x.ai/",
@@ -213,7 +216,9 @@ test("every Sign in with button carries its provider's mark", async () => {
     const name =
       provider.id === "anthropic"
         ? "Sign in again with Anthropic"
-        : `Sign in with ${provider.name}`;
+        : provider.id === "google"
+          ? "Sign in with Google"
+          : `Sign in with ${provider.name}`;
     const button = view.getByRole("button", { name });
     expect(button.querySelector("img")?.getAttribute("data-mark")).toBe(
       provider.mark,
@@ -1037,7 +1042,9 @@ for (const provider of cloudProviders) {
     );
     await user.click(view.getByRole("tab", { name: "Sign in" }));
     await user.click(
-      view.getByRole("button", { name: `Sign in with ${provider.name}` }),
+      view.getByRole("button", {
+        name: `Sign in with ${provider.signsInWith}`,
+      }),
     );
     await view.findByText(`Signed in to ${provider.name}.`);
     // Signed in with a model already named: on by itself, no Continue.
