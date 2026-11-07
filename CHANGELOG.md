@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot filling in an ordinary form on a page whose address carries a signature or token in its
+  query string (an S3 presigned link's `X-Amz-Credential=`, a sign-in's `access_token=`) is no
+  longer stopped with "This needs you" as if it were changing a credential. A password field, a
+  Change password button or a security page's path still hands off.
 - A Bot that clicked a dropdown open, typed its choice and then pressed Enter keeps the choice.
   Enter used to put the dropdown back to its first option, so the form was sent without it.
 - A Bot whose click or Enter on a button could not finish is told why: the page refused to send its
