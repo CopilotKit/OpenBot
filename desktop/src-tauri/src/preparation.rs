@@ -8,6 +8,7 @@ use crate::{
     deployment,
     engine::{Address, Engine},
     harness::HarnessChoice,
+    paths,
     problem::Problem,
     stack,
 };
@@ -107,7 +108,7 @@ pub fn save_engine(root: &Path, engine: Engine) -> Result<(), Problem> {
 /// `\\?\C:\Users\Ada\OpenBot`, and this record is where Settings, the setup window and every
 /// later Start take the installation's folder from.
 pub fn save_selected_root(config: &Path, root: &Path) -> Result<(), Problem> {
-    let root = std::fs::canonicalize(root).map_err(|e| {
+    let root = std::fs::canonicalize(root).map(paths::plain).map_err(|e| {
         Problem::with(
             "OpenBot could not remember this installation for next time.",
             e.to_string(),
@@ -127,6 +128,7 @@ pub fn selected_root(config: &Path) -> Option<PathBuf> {
     let root: PathBuf =
         serde_json::from_slice(&std::fs::read(config.join("last-launched-root.json")).ok()?)
             .ok()?;
+    let root = paths::plain(root);
     root.is_absolute().then_some(root)
 }
 
@@ -533,7 +535,7 @@ mod tests {
         record_launch(&f.root, Some(&chosen)).unwrap();
         save_selected_root(&config, &f.root).unwrap();
         // The fixture's root is canonical, so `\\?\C:\...` on Windows; the record keeps it plain.
-        let remembered = crate::paths::plain(f.root.clone());
+        let remembered = paths::plain(f.root.clone());
         assert_eq!(selected_root(&config), Some(remembered.clone()));
         assert_eq!(launch(&f.root).unwrap().harness, Some(chosen));
         invalidate(&f.root).unwrap();
