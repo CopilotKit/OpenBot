@@ -49,7 +49,9 @@ def test_model_mode_disables_native_and_ambient_tools():
     assert options.setting_sources == []
     assert options.permission_mode == "dontAsk"
     assert set(options.mcp_servers) == {"ag_ui"}
-    assert options.allowed_tools == ["mcp__ag_ui__knowledge_search"]
+    # Claude Code may call the `ag_ui` server's tools, which are only the offered ones; the hook
+    # below is what refuses anything else.
+    assert options.allowed_tools == ["mcp__ag_ui__*"]
     assert "You are Knowledge. Cite sources." in options.system_prompt
     assert "Discard Knowledge" not in options.system_prompt
 
@@ -137,7 +139,9 @@ def test_full_bot_cannot_see_claude_code_web_search_or_shell():
     )
     options = adapter.build_options(request, request.thread_id)
     assert options.tools == []
-    assert "mcp__ag_ui__show_app_access" in options.allowed_tools
+    # The `ag_ui` server, which holds the offered tool, is the one thing allowed.
+    assert options.allowed_tools == ["mcp__ag_ui__*"]
+    assert set(options.mcp_servers) == {"ag_ui"}
     options.cli_path = "/not-executed/claude"
     command = SubprocessCLITransport(
         prompt="contract only", options=options

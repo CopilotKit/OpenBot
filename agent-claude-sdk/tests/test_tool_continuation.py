@@ -58,6 +58,17 @@ def request(thread="thread-a", run="run-1", results=(), tool_count=1, tool_name=
     )
 
 
+def started_with(options):
+    """The system prompt Claude Code starts with, read as the CLI reads it.
+
+    A string is `--system-prompt`; `{"type": "file"}` is `--system-prompt-file`, read at start.
+    """
+    prompt = options.system_prompt
+    if isinstance(prompt, dict) and prompt.get("type") == "file":
+        return Path(prompt["path"]).read_text(encoding="utf-8")
+    return prompt
+
+
 @pytest.fixture
 def tool_name():
     return "computer_navigate"
@@ -77,10 +88,12 @@ def sdk(monkeypatch, tool_name):
             self.disconnected = False
             self.disconnected_event = asyncio.Event()
             self.hooks_entered = asyncio.Event()
+            self.system_prompt = None
             clients.append(self)
 
         async def connect(self):
-            pass
+            # Claude Code reads its system prompt when it starts, from the file it is given.
+            self.system_prompt = started_with(self.options)
 
         async def disconnect(self):
             self.disconnected = True
@@ -253,7 +266,7 @@ def test_client_result_resumes_original_sdk_query(sdk, streaming, model_only, to
                     ],
                 ),
             )
-            assert "LEARNED_CATALOG_MARKER" in str(sdk[0].options.system_prompt)
+            assert "LEARNED_CATALOG_MARKER" in sdk[0].system_prompt
             assert sdk[0].queries == [("1", "thread-a")], (
                 "a tool result must not become another SDK user prompt"
             )
