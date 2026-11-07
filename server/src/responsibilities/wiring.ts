@@ -30,7 +30,7 @@ import {
   type ResponsibilityEngine,
 } from "./engine";
 import { responsibilityTools } from "./tools";
-import type { ResponsibilityStore } from "./types";
+import { type ResponsibilityStore, whyItRepeats } from "./types";
 
 /**
  * The deployment's responsibility engine: a responsibility's turn, with the computer when the Bot
@@ -178,6 +178,9 @@ export function createServerResponsibilityEngine(deps: {
               `${context.event.source} event`,
             ),
             responsibilityId: context.responsibilityId,
+            ...(context.repeats
+              ? { repeats: whyItRepeats(context.repeats) }
+              : {}),
           }),
         });
       },

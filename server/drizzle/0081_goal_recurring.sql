@@ -1,0 +1,1 @@
+ALTER TABLE "responsibilities" ADD COLUMN "recurring" boolean DEFAULT false NOT NULL;
