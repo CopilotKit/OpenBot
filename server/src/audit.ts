@@ -8,6 +8,7 @@ import {
   gt,
   inArray,
   lt,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
@@ -769,6 +770,11 @@ export type AuditEventQuery = {
    * and a filter that returns only the first quietly hides two thirds of the refusals.
    */
   eventType?: string;
+  /**
+   * Types to leave out, separated by commas: what the personal edition's Activity does not show
+   * (`app/src/lib/audit/outcome.ts`), asked of the server so a page of 50 is 50 rows a person reads.
+   */
+  excludeEventType?: string;
   actorUserId?: string;
   /** One kind, or several separated by commas, the way `eventType` takes several. */
   initiatorKind?: string;
@@ -777,7 +783,8 @@ export type AuditEventQuery = {
   /**
    * One Bot's rows: what it did (`payload.bot`) and what was done to it (an `agent` target), the
    * same two the audit page's Bot column reads. Asked of the server, so a Bot's actions older than
-   * the newest page are found too.
+   * the newest page are found too. A folder given to a Bot before its row said `bot` named it as
+   * `botId`, and is that Bot's row too.
    */
   bot?: string;
   from?: string;
@@ -1038,6 +1045,11 @@ function matchesRequested(column: PgColumn, values: string[] | undefined) {
   return inArray(column, [first, ...rest]);
 }
 
+/** The condition a set to leave out puts on a column. Naming nothing leaves out nothing. */
+function notRequested(column: PgColumn, values: string[] | undefined) {
+  return values && values.length > 0 ? notInArray(column, values) : undefined;
+}
+
 export function createAuditReader(database: Database): AuditReader {
   return {
     list: async (query) => {
@@ -1045,6 +1057,10 @@ export function createAuditReader(database: Database): AuditReader {
         matchesRequested(
           auditEvents.eventType,
           requestedValues(query.eventType),
+        ),
+        notRequested(
+          auditEvents.eventType,
+          requestedValues(query.excludeEventType),
         ),
         query.actorUserId
           ? eq(auditEvents.actorUserId, query.actorUserId)
@@ -1063,6 +1079,10 @@ export function createAuditReader(database: Database): AuditReader {
               and(
                 eq(auditEvents.targetType, "agent"),
                 eq(auditEvents.targetId, query.bot),
+              ),
+              and(
+                eq(auditEvents.targetType, "host_access"),
+                eq(sql<string>`${auditEvents.payload} ->> 'botId'`, query.bot),
               ),
             )
           : undefined,
@@ -1165,6 +1185,7 @@ export function auditQueryFromUrl(url: URL): AuditEventQuery {
     cursor,
     limit,
     eventType: optional("eventType"),
+    excludeEventType: optional("excludeEventType"),
     actorUserId: optional("actorUserId"),
     initiatorKind: optional("initiatorKind"),
     targetType: optional("targetType"),

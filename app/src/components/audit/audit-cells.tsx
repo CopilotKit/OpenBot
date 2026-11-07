@@ -274,6 +274,8 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
       : event.targetId;
   if (typeof payload.file === "string") return payload.file;
   if (typeof payload.command === "string") return payload.command;
+  const folders = foldersOf(payload);
+  if (folders) return folders;
   if (typeof element === "object" && element?.name)
     return element.role ? `${element.name} (${element.role})` : element.name;
   if (typeof element === "string") return element;
@@ -285,6 +287,21 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
   )
     return payload.scope;
   return "";
+}
+
+/**
+ * The folder a person gave a Bot or took from it, or the folders stopping folder access ended, by
+ * the name Settings > Computer shows. Rows written before they said so name none.
+ */
+function foldersOf(payload: Record<string, unknown>): string | undefined {
+  if (typeof payload.folder === "string" && payload.folder)
+    return payload.folder;
+  const folders = payload.folders;
+  return Array.isArray(folders) &&
+    folders.length > 0 &&
+    folders.every((folder) => typeof folder === "string")
+    ? folders.join(", ")
+    : undefined;
 }
 
 /** The page host under the subject, meaningful only for browser actions. */
@@ -301,9 +318,15 @@ export function hostText(event: AuditEvent): string {
 /**
  * The Bot a row is about. Actions a Bot took carry it in the payload; events done TO a Bot (routed
  * to it, started, handed work, paused) record it as the target instead, and are just as much its row.
+ * A folder given to a Bot before its row said `bot` named it as `botId`.
  */
 export function botIdOf(event: AuditEvent): string | null {
   if (typeof event.payload?.bot === "string") return event.payload.bot;
+  if (
+    event.targetType === "host_access" &&
+    typeof event.payload?.botId === "string"
+  )
+    return event.payload.botId;
   return event.targetType === "agent" && event.targetId ? event.targetId : null;
 }
 
@@ -575,7 +598,8 @@ export function OnCell({
     event.eventType === "mcp.tools_discovered" ||
     (NAMED_TARGETS.has(event.targetType) && !!event.targetId && !inWords) ||
     typeof payload.file === "string" ||
-    typeof payload.command === "string";
+    typeof payload.command === "string" ||
+    foldersOf(payload) !== undefined;
   // Under the action in the What column, so a row with nothing to name draws nothing.
   return (
     <>

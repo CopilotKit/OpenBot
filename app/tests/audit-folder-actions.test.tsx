@@ -8,7 +8,10 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
-import { AuditPage } from "@/components/manage/audit-page";
+import {
+  AuditPage,
+  withoutOpenBotWorking,
+} from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
@@ -114,7 +117,9 @@ async function renderActivity() {
     localEvaluation: true,
     edition: "personal",
   });
-  queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
+  queryClient.setQueryData([...auditKeys.all, withoutOpenBotWorking("")], {
+    events: ROWS,
+  });
   queryClient.setQueryData(agentKeys.list(false), [
     { id: BOT, name: "Personal Assistant" },
   ]);

@@ -9,7 +9,10 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
 import type { ComponentType, ReactNode } from "react";
-import { AuditPage } from "@/components/manage/audit-page";
+import {
+  AuditPage,
+  withoutOpenBotWorking,
+} from "@/components/manage/audit-page";
 import { PluginPage } from "@/components/manage/plugin-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { auditKeys } from "@/lib/audit/queries";
@@ -123,7 +126,11 @@ function draw(edition: "team" | "personal", screen: () => ReactNode) {
   client.setQueryData(pluginKeys.connections(), { connections: [] });
   client.setQueryData(agentKeys.list(false), []);
   client.setQueryData(agentKeys.list(true), []);
-  client.setQueryData([...auditKeys.all, ""], { events: [startedByOpenBot] });
+  // Activity asks without OpenBot's own working; Admin asks for everything.
+  client.setQueryData(
+    [...auditKeys.all, edition === "personal" ? withoutOpenBotWorking("") : ""],
+    { events: [startedByOpenBot] },
+  );
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: screen }),
