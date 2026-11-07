@@ -226,6 +226,28 @@ test("every Sign in with button carries its provider's mark", async () => {
   }
 });
 
+/*
+ * "Any OpenAI-compatible endpoint" was the one row with nothing beside its name. It stands for no one
+ * vendor, so it carries no vendor's mark, and gets a plain icon in the marks' tile instead.
+ */
+test("the OpenAI-compatible endpoint row shows a plain icon in a mark tile", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return allProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+
+  const row = (
+    await view.findByRole("radio", { name: /^OpenAI-compatible/ })
+  ).closest("label");
+  const tile = row?.querySelector(".mark-tile");
+  expect(tile?.getAttribute("data-icon")).toBe("cloud");
+  expect(tile?.getAttribute("aria-hidden")).toBe("true");
+  expect(tile?.querySelector("svg")).toBeTruthy();
+  // The other rows keep their own marks; only the endpoint row gets the plain icon.
+  expect(view.container.querySelectorAll("[data-icon]").length).toBe(1);
+});
+
 test("a completed plan sign-in enables and submits only its issuing provider", async () => {
   const choices: unknown[] = [];
   invokeHandler = async (command, args) => {
