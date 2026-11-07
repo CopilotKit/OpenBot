@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Settings, Activity and Admin, Audit show an action the person denied as Blocked, never as
+  Allowed, and list it under Blocked; the person's answer reads "Denied by a person" or "Allowed
+  once by a person", and an action that failed shows once, as "Did not happen".
 - A table, chart, card or question a Bot couldn't draw says so ("Couldn't show the data table.")
   instead of "Waiting for complete table data…" or an empty card for good, also after a reload.
 - With reduced motion turned on in the operating system, a step a Bot is still running shows its

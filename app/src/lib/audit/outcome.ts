@@ -90,16 +90,74 @@ export const DID_NOT_HAPPEN_EVENT_TYPES = [
   "component.function_failed",
 ] as const;
 
+/**
+ * Every row about one action a Bot took on its computer, whatever became of it.
+ *
+ * The Computer actions view used to ask for `computer.action_allowed` alone, so a refused, failed or
+ * stopped action was missing from the one view named for them, and the actions that remained all
+ * read as allowed.
+ */
+export const COMPUTER_ACTION_EVENT_TYPES = [
+  "computer.action_allowed",
+  "computer.action_refused",
+  "computer.action_failed",
+  "computer.action_stopped",
+] as const;
+
 export type AuditOutcome = "refused" | "did-not-happen" | "allowed";
 
 const REFUSED = new Set<string>(REFUSED_EVENT_TYPES);
 const DID_NOT_HAPPEN = new Set<string>(DID_NOT_HAPPEN_EVENT_TYPES);
 
-/** What kind of thing this row is, for the label and the colour it is drawn in. */
-export function outcomeOf(eventType: string): AuditOutcome {
+type Row = { eventType: string; payload?: Record<string, unknown> };
+
+/**
+ * What kind of thing this row is, for the label and the colour it is drawn in.
+ *
+ * Mostly its type. The two approval rows are the exception, because one type covers every answer:
+ * `approval.person_decided` is a person allowing or denying, and `approval.evaluated` is the gate
+ * allowing, asking or refusing. Read by type alone, a denial was drawn as "Allowed". They stay out of
+ * the Blocked view, whose list is by type; the action a denial stopped is there as its own row.
+ */
+export function outcomeOf(row: string | Row): AuditOutcome {
+  const { eventType, payload } =
+    typeof row === "string" ? { eventType: row, payload: undefined } : row;
   if (REFUSED.has(eventType)) return "refused";
   if (DID_NOT_HAPPEN.has(eventType)) return "did-not-happen";
+  if (eventType === "approval.person_decided" && payload?.decision === "deny")
+    return "refused";
+  if (
+    eventType === "approval.evaluated" &&
+    (payload?.outcome as { behaviour?: unknown } | undefined)?.behaviour ===
+      "deny"
+  )
+    return "refused";
   return "allowed";
+}
+
+/**
+ * The rows to draw, with each failed or stopped action shown once.
+ *
+ * The computer writes an action's row before it acts, so there is no way to act off the trail, and a
+ * second row when the action then fails or is stopped. Both carry the same `attempt` id. Drawn as they
+ * were, a read of a missing file was two rows, "Allowed" and "Did not happen", and the first is the
+ * one a reader believes. The failure row carries everything the first did, so the first is left out
+ * when its failure is loaded beside it. The trail itself, and the CSV export, keep both.
+ */
+export function oneRowPerAction<T extends Row>(events: T[]): T[] {
+  const ended = new Set(
+    events
+      .filter((event) => DID_NOT_HAPPEN.has(event.eventType))
+      .map((event) => event.payload?.attempt)
+      .filter((attempt): attempt is string => typeof attempt === "string"),
+  );
+  if (ended.size === 0) return events;
+  return events.filter(
+    (event) =>
+      event.eventType !== "computer.action_allowed" ||
+      typeof event.payload?.attempt !== "string" ||
+      !ended.has(event.payload.attempt),
+  );
 }
 
 /** The `eventType` query one of the saved views filters by. */

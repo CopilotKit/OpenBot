@@ -1667,8 +1667,8 @@ describe("acting on a ref the server cannot resolve", () => {
     expect(calls).toEqual([]);
     // Still recorded. An action whose ref resolves to nothing is an action somebody tried to take,
     // and refusing it before the row is written would be a way to act without appearing on the trail.
+    // One row, that it did not happen: nothing was sent, so no row says it was.
     expect(rows.map((row) => row.eventType)).toEqual([
-      "computer.action_allowed",
       "computer.action_failed",
     ]);
     expect(rows[0]?.payload.element).toBe("not in the current snapshot");
