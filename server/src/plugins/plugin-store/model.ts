@@ -664,6 +664,16 @@ export function storableSchema(
  * reason comes back in `skipped`, once, spelled as the vendor listed it — so the caller can say
  * which actions were not recorded rather than leave their absence for somebody to notice.
  */
+/**
+ * The current reading of a vendor's listing, recorded on an app's row by every refresh that stores
+ * its tools (`mcpServers.listingRevision`). Raise it when what is recorded from the same listing
+ * changes, and every app of the active broker is listed again once at the next start.
+ *
+ * 1: a broker's silence is `unclassified` and not `destructive` (Arcade had recorded it as
+ * destructive), and a Composio action with no label is `unclassified` too.
+ */
+export const LISTING_REVISION = 1;
+
 export function storableTools(
   serverId: string,
   listed: ListedTool[],

@@ -53,6 +53,7 @@ import {
   effectiveUrl,
   isDeploymentFault,
   iso,
+  LISTING_REVISION,
   MEMORY_TOOLS_SERVER,
   PluginInvariantError,
   type ServerAddress,
@@ -1898,6 +1899,8 @@ export function serverMethods(context: StoreContext) {
           // Cleared: the listing was stored. The names it left out are a warning — see above.
           lastError: null,
           skippedTools: skipped.length > 0 ? skipped : null,
+          // Recorded by this build's reading of a listing; see `relistOutdatedBrokeredApps`.
+          listingRevision: LISTING_REVISION,
           updatedAt: new Date(),
         })
         .where(eq(mcpServers.id, serverId));
@@ -2049,6 +2052,58 @@ export function serverMethods(context: StoreContext) {
         }
       }
       return refreshed;
+    },
+
+    /**
+     * Lists again, once, every app of the active broker whose tools were recorded by an older reading
+     * of a listing (`mcpServers.listingRevision` behind {@link LISTING_REVISION}).
+     *
+     * CRITERION. After an upgrade, an app's actions are recorded as a fresh install would record
+     * them, without anybody pressing Refresh tools.
+     *
+     * REASON. #1177 records an action its broker says nothing about as `unclassified`, where Arcade's
+     * had been recorded as `destructive`, which always asks. A row listed before it can't be told
+     * from an action Arcade did flag (both are a destructive write), so it is not rewritten in a
+     * migration: the app is asked again. A flagged action comes back destructive and still asks, a
+     * delete or archive name still asks by its name, and only the silence stops asking.
+     *
+     * Only the active broker's apps: a broker lists with the deployment's own key, so nobody's
+     * account is needed, and an app of a broker this deployment no longer uses can't be asked. A
+     * refresh that fails leaves the revision behind, so the next attempt tries again; what is stored
+     * keeps working, and asks as before, until then. Answers the apps still behind.
+     */
+    async relistOutdatedBrokeredApps(): Promise<string[]> {
+      if (!broker) return [];
+      const outdated = await database
+        .select({ id: mcpServers.id })
+        .from(mcpServers)
+        .where(
+          and(
+            eq(mcpServers.provenance, brokerProvider),
+            sql`${mcpServers.listingRevision} < ${LISTING_REVISION}`,
+          ),
+        )
+        .orderBy(asc(mcpServers.id));
+      const behind: string[] = [];
+      for (const { id } of outdated) {
+        try {
+          await this.refreshTools(id);
+        } catch (error) {
+          console.warn(
+            JSON.stringify({
+              type: "brokered-app-relist-failed",
+              serverId: id,
+              error: reasonWithoutStatement(error),
+            }),
+          );
+        }
+        const [after] = await database
+          .select({ revision: mcpServers.listingRevision })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, id));
+        if (after && after.revision < LISTING_REVISION) behind.push(id);
+      }
+      return behind;
     },
 
     async discoverToolsOnConnect(
