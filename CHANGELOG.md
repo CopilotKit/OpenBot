@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A table, chart, card or question a Bot couldn't draw says so ("Couldn't show the data table.")
+  instead of "Waiting for complete table data…" or an empty card for good, also after a reload.
 - With reduced motion turned on in the operating system, a step a Bot is still running shows its
   words again, in the same muted tone as a finished step, instead of only its ▸.
 - Pressing + for a new conversation opens the To: picker with the caret in it every time. A second
