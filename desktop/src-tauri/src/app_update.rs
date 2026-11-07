@@ -437,6 +437,32 @@ mod tests {
         );
     }
 
+    /// The feed as the signing runs now write it (scripts/release-update-feed.sh): the real Mac
+    /// entries Desktop macOS signing wrote, with the signed Windows installer that Desktop Windows
+    /// signing added beside them, signed by `tauri signer sign` with a test key and installed from a
+    /// test feed on Windows Server 2022.
+    const NEXT_WITH_WINDOWS: &str =
+        include_str!("../test-fixtures/app-update/latest-0.3.2-with-windows.json");
+
+    #[test]
+    fn a_release_that_lists_the_windows_installer_is_offered_on_windows_and_on_both_macs() {
+        for platform in ["windows-x86_64", "darwin-aarch64", "darwin-x86_64"] {
+            assert_eq!(
+                newer(&v("0.3.1"), NEXT_WITH_WINDOWS.as_bytes(), platform),
+                Ok(Some(v("0.3.2"))),
+                "{platform}"
+            );
+        }
+        // The key this machine's updater looks for is `{os}-{arch}`, spelled its way.
+        if cfg!(all(windows, target_arch = "x86_64")) {
+            assert_eq!(platform().as_deref(), Some("windows-x86_64"));
+        }
+        assert_eq!(
+            newer(&v("0.3.2"), NEXT_WITH_WINDOWS.as_bytes(), "windows-x86_64"),
+            Ok(None)
+        );
+    }
+
     #[test]
     fn a_release_with_no_signed_archive_for_this_machine_is_not_offered() {
         let next = real_feed_at("0.3.2");
