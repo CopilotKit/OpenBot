@@ -448,6 +448,63 @@ def test_sdk_authentication_signal_is_typed(sdk, model_only):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("model_only", [False, True])
+def test_person_message_after_a_pending_tool_is_answered_not_dropped(sdk, model_only):
+    """A person who writes while a client tool is still pending is heard.
+
+    The browser answers a call it will never finish (Stop, a reload, a tool it only draws) with
+    an "interrupted" result, and sends the person's new message after it in the same request.
+    Resuming the waiting query with that result alone answered the stale call and dropped the
+    person's words: the Bot carried on as if they had said nothing, and the turn's final
+    snapshot left their message out of the thread.
+    """
+
+    async def scenario():
+        adapter = OpenBotClaudeAgentAdapter(name="test", model_only=model_only)
+        try:
+            first = await events(adapter, request())
+            assert any(event.type == "TOOL_CALL_END" for event in first)
+            follow_up = request(
+                run="run-2",
+                results=[
+                    (
+                        "thread-a-tool-0",
+                        "This call produced no result: the surface was interrupted before it could answer.",
+                    )
+                ],
+            )
+            follow_up.messages.append(
+                follow_up.messages[0].model_copy(
+                    update={"id": "user-2", "content": "Seattle"}
+                )
+            )
+            answered = await events(adapter, follow_up)
+            assert sdk[0].interrupted, "the stale query must be stopped, not resumed"
+            assert not sdk[0].results, (
+                "the stale call must not be completed with the interruption as its result"
+            )
+            assert len(sdk) == 2, "the person's message starts a fresh query"
+            assert sdk[1].queries[-1][0] == "Seattle", (
+                "the person's words must reach Claude"
+            )
+            assert answered[-1].type == "RUN_FINISHED"
+            assert any(event.type == "TEXT_MESSAGE_CONTENT" for event in answered)
+            snapshots = [
+                event for event in answered if event.type == "MESSAGES_SNAPSHOT"
+            ]
+            assert all(
+                any(
+                    getattr(message, "content", None) == "Seattle"
+                    for message in snapshot.messages
+                )
+                for snapshot in snapshots
+            ), "the thread kept after the turn must still hold the person's message"
+        finally:
+            await adapter.shutdown()
+
+    asyncio.run(scenario())
+
+
 def test_model_last_step_replaces_pending_query_with_tool_free_replay(sdk):
     async def scenario():
         adapter = OpenBotClaudeAgentAdapter(name="model", model_only=True)

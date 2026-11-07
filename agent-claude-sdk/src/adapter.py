@@ -393,7 +393,18 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             # the last step is sent none, and a step after `search_tools` is sent what it found.
             # Resumed instead, the query never holds a found tool, and Claude called it by the
             # name in the search's text, which is no tool it was given.
-            replaced = answer_only or (
+            # A person who wrote after the pending call is answered by a fresh query from the
+            # whole thread. The browser closes a call it will never finish (Stop, a reload, a
+            # tool it only draws) with an "interrupted" result and sends the new message after
+            # it; resuming the waiting query took only that result, so the Bot carried on as if
+            # nothing had been said, and the turn's snapshot then dropped the person's words
+            # from the thread. A continuation that carries only tool results still resumes.
+            person_spoke = (
+                turn is not None
+                and bool(input_data.messages)
+                and input_data.messages[-1].role == "user"
+            )
+            replaced = answer_only or person_spoke or (
                 self._model_only
                 and turn is not None
                 and {tool.name for tool in input_data.tools} != turn.tool_names
