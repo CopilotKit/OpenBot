@@ -11,12 +11,12 @@ import {
   startsGroup,
   toFieldChange,
 } from "@/components/channels/compose-state";
-import { ModelPicker } from "@/components/channels/composer/model-picker";
 import type { ComposerDraft } from "@/components/channels/composer";
-import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
+import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import {
   Combobox,
   ComboboxChip,
@@ -28,12 +28,14 @@ import {
   ComboboxList,
   useComboboxAnchor,
 } from "@/components/ui/combobox";
+import { newConversationAgent } from "@/lib/agents/default-agent";
 import {
   type AgentProfile,
   agentListQueryOptions,
   agentQueryOptions,
 } from "@/lib/agents/queries";
 import { useStartChannel } from "@/lib/channels/start";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
 import {
@@ -147,9 +149,16 @@ function NewConversation({ composition }: { composition: string }) {
     enabled: Boolean(agent) && profiles !== undefined && !listed,
     retry: false,
   });
-  // Only the URL names a recipient up front. Without one the To: field starts empty and open: a
-  // Bot picked on the person's behalf is one they have to notice and remove.
-  const chosen = listed ?? (fetched?.id === agent ? fetched : undefined);
+  /*
+   * The URL names a recipient up front. Without one, the only Bot there is or the personal
+   * edition's default Bot is picked (`newConversationAgent`); otherwise To: starts empty and open,
+   * since a Bot picked on the person's behalf among several is one they have to notice and remove.
+   */
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const chosen =
+    listed ??
+    (fetched?.id === agent ? fetched : undefined) ??
+    (agent ? undefined : newConversationAgent(profiles, capabilities?.edition));
   const needsUrlAgentDetail =
     Boolean(agent) && profiles !== undefined && !listed;
   const waitingForUrlAgent =
@@ -251,7 +260,7 @@ function NewConversation({ composition }: { composition: string }) {
         <SidebarToggle className="mr-1" />
         <span className="text-sm text-muted-foreground">To:</span>
         <Combobox
-          // Do not auto-open when the recipient came from the URL; the field is already answered.
+          // Do not auto-open when a recipient is already chosen; the field is already answered.
           open={pickerOpen ?? (!chosen && !loadError && !waitingForUrlAgent)}
           onOpenChange={setPickerOpen}
           autoHighlight
@@ -294,7 +303,7 @@ function NewConversation({ composition }: { composition: string }) {
               ref={pickerInput}
               // The popup opening is not enough on its own: typing filters through this input, so
               // the caret starts here whenever the recipient question is still open. A recipient
-              // from the URL means the composer takes focus instead.
+              // already chosen means the composer takes focus instead.
               autoFocus={!chosen}
               placeholder={
                 selected.length

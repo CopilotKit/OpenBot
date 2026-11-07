@@ -23,12 +23,18 @@ import userEvent from "@testing-library/user-event";
 import * as NewBotSheetModule from "@/components/agents/new-bot-sheet";
 import * as SidebarToggleModule from "@/components/layout/sidebar-toggle";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import {
+  type DeploymentCapabilities,
+  deploymentKeys,
+} from "@/lib/deployment/queries";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import {
   NewBotCreationStub,
   SidebarToggleStub,
 } from "./channel-new-error-state.fixture";
 import { settleReactWork } from "./settle-react-work";
+
+const NativeResponse = globalThis.Response;
 
 beforeAll(() => GlobalRegistrator.register());
 
@@ -103,6 +109,21 @@ function queryClientWithAgents(agents: AgentProfile[]) {
     },
   });
   queryClient.setQueryData(agentKeys.list(false), agents);
+  return queryClient;
+}
+
+/** The roster, and which edition this is, as `/api/capabilities` says it. */
+function queryClientWithEdition(
+  agents: AgentProfile[],
+  edition: DeploymentCapabilities["edition"],
+) {
+  const queryClient = queryClientWithAgents(agents);
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: edition === "personal",
+    edition,
+  } satisfies DeploymentCapabilities);
   return queryClient;
 }
 
@@ -223,6 +244,14 @@ const GENERAL_ASSISTANT = agent({
   name: "General Assistant",
   title: "Everyday work",
 });
+/**
+ * A team's Bots: more than one, so a new conversation starts with nobody in To: and asks. With
+ * only one there is nobody to choose between, and it starts with that Bot picked.
+ */
+const SEVERAL_BOTS = [
+  GENERAL_ASSISTANT,
+  agent({ id: "research-assistant", name: "Research Assistant" }),
+];
 
 test("/channel/new reports a failed initial roster load", async () => {
   const view = renderChannelNew(queryClientWithFailingAgents());
@@ -256,12 +285,15 @@ test("/channel/new keeps a successful empty roster as an empty picker", async ()
   await expectSendHeldForABot(view);
 });
 
-test("/channel/new without a URL recipient leaves the To: field empty", async () => {
+test("/channel/new in the team edition with several Bots leaves the To: field empty", async () => {
   const view = renderChannelNew(
-    queryClientWithAgents([
-      agent({ id: "picked-harness", name: "Picked Harness" }),
-      GENERAL_ASSISTANT,
-    ]),
+    queryClientWithEdition(
+      [
+        agent({ id: "picked-harness", name: "Picked Harness" }),
+        GENERAL_ASSISTANT,
+      ],
+      "team",
+    ),
   );
 
   await expectSendHeldForABot(view);
@@ -335,7 +367,7 @@ test("/channel/new keeps a usable hidden detail when a background refetch fails"
 });
 
 test("New Bot is a fixed action outside the auto-highlighted recipient options", async () => {
-  const view = renderChannelNew(queryClientWithAgents([GENERAL_ASSISTANT]));
+  const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
   const create = await view.findByRole("button", {
     name: "New Bot Create a new Bot",
   });
@@ -394,7 +426,7 @@ async function typeDraft(
 }
 
 test("+ while composing a new conversation with a Bot picked starts a fresh one", async () => {
-  const view = renderChannelNew(queryClientWithAgents([GENERAL_ASSISTANT]));
+  const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
   // Picked in To:, as a person does, not handed over in the URL.
   await userEvent
     .setup({ document })
@@ -530,7 +562,7 @@ function plusButton(view: ReturnType<typeof renderChannelNew>) {
 }
 
 test("+ pressed twice fast opens the To: picker exactly as one press does", async () => {
-  const view = renderChannelNew(queryClientWithAgents([GENERAL_ASSISTANT]));
+  const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
   await expectPickerOpenAndFocused(view);
 
   await userEvent.setup({ document }).dblClick(plusButton(view));
@@ -539,7 +571,7 @@ test("+ pressed twice fast opens the To: picker exactly as one press does", asyn
 });
 
 test("+ pressed again after the screen has settled opens the To: picker again", async () => {
-  const view = renderChannelNew(queryClientWithAgents([GENERAL_ASSISTANT]));
+  const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
   const user = userEvent.setup({ document });
   await expectPickerOpenAndFocused(view);
   await user.click(plusButton(view));
@@ -553,7 +585,7 @@ test("+ pressed again after the screen has settled opens the To: picker again", 
 });
 
 test("+ while writing to nobody yet starts a fresh conversation", async () => {
-  const view = renderChannelNew(queryClientWithAgents([GENERAL_ASSISTANT]));
+  const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
   await typeDraftToNobody("not for anyone yet", view);
 
   await userEvent.setup({ document }).click(plusButton(view));
@@ -566,7 +598,7 @@ test("+ while writing to nobody yet starts a fresh conversation", async () => {
 });
 
 test("Enter with no Bot chosen keeps the message, says so, and opens the To: picker", async () => {
-  const view = renderChannelNew(queryClientWithAgents([GENERAL_ASSISTANT]));
+  const view = renderChannelNew(queryClientWithAgents(SEVERAL_BOTS));
   await typeDraftToNobody("hello there", view);
 
   await userEvent.setup({ document }).keyboard("{Enter}");
@@ -599,4 +631,119 @@ test("Enter with no Bot chosen keeps the message, says so, and opens the To: pic
   expect(editor.textContent).toBe("hello there");
   await waitFor(() => expect(document.activeElement).toBe(editor));
   await expectMessageComposerDisabled(view, false);
+});
+
+/** What a person sees right after +: who the message is for in To:, and the caret in the message. */
+async function expectStartsWith(
+  view: ReturnType<typeof renderChannelNew>,
+  name: string,
+) {
+  // Not hidden: with nobody left to ask for, the picker stays shut and the page is not inert.
+  await view.findByRole("button", { name: `Remove ${name}` });
+  expect(view.getByRole("combobox").getAttribute("aria-expanded")).toBe(
+    "false",
+  );
+  const editor = await view.findByRole("textbox", { name: "Message" });
+  await waitFor(() => expect(document.activeElement).toBe(editor));
+}
+
+/*
+ * FOUND ON WINDOWS: in a fresh personal install with one starter Bot, + opened a conversation with
+ * nobody in To:, and a message typed and sent went nowhere until the person picked the only Bot
+ * there was. A new conversation now starts with the Bot the message is for.
+ */
+test("+ in the personal edition starts with its default Bot picked, and Enter sends to it", async () => {
+  const errandHelper = agent({ id: "picked-harness", name: "Errand Helper" });
+  const created: unknown[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (
+    input: Parameters<typeof fetch>[0],
+    init?: RequestInit,
+  ) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+      "http://localhost",
+    );
+    if (url.pathname === "/api/channels" && init?.method === "POST") {
+      created.push(JSON.parse(String(init.body)));
+      return NativeResponse.json(
+        {
+          channel: {
+            id: "errand-channel",
+            name: "Errand Helper",
+            agentIds: [errandHelper.id],
+            threadId: "errand-thread",
+            active: true,
+            lastMessageAt: null,
+          },
+        },
+        { status: 201 },
+      );
+    }
+    return NativeResponse.json({ error: "Not here." }, { status: 404 });
+  }) as typeof fetch;
+  try {
+    const view = renderChannelNew(
+      queryClientWithEdition([GENERAL_ASSISTANT, errandHelper], "personal"),
+    );
+    await expectStartsWith(view, "Errand Helper");
+
+    await typeDraft("what changed in the latest release?", view);
+    await userEvent.setup({ document }).keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(created).toEqual([{ agentIds: ["picked-harness"] }]),
+    );
+    expect(view.queryByText("Choose a Bot first.")).toBeNull();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("+ with only one Bot starts with it picked, in the team edition too", async () => {
+  const view = renderChannelNew(
+    queryClientWithEdition([GENERAL_ASSISTANT], "team"),
+  );
+
+  await expectStartsWith(view, "General Assistant");
+  expect(view.router.state.location.href).toBe("/channel/new");
+});
+
+test("a Bot started with can be removed, and then Enter asks for one", async () => {
+  const view = renderChannelNew(
+    queryClientWithEdition(
+      [
+        agent({ id: "picked-harness", name: "Errand Helper" }),
+        GENERAL_ASSISTANT,
+      ],
+      "personal",
+    ),
+  );
+  await expectStartsWith(view, "Errand Helper");
+
+  fireEvent.click(view.getByRole("button", { name: "Remove Errand Helper" }));
+  await waitFor(() =>
+    expect(
+      view.queryByRole("button", { hidden: true, name: /^Remove / }),
+    ).toBeNull(),
+  );
+  await typeDraft("for whoever", view);
+  await userEvent.setup({ document }).keyboard("{Enter}");
+
+  expect(await view.findByText("Choose a Bot first.")).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      view
+        .getByRole("combobox", { hidden: true })
+        .getAttribute("aria-expanded"),
+    ).toBe("true"),
+  );
+  expect(
+    (await view.findByRole("textbox", { hidden: true, name: "Message" }))
+      .textContent,
+  ).toBe("for whoever");
 });

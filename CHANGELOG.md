@@ -240,6 +240,9 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 
 ### Personal edition
 
+- **+ starts a new conversation with your Bot picked**: the default Bot in the personal edition,
+  and the only Bot wherever there is just one. Enter used to ask you to choose a Bot first, even when
+  there was only one. With several Bots in the team edition, To: still starts empty and asks.
 - **Sign out is gone where nobody signs in**: every personal edition, OpenBot Desktop included,
   and any deployment with `OPENBOT_SINGLE_USER`. Pressing it said "No identity provider is
   configured." and left you where you were.
