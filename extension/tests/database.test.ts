@@ -37,6 +37,21 @@ const freshName = () => `recorder-test-${Date.now()}-${counter++}`;
 const keyPathOf = (db: IDBDatabase, store: string) =>
   db.transaction(store, "readonly").objectStore(store).keyPath;
 
+/**
+ * What `promise` rejected with, or undefined when it resolved, read with a plain `await`.
+ *
+ * Not `expect(promise).rejects`: Bun's `rejects` waits for a promise that is still pending by blocking in a loop of its
+ * own, and that loop runs no `setImmediate` callback until a timer or I/O wakes it. fake-indexeddb runs every request,
+ * commit and abort on `setImmediate`. Run alone, this file has no timer waiting and the wait is instant; in the full
+ * suite an earlier file's timer is still waiting, and the wait for an abort one `setImmediate` would have delivered ran
+ * past the 5 s test timeout on CI.
+ */
+const rejection = (promise: Promise<unknown>) =>
+  promise.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+
 describe("recorder database", () => {
   test("declares the default name and version 2", () => {
     expect(RECORDER_DATABASE).toBe("openbot-recorder");
@@ -123,11 +138,12 @@ describe("recorder database", () => {
       return requestToPromise(t.objectStore("meta").get("n"));
     });
     expect(value).toBe(7);
-    await expect(
+    const thrown = await rejection(
       tx(db, ["meta"], "readwrite", () => {
         throw new Error("boom");
       }),
-    ).rejects.toThrow("boom");
+    );
+    expect((thrown as Error | undefined)?.message).toBe("boom");
     db.close();
   });
 
@@ -143,12 +159,13 @@ describe("recorder database", () => {
 
   test("tx rejects when work touches the transaction after it has finished", async () => {
     const db = await openRecorderDatabase(freshName());
-    await expect(
+    const thrown = await rejection(
       tx(db, ["meta"], "readwrite", async (t) => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         t.objectStore("meta").put("late", "k");
       }),
-    ).rejects.toThrow();
+    );
+    expect(thrown).toBeInstanceOf(Error);
     const stored = await tx(db, ["meta"], "readonly", (t) =>
       requestToPromise(t.objectStore("meta").get("k")),
     );
@@ -163,12 +180,11 @@ describe("recorder database", () => {
         t.objectStore("events").add({ trajectoryId: "t", seq: 0 }),
       ),
     );
-    const error = await tx(db, ["events"], "readwrite", (t) => {
-      t.objectStore("events").add({ trajectoryId: "t", seq: 0 });
-      return "ok";
-    }).then(
-      () => undefined,
-      (e: unknown) => e,
+    const error = await rejection(
+      tx(db, ["events"], "readwrite", (t) => {
+        t.objectStore("events").add({ trajectoryId: "t", seq: 0 });
+        return "ok";
+      }),
     );
     expect((error as Error | undefined)?.name).toBe("ConstraintError");
     db.close();
