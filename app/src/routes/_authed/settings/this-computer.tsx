@@ -17,6 +17,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
+import { describe } from "@/components/layout/update-banner";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -28,13 +29,17 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { desktopShell } from "@/lib/desktop/shell";
 import {
+  checkAppUpdateMutationOptions,
+  installAppUpdateMutationOptions,
   intelligenceMutationOptions,
   restartOpenBotMutationOptions,
   stopOpenBotMutationOptions,
 } from "@/lib/desktop/mutations";
 import {
+  type DesktopAppUpdateCheck,
   type DesktopPart,
   type DesktopStatus,
+  desktopAppUpdateQueryOptions,
   desktopStatusQueryOptions,
   diagnostics,
   formatBytes,
@@ -343,20 +348,105 @@ function MachineSection({
           </ItemContent>
         </Item>
         <Separator />
-        <Item size="sm">
-          <RowMark>
-            <IconInfoCircle className="size-4" />
-          </RowMark>
-          <ItemContent>
-            <ItemTitle>Version {status.version}</ItemTitle>
-            <ItemDescription className="line-clamp-none">
-              {status.build}
-            </ItemDescription>
-          </ItemContent>
-        </Item>
+        <VersionRow status={status} />
       </PageRows>
     </PageSection>
   );
+}
+
+/**
+ * The desktop app's version, with Check for updates. The same check as Check for Updates… in the
+ * tray: the app reads its update feed at once and says what it found. On Windows, which has no menu
+ * bar, this and the tray are the places to ask.
+ */
+function VersionRow({ status }: { status: DesktopStatus }) {
+  const check = useMutation(checkAppUpdateMutationOptions(queryClient));
+  const install = useMutation(installAppUpdateMutationOptions(queryClient));
+  // The download's progress, asked twice a second from the click on, as the banner asks once it
+  // sees an install under way.
+  const offer = useQuery({
+    ...desktopAppUpdateQueryOptions(),
+    refetchInterval: install.isPending ? 500 : false,
+  });
+  const progress = offer.data?.installing ?? null;
+  const installing = install.isPending || progress !== null;
+  const found = check.data;
+  return (
+    <Item size="sm">
+      <RowMark>
+        <IconInfoCircle className="size-4" />
+      </RowMark>
+      <ItemContent>
+        <ItemTitle>Version {status.version}</ItemTitle>
+        <ItemDescription className="line-clamp-none">
+          {status.build}
+        </ItemDescription>
+        {found && !check.isPending && (
+          <ItemDescription
+            className="line-clamp-none text-foreground"
+            role="status"
+          >
+            {checked(found)}
+          </ItemDescription>
+        )}
+        {check.error && (
+          <ItemDescription
+            className="line-clamp-none text-destructive"
+            role="alert"
+          >
+            {reason(check.error)}
+          </ItemDescription>
+        )}
+        {install.error && !installing && (
+          <ItemDescription
+            className="line-clamp-none text-destructive"
+            role="alert"
+          >
+            Couldn't install the update: {reason(install.error)}
+          </ItemDescription>
+        )}
+      </ItemContent>
+      <ItemActions>
+        {found?.found === "available" ? (
+          <Button
+            disabled={installing}
+            onClick={() => install.mutate()}
+            size="sm"
+          >
+            {installing ? describe(progress) : "Update and restart"}
+          </Button>
+        ) : (
+          <Button
+            disabled={check.isPending}
+            onClick={() => check.mutate()}
+            size="sm"
+            variant="outline"
+          >
+            {check.isPending ? "Checking…" : "Check for updates"}
+          </Button>
+        )}
+      </ItemActions>
+    </Item>
+  );
+}
+
+/** What a check found, in a sentence. */
+function checked(found: DesktopAppUpdateCheck): string {
+  switch (found.found) {
+    case "available":
+      return `OpenBot ${found.version} is available.`;
+    case "upToDate":
+      return `OpenBot ${found.current} is up to date.`;
+    case "installing":
+      return `OpenBot is downloading ${found.version} and restarts when it's done.`;
+    case "notOffered":
+      return "This version of OpenBot doesn't update itself. Install a released version to get updates.";
+  }
+}
+
+/** The desktop app refuses with its own sentence, as a plain string. */
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Each container or process as a read-only row: what it is for, and its memory as the value. */

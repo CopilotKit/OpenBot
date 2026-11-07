@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop's Check for updates says "OpenBot 0.3.2 is up to date." or offers the newer
+  version with Update and restart, where a signed release said updates were not configured. It is
+  also Check for Updates… in the tray menu on every platform and under About in the Mac's OpenBot
+  menu, and Check for updates on the Version row of Settings › This computer, so Windows, which has
+  no menu bar, has a way to ask.
 - On the new-conversation screen, "Choose a Bot first." and an error in the same place line up with
   the message box's text, where they sat against the column's left edge.
 - In the personal edition, a Bot names the app card's real buttons: Turn on, then Connect.

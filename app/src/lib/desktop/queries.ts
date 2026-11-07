@@ -60,6 +60,17 @@ export type DesktopAppUpdate = {
   } | null;
 };
 
+/**
+ * What the desktop app found when asked to check for updates now: it reads its update feed at once.
+ * A newer version is named even if this person closed the banner on it, because they asked.
+ */
+export type DesktopAppUpdateCheck =
+  | { found: "available"; version: string; current: string }
+  | { found: "upToDate"; current: string }
+  | { found: "installing"; version: string; current: string }
+  /** This build never updates itself: an internal or candidate build. */
+  | { found: "notOffered"; current: string };
+
 export const desktopKeys = {
   all: ["desktop"] as const,
   status: (memory: boolean) => ["desktop", "status", { memory }] as const,
