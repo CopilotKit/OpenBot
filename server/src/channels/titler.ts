@@ -2,6 +2,7 @@
  * One model call for a few words. Not a Bot and not a turn: a title is not said to anybody and is
  * not part of the conversation it names, so there is no runtime work and no thread to hold.
  */
+import { type PlanModelConfig, PlanModel } from "../agents/plan-model";
 import type { RuntimeModel } from "../copilot";
 import { anthropicMessagesUrl, chatCompletionsUrl } from "../routing/model";
 import { oneLine } from "./text";
@@ -27,6 +28,12 @@ export type TitlerOptions = {
   provider?: RuntimeModel["provider"];
   /** The model to ask, from the tenant package. */
   model: string;
+  /**
+   * The plan the deployment signed in to instead of a key (a Claude or ChatGPT plan on OpenBot
+   * Desktop). Present, the title is asked of the plan's own harness, as the built-in Bots are
+   * answered: there is no key to ask a provider with, and without this no conversation was named.
+   */
+  plan?: PlanModelConfig;
   /** Resolved per call, so a rotated credential is picked up without a restart. */
   resolveApiKey: () => Promise<string | null>;
   environment?: Record<string, string | undefined>;
@@ -41,6 +48,7 @@ export function createChannelTitler(options: TitlerOptions) {
   const call = options.fetchImpl ?? fetch;
 
   return async (excerpt: string): Promise<string | null> => {
+    if (options.plan) return askPlan(options.plan, excerpt, options.timeoutMs);
     const apiKey = await options.resolveApiKey();
     if (!apiKey) return null;
 
@@ -104,4 +112,43 @@ export function createChannelTitler(options: TitlerOptions) {
     const answer = content.trim();
     return answer.length > 0 ? answer : null;
   };
+}
+
+/**
+ * One title from the plan's own harness: model only, no tools, and a conversation of its own each
+ * time, so no title is ever a turn in somebody's thread. A failure throws, so the queue retries it.
+ */
+async function askPlan(
+  plan: PlanModelConfig,
+  excerpt: string,
+  timeoutMs = 60_000,
+): Promise<string | null> {
+  // Aborted by hand: `AbortSignal.timeout` makes HttpAgent's cleanup rethrow a TimeoutError that
+  // nothing catches. The same reason `voice/summary.ts` gives.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const result = await new PlanModel(
+      plan,
+      "conversation-title",
+      { threadId: crypto.randomUUID() },
+      new Set(),
+      controller.signal,
+    ).doGenerate({
+      prompt: [
+        { role: "system", content: INSTRUCTION },
+        { role: "user", content: [{ type: "text", text: excerpt }] },
+      ],
+      maxOutputTokens: 512,
+      abortSignal: controller.signal,
+    });
+    const answer = result.content
+      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("")
+      .trim();
+    return answer.length > 0 ? answer : null;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
 }
