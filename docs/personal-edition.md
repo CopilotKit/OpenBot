@@ -101,8 +101,8 @@ settings and team rules, and a paused Automatic Learning.
 
 | | Personal edition |
 | --- | --- |
-| Use Bots, cloud browser, network and computer, custom rules, password manager, apps a Bot uses as you, check-ins | On |
-| Local computer access, Slack and Teams, Team Bots, Isolated Bots | Off |
+| Use Bots, cloud browser, network and computer, local computer access (folders, in OpenBot Desktop), custom rules, password manager, apps a Bot uses as you, check-ins | On |
+| Slack and Teams, Team Bots, Isolated Bots | Off |
 | Ask before making changes | Off for anybody who has not chosen otherwise. Paying, deleting, sending, sharing and posting ask anyway. See [Approvals](approvals.md) |
 | Stop idle computers | Never: there is one |
 | Check-ins per Bot per day | 24, as in the team edition |
@@ -110,6 +110,27 @@ settings and team rules, and a paused Automatic Learning.
 
 The password manager uses a saved login only after the person picks it in the private sign-in
 form, and taking over the browser is always offered.
+
+### Folders on this computer
+
+In OpenBot Desktop, Settings → Computer → **Folders on this computer** lets a Bot use folders on
+your own machine. Every safeguard the team edition has applies here too:
+
+- You pick each folder in the desktop's own folder picker (**Choose folder** on the Bot's row). A
+  Bot sees only the folders picked for it.
+- A folder is read-only. Before a Bot changes a file or runs a command in it, the desktop app asks
+  you in a dialog of its own. Set **Commands on your computer** in Settings → Approvals to Never to
+  refuse every command.
+- Every folder chosen, every file read or changed and every command is in Activity.
+- Access ends when OpenBot stops, when the desktop app goes offline, or when you press **Revoke** or
+  **Stop folder access**. Nothing is remembered across a restart.
+
+Only the desktop can open a folder. It hands the server a token minted on every Start
+(`OPENBOT_DESKTOP_HOST_TOKEN`), and its folder worker answers the server with it. A personal edition
+started with `scripts/start.sh` has no such token, so the section says it needs OpenBot Desktop and
+offers no picker, and the server refuses a folder request at once (`409`) rather than waiting for a
+desktop that will never answer. See `server/src/host-access/` and
+`desktop/src-tauri/src/desktop_host_access.rs`.
 
 ### Teach a Bot
 

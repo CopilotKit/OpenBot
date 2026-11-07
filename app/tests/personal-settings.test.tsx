@@ -250,13 +250,16 @@ describe("the Computer page", () => {
     name: "Personal Assistant",
   } as AgentProfile;
 
-  async function renderPage(edition: "team" | "personal") {
+  async function renderPage(
+    edition: "team" | "personal",
+    host: HostAccessStatus = hostAccess,
+  ) {
     const client = clientFor(edition);
     client.setDefaultOptions({
       queries: { retry: false, staleTime: Infinity },
     });
     client.setQueryData(computerKeys.fleet(), fleet);
-    client.setQueryData(hostAccessKeys.status(), hostAccess);
+    client.setQueryData(hostAccessKeys.status(), host);
     client.setQueryData(agentKeys.list(false), [assistant]);
     const router = createRouter({
       history: createMemoryHistory({ initialEntries: ["/"] }),
@@ -297,6 +300,47 @@ describe("the Computer page", () => {
     expect(
       within(browsers).getByRole("button", { name: "Reset" }),
     ).toBeTruthy();
+  });
+
+  /** The section the desktop's folder picker is reached from. */
+  function foldersSection(view: Awaited<ReturnType<typeof renderPage>>) {
+    return view.getByRole("heading", { name: "Folders on this computer" })
+      .parentElement?.parentElement as HTMLElement;
+  }
+
+  // OpenBot Desktop gives its server a host, and the personal edition allows it, so a Bot's row
+  // offers the picker. It answered "isn't part of OpenBot Personal".
+  test("in OpenBot Desktop offers each Bot a folder", async () => {
+    const view = await renderPage("personal", {
+      ...hostAccess,
+      desktop: true,
+      connected: true,
+    });
+    const folders = foldersSection(view);
+    expect(within(folders).getByText("Personal Assistant")).toBeTruthy();
+    const choose = within(folders).getByRole("button", {
+      name: "Choose folder",
+    }) as HTMLButtonElement;
+    expect(choose.disabled).toBe(false);
+    expect(folders.textContent).toContain("Folders are read-only.");
+  });
+
+  // Started with scripts/start.sh, or anywhere but the desktop: no host will ever answer, so the
+  // section says what is missing instead of offering a picker that cannot open.
+  test("outside OpenBot Desktop says the folders need it, with no picker to press", async () => {
+    const view = await renderPage("personal", {
+      ...hostAccess,
+      desktop: false,
+    });
+    const folders = foldersSection(view);
+    expect(within(folders).getByText("Needs OpenBot Desktop")).toBeTruthy();
+    expect(
+      within(folders).queryByRole("button", { name: "Choose folder" }),
+    ).toBeNull();
+    expect(
+      within(folders).queryByRole("button", { name: "Stop folder access" }),
+    ).toBeNull();
+    expect(folders.textContent).not.toContain("The desktop app is offline");
   });
 
   test("in the team edition still tells an admin how to give each person a computer", async () => {

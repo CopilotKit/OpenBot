@@ -36,6 +36,11 @@ export type HostAccessPendingOperation = {
 
 export type HostAccessStatus = {
   connected: boolean;
+  /**
+   * Whether this OpenBot runs in OpenBot Desktop, the only thing that can open folders on this
+   * computer. Absent from a server that predates it, which is read as yes.
+   */
+  desktop?: boolean;
   grants: HostFolderGrant[];
   pending: HostAccessPendingOperation[];
 };
