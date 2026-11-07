@@ -62,6 +62,11 @@ deployment:
   tasks and memory still never call one on their own. On an app's page for a Bot, such an Arcade
   action no longer says "destroys things". An app listed before this release is listed again at the
   first start (above).
+- **Settings → Approvals says what always asks**, above its switches: deleting, sending, sharing and
+  posting in your apps and on websites, and every edit or command in a folder on your own computer.
+  A Bot's own computer is its scratch space, so what it does there asks only when your settings or
+  rules say so. The page said every delete asked first, though a Bot deleting a file in its own
+  workspace never did. Onboarding and what Bots are told say the same.
 
 ### Goals and routines
 

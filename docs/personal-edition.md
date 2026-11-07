@@ -118,7 +118,7 @@ settings and team rules, and a paused Automatic Learning.
 | --- | --- |
 | Use Bots, cloud browser, network and computer, local computer access (folders, in OpenBot Desktop), custom rules, password manager, apps a Bot uses as you, check-ins | On |
 | Slack and Teams, Team Bots, Isolated Bots | Off |
-| Ask before making changes | Off for anybody who has not chosen otherwise. Paying, deleting, sending, sharing and posting ask anyway. See [Approvals](approvals.md) |
+| Ask before making changes | Off for anybody who has not chosen otherwise. Paying, and deleting, sending, sharing or posting in your apps and on websites, ask anyway, as does every edit or command in a folder on this computer. A Bot's own computer is its scratch space. See [Approvals](approvals.md) |
 | Stop idle computers | Never: there is one |
 | Check-ins per Bot per day | 24, as in the team edition |
 | SSO, action recording, model and MCP allowlists, skill sharing | Off |

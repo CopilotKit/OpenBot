@@ -121,9 +121,10 @@ function welcomeStep(computer: boolean): OnboardingStep {
             </div>
             <AskFirstSwitch />
             <p className="text-sm text-pretty text-muted-foreground">
-              Paying, deleting, sending, sharing, posting and changing account
-              security always wait for you. You can change this later in
-              Settings.
+              Paying, changing account security, and deleting, sending, sharing
+              or posting in your apps and on websites always wait for you. A
+              Bot's own computer is its scratch space. You can change this later
+              in Settings.
             </p>
           </section>
         }

@@ -386,6 +386,12 @@ test("Welcome asks to set up permissions, with Ask before making changes beside 
   expect(
     view.getByText("Turn this on to review changes before a Bot makes them."),
   ).toBeTruthy();
+  // What always waits is said for what it covers: a Bot's own computer is its scratch space.
+  expect(
+    view.getByText(
+      "Paying, changing account security, and deleting, sending, sharing or posting in your apps and on websites always wait for you. A Bot's own computer is its scratch space. You can change this later in Settings.",
+    ),
+  ).toBeTruthy();
   const ask = await view.findByRole("switch", {
     name: "Ask before making changes",
   });
