@@ -136,7 +136,7 @@ test("Anthropic's credit-balance refusal names Anthropic", async () => {
   expect(message).toContain("Your credit balance is too low");
 });
 
-test("a rate limit is not a billing problem, and keeps its own message", async () => {
+test("a rate limit is not a billing problem, and is told as a rate limit", async () => {
   const provider = refusing({
     status: 429,
     body: {
@@ -155,7 +155,10 @@ test("a rate limit is not a billing problem, and keeps its own message", async (
     defaultModel: "gpt-6.1-terra",
   });
   expect(provider.calls()).toBe(3);
-  expect(message).toContain("Rate limit reached");
+  // In words, as every refusal is (provider-refusal.test.ts); the provider's go to the log.
+  expect(message).toContain(
+    "is limiting how many requests this account can send",
+  );
   expect(message).not.toContain("out of credit");
 });
 

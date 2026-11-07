@@ -340,7 +340,8 @@ async def test_a_plan_refusing_a_model_ends_the_run_with_its_reason_and_refreshe
     assert "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account." in (
         errors[-1]["message"]
     )
-    assert errors[-1].get("code") is None, "a refused model is not a sign-in problem"
+    # A refused model is not a sign-in problem: it is a refusal, which the server says in words.
+    assert errors[-1].get("code") == "OPENBOT_MODEL_REFUSED"
     # The listing is read again on the next use, not after six hours.
     assert (await get("/models")).status_code == 200
     assert len(plan.listings) == 2

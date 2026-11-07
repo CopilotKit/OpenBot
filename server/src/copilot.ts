@@ -45,7 +45,7 @@ import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { sanitizeSeededHistory } from "@openbot/toolkit/history-sanitize";
 import { executeNativeApprovalTool } from "@openbot/toolkit/native-approval";
 import { historyOrEmpty } from "@openbot/toolkit/thread-history";
-import { catchError, defer, from, switchMap, throwError } from "rxjs";
+import { defer, from, switchMap } from "rxjs";
 import { z } from "zod";
 import {
   type ActorAgentResolver,
@@ -81,6 +81,10 @@ import {
   type StoredAttachment,
 } from "./channels/attachment-parts";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
+import {
+  type RefusingProvider,
+  sayingProviderRefusals,
+} from "./agents/provider-refusal";
 import { sayingWhenUnreachable } from "./agents/unreachable";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
@@ -115,7 +119,7 @@ import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
 import type { ProductTelemetry } from "./telemetry/product";
 import { productRuntimeHook } from "./telemetry/product-boundaries";
-import { billingRefusal, providerName } from "./model-billing";
+import { providerName } from "./model-billing";
 import { modelSourceFor, type RunChoice } from "./model-catalogue";
 import { inlineToolImages } from "./tool-images";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
@@ -1158,6 +1162,14 @@ async function inlineAttachments(
   return inlined;
 }
 
+/** Who refuses this deployment's model calls, as a person knows them. See `provider-refusal.ts`. */
+function refusingProvider(model: RuntimeModel): RefusingProvider {
+  return {
+    provider: providerName(modelSourceFor(model, process.env)),
+    signIn: !!model.plan,
+  };
+}
+
 async function buildAgent(
   agent: RegisteredAgent,
   model: RuntimeModel,
@@ -1356,6 +1368,7 @@ async function buildAgent(
               async () => [],
             )
         : undefined,
+      refusingProvider(model),
     );
   }
 
@@ -1471,20 +1484,17 @@ async function buildAgent(
     const admit = admitTools(held, runModel);
     return new BuiltInAgentWithSaneHistory(configuration, {
       /*
-       * A provider out of credit or at its spending limit is told as that, with its name and its
-       * own words, rather than as "Forbidden" or a retry count. See `model-billing.ts`.
+       * A provider's refusal is told in words, naming the provider, rather than as the SDK's text, a
+       * "Forbidden" or a retry count. Out of credit keeps its own sentence, from `model-billing.ts`.
+       * Outside the connection observer, which reads the provider's own words. See
+       * `provider-refusal.ts`.
        */
       observe: (stream) =>
-        observeModelConnection(stream).pipe(
-          catchError((error: unknown) =>
-            throwError(
-              () =>
-                billingRefusal(
-                  error,
-                  providerName(modelSourceFor(runModel, process.env)),
-                ) ?? error,
-            ),
-          ),
+        sayingProviderRefusals(
+          observeModelConnection(stream),
+          agent,
+          refusingProvider(runModel),
+          { untilError: true },
         ),
       ...(admit ? { admitTools: admit } : {}),
       ...(held.size > 0 ? { waiting: held } : {}),
@@ -1993,6 +2003,11 @@ function remoteAgentWithStandingRole(
    * the endpoint. Absent, those runs go to the endpoint holding nothing. See `answersOwnRunsHere`.
    */
   answerOwnRuns?: () => Promise<AbstractAgent>,
+  /**
+   * Who serves this deployment's model, for a harness this deployment runs. A Bot somebody else runs
+   * may be on any provider, so its refusals name the provider only when its own words do.
+   */
+  ourProvider?: RefusingProvider,
 ) {
   const holds = (input: RunAgentInput) => !holdsTools || holdsTools(input);
   /*
@@ -2301,7 +2316,13 @@ function remoteAgentWithStandingRole(
           (url) =>
             url?.replace(/\/$/, "") === agent.endpoint.replace(/\/$/, ""),
         );
-      return owned ? observeModelConnection(stream) : stream;
+      // Outside the connection observer, which reads the provider's own words. See
+      // `provider-refusal.ts`.
+      return sayingProviderRefusals(
+        owned ? observeModelConnection(stream) : stream,
+        agent,
+        owned ? ourProvider : undefined,
+      );
     });
     if (acquireLearnedSkills) {
       const learned = new RemoteLearnedSkillsMiddleware(
