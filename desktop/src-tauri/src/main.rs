@@ -5293,13 +5293,19 @@ async fn run_local_eval(
         let selected = shell.selected_root.lock().unwrap().clone();
         selected.unwrap_or_else(stack::default_root)
     };
-    let report = tauri::async_runtime::spawn_blocking(move || {
+    let mut report = tauri::async_runtime::spawn_blocking(move || {
         know_cli_engine(&root);
         local_eval::run_installed(&attempt, action, &stack)
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)??;
     learn_dashboards(&app, report.stack.iter());
+    // An Intelligence an older app installed, behind the release this app's CLI installs: the
+    // window updates it before it starts OpenBot on it.
+    if action == local_eval::Action::Status {
+        report.update_to =
+            local_eval::update_due(&report, local_eval::bundled_release().as_deref());
+    }
     Ok(report)
 }
 
@@ -9914,6 +9920,7 @@ mod tests {
             readiness: local_eval::Readiness::Unknown,
             licence: local_eval::Licence::Unknown,
             licence_expires_at: None,
+            update_to: None,
         }
     }
 

@@ -219,6 +219,119 @@ test("a recorded, connected stack skips straight to waiting", async () => {
   expect(statusCalls()[0]?.args).toMatchObject({ stack: "local-abc123" });
 });
 
+/** A ready stack an older app set up on rc.8, which this app's CLI would install as rc.9. */
+function onRelease(installedRelease: string, updateTo: string | null) {
+  const base = report({ readiness: "ready", licence: "valid", updateTo });
+  return { ...base, stack: base.stack && { ...base.stack, installedRelease } };
+}
+
+test("a back end an older app installed is updated to this app's release before OpenBot starts on it", async () => {
+  const updating = deferred<LocalReport>();
+  let calls = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updating.promise;
+    calls += 1;
+    return calls === 1
+      ? onRelease("0.16.0-rc.8", "0.16.0-rc.9")
+      : onRelease("0.16.0-rc.9", null);
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  // One plain line while it runs, on the back end's own row.
+  await waitFor(() =>
+    expect(row(screen, WAIT).textContent).toContain(
+      "Updating the back end to 0.16.0-rc.9. Its data stays.",
+    ),
+  );
+  expect(started).toEqual([]);
+  updating.resolve(onRelease("0.16.0-rc.9", null));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+  expect(
+    invokeCalls.find(
+      (call) => (call.args as { action?: string })?.action === "update",
+    )?.args,
+  ).toMatchObject({ stack: "local-abc123" });
+  expect(
+    screen.queryByRole("listitem", { name: "Updating the back end" }),
+  ).toBeNull();
+});
+
+test("a back end already on this app's release is not updated", async () => {
+  invokeHandler = answers({
+    run_local_eval: [onRelease("0.16.0-rc.9", null)],
+  });
+  const started: Startable[] = [];
+  view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual(["run_local_eval:status"]);
+});
+
+test("an update that fails says so and starts OpenBot on the release the back end still has", async () => {
+  for (const failed of [
+    report({
+      outcome: "failed",
+      stack: null,
+      reason: "local-command-failed",
+    }),
+    new Error("timeout"),
+  ]) {
+    let calls = 0;
+    invokeHandler = async (command, args) => {
+      if (command === "cancel_local_eval") return null;
+      const action = (args as { action: string }).action;
+      if (action === "update") {
+        if (failed instanceof Error) throw "timeout";
+        return failed;
+      }
+      calls += 1;
+      // Still rc.8, and still due: tried once in this run, not again.
+      return onRelease("0.16.0-rc.8", "0.16.0-rc.9");
+    };
+    const started: Startable[] = [];
+    const screen = view({
+      stack: "local-abc123",
+      connected: true,
+      onStart: async (startable) => {
+        started.push(startable);
+        return "started";
+      },
+    });
+    await waitFor(() => expect(started).toEqual([startableUrls]));
+    expect(commands()).toEqual([
+      "run_local_eval:status",
+      "run_local_eval:update",
+      "run_local_eval:status",
+    ]);
+    expect(row(screen, "Updating the back end").textContent).toContain(
+      "The back end could not be updated to 0.16.0-rc.9, so it stays on 0.16.0-rc.8. OpenBot tries again the next time it starts.",
+    );
+    expect(calls).toBe(2);
+    cleanup();
+    invokeCalls = [];
+  }
+});
+
 const blockedOnSignIn = report({
   outcome: "blocked",
   stack: null,

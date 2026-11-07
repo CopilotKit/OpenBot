@@ -47,6 +47,9 @@ pub enum Action {
     Status,
     Start,
     Stop,
+    /// `local update`: the release the CLI installs, over a stack an older app set up, with its data
+    /// kept (see `update_due`).
+    Update,
 }
 
 impl Action {
@@ -55,6 +58,7 @@ impl Action {
             Action::Status => "status",
             Action::Start => "start",
             Action::Stop => "stop",
+            Action::Update => "update",
         }
     }
 }
@@ -214,6 +218,9 @@ pub struct Report {
     pub licence: Licence,
     /// When the licence expires, as a strict ISO-8601 instant, so the window can warn ahead of it.
     pub licence_expires_at: Option<String>,
+    /// On `status`: the release this app's CLI installs, when the stack runs an older one. The window
+    /// runs `update` once, before it starts OpenBot on that stack (see `update_due`).
+    pub update_to: Option<String>,
 }
 
 /// What `local connect` answered. The settings it wrote stay in the installation's `.env`; their
@@ -532,6 +539,7 @@ fn report(command: &str, exit_code: i32, stdout: &[u8]) -> Result<Report, Failur
         readiness,
         licence,
         licence_expires_at,
+        update_to: None,
     })
 }
 
@@ -1146,6 +1154,8 @@ impl Limits {
             Action::Status => Duration::from_secs(120),
             Action::Start => Duration::from_secs(15 * 60),
             Action::Stop => Duration::from_secs(10 * 60),
+            // A new release's images, then its migrations and its start: as long as setup's.
+            Action::Update => Duration::from_secs(60 * 60),
         };
         Self {
             timeout,
@@ -1213,6 +1223,46 @@ impl Cancel {
 ///
 /// A debug build also runs a CLI the developer pinned (`developer_cli`), so the flow can be tried
 /// against a real release before one is pinned here. A release build never reads those settings.
+/**
+The Intelligence release this app's CLI installs, when it was built pinned to one.
+
+Read from the bundled CLI when the app was built (`build.rs`, `cli_release::pinned_release_in`). A
+debug build running a developer's CLI names it with `OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE`. `None`
+for a CLI that takes Helm's newest stable release: then which release it would install is not
+known here, and no stack is updated.
+*/
+pub fn bundled_release() -> Option<String> {
+    #[cfg(debug_assertions)]
+    if let Ok(release) = std::env::var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE") {
+        return Some(release).filter(|release| !release.is_empty());
+    }
+    option_env!("OPENBOT_BUNDLED_CLI_INTELLIGENCE").map(str::to_owned)
+}
+
+/**
+Whether a local Intelligence must be updated before OpenBot starts on it, and to what.
+
+THE PROBLEM. The app installs Intelligence once, at setup, and only ever starts it after that. So a
+person whose stack an older app set up kept that release however many apps came after: a stack on
+0.16.0-rc.8 refuses every recording with `TRAJECTORIES_UNAVAILABLE`, which rc.9, the release this
+app's CLI installs, does not.
+
+THE RULE. Due when the stack's installed release is older, by semantic version, than `target`, the
+release this app's CLI installs (`bundled_release`). Never when it is the same or newer: a stack is
+not moved back. Never when either version cannot be read, or a saved update is already under way
+(the CLI resumes that itself on `start`). The CLI's own `local update` does the work, keeping the
+stack's data and app connections, and leaves the stack as it was when it fails.
+*/
+pub fn update_due(report: &Report, target: Option<&str>) -> Option<String> {
+    let target = target?;
+    let stack = report.stack.as_ref()?;
+    if report.outcome != Outcome::Completed || stack.update_in_progress {
+        return None;
+    }
+    let version = |text: &str| semver::Version::parse(text.trim().trim_start_matches('v')).ok();
+    (version(target)? > version(&stack.installed_release)?).then(|| target.to_owned())
+}
+
 pub fn installed() -> Result<PinnedCli, Failure> {
     #[cfg(debug_assertions)]
     if let Some(cli) = developer_cli() {
@@ -1478,7 +1528,10 @@ fn engine_environment(engine: Option<&CliEngine>) -> Vec<(&'static str, Option<S
 /// Decline the calls that create or start Intelligence's cluster on a rootless Podman machine.
 /// Everything else runs: `status`, `stop` and the account calls work on any engine.
 fn refuse_rootless(arguments: &[&str], engine: Option<&CliEngine>) -> Result<(), Failure> {
-    let runs_workloads = matches!(arguments, ["local", "setup", ..] | ["local", "start", ..]);
+    let runs_workloads = matches!(
+        arguments,
+        ["local", "setup", ..] | ["local", "start", ..] | ["local", "update", ..]
+    );
     if runs_workloads && engine.is_some_and(|engine| engine.rootless) {
         return Err(Failure::RootlessPodman);
     }
@@ -2219,6 +2272,98 @@ mod tests {
 
     fn status(input: &Value) -> Result<Report, Failure> {
         normalize(Action::Status, 0, input.to_string().as_bytes())
+    }
+
+    /// A stack on `installed`, as `local status` reports it.
+    fn on_release(installed: &str) -> Report {
+        let mut input = envelope();
+        input["stack"]["installedRelease"] = json!(installed);
+        status(&input).unwrap()
+    }
+
+    /// The 0.16.0-rc.9 CLI (copilotkit 4.34.0-pre.48a3863), as its bundle names the release its
+    /// `local setup` and `local update` install.
+    const PINNED_CLI: &str = r#"async function resolveDefaultLocalRelease(directory2, dependencies = {}) {   const pinnedVersion = false ? "" : "0.16.0-rc.9";   const support = supportSchema.parse("#;
+
+    #[test]
+    fn the_release_a_cli_installs_is_read_out_of_the_cli_itself() {
+        assert_eq!(
+            crate::cli_release::pinned_release_in(PINNED_CLI).as_deref(),
+            Some("0.16.0-rc.9")
+        );
+        // A CLI built without a pin takes Helm's newest stable release: no version to compare.
+        assert_eq!(
+            crate::cli_release::pinned_release_in("const pinnedVersion = true ? \"\" : \"\";"),
+            None
+        );
+        assert_eq!(crate::cli_release::pinned_release_in("nothing here"), None);
+        // Nothing that is not a plain version comes out of it.
+        assert_eq!(
+            crate::cli_release::pinned_release_in(
+                "const pinnedVersion = false ? \"\" : \"0.16.0; rm -rf\";"
+            ),
+            None
+        );
+    }
+
+    /// The Trajectory refusal: a stack an older app set up on rc.8 is updated to the rc.9 this
+    /// app's CLI installs, and a stack already on it, or past it, is left alone.
+    #[test]
+    fn a_stack_older_than_the_release_the_cli_installs_is_updated_and_no_other() {
+        let target = Some("0.16.0-rc.9");
+        assert_eq!(
+            update_due(&on_release("0.16.0-rc.8"), target).as_deref(),
+            Some("0.16.0-rc.9")
+        );
+        assert_eq!(
+            update_due(&on_release("0.16.0-rc.5"), target).as_deref(),
+            Some("0.16.0-rc.9")
+        );
+        assert_eq!(
+            update_due(&on_release("0.15.1"), target).as_deref(),
+            Some("0.16.0-rc.9")
+        );
+        for current in ["0.16.0-rc.9", "v0.16.0-rc.9", "0.16.0-rc.10", "0.16.0"] {
+            assert_eq!(update_due(&on_release(current), target), None, "{current}");
+        }
+        // Not known: a CLI with no pinned release, or a version that does not read.
+        assert_eq!(update_due(&on_release("0.16.0-rc.8"), None), None);
+        assert_eq!(update_due(&on_release("latest"), target), None);
+        // A saved update is the CLI's own to resume, on `start`.
+        let mut resuming = envelope();
+        resuming["stack"]["installedRelease"] = json!("0.16.0-rc.8");
+        resuming["stack"]["update"] = json!({ "attemptedRelease": { "version": "0.16.0-rc.9" } });
+        assert_eq!(update_due(&status(&resuming).unwrap(), target), None);
+        // A report that is not a completed status says nothing about the stack's release.
+        let mut blocked = on_release("0.16.0-rc.8");
+        blocked.outcome = Outcome::Blocked;
+        assert_eq!(update_due(&blocked, target), None);
+    }
+
+    /// `local update --stack <id> --json`, fixed like every other call, and read like them: its
+    /// completed report, including the CLI's answer that the stack already runs that release.
+    #[test]
+    fn update_runs_as_a_fixed_call_and_reports_like_the_others() {
+        let stack = StackId::parse("local-abc123").unwrap();
+        assert_eq!(
+            arguments(Action::Update, &stack),
+            ["local", "update", "--stack", "local-abc123", "--json"]
+        );
+        let mut updated = envelope();
+        updated["command"] = json!("local update");
+        updated["stack"]["installedRelease"] = json!("0.16.0-rc.9");
+        let report = normalize(Action::Update, 0, updated.to_string().as_bytes()).unwrap();
+        assert_eq!(report.outcome, Outcome::Completed);
+        assert_eq!(report.stack.unwrap().installed_release, "0.16.0-rc.9");
+        // `status` is not `update`: an answer for another command is refused.
+        assert_eq!(
+            normalize(Action::Update, 0, envelope().to_string().as_bytes()),
+            Err(Failure::UnexpectedCommand)
+        );
+        assert_eq!(
+            Limits::for_action(Action::Update).timeout,
+            Duration::from_secs(60 * 60)
+        );
     }
 
     fn exposes_secret(report: &Report) -> bool {
@@ -3666,7 +3811,7 @@ mod tests {
     }
 
     #[test]
-    fn a_rootless_podman_declines_setup_and_start_and_nothing_else() {
+    fn a_rootless_podman_declines_setup_start_and_update_and_nothing_else() {
         use crate::engine::Engine;
         let rootless = CliEngine {
             engine: Engine::Podman,
@@ -3682,6 +3827,8 @@ mod tests {
         for arguments in [
             SETUP_ARGUMENTS.to_vec(),
             arguments(Action::Start, &stack).to_vec(),
+            // It installs a release, as setup does.
+            arguments(Action::Update, &stack).to_vec(),
         ] {
             assert_eq!(
                 refuse_rootless(&arguments, Some(&rootless)),

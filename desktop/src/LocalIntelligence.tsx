@@ -98,6 +98,13 @@ type State = {
    * would only loop.
    */
   refused: string | null;
+  /** What the running row is doing, when it says more than its label. */
+  detail: string | null;
+  /**
+   * The back end could not be updated to the release this app installs. Said, and not a stop: the
+   * release it had is still there and still runs.
+   */
+  updateFailed: string | null;
 };
 
 const idle: State = {
@@ -107,7 +114,12 @@ const idle: State = {
   blocked: null,
   problem: null,
   refused: null,
+  detail: null,
+  updateFailed: null,
 };
+
+/** The row an update that failed is said on, under the back end's. */
+const UPDATING = "Updating the back end";
 
 export type LocalSequence = State & {
   /** Set up, connected and reported ready and valid, and waiting for the go-ahead to start. */
@@ -226,6 +238,39 @@ export function useLocalSequence({
   }
 
   /**
+   * Install the release this app's CLI installs over a stack an older app set up, with the CLI's
+   * own `local update`, which keeps the stack's data and app connections. Once per wait. A failure
+   * is said and does not stop the sequence: the release the stack had is still there, and OpenBot
+   * starts on it. False only when the run was stopped meanwhile.
+   */
+  async function updateIntelligence(
+    id: string,
+    to: string,
+    from: string,
+    token: number,
+  ): Promise<boolean> {
+    update({ detail: `Updating the back end to ${to}. Its data stays.` });
+    const started = runLocalEval("update", id);
+    attempt.current = started.attempt;
+    let updated = false;
+    try {
+      updated = (await started.report).outcome === "completed";
+    } catch {
+      updated = false;
+    } finally {
+      if (attempt.current === started.attempt) attempt.current = null;
+    }
+    if (generation.current !== token) return false;
+    update({
+      detail: null,
+      updateFailed: updated
+        ? null
+        : `The back end could not be updated to ${to}, so it stays on ${from}. OpenBot tries again the next time it starts.`,
+    });
+    return true;
+  }
+
+  /**
    * Status until the CLI reports ready and valid, or anything that waiting will not change.
    * Only "starting" is waited on: unknown is what an older CLI always says. A stopped stack is
    * started once, as its own readiness row offers.
@@ -245,9 +290,23 @@ export function useLocalSequence({
       return null;
     };
     let startedIntelligence = false;
+    let updatedIntelligence = false;
     for (let tries = 0; ; tries += 1) {
       const found = await report("status");
       if (!found) return null;
+      // A stack an older app set up runs an older release than this app installs: updated first,
+      // once, so OpenBot starts on the release it was built with.
+      if (found.updateTo && found.stack && !updatedIntelligence) {
+        updatedIntelligence = true;
+        const going = await updateIntelligence(
+          id,
+          found.updateTo,
+          found.stack.installedRelease,
+          token,
+        );
+        if (!going) return null;
+        continue;
+      }
       if (isReady(found)) {
         if (!found.stack) {
           update({ blocked: { said: said("missing-stack"), reason: null } });
@@ -290,7 +349,7 @@ export function useLocalSequence({
   async function run(from: Phase): Promise<void> {
     halt();
     const token = generation.current;
-    update({ blocked: null, problem: null });
+    update({ blocked: null, problem: null, detail: null, updateFailed: null });
     const { root } = latest.current;
     let id = latest.current.stack;
     const stop = (reason?: { said: string; reason?: LocalReason | null }) => {
@@ -426,21 +485,26 @@ export function useLocalSequence({
   const reached = state.at
     ? PHASES.findIndex(([phase]) => phase === state.at)
     : -1;
-  const steps: Progress[] = PHASES.slice(0, reached + 1).map(
-    ([, label], index) =>
-      index < reached
-        ? { step: label, ok: true, detail: "" }
-        : state.running
-          ? {
-              step: label,
-              ok: true,
-              running: true,
-              detail: "",
-              startedAt: state.since ?? undefined,
-            }
-          : stopped
-            ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
-            : { step: label, ok: true, detail: "" },
+  const steps: Progress[] = PHASES.slice(0, reached + 1).flatMap(
+    ([phase, label], index): Progress[] => {
+      const row: Progress =
+        index < reached
+          ? { step: label, ok: true, detail: "" }
+          : state.running
+            ? {
+                step: label,
+                ok: true,
+                running: true,
+                detail: state.detail ?? "",
+                startedAt: state.since ?? undefined,
+              }
+            : stopped
+              ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
+              : { step: label, ok: true, detail: "" };
+      return phase === "wait" && state.updateFailed
+        ? [row, { step: UPDATING, ok: false, detail: state.updateFailed }]
+        : [row];
+    },
   );
 
   return {
