@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Activity names a Bot and never shows its id: hovering a Bot showed "picked-harness", a Bot's
+  avatar in a conversation was labelled with it, and a deleted Bot now reads "A Bot no longer here".
 - The first-use starter tasks step aside while a Bot waits on your answer, where they covered the
   bottom of its question.
 - A Bot's step reads in words from the moment it starts, even for a tool with no label of its own:

@@ -431,11 +431,9 @@ export function BotCell({
   nameFor: NameFor;
 }) {
   const bot = botIdOf(event);
-  // Keep the immutable bot id available even when names collide.
+  // The name and nothing else, a tooltip included: a person never reads a Bot's id. The CSV keeps it.
   return bot ? (
-    <span className="text-muted-foreground" title={bot}>
-      {nameFor(bot)}
-    </span>
+    <span className="text-muted-foreground">{nameFor(bot)}</span>
   ) : (
     <span className="text-muted-foreground">-</span>
   );
@@ -461,7 +459,6 @@ export function StartedByCell({
           ? "font-medium text-amber-600 dark:text-amber-500"
           : "text-muted-foreground"
       }
-      title={unattended ? (event.initiatorId ?? undefined) : undefined}
     >
       {startedByLine(startedByText(event, nameFor))}
     </span>

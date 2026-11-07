@@ -41,7 +41,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { useBotNames } from "@/lib/agents/bot-names";
 import { conversationLabel } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
@@ -120,10 +120,8 @@ const TRANSPORT: Record<
  */
 export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
   const reach = useQuery(deliveryQueryOptions());
-  const bots = useQuery(agentListQueryOptions());
   // People read Bots by name; the id is what the list used to show.
-  const botName = (id: string) =>
-    bots.data?.find((bot) => bot.id === id)?.name ?? id;
+  const botName = useBotNames();
   const [challengeId, setChallengeId] = useState(readPending);
   useEffect(() => writePending(challengeId), [challengeId]);
   const [connecting, setConnecting] = useState<Transport | null>(null);
