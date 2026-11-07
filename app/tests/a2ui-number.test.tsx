@@ -39,3 +39,59 @@ test("editing a generated numeric field adds numbers instead of joining text", a
   await user.type(view.getByRole("spinbutton"), ".5");
   expect(view.getByRole("status").textContent).toBe("430.5");
 });
+
+for (const variant of ["shortText", undefined] as const) {
+  test(`text field ${variant ?? "default"} preserves leading zeros`, async () => {
+    let stored: unknown;
+    function Text() {
+      const [value, setValue] = useState<unknown>("");
+      return (
+        <Field
+          label="ZIP"
+          variant={variant}
+          value={value}
+          setValue={(next: unknown) => {
+            stored = next;
+            setValue(next);
+          }}
+        />
+      );
+    }
+    const view = render(<Text />);
+    const user = userEvent.setup({ document: window.document });
+    await user.type(view.getByRole("textbox"), "007");
+    expect(stored).toBe("007");
+  });
+}
+
+test("an external value change resets the cleared field's local blank display", async () => {
+  function Resettable() {
+    const [value, setValue] = useState<unknown>(200);
+    return (
+      <>
+        <Field
+          label="Amount"
+          variant="number"
+          value={value}
+          setValue={setValue}
+        />
+        <button type="button" onClick={() => setValue(7)}>
+          Seven
+        </button>
+        <button type="button" onClick={() => setValue(0)}>
+          Zero
+        </button>
+      </>
+    );
+  }
+  const view = render(<Resettable />);
+  const user = userEvent.setup({ document: window.document });
+  const field = view.getByRole("spinbutton") as HTMLInputElement;
+  await user.click(field);
+  await user.keyboard("{Control>}a{/Control}{Backspace}");
+  expect(field.value).toBe("");
+  await user.click(view.getByText("Seven"));
+  expect(field.value).toBe("7");
+  await user.click(view.getByText("Zero"));
+  expect(field.value).toBe("0");
+});
