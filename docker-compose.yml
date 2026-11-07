@@ -258,6 +258,11 @@ services:
     # and a Compose-derived name would change with the project.
     image: ${COMPUTER_IMAGE:-openbot-agent-computer:latest}
     pull_policy: ${IMAGE_PULL_POLICY:-build}
+    # A Bot's shell runs `ping`, which needs raw ICMP sockets. Docker grants NET_RAW by default and
+    # Podman does not, so without this ping fails with "Operation not permitted" on Podman (the
+    # Desktop's engine on Windows), even as root. Asked for here so both engines give the same.
+    cap_add:
+      - NET_RAW
     ports:
       # Loopback only. This process drives a browser holding real logins; COMPUTER_TOKEN is the
       # request control, and loopback keeps the surface off routed networks.

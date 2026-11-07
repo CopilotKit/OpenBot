@@ -852,3 +852,20 @@ test("mounts the model sign-in folder into the server, and only there", () => {
     expect(JSON.stringify(service.volumes ?? [])).not.toContain(".openbot");
   }
 });
+
+/*
+ * A Bot's shell runs `ping` on its computer. iputils' ping carries the `cap_net_raw` file
+ * capability, and a process cannot exec a file whose capabilities are outside the container's
+ * bounding set. Docker's default set has NET_RAW; Podman's (the Desktop's engine on Windows and the
+ * default everywhere) does not, so on Windows `ping 8.8.8.8` answered "Operation not permitted",
+ * even as root. The computer asks for NET_RAW itself, so both engines give it the same.
+ */
+test("the computer is given NET_RAW, so ping works on Podman as on Docker", () => {
+  const computer = (
+    parse(composeFile()) as {
+      services: Record<string, { cap_add?: string[]; cap_drop?: string[] }>;
+    }
+  ).services["agent-computer"];
+  expect(computer?.cap_add ?? []).toContain("NET_RAW");
+  expect(computer?.cap_drop ?? []).not.toContain("NET_RAW");
+});
