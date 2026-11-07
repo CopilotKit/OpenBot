@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
 import {
   cancelLocalEval,
@@ -20,7 +21,7 @@ import { StatusLine } from "./SetupProgress";
 type Seen =
   | { at: "checking" }
   | { at: "signed-out" }
-  | { at: "signing-in" }
+  | { at: "signing-in"; attempt: string }
   | { at: "agreement"; terms: Extract<LocalTerms, { status: "required" }> }
   | { at: "apps"; version: string | null }
   | { at: "apps-failed"; version: string | null; problem: Problem }
@@ -161,9 +162,9 @@ export function CopilotKitAccount({
   }, []);
 
   async function signIn() {
-    setSeen({ at: "signing-in" });
     const started = signInToCopilotKit();
     attempt.current = started.attempt;
+    setSeen({ at: "signing-in", attempt: started.attempt });
     try {
       const signedIn = await started.signedIn;
       if (attempt.current !== started.attempt) return;
@@ -175,6 +176,14 @@ export function CopilotKitAccount({
       attempt.current = null;
       setSeen({ at: "failed", said: "Sign-in didn’t finish. Try again." });
     }
+  }
+
+  /** Stop the CLI's sign-in and go back to the start of this step. */
+  function cancelSignIn() {
+    const running = attempt.current;
+    attempt.current = null;
+    if (running) cancelLocalEval(running).catch(() => {});
+    setSeen({ at: "signed-out" });
   }
 
   const agreement = seen.at === "agreement" ? seen.terms : null;
@@ -210,9 +219,11 @@ export function CopilotKitAccount({
         <StatusLine>Checking your CopilotKit account…</StatusLine>
       )}
       {seen.at === "signing-in" && (
-        <StatusLine>
-          Finish signing in to CopilotKit in your browser…
-        </StatusLine>
+        <CopilotKitSignInWait
+          attempt={seen.attempt}
+          waiting="Finish signing in to CopilotKit in your browser…"
+          onCancel={cancelSignIn}
+        />
       )}
       {seen.at === "apps" && <StatusLine>Connecting your apps…</StatusLine>}
       {seen.at === "apps-failed" && (

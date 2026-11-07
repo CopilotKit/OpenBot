@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
 import {
   cancelLocalEval,
@@ -638,7 +639,8 @@ function needsPerson(sequence: LocalSequence): boolean {
 }
 
 function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
-  const [waiting, setWaiting] = useState(false);
+  /** The sign-in being waited on, if one is. */
+  const [waiting, setWaiting] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const attempt = useRef<string | null>(null);
   // Leaving stops the wait for the browser.
@@ -650,30 +652,47 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
   );
 
   async function signIn() {
-    setWaiting(true);
     setFailed(null);
     const started = signInToCopilotKit();
     attempt.current = started.attempt;
+    setWaiting(started.attempt);
     try {
-      if (await started.signedIn) onSignedIn();
+      const signedIn = await started.signedIn;
+      if (attempt.current !== started.attempt) return;
+      if (signedIn) onSignedIn();
       else setFailed("Sign-in did not finish. Try again.");
     } catch (error) {
+      if (attempt.current !== started.attempt) return;
       setFailed(
         error instanceof LocalEvalError && error.category !== "unrecognized"
           ? said(error.category)
           : "Sign-in did not finish. Try again.",
       );
     } finally {
-      attempt.current = null;
-      setWaiting(false);
+      if (attempt.current === started.attempt) {
+        attempt.current = null;
+        setWaiting(null);
+      }
     }
+  }
+
+  /** Stop the CLI's sign-in and offer it again. */
+  function cancel() {
+    const running = attempt.current;
+    attempt.current = null;
+    if (running) cancelLocalEval(running).catch(() => {});
+    setWaiting(null);
   }
 
   return (
     <div className="local-needs">
       <p>OpenBot's back end needs your CopilotKit account.</p>
       {waiting ? (
-        <StatusLine>Finish signing in in your browser…</StatusLine>
+        <CopilotKitSignInWait
+          attempt={waiting}
+          waiting="Finish signing in in your browser…"
+          onCancel={cancel}
+        />
       ) : (
         <div className="row">
           <button type="button" onClick={signIn}>

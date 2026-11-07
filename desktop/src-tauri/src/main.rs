@@ -5464,7 +5464,8 @@ async fn set_up_local_eval(
 Sign in to CopilotKit, which local evaluation needs to issue its licence: `login --json`.
 
 The CLI opens the approval page in the browser and waits for it; this returns once the person has
-approved it there, or it failed. `attempt` lets `cancel_local_eval` stop the wait.
+approved it there, or it failed. `attempt` lets `cancel_local_eval` stop the wait, and
+`copilotkit_sign_in_page` show the page it is waiting on.
 */
 #[tauri::command]
 async fn sign_in_to_copilotkit(
@@ -5478,6 +5479,13 @@ async fn sign_in_to_copilotkit(
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)?
+}
+
+/// The approval page and code `sign_in_to_copilotkit`'s `attempt` is waiting on, once the CLI has
+/// opened it, so the window can show the code and open the page again.
+#[tauri::command]
+fn copilotkit_sign_in_page(attempt: String) -> Option<local_eval::SignInPage> {
+    local_eval::shown_sign_in_page(&attempt)
 }
 
 /// The evaluation agreement local setup needs accepted, for the window to show before Accept.
@@ -7079,6 +7087,7 @@ fn main() {
             offer_local_intelligence,
             set_up_local_eval,
             sign_in_to_copilotkit,
+            copilotkit_sign_in_page,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,
