@@ -17,8 +17,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useBotNames } from "@/lib/agents/bot-names";
 import {
+  COMPUTER_ACTION_EVENT_TYPES,
   DID_NOT_HAPPEN_EVENT_TYPES,
   eventTypeFilter,
+  oneRowPerAction,
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
 import { auditEventsQueryOptions, auditExportUrl } from "@/lib/audit/queries";
@@ -42,7 +44,7 @@ const FILTERS = [
   {
     label: "Computer actions",
     icon: IconDeviceDesktop,
-    search: "?eventType=computer.action_allowed",
+    search: eventTypeFilter(COMPUTER_ACTION_EVENT_TYPES),
   },
   {
     label: "Blocked",
@@ -69,7 +71,7 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
   const [search, setSearch] = useState<string>(FILTERS[0].search);
   const [query, setQuery] = useState("");
   const events = useQuery(auditEventsQueryOptions(search));
-  const rows = (events.data?.events ?? []) as AuditEvent[];
+  const rows = oneRowPerAction((events.data?.events ?? []) as AuditEvent[]);
   const nameFor = useBotNames();
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
