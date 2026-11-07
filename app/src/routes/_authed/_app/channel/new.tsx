@@ -1,7 +1,7 @@
 import type { Message } from "@ag-ui/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useLocation } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { useRef, useState } from "react";
 import { NewBotSheet } from "@/components/agents/new-bot-sheet";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { ChannelAvatar } from "@/components/channels/avatar";
@@ -59,26 +59,42 @@ export const Route = createFileRoute("/_authed/_app/channel/new")({
    */
   validateSearch: (search: Record<string, unknown>): { agent?: string } =>
     searchTextEntry("agent", search.agent),
+  /*
+   * Which new conversation this is. Every arrival here that this page did not make itself is a
+   * fresh one: the + button (pressed once or many times), a Bot's profile link, Back to an earlier
+   * draft. Each is given its own id here, in history state. The page's own navigations (a Bot
+   * picked or removed, a Bot made from the picker) carry the id forward, so they keep the draft
+   * they belong to.
+   *
+   * WHY NOT JUST THE URL: the picked Bots and the typed message live in this page, not the URL, and
+   * a second visit to the same route does not remount it. Pressing + while a Bot was already picked
+   * dropped `?agent=` from the URL but left the Bot in To: and the message in the box, so the screen
+   * and the URL disagreed and a reload changed who the message would go to.
+   *
+   * WHY NOT THE HISTORY ENTRY'S OWN KEY: the router makes no history entry for a navigation to the
+   * location it is already on. A second press of + on an untouched new conversation was exactly
+   * that, so nothing remounted, and the first press had already closed the To: picker as a click
+   * outside it and left focus on +. An arrival without an id is now always a different location
+   * from one with an id, so every press is a new entry and a fresh page.
+   *
+   * WHY CONTEXT AND NOT THE LOCATION: the router publishes a new location before the route's search
+   * catches up, so a page keyed on the location remounted once with the new key and the old
+   * `?agent=`, and handed the caret to the composer. Context commits with the search.
+   */
+  beforeLoad: ({ location }) => {
+    const composition = location.state.newConversation;
+    if (!composition) {
+      throw redirect({
+        replace: true,
+        search: location.search,
+        state: ownedBy(newId()),
+        to: "/channel/new",
+      });
+    }
+    return { composition };
+  },
   component: RouteComponent,
 });
-
-/**
- * Which new conversation this is. Every arrival here that this page did not make itself is a fresh
- * one: the + button, a Bot's profile link, Back to an earlier draft. The page's own navigations (a
- * Bot picked or removed, a Bot made from the picker) carry the id forward in history state, so they
- * keep the draft they belong to.
- *
- * WHY NOT JUST THE URL: the picked Bots and the typed message live in this page, not the URL, and a
- * second visit to the same route does not remount it. Pressing + while a Bot was already picked
- * dropped `?agent=` from the URL but left the Bot in To: and the message in the box, so the screen
- * and the URL disagreed and a reload changed who the message would go to.
- */
-function compositionOf(state: {
-  newConversation?: string;
-  __TSR_key?: string;
-}): string | undefined {
-  return state.newConversation ?? state.__TSR_key;
-}
 
 declare module "@tanstack/react-router" {
   interface HistoryState {
@@ -93,12 +109,8 @@ function ownedBy(composition: string) {
 }
 
 function RouteComponent() {
-  const composition = useLocation({
-    select: (location) => compositionOf(location.state),
-  });
-  return (
-    <NewConversation composition={composition ?? ""} key={composition ?? ""} />
-  );
+  const { composition } = Route.useRouteContext();
+  return <NewConversation composition={composition} key={composition} />;
 }
 
 function NewConversation({ composition }: { composition: string }) {
@@ -113,6 +125,9 @@ function NewConversation({ composition }: { composition: string }) {
   );
 
   const [error, setError] = useState<string | null>(null);
+  /** Enter or Send was pressed with nobody in To:. Said until a Bot is chosen. */
+  const [askedForBot, setAskedForBot] = useState(false);
+  const pickerInput = useRef<HTMLInputElement>(null);
   // Optimistic seed shown before the first channel record exists.
   const [sent, setSent] = useState<Message | null>(null);
 
@@ -250,6 +265,7 @@ function NewConversation({ composition }: { composition: string }) {
           onValueChange={(next: AgentProfile[], details) => {
             const kept = toFieldChange(selected, next, details.reason);
             setPicked(kept);
+            setAskedForBot(false);
             // The first Bot stays in the URL so a reload keeps the conversation's recipient; the
             // rest of a group lives in the page. Not a separate navigation history entry.
             void navigate({
@@ -275,6 +291,7 @@ function NewConversation({ composition }: { composition: string }) {
               </ComboboxChip>
             ))}
             <ComboboxChipsInput
+              ref={pickerInput}
               // The popup opening is not enough on its own: typing filters through this input, so
               // the caret starts here whenever the recipient question is still open. A recipient
               // from the URL means the composer takes focus instead.
@@ -352,7 +369,8 @@ function NewConversation({ composition }: { composition: string }) {
       <ConversationView
         // Choosing a coworker answers the "To:" field, so the message is what remains: the caret
         // lands in the composer the moment a recipient exists, whether picked here or in the URL.
-        autoFocus
+        // Not before: an empty To: keeps the caret, even though the composer below takes words.
+        autoFocus={recipients.length > 0}
         // Commands must be loaded before the first channel message is sent.
         commands={skillCommands}
         modelPicker={
@@ -362,9 +380,23 @@ function NewConversation({ composition }: { composition: string }) {
             value={draftModel.value}
           />
         }
-        disabled={
-          Boolean(loadError) || waitingForUrlAgent || recipients.length === 0
-        }
+        disabled={Boolean(loadError) || waitingForUrlAgent}
+        /*
+         * WRITING FIRST IS FINE; SENDING WAITS FOR A BOT. The composer used to be disabled until To:
+         * had somebody in it, and a disabled composer is a dead end: it took a paste but no typing,
+         * no caret, and an Enter that went nowhere with nothing said. Now it takes words as home's
+         * does, and Enter or Send with nobody chosen opens To: and says why. The words stay put, and
+         * the caret comes back to them once a Bot is picked.
+         */
+        {...(recipients.length === 0
+          ? {
+              onSendHeld: () => {
+                setAskedForBot(true);
+                setPickerOpen(true);
+                pickerInput.current?.focus();
+              },
+            }
+          : {})}
         messages={sent ? [sent] : []}
         starterSuggestions={
           !group && !sent ? (
@@ -387,6 +419,10 @@ function NewConversation({ composition }: { composition: string }) {
           loadError || error ? (
             <p className="pb-2 text-sm text-destructive" role="alert">
               {loadError ?? error}
+            </p>
+          ) : askedForBot && recipients.length === 0 ? (
+            <p className="pb-2 text-sm text-muted-foreground" role="status">
+              Choose a Bot first.
             </p>
           ) : null
         }
