@@ -12,8 +12,12 @@ import { SEARCH_TOOLS } from "./tool-search";
  * the reader's problem, and putting it on screen tells them how the thing is built rather than what
  * their Bot just did.
  *
- * Anything that is not a prefixed MCP name is left exactly as it is: a component the app registered
- * already has a name somebody chose.
+ * ANY OTHER NAME IS PUT IN WORDS TOO, never drawn as it came. A line is drawn the moment a call
+ * starts, before its arguments and before the app's own renderer for it may have loaded, so its name
+ * is all there is to say. FOUND LIVE: a Bot first called `web_search`, a name it was never offered,
+ * and its line read "web_search" until the real search joined it. A component the app draws
+ * (`showBarChart`) reads "Show bar chart" while its renderer is not there yet, and a name with no
+ * words in it reads as a tool being used.
  */
 export type ToolName = {
   /** What was done, for the line itself. */
@@ -26,7 +30,15 @@ export function readToolName(name: string, running = false): ToolName {
   const own = ownToolLabel(name, running);
   if (own) return { label: own };
   const parts = name.split("__");
-  if (parts.length < 3 || parts[0] !== "mcp") return { label: name };
+  if (parts.length < 3 || parts[0] !== "mcp")
+    return {
+      label:
+        wordsOf(name).length > 0
+          ? humanise(name)
+          : running
+            ? "Using a tool"
+            : "Used a tool",
+    };
 
   const [, rawServer, ...rest] = parts;
   return appToolName(rawServer ?? "", rest.join("__"));

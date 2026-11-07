@@ -111,9 +111,14 @@ describe("naming a tool call", () => {
     });
   });
 
-  test("a component the app registered is left alone", () => {
-    // These names were chosen by somebody and are already what the reader should see.
-    expect(readToolName("showBarChart")).toEqual({ label: "showBarChart" });
+  test("a name outside MCP and the label table still reads in words", () => {
+    // A component's line is drawn before its renderer may have loaded, and a model can call a name
+    // it was never offered. Either way the line says it in words, from the first frame.
+    expect(readToolName("showBarChart")).toEqual({ label: "Show bar chart" });
+    expect(readToolName("web_search", true)).toEqual({ label: "Web search" });
+    expect(readToolName("web_search")).toEqual({ label: "Web search" });
+    expect(readToolName("", true)).toEqual({ label: "Using a tool" });
+    expect(readToolName("__")).toEqual({ label: "Used a tool" });
   });
 
   test("the server is dropped when a hyphenated server's words are already in the label", () => {
@@ -172,8 +177,8 @@ describe("this deployment's own tools", () => {
     });
   });
 
-  test("any other bare name is left exactly as it is", () => {
-    expect(readToolName("run_command", true)).toEqual({ label: "run_command" });
+  test("any other bare name reads in words, never as its identifier", () => {
+    expect(readToolName("run_command", true)).toEqual({ label: "Run command" });
   });
 });
 
