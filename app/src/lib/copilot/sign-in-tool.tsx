@@ -211,7 +211,7 @@ function SignInCard({
                 </DialogDescription>
               </DialogHeader>
               <DialogBody className="mt-4 overflow-y-auto">
-                <SignInForm requestId={requestId} />
+                <SignInForm inDialog requestId={requestId} />
               </DialogBody>
             </DialogContent>
           </Dialog>
