@@ -774,6 +774,12 @@ export type AuditEventQuery = {
   initiatorKind?: string;
   targetType?: string;
   targetId?: string;
+  /**
+   * One Bot's rows: what it did (`payload.bot`) and what was done to it (an `agent` target), the
+   * same two the audit page's Bot column reads. Asked of the server, so a Bot's actions older than
+   * the newest page are found too.
+   */
+  bot?: string;
   from?: string;
   to?: string;
 };
@@ -1051,6 +1057,15 @@ export function createAuditReader(database: Database): AuditReader {
           ? eq(auditEvents.targetType, query.targetType)
           : undefined,
         query.targetId ? eq(auditEvents.targetId, query.targetId) : undefined,
+        query.bot
+          ? or(
+              eq(sql<string>`${auditEvents.payload} ->> 'bot'`, query.bot),
+              and(
+                eq(auditEvents.targetType, "agent"),
+                eq(auditEvents.targetId, query.bot),
+              ),
+            )
+          : undefined,
         query.from
           ? gt(auditEvents.createdAt, new Date(query.from))
           : undefined,
@@ -1154,6 +1169,7 @@ export function auditQueryFromUrl(url: URL): AuditEventQuery {
     initiatorKind: optional("initiatorKind"),
     targetType: optional("targetType"),
     targetId: optional("targetId"),
+    bot: optional("bot"),
     from,
     to,
   };
