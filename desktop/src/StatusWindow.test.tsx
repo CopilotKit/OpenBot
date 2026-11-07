@@ -132,8 +132,10 @@ test("Open log folder asks the desktop app to open its own log folder", async ()
   );
   // The window asks; the desktop app opens the folder it writes to, never one it is handed.
   expect(
-    invokeCalls.filter((call) => call.command === "open_log_folder"),
-  ).toEqual([{ command: "open_log_folder" }]);
+    invokeCalls
+      .filter((call) => call.command === "open_log_folder")
+      .map((call) => call.args === undefined),
+  ).toEqual([true]);
   expect(
     view.container.querySelector(".status-details")?.textContent,
   ).toContain(`Logs${logFolder}`);
