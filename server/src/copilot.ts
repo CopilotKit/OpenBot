@@ -1964,6 +1964,20 @@ function remoteAgentWithStandingRole(
         (tool) => tool.name === "ask_person" || !clientNames.has(tool.name),
       )
       .map((tool) => tool.name);
+    /*
+     * What this side answers when the endpoint hands a call back unanswered.
+     *
+     * Coordination as well, because not every endpoint can call back. The Claude Agent SDK harness
+     * (the Claude-plan starter Bot) runs every tool it is offered as a client tool: it streams the
+     * call and ends its run for the caller to answer. Its `ask_person` then reached the browser,
+     * which only draws that tool, so no question was saved, the person saw no notice, and the reply
+     * they typed was sent as the unanswered call's "interrupted" result and lost. An endpoint that
+     * does call back answers the call in its own stream, and the middleware leaves an answered call
+     * alone, so nothing is asked or handed on twice.
+     */
+    const answeredHere = tools.filter(
+      (tool) => typeof tool.execute === "function",
+    );
     const forwardedProps = {
       ...(isPlainObject(input.forwardedProps) ? input.forwardedProps : {}),
       openbotBotId: agent.id,
@@ -2110,9 +2124,9 @@ function remoteAgentWithStandingRole(
             ? { ...forwardedProps, openbotModel: chosenModel }
             : forwardedProps,
         };
-        if (clientTools.length === 0) return next.run(prepared);
+        if (answeredHere.length === 0) return next.run(prepared);
         return new HeadlessToolsMiddleware(
-          clientTools.map((tool) => ({
+          answeredHere.map((tool) => ({
             definition: {
               name: tool.name,
               description: tool.description,
