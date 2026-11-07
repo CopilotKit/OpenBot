@@ -108,6 +108,11 @@ export type TurnRunner = (input: {
   };
   /** The reply so far, each time more of it arrives, for a surface that shows a turn in progress. */
   onText?: (text: string) => void;
+  /**
+   * Narrows the seeded history to what this turn should SEE. Persisting is unaffected: the platform's
+   * whole history still decides what is already stored. Absent, the whole thread is sent.
+   */
+  historyFilter?: (history: Message[]) => Message[];
 }) => Promise<{ replyText: string; components?: DrawnComponent[] }>;
 
 /** A display component the Bot drew in a turn and the server allowed, with the props it drew. */
@@ -317,7 +322,10 @@ export { frameFiring };
 export function turnMessages(input: {
   /** The thread's history as the platform holds it, already converted and sanitized. */
   seeded: Message[];
-  /** The ids of that history, before sanitizing, which is what the platform already holds. */
+  /**
+   * The ids of that history before sanitizing AND before any `historyFilter`, which is what the
+   * platform already holds: a message filtered out of view is still never persisted again.
+   */
   historicIds: ReadonlySet<string>;
   /** This turn's own message; ignored for a continuation. */
   turn: Message;
@@ -701,6 +709,7 @@ export function createTurnRunner(options: {
       runId: suppliedRunId,
       depth,
       onText,
+      historyFilter,
     } = hostTurn;
     if (signal?.aborted) throw new Error("The headless turn was cancelled.");
     // A paused Bot or a refused capability throws here; a pause mid-turn aborts the returned signal.
@@ -765,7 +774,16 @@ export function createTurnRunner(options: {
       { messages: [] as ThreadHistoryMessage[] },
     );
 
-    const seeded = sanitizeSeededHistory(history.messages.map(toAgentMessage));
+    const sanitized = sanitizeSeededHistory(
+      history.messages.map(toAgentMessage),
+    );
+    /*
+     * What this turn SEES, which a caller may narrow — a responsibility sends only its own goal's
+     * runs; see `responsibility-history.ts`. `historicIds` below is still taken from the WHOLE
+     * history, so a message filtered out of view is still known to be stored and is never persisted
+     * again, and nothing this turn does removes it from the thread.
+     */
+    const seeded = historyFilter ? historyFilter(sanitized) : sanitized;
     /*
      * This turn's own message — and the ONLY message that is framed. See {@link frameFiring} for the
      * firing it did nothing on. The seeded history above is untouched, which is what keeps a previous
