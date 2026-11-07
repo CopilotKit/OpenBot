@@ -1949,16 +1949,20 @@ function remoteAgentWithStandingRole(
           )
         : undefined;
     // Governed vendor/host calls use the actual AG-UI client lifecycle, so approvals capture
-    // the provider's toolCallId, messages and state. Coordination retains its signed callback.
+    // the provider's toolCallId, messages and state. Questions also need this fallback for
+    // harnesses that return AG-UI calls rather than executing signed deployment callbacks.
+    // Their handler still performs coordination authorization; backend results are not repeated.
     const clientTools = tools.filter(
       (tool) =>
-        typeof tool.execute === "function" &&
-        tool.name !== "message_bot" &&
-        tool.name !== "ask_person",
+        typeof tool.execute === "function" && tool.name !== "message_bot",
     );
     const clientNames = new Set(clientTools.map((tool) => tool.name));
+    // Callback-capable harnesses must retain their signed question route. The client
+    // fallback above only executes unanswered calls, so these lists may overlap.
     const deploymentTools = tools
-      .filter((tool) => !clientNames.has(tool.name))
+      .filter(
+        (tool) => tool.name === "ask_person" || !clientNames.has(tool.name),
+      )
       .map((tool) => tool.name);
     const forwardedProps = {
       ...(isPlainObject(input.forwardedProps) ? input.forwardedProps : {}),

@@ -5,6 +5,7 @@ import {
   standardUI,
 } from "@copilotkit/react-core/v2/generative-ui";
 import { SERIES_COLOURS } from "@/components/gallery/palette";
+import { A2UITextField } from "./a2ui-text-field";
 import { A2UICode, A2UIMarkdown } from "./a2ui-markdown";
 
 /**
@@ -36,6 +37,7 @@ export const OPENBOT_UI = createGenerativeUI({
   id: "openbot/ui@1",
   extends: [standardUI.omit([...OMITTED_STANDARD_COMPONENTS])],
   overrides: {
+    TextField: { component: A2UITextField },
     Code: { component: A2UICode },
     Markdown: { component: A2UIMarkdown },
   },
