@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Claude Agent SDK Bot answers after you decide a step it asked about (Don't do it, I did it
+  myself, Deny or Allow once), also when it asked for several steps at once or you decided after
+  five minutes. A long browser task is no longer cut off after five minutes with no reply.
 - A Bot filling in an ordinary form on a page whose address carries a signature or token in its
   query string (an S3 presigned link's `X-Amz-Credential=`, a sign-in's `access_token=`) is no
   longer stopped with "This needs you" as if it were changing a credential. A password field, a
