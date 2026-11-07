@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { routines } from "../db/schema/coworker";
 import {
@@ -19,6 +19,7 @@ import {
   ResponsibilityNotFoundError,
   ResponsibilityRefusedError,
   type ResponsibilityStore,
+  routineRunsGoal,
   whyItRepeats,
 } from "./types";
 
@@ -65,10 +66,9 @@ export function createResponsibilityStore(
   }
   /**
    * Why this goal runs again and again (`GoalRepeats`), read where it already lives: its own flag,
-   * its subscriptions, its enabled triggers, and the enabled routines of its Bot that name it, by id
-   * or by title. FOUND LIVE: a Bot wrote `Run the goal "Daily CopilotKit/OpenBot release check"`
-   * into the routine it made for a goal. A routine that only mentions the title counts too: the run
-   * then can't end the goal, and the person still can.
+   * its subscriptions, its enabled triggers, and the enabled routines of its Bot that run it
+   * (`routineRunsGoal`). A routine that only mentions the title counts too: the run then can't end
+   * the goal, and the person still can.
    */
   async function repeatsOf(
     connection: Connection,
@@ -78,22 +78,19 @@ export function createResponsibilityStore(
     >,
   ): Promise<GoalRepeats | null> {
     if (goal.recurring) return "recurring";
-    const [routine] = await connection
-      .select({ id: routines.id })
+    // A person keeps at most 20 routines switched on (`MAX_ENABLED_ROUTINES`), so this read is small.
+    const enabled = await connection
+      .select({ instruction: routines.instruction })
       .from(routines)
       .where(
         and(
           eq(routines.ownerUserId, goal.ownerUserId),
           eq(routines.agentId, goal.agentId),
           eq(routines.enabled, true),
-          or(
-            sql`strpos(${routines.instruction}, ${goal.id}) > 0`,
-            sql`strpos(lower(${routines.instruction}), lower(${goal.title})) > 0`,
-          ),
         ),
-      )
-      .limit(1);
-    if (routine) return "routine";
+      );
+    if (enabled.some(({ instruction }) => routineRunsGoal(instruction, goal)))
+      return "routine";
     if (goal.subscriptions.length > 0) return "event";
     const [trigger] = await connection
       .select({ id: responsibilityTriggers.id })
