@@ -7,6 +7,7 @@ import {
   IconList,
   IconRefresh,
   IconSearch,
+  IconX,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
@@ -61,12 +62,33 @@ const FILTERS = [
   },
 ] as const;
 
+/** A saved view's query with one Bot's rows asked for too, for the table and the export alike. */
+export function withBot(search: string, bot: string | undefined): string {
+  if (!bot) return search;
+  const params = new URLSearchParams(
+    search.startsWith("?") ? search.slice(1) : search,
+  );
+  params.set("bot", bot);
+  return `?${params.toString()}`;
+}
+
 /**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's
  * controls for these). The personal edition's Settings renders this page with none.
+ *
+ * `bot` narrows every view to one Bot's rows, asked of the server; `onClearBot` takes it off.
  */
-export function AuditPage({ children }: { children?: ReactNode } = {}) {
-  const [search, setSearch] = useState<string>(FILTERS[0].search);
+export function AuditPage({
+  bot,
+  children,
+  onClearBot,
+}: {
+  bot?: string;
+  children?: ReactNode;
+  onClearBot?: () => void;
+} = {}) {
+  const [view, setView] = useState<string>(FILTERS[0].search);
+  const search = withBot(view, bot);
   const [query, setQuery] = useState("");
   const events = useQuery(auditEventsQueryOptions(search));
   const rows = (events.data?.events ?? []) as AuditEvent[];
@@ -151,7 +173,7 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
                       className="inline-flex items-center gap-0.5 rounded-lg border border-border p-0.5"
                     >
                       {FILTERS.map((filter) => {
-                        const active = search === filter.search;
+                        const active = view === filter.search;
                         return (
                           <Button
                             aria-pressed={active}
@@ -162,7 +184,7 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
                                 : "text-muted-foreground",
                             )}
                             key={filter.label}
-                            onClick={() => setSearch(filter.search)}
+                            onClick={() => setView(filter.search)}
                             size="xs"
                             type="button"
                             variant="ghost"
@@ -173,6 +195,17 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
                         );
                       })}
                     </fieldset>
+                    {bot ? (
+                      <Button
+                        aria-label={`Show every Bot, not only ${nameFor(bot)}`}
+                        onClick={onClearBot}
+                        size="xs"
+                        variant="outline"
+                      >
+                        Only {nameFor(bot)}
+                        <IconX />
+                      </Button>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="relative w-64">

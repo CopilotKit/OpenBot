@@ -7,6 +7,7 @@ import {
   IconClockPlay,
   IconHelpCircle,
   IconHistory,
+  IconListDetails,
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -27,6 +28,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   cancelFollowUpMutationOptions,
   stopHandoffMutationOptions,
@@ -37,6 +39,7 @@ import {
   type BotActivity,
   botActivityQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -308,7 +311,7 @@ export function activitySummary(activity: BotActivity): string {
   if (parts.length) return parts.join(" · ");
   return activity.completed.length
     ? "Nothing running or scheduled"
-    : "Nothing yet";
+    : "No tasks, routines or goals yet";
 }
 
 /** In progress, Scheduled and Completed, read from the ledgers the work already lives in. */
@@ -340,10 +343,57 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
       />
       <ActivitySection
         agentId={agentId}
-        empty="Nothing has finished yet."
+        empty="No tasks, routines or goals have finished yet."
         items={activity.data.completed}
         title="Completed"
       />
+      <BotActionsSection agentId={agentId} />
     </>
+  );
+}
+
+/**
+ * Where this Bot's actions are: the audit trail, narrowed to it.
+ *
+ * The lists above are tasks, routines and goals. A file saved, a page opened or an app called in a
+ * conversation is none of those, so a Bot could work all day and this page said nothing had
+ * finished. Those actions are recorded once, in the trail, with whether each was allowed, blocked
+ * or did not happen; this links there rather than keeping a second copy here. Only for someone who
+ * can open the trail: Settings › Activity in the personal edition, Admin › Audit for an admin.
+ */
+function BotActionsSection({ agentId }: { agentId: string }) {
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const admin = useQuery(currentUserQueryOptions()).data?.role === "admin";
+  if (!personal && !admin) return null;
+  return (
+    <PageSection title="Actions">
+      <PageRows>
+        <Item
+          render={
+            personal ? (
+              <Link search={{ bot: agentId }} to="/settings/activity" />
+            ) : (
+              <Link search={{ bot: agentId }} to="/admin/audit" />
+            )
+          }
+          size="sm"
+        >
+          <ItemMedia variant="icon">
+            <IconListDetails />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>Every action this Bot took</ItemTitle>
+            <ItemDescription>
+              See the files, pages and apps it used, and which were allowed,
+              blocked or didn't happen.
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <IconChevronRight className="size-4 text-muted-foreground" />
+          </ItemActions>
+        </Item>
+      </PageRows>
+    </PageSection>
   );
 }
