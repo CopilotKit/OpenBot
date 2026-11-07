@@ -2,6 +2,11 @@ import { runTimeZone } from "@openbot/shared/person-time-zone";
 import { currentApprovalContext } from "@openbot/toolkit/continuation";
 import { cutAtCodeUnits } from "../channels/text";
 import {
+  callGoalTool,
+  GOAL_TOOLS,
+  isGoalTool,
+} from "../responsibilities/chat-tools";
+import {
   callTriggerTool,
   isTriggerTool,
   TRIGGER_TOOLS,
@@ -245,8 +250,10 @@ type Connection = {
  * belongs to the actor is {@link callTool}'s, where the actor is what authorizes the change.
  */
 export async function listTools(): Promise<McpTool[]> {
-  // The trigger tools ride this transport so the same catalogue grant governs them.
-  return [...TOOLS, ...TRIGGER_TOOLS].map((tool) => ({ ...tool }));
+  // The trigger and goal tools ride this transport so the same catalogue grant governs them.
+  return [...TOOLS, ...TRIGGER_TOOLS, ...GOAL_TOOLS].map((tool) => ({
+    ...tool,
+  }));
 }
 
 export const listNeedsCredential = false;
@@ -483,6 +490,34 @@ export async function callTool(
         return failure(
           "There is no trigger or goal of yours with that id for me.",
         );
+      const message = error instanceof Error ? error.message : String(error);
+      return failure(Array.from(message).slice(0, MAX_RUN_ERROR).join(""));
+    }
+  }
+  if (isGoalTool(toolName)) {
+    try {
+      const answer = await callGoalTool(
+        {
+          ownerUserId,
+          agentId,
+          threadId: connection.threadId?.trim() || undefined,
+        },
+        toolName,
+        args,
+      );
+      return answer.startsWith("Refused.")
+        ? failure(answer.slice("Refused.".length).trim())
+        : asResult(answer);
+    } catch (error) {
+      // The conversation a new goal reports into is chosen by the routine store's rule, and so is
+      // its refusal: which conversations there are to choose from.
+      if (
+        error instanceof RoutineRefusedError ||
+        error instanceof ResponsibilityRefusedError
+      )
+        return failure(error.message);
+      if (error instanceof ResponsibilityNotFoundError)
+        return failure("There is no goal of yours with that id for me.");
       const message = error instanceof Error ? error.message : String(error);
       return failure(Array.from(message).slice(0, MAX_RUN_ERROR).join(""));
     }

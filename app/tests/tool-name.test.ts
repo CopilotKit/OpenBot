@@ -64,6 +64,16 @@ describe("naming a tool call", () => {
     });
   });
 
+  test("a goal's tools on the Routines app read as a goal's run reads them", () => {
+    // Asked for a goal in a conversation, the step read "Create goal" beside "routines".
+    expect(readToolName("mcp__routines__create_goal")).toEqual({
+      label: "Created a goal",
+    });
+    expect(readToolName("mcp__routines__list_goals", true)).toEqual({
+      label: "Checking goals",
+    });
+  });
+
   test("camelCase from a vendor reads the same way", () => {
     // The server is dropped here too: the vendor put it in the tool name themselves.
     expect(readToolName("mcp__jira__searchJiraIssues")).toEqual({

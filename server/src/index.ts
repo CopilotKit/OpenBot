@@ -294,6 +294,7 @@ import {
 import { createResponsibilityStore } from "./responsibilities/store";
 import { responsibilityTools } from "./responsibilities/tools";
 import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
+import { useGoalTools } from "./responsibilities/chat-tools";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
 import type { Responsibility } from "./responsibilities/types";
@@ -1261,6 +1262,13 @@ useTriggerTools({
   responsibilities: responsibilityStore,
   publicUrl: config.publicUrl ?? null,
   emailDomain: inboundEmail?.domain ?? null,
+});
+// And goals, through the same transport: asked for a goal, a Bot makes one. See chat-tools.ts.
+useGoalTools({
+  store: responsibilityStore,
+  // Read when a goal is run, long after the engine further down is made.
+  engine: { ingest: (event) => responsibilityEngine.ingest(event) },
+  conversationFor: routineStore.conversationFor,
 });
 
 /**

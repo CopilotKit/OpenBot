@@ -202,6 +202,16 @@ export type RoutinePatch = Partial<{
 
 export type RoutineStore = {
   create(input: RoutineInput): Promise<Routine>;
+  /**
+   * The conversation work for this owner and Bot posts into, by the rule `create` follows: the one
+   * named, when they share it; else the one the request was made in; else the only one they share.
+   * Refuses with the choices otherwise. A goal made in a conversation picks its conversation by it.
+   */
+  conversationFor(
+    ownerUserId: string,
+    agentId: string,
+    wanted: { channelId?: string; threadId?: string },
+  ): Promise<string>;
   listFor(ownerUserId: string): Promise<RoutineSummary[]>;
   update(
     ownerUserId: string,
@@ -686,6 +696,9 @@ export function createRoutineStore(database: Database): RoutineStore {
 
   return {
     update,
+
+    conversationFor: (ownerUserId, agentId, wanted) =>
+      resolveChannel(ownerUserId, agentId, wanted),
 
     async create(input) {
       const instruction = validInstruction(input.instruction);

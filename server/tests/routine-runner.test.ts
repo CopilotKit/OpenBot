@@ -82,6 +82,14 @@ function harness(options: {
 
   const routineStore: RoutineStore = {
     create: () => unreachable("create"),
+    conversationFor: () => unreachable("conversationFor"),
+    startManualRun: () => unreachable("startManualRun"),
+    listRuns: () => unreachable("listRuns"),
+    routineForFiring: () => unreachable("routineForFiring"),
+    reapAbandonedRuns: () => unreachable("reapAbandonedRuns"),
+    recordSweep: () => unreachable("recordSweep"),
+    lastSweptAt: () => unreachable("lastSweptAt"),
+    markUnschedulable: () => unreachable("markUnschedulable"),
     listFor: () => unreachable("listFor"),
     update: () => unreachable("update"),
     remove: () => unreachable("remove"),
