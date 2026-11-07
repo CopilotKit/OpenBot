@@ -466,6 +466,34 @@ test("a CopilotKit sign-in waiting on the browser shows its code and page, and C
   expect(screen.queryByText("WXYZ-2345")).toBeNull();
 });
 
+/*
+ * The sign-in setup stops for is a CopilotKit sign-in, so it shows CopilotKit's logotype, before and
+ * while it waits on the browser. It showed none.
+ */
+test("a CopilotKit sign-in setup stops for shows CopilotKit's logotype, before and while it waits", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [blockedOnSignIn],
+    sign_in_to_copilotkit: [new Promise(() => {})],
+    copilotkit_sign_in_page: [
+      {
+        url: "https://dashboard.copilotkit.ai/cli-auth/device",
+        userCode: "WXYZ-2345",
+      },
+    ],
+    cancel_local_eval: [null],
+  });
+  const screen = view();
+  const logo = () => screen.getByRole("img", { name: "CopilotKit" });
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+  );
+  await screen.findByText("WXYZ-2345");
+  expect(logo().getAttribute("src")).toBe("/copilotkit-logo.svg");
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await screen.findByRole("button", { name: "Sign in to CopilotKit" });
+  expect(logo().getAttribute("src")).toBe("/copilotkit-logo.svg");
+});
+
 test("setup that needs the agreement shows it, and only Accept sets up again with that version", async () => {
   invokeHandler = answers({
     set_up_local_eval: [blockedOnTerms, report()],
