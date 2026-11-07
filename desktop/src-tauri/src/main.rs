@@ -7257,6 +7257,36 @@ fn main() {
 }
 
 #[cfg(test)]
+mod background_launch_tests {
+    use tauri::utils::config::BackgroundThrottlingPolicy;
+
+    /// OpenBot that opens at login, or that somebody launches and switches away from, starts with
+    /// its window behind other windows. WebKit counts an occluded window's page as not visible,
+    /// and its default inactive policy (`WKInactiveSchedulingPolicySuspend`) lets RunningBoard
+    /// suspend the page's web content process. The setup page then never loads, its JavaScript
+    /// never runs, and nothing starts until the window is brought forward: a blank white window
+    /// that runs nothing. A page already running goes blank the same way once it has sat hidden
+    /// long enough to be suspended. The window's configuration, as compiled into the app, must keep
+    /// the page running while nobody is looking at it.
+    #[test]
+    fn main_window_page_keeps_running_while_the_window_is_hidden_or_covered() {
+        let context: tauri::Context<tauri::test::MockRuntime> =
+            tauri::generate_context!(test = true);
+        let main = context
+            .config()
+            .app
+            .windows
+            .iter()
+            .find(|window| window.label == "main")
+            .expect("tauri.conf.json declares the main window");
+        assert_eq!(
+            main.background_throttling,
+            Some(BackgroundThrottlingPolicy::Disabled),
+        );
+    }
+}
+
+#[cfg(test)]
 mod runtime_update_tests {
     use super::*;
     #[test]
