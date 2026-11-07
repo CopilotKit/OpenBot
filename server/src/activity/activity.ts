@@ -36,6 +36,7 @@ import {
   responsibilities,
   responsibilityEvents,
   responsibilityRuns,
+  responsibilityTriggers,
   routineRuns,
   routines,
   workItems,
@@ -75,6 +76,12 @@ export type ActivityItem = {
 export type BotActivity = {
   inProgress: ActivityItem[];
   scheduled: ActivityItem[];
+  /**
+   * Active goals with nothing to start them on their own: no schedule and no event. They run when
+   * somebody asks, with Run now on the goal. Not `scheduled`, which is work lined up for a time or an
+   * event: a goal that only runs when asked was counted there, and a Bot page said "2 scheduled".
+   */
+  onDemand: ActivityItem[];
   completed: ActivityItem[];
 };
 
@@ -172,6 +179,7 @@ export function createActivityStore(database: Database) {
       const activity: BotActivity = {
         inProgress: [],
         scheduled: [],
+        onDemand: [],
         completed: [],
       };
       const now = Date.now();
@@ -234,7 +242,8 @@ export function createActivityStore(database: Database) {
         }
       }
 
-      // Responsibilities: an active one is standing work; each run is a piece of it.
+      // Responsibilities: an active one is standing work; each run is a piece of it. One that wakes
+      // on an event is lined up for it; one with no event runs only when somebody asks.
       const goals = await database
         .select()
         .from(responsibilities)
@@ -244,22 +253,48 @@ export function createActivityStore(database: Database) {
             eq(responsibilities.agentId, agentId),
           ),
         );
-      for (const goal of goals)
-        if (goal.status === "active")
-          activity.scheduled.push({
-            id: `responsibility:${goal.id}`,
-            kind: "responsibility",
-            title: goal.title,
-            detail: goal.subscriptions.length
-              ? `Wakes on ${goal.subscriptions.map((s) => `${s.source}/${s.eventType}`).join(", ")}`
-              : "Runs when asked",
-            status: "active",
-            at: iso(goal.updatedAt),
-            channelId: goal.channelId,
-            needsYou: false,
-            stoppable: false,
-            cancellable: false,
-          });
+      // A goal's triggers wake it as its subscriptions do; a paused one starts nothing.
+      const triggers = goals.length
+        ? await database
+            .select({
+              goalId: responsibilityTriggers.responsibilityId,
+              kind: responsibilityTriggers.kind,
+            })
+            .from(responsibilityTriggers)
+            .where(
+              and(
+                eq(responsibilityTriggers.ownerUserId, ownerUserId),
+                eq(responsibilityTriggers.enabled, true),
+                inArray(
+                  responsibilityTriggers.responsibilityId,
+                  goals.map((goal) => goal.id),
+                ),
+              ),
+            )
+        : [];
+      for (const goal of goals) {
+        if (goal.status !== "active") continue;
+        const wakesOn = [
+          ...goal.subscriptions.map((s) => `${s.source}/${s.eventType}`),
+          ...triggers
+            .filter((trigger) => trigger.goalId === goal.id)
+            .map((trigger) => trigger.kind),
+        ];
+        (wakesOn.length ? activity.scheduled : activity.onDemand).push({
+          id: `responsibility:${goal.id}`,
+          kind: "responsibility",
+          title: goal.title,
+          detail: wakesOn.length
+            ? `Wakes on ${wakesOn.join(", ")}`
+            : "Runs when asked",
+          status: "active",
+          at: iso(goal.updatedAt),
+          channelId: goal.channelId,
+          needsYou: false,
+          stoppable: false,
+          cancellable: false,
+        });
+      }
       if (goals.length > 0) {
         const byId = new Map(goals.map((goal) => [goal.id, goal]));
         const runs = await database

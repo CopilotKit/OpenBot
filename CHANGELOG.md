@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A goal that runs only when asked is counted "on demand" on a Bot's page and listed under On demand
+  on its Activity page. It was counted and listed as scheduled.
 - A notice a Bot draws in a conversation labels its badge "Good news", "Heads up" or "Problem".
   It showed the tone's own name, such as "positive".
 - A Bot's step that asked for a tool the Bot doesn't have says so in one sentence and reads "didn't

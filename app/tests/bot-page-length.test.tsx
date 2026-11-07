@@ -12,6 +12,7 @@ import {
   activitySummary,
   BotActivityGlance,
   BotActivityRow,
+  BotActivitySections,
 } from "@/components/bot-profile/activity";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import type { ActivityItem, BotActivity } from "@/lib/bot-lifecycle/queries";
@@ -70,6 +71,47 @@ test("the activity row counts what is running and what is lined up", () => {
   expect(activitySummary(activity(0, 0, 0))).toBe(
     "No tasks, routines or goals yet",
   );
+});
+
+/*
+ * FOUND ON WINDOWS: a goal that only runs when asked sat under Scheduled, and a Bot with one routine
+ * and that goal read "2 scheduled".
+ */
+test("a goal that runs only when asked is counted and listed as on demand, never as scheduled", async () => {
+  const [routine] = items(1, "Check releases");
+  const goal = {
+    ...(routine as ActivityItem),
+    id: "responsibility:watch",
+    kind: "responsibility",
+    title: "Watch OpenBot releases",
+    detail: "Runs when asked",
+    status: "active",
+  } as ActivityItem;
+  const data = {
+    inProgress: [],
+    scheduled: [{ ...(routine as ActivityItem), status: "scheduled" }],
+    onDemand: [goal],
+    completed: [],
+  };
+  expect(activitySummary(data)).toBe("1 scheduled · 1 on demand");
+  expect(activitySummary({ ...data, scheduled: [] })).toBe("1 on demand");
+
+  const page = glance(data);
+  expect(await page.findByText("1 scheduled · 1 on demand")).toBeTruthy();
+  expect(page.getByText("Watch OpenBot releases")).toBeTruthy();
+  cleanup();
+
+  const sections = glance(data, BotActivitySections);
+  const scheduled = await sections.findByRole("heading", { name: "Scheduled" });
+  const onDemand = sections.getByRole("heading", { name: "On demand" });
+  const listedUnder = (heading: HTMLElement) =>
+    [
+      ...(heading
+        .closest("section")
+        ?.querySelectorAll("[data-slot=item-title]") ?? []),
+    ].map((title) => title.textContent);
+  expect(listedUnder(scheduled)).toEqual(["Check releases 1"]);
+  expect(listedUnder(onDemand)).toEqual(["Watch OpenBot releases"]);
 });
 
 test("the newest three suggestions show, and the rest open in place", async () => {

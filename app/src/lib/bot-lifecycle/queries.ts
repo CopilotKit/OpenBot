@@ -64,6 +64,11 @@ export type ActivityItem = {
 export type BotActivity = {
   inProgress: ActivityItem[];
   scheduled: ActivityItem[];
+  /**
+   * Goals that run only when somebody asks: nothing schedules or wakes them, so they are not
+   * scheduled. Absent from a server older than this app.
+   */
+  onDemand?: ActivityItem[];
   completed: ActivityItem[];
 };
 
