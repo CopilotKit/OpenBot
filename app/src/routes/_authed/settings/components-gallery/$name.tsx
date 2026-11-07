@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { componentListQueryOptions } from "@/lib/components/queries";
+import { galleryComponent } from "@/lib/copilot/gallery-registry";
 
 /** The same way back from every state this route can be in. */
 const BACK = {
@@ -121,7 +122,12 @@ function RouteComponent() {
   return (
     <PageShell
       backButton={BACK}
-      description={component.publishedDescription ?? undefined}
+      // What it shows, in the person's words; see the gallery's own page for why not the model's.
+      description={
+        galleryComponent(component.name)?.summary ??
+        component.publishedDescription ??
+        undefined
+      }
       title={component.title}
     >
       <div className="relative mt-8 aspect-[2/1] overflow-hidden rounded-lg border border-border bg-card">

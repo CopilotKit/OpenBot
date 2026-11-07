@@ -292,6 +292,8 @@ export const GALLERY: GalleryComponent[] = [
     name: "showActivityReport",
     title: TITLE,
     kind: "card",
+    summary:
+      "Shows what your Bots have been doing and what was refused, read from OpenBot's own records.",
     description:
       "Show what this deployment has actually been doing, read from its own records rather than from anything you know. Use for 'what have the Bots been up to' and 'what has been refused'. You choose the report and the period; the figures are read for you and you will not see them.",
     parameters: ActivityReportProps,

@@ -544,6 +544,7 @@ export const GALLERY: GalleryComponent[] = [
     name: "showBarChart",
     title: "Bar chart",
     kind: "chart",
+    summary: "Compares a few named things, such as teams or months, as bars.",
     description:
       "Show values as a bar chart. Use when comparing a handful of named things, teams, months, categories. Not for a trend over time, which is showLineChart.",
     parameters: BarChartProps,
@@ -564,6 +565,7 @@ export const GALLERY: GalleryComponent[] = [
     name: "showPieChart",
     title: "Donut chart",
     kind: "chart",
+    summary: "Shows how a whole splits into parts, as a donut with a legend.",
     description:
       "Show how a whole is divided, as a donut with a legend. Use only when the parts sum to something meaningful, and prefer a bar chart above about six slices.",
     parameters: PieChartProps,
@@ -583,6 +585,7 @@ export const GALLERY: GalleryComponent[] = [
     name: "showLineChart",
     title: "Line chart",
     kind: "chart",
+    summary: "Shows how one or more values change over time.",
     description:
       "Show one or more series over an ordered axis, usually time. Every series must have one value per label.",
     parameters: LineChartProps,
@@ -600,6 +603,8 @@ export const GALLERY: GalleryComponent[] = [
     name: "showAreaChart",
     title: "Area chart",
     kind: "chart",
+    summary:
+      "Shows how totals build up over time, with the area under each line filled.",
     description:
       "The same as showLineChart with the area under each line filled. Use for volume or accumulation rather than for a rate.",
     parameters: AreaChartProps,
@@ -617,6 +622,8 @@ export const GALLERY: GalleryComponent[] = [
     name: "showProgress",
     title: "Progress against target",
     kind: "chart",
+    summary:
+      "Shows how close each value is to its target, such as budget spent or work done.",
     description:
       "Show values against their targets as progress bars. Use for 'are we there yet' questions, budget spent against budget, done against planned.",
     parameters: ProgressChartProps,
