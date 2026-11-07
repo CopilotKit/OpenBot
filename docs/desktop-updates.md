@@ -16,6 +16,8 @@ If any step fails, the previous files go back, the database is restored from the
 
 The restore works whoever is connected. The database is published on the host's loopback, so anything on the computer can hold sessions to it and reconnect as soon as they end (a developer's OpenBot server left running on the host held twelve). So every container of the installation's Compose project but Postgres is stopped, the dump is restored in one transaction into a scratch database nobody connects to, and then the database refuses new connections, its sessions are ended, it is dropped (`WITH (FORCE)`) and the scratch database is renamed into its place (`stack::restore_runtime_database`).
 
+An installation an earlier app left running (an installer that closed the app without its Quit, a crash, a force quit) is not shown as it is when it is behind the app's release: the window stays on setup, and Start upgrades it as above. One on the app's release, or newer, is shown at launch, and from then on it is the app's own, as one Start raised is: the menus say it is running, and Stop, Restart and Quit take it down.
+
 A deployment newer than the app is never moved back: its database is already migrated past what the app's release knows. It keeps running, and the app's own update offer catches the app up. Releases before v0.3.0 ran the server on the host; Install lays those out again at the latest release.
 
 `.env`, keys, credentials, profiles, volumes, override files and everything else the installation keeps for itself are never touched.
