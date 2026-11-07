@@ -1,3 +1,4 @@
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 
@@ -99,7 +100,13 @@ export const DATA_FUNCTIONS: DataFunction[] = [
             order by created_at desc
             limit ${limit}`,
       );
-      return { rows: [...rows] };
+      // A person's denial carries the sentence the Bot was told; a component shows it to a person.
+      return {
+        rows: [...rows].map((row) => ({
+          ...row,
+          reason: row.reason === null ? null : outcomeForPerson(row.reason),
+        })),
+      };
     },
   },
 ];
