@@ -61,6 +61,13 @@ export type VendorTransport = {
    * sequence hinted that the middle step was doing no work.
    */
   listNeedsCredential: boolean;
+  /**
+   * Whether the tool list is this deployment's own code rather than a vendor's answer, as it is for
+   * Routines and Drive. Such a list is brought up to date at every start (`refreshOwnListings`),
+   * because the copy saved when the app was added belongs to whichever build added it. Absent for a
+   * list somebody else publishes, which only a Refresh replaces.
+   */
+  listIsThisCode?: boolean;
   listTools(connection: {
     url: string;
     token?: string;
