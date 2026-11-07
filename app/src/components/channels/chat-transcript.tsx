@@ -82,6 +82,11 @@ import {
   REFUSAL_MARKER,
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
+import {
+  RESEARCH_RESULTS_LABELS,
+  readResearchSources,
+  researchRoleOfCall,
+} from "@/lib/plugins/research-results";
 import { useResultVisibility } from "@/lib/product-telemetry";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
@@ -99,6 +104,7 @@ import type { QueuedMessage } from "./composer";
 import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
 import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
+import { ResearchResults } from "./research-results";
 import { TeamBotConsentCard } from "./team-bot-consent";
 import {
   dropRepeatedAppCards,
@@ -1714,6 +1720,27 @@ export function ServerToolLine({
    * happened; the Bot's own reply says what it found.
    */
   const shown = name === SHOW_APP_ACCESS_TOOL ? undefined : body;
+  /*
+   * A web search or a page read opens to the pages it found, not to the provider's JSON. The list
+   * bounds itself (a few results, each cut to a few lines), so the line does not scroll around it.
+   */
+  const role = researchRoleOfCall(name);
+  const sources =
+    role && shown && !refused && !failed ? readResearchSources(shown) : null;
+  if (role && sources)
+    return (
+      <ToolLine
+        {...(detail ? { detail } : {})}
+        bare
+        label={label}
+        running={running}
+      >
+        <ResearchResults
+          label={RESEARCH_RESULTS_LABELS[role]}
+          sources={sources}
+        />
+      </ToolLine>
+    );
   return (
     <ToolLine
       {...(detail ? { detail } : {})}
