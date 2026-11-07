@@ -407,6 +407,9 @@ pub struct Status {
     /// This app's own version.
     pub current: String,
     pub installing: Option<Installing>,
+    /// Whether this build updates itself (`Feed::of` finds it a feed). An internal or candidate
+    /// build, or one without the updater, never does, and a window says so up front.
+    pub updates_itself: bool,
 }
 
 /// What to offer, given what the feed said and what this person closed.
@@ -418,7 +421,12 @@ pub fn to_offer(newer: Option<&Version>, dismissed: Option<&Version>) -> Option<
     }
 }
 
-pub fn status(known: &Known, current: &Version, config: Option<&Path>) -> Status {
+pub fn status(
+    known: &Known,
+    current: &Version,
+    config: Option<&Path>,
+    updates_itself: bool,
+) -> Status {
     let installing = known.installing.lock().unwrap().clone();
     let newer = known.newer();
     // An install under way keeps its version on screen whatever was closed before.
@@ -431,6 +439,7 @@ pub fn status(known: &Known, current: &Version, config: Option<&Path>) -> Status
         version: version.map(|v| v.to_string()),
         current: current.to_string(),
         installing,
+        updates_itself,
     }
 }
 
@@ -764,7 +773,7 @@ mod tests {
         let config = crate::test_support::temp_root("app-update-dismissed");
         let known = Known::default();
         known.record(&Ok(Some(v("0.3.2"))));
-        let shown = |known: &Known| status(known, &v("0.3.1"), Some(&config)).version;
+        let shown = |known: &Known| status(known, &v("0.3.1"), Some(&config), true).version;
         assert_eq!(shown(&known).as_deref(), Some("0.3.2"));
 
         dismiss(&config, &v("0.3.2")).unwrap();
@@ -795,7 +804,7 @@ mod tests {
         known.begin_install();
         known.downloaded(50, Some(200));
         known.downloaded(50, None);
-        let shown = status(&known, &v("0.3.1"), Some(&config));
+        let shown = status(&known, &v("0.3.1"), Some(&config), true);
         assert_eq!(shown.version.as_deref(), Some("0.3.2"));
         assert_eq!(
             shown.installing,
@@ -806,11 +815,14 @@ mod tests {
             })
         );
         known.restarting();
-        assert!(status(&known, &v("0.3.1"), Some(&config))
+        assert!(status(&known, &v("0.3.1"), Some(&config), true)
             .installing
             .is_some_and(|i| i.restarting));
         known.end_install();
-        assert_eq!(status(&known, &v("0.3.1"), Some(&config)).version, None);
+        assert_eq!(
+            status(&known, &v("0.3.1"), Some(&config), true).version,
+            None
+        );
         let _ = std::fs::remove_dir_all(&config);
     }
 
@@ -946,7 +958,10 @@ mod tests {
         server.join().unwrap();
         assert_eq!(known.newer(), Some(v("0.3.3")));
         // The banner still keeps the person's close.
-        assert_eq!(status(&known, &v("0.3.2"), Some(&config)).version, None);
+        assert_eq!(
+            status(&known, &v("0.3.2"), Some(&config), true).version,
+            None
+        );
         let _ = std::fs::remove_dir_all(&config);
     }
 
@@ -965,6 +980,28 @@ mod tests {
             Ok(Asked::NotOffered {
                 current: "0.3.2-internal.731.gabc1234".into()
             })
+        );
+    }
+
+    /// The setup window reads `updatesItself` before anybody checks, so a build that never updates
+    /// itself says so up front and never promises updates.
+    #[test]
+    fn the_status_says_whether_this_build_updates_itself() {
+        let internal = v("0.3.2-internal.731.gabc1234");
+        let fixed = status(&Known::default(), &internal, None, false);
+        assert_eq!(
+            serde_json::to_value(&fixed).unwrap(),
+            serde_json::json!({
+                "version": null,
+                "current": "0.3.2-internal.731.gabc1234",
+                "installing": null,
+                "updatesItself": false,
+            })
+        );
+        let release = status(&Known::default(), &v("0.3.2"), None, true);
+        assert_eq!(
+            serde_json::to_value(&release).unwrap()["updatesItself"],
+            serde_json::json!(true)
         );
     }
 
