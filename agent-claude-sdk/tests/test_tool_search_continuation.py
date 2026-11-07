@@ -29,6 +29,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
     UserMessage,
 )
+from claude_agent_sdk._internal.sdk_mcp_bridge import SdkMcpBridge
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.adapter import OpenBotClaudeAgentAdapter
@@ -95,6 +96,38 @@ def step(run, tools, search_result=None):
     )
 
 
+async def listed_tools(options):
+    server = (options.mcp_servers or {}).get("ag_ui")
+    if server is None:
+        return set()
+    bridge = SdkMcpBridge("ag_ui", server["instance"])
+    try:
+        await bridge.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "claude-code", "version": "test"},
+                },
+            }
+        )
+        await bridge.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        listed = await bridge.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    finally:
+        await bridge.aclose()
+    names = {f"mcp__ag_ui__{tool['name']}" for tool in listed["result"]["tools"]}
+    # And only those an allow rule lets it call without asking (`dontAsk` refuses the rest).
+    allowed = options.allowed_tools or []
+    return {
+        name
+        for name in names
+        if name in allowed or any(rule.endswith("*") and name.startswith(rule[:-1]) for rule in allowed)
+    }
+
+
 @pytest.fixture
 def sdk(monkeypatch):
     clients = []
@@ -102,13 +135,15 @@ def sdk(monkeypatch):
     class Client:
         def __init__(self, options):
             self.options = options
-            self.held = set(options.allowed_tools or [])
+            self.held = set()
             self.input = []
             self.interrupted = False
             clients.append(self)
 
         async def connect(self):
-            pass
+            # What Claude Code holds is what the `ag_ui` server lists when it starts, asked over
+            # the SDK's own JSON-RPC bridge, as the CLI asks it.
+            self.held = await listed_tools(self.options)
 
         async def disconnect(self):
             pass
@@ -224,7 +259,7 @@ def test_the_step_after_a_search_holds_and_calls_the_found_tool(sdk):
                 "the found tool must be called by the name the server offered it under"
             )
             assert second[-1].type == "RUN_FINISHED"
-            assert f"mcp__ag_ui__{FOUND}" in sdk[-1].options.allowed_tools
+            assert f"mcp__ag_ui__{FOUND}" in sdk[-1].held
             # The first query, which never held it, is stopped rather than resumed, and the new
             # one answers from the search's real result.
             assert len(sdk) == 2
