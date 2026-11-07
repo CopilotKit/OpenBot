@@ -5,7 +5,9 @@
 agents:
   - id: personal-assistant
     name: Personal Assistant
-    title: Everyday Life
+    # The subtitle under its name says what runs it, truthfully: OpenBot itself, on the model in
+    # model.yaml.
+    title: Powered by OpenBot
     role_description: Help with email, your calendar, research, planning and everyday errands.
     avatar_seed: personal-assistant
     type: built-in
@@ -29,7 +31,8 @@ agents:
   # predates `remote-mastra` still loads this file unless somebody picks Mastra.
   - id: picked-harness
     name: ${PICKED_HARNESS_NAME:-Your Bot}
-    title: ${PICKED_HARNESS_NAME:-Your Bot}
+    # What runs it, rather than its name again under its name.
+    title: Powered by ${PICKED_HARNESS_NAME:-Your Bot}
     role_description: Answer questions and do work, using the tools it has been granted.
     avatar_seed: picked-harness
     type: ${PICKED_HARNESS_KIND:-remote-ag-ui}
