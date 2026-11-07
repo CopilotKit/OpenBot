@@ -67,14 +67,14 @@ async fn status(
 }
 
 #[tauri::command]
-async fn restart(app: tauri::AppHandle) -> Result<(), String> {
-    crate::restart_openbot(app).await
+pub async fn restart<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    crate::restart_openbot_from(app, crate::AskedFrom::Settings).await
 }
 
 /// Stops everything, as the menu's Stop did. The page asking goes with it; the window shows setup.
 #[tauri::command]
-async fn stop(app: tauri::AppHandle) {
-    crate::stop_openbot_from_status(app);
+pub async fn stop<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    crate::stop_from_menu(app, crate::AskedFrom::Settings);
 }
 
 /// `local status`, `start` or `stop` for the stack recorded for this installation.

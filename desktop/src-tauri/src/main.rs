@@ -2944,7 +2944,11 @@ async fn stop_stack<R: tauri::Runtime>(
     root: String,
 ) -> Result<(), String> {
     let asked = std::time::Instant::now();
-    log::info!("[stop] asked in {root}");
+    log_stop_asked(
+        &app.state::<Shell>(),
+        &stack::root_from(&root),
+        AskedFrom::SetupWindow,
+    );
     // Inventory, held-child cleanup and Compose all block. Keep the complete shutdown off both
     // Tauri's event loop and its async workers, and resolve IPC only when shutdown has finished.
     let stopped = tauri::async_runtime::spawn_blocking(move || {
@@ -2955,6 +2959,39 @@ async fn stop_stack<R: tauri::Runtime>(
     .and_then(|stopped| stopped);
     logging::outcome("stop", asked, &stopped);
     stopped
+}
+
+/// Where Stop or Restart was asked from, for its first entry in the log. Each is reached from
+/// several places, and a log that cannot say which leaves the reader guessing what was pressed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AskedFrom {
+    /// The setup window's Stop.
+    SetupWindow,
+    /// Settings > This computer, in OpenBot's own page.
+    Settings,
+    StatusWindow,
+    /// Stop OpenBot in the tray or the window menu.
+    Menu,
+    Quit,
+}
+
+impl AskedFrom {
+    fn said(self) -> &'static str {
+        match self {
+            AskedFrom::SetupWindow => "from the setup window",
+            AskedFrom::Settings => "from Settings",
+            AskedFrom::StatusWindow => "from the Status window",
+            AskedFrom::Menu => "from the menu",
+            AskedFrom::Quit => "by Quit",
+        }
+    }
+}
+
+/// Stop's first entry, as Start's: `[stop] asked in ~/OpenBot from Settings`, naming the
+/// installation it is about to stop. `logging::outcome` writes its last.
+fn log_stop_asked(shell: &Shell, fallback_root: &Path, from: AskedFrom) {
+    let root = cleanup_root(shell, fallback_root);
+    log::info!("[stop] asked in {} {}", root.display(), from.said());
 }
 
 #[cfg(test)]
@@ -3041,10 +3078,17 @@ the same cleanup runs in the same order and the exit follows.
 fn quit_cleanup_shown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<String> {
     show_shutting_down(app);
     desktop_telemetry::shutdown(app);
-    quit_cleanup(&app.state::<Shell>(), |step, state| {
-        report_quit(app, step, state)
-    })
-    .lines()
+    let shell = app.state::<Shell>();
+    let asked = std::time::Instant::now();
+    log_stop_asked(&shell, &stack::default_root(), AskedFrom::Quit);
+    let failures = quit_cleanup(&shell, |step, state| report_quit(app, step, state)).lines();
+    let stopped = if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    };
+    logging::outcome("stop", asked, &stopped);
+    failures
 }
 
 /// The window event that carries the Shutting down screen's rows, the whole list each time.
@@ -3972,6 +4016,7 @@ where
 #[tauri::command]
 async fn show_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
     let asked = std::time::Instant::now();
+    log::info!("[show] asked");
     let shown = tauri::async_runtime::spawn_blocking(move || {
         let ports = ports_for_shell(&app)?;
         show_openbot_on(app, &ports)
@@ -4929,8 +4974,15 @@ Only an OpenBot this session started, whose engine it knows.
 */
 #[tauri::command]
 async fn restart_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    restart_openbot_from(app, AskedFrom::StatusWindow).await
+}
+
+async fn restart_openbot_from<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    from: AskedFrom,
+) -> Result<(), String> {
     let asked = std::time::Instant::now();
-    log::info!("[restart] asked");
+    log::info!("[restart] asked {}", from.said());
     // Compose takes seconds to restart a container. Off Tauri's threads, as Stop is.
     let restarted = tauri::async_runtime::spawn_blocking(move || restart_openbot_now(&app))
         .await
@@ -4960,7 +5012,7 @@ fn restart_openbot_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(
 /// Stop, as the menu used to offer it: everything, Intelligence included if OpenBot started it.
 #[tauri::command]
 fn stop_openbot_from_status(app: tauri::AppHandle) {
-    stop_from_menu(app);
+    stop_from_menu(app, AskedFrom::StatusWindow);
 }
 
 /// Both pages are single-page apps. Keep their route and in-memory state on restore.
@@ -6621,27 +6673,26 @@ fn publish_quit_notice_failure<R: tauri::Runtime>(app: tauri::AppHandle<R>, erro
     let _ = show_setup_and_focus(app);
 }
 
-fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+/// Stop in the background, then the setup window: the menu's Stop, and the Status window's and
+/// Settings > This computer's, which `from` tells apart in the log.
+fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>, from: AskedFrom) {
     std::thread::spawn(move || {
-        let root = default_root();
-        let root_path = PathBuf::from(&root);
-        log::info!("[menu] stopping the stack under {root}");
-        let stopped = stop_everything(&app, &root_path);
+        let asked = std::time::Instant::now();
+        let root = stack::default_root();
+        let shell = app.state::<Shell>();
+        log_stop_asked(&shell, &root, from);
+        let stopped = stop_everything(&app, &root);
         refresh_menus(&app);
-        match settle_menu_stop(&app.state::<Shell>(), &root_path, stopped) {
-            None => {
-                log::info!("[menu] stopped");
-                report(&app, "stopped", true, "OpenBot has been stopped");
-            }
+        let settled = match settle_menu_stop(&shell, &root, stopped) {
+            None => Ok(()),
+            Some(problem) => Err(problem),
+        };
+        logging::outcome("stop", asked, &settled);
+        match settled {
+            Ok(()) => report(&app, "stopped", true, "OpenBot has been stopped"),
             // Said rather than swallowed. A menu item that fails silently is worse than one
             // that is not there: the person believes the stack is down and it is not.
-            Some(problem) => {
-                log::error!(
-                    "[menu] stop failed: {}",
-                    logging::Failure::described(&problem)
-                );
-                report(&app, "stopped", false, problem.said);
-            }
+            Err(problem) => report(&app, "stopped", false, problem.said),
         }
         let _ = show_setup(app.clone());
     });
@@ -6681,7 +6732,7 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         "open" => show_whichever_applies(app),
         // Stop without quitting: the stack is what costs something to leave running, and somebody
         // who wants it stopped does not necessarily want the application gone.
-        "stop" => stop_from_menu(app.clone()),
+        "stop" => stop_from_menu(app.clone(), AskedFrom::Menu),
         "status" => show_status_window(app),
         app_update::MENU_ID => check_for_updates_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
