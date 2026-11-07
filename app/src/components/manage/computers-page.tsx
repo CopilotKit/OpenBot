@@ -45,6 +45,7 @@ import {
   type ComputerProfile,
   computerFleetQueryOptions,
 } from "@/lib/computers/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 
 /** One row's identity: the computer, and on a shared computer the Bot's seat on it. */
@@ -55,9 +56,16 @@ function rowId(computer: ComputerProfile): string {
 /**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's
  * controls for these). The personal edition's Settings renders this page with none.
+ *
+ * In the personal edition this is one person's one computer. What only a team can act on goes: the
+ * notice about giving each person a computer of their own, whose seat a row is, and where its
+ * traffic leaves. Each Bot's browser stays, with Stop and Reset, because this is the one place the
+ * person can sign a Bot out of everything.
  */
 export function ComputersPage({ children }: { children?: ReactNode } = {}) {
   const paths = useManagePaths();
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   /** The row currently running a stop/reset request. */
   const [busy, setBusy] = useState<string | null>(null);
   /** Reset deletes the browser profiles, so it requires confirmation. */
@@ -125,6 +133,8 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
    * computer a row is one person's seat on one Bot, so it names both.
    */
   const titleOf = (computer: ComputerProfile): string => {
+    // One person, so a row is one of their Bots.
+    if (personal) return computer.botId ? nameFor(computer.botId) : "Computer";
     const person =
       computer.person?.name ?? computer.person?.email ?? computer.personId;
     if (computer.kind === "person") {
@@ -149,8 +159,12 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
 
   return (
     <PageShell
-      description="Each person's computer, and each isolated Bot's. Every Bot keeps its own browser profile on it, which keeps that Bot signed in. Resetting a computer signs every Bot on it out of everything."
-      title="Computers"
+      description={
+        personal
+          ? "Your Bots share one computer. Each Bot keeps its own browser profile there, which keeps it signed in. A command one Bot runs can still read another Bot's files."
+          : "Each person's computer, and each isolated Bot's. Every Bot keeps its own browser profile on it, which keeps that Bot signed in. Resetting a computer signs every Bot on it out of everything."
+      }
+      title={personal ? "Computer" : "Computers"}
     >
       {problem ? (
         <p
@@ -161,7 +175,7 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
         </p>
       ) : null}
 
-      {isolation === "shared" ? (
+      {personal ? null : isolation === "shared" ? (
         <p className="mt-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
           <span className="font-medium">
             Every person's Bots run on one computer.
@@ -205,7 +219,11 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
         stopping={stopHostAccess.isPending}
       />
 
-      <PageSection title="Computers in this deployment">
+      <PageSection
+        title={
+          personal ? "Your Bots' browsers" : "Computers in this deployment"
+        }
+      >
         {setState.error ? (
           <p
             className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
@@ -217,8 +235,13 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
         {computers === null && problem ? (
           <PageEmpty icon={IconAlertTriangle} title="Couldn't load the list" />
         ) : computers === null ? null : computers.length === 0 ? (
-          <PageEmpty icon={IconDeviceDesktop} title="No computers yet">
-            One shows up the first time a Bot opens a page.
+          <PageEmpty
+            icon={IconDeviceDesktop}
+            title={personal ? "No browsers yet" : "No computers yet"}
+          >
+            {personal
+              ? "One starts the first time a Bot opens a page."
+              : "One shows up the first time a Bot opens a page."}
           </PageEmpty>
         ) : (
           <PageRows>
@@ -230,17 +253,19 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
                       {titleOf(computer)}
                     </ItemTitle>
                     <ItemDescription>
-                      {scopeOf(computer)}
-                      {" · "}
+                      {personal ? null : `${scopeOf(computer)} · `}
                       {computer.running
                         ? `Browser running since ${new Date(computer.startedAt ?? "").toLocaleTimeString()}`
                         : "No browser running. It starts when the Bot next needs it."}
-                      {" · "}
-                      {computer.egress === undefined
-                        ? "Egress not reported"
-                        : computer.egress === null
-                          ? "Leaves directly"
-                          : `Leaves through ${computer.egress}`}
+                      {personal
+                        ? null
+                        : ` · ${
+                            computer.egress === undefined
+                              ? "Egress not reported"
+                              : computer.egress === null
+                                ? "Leaves directly"
+                                : `Leaves through ${computer.egress}`
+                          }`}
                       {computer.updateAvailable ? " · Update available" : ""}
                     </ItemDescription>
                   </ItemContent>
@@ -295,7 +320,11 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Reset {confirming ? titleOf(confirming) : ""}?
+              {personal
+                ? confirming?.botId
+                  ? `Reset ${nameFor(confirming.botId)}'s browser?`
+                  : "Reset the computer?"
+                : `Reset ${confirming ? titleOf(confirming) : ""}?`}
             </DialogTitle>
             <DialogDescription>
               {confirming?.kind === "person" && !confirming.botId
@@ -370,18 +399,31 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
         </DialogContent>
       </Dialog>
 
-      <p className="mt-4 text-muted-foreground text-sm">
-        <strong>Stop</strong> closes the computer's browsers and keeps their
-        logins. It starts again the next time a Bot needs it.{" "}
-        <strong>Reset</strong> deletes the profiles and signs every Bot on it
-        out of everything. <strong>Update computer</strong> shows when a
-        computer runs an older image. It moves the computer to the new one and
-        keeps its files and sign-ins. All three show in{" "}
-        <Link className="underline" {...paths.audit()}>
-          Audit
-        </Link>
-        .
-      </p>
+      {personal ? (
+        <p className="mt-4 text-muted-foreground text-sm">
+          <strong>Stop browser</strong> closes a Bot's browser and keeps its
+          sign-ins. It starts again the next time the Bot needs it.{" "}
+          <strong>Reset</strong> deletes the Bot's browser profile and signs it
+          out of everything. Both show in{" "}
+          <Link className="underline" {...paths.audit()}>
+            Activity
+          </Link>
+          .
+        </p>
+      ) : (
+        <p className="mt-4 text-muted-foreground text-sm">
+          <strong>Stop</strong> closes the computer's browsers and keeps their
+          logins. It starts again the next time a Bot needs it.{" "}
+          <strong>Reset</strong> deletes the profiles and signs every Bot on it
+          out of everything. <strong>Update computer</strong> shows when a
+          computer runs an older image. It moves the computer to the new one and
+          keeps its files and sign-ins. All three show in{" "}
+          <Link className="underline" {...paths.audit()}>
+            Audit
+          </Link>
+          .
+        </p>
+      )}
       {children}
     </PageShell>
   );

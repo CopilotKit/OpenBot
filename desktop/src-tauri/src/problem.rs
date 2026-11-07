@@ -148,17 +148,28 @@ pub fn said_about(output: &str) -> String {
             .into();
     }
     // A registry that did not answer, while the engine did: the engine is what reports it, so the
-    // "connection refused" in it is the registry's, not the engine's.
+    // "connection refused" in it is the registry's, not the engine's. Podman's Docker API answers a
+    // pull that never started with only the root cause, so a refused registry reads, in full,
+    // "Error response from daemon: connection refused". A response is the engine answering.
     if lower.contains("failed to resolve reference")
         || lower.contains("failed to do request")
         || lower.contains("error pulling")
+        || lower.contains("pinging container registry")
         || (lower.contains("error response from daemon")
-            && (lower.contains("dial tcp")
-                || lower.contains("no such host")
-                || lower.contains("i/o timeout")))
+            && [
+                "dial tcp",
+                "connection refused",
+                "no such host",
+                "i/o timeout",
+                "network is unreachable",
+                "no route to host",
+                "connection reset",
+            ]
+            .iter()
+            .any(|cause| lower.contains(cause)))
     {
-        return "OpenBot couldn't download what it needs. Check the internet connection, and try \
-                again."
+        return "OpenBot couldn't download the software it needs. Check your internet connection, \
+                proxy or firewall, and try again."
             .into();
     }
     if lower.contains("cannot connect")
@@ -209,6 +220,8 @@ mod tests {
         for raw in [
             r#"{"id":"Image 127.0.0.1:5050/openbot-server@sha256:d6dcee1f","status":"Error","text":"Error","details":"failed to resolve reference \"127.0.0.1:5050/openbot-server@sha256:d6dcee1f\": failed to do request: Head \"http://127.0.0.1:5050/v2/openbot-server/manifests/sha256:d6dcee1f\": dial tcp 127.0.0.1:5050: connect: connection refused"}"#,
             "Error response from daemon: Get \"https://ghcr.io/v2/\": dial tcp: lookup ghcr.io: no such host",
+            // Podman, whose answer is only the root cause. See `pull_metrics` for the whole output.
+            "Error response from daemon: connection refused",
         ] {
             let said = said_about(raw);
             assert!(said.contains("couldn't download"), "{said}");

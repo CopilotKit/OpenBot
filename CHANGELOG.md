@@ -14,6 +14,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   conversation opens after OpenBot was quit and reopened no longer fails with "Take a fresh browser
   snapshot after handback before acting." A conversation never shows that instruction, which is
   meant for the Bot.
+- A personal edition set up with `start.sh` under v0.3.1 starts on this release. Its package is now
+  called `openbot`, and the server would have refused the Personal Assistant it seeded as `personal`
+  as another package's Bot and stopped. `brand.yaml` takes `tenant.former_ids`: a deployment set up
+  under one of them keeps its Bots, conversations and deployment name. See
+  [configuration](docs/configuration.md#brandyaml).
 - OpenBot Desktop's menu bar and tray no longer have an item that opens the back end's own
   dashboard, which is branded as another product. The Status window and Settings, This computer
   list each part by what it does: "Front end and Bots", "Background jobs", "Database" and "Bot

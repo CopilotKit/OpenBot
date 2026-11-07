@@ -4,13 +4,14 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
   agents,
+  brokeredConnections,
   channelAgents,
   channelMemberships,
   channels,
@@ -22,6 +23,7 @@ import {
 } from "../src/db/schema";
 import {
   createApplicationConfiguration,
+  deploymentNameOf,
   expandEnvironment,
   type LoadedTenantPackage,
   loadTenantPackage,
@@ -86,6 +88,7 @@ function loadedPackage(
   createdTenantIds.push(tenantId);
   return {
     tenantId,
+    formerTenantIds: [],
     productName: "Package Test",
     stylesheet: null,
     agents: [agent],
@@ -1781,4 +1784,207 @@ test("blank package endpoint disables only its owned agent and restores it when 
         .where(eq(deploymentPackages.id, otherPackageId));
     await database.delete(users).where(eq(users.id, actor.id));
   }
+});
+
+/**
+ * A personal edition set up under v0.3.1, whose package was then called `personal`, upgraded to the
+ * package renamed `openbot`.
+ *
+ * Before `tenant.former_ids`, the upgraded server refused its own Personal Assistant as another
+ * package's Bot ("collides with a user-created agent") and stopped at boot, and with DEPLOYMENT_ID
+ * unset it started minting thread ids under a different deployment name.
+ *
+ * The real `examples/personal` package, with its ids suffixed so the suite never touches a row a
+ * real deployment or another test could hold.
+ */
+describe("upgrading a deployment set up under a package's former id", () => {
+  test("the shipped personal package names `personal` as its former id", async () => {
+    const shipped = await loadTenantPackage(
+      fileURLToPath(new URL("../../examples/personal", import.meta.url)),
+    );
+    expect(shipped.tenantId).toBe("openbot");
+    expect(shipped.formerTenantIds).toEqual(["personal"]);
+  });
+
+  test("a package may not name its own id as a former one", () => {
+    expect(() =>
+      validateTenantPackage({
+        brand:
+          "tenant:\n  id: openbot\n  former_ids: [openbot]\n  product_name: OpenBot\n",
+        agents: "agents: []\n",
+        channels: "channels: []\n",
+        model:
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
+        knowledge: "sources: []\n",
+        themeCss: "",
+      }),
+    ).toThrow('tenant.former_ids names "openbot"');
+  });
+
+  test("boots with its Bots, conversations and connections intact, under the name it had", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const rename = (id: string) => `${id}-${suffix}`;
+    const shipped = await loadTenantPackage(
+      fileURLToPath(new URL("../../examples/personal", import.meta.url)),
+    );
+    const formerId = rename(shipped.formerTenantIds[0] ?? "personal");
+    const currentId = rename(shipped.tenantId);
+    createdTenantIds.push(formerId, currentId);
+    const isolate = (
+      tenantId: string,
+      formerTenantIds: string[],
+    ): LoadedTenantPackage => ({
+      ...shipped,
+      tenantId,
+      formerTenantIds,
+      skills: [],
+      agents: shipped.agents.map((agent) => ({
+        ...agent,
+        id: rename(agent.id),
+        skills: [],
+      })),
+      channels: shipped.channels.map((channel) => ({
+        ...channel,
+        id: rename(channel.id),
+        permittedAgents: channel.permittedAgents.map(rename),
+      })),
+    });
+    // v0.3.1: the same package, under the id it had then.
+    const v031 = isolate(formerId, []);
+    // This release: renamed, and saying what it used to be called.
+    const upgraded = isolate(currentId, [formerId]);
+    const assistant = rename("personal-assistant");
+    const packageChannel = rename("personal-assistant");
+    createdAgentIds.push(assistant);
+    createdChannelIds.push(packageChannel);
+
+    await synchronizeTenantPackage(database, v031);
+    const userId = await createUser();
+    const actor = { id: userId, role: "user" as const };
+
+    // A Bot the person made, and a conversation with each Bot.
+    const ownBot = `agent_${suffix}`;
+    createdAgentIds.push(ownBot);
+    await database.insert(agents).values({
+      id: ownBot,
+      name: "Trip Planner",
+      type: "built_in",
+      configuration: { systemPrompt: "Plan my trips." },
+      packageId: null,
+    });
+    await database.insert(agentProfiles).values({
+      agentId: ownBot,
+      title: "Travel",
+      roleDescription: "Plan my trips.",
+      avatarSeed: ownBot,
+      visibility: "private",
+      ownerUserId: userId,
+    });
+    const conversations = [
+      { id: `channel_${suffix}-assistant`, agentId: assistant },
+      { id: `channel_${suffix}-own`, agentId: ownBot },
+    ];
+    for (const conversation of conversations) {
+      createdChannelIds.push(conversation.id);
+      await database.insert(channels).values({
+        id: conversation.id,
+        name: conversation.agentId,
+        description: "A conversation.",
+        allowedGroups: [],
+      });
+      await database
+        .insert(channelAgents)
+        .values({ channelId: conversation.id, agentId: conversation.agentId });
+      await database
+        .insert(channelMemberships)
+        .values({ channelId: conversation.id, userId });
+    }
+    // An app the person connected.
+    await database.insert(brokeredConnections).values({
+      provider: "composio",
+      app: `gmail-${suffix}`,
+      holder: "person",
+      userId,
+      vendorUserId: `person-${suffix}`,
+      connectedBy: userId,
+      verified: true,
+    });
+
+    const snapshot = async () => ({
+      bots: (await createAgentProfileStore(database, undefined).list(actor))
+        .filter((bot) => bot.id === assistant || bot.id === ownBot)
+        .map((bot) => ({ id: bot.id, deletedAt: bot.deletedAt }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+      conversations: (
+        await database
+          .select({
+            channelId: channelMemberships.channelId,
+            agentId: channelAgents.agentId,
+          })
+          .from(channelMemberships)
+          .innerJoin(
+            channelAgents,
+            eq(channelAgents.channelId, channelMemberships.channelId),
+          )
+          .where(eq(channelMemberships.userId, userId))
+      ).sort((a, b) => a.channelId.localeCompare(b.channelId)),
+      connections: (
+        await database
+          .select({
+            app: brokeredConnections.app,
+            vendorUserId: brokeredConnections.vendorUserId,
+            verified: brokeredConnections.verified,
+          })
+          .from(brokeredConnections)
+          .where(eq(brokeredConnections.userId, userId))
+      ).sort((a, b) => a.app.localeCompare(b.app)),
+    });
+    const before = await snapshot();
+    expect(before.bots.map((bot) => bot.id).sort()).toEqual(
+      [assistant, ownBot].sort(),
+    );
+    expect(before.conversations).toHaveLength(2);
+    expect(before.connections).toHaveLength(1);
+
+    // The upgraded server names itself before it synchronises.
+    expect(await deploymentNameOf(database, upgraded)).toBe(formerId);
+
+    const row = await synchronizeTenantPackage(database, upgraded);
+    expect(row.tenantId).toBe(currentId);
+    expect(await snapshot()).toEqual(before);
+
+    // The package's Bot and channel are now the renamed package's; the person's Bot is still theirs.
+    const owners = await database
+      .select({ id: agents.id, packageId: agents.packageId })
+      .from(agents)
+      .where(inArray(agents.id, [assistant, ownBot]));
+    expect(Object.fromEntries(owners.map((a) => [a.id, a.packageId]))).toEqual({
+      [assistant]: row.id,
+      [ownBot]: null,
+    });
+    const [channel] = await database
+      .select({ packageId: channels.packageId })
+      .from(channels)
+      .where(eq(channels.id, packageChannel));
+    expect(channel?.packageId).toBe(row.id);
+
+    // And on every boot after: the same name, the same rows.
+    expect(await deploymentNameOf(database, upgraded)).toBe(formerId);
+    await synchronizeTenantPackage(database, upgraded);
+    expect(await snapshot()).toEqual(before);
+
+    await database
+      .delete(brokeredConnections)
+      .where(eq(brokeredConnections.userId, userId));
+  });
+
+  test("a deployment that never had a former id is named by the package's id", async () => {
+    const tenantId = `fresh-${randomUUID().slice(0, 8)}`;
+    expect(
+      await deploymentNameOf(database, {
+        tenantId,
+        formerTenantIds: [`never-${randomUUID().slice(0, 8)}`],
+      }),
+    ).toBe(tenantId);
+  });
 });

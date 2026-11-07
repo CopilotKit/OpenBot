@@ -70,7 +70,11 @@ import type { CardPlace } from "@/lib/copilot/carry-on";
 import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { markdownComponents, markdownPlugins } from "@/lib/markdown";
+import {
+  markdownComponents,
+  markdownPlugins,
+  replyRemarkPlugins,
+} from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import {
   asText,
@@ -882,6 +886,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
                     components={markdownComponents}
                     mode={mode}
                     plugins={markdownPlugins}
+                    remarkPlugins={replyRemarkPlugins}
                   >
                     {revealed}
                   </Streamdown>
