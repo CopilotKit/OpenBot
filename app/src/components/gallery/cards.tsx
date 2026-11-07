@@ -114,14 +114,14 @@ export const ChecklistCardProps = z.object({
     .array(
       z.object({
         text: z.string(),
-        done: z.boolean().describe("Whether this one is already finished"),
+        done: z.boolean().describe("Whether this task is already finished"),
         note: z
           .string()
           .optional()
           .describe("A short aside, e.g. who it is waiting on"),
       }),
     )
-    .describe("The items, in the order they should be done"),
+    .describe("The tasks, in the order they should be done"),
 });
 
 /**
@@ -162,12 +162,15 @@ export function ChecklistCard({
             >
               {item.done ? "✓" : ""}
             </span>
+            {/*
+             * Done is the tick and a muted line, never a line through it. A strike reads as deleted,
+             * and a list whose every item is finished was drawn as an answer crossed out.
+             */}
             <span className="min-w-0">
-              <span
-                className={
-                  item.done ? "text-muted-foreground line-through" : ""
-                }
-              >
+              <span className={item.done ? "text-muted-foreground" : ""}>
+                <span className="sr-only">
+                  {item.done ? "Done: " : "To do: "}
+                </span>
                 {item.text}
               </span>
               {item.note ? (
@@ -277,7 +280,7 @@ export const GALLERY: GalleryComponent[] = [
     title: "Checklist",
     kind: "card",
     description:
-      "Show a list of things and which are done. Reporting only, the person cannot tick these, so do not use it to ask for anything.",
+      "Show the tasks or steps of a piece of work and which are finished, such as a release plan or an onboarding list. Only for work somebody ticks off. Not for presenting information: findings, options, recommendations or a list of points go in text or a notice. The person cannot tick these here, so do not use it to ask for anything.",
     parameters: ChecklistCardProps,
     Component: ChecklistCard as GalleryComponent["Component"],
     preview: {
