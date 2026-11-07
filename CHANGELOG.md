@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A goal's run is told "goal", the word every screen uses, so a Bot no longer says it "marked the
+  responsibility complete". Its tools are now `create_goal`, `list_goals`, `update_goal`,
+  `report_goal_progress`, `run_goal`, `pause_goal`, `resume_goal` and `complete_goal` (they were
+  `*_responsibility`), the trigger tools point at the Goals page and take `goalId`
+  (`responsibilityId` still works), and the refusals a goal's tools and routes give say goal. The
+  conversation names a goal's steps "Checked goals", "Marked a goal complete" and so on. Routes,
+  APIs and the database are unchanged.
 - On OpenBot Desktop signed in with a Claude or ChatGPT plan, conversations get a generated name in
   the sidebar. With no model key, nothing named them, so each showed the start of its first message.
   The name now comes from the plan's own model, as the built-in Bots' answers do; a Bot you brought

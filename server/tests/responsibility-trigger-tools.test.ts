@@ -70,7 +70,7 @@ afterEach(() => useTriggerTools(null));
 test("create_trigger is attributed to the connection and never echoes the key", async () => {
   const calls = install();
   const result = await callTool(CONNECTION, "create_trigger", {
-    responsibilityId: "goal-1",
+    goalId: "goal-1",
     kind: "webhook",
     eventTypes: ["deploy"],
     ownerUserId: "attacker",
@@ -82,7 +82,7 @@ test("create_trigger is attributed to the connection and never echoes the key", 
   expect(result.text).toContain(
     `https://openbot.example.test/api/events/triggers/${TRIGGER_ID}`,
   );
-  expect(result.text).toContain("Responsibilities page");
+  expect(result.text).toContain("Goals page");
   expect(calls.find((call) => call[0] === "create")).toEqual([
     "create",
     "owner-1",
@@ -93,12 +93,22 @@ test("create_trigger is attributed to the connection and never echoes the key", 
   ]);
 });
 
+test("create_trigger still takes the goal as responsibilityId, its name before it said goal", async () => {
+  const calls = install();
+  const result = await callTool(CONNECTION, "create_trigger", {
+    responsibilityId: "goal-1",
+    kind: "webhook",
+  });
+  expect(result.isError).toBe(false);
+  expect(calls.find((call) => call[0] === "create")?.[2]).toBe("goal-1");
+});
+
 test("a Bot cannot manage triggers on another person's or another Bot's responsibility", async () => {
   install();
   const foreign = await callTool(
     { ...CONNECTION, botId: "bot-2" },
     "create_trigger",
-    { responsibilityId: "goal-1", kind: "webhook" },
+    { goalId: "goal-1", kind: "webhook" },
   );
   expect(foreign.isError).toBe(true);
   const other = await callTool(

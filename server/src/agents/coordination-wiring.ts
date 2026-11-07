@@ -294,7 +294,7 @@ export function wireCoordination(deps: {
             !result.text.startsWith(REFUSAL_MARKER)
           )
             throw new HeadlessToolSuspension(
-              "This responsibility is waiting for the person's answer.",
+              "This goal is waiting for the person's answer.",
               {
                 kind: PERSON_QUESTION_WAITING,
                 continuation: snapshot,
