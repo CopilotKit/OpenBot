@@ -91,7 +91,7 @@ async function renderAudit(sections?: ReactNode) {
 
 const whats = (container: HTMLElement) =>
   [...container.querySelectorAll("tbody tr")].map(
-    (row) => row.querySelector("[data-column=what]")?.textContent,
+    (row) => row.querySelector("[data-column=what] > div")?.textContent,
   );
 
 test("the page fills the shell's panel and only the table scrolls", async () => {

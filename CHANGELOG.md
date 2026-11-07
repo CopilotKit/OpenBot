@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The Audit table fits OpenBot Desktop's default window: what an action acted on sits under it
+  and who started it under the Bot, so Decision shows without scrolling sideways.
 - A Bot's Activity page says it lists the Bot's tasks, routines and goals, and links to every
   action the Bot took, in Settings, Activity (Admin, Audit for an admin) narrowed to that Bot.
 - Settings, Activity and Admin, Audit show an action the person denied as Blocked, never as
