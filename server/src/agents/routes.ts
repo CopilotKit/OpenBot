@@ -38,6 +38,7 @@ type AgentInputObject = {
   endpoint?: unknown;
   auth?: unknown;
   isolated?: unknown;
+  instructions?: unknown;
 };
 
 /**
@@ -139,6 +140,19 @@ export function parseAgentInput(
   }
   const isolated = input.isolated;
 
+  // Absent leaves them as they are. Only the personal starter keeps instructions apart from what
+  // it does, and the same limit holds for them as held when they were edited as that text.
+  let instructions: string | undefined;
+  if (input.instructions !== undefined) {
+    const bounded = boundedText(
+      input.instructions,
+      1000,
+      "Instructions must be text between 1 and 1000 characters.",
+    );
+    if (typeof bounded !== "string") return bounded;
+    instructions = bounded;
+  }
+
   return {
     ok: true,
     value: {
@@ -149,6 +163,7 @@ export function parseAgentInput(
       endpoint,
       auth,
       ...(isolated === undefined ? {} : { isolated }),
+      ...(instructions === undefined ? {} : { instructions }),
     },
   };
 }
@@ -1002,6 +1017,8 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     hasCallbackToken: agent.hasCallbackToken,
     // What the owner asked for. Whether it is in effect is `isolationActive`, added by the route.
     isolated: agent.isolated,
+    // The personal starter's, for its Setup page. No other Bot's DTO carries any.
+    ...(agent.instructions ? { instructions: agent.instructions } : {}),
     canManage: canManageAgent(actor, agent),
     // Ownership, kept separate from permission. `canManage` is also true for an administrator on
     // another user's coworker, so a roster that split "mine" on it would file other people's work

@@ -212,6 +212,7 @@ const joinedProjection = {
   /* The hash, only so a surface can say whether one exists. It never leaves this module. */
   callbackTokenHash: agentProfiles.callbackTokenHash,
   configuration: agents.configuration,
+  type: agents.type,
 };
 
 function joinedProfiles(executor: DatabaseExecutor, actor: AgentActor) {
@@ -272,7 +273,30 @@ function mapProfile(
     // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
     // wipe one by saving an unrelated edit; showing the value would put a secret in a screenshot.
     hasAuth: authFromConfiguration(row.configuration) !== null,
+    instructions: starterInstructionsOf(row),
   };
+}
+
+/**
+ * Where a personal starter keeps its instructions: the prompt a Bot that runs here runs on, or the
+ * instructions OpenBot sends a remote one in its standing role, after what it does.
+ */
+export function starterInstructionsKey(
+  type: "built_in" | "remote_ag_ui" | "remote_mastra",
+): "systemPrompt" | "standingInstructions" {
+  return type === "built_in" ? "systemPrompt" : "standingInstructions";
+}
+
+/** A personal starter's instructions, or null for any other Bot. See `AgentProfile.instructions`. */
+function starterInstructionsOf(row: {
+  type: "built_in" | "remote_ag_ui" | "remote_mastra";
+  configuration: unknown;
+}): string | null {
+  const configuration = row.configuration as {
+    personalStarter?: unknown;
+  } | null;
+  if (configuration?.personalStarter !== true) return null;
+  return promptOf(configuration, starterInstructionsKey(row.type));
 }
 
 /**
@@ -668,7 +692,20 @@ export function createAgentProfileStore(
            * acquire one — its instruction travels as the standing role message instead — and the
            * tenant package's Bots, whose `system_prompt` is deliberately not their
            * `role_description`, remain protected except for the editable personal starter.
+           *
+           * NOT FOR THE PERSONAL STARTER EITHER. It is seeded from the package, so what it does and
+           * what it is told are two texts, as they are for every package Bot: its description is
+           * what a conversation's header shows, and its instructions are edited on their own
+           * (`input.instructions`). Moving its description into its prompt would leave it running on
+           * one sentence written for a person.
            */
+          const starter = previous.personalStarter === true;
+          const described = input.roleDescription !== profile.roleDescription;
+          const instructed =
+            starter &&
+            row !== undefined &&
+            input.instructions !== undefined &&
+            input.instructions !== profile.instructions;
           // An edit that sends the address the Bot already has leaves the stored one as it is.
           const repointed =
             input.endpoint !== undefined &&
@@ -676,9 +713,11 @@ export function createAgentProfileStore(
             !sameAddress(input.endpoint, profile.endpoint);
           const configuration: Record<string, unknown> = {
             ...previous,
-            ...(row?.type === "built_in" &&
-            input.roleDescription !== profile.roleDescription
+            ...(!starter && row?.type === "built_in" && described
               ? { systemPrompt: input.roleDescription }
+              : {}),
+            ...(instructed
+              ? { [starterInstructionsKey(row.type)]: input.instructions }
               : {}),
             ...(repointed ? { endpoint: input.endpoint } : {}),
             ...(input.auth && vault
@@ -709,10 +748,7 @@ export function createAgentProfileStore(
             configuration.personalConnection = true;
           }
 
-          if (
-            row?.type !== "built_in" &&
-            input.roleDescription !== profile.roleDescription
-          ) {
+          if (!starter && row?.type !== "built_in" && described) {
             delete configuration.standingInstructions;
           }
 
