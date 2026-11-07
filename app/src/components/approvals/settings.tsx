@@ -96,7 +96,23 @@ export function ApprovalSettings() {
           .
         </p>
       ) : null}
-      <PageSection title="Before a Bot acts">
+      <PageSection
+        description={
+          /*
+           * What asks whatever these settings say (server/src/approvals/policy.ts). A Bot's own
+           * computer is left out on purpose: its workspace is its scratch space, so deleting a file
+           * there is an ordinary change, as the last sentence says.
+           */
+          <>
+            Payments, passwords and security settings are always handed to you.
+            Deleting, sending, sharing and posting in your apps and on websites
+            always ask first. So does every edit or command in a folder on your
+            own computer. A Bot's own computer is its scratch space, so what it
+            does there asks only when your settings or rules say so.
+          </>
+        }
+        title="Before a Bot acts"
+      >
         <PageRows>
           <Item size="sm">
             <ItemMedia variant="icon">
@@ -187,10 +203,8 @@ export function ApprovalSettings() {
         description={
           <>
             The strictest matching rule wins. An "ask" rule beats an "allow"
-            rule.{personal ? " " : " Team rules are locked. "}Passwords,
-            security settings and payments are always handed to you. Deleting,
-            sending, sharing and posting always ask first. Rules for one Bot are
-            on{" "}
+            rule.{personal ? " " : " Team rules are locked. "}Rules for one Bot
+            are on{" "}
             <Link className="underline underline-offset-4" to="/bots">
               that Bot's page
             </Link>

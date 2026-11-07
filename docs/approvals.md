@@ -57,9 +57,11 @@ With Ask before making changes off, a Bot reads and makes ordinary changes witho
 an email, editing your documents, creating a calendar event for yourself, labelling mail, saving a
 page, writing a file on its own computer.
 
-A Bot's own computer is its workspace. Writing, reading and deleting files there, and the commands
-it runs there, are not account actions and don't ask. Commands on your own computer follow
-**Commands on your computer** in Settings → Approvals.
+A Bot's own computer is its scratch space. Writing, reading and deleting files there, and the
+commands it runs there, are not account actions and don't ask unless Ask before making changes,
+Auto-review or a rule says so. A folder on your own computer is different: the OpenBot desktop app
+asks before every edit or command in it, and **Commands on your computer** in Settings → Approvals
+can refuse commands there altogether. Settings → Approvals says this above its switches.
 
 ## What isn't recognised
 

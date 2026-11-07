@@ -87,6 +87,28 @@ describe("a Bot OpenBot runs leaves the asking to OpenBot", () => {
     ...(destructive ? { destructive } : {}),
   });
 
+  test("the guidance promises a card for deleting in the person's apps, never on the Bot's own computer", () => {
+    const guidance = APPROVAL_GUIDANCE.replace(/\s+/g, " ");
+    expect(guidance).toContain(
+      "before you delete, archive, send, share or post anything in their apps or on websites",
+    );
+    expect(guidance).toContain("Your own computer is your scratch space");
+    // As the policy has it: deleting a file in the Bot's own workspace is an ordinary change.
+    expect(
+      safetyRequirement({
+        actorId: "owner",
+        botId: "assistant",
+        toolRef: "computer_run_command",
+        effect: "write",
+        scope: "workspace",
+        args: { command: "rm -f decline-test-f6.txt && echo deleted" },
+      }),
+    ).toBeUndefined();
+    expect(safetyRequirement(app("GOOGLEDRIVE_DELETE_FILE"))?.behaviour).toBe(
+      "ask",
+    );
+  });
+
   test("the guidance says OpenBot asks before you archive, and it does", () => {
     expect(APPROVAL_GUIDANCE.replace(/\s+/g, " ")).toContain(
       "delete, archive, send",
