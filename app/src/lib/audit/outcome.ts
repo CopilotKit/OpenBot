@@ -105,34 +105,13 @@ export const COMPUTER_ACTION_EVENT_TYPES = [
 ] as const;
 
 /**
- * OpenBot's own working, which the personal edition's Activity leaves out. None of it is something
- * a Bot did or a person can act on, and Admin keeps all of it.
+ * OpenBot's own working, which the personal edition's Activity leaves out, and the rule that draws an
+ * action once. Shared with the server, whose Activity report counts what this page shows.
  */
-export const OPENBOT_WORKING_EVENT_TYPES = [
-  /*
-   * Which tools a run was offered, written on every turn ("Choose tools for a run, 96 of 96 tools").
-   * Everything offered was already the Bot's, and a run offered too many says so on its own row
-   * (`agent.tool_limit_refused`). Admin keeps it for tuning which skills declare which tools.
-   */
-  "mcp.tools_discovered",
-  /*
-   * Which Bot a message went to, written on every message ("Sent to the default Bot, fallback:
-   * one-candidate"). The conversation already shows which Bot answered, and a person picks another
-   * with @. Admin keeps it for tuning the router.
-   */
-  "channel.routed",
-  /*
-   * A build's components, published as OpenBot first sees them. The personal edition has no way for
-   * a person to publish or withdraw one, so every such row is OpenBot setting itself up.
-   */
-  "component.published",
-  /*
-   * The computer's boundary and isolation as the server read them at start-up, two rows at every
-   * start. The personal edition has one computer and no admin setting either.
-   */
-  "computer.policy_loaded",
-  "computer.isolation_loaded",
-] as const;
+export {
+  OPENBOT_WORKING_EVENT_TYPES,
+  oneRowPerAction,
+} from "@openbot/shared/activity-rows";
 
 export type AuditOutcome = "refused" | "did-not-happen" | "allowed";
 
@@ -172,38 +151,6 @@ export function outcomeOf(row: string | Row): AuditOutcome {
   )
     return "refused";
   return "allowed";
-}
-
-/**
- * The rows to draw, with each failed, stopped or refused action shown once.
- *
- * The computer writes an action's row before it acts, so there is no way to act off the trail, and a
- * second row when the action then fails or is stopped. Both carry the same `attempt` id. Drawn as they
- * were, a read of a missing file was two rows, "Allowed" and "Did not happen", and the first is the
- * one a reader believes. The failure row carries everything the first did, so the first is left out
- * when its failure is loaded beside it. The trail itself, and the CSV export, keep both.
- *
- * A refusal can end an attempt too: a folder action on the person's own computer is written as it
- * goes to the desktop, which then asks them, and their Deny is the refused row that ends it.
- */
-export function oneRowPerAction<T extends Row>(events: T[]): T[] {
-  const ended = new Set(
-    events
-      .filter(
-        (event) =>
-          DID_NOT_HAPPEN.has(event.eventType) ||
-          event.eventType === "computer.action_refused",
-      )
-      .map((event) => event.payload?.attempt)
-      .filter((attempt): attempt is string => typeof attempt === "string"),
-  );
-  if (ended.size === 0) return events;
-  return events.filter(
-    (event) =>
-      event.eventType !== "computer.action_allowed" ||
-      typeof event.payload?.attempt !== "string" ||
-      !ended.has(event.payload.attempt),
-  );
 }
 
 /** The `eventType` query one of the saved views filters by. */

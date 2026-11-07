@@ -1,3 +1,7 @@
+import {
+  ACTION_ENDINGS,
+  OPENBOT_WORKING_EVENT_TYPES,
+} from "@openbot/shared/activity-rows";
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { sql } from "drizzle-orm";
 import type { Database } from "../db/client";
@@ -51,6 +55,58 @@ function bounded(
   return Math.min(max, Math.max(min, parsed));
 }
 
+/**
+ * Each Bot's actions as the personal edition's Activity page shows them, so the report's figure for a
+ * Bot is the number of rows the person finds there for it. Seen on Windows: a report drew "Errand
+ * Helper 45" beside an Activity page listing 23 of its rows; the other 22 were choosing tools for a
+ * run, which the page leaves out.
+ *
+ * The same rows the page asks for (`@openbot/shared/activity-rows`): none of OpenBot's own working,
+ * each action once (the first row of an action that then failed, was stopped or was refused is not
+ * counted), and a Bot's rows as its Bot column reads them: the Bot it names, the Bot a row was about
+ * (an `agent` target), and the Bot an older folder row named as `botId`.
+ */
+async function personalBotActivity(database: Database, days: number) {
+  const window = sql`created_at > now() - make_interval(days => ${days})`;
+  const list = (types: readonly string[]) =>
+    sql.join(
+      types.map((type) => sql`${type}`),
+      sql`, `,
+    );
+  const rows = await database.execute<{ bot: string; actions: number }>(
+    sql`with ended as (
+          select payload->>'attempt' as attempt
+          from audit_events
+          where ${window}
+            and event_type in (${list(ACTION_ENDINGS)})
+            and jsonb_typeof(payload->'attempt') = 'string'
+        )
+        select bot, count(*)::int as actions
+        from (
+          select coalesce(
+                   case when jsonb_typeof(payload->'bot') = 'string' then payload->>'bot' end,
+                   case when target_type = 'host_access' and jsonb_typeof(payload->'botId') = 'string'
+                        then payload->>'botId' end,
+                   case when target_type = 'agent' then target_id end
+                 ) as bot
+          from audit_events
+          where ${window}
+            and event_type not in (${list(OPENBOT_WORKING_EVENT_TYPES)})
+            and not (
+              event_type = 'computer.action_allowed'
+              and exists (
+                select 1 from ended where ended.attempt = audit_events.payload->>'attempt'
+              )
+            )
+        ) shown
+        where bot is not null
+        group by 1
+        order by actions desc
+        limit 12`,
+  );
+  return [...rows];
+}
+
 export const DATA_FUNCTIONS: DataFunction[] = [
   {
     name: "botActivity",
@@ -59,6 +115,8 @@ export const DATA_FUNCTIONS: DataFunction[] = [
     reads: "the audit trail",
     async run(database, args) {
       const days = bounded(args.days, { fallback: 7, min: 1, max: 90 });
+      if (currentEdition() === "personal")
+        return { days, rows: await personalBotActivity(database, days) };
       // Counted in the database rather than fetched and counted here: the trail is the one table that
       // grows without limit, and a component asking for a chart must not pull a year of it across the
       // wire in order to add up seven days.
