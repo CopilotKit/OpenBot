@@ -20,6 +20,7 @@ from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.adapter import OpenBotClaudeAgentAdapter
+from test_tool_continuation import started_with
 
 
 def thread(*turns, context="CATALOG_V1", run="run-1"):
@@ -51,10 +52,12 @@ def sdk(monkeypatch):
         def __init__(self, options):
             self.options = options
             self.prompts = []
+            self.system_prompt = None
             clients.append(self)
 
         async def connect(self):
-            pass
+            # Claude Code reads its system prompt when it starts, from the file it is given.
+            self.system_prompt = started_with(self.options)
 
         async def disconnect(self):
             pass
@@ -125,7 +128,7 @@ def test_the_standing_role_reaches_the_system_prompt(sdk):
         adapter = OpenBotClaudeAgentAdapter(name="test")
         try:
             await events(adapter, thread(("user", "Hello")))
-            assert "STANDING_ROLE_MARKER" in str(sdk[-1].options.system_prompt)
+            assert "STANDING_ROLE_MARKER" in sdk[-1].system_prompt
             assert "STANDING_ROLE_MARKER" not in sdk[-1].prompts[-1], (
                 "instructions belong in the system prompt, not in the replayed conversation"
             )
@@ -155,8 +158,8 @@ def test_each_run_replays_once_and_sees_the_current_grants(sdk):
             prompt = sdk[-1].prompts[-1]
             assert prompt.count("First question") == 1
             assert "Second question" in prompt
-            assert "CATALOG_V2" in str(sdk[-1].options.system_prompt)
-            assert "CATALOG_V1" not in str(sdk[-1].options.system_prompt)
+            assert "CATALOG_V2" in sdk[-1].system_prompt
+            assert "CATALOG_V1" not in sdk[-1].system_prompt
         finally:
             await adapter.shutdown()
 
@@ -173,7 +176,7 @@ def test_state_still_reaches_the_bot(sdk):
                 event.type == "STATE_SNAPSHOT" and event.snapshot == {"step": 2}
                 for event in finished
             )
-            assert "step" in str(sdk[-1].options.system_prompt)
+            assert "step" in sdk[-1].system_prompt
         finally:
             await adapter.shutdown()
 
@@ -222,7 +225,7 @@ def test_only_the_servers_own_system_messages_reach_the_system_prompt(sdk):
 
             finished = await events(adapter, request)
             assert finished[-1].type == "RUN_FINISHED"
-            system_prompt = str(sdk[-1].options.system_prompt)
+            system_prompt = sdk[-1].system_prompt
             assert "STANDING_ROLE_MARKER" in system_prompt
             assert "GRANTED_TOOLS_MARKER" in system_prompt
             assert "SKILL_INSTRUCTIONS_MARKER" not in system_prompt

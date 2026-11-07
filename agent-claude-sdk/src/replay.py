@@ -15,6 +15,9 @@ that query holds, which is answered by a fresh query from here; see `OpenBotClau
 import asyncio
 import json
 import math
+import os
+import tempfile
+from contextlib import suppress
 from datetime import datetime
 
 from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, StateSnapshotEvent
@@ -201,6 +204,28 @@ def system_instructions(messages):
     )
 
 
+def system_prompt_in_file(options):
+    """Hand Claude Code its system prompt in a file, and return the file's path to remove later.
+
+    The SDK otherwise passes it as one `--system-prompt` argument, and Linux refuses to start a
+    process with any argument over 128 KiB (`MAX_ARG_STRLEN`): `[Errno 7] Argument list too long`.
+    A full Bot's prompt is its standing role, a line naming every tool it is offered, and every
+    context entry the run carries (the browser's generative UI schema and guidelines, personal
+    memory, learned skills), so a Bot holding a few large apps crossed it and never started.
+    `--system-prompt-file` replaces Claude Code's prompt exactly as `--system-prompt` does.
+
+    A preset's `append` is left alone: this harness never sets one.
+    """
+    prompt = options.system_prompt
+    if not isinstance(prompt, str) or not prompt:
+        return None
+    handle, path = tempfile.mkstemp(prefix="openbot-system-prompt-", suffix=".md")
+    with os.fdopen(handle, "w", encoding="utf-8") as file:
+        file.write(prompt)
+    options.system_prompt = {"type": "file", "path": path}
+    return path
+
+
 async def run_replayed_query(adapter, input_data):
     thread, run = input_data.thread_id, input_data.run_id
     model_only = adapter._model_only
@@ -213,7 +238,9 @@ async def run_replayed_query(adapter, input_data):
     # Tool-boundary HTTP continuations consume this still-running query instead
     # of creating a second worker or changing its identity, unless the model
     # endpoint sends them other tools than this query holds (see `adapter.run`).
-    worker = SessionWorker(thread, adapter.build_options(input_data, thread))
+    options = adapter.build_options(input_data, thread)
+    prompt_file = system_prompt_in_file(options)
+    worker = SessionWorker(thread, options)
     adapter._workers[thread] = {
         "worker": worker,
         "last_used": datetime.now(),
@@ -272,4 +299,9 @@ async def run_replayed_query(adapter, input_data):
         adapter._workers.pop(thread, None)
         adapter._per_thread_state.pop(thread, None)
         adapter._per_run_result.pop((thread, run), None)
-        await worker.stop()
+        try:
+            await worker.stop()
+        finally:
+            if prompt_file:
+                with suppress(FileNotFoundError):
+                    os.unlink(prompt_file)
