@@ -1,6 +1,11 @@
 ; OpenBot Desktop's NSIS installer hooks: bundle.windows.nsis.installerHooks in tauri.conf.json.
 ; https://v2.tauri.app/distribute/windows-installer/
 
+; The header image (bundle.windows.nsis.headerImage) goes on the right of each page's header, where NSIS puts its icon
+; when there is none. Modern UI puts it on the left by default, ahead of the page's title. Tauri includes this file
+; before it inserts the pages, which is when Modern UI reads the define.
+!define MUI_HEADERIMAGE_RIGHT
+
 ; Uninstalling takes away what the Recorder host install wrote for this person (src/recorder_install.rs): each
 ; browser's native messaging host key and the one manifest they all point at, which sits beside the app in
 ; %LOCALAPPDATA%\OpenBot. Not on an update, which runs the old uninstaller with /UPDATE; the new version writes them
