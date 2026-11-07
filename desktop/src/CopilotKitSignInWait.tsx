@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
-import { type CopilotKitSignInPage, copilotKitSignInPage } from "./localEvalCli";
+import {
+  type CopilotKitSignInPage,
+  copilotKitSignInPage,
+} from "./localEvalCli";
 import { StatusLine } from "./SetupProgress";
 
 /** How often the window asks for the page while the sign-in waits. */

@@ -415,7 +415,9 @@ test("a CopilotKit sign-in waiting on the browser shows its code and page, and C
     invokeCalls.filter((call) => call.command === "cancel_local_eval"),
   ).toContainEqual({
     command: "cancel_local_eval",
-    args: { attempt: (signIn?.args as { attempt?: string } | undefined)?.attempt },
+    args: {
+      attempt: (signIn?.args as { attempt?: string } | undefined)?.attempt,
+    },
   });
   expect(
     await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
