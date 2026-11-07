@@ -1,4 +1,5 @@
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
+import { Fragment, type ReactNode } from "react";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
 
@@ -37,6 +38,82 @@ const WHEN = new Intl.DateTimeFormat(undefined, {
 
 export function whenText(event: AuditEvent): string {
   return WHEN.format(new Date(event.createdAt));
+}
+
+const DAY = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+const TIME = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+/** The day over the time, so the column is as wide as a date rather than a date and a time. */
+export function WhenCell({ event }: { event: AuditEvent }) {
+  const at = new Date(event.createdAt);
+  return (
+    <>
+      <div>{DAY.format(at)}</div>
+      <div>{TIME.format(at)}</div>
+    </>
+  );
+}
+
+/**
+ * An identifier with a break allowed after each `.`, `/`, `_` and `-`, so `mcp.tools_discovered` or
+ * a file path wraps at its own seams when the column is narrow, and is never cut mid-word.
+ */
+function breakable(text: string): ReactNode {
+  let at = 0;
+  return text.split(/(?<=[./_-])/).map((part) => {
+    const start = at;
+    at += part.length;
+    return (
+      <Fragment key={start}>
+        {start > 0 ? <wbr /> : null}
+        {part}
+      </Fragment>
+    );
+  });
+}
+
+/**
+ * What was done, with what it was done to beneath it. One column rather than two, so the table
+ * fits the Desktop's default window: drawn side by side, What, On, Bot and Started by pushed
+ * Decision off the right edge of a 1000px window.
+ */
+export function WhatCell({ event }: { event: AuditEvent }) {
+  return (
+    <>
+      <div className="font-medium">{breakable(whatText(event))}</div>
+      <OnCell event={event} />
+    </>
+  );
+}
+
+/** The Bot, with what started it beneath it, for the same reason as {@link WhatCell}. */
+export function WhoCell({
+  event,
+  nameFor,
+}: {
+  event: AuditEvent;
+  nameFor: NameFor;
+}) {
+  return (
+    <>
+      <div>
+        <BotCell event={event} nameFor={nameFor} />
+      </div>
+      <div className="text-xs">
+        <StartedByCell event={event} nameFor={nameFor} />
+      </div>
+    </>
+  );
 }
 
 /**
@@ -324,24 +401,23 @@ export function OnCell({ event }: { event: AuditEvent }) {
     (NAMED_TARGETS.has(event.targetType) && !!event.targetId) ||
     typeof payload.file === "string" ||
     typeof payload.command === "string";
+  // Under the action in the What column, so a row with nothing to name draws nothing.
   return (
     <>
-      {!subject ? (
-        <span className="text-muted-foreground">-</span>
-      ) : mono ? (
-        <span className="font-mono text-xs">{subject}</span>
+      {!subject ? null : mono ? (
+        <div className="mt-0.5 font-mono text-xs">{breakable(subject)}</div>
       ) : typeof element === "object" && element?.name ? (
-        <span>
+        <div className="mt-0.5">
           {element.name}
           {element.role ? (
             <span className="text-muted-foreground"> ({element.role})</span>
           ) : null}
-        </span>
+        </div>
       ) : (
-        <span className="text-muted-foreground">{subject}</span>
+        <div className="mt-0.5 text-muted-foreground">{breakable(subject)}</div>
       )}
       {host ? (
-        <div className="text-muted-foreground text-xs">{host}</div>
+        <div className="text-muted-foreground text-xs">{breakable(host)}</div>
       ) : null}
     </>
   );
@@ -387,9 +463,16 @@ export function StartedByCell({
       }
       title={unattended ? (event.initiatorId ?? undefined) : undefined}
     >
-      {startedByText(event, nameFor)}
+      {startedByLine(startedByText(event, nameFor))}
     </span>
   );
+}
+
+/** Under the Bot's name, so it says what it is: "Started by a routine", "Handed on by Scout". */
+export function startedByLine(text: string): string {
+  return text.startsWith("Handed on")
+    ? text
+    : `Started by ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 }
 
 export function DecisionCell({ event }: { event: AuditEvent }) {
@@ -409,13 +492,13 @@ export function DecisionCell({ event }: { event: AuditEvent }) {
       </span>
       {decisionDetails(event).map((line) => (
         /*
-         * A width rather than a max-width, because the table lays itself out from its content and a
-         * max-width on a block inside a cell does not constrain that. A router's reason is a
-         * sentence a model wrote, and left unbounded in the last column it pushes the table wider
-         * than the pane.
+         * A cap on the line, not a width. A fixed 22rem held the Decision column at least that wide,
+         * and with the columns beside it pushed the table past a 1000px window. The table gives the
+         * column what is left, the sentence wraps inside it, and a long unbroken word (a URL a
+         * router quoted) breaks rather than widening the table.
          */
         <div
-          className="mt-0.5 w-[22rem] max-w-full break-words text-muted-foreground text-xs"
+          className="mt-0.5 max-w-[22rem] text-muted-foreground text-xs [overflow-wrap:anywhere]"
           key={line}
         >
           {line}

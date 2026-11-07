@@ -40,17 +40,16 @@ import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { cn } from "@/lib/utils";
 import {
   type AuditEvent,
-  BotCell,
   botText,
   DecisionCell,
-  OnCell,
   OUTCOME_MARK,
   OUTCOME_ROW,
-  StartedByCell,
   searchTextOf,
   startedByText,
+  WhatCell,
+  WhenCell,
+  WhoCell,
   whatText,
-  whenText,
 } from "./audit-cells";
 
 /**
@@ -70,6 +69,12 @@ type NameFor = (botId: string) => string;
 
 /** Only the hidden `search` column takes part in search; it holds every visible word of the row. */
 const SEARCHABLE = new Set(["search"]);
+
+/**
+ * Columns that exist to be searched or filtered by and are not drawn as columns of their own. Who
+ * started a row is drawn under its Bot (`WhoCell`), and still has a column for the Started by filter.
+ */
+const UNDRAWN = new Set(["search", "startedBy"]);
 
 const INITIAL_SORT: SortingState = [{ id: "when", desc: true }];
 
@@ -156,7 +161,7 @@ export function AuditTable({
           {table.getHeaderGroups().map((group) => (
             <TableRow className="hover:bg-transparent" key={group.id}>
               {group.headers
-                .filter((header) => header.column.id !== "search")
+                .filter((header) => !UNDRAWN.has(header.column.id))
                 .map((header) => (
                   <TableHead
                     className={cn(
@@ -183,15 +188,13 @@ export function AuditTable({
               >
                 {row
                   .getAllCells()
-                  .filter((cell) => cell.column.id !== "search")
+                  .filter((cell) => !UNDRAWN.has(cell.column.id))
                   .map((cell) => (
                     <TableCell
                       className={cn(
                         cell.column.id === "mark" && "w-8 pr-0 pl-4",
                         cell.column.id === "when" &&
                           "whitespace-nowrap font-mono text-muted-foreground text-xs tabular-nums",
-                        cell.column.id === "what" && "font-medium",
-                        cell.column.id === "bot" && "whitespace-nowrap",
                       )}
                       data-column={cell.column.id}
                       key={cell.id}
@@ -349,20 +352,14 @@ function auditColumns(
           </button>
         );
       },
-      cell: ({ row }) => whenText(row.original),
+      cell: ({ row }) => <WhenCell event={row.original} />,
       sortFn: (a, b, id) => a.getValue<number>(id) - b.getValue<number>(id),
     },
     {
       id: "what",
       accessorFn: (event) => whatText(event),
       header: "What",
-      cell: ({ row }) => whatText(row.original),
-      enableSorting: false,
-    },
-    {
-      id: "on",
-      header: "On",
-      cell: ({ row }) => <OnCell event={row.original} />,
+      cell: ({ row }) => <WhatCell event={row.original} />,
       enableSorting: false,
     },
     {
@@ -370,17 +367,15 @@ function auditColumns(
       accessorFn: (event) => botText(event, nameFor) || "None",
       filterFn: anyOf,
       header: "Bot",
-      cell: ({ row }) => <BotCell event={row.original} nameFor={nameFor} />,
+      cell: ({ row }) => <WhoCell event={row.original} nameFor={nameFor} />,
       enableSorting: false,
     },
     {
       id: "startedBy",
       accessorFn: (event) => startedByText(event, nameFor),
       filterFn: anyOf,
-      header: "Started by",
-      cell: ({ row }) => (
-        <StartedByCell event={row.original} nameFor={nameFor} />
-      ),
+      header: () => null,
+      cell: () => null,
       enableSorting: false,
     },
     {
