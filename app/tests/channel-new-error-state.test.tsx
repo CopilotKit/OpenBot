@@ -165,10 +165,13 @@ function renderChannelNew(
     routeTree,
     history: createMemoryHistory({ initialEntries: [initialEntry] }),
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
+  return Object.assign(
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    ),
+    { router },
   );
 }
 
@@ -353,4 +356,95 @@ test("creating a Bot preserves existing recipients and selects the created Bot",
       view.getByRole("button", { name: "Remove Created Bot" }),
     ).toBeTruthy();
   });
+});
+
+/** What the sidebar's + does: a plain link to `/channel/new`, no recipient, no state. */
+async function pressPlus(view: ReturnType<typeof renderChannelNew>) {
+  await view.router.navigate({ to: "/channel/new" });
+}
+
+async function typeDraft(
+  text: string,
+  view: ReturnType<typeof renderChannelNew>,
+) {
+  const editor = await view.findByRole("textbox", {
+    hidden: true,
+    name: "Message",
+  });
+  const user = userEvent.setup({ document });
+  await user.click(editor);
+  await user.keyboard(text);
+  await waitFor(() => expect(editor.textContent).toBe(text));
+}
+
+test("+ while composing a new conversation with a Bot picked starts a fresh one", async () => {
+  const view = renderChannelNew(queryClientWithAgents([GENERAL_ASSISTANT]));
+  // Picked in To:, as a person does, not handed over in the URL.
+  await userEvent
+    .setup({ document })
+    .type(await view.findByRole("combobox"), "General");
+  fireEvent.click(
+    await view.findByRole("option", { name: /General Assistant/ }),
+  );
+  expect(
+    await view.findByRole("button", { name: "Remove General Assistant" }),
+  ).toBeTruthy();
+  expect(view.router.state.location.search).toEqual({
+    agent: "general-assistant",
+  });
+  await typeDraft("half a thought", view);
+
+  await pressPlus(view);
+
+  // The URL names no Bot, so neither does the screen, and the half-written message is gone.
+  expect(view.router.state.location.href).toBe("/channel/new");
+  await waitFor(() =>
+    expect(
+      view.queryByRole("button", {
+        hidden: true,
+        name: "Remove General Assistant",
+      }),
+    ).toBeNull(),
+  );
+  expect(
+    (view.getByRole("combobox", { hidden: true }) as HTMLInputElement)
+      .placeholder,
+  ).toBe("Choose a Bot…");
+  const editor = await view.findByRole("textbox", {
+    hidden: true,
+    name: "Message",
+  });
+  expect(editor.textContent).toBe("");
+  await expectMessageComposerDisabled(view, true);
+});
+
+test("picking and removing Bots keeps the conversation being written", async () => {
+  const second = agent({ id: "second-bot", name: "Second Bot" });
+  const view = renderChannelNew(
+    queryClientWithAgents([GENERAL_ASSISTANT, second]),
+    "/channel/new?agent=general-assistant",
+  );
+  await typeDraft("for both of you", view);
+  const input = await view.findByRole("combobox", { hidden: true });
+  await userEvent.setup({ document }).type(input, "Second");
+  fireEvent.click(await view.findByRole("option", { name: /Second Bot/ }));
+  await view.findByRole("button", { hidden: true, name: "Remove Second Bot" });
+  fireEvent.click(
+    view.getByRole("button", {
+      hidden: true,
+      name: "Remove General Assistant",
+    }),
+  );
+
+  // The page's own navigation moved the first Bot in the URL; nothing was thrown away.
+  await waitFor(() =>
+    expect(view.router.state.location.search).toEqual({ agent: "second-bot" }),
+  );
+  expect(
+    view.getByRole("button", { hidden: true, name: "Remove Second Bot" }),
+  ).toBeTruthy();
+  expect(
+    (await view.findByRole("textbox", { hidden: true, name: "Message" }))
+      .textContent,
+  ).toBe("for both of you");
 });

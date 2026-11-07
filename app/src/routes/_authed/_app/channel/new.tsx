@@ -1,6 +1,6 @@
 import type { Message } from "@ag-ui/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { useState } from "react";
 import { NewBotSheet } from "@/components/agents/new-bot-sheet";
 import AgentOrb from "@/components/agents/orb/agent-orb";
@@ -60,7 +60,46 @@ export const Route = createFileRoute("/_authed/_app/channel/new")({
   component: RouteComponent,
 });
 
+/**
+ * Which new conversation this is. Every arrival here that this page did not make itself is a fresh
+ * one: the + button, a Bot's profile link, Back to an earlier draft. The page's own navigations (a
+ * Bot picked or removed, a Bot made from the picker) carry the id forward in history state, so they
+ * keep the draft they belong to.
+ *
+ * WHY NOT JUST THE URL: the picked Bots and the typed message live in this page, not the URL, and a
+ * second visit to the same route does not remount it. Pressing + while a Bot was already picked
+ * dropped `?agent=` from the URL but left the Bot in To: and the message in the box, so the screen
+ * and the URL disagreed and a reload changed who the message would go to.
+ */
+function compositionOf(state: {
+  newConversation?: string;
+  __TSR_key?: string;
+}): string | undefined {
+  return state.newConversation ?? state.__TSR_key;
+}
+
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    /** Set by `/channel/new` on its own navigations: which new conversation they belong to. */
+    newConversation?: string;
+  }
+}
+
+/** History state marking a navigation as this page's own. */
+function ownedBy(composition: string) {
+  return { newConversation: composition };
+}
+
 function RouteComponent() {
+  const composition = useLocation({
+    select: (location) => compositionOf(location.state),
+  });
+  return (
+    <NewConversation composition={composition ?? ""} key={composition ?? ""} />
+  );
+}
+
+function NewConversation({ composition }: { composition: string }) {
   const { agent } = Route.useSearch();
   const queryClient = useQueryClient();
   const [creatingBot, setCreatingBot] = useState(false);
@@ -167,6 +206,7 @@ function RouteComponent() {
             void navigate({
               replace: true,
               search: kept[0] ? { agent: kept[0].id } : {},
+              state: ownedBy(composition),
             });
           }}
           value={selected}
@@ -247,7 +287,11 @@ function RouteComponent() {
                   : [...existing, profile];
               });
               if (selected.length === 0)
-                void navigate({ replace: true, search: { agent: agentId } });
+                void navigate({
+                  replace: true,
+                  search: { agent: agentId },
+                  state: ownedBy(composition),
+                });
             })
             .catch(() => {
               setError(
