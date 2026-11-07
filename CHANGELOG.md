@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's question that you answer in your own words, such as which city you're in, reaches you
+  with a field to type the answer. On the "Find weekend plans" starter it showed "Blocked: Asked
+  you", and you were never asked.
 - OpenBot Desktop's Updates section on a build that doesn't update itself, such as an internal
   build, says so up front. It promised signed updates and then said the opposite after Check for
   updates.

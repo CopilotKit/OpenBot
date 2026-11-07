@@ -111,26 +111,31 @@ describe("asking a person", () => {
     expect(asked[0]).toMatchObject({ question: "Two launch decisions", parts });
   });
 
-  test("a part offering a single option is refused rather than sent", async () => {
-    let reached = false;
+  /*
+   * One option is a suggestion, not a malformed question. It was refused, which left the person
+   * unasked over a hint; the card offers it as a choice above the field for their own words.
+   */
+  test("a part offering a single option is sent, with the option as a suggestion", async () => {
+    const asked: unknown[] = [];
     const tool = escalationTool({
       from: FROM,
-      route: async () => {
-        reached = true;
+      route: async (input) => {
+        asked.push(input);
         return { reached: "the person in this conversation" };
       },
     });
+    const parts = [
+      { header: "Tier name", question: "Which name?", options: ["Pro"] },
+      { header: "Soar", question: "Is Soar in?" },
+    ];
 
     const said = await tool.execute({
       question: "Two launch decisions",
-      parts: [
-        { header: "Tier name", question: "Which name?", options: ["Pro"] },
-        { header: "Soar", question: "Is Soar in?" },
-      ],
+      parts,
     });
 
-    expect(reached).toBe(false);
-    expect(said).toContain("That was not put to anybody");
+    expect(String(said)).toStartWith(PUT_TO);
+    expect(asked[0]).toMatchObject({ question: "Two launch decisions", parts });
   });
 
   test("a question that reached nobody is recorded as one", async () => {
