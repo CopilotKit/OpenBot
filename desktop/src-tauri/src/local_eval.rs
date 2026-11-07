@@ -12,7 +12,8 @@
 //! - **Arguments are fixed.** Only `status`, `start`, `stop` and `login`, a validated stack id and
 //!   `--json`, plus the constant `list`, `setup`, `connect` and `login --help` lists and the sign-in's
 //!   `--mode openbot`, and `integrations composio provision` with a validated installation id and
-//!   a file OpenBot made, as separate arguments with no shell. The CLI's `resumeCommand` strings
+//!   a file OpenBot made, and `telemetry link` with validated installation and account IDs,
+//!   as separate arguments with no shell. The CLI's `resumeCommand` strings
 //!   are text for a terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
 //!   cross IPC or reach a log. Failures are static categories with no payload. The account
@@ -2279,6 +2280,67 @@ pub fn account_sign_in_installed(attempt: &str) -> Result<AccountSignIn, Failure
     })
 }
 
+/// Closed output of the CLI's authenticated desktop identity handshake.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TelemetryIdentity {
+    Account { account_id: String },
+    Linked { account_id: String },
+    Skipped,
+}
+
+/// Link only after the desktop has durably saved the account returned by the first call.
+/// Credentials and the account's email stay in the CLI. Old CLIs fail without blocking setup.
+pub fn link_telemetry_installed(
+    installation: &Installation,
+    account: Option<&str>,
+) -> Result<TelemetryIdentity, Failure> {
+    if account.is_some_and(|value| !crate::telemetry::is_account_id(value)) {
+        return Err(Failure::ContractMismatch);
+    }
+    let cancel = Cancel::default();
+    let limits = Limits {
+        timeout: Duration::from_secs(10),
+        ..Limits::for_action(Action::Status)
+    };
+    one_at_a_time(&cancel, limits, |limits| {
+        let cli = installed()?;
+        let mut arguments = vec![
+            "telemetry",
+            "link",
+            "--installation-id",
+            installation.as_str(),
+            "--json",
+        ];
+        if let Some(account) = account {
+            arguments.extend(["--account-id", account]);
+        }
+        let (code, bytes) = execute(&cli, &arguments, None, limits, &cancel)?;
+        normalize_telemetry_identity(code, &bytes)
+    })
+}
+
+/// Refuse unexpected or private fields before returning anything to the shell.
+pub fn normalize_telemetry_identity(code: i32, bytes: &[u8]) -> Result<TelemetryIdentity, Failure> {
+    if code != 0 {
+        return Err(Failure::UnexpectedExit);
+    }
+    if bytes.len() > MAX_OUTPUT {
+        return Err(Failure::OutputLimit);
+    }
+    let result: TelemetryIdentity =
+        serde_json::from_slice(bytes).map_err(|_| Failure::InvalidJson)?;
+    match &result {
+        TelemetryIdentity::Account { account_id } | TelemetryIdentity::Linked { account_id }
+            if !crate::telemetry::is_account_id(account_id) =>
+        {
+            return Err(Failure::ContractMismatch)
+        }
+        _ => {}
+    }
+    Ok(result)
+}
+
 /// The approval page each waiting account sign-in has shown, by attempt id.
 static SIGN_IN_PAGES: std::sync::Mutex<Vec<(String, SignInPage)>> =
     std::sync::Mutex::new(Vec::new());
@@ -2464,6 +2526,29 @@ mod tests {
     /// The 0.16.0-rc.9 CLI (copilotkit 4.34.0-pre.48a3863), as its bundle names the release its
     /// `local setup` and `local update` install.
     const PINNED_CLI: &str = r#"async function resolveDefaultLocalRelease(directory2, dependencies = {}) {   const pinnedVersion = false ? "" : "0.16.0-rc.9";   const support = supportSchema.parse("#;
+
+    #[test]
+    fn telemetry_link_accepts_only_the_closed_account_handshake() {
+        let account = "a".repeat(64);
+        for kind in ["account", "linked"] {
+            let response = serde_json::json!({ "type": kind, "account_id": account });
+            assert!(normalize_telemetry_identity(0, response.to_string().as_bytes()).is_ok());
+            assert!(normalize_telemetry_identity(1, response.to_string().as_bytes()).is_err());
+            let mut extra = response.clone();
+            extra["email"] = serde_json::json!("private@example.com");
+            assert!(normalize_telemetry_identity(0, extra.to_string().as_bytes()).is_err());
+        }
+        assert_eq!(
+            normalize_telemetry_identity(0, br#"{"type":"skipped"}"#),
+            Ok(TelemetryIdentity::Skipped)
+        );
+        assert!(normalize_telemetry_identity(
+            0,
+            br#"{"type":"account","account_id":"private@example.com"}"#
+        )
+        .is_err());
+        assert!(normalize_telemetry_identity(0, b"not json").is_err());
+    }
 
     #[test]
     fn the_release_a_cli_installs_is_read_out_of_the_cli_itself() {
