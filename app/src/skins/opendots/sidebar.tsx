@@ -23,6 +23,7 @@ import {
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
+import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -578,8 +579,11 @@ function UserRow() {
       >
         {initials}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[12px] text-(--opendots-muted)">
-        {name}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-[12px] text-(--opendots-muted)">
+          {name}
+        </span>
+        <OpenBotVersion className="text-[10px] leading-3 text-(--opendots-icon)" />
       </span>
       {signOutOffered ? (
         <IconAction

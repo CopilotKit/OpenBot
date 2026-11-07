@@ -17,9 +17,12 @@ const MEMBER = {
  * The rules worth pinning are the shapes — what the app gates on has to keep meaning what it meant,
  * and a body the route does not understand has to be refused rather than written.
  */
-function appWith(store?: OnboardingStore) {
+function appWith(
+  store?: OnboardingStore,
+  environment: Record<string, string> = {},
+) {
   return createApp(
-    loadConfig(testEnvironment()),
+    loadConfig(testEnvironment(environment)),
     {
       handler: () => new Response(null, { status: 204 }),
       api: { getSession: async () => ({ user: MEMBER }) },
@@ -72,6 +75,36 @@ describe("onboarding routes", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { user: { onboarding: null } };
     expect(body.user.onboarding).toBeNull();
+  });
+
+  test("/api/me carries the OpenBot release the server runs, beside the person", async () => {
+    const app = appWith(undefined, { OPENBOT_BUILD_VERSION: "v0.3.1" });
+
+    const response = await app.request("http://openbot.local/api/me");
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      user: Record<string, unknown>;
+      version: unknown;
+    };
+    expect(body.version).toBe("v0.3.1");
+    expect(body.user).not.toHaveProperty("version");
+  });
+
+  test("/api/me answers a null version when the build has none", async () => {
+    const builds: Record<string, string>[] = [
+      {},
+      { OPENBOT_BUILD_VERSION: "  " },
+    ];
+    for (const environment of builds) {
+      const response = await appWith(undefined, environment).request(
+        "http://openbot.local/api/me",
+      );
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as { version: unknown }).version).toBe(
+        null,
+      );
+    }
   });
 
   test("a step moves the person and answers with where they are now", async () => {

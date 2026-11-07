@@ -78,6 +78,8 @@ afterAll(async () => {
 function renderSidebar(
   role: "admin" | "user",
   edition: "team" | "personal" = "team",
+  /** Serve `/api/me` with this body instead of seeding the person, so the real read runs. */
+  me?: Record<string, unknown>,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -89,13 +91,24 @@ function renderSidebar(
     localEvaluation: edition === "personal",
     edition,
   });
-  queryClient.setQueryData(authKeys.currentUser(), {
+  const person = {
     id: "maya",
     name: "Maya Chen",
     email: "maya@example.com",
     role,
     onboarding: null,
-  });
+  };
+  if (me) {
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL) =>
+        new URL(String(input), "http://localhost/").pathname === "/api/me"
+          ? Response.json({ user: person, ...me })
+          : Response.json({ error: "not served" }, { status: 404 }),
+      { preconnect: originalFetch.preconnect },
+    );
+  } else {
+    queryClient.setQueryData(authKeys.currentUser(), person);
+  }
   queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
@@ -200,6 +213,27 @@ test.each(["user", "admin"] as const)(
     expect(links(menu)).toEqual(expected(role, "account"));
   },
 );
+
+test("the running OpenBot version sits under the person's name, from /api/me", async () => {
+  const { view } = renderSidebar("user", "team", { version: "v0.3.1" });
+  const version = await view.findByText("v0.3.1");
+  const account = view.getByRole("button", { name: /Maya Chen/ });
+  expect(account.contains(version)).toBe(true);
+  // Directly under the name, in the same column.
+  const name = within(account).getByText("Maya Chen");
+  expect(version.parentElement).toBe(name.parentElement);
+  expect(name.nextElementSibling).toBe(version);
+});
+
+test.each([
+  ["null", { version: null }],
+  ["absent", {}],
+])("no version line when the server has none (%s)", async (_label, me) => {
+  const { view } = renderSidebar("user", "team", me);
+  const account = await view.findByRole("button", { name: /Maya Chen/ });
+  expect(account.querySelector('[data-slot="openbot-version"]')).toBeNull();
+  expect(account.textContent).not.toMatch(/v\d/);
+});
 
 test("Admin is in the list for admins only", () => {
   const ids = (role: string | undefined) =>

@@ -19,6 +19,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
+import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import {
@@ -97,6 +98,8 @@ function RailUserMenu() {
           <DropdownMenuLabel className="max-w-56 truncate">
             {user.data.name?.trim() || user.data.email}
           </DropdownMenuLabel>
+          {/* The rail draws only the avatar, so the version sits under the name here. */}
+          <OpenBotVersion className="-mt-1 max-w-56 px-1.5 pb-1 text-[10px] leading-3 text-muted-foreground" />
         </DropdownMenuGroup>
         {signOutOffered ? (
           <>

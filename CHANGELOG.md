@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The sidebar shows which OpenBot release is running, in small grey type under your name at the
+  bottom left (in OpenDots, under your name in the account menu and the phone drawer). It is the
+  server's own version, so it names what is deployed, and nothing shows when the server has none,
+  as in development.
 - OpenBot Desktop keeps a log file on every platform, with each Start, Stop, update, container
   command, update check and error, timestamped. Open it from Open log folder in Settings > This
   computer or the Status window. It stays on your computer, rotates at 5 MB with four older files
