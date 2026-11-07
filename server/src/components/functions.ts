@@ -1,6 +1,7 @@
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { sql } from "drizzle-orm";
 import type { Database } from "../db/client";
+import { currentEdition } from "../edition";
 
 /**
  * The data a component may fetch for itself, instead of being handed figures by a model.
@@ -110,6 +111,23 @@ export const DATA_FUNCTIONS: DataFunction[] = [
     },
   },
 ];
+
+/**
+ * What a component is told, and the person reads on its card, when it may not read a function.
+ *
+ * In the team edition an admin gives a component its data, so the refusal says so. The personal
+ * edition has no admin: the person owns everything these read, and OpenBot gives its own components
+ * what they read when they arrive (`PERSONAL_GRANTED_BY` in `routes.ts`). There a refusal is
+ * OpenBot's fault, and it never sends the person to an admin they don't have.
+ */
+export function functionRefusal(
+  component: string,
+  functionName: string,
+): string {
+  return currentEdition() === "personal"
+    ? "It can't read the data it needs."
+    : `${component} can't use the function ${functionName}. An admin has to give it to this component.`;
+}
 
 export function dataFunction(name: string): DataFunction | undefined {
   return DATA_FUNCTIONS.find((entry) => entry.name === name);

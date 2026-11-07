@@ -1,6 +1,8 @@
+import { auditEventWords } from "@openbot/shared/audit-words";
 import { useContext, useEffect, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
+import { useBotNames } from "@/lib/agents/bot-names";
 import { callComponentFunction } from "@/lib/components/queries";
 import { useActiveBotId } from "@/lib/copilot/active-bot";
 import { useConversation } from "@/lib/copilot/conversation";
@@ -9,7 +11,7 @@ import { keyedLookup } from "@/lib/lookup";
 import { FailedCard, UNREADABLE } from "./failed";
 import { GalleryFrame } from "./frame";
 import { seriesColour } from "./palette";
-import { GalleryStreamingContext } from "./streaming";
+import { GalleryDecidedContext, GalleryStreamingContext } from "./streaming";
 
 /**
  * Server-filled report component. The model chooses report arguments; data and permissions come
@@ -74,12 +76,16 @@ export function ActivityReportCard({
   const conversation = useConversation();
   const [state, setState] = useState<State>({ status: "reading" });
   const streaming = useContext(GalleryStreamingContext);
+  const decided = useContext(GalleryDecidedContext);
 
   const functionName = report ? keyedLookup(FUNCTION_FOR, report) : undefined;
 
   useEffect(() => {
-    // Nothing to read until the arguments have finished streaming in.
-    if (!functionName) return;
+    /*
+     * Nothing to read until the arguments are final and the call is allowed. A refused call is drawn
+     * as its refusal and never reads, so one try is one row on the trail.
+     */
+    if (!functionName || streaming || !decided) return;
     let current = true;
 
     void callComponentFunction(
@@ -103,7 +109,7 @@ export function ActivityReportCard({
     return () => {
       current = false;
     };
-  }, [functionName, days, botId]);
+  }, [functionName, days, botId, streaming, decided]);
 
   /*
    * No report it can read. While the call streams, the name is still arriving. Once its arguments
@@ -159,6 +165,8 @@ function ActivityChart({
   title?: string;
   ask?: (text: string) => void;
 }) {
+  // Bots by the names people know them by: the trail counts them by id.
+  const nameFor = useBotNames();
   const rows = data?.rows ?? [];
   if (rows.length === 0) {
     return (
@@ -180,7 +188,7 @@ function ActivityChart({
           <Button
             onClick={() =>
               ask(
-                `What has ${busiest.bot} actually been doing? Look at the audit trail and summarise it.`,
+                `What has ${nameFor(busiest.bot) || busiest.bot} actually been doing? Look at the audit trail and summarise it.`,
               )
             }
             size="sm"
@@ -197,7 +205,7 @@ function ActivityChart({
         {rows.map((row, index) => (
           <li className="flex items-center gap-3" key={row.bot}>
             <span className="w-40 shrink-0 truncate text-xs text-muted-foreground">
-              {row.bot}
+              {nameFor(row.bot)}
             </span>
             <span className="h-4 flex-1 overflow-hidden rounded bg-foreground/5">
               <span
@@ -228,6 +236,7 @@ function RefusalList({
   title?: string;
   ask?: (text: string) => void;
 }) {
+  const nameFor = useBotNames();
   const rows = data?.rows ?? [];
   if (rows.length === 0) {
     return (
@@ -263,9 +272,12 @@ function RefusalList({
         {rows.map((row) => (
           <li className="text-sm" key={`${row.at}-${row.what}`}>
             <div className="flex items-baseline gap-2">
-              <span className="font-medium">{row.what}</span>
+              {/* In words, as Activity says it: the trail stores `computer.action_refused`. */}
+              <span className="font-medium">{auditEventWords(row.what)}</span>
               {row.bot ? (
-                <span className="text-xs text-muted-foreground">{row.bot}</span>
+                <span className="text-xs text-muted-foreground">
+                  {nameFor(row.bot)}
+                </span>
               ) : null}
               <span className="ml-auto text-xs text-muted-foreground">
                 {new Date(row.at).toLocaleString()}

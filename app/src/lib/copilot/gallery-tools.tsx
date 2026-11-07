@@ -19,7 +19,9 @@ import {
 import { RefusedCard } from "@/components/gallery/refused";
 import {
   ArgumentsArrivingContext,
+  GalleryDecidedContext,
   GalleryStreamingContext,
+  TurnInFlightContext,
 } from "@/components/gallery/streaming";
 import {
   agentComponentsQueryOptions,
@@ -197,6 +199,7 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
       store.get,
     );
     const arriving = useContext(ArgumentsArrivingContext);
+    const turnRunning = useContext(TurnInFlightContext);
     const refusal = props.toolCallId
       ? snapshot.refusals.get(props.toolCallId)
       : undefined;
@@ -243,9 +246,13 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
      * arguments are streaming (`inProgress`, not `executing`) in a row that can still receive them.
      */
     const complete = !(arriving && props.status === "inProgress");
+    // Still being decided: the call has no answer yet in a turn that is still running.
+    const decided = !(turnRunning && props.status !== "complete");
     return (
       <GalleryStreamingContext.Provider value={!complete}>
-        <Component {...settledArgs(props.args ?? {}, complete)} />
+        <GalleryDecidedContext.Provider value={decided}>
+          <Component {...settledArgs(props.args ?? {}, complete)} />
+        </GalleryDecidedContext.Provider>
       </GalleryStreamingContext.Provider>
     );
   };
