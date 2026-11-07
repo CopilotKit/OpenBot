@@ -121,7 +121,7 @@ A release is signed as the same product its ad-hoc installer was.
 - a stable release is not pinned, and carries the updater;
 - either bundles the Intelligence CLI whenever the tree has `tauri.bundled-cli.conf.json`.
 
-Only the signing job produces updater artifacts. `bundle.createUpdaterArtifacts` lives in
+Only the signing job produces Mac updater artifacts. `bundle.createUpdaterArtifacts` lives in
 `desktop/src-tauri/tauri.macos-signing.conf.json`, which that job alone passes to Tauri, because
 Tauri refuses to finish any bundle that asks for updater artifacts without
 `TAURI_SIGNING_PRIVATE_KEY`. In the base config it would break ordinary desktop CI and the local
@@ -129,9 +129,11 @@ build above. Do not rename the overlay `tauri.macos.conf.json`: Tauri merges tha
 every Mac build automatically.
 
 The overlay also holds the updater itself, `plugins.updater` with its endpoints and public key.
-The app registers the updater plugin only when its config has that block, so desktop CI, local
-builds and the unsigned release installers have no updater. They never offer an update and never
-show an update error, because they could not verify one.
+The Windows signing overlay, `tauri.windows-signing.conf.json`, holds the same block, with the same
+key and endpoints (see [Windows updates](#windows-updates)). The app registers the updater plugin
+only when its config has that block, so desktop CI, local builds and the unsigned release installers
+have no updater. They never offer an update and never show an update error, because they could not
+verify one.
 
 ### The updater
 
@@ -139,8 +141,8 @@ A signed app reads `https://downloads.copilotkit.ai/latest/latest.json` at launc
 hours while it runs. When that address does not answer, it reads
 `https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json`, the file
 [Downloads sync](#downloadscopilotkitai) copies there. Both addresses are `plugins.updater.endpoints`
-in `tauri.macos-signing.conf.json`, in that order, and the install reads them the same way, so what
-the app offers and what it installs come from one file. GitHub redirects its address to the
+in `tauri.macos-signing.conf.json` and `tauri.windows-signing.conf.json`, in that order, and the
+install reads them the same way, so what the app offers and what it installs come from one file. GitHub redirects its address to the
 `latest.json` attached to the release marked Latest, so the newest non-draft, non-prerelease release
 is always the one offered.
 
@@ -150,6 +152,9 @@ Nothing installs without that click. Closing either hides both until a newer ver
 through reloads and restarts. The click downloads the archive and verifies its signature while
 OpenBot keeps running, installs it, stops OpenBot (the local Intelligence keeps running), and
 restarts the app; that Start [moves the installation to the app's release](desktop-updates.md#the-deployment-follows-the-app).
+On Windows the order differs, because Windows will not replace a running app: once the installer
+is downloaded and verified, OpenBot is stopped, the installer runs in update mode with a small
+progress window and no questions, and it starts the new version when it is done.
 The shell does all of it (`desktop/src-tauri/src/app_update.rs`); neither page reaches the feed or
 holds the updater's permissions. A self-hosted OpenBot in a browser has no shell, and never reads
 the feed.
@@ -165,8 +170,8 @@ OpenBot in `~/OpenBot`. Release builds never read the variable.
 
 After it attaches `latest.json`, and marks the release Latest when it should (see below), the
 signing workflow fetches the GitHub address the way the app does, following redirects, and fails
-unless the answer is JSON whose `version` is the release version and which has a `darwin-*` platform
-with a URL and signature. Downloads sync, which that same step starts, then puts a copy of that file,
+unless the answer is JSON whose `version` is the release version and which lists `darwin-aarch64`,
+`darwin-x86_64` and `windows-x86_64`, each with a URL and signature. Downloads sync, which that same step starts, then puts a copy of that file,
 checked against GitHub's digest, at the downloads address within minutes. A release that is not
 Latest is not checked, because the apps never read its feed: a candidate, a patch to an older line,
 or a release signed again by hand.
@@ -175,8 +180,9 @@ or a release signed again by hand.
 
 `releases/latest`, the download links under it and the update feed all follow the release marked
 Latest. A stable release is published **not** Latest, and becomes Latest only once both signing
-runs have attached their signed installers: Desktop macOS signing its `.dmg` files and `latest.json`,
-and Desktop Windows signing its `-setup.exe`, each under its fixed download name too. Whichever
+runs have attached their signed installers and listed them in `latest.json`: Desktop macOS signing
+its `.dmg` files and both Mac archives, and Desktop Windows signing its `-setup.exe`, each under its
+fixed download name too. Whichever
 finishes second marks it ([`scripts/release-make-latest.sh`](../scripts/release-make-latest.sh)).
 The two attach jobs share the concurrency group `release-attach-<tag>`, so they run one after the
 other and the second always sees what the first attached.
@@ -192,8 +198,8 @@ script again just before it does, so a newer release published meanwhile keeps L
 the publish workflow does not touch Latest.
 
 On a stable release only the signing runs attach the fixed download names, so a fixed name on it
-means its installer is signed. The release becomes Latest once `latest.json` and every fixed name
-are on it.
+means its installer is signed. The release becomes Latest once every fixed name is on it and its
+`latest.json` lists every platform, so no app is left out of a Latest release's feed.
 
 Making a release Latest also starts **Downloads sync**, so
 [downloads.copilotkit.ai](#downloadscopilotkitai) serves the same signed installers. Both attach jobs
@@ -203,11 +209,33 @@ If either signing run is never approved, or fails, the release stays not Latest.
 its tag with `make-latest` set, or mark it Latest by hand on its release page.
 
 `latest.json` names a version and, for `darwin-aarch64` and `darwin-x86_64`, an archive URL and
-that archive's minisign signature. The app verifies the signature against the public key in
-`plugins.updater.pubkey` in `tauri.macos-signing.conf.json` and refuses any archive that does not
+that archive's minisign signature, and for `windows-x86_64` the signed installer's URL and its
+signature. Both signing runs write into the one file
+([`scripts/release-update-feed.sh`](../scripts/release-update-feed.sh)): each keeps the platforms the
+other already listed for the same version, and their attach jobs never run at once. The app verifies
+the signature against the public key in `plugins.updater.pubkey` and refuses any file that does not
 match. That key pair is the Tauri updater key. It is not the Developer ID certificate, and it is
 not the Windows Key Vault certificate. Losing the private key means installed apps can never update
 again, so keep it in 1Password as well as in the environment.
+
+### Windows updates
+
+On Windows the updater installs the NSIS installer itself, so the file a person downloads and the
+file the updater installs are the same signed `-setup.exe`. Its updater signature is made after
+Authenticode signing, over exactly those bytes, by the **Sign the installer for the updater** job
+of [Desktop Windows signing](windows-signing.md#updates). The updater key lives only in the
+`macos-signing` environment, so that job runs there: a Windows release run asks for a
+`windows-signing` approval to build and sign, then a `macos-signing` approval to sign for the
+updater. The job signs with `tauri signer sign`, the same signing `tauri build` does for the Mac
+archives, checks the signature against `plugins.updater.pubkey` with minisign, and the attach job
+uploads `OpenBot_<version>_x64-setup.exe.sig` and lists the installer in `latest.json`.
+
+The Windows app installs per user, so the update needs no administrator prompt. It runs the
+installer in update mode (`installMode: passive`), which never runs the uninstaller: the
+installation in `~/OpenBot`, the app's settings and data under `%APPDATA%` and `%LOCALAPPDATA%`, and
+the Recorder's registration all stay as they were. Windows apps from
+before this have no updater, so each Windows installation updates by hand once, to the first
+release that has it.
 
 A failed check says nothing, because an offline laptop is not a problem to report. A failed
 install shows its error.
@@ -229,7 +257,8 @@ environment **secrets**:
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | That key's password |
 
 The job also reads the existing `OPENBOT_GOOGLE_MODEL_OAUTH_*` variables and secret, as the other
-desktop builds do.
+desktop builds do. Desktop Windows signing's **Sign the installer for the updater** job reads the
+two `TAURI_SIGNING_*` secrets from this environment too; nothing else outside it holds them.
 
 Put the matching updater **public** key in `plugins.updater.pubkey` in
 `desktop/src-tauri/tauri.macos-signing.conf.json`. The signing job refuses to run while that field
@@ -571,16 +600,18 @@ Then, in order:
 - [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag. It waits
   for a `macos-signing` reviewer, then attaches the signed `.dmg` files to the release. The signed
   `.dmg` has the same name as the ad-hoc one and replaces it, under both names. For a stable release
-  it also attaches the updater archives and `latest.json`, and then marks the release Latest when
-  `verify` decided it becomes Latest and Windows signing has already attached its installer (see
+  it also attaches the updater archives and lists them in `latest.json`, and then marks the release
+  Latest when `verify` decided it becomes Latest and Windows signing has already attached and
+  listed its installer (see
   [Which release is Latest](#which-release-is-latest)). A
   candidate or beta's signed `.dmg` is pinned to its images, and has no updater archive and no
   `latest.json`
 - [Desktop Windows signing](windows-signing.md) is dispatched on the tag. It waits for a
   `windows-signing` reviewer, then attaches the signed `-setup.exe`, which replaces the unsigned one
-  under both names. A candidate or beta's is pinned to its images. For a stable release it marks the
-  release Latest when `verify` decided it becomes Latest and Mac signing has already attached its
-  installers
+  under both names. A candidate or beta's is pinned to its images. For a stable release it then
+  waits for a `macos-signing` reviewer to sign the installer for the updater, attaches that
+  signature, lists the installer in `latest.json`, and marks the release Latest when `verify`
+  decided it becomes Latest and Mac signing has already attached and listed its installers
 - for a final cut from `release/X.Y`, the merge-back PR opens as described under
   [Finishing a candidate](#finishing-a-candidate)
 

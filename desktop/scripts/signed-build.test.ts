@@ -232,6 +232,30 @@ test("an internal signed build is never pinned, even from a candidate's branch",
   expect(calls).toEqual([]);
 });
 
+// Before, the Windows overlay had no updater, so a signed Windows app never read the feed, was
+// never offered a release and could not install one.
+test("a Windows stable release is signed unpinned, with the updater the Mac carries", () => {
+  const dir = desktop(stable);
+  const { run, calls } = fakeRun();
+  const result = plan(dir, run, "win32");
+  expect(result.pinned).toBeNull();
+  expect(result.updater).toBe(true);
+  expect(result.configs).toEqual([
+    "src-tauri/tauri.windows-signing.conf.json",
+    "src-tauri/tauri.build-version.conf.json",
+  ]);
+  expect(calls).toEqual([]);
+  const windows = JSON.parse(real("src-tauri/tauri.windows-signing.conf.json"));
+  const mac = JSON.parse(real("src-tauri/tauri.macos-signing.conf.json"));
+  const { windows: install, ...updater } = windows.plugins.updater;
+  // The same key and the same feed: one latest.json serves both, and one key signs both.
+  expect(updater).toEqual(mac.plugins.updater);
+  // A small progress window and no questions: the update was already asked for in the app.
+  expect(install).toEqual({ installMode: "passive" });
+  // No updater artifacts from the build, which would need the updater key in this environment.
+  expect(windows.bundle.createUpdaterArtifacts).toBeUndefined();
+});
+
 test("a Windows candidate is pinned, and its overlay keeps the signing command", () => {
   const dir = desktop(candidate);
   const { run } = fakeRun({ version: "v0.3.0-rc.1", commit: SHA, images: {} });
@@ -242,6 +266,8 @@ test("a Windows candidate is pinned, and its overlay keeps the signing command",
   expect(overlay.bundle.windows.signCommand.args).toContain(
     "../scripts/sign-windows.ps1",
   );
+  // Never offered anything: the updater is taken out with the rest of `plugins`.
+  expect(overlay.plugins).toBeUndefined();
 });
 
 test("the CLI is bundled whenever the tree has the overlay for it, pinned or not", () => {

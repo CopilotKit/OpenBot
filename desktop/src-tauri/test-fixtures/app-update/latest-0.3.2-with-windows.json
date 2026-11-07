@@ -1,0 +1,19 @@
+{
+  "version": "0.3.2",
+  "notes": "",
+  "pub_date": "2026-11-07T01:27:36Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUVlRBcFNmbHg3QlpoQUZtTWtGWGRheG1kektYVjNXWi9HRGg4b3FLQUtMODdQUjhJTVNuc2lrZnFPR2ZUdHh3cDBNNkh3b1AxLzRtWFE5Q0JXQ1QzbjhMVG44eGk4VHdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTQ2NTAzCWZpbGU6T3BlbkJvdC5hcHAudGFyLmd6ClNOMDQ2K202MTFVYVFCUmwwZDFWdjE2UGtuYVMzUFR0a2s0ZDV1V2gyU09XOXlPQU4yWUJQVC9URmtVRlY2ZFBkWmhlbm5WRit3cDZ2azFWbEx4MkJBPT0K",
+      "url": "https://github.com/CopilotKit/OpenBot/releases/download/v0.3.1/OpenBot-darwin-aarch64.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUVlRBcFNmbHg3QlYyQTVCYlRDNHhvSWVGMThHMlpCN0t3RExFWS9UNkpnR3NlT1lBNis5OTdjQXAvUE5JMDZmNjFzMG4xaHh3YU1TclhHNDhMZXhha3gxczY0d3VZb0FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTQ3MDQ1CWZpbGU6T3BlbkJvdC5hcHAudGFyLmd6CjVVU1ZQS29xNXI0aFdyRXVkSlFoQXV1enFtZ2ovZ21GK2ROQjMrWVBZa1BhMTJiWVRrdk9tNEZLUTNSUUhwaUIya01DMlJYeGFXSk5DY0hZYUdvMkRnPT0K",
+      "url": "https://github.com/CopilotKit/OpenBot/releases/download/v0.3.1/OpenBot-darwin-x86_64.app.tar.gz"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTRm1DWm1NUldWQ0paOGE4ekc5WncrVk1QVzhmZktoU3NWNHVJdy9EWDdiZVN5Ymo3aDBVOFlST2lPdjljeEtGUzY4SGphbGVhMUFmZzRmU2taN3FUdDg4Q0tSL1B4aVFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MDE0ODQwCWZpbGU6T3BlbkJvdF8wLjMuMl94NjQtc2V0dXAuZXhlCmdndWwvaHJ5dVBuZkJadXhqY1NuYi9qYTQvelV0Y0U0eVpQWFNKMmxRQmV2U1NDWjd0YnF0NkFkSytLMlM4U0dUVUorLzlUdEdVRVUyNHkzUXdZZkNBPT0K",
+      "url": "https://github.com/CopilotKit/OpenBot/releases/download/v0.3.2/OpenBot_0.3.2_x64-setup.exe"
+    }
+  }
+}

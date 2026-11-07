@@ -14,12 +14,25 @@ import { join } from "node:path";
 const root = join(import.meta.dir, "../..");
 const read = (path: string) => readFileSync(join(root, path), "utf8");
 
-type Step = { name?: string; run?: string; env?: Record<string, string> };
+type Step = {
+  name?: string;
+  id?: string;
+  if?: string;
+  uses?: string;
+  run?: string;
+  env?: Record<string, string>;
+  with?: Record<string, string>;
+};
 type Workflow = {
   on: { workflow_dispatch?: { inputs?: Record<string, { type?: string }> } };
   jobs: Record<
     string,
     {
+      if?: string;
+      needs?: string | string[];
+      environment?: string;
+      permissions?: Record<string, string>;
+      outputs?: Record<string, string>;
       env?: Record<string, string>;
       steps?: Step[];
       concurrency?: { group?: string; "cancel-in-progress"?: boolean };
@@ -99,4 +112,75 @@ test("the Mac and Windows attach jobs of one release never run at the same time"
       ),
     ).toBe(true);
   }
+});
+
+// On Windows the updater installs the signed installer itself, and the updater key lives only in
+// `macos-signing`. A job there signs the installer the signing job verified, and the attach job
+// waits for it and lists the installer in latest.json.
+test("Windows signing signs its installer for the updater with the Mac's key, then attaches and lists it", () => {
+  const windows = workflow(".github/workflows/desktop-signing.yml");
+  const sign = windows.jobs.sign;
+  expect(sign?.outputs?.updater).toBe(
+    expression("steps.build.outputs.updater"),
+  );
+  const build = sign?.steps?.find((step) => step.name === "Build and sign");
+  expect(build?.id).toBe("build");
+  expect(build?.run).toContain("src-tauri/tauri.windows-signing.conf.json");
+
+  const update = windows.jobs["sign-update"];
+  expect(update?.needs).toBe("sign");
+  expect(update?.environment).toBe("macos-signing");
+  expect(update?.permissions).toEqual({ contents: "read" });
+  // Only a run that attaches to a release, and only a build with the updater.
+  expect(update?.if).toContain("inputs.release-tag != ''");
+  expect(update?.if).toContain("needs.sign.outputs.updater == 'true'");
+  const steps = update?.steps ?? [];
+  const download = steps.find((step) =>
+    step.uses?.startsWith("actions/download-artifact@"),
+  );
+  // The bytes the signing job verified, Authenticode signature and all.
+  expect(download?.with?.name).toBe(expression("needs.sign.outputs.artifact"));
+  const signing = steps.find((step) =>
+    step.run?.includes("desktop/scripts/sign-windows-update.sh"),
+  );
+  expect(signing?.env?.TAURI_SIGNING_PRIVATE_KEY).toBe(
+    expression("secrets.TAURI_SIGNING_PRIVATE_KEY"),
+  );
+  expect(signing?.env?.TAURI_SIGNING_PRIVATE_KEY_PASSWORD).toBe(
+    expression("secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD"),
+  );
+  expect(steps.some((step) => step.run?.includes("minisign"))).toBe(true);
+  // The key is in no other job of this workflow.
+  for (const [name, job] of Object.entries(windows.jobs)) {
+    if (name === "sign-update") continue;
+    expect(JSON.stringify(job)).not.toContain("TAURI_SIGNING_PRIVATE_KEY");
+  }
+
+  const publish = windows.jobs.publish;
+  expect(publish?.needs).toEqual(["sign", "sign-update"]);
+  // A pinned build skips sign-update and is still attached.
+  expect(publish?.if).toContain("needs.sign-update.result == 'skipped'");
+  expect(
+    publish?.steps?.find(
+      (step) =>
+        step.with?.name === expression("needs.sign-update.outputs.artifact"),
+    )?.if,
+  ).toBe("needs.sign-update.result == 'success'");
+  expect(read("desktop/scripts/publish-signed-windows.sh")).toContain(
+    '"$root/scripts/release-update-feed.sh" "windows-x86_64=$installer"',
+  );
+  expect(read("desktop/scripts/publish-signed-mac.sh")).toContain(
+    '"$root/scripts/release-update-feed.sh"',
+  );
+});
+
+// Latest waits for a feed that lists every platform, so no release is ever Latest with Windows apps
+// left out of it.
+test("a stable release becomes Latest only once its feed lists Mac and Windows", () => {
+  expect(read("scripts/release-update-feed.sh")).toContain(
+    "printf '%s\\n' darwin-aarch64 darwin-x86_64 windows-x86_64",
+  );
+  expect(read("scripts/release-make-latest.sh")).toContain(
+    'release-update-feed.sh" --platforms',
+  );
 });

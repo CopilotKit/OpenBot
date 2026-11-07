@@ -72,39 +72,19 @@ if [ -n "$pinned" ]; then
   exit 0
 fi
 
-# latest.json names a version, and for each architecture the archive URL and the minisign
-# signature of the archive at that URL. It is written from both architectures' real `.sig` files.
-base="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
-platforms='{}'
-for target in darwin-aarch64 darwin-x86_64; do
-  archive="$artifacts/OpenBot-$target.app.tar.gz"
-  test -f "$archive"
-  test -f "$archive.sig"
-  platforms="$(jq -n \
-    --argjson platforms "$platforms" \
-    --arg target "$target" \
-    --arg signature "$(cat "$archive.sig")" \
-    --arg url "$base/OpenBot-$target.app.tar.gz" \
-    '$platforms + { ($target): { signature: $signature, url: $url } }')"
-done
-# The notes are the changelog section a person wrote, the same ones the release carries.
-notes="$(awk -v v="## ${version%%-*}" '$0==v{f=1;next} /^## /{if(f)exit} f' "$root/CHANGELOG.md")"
-jq -n \
-  --arg version "$version" \
-  --arg notes "$notes" \
-  --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --argjson platforms "$platforms" \
-  '{ version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms }' \
-  > latest.json
-cat latest.json
-
-gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" latest.json --clobber
-gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" "${uploads[@]}" --clobber
 gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" \
   "$artifacts/OpenBot-darwin-aarch64.app.tar.gz" \
   "$artifacts/OpenBot-darwin-aarch64.app.tar.gz.sig" \
   "$artifacts/OpenBot-darwin-x86_64.app.tar.gz" \
   "$artifacts/OpenBot-darwin-x86_64.app.tar.gz.sig" --clobber
+gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" "${uploads[@]}" --clobber
 
-# Latest once Windows signing has attached its installer too, and the feed check when it is.
+# Both architectures' archives into latest.json, written from their real `.sig` files, beside the
+# Windows installer that Desktop Windows signing lists there whether it ran first or runs next.
+VERSION="$version" "$root/scripts/release-update-feed.sh" \
+  "darwin-aarch64=$artifacts/OpenBot-darwin-aarch64.app.tar.gz" \
+  "darwin-x86_64=$artifacts/OpenBot-darwin-x86_64.app.tar.gz"
+
+# Latest once Windows signing has attached its installer and listed it too, and the feed check when
+# it is.
 MAKE_LATEST="$make_latest" FEED_RETRY_DELAY="$delay" "$root/scripts/release-make-latest.sh"

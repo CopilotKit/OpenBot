@@ -6,7 +6,7 @@
 //! OpenBot has no shell to ask, so it never asks the feed anything.
 //!
 //! Offered only where the updater can install it: a stable, unpinned build whose configuration
-//! carries `plugins.updater` (today the signed Mac release). The feed is that block's own
+//! carries `plugins.updater` (the signed Mac and Windows releases). The feed is that block's own
 //! `endpoints`, read in the updater's order, so the banner and the install read the same file.
 //!
 //! The person can close the banner. That is kept per version in the app's config directory, and
@@ -433,6 +433,32 @@ mod tests {
                 real_feed_at("0.3.1+mac").as_bytes(),
                 "darwin-aarch64"
             ),
+            Ok(None)
+        );
+    }
+
+    /// The feed as the signing runs now write it (scripts/release-update-feed.sh): the real Mac
+    /// entries Desktop macOS signing wrote, with the signed Windows installer that Desktop Windows
+    /// signing added beside them, signed by `tauri signer sign` with a test key and installed from a
+    /// test feed on Windows Server 2022.
+    const NEXT_WITH_WINDOWS: &str =
+        include_str!("../test-fixtures/app-update/latest-0.3.2-with-windows.json");
+
+    #[test]
+    fn a_release_that_lists_the_windows_installer_is_offered_on_windows_and_on_both_macs() {
+        for platform in ["windows-x86_64", "darwin-aarch64", "darwin-x86_64"] {
+            assert_eq!(
+                newer(&v("0.3.1"), NEXT_WITH_WINDOWS.as_bytes(), platform),
+                Ok(Some(v("0.3.2"))),
+                "{platform}"
+            );
+        }
+        // The key this machine's updater looks for is `{os}-{arch}`, spelled its way.
+        if cfg!(all(windows, target_arch = "x86_64")) {
+            assert_eq!(platform().as_deref(), Some("windows-x86_64"));
+        }
+        assert_eq!(
+            newer(&v("0.3.2"), NEXT_WITH_WINDOWS.as_bytes(), "windows-x86_64"),
             Ok(None)
         );
     }

@@ -157,13 +157,16 @@ Use a candidate to test what will become a release. The details are in
    **Expected:** a GitHub prerelease `vX.Y.Z-rc.1` with `container-images.json`, the source
    archive, the chart, the release manifest, and the Mac and Windows installers.
 5. Approve **Desktop macOS signing** and **Desktop Windows signing** when they ask. These need a
-   `macos-signing` and a `windows-signing` approver.
+   `macos-signing` and a `windows-signing` approver. For a stable release, Desktop Windows signing
+   asks a second time, for `macos-signing`, once its installer is signed: that job signs the
+   installer for the in-app updater with the updater key.
    **Expected:** the signed Apple silicon `.dmg` replaces the ad-hoc one on the release, a signed
    Intel `.dmg` is added, and the signed `-setup.exe` replaces the unsigned one. Each is attached
    under its versioned name and its fixed name. For a candidate all three are pinned to the
-   candidate's images, like the unsigned ones. A stable release also gets `latest.json`, and becomes
-   Latest when the second of the two signing runs finishes. Until then the fixed addresses keep
-   giving the previous release's signed installers.
+   candidate's images, like the unsigned ones. A stable release also gets `latest.json`, listing
+   both Mac archives and the Windows installer, and becomes Latest when the second of the two
+   signing runs finishes. Until then the fixed addresses keep giving the previous release's signed
+   installers.
 6. Test the candidate with [Install and test](#3-install-and-test) and
    [Check a build](#4-check-a-build).
 7. For a fix, merge it into `release/X.Y`, then run **Create release PR** from that branch with
