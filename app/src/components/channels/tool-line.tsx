@@ -16,6 +16,7 @@ const SHORT_LABEL = 32;
 export function ToolLine({
   icon,
   label,
+  attempted,
   detail,
   running,
   refused,
@@ -29,6 +30,11 @@ export function ToolLine({
   icon?: ReactNode;
   /** What was done, in a couple of words: "Searched Slack", "Filled in", "Read the page". */
   label: string;
+  /**
+   * What was tried, for a step that was refused: "Save file", not "Saved file". A refused step did
+   * not happen, so its line says what was attempted. Without it the label is used.
+   */
+  attempted?: string;
   /** What it was done to. Muted, and truncated rather than wrapped. */
   detail?: string;
   running?: boolean;
@@ -82,7 +88,7 @@ export function ToolLine({
         }
       >
         {refused
-          ? `Blocked: ${label}`
+          ? `Blocked: ${attempted ?? label}`
           : failed
             ? `${label}, didn't work`
             : notYet

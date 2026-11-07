@@ -105,7 +105,7 @@ test("a change goes to the server's gate even when nothing about approvals has l
       },
     };
     const subscribers: {
-      onRunInitialized?: (input: { input: unknown }) => void;
+      onRunInitialized?: (input: { messages: unknown[]; input: unknown }) => void;
     }[] = [];
     const agent = {
       threadId: "thread",
@@ -122,6 +122,7 @@ test("a change goes to the server's gate even when nothing about approvals has l
     const stop = observeApprovalAgent(agent as never);
     for (const subscriber of subscribers)
       subscriber.onRunInitialized?.({
+        messages: agent.messages,
         input: {
           runId: "run-1",
           threadId: "thread",
@@ -191,7 +192,7 @@ async function clickAgainstGate(
       },
     };
     const subscribers: {
-      onRunInitialized?: (input: { input: unknown }) => void;
+      onRunInitialized?: (input: { messages: unknown[]; input: unknown }) => void;
     }[] = [];
     const agent = {
       threadId: "thread",
@@ -208,6 +209,7 @@ async function clickAgainstGate(
     const stop = observeApprovalAgent(agent as never);
     for (const subscriber of subscribers)
       subscriber.onRunInitialized?.({
+        messages: agent.messages,
         input: {
           runId: "run-1",
           threadId: "thread",
@@ -337,7 +339,7 @@ async function navigateWith(
       },
     };
     const subscribers: {
-      onRunInitialized?: (input: { input: unknown }) => void;
+      onRunInitialized?: (input: { messages: unknown[]; input: unknown }) => void;
     }[] = [];
     const agent = {
       threadId: "thread",
@@ -356,6 +358,7 @@ async function navigateWith(
       : () => undefined;
     for (const subscriber of subscribers)
       subscriber.onRunInitialized?.({
+        messages: agent.messages,
         input: {
           runId: "run-1",
           threadId: "thread",

@@ -29,8 +29,11 @@ export function observeApprovalAgent(agent: Agent): () => void {
   letGo.delete(agent);
   if (!observing.has(agent)) {
     const subscription = agent.subscribe({
-      onRunInitialized: ({ input }) => {
+      onRunInitialized: ({ input, messages }) => {
         inputs.set(agent, input);
+        const answers = withoutWaitingPlaceholders(messages);
+        // Returned, the SDK sends the run these and keeps them as the agent's own messages.
+        if (answers.length !== messages.length) return { messages: answers };
       },
       onRunStartedEvent: ({ input, event }) => {
         inputs.set(agent, {
@@ -51,6 +54,40 @@ export function observeApprovalAgent(agent: Agent): () => void {
     letGo.add(agent);
     if ((turns.get(agent) ?? 0) === 0) stopObserving(agent);
   };
+}
+
+/** What a computer tool's handler answers the SDK with while the gate holds the step for a person. */
+export const WAITING_FOR_PERSON = { waiting: true } as const;
+
+function isWaitingPlaceholder(message: { role: string; content?: unknown }) {
+  if (message.role !== "tool" || typeof message.content !== "string")
+    return false;
+  try {
+    const parsed: unknown = JSON.parse(message.content);
+    return (
+      !!parsed &&
+      typeof parsed === "object" &&
+      (parsed as { waiting?: unknown }).waiting === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The conversation without the stand-in answers a held step left behind.
+ *
+ * The SDK keeps whatever a handler returns as the call's tool message, and a held step's handler
+ * returns `WAITING_FOR_PERSON`. The real answer comes later, from the server's continuation, which
+ * the thread saves. Left in, the stand-in went out with the person's next message as a message the
+ * thread did not hold, was saved, and took the real answer's place: a declined step, opened again,
+ * read as one with no answer and was drawn as done. So it never leaves the browser. A step still
+ * waiting is sent with no answer, which every run already handles as a call nothing has answered.
+ */
+export function withoutWaitingPlaceholders<
+  M extends { role: string; content?: unknown },
+>(messages: ReadonlyArray<M>): M[] {
+  return messages.filter((message) => !isWaitingPlaceholder(message));
 }
 
 /**
