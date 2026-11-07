@@ -130,3 +130,29 @@ test("while one is still running, its line says what it is doing", async () => {
   expect(await view.findByText("Saving a memory")).toBeTruthy();
   expect(view.queryByText("remember_personal_fact")).toBeNull();
 });
+
+/*
+ * A DRAWN INTERFACE IS A STEP TOO. The runtime offers `render_ui` when a conversation can draw
+ * generated interfaces, so no OpenBot registration names it, and a live conversation read
+ * "render_ui" above the trip budget its Bot had just drawn.
+ */
+test("drawing an interface reads as what the Bot did, not the tool's identifier", async () => {
+  const view = draw([
+    { id: "u1", role: "user", content: "Build a weekend trip budget." },
+    ...step("render_ui", '{"rendered":true}'),
+  ]);
+  expect(await view.findByText("Drew an interface")).toBeTruthy();
+  expect(view.queryByText("render_ui")).toBeNull();
+});
+
+test("while the interface is still being drawn, its line says so in words", async () => {
+  const view = draw(
+    [
+      { id: "u1", role: "user", content: "Build a weekend trip budget." },
+      ...step("render_ui"),
+    ],
+    true,
+  );
+  expect(await view.findByText("Drawing an interface")).toBeTruthy();
+  expect(view.queryByText("render_ui")).toBeNull();
+});
