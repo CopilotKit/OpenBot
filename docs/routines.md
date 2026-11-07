@@ -19,6 +19,10 @@ its tools can't be taken from a Bot: the server answers `403`. A Bot still asks 
 while Ask before making changes is on, and before `delete_routine` always (see
 [Approvals](approvals.md)). See `server/src/plugins/personal-defaults.ts`.
 
+Its tools are OpenBot's own code, so the server brings the saved list up to date with the running
+release at every start, before it gives them out: a tool a release renames, rewords or adds reaches an
+existing installation without anybody pressing Refresh. A start where nothing changed writes nothing.
+
 The routine belongs to whoever asked for it and runs as them. See
 [Who a routine runs as](#who-a-routine-runs-as).
 

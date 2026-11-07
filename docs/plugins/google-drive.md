@@ -66,7 +66,9 @@ At `/admin/plugins/google-drive`:
 
 That completes setup. No personal account is needed to get this far — the tool list for this
 connector is OpenBot's own code rather than an answer from a remote server, so there is nothing to
-authenticate in order to read it.
+authenticate in order to read it. For the same reason, after an upgrade the server brings the
+recorded tools up to date with the new release when it starts; nobody has to press Refresh again.
+Which Bots hold them is left as it was.
 
 To check it actually works, use **Your account** on the same page: it connects *your* Google account
 and returns you here. That is a personal grant like anybody else's, reaching your documents only, and
