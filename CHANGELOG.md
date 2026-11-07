@@ -230,6 +230,10 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 - **A Bot names the app card's real button**: Turn on (then Connect, if the card offers it),
   Connect, Set up for an app that takes a key, or Set it up. It always said to press Connect, which
   the card doesn't show for an app that has to be turned on first.
+- **Turning off an app you added from Composio's or Arcade's directory takes you back to
+  Connections**, where you can add it again from the directory. Its page said "Not an app. There is
+  no app with that name." An app Connections always lists, such as Notion, still stays on its page,
+  off, with Connect.
 
 ### The Bot's browser
 
