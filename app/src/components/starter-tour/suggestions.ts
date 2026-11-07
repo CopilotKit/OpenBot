@@ -18,7 +18,7 @@ export const STARTER_SUGGESTIONS: CopilotChatSuggestionViewProps["suggestions"] 
     {
       title: "Find weekend plans",
       message:
-        "Find three things to do this weekend in my city. Ask me which city if you don't know. Use web search and fetch tools only, without opening or navigating a browser. Include dates and source links. If those tools aren't available, help me set up search instead of switching to the browser.",
+        "Find three things to do this weekend in my city. Ask me which city if you don't know. Use web search and fetch tools only, without opening or navigating a browser. Read the source pages to verify each event's date and any price or free-admission claim. Include dates and source links, and leave out details you cannot verify. If those tools aren't available, help me set up search instead of switching to the browser.",
       isLoading: false,
     },
     {

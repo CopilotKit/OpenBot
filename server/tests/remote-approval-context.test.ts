@@ -6,7 +6,7 @@ import { z } from "zod";
 import { currentApprovalContext } from "../src/approvals/types";
 import { buildAgents } from "../src/copilot";
 
-async function fixture(answered = false) {
+async function fixture(answered = false, toolName = "mcp__vendor__write") {
   const requests: RunAgentInput[] = [];
   const run = spyOn(HttpAgent.prototype, "run").mockImplementation((input) => {
     requests.push(input);
@@ -16,7 +16,7 @@ async function fixture(answered = false) {
       {
         type: "TOOL_CALL_START",
         toolCallId: "provider-call",
-        toolCallName: "mcp__vendor__write",
+        toolCallName: toolName,
         parentMessageId: "provider-message",
       },
       {
@@ -58,9 +58,9 @@ async function fixture(answered = false) {
     { provider: "openai", defaultModel: "test" },
     null,
   ];
-  args[4] = async () => [
+  args[toolName === "ask_person" ? 10 : 4] = async () => [
     {
-      name: "mcp__vendor__write",
+      name: toolName,
       ref: "vendor/write",
       description: "Write with approval",
       parameters: z.object({ value: z.string() }),
@@ -128,3 +128,16 @@ test("backend answered remote tool calls are forwarded without duplicate executi
     f.run.mockRestore();
   }
 });
+
+for (const answered of [false, true]) {
+  test(`remote question ${answered ? "already answered is not repeated" : "executes through its authorized handler"}`, async () => {
+    const f = await fixture(answered, "ask_person");
+    try {
+      await f.agent.runAgent({ runId: "canonical-run" });
+      expect(f.calls()).toBe(answered ? 0 : 1);
+      if (!answered) expect(f.context()?.toolName).toBe("ask_person");
+    } finally {
+      f.run.mockRestore();
+    }
+  });
+}
