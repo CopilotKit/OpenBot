@@ -1,4 +1,5 @@
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
+import { auditActionWords, auditEventWords } from "@openbot/shared/audit-words";
 import { Fragment, type ReactNode } from "react";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
@@ -86,11 +87,25 @@ function breakable(text: string): ReactNode {
  * What was done, with what it was done to beneath it. One column rather than two, so the table
  * fits the Desktop's default window: drawn side by side, What, On, Bot and Started by pushed
  * Decision off the right edge of a 1000px window.
+ *
+ * In words. `storedName` puts the name the trail keeps it under on hover, for an admin matching a row
+ * against the export or a collector; a page anybody can open leaves it off.
  */
-export function WhatCell({ event }: { event: AuditEvent }) {
+export function WhatCell({
+  event,
+  storedName = false,
+}: {
+  event: AuditEvent;
+  storedName?: boolean;
+}) {
   return (
     <>
-      <div className="font-medium">{breakable(whatText(event))}</div>
+      <div
+        className="font-medium"
+        title={storedName ? whatName(event) : undefined}
+      >
+        {whatText(event)}
+      </div>
       <OnCell event={event} />
     </>
   );
@@ -117,16 +132,33 @@ export function WhoCell({
 }
 
 /**
- * Strip the internal computer tool namespace for display. An approval row is about an action too, and
- * names the tool it was asked about, so it reads as the same action its other rows are.
+ * The action a row is about, as the trail stores it. An approval row is about an action too, and
+ * names the tool it was asked about, so it reads as the same action its other rows are; so does an
+ * app's tool call, which names its tool as its target.
  */
-export function whatText(event: AuditEvent): string {
+function actionOf(event: AuditEvent): string | undefined {
   const action =
     event.payload?.action ??
     (event.targetType === "approval" ? event.payload?.tool : undefined);
-  return typeof action === "string"
-    ? action.replace("computer_", "")
-    : event.eventType;
+  if (typeof action === "string") return action;
+  if (
+    event.eventType.startsWith("mcp.call") &&
+    event.targetType === "mcp_tool" &&
+    event.targetId
+  )
+    return event.targetId;
+  return undefined;
+}
+
+/** What a row is about, in the trail's own name for it: for search, and for Admin's hover. */
+export function whatName(event: AuditEvent): string {
+  return actionOf(event) ?? event.eventType;
+}
+
+/** What a row is about, in words: "Save a file", "Choose tools for a run". See `audit-words`. */
+export function whatText(event: AuditEvent): string {
+  const action = actionOf(event);
+  return action ? auditActionWords(action) : auditEventWords(event.eventType);
 }
 
 type Element = { role?: string; name?: string } | string | undefined;
@@ -376,6 +408,8 @@ export function decisionDetails(event: AuditEvent): string[] {
 export function searchTextOf(event: AuditEvent, nameFor: NameFor): string {
   return [
     whatText(event),
+    // The stored name too, so a row is found by what the export and a collector call it.
+    whatName(event),
     subjectText(event),
     hostText(event),
     botText(event, nameFor),

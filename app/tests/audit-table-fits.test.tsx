@@ -115,7 +115,7 @@ test("five columns, not seven: what it acted on sits under the action, and who s
     [...(row?.querySelectorAll(`[data-column=${column}] > div`) ?? [])].map(
       (line) => line.textContent,
     );
-  expect(cell(refused, "what")).toEqual(["write_file", "reports/refused.txt"]);
+  expect(cell(refused, "what")).toEqual(["Save a file", "reports/refused.txt"]);
   expect(cell(refused, "bot")).toEqual([
     "Claude Agent SDK",
     "Started by a person",

@@ -98,11 +98,14 @@ export function AuditTable({
   events,
   nameFor,
   query,
+  storedNames = false,
   toolbar,
 }: {
   events: AuditEvent[];
   nameFor: NameFor;
   query: string;
+  /** Whether a row's What shows the trail's stored name on hover: Admin's, not a person's. */
+  storedNames?: boolean;
   /**
    * Drawn above the table, given how many rows it shows ("3 events", "1 of 3 events") and the filter
    * buttons to place beside the search. It stays put; only the rows under it scroll.
@@ -114,7 +117,10 @@ export function AuditTable({
 }) {
   const [sorting, setSorting] = useState<SortingState>(INITIAL_SORT);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-  const columns = useMemo(() => auditColumns(nameFor), [nameFor]);
+  const columns = useMemo(
+    () => auditColumns(nameFor, storedNames),
+    [nameFor, storedNames],
+  );
   const table = useTable({
     features,
     columns,
@@ -314,6 +320,7 @@ function countLabel(shown: number, total: number): string {
 
 function auditColumns(
   nameFor: NameFor,
+  storedNames: boolean,
 ): ColumnDef<typeof features, AuditEvent>[] {
   return [
     {
@@ -362,7 +369,9 @@ function auditColumns(
       id: "what",
       accessorFn: (event) => whatText(event),
       header: "What",
-      cell: ({ row }) => <WhatCell event={row.original} />,
+      cell: ({ row }) => (
+        <WhatCell event={row.original} storedName={storedNames} />
+      ),
       enableSorting: false,
     },
     {

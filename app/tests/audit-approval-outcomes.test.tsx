@@ -181,19 +181,19 @@ test("a denied write reads as refused, and the person's answer as a denial", asy
   );
   expect(rows).toEqual([
     {
-      what: "write_file",
+      what: "Save a file",
       on: "refused.txt",
       decision: "BlockedA person denied it when asked.",
       outcome: "refused",
     },
     {
-      what: "write_file",
+      what: "Save a file",
       on: "refused.txt",
       decision: "Denied by a person",
       outcome: "refused",
     },
     {
-      what: "write_file",
+      what: "Save a file",
       on: "refused.txt",
       decision:
         "Asked a person firstYou asked to review changes before they happen.",
@@ -219,7 +219,7 @@ test("a read that failed is one row that says it did not happen", async () => {
   );
   expect(rows).toEqual([
     {
-      what: "read_file",
+      what: "Read a file",
       on: "missing-report.txt",
       decision:
         "Did not happenmissing-report.txt does not exist in the workspace.",
