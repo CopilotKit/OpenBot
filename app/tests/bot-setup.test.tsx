@@ -20,6 +20,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { KEY_FROM_OPENBOT } from "@/components/agents/callback-token-panel";
 import { SetupSections } from "@/components/bot-profile/setup";
 import {
   ISOLATED_EXPLAINED,
@@ -67,6 +68,8 @@ afterEach(() => {
 
 /** What `scripts/start.sh` sets `MANAGED_AGENT_AG_UI_URL` to. */
 const MANAGED = "http://localhost:4201/ag-ui";
+/** The harness OpenBot Desktop runs for the personal starter, as `PICKED_HARNESS_URL` names it. */
+const PICKED = "http://agent-harness:4212";
 
 const actor = {
   id: "owner",
@@ -146,7 +149,8 @@ function serve(
     true,
     MANAGED,
     undefined,
-    undefined,
+    // The addresses this deployment runs, as app.ts names them from its configuration.
+    { token: "deployment-token", endpoints: [MANAGED, PICKED] },
     { available: options.isolationAvailable ?? true },
   );
   globalThis.fetch = Object.assign(
@@ -248,6 +252,27 @@ test("a coworker somebody hosts keeps its own endpoint when it is renamed", asyn
     name: "Receipts",
     endpoint: "https://agents.example.test/ag-ui",
   });
+});
+
+test("a Bot on the harness OpenBot runs says it can use its tools, and offers no key to make", async () => {
+  serve(PICKED);
+  const view = draw("personal");
+
+  expect(await view.findByText(KEY_FROM_OPENBOT)).toBeTruthy();
+  expect(view.queryByText(/can't use tools/)).toBeNull();
+  expect(view.queryByRole("button", { name: "Generate key" })).toBeNull();
+});
+
+test("a Bot somebody hosts is still offered a key for its tools", async () => {
+  serve("https://agents.example.test/ag-ui");
+  const view = draw("personal");
+
+  expect(
+    await view.findByText(
+      "This Bot has no key yet. It can talk but can't use tools. Generate a key and add it to your agent's configuration.",
+    ),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Generate key" })).toBeTruthy();
 });
 
 test("someone who cannot manage the Bot reads its setup but cannot open an editor", async () => {
