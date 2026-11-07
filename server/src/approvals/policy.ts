@@ -90,6 +90,8 @@ const SAFETY_REQUIREMENTS: readonly {
   reason: string;
   /** Matched on every word of the action: its tool, target, arguments and page. */
   pattern: RegExp;
+  /** Matched on the page's address without its query string and fragment (see {@link pageWithoutQuery}). */
+  pagePathOnly?: true;
   /** Matched on a connector tool's own name only (see {@link actionName}). */
   tool?: RegExp;
   /** Matched on the label of the control a browser click presses only. */
@@ -101,6 +103,13 @@ const SAFETY_REQUIREMENTS: readonly {
       "Changing a password, passcode, two-factor setting, recovery code or other credential is always done by the person.",
     pattern:
       /pass(word|code|phrase)|passwd|\b2fa\b|two[-_ ]?factor|\bmfa\b|one[-_ ]?time[-_ ]?code|\botp\b|recovery[-_ ]?(code|key|email|phone)|security[-_ ]?question|api[-_ ]?key|access[-_ ]?token|credential|sign[-_ ]?in[-_ ]?method/i,
+    /*
+     * A page is about credentials by where it is, not by what its address carries. A link signed
+     * for one download or a sign-in's return address holds `X-Amz-Credential=`, `access_token=` or
+     * `api_key=` in its query string or fragment on any page at all, and a Bot typing a name into a
+     * form there is not changing a credential. The page's path, the field and the button still count.
+     */
+    pagePathOnly: true,
   },
   {
     id: "security_settings",
@@ -287,6 +296,24 @@ function paysToSubscribe(
   }
 }
 
+/**
+ * The target with its page's address cut to where the page is: origin and path, without the query
+ * string or fragment. A target with no page, or an address that does not parse, is left whole, so
+ * an address this cannot read is matched as before rather than not at all.
+ */
+function pageWithoutQuery(target: unknown): unknown {
+  if (target === null || typeof target !== "object" || Array.isArray(target))
+    return target;
+  const page = (target as { pageUrl?: unknown }).pageUrl;
+  if (typeof page !== "string") return target;
+  try {
+    const url = new URL(page);
+    return { ...target, pageUrl: `${url.origin}${url.pathname}` };
+  } catch {
+    return target;
+  }
+}
+
 /** How deep a value is read. Anything nested further is not, so matching stays cheap. */
 const MAX_DEPTH = 6;
 
@@ -367,12 +394,12 @@ export function safetyRequirement(
     !Array.isArray(candidate.args)
       ? { ...(candidate.args as Record<string, unknown>), text: undefined }
       : candidate.args;
-  const words = [
-    candidate.toolRef,
-    candidate.scope,
-    flatten(args),
-    flatten(candidate.target),
-  ].join(" ");
+  const wordsWith = (target: unknown) =>
+    [candidate.toolRef, candidate.scope, flatten(args), flatten(target)].join(
+      " ",
+    );
+  const words = wordsWith(candidate.target);
+  const pathWords = wordsWith(pageWithoutQuery(candidate.target));
   const named = actionName(candidate);
   const matches = (entry: {
     tool?: { test(name: string): boolean };
@@ -383,7 +410,9 @@ export function safetyRequirement(
       true;
   const handOff =
     SAFETY_REQUIREMENTS.find(
-      (entry) => entry.pattern.test(words) || matches(entry),
+      (entry) =>
+        entry.pattern.test(entry.pagePathOnly ? pathWords : words) ||
+        matches(entry),
     ) ??
     (paysToSubscribe(candidate, named)
       ? SAFETY_REQUIREMENTS.find((entry) => entry.id === "payments")
