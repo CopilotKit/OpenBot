@@ -755,6 +755,12 @@ export function createApp(
           ? await onboardingStore.status(context.var.actor.id)
           : null,
       },
+      /*
+       * The OpenBot release this server runs, drawn small under the person's name. Here rather than
+       * on /api/capabilities, which anybody can read: as with /release, the exact version is not
+       * handed to whoever can reach the port. Null when the build has none, such as in development.
+       */
+      version: config.version ?? null,
     }),
   );
   app.route("/api/me/profile", createProfileRoutes(requireUser, profileStore));

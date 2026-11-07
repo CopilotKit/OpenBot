@@ -299,6 +299,12 @@ export type DeploymentConfig = {
    */
   deploymentId: string | undefined;
   /**
+   * The OpenBot release this server runs, such as `v0.3.1`, from OPENBOT_BUILD_VERSION: release CI
+   * bakes it into the image, and OpenBot Desktop sets it from the release it installed. Absent in
+   * development and in a local image build.
+   */
+  version?: string;
+  /**
    * The key this deployment talks to Composio with, the broker that holds people's accounts for a
    * few hundred apps so a Bot can act in Gmail or Slack without an OAuth client of this
    * deployment's own registered with each of them.
@@ -1646,6 +1652,9 @@ export function loadConfig(
     ...(githubApp ? { githubApp } : {}),
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
+    ...(optional(environment, "OPENBOT_BUILD_VERSION")
+      ? { version: optional(environment, "OPENBOT_BUILD_VERSION") as string }
+      : {}),
     composioApiKey: optional(environment, "COMPOSIO_API_KEY"),
     arcadeApiKey: optional(environment, "ARCADE_API_KEY"),
     brokerProvider: brokerProvider(environment),
