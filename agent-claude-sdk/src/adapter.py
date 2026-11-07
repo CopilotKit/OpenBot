@@ -107,6 +107,11 @@ class _Turn:
     # Tool calls Claude Code reported as failed, and the result the turn streamed for each.
     failed: set[str] = field(default_factory=set)
     failed_results: dict[str, str] = field(default_factory=dict)
+    # Client calls Claude Code has actually run, and so is waiting on the browser for. See
+    # `_hand_to_browser`.
+    invoked: set[str] = field(default_factory=set)
+    # The assistant message streaming now has ended, so every call in it has reached the browser.
+    settled: bool = False
     # The model the server chose when this query started, or that it was switched to since.
     model: str | None = None
 
@@ -179,6 +184,9 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 raise asyncio.CancelledError("The client tool query was cancelled")
             if not tool_use_id:
                 raise RuntimeError("Claude did not identify the pending client tool")
+            # Claude Code ran it, so the browser has a call to answer. See `_hand_to_browser`.
+            turn.invoked.add(tool_use_id)
+            self._hand_to_browser(turn)
             # The hook can arrive before the event consumer has seen TOOL_CALL_START.
             # Both paths use the SDK ID; names/arguments cannot disambiguate parallel calls.
             content = await turn.result(tool_use_id)
@@ -266,11 +274,17 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     and message.event.get("type") == "message_start"
                 ):
                     streaming = True
+                    turn = self._turns.get(thread_id)
+                    if turn:
+                        turn.settled = False
                 if isinstance(message, UserMessage) and isinstance(message.content, list):
                     turn = self._turns.get(thread_id)
                     for block in message.content:
-                        if turn and isinstance(block, ToolResultBlock) and block.is_error:
+                        if not turn or not isinstance(block, ToolResultBlock):
+                            continue
+                        if block.is_error:
                             turn.failed.add(block.tool_use_id)
+                        self._answered_without_browser(turn, block.tool_use_id)
                 yield message
                 complete = isinstance(message, AssistantMessage) and not streaming
                 if (
@@ -281,15 +295,51 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     complete = True
                 if complete:
                     turn = self._turns[thread_id]
-                    ready = turn.ended - turn.announced
-                    if ready:
-                        turn.announced.update(ready)
-                        await turn.queue.put(_ClientBoundary(ready))
+                    turn.settled = True
+                    self._hand_to_browser(turn)
 
         async for event in super()._stream_claude_sdk(
             messages(), thread_id, run_id, input_data, set()
         ):
             yield event
+
+    @staticmethod
+    def _hand_to_browser(turn):
+        """End this run on the client calls the browser has to answer, once there is one.
+
+        The run ends here and the browser runs the calls, then sends their results in a run of its
+        own, which picks the query up again (`run`). Two things have to be true first. The message
+        that asked for them has ended, so the browser has every call in it whole. And Claude Code
+        has run at least one of them: it can refuse a call itself before running it, for input it
+        can't parse, and then nothing waits on the browser. Handed over anyway, the browser had
+        nothing to run (the call already had Claude Code's error as its result), sent no run back,
+        and the model's own answer to the refusal, a retry or the answer in words, stayed here
+        unsent. The person saw the turn stop.
+
+        Claude Code may run a message's calls one at a time, each waiting on the browser before the
+        next, so the first one run hands over every call of the message still open.
+        """
+        ready = turn.ended - turn.announced
+        if not turn.settled or not ready & turn.invoked:
+            return
+        turn.announced.update(ready)
+        turn.queue.put_nowait(_ClientBoundary(ready))
+
+    @staticmethod
+    def _answered_without_browser(turn, tool_id):
+        """Forget a client call Claude Code answered itself before it was handed to the browser.
+
+        Only a refusal does that: a call Claude Code runs is answered with the browser's result,
+        after it was handed over. The refused call is no longer waited on, so the run goes on with
+        whatever the model does next.
+        """
+        if tool_id not in turn.offered or tool_id in turn.announced:
+            return
+        turn.offered.discard(tool_id)
+        turn.ended.discard(tool_id)
+        pending = turn.results.pop(tool_id, None)
+        if pending is not None and not pending.done():
+            pending.cancel()
 
     @staticmethod
     def _keep_failures(event, turn):

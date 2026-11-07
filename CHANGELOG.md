@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Claude Agent SDK Bot whose step was refused by Claude Code before it ran, such as a table sent
+  with broken data, goes on to retry or answer in words. The turn used to stop there in silence.
 - In the personal edition, a Bot names the app card's real buttons: Turn on, then Connect.
 - OpenBot Desktop's Claude plan sign-in says you'll paste back a code, not that nothing is typed.
 - At every start the server brings the saved tools of OpenBot's own apps, Routines and Google Drive,
