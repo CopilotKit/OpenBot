@@ -214,6 +214,21 @@ export function signInToCopilotKit(): {
   return { attempt, signedIn };
 }
 
+/** The approval page a CopilotKit sign-in is waiting on, and the code that page shows. */
+export type CopilotKitSignInPage = { url: string; userCode: string };
+
+/**
+ * The page the CLI opened for the sign-in `attempt`, once it has opened one, or null. A code that
+ * expires unapproved is replaced, so ask again while the sign-in waits.
+ */
+export function copilotKitSignInPage(
+  attempt: string,
+): Promise<CopilotKitSignInPage | null> {
+  return invoke<CopilotKitSignInPage | null>("copilotkit_sign_in_page", {
+    attempt,
+  });
+}
+
 /**
  * Connects this installation's apps with the CopilotKit sign-in the CLI now holds: CopilotKit
  * makes or replays its Composio project, and the native side keeps the key. Resolves once
