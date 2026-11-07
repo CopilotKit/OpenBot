@@ -73,10 +73,6 @@ deployment exactly as a typed endpoint key is, as `OPENAI_API_KEY` against that 
 URL, and saved in the protected store under the same endpoint-scoped entry. Bots run
 the `pareto` model; the composer lists what the gateway's `/v1/models` publishes.
 
-The row announces Unbiased AI's launch offer for new accounts, 50% off the first
-three months, until the end of November 2026 (Pacific time); from then on it reads
-as any other row, with no release needed. The offer itself is the platform's to end.
-
 A distributor can set `OPENBOT_UNBIASED_OAUTH_CLIENT_ID` to an alternative client
 registered with Unbiased AI. `OPENBOT_UNBIASED_PLATFORM_URL` points the flow at another
 platform for testing against a mock; the approval URL must belong to that platform.

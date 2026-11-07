@@ -38,9 +38,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Unbiased AI's approval page in the browser, where a person signs in or creates an account, and
   OpenBot receives an API key for the `pareto` model on Unbiased AI's OpenAI-compatible gateway. The
   key is stored on this computer the way a typed endpoint key is, and an Unbiased AI API key can be
-  pasted instead. Until the end of November 2026 the row carries the launch offer for new
-  accounts, 50% off for the first three months. See
-  [Model provider OAuth](desktop/PROVIDER_OAUTH.md#unbiased-ai).
+  pasted instead. See [Model provider OAuth](desktop/PROVIDER_OAUTH.md#unbiased-ai).
 - OpenBot Desktop installs the personal edition: nobody signs in, one computer is shared by your
   Bots, and you start with the Personal Assistant. Before, it installed the team edition, with its
   admin screens, the fintech example's Bots and a computer for each Bot. An existing installation

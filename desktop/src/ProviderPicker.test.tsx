@@ -1298,24 +1298,6 @@ test("a refused Unbiased AI sign-in shows why, submits nothing and keeps no key"
   expect(choices).toEqual([]);
 });
 
-test("a row's promotion shows as a badge beside its name, and only there", async () => {
-  invokeHandler = async (command) => {
-    if (command === "providers")
-      return allProviders.map((row) =>
-        row.id === "unbiased" ? { ...row, promotion: "50% off" } : row,
-      );
-    throw new Error(`unexpected command ${command}`);
-  };
-  const view = await renderPicker();
-  const badge = await view.findByText("50% off");
-  expect(badge.className).toBe("tile-badge");
-  expect(badge.parentElement?.className).toBe("tile-name");
-  expect(badge.parentElement?.textContent).toBe("Unbiased AI 50% off");
-  expect(view.getAllByText("50% off")).toHaveLength(1);
-  // The badge is part of the row's name for a screen reader, so the row is still found by it.
-  expect(await view.findByRole("radio", { name: /Unbiased AI/ })).toBeTruthy();
-});
-
 test("a chosen provider stands alone, and Change or Escape shows them all again", async () => {
   invokeHandler = async (command) => {
     if (command === "providers") return providers;
