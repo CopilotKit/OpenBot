@@ -214,11 +214,14 @@ what OpenBot asks before running it depends on that classification. Arcade publi
 | `GithubApi` | 100 (the page cap) |                    **0** |
 
 Curated toolkits classify every tool. Generated API wrappers classify none. An action that is not
-classified is treated as a **destructive write**, because an unlabelled action is not claiming to be
-safe. So an administrator enabling an unclassified toolkit is warned **before** finishing that
-**every call will ask for approval** — not because anything is wrong with the toolkit, but because
-nothing in it can be told apart from a write that cannot be undone. Where a curated toolkit exists
-for the app, enable that one.
+classified is recorded as an **unclassified write** (`unclassified` on `mcp_tools`), because an
+unlabelled action is not claiming to be safe. It asks first wherever a change asks (**Ask before
+making changes**, an approval rule), and a check-in, a task's unasked read or a memory source never
+calls it. It is not marked destructive, because Arcade never said it destroys anything: that marker
+is what makes a call always ask (see [Approvals](../approvals.md)) and what a Bot's page draws as
+"destroys things", and it stays for the actions Arcade flags, such as `Attio.RemoveFromList`. A
+Composio action with no label is recorded the same way. An administrator enabling an unclassified
+toolkit is warned **before** finishing. Where a curated toolkit exists for the app, enable that one.
 
 ## Least privilege is not an Arcade property
 

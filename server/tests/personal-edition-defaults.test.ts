@@ -36,21 +36,22 @@ describe("the personal edition's capabilities", () => {
     expect(resolveCapability(rows, member, "slackTeams").allowed).toBe(false);
   });
 
-  test.each([
-    "isolatedComputers",
-    "teamBots",
-    "slackTeams",
-    "localComputer",
-  ] as const)("refuses %s", (capability) => {
-    setEdition("personal");
-    expect(resolveCapability([], member, capability).allowed).toBe(false);
-  });
+  test.each(["isolatedComputers", "teamBots", "slackTeams"] as const)(
+    "refuses %s",
+    (capability) => {
+      setEdition("personal");
+      expect(resolveCapability([], member, capability).allowed).toBe(false);
+    },
+  );
 
   test.each([
     "passwordManager",
     "proactive",
     "useBots",
     "cloudBrowser",
+    // Folders on the person's own machine, through OpenBot Desktop. It was refused with "isn't part
+    // of OpenBot Personal" on the desktop that offers it.
+    "localComputer",
   ] as const)("keeps %s on", (capability) => {
     setEdition("personal");
     expect(resolveCapability([], member, capability).allowed).toBe(true);

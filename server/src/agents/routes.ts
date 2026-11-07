@@ -297,10 +297,11 @@ export function createAgentRoutes(
     canHandOn?: (agentId: string) => Promise<boolean | undefined>;
   },
   /**
-   * Whether a coworker can run on this deployment's own Bot, i.e. be created with no endpoint.
+   * Whether a coworker can be created with no endpoint, i.e. run here.
    *
-   * The store already refuses such a create on a deployment with no managed Bot; this exists so a
-   * screen can say so before somebody fills in three steps of a form that was always going to fail.
+   * It runs on the managed Bot when there is one, and otherwise in this server on its role
+   * description (`create`'s `built_in` branch). This exists so a screen can say so before somebody
+   * fills in three steps of a form that was always going to fail.
    */
   builtInAvailable = false,
   /**
@@ -338,6 +339,11 @@ export function createAgentRoutes(
    * Absent is no: a deployment that never said it can make a second computer is not trusted to.
    */
   isolation?: { available: boolean },
+  /**
+   * The name this server's container reaches the person's machine by (`OPENBOT_THIS_MACHINE_HOST`),
+   * so a connection test dials an agent on their loopback where a run will. See onThisMachine.
+   */
+  dial?: { thisMachineHost?: string },
 ) {
   const isolationAvailable = isolation?.available ?? false;
   /** The dto with the one fact only this closure knows: whether the coworker runs on our own Bot. */
@@ -353,6 +359,15 @@ export function createAgentRoutes(
      */
     runsOnOpenBotModel:
       agent.endpoint === null || takesModelChoice(agent.endpoint),
+    /*
+     * Whether OpenBot gives it a key on every run, as it does at every address it runs itself: the
+     * Bot in the box and the harness picked in setup (see runtime-agents.ts). Such a Bot uses its
+     * tools with no key of its own, so its Setup page must not say it can't.
+     */
+    keyFromOpenBot:
+      typeof agent.endpoint === "string" &&
+      managedRun !== undefined &&
+      isManagedEndpoint(agent.endpoint, managedRun.endpoints),
   });
   /**
    * The dtos, each with whether its computer of its own is in effect now.
@@ -538,6 +553,9 @@ export function createAgentRoutes(
       // Our own addresses are reachable at exactly their URLs: the test must not refuse the Bot
       // this deployment started, and must not open anything else on its host.
       ...(managedRun ? { managedEndpoints: managedRun.endpoints } : {}),
+      ...(dial?.thisMachineHost
+        ? { thisMachineHost: dial.thisMachineHost }
+        : {}),
     });
     // 200 either way: the request succeeded, and the verdict is the payload. A failed connection test
     // is an answer, not an error, and a 4xx here would have the surface render it as a broken button.

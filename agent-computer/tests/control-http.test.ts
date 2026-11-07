@@ -118,7 +118,8 @@ describe.skipIf(!asked)(
         (await post("/control/release", { requestId: "wrong" })).status,
       ).toBe(409);
       expect((await post("/control/release", { requestId })).status).toBe(200);
-      for (const path of ["/navigate", "/click", "/type", "/key", "/scroll"]) {
+      // Opening another page needs no look at the one the person left; see handback-fresh-look.test.ts.
+      for (const path of ["/click", "/type", "/key", "/scroll"]) {
         const response = await post(path, {});
         expect(response.status).toBe(409);
         expect(await response.json()).toMatchObject({

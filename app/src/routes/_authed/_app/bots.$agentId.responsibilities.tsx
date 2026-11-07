@@ -14,7 +14,7 @@ function ResponsibilitiesPage() {
     <BotSubpage
       agentId={agentId}
       description="Review this Bot’s ongoing goals, what triggered each run, and its results."
-      title="Responsibilities"
+      title="Goals"
     >
       {(agent) => <BotResponsibilities agentId={agent.id} />}
     </BotSubpage>

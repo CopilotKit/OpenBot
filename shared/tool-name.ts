@@ -12,8 +12,12 @@ import { SEARCH_TOOLS } from "./tool-search";
  * the reader's problem, and putting it on screen tells them how the thing is built rather than what
  * their Bot just did.
  *
- * Anything that is not a prefixed MCP name is left exactly as it is: a component the app registered
- * already has a name somebody chose.
+ * ANY OTHER NAME IS PUT IN WORDS TOO, never drawn as it came. A line is drawn the moment a call
+ * starts, before its arguments and before the app's own renderer for it may have loaded, so its name
+ * is all there is to say. FOUND LIVE: a Bot first called `web_search`, a name it was never offered,
+ * and its line read "web_search" until the real search joined it. A component the app draws
+ * (`showBarChart`) reads "Show bar chart" while its renderer is not there yet, and a name with no
+ * words in it reads as a tool being used.
  */
 export type ToolName = {
   /** What was done, for the line itself. */
@@ -26,11 +30,31 @@ export function readToolName(name: string, running = false): ToolName {
   const own = ownToolLabel(name, running);
   if (own) return { label: own };
   const parts = name.split("__");
-  if (parts.length < 3 || parts[0] !== "mcp") return { label: name };
+  if (parts.length < 3 || parts[0] !== "mcp")
+    return {
+      label:
+        wordsOf(name).length > 0
+          ? humanise(name)
+          : running
+            ? "Using a tool"
+            : "Used a tool",
+    };
 
   const [, rawServer, ...rest] = parts;
+  /*
+   * OpenBot's own Routines app also carries a goal's tools for a conversation. They are the tools a
+   * goal's run holds, so they read in its words, "Created a goal", and not "Create goal" beside
+   * "routines".
+   */
+  if (rawServer === ROUTINES_APP) {
+    const goal = ownToolLabel(rest.join("__"), running);
+    if (goal) return { label: goal };
+  }
   return appToolName(rawServer ?? "", rest.join("__"));
 }
+
+/** The key of OpenBot's own Routines app (`ALWAYS_ON_APP` on the server). */
+const ROUTINES_APP = "routines";
 
 /**
  * One app's tool, from its server key and the tool's own name: what `readToolName` reads out of an
@@ -158,6 +182,35 @@ type OwnTool = {
   answersTheModel?: true;
 };
 
+/** A goal's tools, under the names they are offered as. */
+function goalTools(names: {
+  create: string;
+  list: string;
+  update: string;
+  report: string;
+  run: string;
+  pause: string;
+  resume: string;
+  complete: string;
+}): Record<string, OwnTool> {
+  return {
+    [names.create]: { running: "Creating a goal", done: "Created a goal" },
+    [names.list]: { running: "Checking goals", done: "Checked goals" },
+    [names.update]: { running: "Updating a goal", done: "Updated a goal" },
+    [names.report]: {
+      running: "Recording progress",
+      done: "Recorded progress",
+    },
+    [names.run]: { running: "Starting a goal", done: "Started a goal" },
+    [names.pause]: { running: "Pausing a goal", done: "Paused a goal" },
+    [names.resume]: { running: "Resuming a goal", done: "Resumed a goal" },
+    [names.complete]: {
+      running: "Marking a goal complete",
+      done: "Marked a goal complete",
+    },
+  };
+}
+
 /**
  * The tools OpenBot itself offers a Bot, named in words somebody chose.
  *
@@ -206,6 +259,12 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     done: "Checked available tools",
   },
   save_skill: { running: "Proposing a skill", done: "Proposed a skill" },
+
+  /*
+   * Drawing a generated interface in the conversation. The runtime offers it, not an OpenBot
+   * registration, so `built-in-tool-labels.test.ts` cannot find it; its words go here by hand.
+   */
+  render_ui: { running: "Drawing an interface", done: "Drew an interface" },
 
   // Making a Bot from a conversation.
   list_bots: {
@@ -270,39 +329,28 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     done: "Cleared a next step",
   },
 
-  // Responsibilities.
-  create_responsibility: {
-    running: "Creating a responsibility",
-    done: "Created a responsibility",
-  },
-  list_responsibilities: {
-    running: "Checking responsibilities",
-    done: "Checked responsibilities",
-  },
-  update_responsibility: {
-    running: "Updating a responsibility",
-    done: "Updated a responsibility",
-  },
-  report_responsibility_progress: {
-    running: "Recording progress",
-    done: "Recorded progress",
-  },
-  run_responsibility: {
-    running: "Starting a responsibility",
-    done: "Started a responsibility",
-  },
-  pause_responsibility: {
-    running: "Pausing a responsibility",
-    done: "Paused a responsibility",
-  },
-  resume_responsibility: {
-    running: "Resuming a responsibility",
-    done: "Resumed a responsibility",
-  },
-  complete_responsibility: {
-    running: "Marking a responsibility complete",
-    done: "Marked a responsibility complete",
-  },
+  // Goals. The `*_responsibility` names are what a goal's tools were called before they said goal,
+  // kept so the steps in a conversation recorded then still read as words.
+  ...goalTools({
+    create: "create_goal",
+    list: "list_goals",
+    update: "update_goal",
+    report: "report_goal_progress",
+    run: "run_goal",
+    pause: "pause_goal",
+    resume: "resume_goal",
+    complete: "complete_goal",
+  }),
+  ...goalTools({
+    create: "create_responsibility",
+    list: "list_responsibilities",
+    update: "update_responsibility",
+    report: "report_responsibility_progress",
+    run: "run_responsibility",
+    pause: "pause_responsibility",
+    resume: "resume_responsibility",
+    complete: "complete_responsibility",
+  }),
 
   // The browser. A folded group names these steps in the same words (`browser-activity.ts`).
   computer_navigate: { running: "Opening page", done: "Opened page" },

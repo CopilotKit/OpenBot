@@ -4,8 +4,9 @@ import { classify } from "../src/plugins/arcade";
 /**
  * What an Arcade tool does, read from `metadata.behavior`. `destructive` is read FIRST: a reading
  * that checked `read_only` first would record a both-flagged tool as a read, the one direction
- * nothing downstream recovers from. Anything that cannot be read fails closed to a destructive
- * write, which costs an approval in front of a read rather than a deletion let through unannounced.
+ * nothing downstream recovers from. Anything that cannot be read is an unclassified write: a write,
+ * never a read, and not destructive, because Arcade never said so. Destructive is what makes a call
+ * always ask; unclassified is what keeps a background read away from it.
  */
 describe("classify", () => {
   test("destructive is a destructive write", () => {
@@ -34,14 +35,24 @@ describe("classify", () => {
     ).toEqual({ effect: "write", destructive: false });
   });
 
-  test("absent metadata fails closed", () => {
-    expect(classify(undefined)).toEqual({ effect: "write", destructive: true });
+  test("absent metadata is an unclassified write, not a destructive one", () => {
+    expect(classify(undefined)).toEqual({
+      effect: "write",
+      destructive: false,
+      unclassified: true,
+    });
+    expect(classify({ metadata: null })).toEqual({
+      effect: "write",
+      destructive: false,
+      unclassified: true,
+    });
   });
 
-  test("a string-valued flag fails closed rather than coercing", () => {
+  test("a string-valued flag is unclassified rather than coerced", () => {
     expect(classify({ behavior: { read_only: "true" } })).toEqual({
       effect: "write",
-      destructive: true,
+      destructive: false,
+      unclassified: true,
     });
   });
 });

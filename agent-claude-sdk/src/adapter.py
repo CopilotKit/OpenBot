@@ -21,6 +21,8 @@ from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, RunStartedEve
 from ag_ui_claude_sdk import ClaudeAgentAdapter
 from claude_agent_sdk import (
     AssistantMessage,
+    CLIConnectionError,
+    CLINotFoundError,
     EffortLevel,
     HookMatcher,
     ToolResultBlock,
@@ -35,9 +37,35 @@ logger = logging.getLogger(__name__)
 # The efforts `ClaudeAgentOptions.effort` takes (the CLI's `--effort`), read from the SDK itself.
 SDK_EFFORTS = frozenset(get_args(EffortLevel))
 
+AG_UI_TOOL_PREFIX = "mcp__ag_ui__"
+# Every tool of the `ag_ui` server, in Claude Code's permission-rule syntax
+# (https://code.claude.com/docs/en/permissions: "`mcp__puppeteer__*` matches every tool from the
+# `puppeteer` server").
+AG_UI_TOOLS = f"{AG_UI_TOOL_PREFIX}*"
+
+# What a person is told when Claude Code never started, in place of the process error.
+START_FAILED = (
+    "This Bot couldn't start, so it didn't answer. Send your message again, and restart "
+    "OpenBot if it keeps happening."
+)
+
 
 class ModelAuthenticationError(Exception):
     pass
+
+
+def not_started(error):
+    """Whether this is the SDK saying Claude Code's process was never started.
+
+    The SDK raises `CLIConnectionError` from `connect` with these messages (subprocess_cli.py in
+    0.2.152), and also once a running process goes away, which is not a start failure.
+    """
+    return isinstance(error, CLINotFoundError) or (
+        isinstance(error, CLIConnectionError)
+        and str(error).startswith(
+            ("Failed to start Claude Code", "Working directory does not exist")
+        )
+    )
 
 
 def run_model(forwarded_props):
@@ -79,6 +107,11 @@ class _Turn:
     # Tool calls Claude Code reported as failed, and the result the turn streamed for each.
     failed: set[str] = field(default_factory=set)
     failed_results: dict[str, str] = field(default_factory=dict)
+    # Client calls Claude Code has actually run, and so is waiting on the browser for. See
+    # `_hand_to_browser`.
+    invoked: set[str] = field(default_factory=set)
+    # The assistant message streaming now has ended, so every call in it has reached the browser.
+    settled: bool = False
     # The model the server chose when this query started, or that it was switched to since.
     model: str | None = None
 
@@ -130,6 +163,17 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     options.system_prompt, instructions
                 )
         tool_names = {tool.name for tool in input_data.tools} if input_data else set()
+        # Upstream allows each `ag_ui` tool by name, and the SDK passes the list to Claude Code as
+        # one `--allowedTools` argument, so it grew with every tool a Bot holds. A Bot offered all
+        # of HubSpot, Notion and Calendar is offered hundreds. The `ag_ui` server holds exactly this
+        # run's tools (and the state tool), so one rule for the server allows the same set.
+        options.allowed_tools = [
+            rule
+            for rule in options.allowed_tools
+            if not rule.startswith(AG_UI_TOOL_PREFIX)
+        ]
+        if "ag_ui" in (options.mcp_servers or {}):
+            options.allowed_tools.append(AG_UI_TOOLS)
 
         async def client_result(input_data, tool_use_id, context):
             turn = self._turns.get(thread_id)
@@ -140,6 +184,9 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 raise asyncio.CancelledError("The client tool query was cancelled")
             if not tool_use_id:
                 raise RuntimeError("Claude did not identify the pending client tool")
+            # Claude Code ran it, so the browser has a call to answer. See `_hand_to_browser`.
+            turn.invoked.add(tool_use_id)
+            self._hand_to_browser(turn)
             # The hook can arrive before the event consumer has seen TOOL_CALL_START.
             # Both paths use the SDK ID; names/arguments cannot disambiguate parallel calls.
             content = await turn.result(tool_use_id)
@@ -168,17 +215,16 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             options.setting_sources = []
             options.strict_mcp_config = True
             options.permission_mode = "dontAsk"
-            options.allowed_tools = [
-                f"mcp__ag_ui__{name}" for name in sorted(tool_names)
-            ]
+            options.allowed_tools = [AG_UI_TOOLS] if tool_names else []
             options.mcp_servers = {
                 name: server
                 for name, server in options.mcp_servers.items()
                 if name == "ag_ui"
             }
+            offered = {f"{AG_UI_TOOL_PREFIX}{name}" for name in tool_names}
 
             async def only_offered(input_data, tool_use_id, context):
-                if input_data.get("tool_name") in options.allowed_tools:
+                if input_data.get("tool_name") in offered:
                     return {}
                 return {
                     "hookSpecificOutput": {
@@ -189,6 +235,14 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 }
 
             options.hooks["PreToolUse"] = [HookMatcher(hooks=[only_offered])]
+        else:
+            # A full Bot acts through what OpenBot grants it: its computer, its apps, web search,
+            # Routines and `run_subagent`, each under the deployment's policy and audit trail.
+            # Claude Code's own versions (WebSearch, Bash, Read, CronCreate, Agent, RemoteTrigger
+            # and the rest) run in this container instead, ungoverned and unapproved. Left in
+            # view, Claude reached for its own WebSearch, was refused, and told the person to
+            # grant it. No built-ins, as on the model endpoint; OpenBot's tools still load.
+            options.tools = []  # SDK 0.2.152 maps this to --tools "".
         return options
 
     async def _run_query(self, input_data):
@@ -220,11 +274,17 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     and message.event.get("type") == "message_start"
                 ):
                     streaming = True
+                    turn = self._turns.get(thread_id)
+                    if turn:
+                        turn.settled = False
                 if isinstance(message, UserMessage) and isinstance(message.content, list):
                     turn = self._turns.get(thread_id)
                     for block in message.content:
-                        if turn and isinstance(block, ToolResultBlock) and block.is_error:
+                        if not turn or not isinstance(block, ToolResultBlock):
+                            continue
+                        if block.is_error:
                             turn.failed.add(block.tool_use_id)
+                        self._answered_without_browser(turn, block.tool_use_id)
                 yield message
                 complete = isinstance(message, AssistantMessage) and not streaming
                 if (
@@ -235,15 +295,51 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     complete = True
                 if complete:
                     turn = self._turns[thread_id]
-                    ready = turn.ended - turn.announced
-                    if ready:
-                        turn.announced.update(ready)
-                        await turn.queue.put(_ClientBoundary(ready))
+                    turn.settled = True
+                    self._hand_to_browser(turn)
 
         async for event in super()._stream_claude_sdk(
             messages(), thread_id, run_id, input_data, set()
         ):
             yield event
+
+    @staticmethod
+    def _hand_to_browser(turn):
+        """End this run on the client calls the browser has to answer, once there is one.
+
+        The run ends here and the browser runs the calls, then sends their results in a run of its
+        own, which picks the query up again (`run`). Two things have to be true first. The message
+        that asked for them has ended, so the browser has every call in it whole. And Claude Code
+        has run at least one of them: it can refuse a call itself before running it, for input it
+        can't parse, and then nothing waits on the browser. Handed over anyway, the browser had
+        nothing to run (the call already had Claude Code's error as its result), sent no run back,
+        and the model's own answer to the refusal, a retry or the answer in words, stayed here
+        unsent. The person saw the turn stop.
+
+        Claude Code may run a message's calls one at a time, each waiting on the browser before the
+        next, so the first one run hands over every call of the message still open.
+        """
+        ready = turn.ended - turn.announced
+        if not turn.settled or not ready & turn.invoked:
+            return
+        turn.announced.update(ready)
+        turn.queue.put_nowait(_ClientBoundary(ready))
+
+    @staticmethod
+    def _answered_without_browser(turn, tool_id):
+        """Forget a client call Claude Code answered itself before it was handed to the browser.
+
+        Only a refusal does that: a call Claude Code runs is answered with the browser's result,
+        after it was handed over. The refused call is no longer waited on, so the run goes on with
+        whatever the model does next.
+        """
+        if tool_id not in turn.offered or tool_id in turn.announced:
+            return
+        turn.offered.discard(tool_id)
+        turn.ended.discard(tool_id)
+        pending = turn.results.pop(tool_id, None)
+        if pending is not None and not pending.done():
+            pending.cancel()
 
     @staticmethod
     def _keep_failures(event, turn):
@@ -294,6 +390,14 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 event = self._keep_failures(event, turn)
                 await turn.queue.put(event)
         except Exception as error:
+            if not_started(error):
+                # Claude Code never ran, so this sentence is all the conversation will show. The
+                # process error ("[Errno 7] Argument list too long") is for the log.
+                logger.error("Claude Code did not start: %s", error)
+                await turn.queue.put(
+                    RunErrorEvent(message=START_FAILED, code="OPENBOT_HARNESS_START_FAILED")
+                )
+                return
             await turn.queue.put(
                 RunErrorEvent(
                     message=str(error),
@@ -329,16 +433,45 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 self._model_only
                 and (input_data.forwarded_props or {}).get("openbotAnswerOnly") is True
             )
-            if answer_only:
-                # An SDK query keeps the tools it started with. The last model step must
-                # replay the real collected results in a fresh query with no tools, rather
-                # than resume a query that can keep calling them until the step cap.
-                await self.interrupt(thread_id)
-                input_data = input_data.model_copy(update={"tools": []})
             turn = self._turns.get(thread_id)
             if turn is not None and turn.task.done():
                 self._turns.pop(thread_id)
                 turn = None
+            if turn is not None and all(
+                turn.result(tool_id).done() for tool_id in turn.delivered
+            ):
+                # Nothing it handed out is still waiting for a result, so this query can take no
+                # more: it ran out of time while the browser or the person had the step, and is
+                # still shutting down. A run only ever finds a live query between its client steps.
+                await self.interrupt(thread_id)
+                turn = None
+            # An SDK query keeps the tools it started with. On the model endpoint the server
+            # decides each step's tools, and a step that is sent other tools than the running
+            # query holds is answered by a fresh query replaying the real collected results:
+            # the last step is sent none, and a step after `search_tools` is sent what it found.
+            # Resumed instead, the query never holds a found tool, and Claude called it by the
+            # name in the search's text, which is no tool it was given.
+            # A person who wrote after the pending call is answered by a fresh query from the
+            # whole thread. The browser closes a call it will never finish (Stop, a reload, a
+            # tool it only draws) with an "interrupted" result and sends the new message after
+            # it; resuming the waiting query took only that result, so the Bot carried on as if
+            # nothing had been said, and the turn's snapshot then dropped the person's words
+            # from the thread. A continuation that carries only tool results still resumes.
+            person_spoke = (
+                turn is not None
+                and bool(input_data.messages)
+                and input_data.messages[-1].role == "user"
+            )
+            replaced = answer_only or person_spoke or (
+                self._model_only
+                and turn is not None
+                and {tool.name for tool in input_data.tools} != turn.tool_names
+            )
+            if replaced:
+                await self.interrupt(thread_id)
+                turn = None
+            if answer_only:
+                input_data = input_data.model_copy(update={"tools": []})
 
             yield RunStartedEvent(thread_id=thread_id, run_id=run_id)
             if turn is not None:
@@ -362,15 +495,12 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     yield RunFinishedEvent(thread_id=thread_id, run_id=run_id)
                     return
             else:
-                if (
-                    not answer_only
-                    and input_data.messages
-                    and input_data.messages[-1].role == "tool"
-                ):
-                    yield RunErrorEvent(
-                        message="The Claude query for this tool result is no longer running. Start a new message."
-                    )
-                    return
+                # A tool result whose query is no longer running is answered by a fresh query that
+                # replays the thread, the call and its result included, as a replaced model step is.
+                # A query is bounded (`run_replayed_query`), and the person deciding a step OpenBot
+                # asked them about routinely takes longer than that bound; a restart ends one too.
+                # Refused, the run ended with an error nobody was shown and the Bot never answered
+                # the person's decision.
                 chosen = run_model(input_data.forwarded_props)
                 turn = _Turn(
                     tool_names={tool.name for tool in input_data.tools},
@@ -437,7 +567,10 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             if turn is None:
                 continue
             turn.cancelled = True
-            await super().interrupt(current)
+            # Only this thread's own worker. Upstream interrupts every thread's worker when it is
+            # given a thread it no longer holds, which a query that ended on its own no longer is.
+            if current in self._workers:
+                await super().interrupt(current)
             for result in turn.results.values():
                 if not result.done():
                     result.cancel()

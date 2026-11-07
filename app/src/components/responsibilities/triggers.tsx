@@ -197,7 +197,7 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
       </div>
       {goal.status !== "active" && (
         <p className="text-muted-foreground text-xs">
-          This responsibility is {goal.status}. Its triggers won't start it.
+          This goal is {goal.status}. Its triggers won't start it.
         </p>
       )}
       {triggers.error && (
@@ -531,7 +531,7 @@ function NewTriggerDialog({
         <DialogHeader>
           <DialogTitle>Add trigger</DialogTitle>
           <DialogDescription>
-            Something outside OpenBot that starts this responsibility.
+            Something outside OpenBot that starts work on this goal.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">

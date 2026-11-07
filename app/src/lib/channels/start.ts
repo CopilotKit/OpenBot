@@ -130,6 +130,9 @@ export function useStartChannel() {
   const createChannel = useMutation(createChannelMutationOptions(queryClient));
   const createGroup = useMutation(createGroupMutationOptions(queryClient));
   const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
+  const discardFailedStart = useMutation(
+    deleteChannelMutationOptions(queryClient, true),
+  );
 
   const start = (
     agentId: string,
@@ -150,7 +153,7 @@ export function useStartChannel() {
       },
       save: saveConversationModel,
       discard: async (channelId) => {
-        await deleteChannel.mutateAsync(channelId);
+        await discardFailedStart.mutateAsync(channelId);
       },
       open: async (channelId) => {
         stashFirstMessage(channelId, text, skillInstructions);

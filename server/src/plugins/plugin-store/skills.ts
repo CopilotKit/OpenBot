@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, or } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
 import {
   agentProfiles,
@@ -10,6 +10,7 @@ import {
   skillTools,
   vendorNameOf,
 } from "../../db/schema";
+import { currentEdition } from "../../edition";
 import type { StoreContext } from "./context";
 import { PluginRefusedError, type SkillActor, type SkillRecord } from "./model";
 
@@ -313,8 +314,21 @@ export function skillMethods(context: StoreContext) {
      * configured while no hop ever happened.
      *
      * The join keeps a grant held by a Bot that no longer exists from counting.
+     *
+     * In the personal edition, every other Bot, granted or not. There is one person and every Bot
+     * is theirs, so there is nobody to keep one Bot from another, as there is nobody to keep an app
+     * from a Bot (see `personal-defaults.ts`), and nobody else to grant it either: Personal
+     * Assistant told the person it had no way to ask the Bot they had just picked.
      */
     async botsReachableFrom(agentId: string): Promise<string[]> {
+      if (currentEdition() === "personal") {
+        const rows = await database
+          .select({ id: agents.id })
+          .from(agents)
+          .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
+          .where(and(ne(agents.id, agentId), isNull(agentProfiles.deletedAt)));
+        return rows.map((row) => row.id);
+      }
       const rows = await database
         .select({ ref: pluginGrants.ref })
         .from(pluginGrants)

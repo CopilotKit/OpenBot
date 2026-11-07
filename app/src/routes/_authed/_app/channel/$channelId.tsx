@@ -4,6 +4,7 @@ import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
+import { ConversationApprovals } from "@/components/approvals/inline-approval";
 import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
@@ -89,6 +90,11 @@ function RouteComponent() {
       open={(isSettingsOpen || isWatching) && agentId !== undefined}
       detailWidth={isWatching ? SCREEN_PANEL_WIDTH : undefined}
       title={isWatching ? "Computer" : undefined}
+      waiting={
+        channel.data ? (
+          <ConversationApprovals threadId={channel.data.threadId} />
+        ) : null
+      }
       detail={
         agentId === undefined ? null : isWatching ? (
           // Manual watch remains active even when there is no current browser action.

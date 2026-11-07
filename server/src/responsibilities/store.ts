@@ -114,7 +114,7 @@ export function createResponsibilityStore(
         const existing = await owned(transaction, ownerUserId, id, true);
         if (existing.status === "completed" && status !== "completed")
           throw new ResponsibilityRefusedError(
-            "A completed responsibility cannot be resumed. Create a new responsibility.",
+            "A completed goal can't be resumed. Create a new goal.",
           );
         const [row] = await transaction
           .update(responsibilities)
@@ -144,7 +144,7 @@ export function createResponsibilityStore(
           throw new ResponsibilityNotFoundError();
         if (existing.status !== "active")
           throw new ResponsibilityRefusedError(
-            "Only an active responsibility can make progress.",
+            "Only an active goal can make progress.",
           );
         if (input.sourceRunId) {
           const [run] = await transaction
@@ -159,7 +159,7 @@ export function createResponsibilityStore(
             );
           if (!run)
             throw new ResponsibilityRefusedError(
-              "Progress must come from the responsibility's current run.",
+              "Progress must come from the goal's current run.",
             );
         }
         const [row] = await transaction
@@ -354,7 +354,7 @@ export function createResponsibilityStore(
               status: "skipped",
               error:
                 goal.status !== "active"
-                  ? `Responsibility is ${goal.status}.`
+                  ? `The goal is ${goal.status}.`
                   : "Bot or conversation access changed.",
               finishedAt: new Date(),
             })
@@ -409,7 +409,7 @@ export function createResponsibilityStore(
           .for("update");
         if (run?.status !== "running")
           throw new ResponsibilityRefusedError(
-            "This responsibility run is no longer running.",
+            "This goal's run is no longer running.",
           );
         const replyText =
           outcome.status === "succeeded"
@@ -432,6 +432,19 @@ export function createResponsibilityStore(
             .set({ lastResult: replyText, updatedAt: new Date() })
             .where(eq(responsibilities.id, run.responsibilityId));
       });
+    },
+    async requeueRun(runId) {
+      const [requeued] = await database
+        .update(responsibilityRuns)
+        .set({ status: "queued", startedAt: null, finishedAt: null })
+        .where(
+          and(
+            eq(responsibilityRuns.id, runId),
+            eq(responsibilityRuns.status, "running"),
+          ),
+        )
+        .returning({ id: responsibilityRuns.id });
+      return Boolean(requeued);
     },
     async resumeWaiting(ownerUserId, runId, response) {
       if (JSON.stringify(response)?.length > 32_768)
@@ -458,7 +471,7 @@ export function createResponsibilityStore(
         if (!run) throw new ResponsibilityNotFoundError();
         if (goal.status !== "active")
           throw new ResponsibilityRefusedError(
-            "Resume the responsibility before answering its waiting run.",
+            "Resume the goal before answering its waiting run.",
           );
         if (run.status !== "waiting" || !run.waiting) return false;
         await transaction

@@ -73,6 +73,13 @@ export const EVERY_BOT_REFUSAL =
   "In OpenBot Personal every Bot can use every app you connect. Turn the app off to take it from all of them.";
 
 /**
+ * What the personal edition's server answers when somebody tries to stop one Bot asking another.
+ * Every Bot there is the one person's, so each can ask the others (see `botsReachableFrom`).
+ */
+export const EVERY_BOT_ASKS_REFUSAL =
+  "In OpenBot Personal every Bot can ask your other Bots for help.";
+
+/**
  * Gives Bots every tool of these apps they don't hold yet. Writes nothing when they hold them all,
  * so asking on every run costs reads and no trail rows. The trail names why: Routines' grants as
  * always on, any other app's as `by`.
@@ -140,19 +147,25 @@ async function everyBotApps(deps: PersonalDefaultsDeps): Promise<string[]> {
 }
 
 /**
- * At startup, in every edition: add Routines if it isn't added, and give every Bot all of its tools.
- * The ones that change things too, because scheduling is the point; a Bot still asks before each one
- * runs while Ask before acting is on.
+ * At startup, in every edition: add Routines if it isn't added, bring the saved tools of every app
+ * whose tools are OpenBot's own code up to date with this build (see `refreshOwnListings`), and give
+ * every Bot all of Routines' tools. The ones that change things too, because scheduling is the point;
+ * a Bot still asks before each one runs while Ask before acting is on.
+ *
+ * Brought up to date before the grants, so a tool this build adds to Routines is given to every Bot
+ * at the same start rather than the one after.
  */
 export async function ensureAlwaysOnApp(
   store: Pick<Store, "grant"> & {
     serverAddress(serverId: string): Promise<unknown>;
     addServer(input: { key: string; by: string }): Promise<unknown>;
+    refreshOwnListings(): Promise<string[]>;
   },
   deps: PersonalDefaultsDeps,
 ): Promise<void> {
   if (!(await store.serverAddress(ALWAYS_ON_APP)))
     await store.addServer({ key: ALWAYS_ON_APP, by: ALWAYS_ON_BY });
+  await store.refreshOwnListings();
   await grantEveryTool(
     store,
     deps,

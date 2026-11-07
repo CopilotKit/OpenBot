@@ -32,6 +32,11 @@ export type DesktopStatus = {
   appPort: number | null;
   version: string;
   build: string;
+  /**
+   * The folder the desktop app writes its log file to. Absent from a desktop app older than the
+   * log, which has no Open log folder to offer.
+   */
+  logFolder?: string | null;
 };
 
 /** The Intelligence CLI's own end-to-end readiness. */
@@ -58,7 +63,23 @@ export type DesktopAppUpdate = {
     total: number | null;
     restarting: boolean;
   } | null;
+  /**
+   * False on a build that never updates itself: an internal or candidate build, or one without the
+   * updater. Absent from a desktop app older than the field, which still answers a check.
+   */
+  updatesItself?: boolean;
 };
+
+/**
+ * What the desktop app found when asked to check for updates now: it reads its update feed at once.
+ * A newer version is named even if this person closed the banner on it, because they asked.
+ */
+export type DesktopAppUpdateCheck =
+  | { found: "available"; version: string; current: string }
+  | { found: "upToDate"; current: string }
+  | { found: "installing"; version: string; current: string }
+  /** This build never updates itself: an internal or candidate build. */
+  | { found: "notOffered"; current: string };
 
 export const desktopKeys = {
   all: ["desktop"] as const,

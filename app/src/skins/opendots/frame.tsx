@@ -40,6 +40,7 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { setBotPausedMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import { botLifecycleQueryOptions } from "@/lib/bot-lifecycle/queries";
@@ -77,6 +78,7 @@ function RailUserMenu() {
   const user = useQuery(currentUserQueryOptions());
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
+  const signOutOffered = useSignOutOffered();
   if (!user.data) return null;
   return (
     <DropdownMenu>
@@ -99,19 +101,23 @@ function RailUserMenu() {
           {/* The rail draws only the avatar, so the version sits under the name here. */}
           <OpenBotVersion className="-mt-1 max-w-56 px-1.5 pb-1 text-[10px] leading-3 text-muted-foreground" />
         </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          className="gap-2 px-2 py-1.5"
-          disabled={signOut.isPending}
-          onClick={async () => {
-            await signOut.mutateAsync();
-            await navigate({ to: "/sign" });
-          }}
-          variant="destructive"
-        >
-          <IconLogout />
-          Sign out
-        </DropdownMenuItem>
+        {signOutOffered ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="gap-2 px-2 py-1.5"
+              disabled={signOut.isPending}
+              onClick={async () => {
+                await signOut.mutateAsync();
+                await navigate({ to: "/sign" });
+              }}
+              variant="destructive"
+            >
+              <IconLogout />
+              Sign out
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
+import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { authFromConfiguration } from "../src/agents/auth-header";
 import {
   AgentNotFoundError,
@@ -246,6 +247,43 @@ async function agentRow(agentId: string): Promise<{
 }
 
 describe("agent profile store integration", () => {
+  test("editing a duplicate replaces its copied standing instructions", async () => {
+    const owner = await createUser();
+    const source = await createProfileFixture({ owner });
+    await database
+      .update(agents)
+      .set({
+        configuration: {
+          endpoint: "https://seed.example.test/ag-ui",
+          standingInstructions: "Handle email and calendars.",
+        },
+      })
+      .where(eq(agents.id, source.agentId));
+    const copy = await store.duplicate(owner, source.agentId);
+    createdAgentIds.push(copy.id);
+    const runtime = createRuntimeAgentLoader(database);
+    const before = (await runtime(owner)).find((agent) => agent.id === copy.id);
+    if (before?.type !== "remote_ag_ui")
+      throw new Error("Expected remote copy");
+    expect(before.standingMessage.content).toContain(
+      "Handle email and calendars.",
+    );
+    await store.update(owner, copy.id, {
+      name: "Research Bot",
+      title: "Research",
+      roleDescription: "Only research public sources.",
+      visibility: "private",
+    });
+    const after = (await runtime(owner)).find((agent) => agent.id === copy.id);
+    if (after?.type !== "remote_ag_ui") throw new Error("Expected remote copy");
+    expect(after.standingMessage.content).toContain(
+      "Only research public sources.",
+    );
+    expect(after.standingMessage.content).not.toContain(
+      "Handle email and calendars.",
+    );
+  });
+
   test("refuses to create a coworker with no endpoint when this deployment has no managed Bot", async () => {
     const owner = await createUser();
     const withoutManaged = createAgentProfileStore(database, undefined);

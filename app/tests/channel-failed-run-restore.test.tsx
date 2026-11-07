@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
-import { CopilotKitProvider } from "@copilotkit/react-core/v2";
+import { CopilotKitProvider, useFrontendTool } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
@@ -51,6 +51,7 @@ const REJECTED = "invalid x-api-key";
 /** How the next `/run` goes. A fresh one per test. */
 type RunPlan =
   | { kind: "fails"; message: string }
+  | { kind: "calls"; tool: string }
   | { kind: "answers"; text: string }
   | { kind: "stalls"; text: string };
 
@@ -102,6 +103,24 @@ function run(input: RunAgentInput): Response {
     input.threadId,
     input.messages.filter((message) => message.role === "user"),
   );
+  if (plan.kind === "calls") {
+    // A step the browser carries out, as a Bot's run ends on one: the call, then RUN_FINISHED.
+    const toolCallId = `call-${input.runId}`;
+    const events = [
+      started,
+      {
+        type: "TOOL_CALL_START",
+        toolCallId,
+        toolCallName: plan.tool,
+        parentMessageId: `asks-${input.runId}`,
+      },
+      { type: "TOOL_CALL_ARGS", toolCallId, delta: "{}" },
+      { type: "TOOL_CALL_END", toolCallId },
+      { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+    ];
+    record(input.threadId, events);
+    return sse(events);
+  }
   if (plan.kind === "fails") {
     const events = [
       started,
@@ -253,16 +272,33 @@ afterEach(() => {
   stored = new Map();
   stopRequests = [];
   stalled = null;
+  stepsRun = 0;
 });
 afterAll(() => {
   globalThis.fetch = originalFetch;
   GlobalRegistrator.unregister();
 });
 
+/** A step the browser answers, as the computer's tools are: it runs here and the turn goes on. */
+const STEP = "fixture_step";
+let stepsRun = 0;
+function BrowserStep() {
+  useFrontendTool({
+    name: STEP,
+    description: "A step the browser carries out.",
+    handler: async () => {
+      stepsRun += 1;
+      return { ok: false, reason: "The button is not on the page any more." };
+    },
+  });
+  return null;
+}
+
 function conversation(selected: AgentChannel) {
   return (
     <QueryClientProvider client={queryClient}>
       <CopilotKitProvider runtimeUrl="http://localhost/api/copilotkit">
+        <BrowserStep />
         {/* Keyed as the channel route keys it, so another conversation is a fresh mount. */}
         <ChannelChat
           channel={selected}
@@ -378,4 +414,23 @@ test("a run the person stopped is not shown as a failure, live or after a reload
   await settled(back, "Summarise my inbox");
   await back.findByText("Reading your inbox");
   expect(back.queryByTestId("transcript-stopped")).toBeNull();
+});
+
+test("a turn that fails in a run after its browser steps says so, as one that fails at once does", async () => {
+  // The Bot works through browser steps, each answered here and sent back in a run of its own, and
+  // the run after the last of them fails. That turn used to end on its steps with nothing said.
+  const OUT_OF_TIME = "The Claude query timed out after 300s.";
+  plans = [
+    { kind: "calls", tool: STEP },
+    { kind: "calls", tool: STEP },
+    { kind: "fails", message: OUT_OF_TIME },
+  ];
+  const live = open();
+  await send(live, "Sign me up on the garden form");
+  const shown = await live.findByTestId("transcript-stopped");
+  expect(shown.textContent).toBe(OUT_OF_TIME);
+  expect(stepsRun).toBe(2);
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
 });

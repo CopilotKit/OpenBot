@@ -17,6 +17,12 @@ const PROGRESS = "\nProgress so far: ";
 const TRIGGER = "\nTrigger: ";
 const EVENT = "\nEvent data:\n";
 const REPORT =
+  "\n\nRecord meaningful progress with report_goal_progress for goal ";
+/**
+ * The same line as every turn was sent before a goal's tools said goal. A conversation recorded then
+ * still has it, and is still drawn as a goal's turn.
+ */
+const REPORTED_AS_RESPONSIBILITY =
   "\n\nRecord meaningful progress with report_responsibility_progress for responsibility ";
 
 export type ResponsibilityTurnParts = {
@@ -54,9 +60,12 @@ export type ResponsibilityTurn = {
 export function readResponsibilityTurn(
   text: string,
 ): ResponsibilityTurn | null {
-  const report = text.lastIndexOf(REPORT);
+  // Whichever line comes last is the turn's own: event data may quote either.
+  const [marker, report] = [REPORT, REPORTED_AS_RESPONSIBILITY]
+    .map((each) => [each, text.lastIndexOf(each)] as const)
+    .reduce((last, each) => (each[1] > last[1] ? each : last));
   if (report === -1 || !text.endsWith(".")) return null;
-  const responsibilityId = text.slice(report + REPORT.length, -1);
+  const responsibilityId = text.slice(report + marker.length, -1);
   if (!/^[\w-]+$/.test(responsibilityId)) return null;
 
   const criteria = text.indexOf(CRITERIA);

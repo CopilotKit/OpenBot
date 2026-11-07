@@ -144,7 +144,7 @@ pub fn allow<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
         .permission(format!("{PLUGIN}:allow-open"));
     match app.add_capability(capability) {
         Ok(()) => granted.push(origin),
-        Err(error) => eprintln!("[intelligence] could not allow the app page: {error}"),
+        Err(error) => log::warn!("[intelligence] could not allow the app page: {error}"),
     }
 }
 

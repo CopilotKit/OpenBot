@@ -26,6 +26,8 @@ export function isSkinId(value: unknown): value is SkinId {
 }
 
 export type UserPreferences = {
+  /** Server-owned first new eligible conversation; shared by both starter Bots. */
+  starterTourChannelId?: string;
   /** Set by profile saves so choosing a name finishes the first-run prompt. */
   profileNameSet?: boolean;
   messageListEmphasis: MessageListEmphasis;

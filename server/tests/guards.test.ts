@@ -73,6 +73,8 @@ describe("server authorization", () => {
         // No store was passed, so this deployment tracks no onboarding and the app gates nobody.
         onboarding: null,
       },
+      // The release the server runs rides beside the person; this test config sets none.
+      version: null,
     });
   });
 

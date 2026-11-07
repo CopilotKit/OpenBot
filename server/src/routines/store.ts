@@ -36,7 +36,7 @@ import {
   ne,
   sql,
 } from "drizzle-orm";
-import { ROSTER_ORDER } from "../channels/routes";
+import { conversationName, ROSTER_ORDER } from "../channels/routes";
 import { oneLine } from "../channels/text";
 import type { Database } from "../db/client";
 import {
@@ -71,6 +71,8 @@ export class RoutineRefusedError extends Error {
 export const MAX_ENABLED_ROUTINES = 20;
 /** Same code-point cap discipline as channel activity. */
 export const MAX_INSTRUCTION_CODE_POINTS = 2000;
+/** A name, not a second instruction: one line a row can show whole. */
+export const MAX_TITLE_CODE_POINTS = 100;
 /** Capped like audit payloads, because a failure is not a promise about length. */
 export const MAX_RUN_ERROR = 400;
 /**
@@ -89,6 +91,7 @@ const NO_CHANNEL_AT_ALL =
   "We have no conversation for me to post into. Start one and ask again.";
 const INSTRUCTION_EMPTY = "A routine needs an instruction to carry out.";
 const INSTRUCTION_TOO_LONG = `An instruction can be at most ${MAX_INSTRUCTION_CODE_POINTS} characters.`;
+const TITLE_TOO_LONG = `A routine's title can be at most ${MAX_TITLE_CODE_POINTS} characters.`;
 const TOO_MANY_ENABLED = `You already have ${MAX_ENABLED_ROUTINES} routines switched on. Switch one off before adding another.`;
 
 /** How many conversations a refusal reads out before it gives up and says "and others". */
@@ -102,6 +105,8 @@ export type Routine = {
   agentId: string;
   channelId: string;
   instruction: string;
+  /** What the person called it, or null when they named it nothing. */
+  title: string | null;
   cron: string;
   timezone: string;
   enabled: boolean;
@@ -115,6 +120,8 @@ export type RoutineSummary = {
   id: string;
   agentId: string;
   instruction: string;
+  /** What the person called it, or null when they named it nothing: then the instruction names it. */
+  title: string | null;
   /**
    * The schedule in words — "Weekdays at 09:00" — for the shapes `describeCron` recognizes, and
    * the raw five-field expression for everything else. Prose where prose is possible; never a
@@ -156,6 +163,8 @@ export type RoutineInput = {
    */
   threadId?: string;
   instruction: string;
+  /** What the person called it, in their words. Absent or blank: it has no title. */
+  title?: string;
   cron: string;
   timezone?: string;
 };
@@ -194,6 +203,7 @@ export type RoutineRunSummary = {
 
 export type RoutinePatch = Partial<{
   instruction: string;
+  title: string;
   cron: string;
   timezone: string;
   channelId: string;
@@ -202,6 +212,16 @@ export type RoutinePatch = Partial<{
 
 export type RoutineStore = {
   create(input: RoutineInput): Promise<Routine>;
+  /**
+   * The conversation work for this owner and Bot posts into, by the rule `create` follows: the one
+   * named, when they share it; else the one the request was made in; else the only one they share.
+   * Refuses with the choices otherwise. A goal made in a conversation picks its conversation by it.
+   */
+  conversationFor(
+    ownerUserId: string,
+    agentId: string,
+    wanted: { channelId?: string; threadId?: string },
+  ): Promise<string>;
   listFor(ownerUserId: string): Promise<RoutineSummary[]>;
   update(
     ownerUserId: string,
@@ -305,6 +325,7 @@ function toRoutine(row: RoutineRow): Routine {
     agentId: row.agentId,
     channelId: row.channelId,
     instruction: row.instruction,
+    title: row.title,
     cron: row.cron,
     timezone: row.timezone,
     enabled: row.enabled,
@@ -322,6 +343,19 @@ function validInstruction(instruction: string): string {
     throw new RoutineRefusedError(INSTRUCTION_TOO_LONG);
   }
   return trimmed;
+}
+
+/**
+ * A title as one line, measured in code points like an instruction. Blank is no title, which the
+ * row stores as null so the instruction names the routine instead.
+ */
+function validTitle(title: string | undefined): string | null {
+  const line = title?.replace(/\s+/g, " ").trim() ?? "";
+  if (line.length === 0) return null;
+  if (Array.from(line).length > MAX_TITLE_CODE_POINTS) {
+    throw new RoutineRefusedError(TITLE_TOO_LONG);
+  }
+  return line;
 }
 
 /**
@@ -634,6 +668,7 @@ export function createRoutineStore(database: Database): RoutineStore {
       if (patch.instruction !== undefined) {
         values.instruction = validInstruction(patch.instruction);
       }
+      if (patch.title !== undefined) values.title = validTitle(patch.title);
       if (patch.channelId !== undefined) {
         values.channelId = await resolveChannel(
           ownerUserId,
@@ -687,8 +722,12 @@ export function createRoutineStore(database: Database): RoutineStore {
   return {
     update,
 
+    conversationFor: (ownerUserId, agentId, wanted) =>
+      resolveChannel(ownerUserId, agentId, wanted),
+
     async create(input) {
       const instruction = validInstruction(input.instruction);
+      const title = validTitle(input.title);
       const timezone = input.timezone ?? "UTC";
       const channelId = await resolveChannel(input.ownerUserId, input.agentId, {
         channelId: input.channelId,
@@ -715,6 +754,7 @@ export function createRoutineStore(database: Database): RoutineStore {
               agentId: input.agentId,
               channelId,
               instruction,
+              title,
               cron: input.cron,
               timezone,
               nextRunAt,
@@ -740,7 +780,7 @@ export function createRoutineStore(database: Database): RoutineStore {
       const rows = await database
         .select({
           routine: routines,
-          channelName: channels.name,
+          channelName: conversationName,
           channelSummary: channels.summary,
           channelOpening: channels.opening,
           channelLastMessage: channels.lastMessage,
@@ -799,6 +839,7 @@ export function createRoutineStore(database: Database): RoutineStore {
           id: routine.id,
           agentId: routine.agentId,
           instruction: routine.instruction,
+          title: routine.title,
           schedule: describeCron(routine.cron),
           timezone: routine.timezone,
           enabled: routine.enabled,

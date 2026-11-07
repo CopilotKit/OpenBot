@@ -60,7 +60,7 @@ afterEach(() => {
 afterAll(() => GlobalRegistrator.unregister());
 
 function available(version = "0.3.2"): AppUpdate {
-  return { version, current: "0.3.1", installing: null };
+  return { version, current: "0.3.1", installing: null, updatesItself: true };
 }
 
 test("a shell with nothing to say says nothing", async () => {
@@ -72,7 +72,12 @@ test("a shell with nothing to say says nothing", async () => {
 });
 
 test("no newer version, or one already closed, says nothing", async () => {
-  offer = { version: null, current: "0.3.1", installing: null };
+  offer = {
+    version: null,
+    current: "0.3.1",
+    installing: null,
+    updatesItself: true,
+  };
   const view = render(<UpdateOffer />);
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(view.container.textContent).toBe("");

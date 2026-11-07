@@ -72,13 +72,13 @@ export const responsibilityEventSchema = z
     if (event.triggerId && !event.responsibilityId)
       context.addIssue({
         code: "custom",
-        message: "A trigger event must name its responsibility.",
+        message: "A trigger event must name its goal.",
       });
   });
 
 export class ResponsibilityNotFoundError extends Error {
   constructor() {
-    super("This responsibility could not be found.");
+    super("This goal could not be found.");
     this.name = "ResponsibilityNotFoundError";
   }
 }
@@ -96,7 +96,7 @@ export function parseResponsibilityInput(input: unknown): ResponsibilityInput {
   const result = responsibilityInputSchema.safeParse(input);
   if (!result.success)
     throw new ResponsibilityRefusedError(
-      result.error.issues[0]?.message ?? "Invalid responsibility.",
+      result.error.issues[0]?.message ?? "Invalid goal.",
     );
   return result.data;
 }
@@ -198,6 +198,11 @@ export type ResponsibilityStore = {
     options?: { recovered: boolean },
   ): Promise<ResponsibilityRunContext | null>;
   settleRun(runId: string, outcome: ResponsibilityRunOutcome): Promise<void>;
+  /**
+   * Put a run that started back in the queue, unrun: its conversation was busy, so nothing happened.
+   * False when it is no longer running.
+   */
+  requeueRun(runId: string): Promise<boolean>;
   resumeWaiting(
     ownerUserId: string,
     runId: string,

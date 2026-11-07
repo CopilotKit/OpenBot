@@ -24,7 +24,7 @@ import { createIntelligenceClient } from "../src/intelligence-client";
  * writing down when a stop is recorded (`POST /api/threads/:id/connect`, the first step of
  * recording one) and when a run's terminal event arrives.
  *
- * CopilotKit records stops from 1.84.1 (`ɵrecordRunStop` on the client, `recordStop` on the
+ * CopilotKit records stops from 1.85.0 (`ɵrecordRunStop` on the client, `recordStop` on the
  * Intelligence runner), and that is what CI installs; `@copilotkit/runtime` 1.83.0 had neither. So
  * where an installed runtime lacks it, two stand-ins carry that release's behaviour on top of the
  * real client and runner: `recordingStops` gives the client the method, and
@@ -34,7 +34,7 @@ import { createIntelligenceClient } from "../src/intelligence-client";
  * recorded once, as it is in production. The last test is the runtime exactly as installed.
  */
 
-/** Whether the installed runtime records the stops its runner makes (1.84.1 and later). */
+/** Whether the installed runtime records the stops its runner makes (1.85.0 and later). */
 const runtimeRecordsStops =
   typeof (CopilotKitIntelligence.prototype as { ɵrecordRunStop?: unknown })
     .ɵrecordRunStop === "function";
@@ -194,7 +194,7 @@ function recordingStops(client: CopilotKitIntelligence) {
 }
 
 /**
- * The Intelligence runner as the release that records stops has it (1.84.1, `runner/intelligence.ts`),
+ * The Intelligence runner as the release that records stops has it (1.85.0, `runner/intelligence.ts`),
  * on top of the installed one where that does not record stops itself. Asked to stop a run, it starts
  * the record and aborts the run's agent at once, and holds only the run's end, which is what its
  * terminal event follows, until the record settles or two seconds pass. A record that fails never

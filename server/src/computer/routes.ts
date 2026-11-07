@@ -20,6 +20,7 @@ import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import {
   type ActionActor,
   ActionRefusedError,
+  ActionUnfinishedError,
   type ComputerGateway,
   ComputerStillStartingError,
   ComputerUnavailableError,
@@ -1184,6 +1185,10 @@ function errorBody(error: unknown): Record<string, unknown> {
     ...(error instanceof HandoffRequestError
       ? { controlRequestError: true }
       : {}),
+    // Why the action on an element that is there did not finish, as the computer named it.
+    ...(error instanceof ActionUnfinishedError
+      ? { unfinished: error.unfinished }
+      : {}),
     /*
      * A cold start that outlasted the wait. Marked so the browser can draw a wait rather than a
      * failure, and tell the model the call was not performed and is worth repeating. Without the
@@ -1222,6 +1227,9 @@ function statusFor(error: unknown): 400 | 403 | 404 | 409 | 413 | 500 | 503 {
   // another snapshot. Not 503, which says the computer is unavailable and sends an operator hunting a
   // container that is running perfectly.
   if (error instanceof ElementNotFoundError) return 409;
+  // The element is there and the action could not finish. Nothing is broken here either: the caller
+  // clears what is in the way, or waits for the page, first.
+  if (error instanceof ActionUnfinishedError) return 409;
   // Nothing is broken here either: the call has to come again with its conversation first.
   if (error instanceof ApprovalNeedsConversationError) return 409;
   // A person holding the wheel, or a person driving before taking it. Nothing is broken; the caller

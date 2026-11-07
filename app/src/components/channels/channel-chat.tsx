@@ -11,6 +11,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import {
   answerMessage,
+  askedSinceLastMessage,
+  conversationQuestion,
   QuestionNotice,
   shownAnswer,
   useConversationQuestion,
@@ -29,8 +31,12 @@ import {
 } from "@/components/channels/transcript-messages";
 import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
+import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { answerPersonQuestionMutationOptions } from "@/lib/approvals";
+import {
+  answerPersonQuestionMutationOptions,
+  approvalInboxOptions,
+} from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
   recordChannelActivityMutationOptions,
@@ -813,6 +819,7 @@ export function ChannelChat({
     trimmed: string,
     skillInstructions: string[],
     attachments: Attachment[],
+    sent?: Message,
   ) => {
     // Wait briefly for the runtime agent instance before adding the message.
     if (!isReadyRef.current) {
@@ -900,11 +907,13 @@ export function ChannelChat({
         ),
       );
 
-    target.addMessage({
-      content: toMessageContent(trimmed, attachments),
-      id: newId(),
-      role: "user",
-    });
+    target.addMessage(
+      sent ?? {
+        content: toMessageContent(trimmed, attachments),
+        id: newId(),
+        role: "user",
+      },
+    );
     report(trimmed || describeAttachments(attachments), null);
 
     // Providers reject later turns if prior tool calls have no result; repair before sending.
@@ -991,6 +1000,8 @@ export function ChannelChat({
     text: string,
     skillInstructions: string[] = [],
     attachments: Attachment[] = [],
+    /** The message to send for `text`, when it is more than the words: an answer to a question. */
+    sent?: Message,
   ) => {
     const trimmed = text.trim();
     // A pasted screenshot with no caption is still a message to send: `canSendDraft` already
@@ -1011,7 +1022,12 @@ export function ChannelChat({
       void setChannelBusy({ channelId: channel.id, busy: true });
     }
     try {
-      const reply = await deliver(trimmed, skillInstructions, attachments);
+      const reply = await deliver(
+        trimmed,
+        skillInstructions,
+        attachments,
+        sent,
+      );
       /*
        * The person left while this turn was running (holding control of the Bot's browser, say) and the turn went on
        * without this screen. The run-finished subscription that tells the roster what the Bot said went with it, so the
@@ -1033,8 +1049,15 @@ export function ChannelChat({
   };
 
   useEffect(() => {
-    const fail = (message: string) => {
-      if (!awaitingReply.current) return;
+    /*
+     * `laterRun` is a RUN_ERROR from a run of a turn still going here after its first run has
+     * finished. A turn that touches the browser is several runs, and `awaitingReply` comes down when
+     * the first one ends on its browser step, so a Bot that failed in the run after it (out of time
+     * nine steps into a form) ended the turn with its steps on screen and nothing said. Only a
+     * RUN_ERROR counts there: the Bot said it failed, where a Stop ends a run as finished, cancelled.
+     */
+    const fail = (message: string, laterRun = false) => {
+      if (!awaitingReply.current && !(laterRun && turnsRef.current > 0)) return;
       awaitingReply.current = false;
       // Both halves of one fact: the sentence the transcript shows, and the reason `deliver` throws
       // so the draft behind the turn is restored rather than counted as sent. See `turnFailure`.
@@ -1044,7 +1067,7 @@ export function ChannelChat({
     const subscription = agent.subscribe?.({
       // Both surfaces fall back to the same sentence, from the same place, so a person who uses
       // both is not told two different things about the same silence.
-      onRunErrorEvent: ({ event }) => fail(stoppedReason(event?.message)),
+      onRunErrorEvent: ({ event }) => fail(stoppedReason(event?.message), true),
       onRunFailed: ({ error }) => fail(stoppedReason(error)),
       onRunFinishedEvent: ({ event }) => {
         /*
@@ -1053,7 +1076,9 @@ export function ChannelChat({
          */
         if (
           (event as { outcome?: { type?: unknown } } | undefined)?.outcome
-            ?.type === "interrupt"
+            ?.type === "interrupt" ||
+          // And a run that ended on a question to the person, the same way.
+          askedSinceLastMessage(agent.messages)
         )
           void queryClient.invalidateQueries({ queryKey: ["approvals"] });
         const wasOurs = awaitingReply.current;
@@ -1087,18 +1112,50 @@ export function ChannelChat({
   /** Stable reference for effects and component callbacks. */
   /*
    * A question the Bot is waiting on in this conversation. While there is one, what the person sends
-   * is their answer to it: it goes through the answer path, which resumes the turn that asked (a
-   * routine's, with the routine's tools) and closes the question, rather than starting a new turn
-   * that leaves it open. Their words are drawn at once under the id the server stores them under;
-   * the Bot's reply arrives as any turn run away from this tab does, through the history read above.
+   * is their answer to it: it goes through the answer path, which closes the question rather than
+   * starting a new turn that leaves it open.
+   *
+   * A question this conversation's own turn asked is answered by its next turn, run HERE like any
+   * other: its steps stream as they happen and Stop stops it. It used to be resumed on the server
+   * with nothing here attached to it, so the screen said "reading your answer" with no steps and no
+   * Stop until the whole turn was over, and then drew every step at once.
+   *
+   * A question a routine or a goal asked still goes back to the server, which resumes that run's work
+   * with its own tools. Then their words are drawn at once under the id the server stores them under,
+   * and the Bot's reply arrives as any turn run away from this tab does, through the history read
+   * above. So does an answer given while a turn is still going here, which a turn of its own would
+   * race.
    */
   const question = useConversationQuestion(channel.id, channel.threadId);
+  /*
+   * The question a message sent now answers. The inbox above is polled, so a person who answers the
+   * moment the Bot asks can be ahead of it: their answer went as a plain message, the question stayed
+   * open, and its card and badge came back after the turn it should have closed. So when the
+   * transcript shows the Bot asked since the person last spoke, the inbox is read again first.
+   */
+  const waitingQuestion = async () => {
+    if (question || !askedSinceLastMessage(agentRef.current.messages))
+      return question;
+    const inbox = await queryClient
+      .fetchQuery({ ...approvalInboxOptions(), staleTime: 0 })
+      .catch(() => undefined);
+    return conversationQuestion(inbox, channel.id, channel.threadId);
+  };
   const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
   const [answeredId, setAnsweredId] = useState<string | null>(null);
-  const answerTo = async (text: string) => {
-    if (!question) return;
-    await answer.mutateAsync({ id: question.id, response: text });
-    const sent = answerMessage(question, text);
+  const answerTo = async (text: string, asked = question) => {
+    if (!asked) return;
+    const sent = answerMessage(asked, text);
+    const idle = turnsRef.current === 0 && !agentRef.current.isRunning;
+    const continueHere = await answer.mutateAsync({
+      id: asked.id,
+      response: text,
+      inConversation: idle,
+    });
+    if (continueHere) {
+      await say(text, [], [], sent);
+      return;
+    }
     setAnsweredId(sent.id);
     agent.setMessages([...agent.messages, sent]);
   };
@@ -1219,6 +1276,28 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            starterSuggestions={
+              channel.agentIds.length === 1 ? (
+                <StarterSuggestions
+                  agentId={runtimeAgentId}
+                  channelId={channel.id}
+                  disabled={
+                    !channel.active ||
+                    historyLoading ||
+                    agent.isRunning ||
+                    turnsInFlight > 0 ||
+                    Boolean(question) ||
+                    call.active ||
+                    runModel.saving
+                  }
+                  onSelect={async (text) => {
+                    await runModel.beforeSend();
+                    // The transcript already reports a failed turn through runError.
+                    await sayRef.current(text).catch(() => undefined);
+                  }}
+                />
+              ) : undefined
+            }
             intro={
               /* From the roster this screen already reads; nothing while it loads. */
               botProfile ? <ConversationIntro agent={botProfile} /> : undefined
@@ -1330,12 +1409,12 @@ export function ChannelChat({
               );
 
               // An answer is words only: a draft carrying files or a skill is sent as a turn.
-              if (
-                question &&
-                draft.attachments.length === 0 &&
-                skillInstructions.length === 0
-              ) {
-                await answerTo(draft.text);
+              const asked =
+                draft.attachments.length === 0 && skillInstructions.length === 0
+                  ? await waitingQuestion()
+                  : undefined;
+              if (asked) {
+                await answerTo(draft.text, asked);
                 return;
               }
               await say(draft.text, skillInstructions, draft.attachments);

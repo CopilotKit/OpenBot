@@ -294,6 +294,10 @@ import {
 import { createResponsibilityStore } from "./responsibilities/store";
 import { responsibilityTools } from "./responsibilities/tools";
 import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
+import {
+  useGoalTools,
+  withoutGoalCopiesInGoalRun,
+} from "./responsibilities/chat-tools";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
 import type { Responsibility } from "./responsibilities/types";
@@ -316,6 +320,7 @@ import {
 } from "./telemetry/product-boundaries";
 import {
   createPackageStatusReader,
+  deploymentNameOf,
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
@@ -449,9 +454,11 @@ const agentProfileStore = createAgentProfileStore(
 // Read here rather than beside the synchronise below, because the package names the deployment and
 // the channel store needs that name before it can mint a thread id.
 const tenantPackage = await loadTenantPackage(config.tenantPackageDirectory);
-const threadIdentity = createThreadIdentity(
-  config.deploymentId ?? tenantPackage.tenantId,
-);
+// The package's id unless DEPLOYMENT_ID says otherwise, and the id the deployment was set up under if
+// the package has since been renamed. See `deploymentNameOf`.
+const deploymentId =
+  config.deploymentId ?? (await deploymentNameOf(database, tenantPackage));
+const threadIdentity = createThreadIdentity(deploymentId);
 const baseChannelStore = createChannelStore(
   database,
   agentProfileStore,
@@ -594,7 +601,7 @@ const { resolveRequestActor, identifyUser, identifyActor } = createRequestActor(
   },
 );
 // Where a person's own OpenBot browser may go: not where Bots may, but where their browser on their own laptop would
-// (browser/egress.ts). On OpenBot Desktop's host-side computer that is their own desktop, so everywhere.
+// (browser/egress.ts). On a host-side computer of people's browsers that is their own desktop, so everywhere.
 const personBrowserPolicy = personBrowserEgressPolicy({
   native: config.browser !== undefined,
   allowPrivateHosts: config.computer?.allowPrivateHosts ?? false,
@@ -609,6 +616,7 @@ const computerProvider = config.computer
       withPersonBrowsers(
         createComputerProvider(config.computer),
         config.browser?.url,
+        config.edition,
       ),
       {
         policyForBot: (botId) =>
@@ -1080,7 +1088,7 @@ await ensureSingleUserIdentity(database, {
 const pluginStore = withPersonalDefaults(
   createPluginStore({
     database,
-    deploymentId: config.deploymentId ?? tenantPackage.tenantId,
+    deploymentId,
     auditStore: bootAuditStore,
     credentials: credentialStore,
     encryptionKey: config.keyEncryptionKey,
@@ -1125,7 +1133,7 @@ const accountModes = createAccountModeSwitch({
   store: pluginStore,
   sharedUse: sharedUseStore,
   teamRules: approvalService.store.policy,
-  deploymentId: config.deploymentId ?? tenantPackage.tenantId,
+  deploymentId,
   audit: bootAuditStore,
 });
 
@@ -1257,6 +1265,13 @@ useTriggerTools({
   responsibilities: responsibilityStore,
   publicUrl: config.publicUrl ?? null,
   emailDomain: inboundEmail?.domain ?? null,
+});
+// And goals, through the same transport: asked for a goal, a Bot makes one. See chat-tools.ts.
+useGoalTools({
+  store: responsibilityStore,
+  // Read when a goal is run, long after the engine further down is made.
+  engine: { ingest: (event) => responsibilityEngine.ingest(event) },
+  conversationFor: routineStore.conversationFor,
 });
 
 /**
@@ -1867,6 +1882,10 @@ const agentFetch = createAgentFetch({
     config.managedAgent?.endpoint,
     config.managedAgent?.alsoRun,
   ].filter((url): url is URL => url !== undefined),
+  // An agent the person runs on their own loopback, reached from this server's container.
+  ...(config.thisMachineHost
+    ? { thisMachineHost: config.thisMachineHost }
+    : {}),
   // The refusal is what the run already knows; this is what the deployment knows. Written here
   // rather than in `endpoint.ts` so that file keeps deciding and nothing else, the way the
   // target check it reuses does.
@@ -2042,7 +2061,11 @@ const actorAgentResolver = createActorAgentResolver({
     restrictToolsForRun(
       initiator,
       actorId,
-      loadToolsForActor(actorId, initiator),
+      // A goal's run holds the goal's own tools; the Routines copies would be a second set.
+      withoutGoalCopiesInGoalRun(
+        initiator,
+        loadToolsForActor(actorId, initiator),
+      ),
       checkInScope,
     ),
   signRunForActor,
@@ -2179,7 +2202,8 @@ const responsibilitySweep = repeatAfterEach(async () => {
     if (
       report.succeeded.length ||
       report.failed.length ||
-      report.waiting.length
+      report.waiting.length ||
+      report.busy.length
     )
       console.info(
         JSON.stringify({ type: "responsibility-dispatch", ...report }),
@@ -2699,6 +2723,7 @@ const channelSummaries = {
   title: createChannelTitler({
     provider: runtimeModel.provider,
     model: runtimeModel.defaultModel,
+    ...(runtimeModel.plan ? { plan: runtimeModel.plan } : {}),
     resolveApiKey: resolveRuntimeModelApiKey,
   }),
   owner: workOwner("summariser"),
@@ -2963,15 +2988,16 @@ const app = createApp(
           },
         }
       : {}),
-    // Only where a person's browser can run: OpenBot Desktop's host-side computer, or computers Bots run on that give
-    // each its own. Where every Bot shares one, the routes have no computers and say why (browser/host.ts).
+    // Only where a person's browser can run: a host-side computer of people's browsers, computers Bots run on that give
+    // each its own, or the personal edition's one computer. Where every Bot shares one, the routes have no computers and
+    // say why (browser/host.ts).
     ...(computerGateway || config.browser
       ? {
           browser: {
             ...personBrowserPlace({
               provider: computerProvider,
               browserUrl: config.browser?.url,
-              ...(config.browserAbsent ? { absent: config.browserAbsent } : {}),
+              edition: config.edition,
               computers: () =>
                 computerGateway
                   ? gatewayBrowserComputers(

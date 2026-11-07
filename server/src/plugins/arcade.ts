@@ -45,9 +45,12 @@ export function toolkitOf(url: string): string | null {
  * the one direction nothing downstream recovers from, since nothing ever asks again.
  *
  * ABSENT METADATA, OR A FLAG THAT `flagOf` ANSWERS NULL (a vendor publishing a string where it
- * documents a boolean), IS A DESTRUCTIVE WRITE, which is also what a listing that would not say
- * already records in `./mcp`. It fails safe by putting an approval in front of a read, which is
- * annoying and correct; the alternative lets a deletion through unannounced.
+ * documents a boolean), IS AN UNCLASSIFIED WRITE: `unclassified`, and never `destructive`. It is a
+ * write, so chat asks first wherever it asks before changes, and a check-in, a task's trusted read
+ * and a memory source all treat it as they treat a destructive action (see `mightDestroy` in
+ * `./catalogue`). It is not destructive, because Arcade never said so: that word is what makes a
+ * call always ask and what the Bot page draws in red, and it is kept for an action the vendor
+ * flagged. A Composio action with no label is recorded the same way (`effectOf` in `./composio`).
  *
  * AN EMPTY BEHAVIOUR OBJECT IS A VENDOR THAT SAID NOTHING, AND IS READ EXACTLY AS AN ABSENT ONE.
  * `{}` — or a block carrying only `idempotent` and the like — states NEITHER flag, so the two
@@ -69,8 +72,14 @@ export function toolkitOf(url: string): string | null {
 export function classify(metadata: unknown): {
   effect: "read" | "write";
   destructive: boolean;
+  /** Arcade said nothing this can read about what the action does. */
+  unclassified?: true;
 } {
-  const closed = { effect: "write", destructive: true } as const;
+  const closed = {
+    effect: "write",
+    destructive: false,
+    unclassified: true,
+  } as const;
   if (typeof metadata !== "object" || metadata === null) return closed;
   const behavior = (metadata as { behavior?: unknown }).behavior;
   if (typeof behavior !== "object" || behavior === null) return closed;

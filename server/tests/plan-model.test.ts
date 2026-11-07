@@ -1,4 +1,6 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { type BaseEvent, EventType, type RunAgentInput } from "@ag-ui/client";
+import { lastValueFrom, toArray } from "rxjs";
 import { z } from "zod";
 import {
   PLAN_RUN_COMPLETED,
@@ -6,7 +8,9 @@ import {
   planMessages,
   planModelForEnvironment,
 } from "../src/agents/plan-model";
+import { SEARCH_TOOLS, TOOL_SEARCH_FLOOR } from "../src/agents/tool-search";
 import { buildAgents } from "../src/copilot";
+import { grantedTools } from "../src/plugins/tools";
 
 test("a plan-only built-in keeps its identity and instructions", async () => {
   const requests: Record<string, unknown>[] = [];
@@ -447,4 +451,209 @@ test("image bytes cross the pinned JS/Python protocol boundary without becoming 
   } finally {
     server.stop(true);
   }
+});
+
+/*
+ * FOUND LIVE. The Personal Assistant on a Claude plan held Routines, Google Calendar and HubSpot,
+ * hundreds of tools, so an app's tools waited behind search. Asked to set up a routine, it searched
+ * three times for `create_routine`, and the run then failed: "The plan harness attempted an unoffered
+ * tool: create_routine". The harness kept the first step's tools for the whole run (see
+ * agent-claude-sdk/tests/test_tool_search_continuation.py), and Routines, the app every Bot holds to
+ * schedule its own work, were among the tools waiting.
+ *
+ * Here the server's side of the plan path, with the plugin store's own tool shapes: a fake harness
+ * that calls only what each step offers it, the way the harness's Claude query does.
+ */
+describe("a plan Bot past the search floor", () => {
+  const SHOP = "mcp__composio-shopify__";
+  const ORDERS = `${SHOP}SHOPIFY_LIST_ORDERS`;
+  const CREATE_ROUTINE = "mcp__routines__create_routine";
+  const assistant = {
+    id: "personal-assistant",
+    name: "Personal Assistant",
+    type: "built_in" as const,
+    systemPrompt: "Help the person.",
+  };
+
+  /** What the plugin store lists for the Bot: Routines and an app well past the floor. */
+  const listed = [
+    ...[
+      "create_routine",
+      "list_routines",
+      "update_routine",
+      "delete_routine",
+    ].map((tool) => ({
+      toolName: `mcp__routines__${tool}`,
+      ref: `routines/${tool}`,
+      description: `${tool.replace("_", " ")}: a standing instruction run on a cron schedule.`,
+      inputSchema: { type: "object", properties: { cron: { type: "string" } } },
+    })),
+    ...Array.from({ length: TOOL_SEARCH_FLOOR + 10 }, (_, index) => ({
+      toolName: `${SHOP}SHOPIFY_GET_RESOURCE_${index}`,
+      ref: `composio-shopify/SHOPIFY_GET_RESOURCE_${index}`,
+      description: `Retrieves Shopify Admin API resource number ${index}.`,
+      inputSchema: { type: "object", properties: { id: { type: "string" } } },
+    })),
+    {
+      toolName: ORDERS,
+      ref: "composio-shopify/SHOPIFY_LIST_ORDERS",
+      description: "Lists the orders placed in the store, newest first.",
+      inputSchema: { type: "object", properties: {} },
+    },
+  ];
+
+  /**
+   * A harness answering each step from what that step offers. `act` gets the step's offered names,
+   * its tool results and how many calls reached the plugin store, and returns the one tool to call,
+   * or text to answer with.
+   */
+  async function run(
+    act: (step: {
+      offered: string[];
+      results: string[];
+      ran: number;
+    }) => { call: string; args: object } | { text: string },
+  ) {
+    const offered: string[][] = [];
+    const calls: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (request) => {
+        const body = await request.json();
+        if (new URL(request.url).pathname.endsWith("/cancel"))
+          return Response.json({ ok: true });
+        const names = (body.tools as { name: string }[]).map(
+          (tool) => tool.name,
+        );
+        offered.push(names);
+        const results = (body.messages as { role: string; content: string }[])
+          .filter((message) => message.role === "tool")
+          .map((message) => message.content);
+        const next = act({ offered: names, results, ran: calls.length });
+        const id = `call-${offered.length}`;
+        const events =
+          "call" in next
+            ? [
+                {
+                  type: "TOOL_CALL_START",
+                  toolCallId: id,
+                  toolCallName: next.call,
+                },
+                {
+                  type: "TOOL_CALL_ARGS",
+                  toolCallId: id,
+                  delta: JSON.stringify(next.args),
+                },
+                { type: "TOOL_CALL_END", toolCallId: id },
+              ]
+            : [
+                {
+                  type: "TEXT_MESSAGE_START",
+                  messageId: id,
+                  role: "assistant",
+                },
+                {
+                  type: "TEXT_MESSAGE_CONTENT",
+                  messageId: id,
+                  delta: next.text,
+                },
+                { type: "TEXT_MESSAGE_END", messageId: id },
+              ];
+        return new Response(
+          [
+            { type: "RUN_STARTED", threadId: body.threadId, runId: body.runId },
+            ...events,
+            {
+              type: "RUN_FINISHED",
+              threadId: body.threadId,
+              runId: body.runId,
+            },
+          ]
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join(""),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      },
+    });
+    try {
+      const store = {
+        listForAgent: async () => ({ tools: listed }),
+        callTool: async (call: { ref: string }) => {
+          calls.push(call.ref);
+          return { text: '{"ok":true}', isError: false };
+        },
+      } as never;
+      const agents = await buildAgents(
+        [assistant],
+        {
+          provider: "openai",
+          defaultModel: "unused",
+          plan: { provider: "claude", endpoint: server.url, token: "owned" },
+        },
+        null,
+        undefined,
+        (botId) => grantedTools({ store, botId, actorId: "person-1" }),
+      );
+      const agent = agents[assistant.id];
+      if (!agent) throw new Error("buildAgents returned no personal-assistant");
+      const input: RunAgentInput = {
+        threadId: `plan-search-${crypto.randomUUID()}`,
+        runId: crypto.randomUUID(),
+        messages: [
+          {
+            id: "ask",
+            role: "user",
+            content:
+              "Set up a routine that says 'Routine tick' every 15 minutes.",
+          },
+        ],
+        tools: [],
+        context: [],
+        state: {},
+        forwardedProps: {},
+      };
+      const seen: BaseEvent[] = await lastValueFrom(
+        agent.run(input).pipe(toArray()),
+      );
+      return { seen, offered, calls };
+    } finally {
+      server.stop(true);
+    }
+  }
+
+  const errors = (seen: BaseEvent[]) =>
+    seen
+      .filter((event) => event.type === EventType.RUN_ERROR)
+      .map((event) => (event as { message?: string }).message);
+
+  test("calls a tool its search found on the next step, and it runs through the plugin store", async () => {
+    const { seen, offered, calls } = await run(({ offered, results, ran }) => {
+      const found = results
+        .join("\n")
+        .match(/Tools found: ([^\n]*)/)?.[1]
+        ?.split(", ");
+      if (ran > 0) return { text: "One order came in." };
+      if (found?.includes(ORDERS) && offered.includes(ORDERS))
+        return { call: ORDERS, args: {} };
+      return { call: SEARCH_TOOLS, args: { query: "list orders" } };
+    });
+    expect(errors(seen)).toEqual([]);
+    expect(offered[0]).toContain(SEARCH_TOOLS);
+    expect(offered[0]).not.toContain(ORDERS);
+    expect(offered[1]).toContain(ORDERS);
+    expect(calls).toEqual(["composio-shopify/SHOPIFY_LIST_ORDERS"]);
+  });
+
+  test("holds Routines in front on every step, so it schedules without searching", async () => {
+    const { seen, offered, calls } = await run(({ ran }) =>
+      ran > 0
+        ? { text: "Your routine is set." }
+        : { call: CREATE_ROUTINE, args: { cron: "*/15 * * * *" } },
+    );
+    expect(errors(seen)).toEqual([]);
+    expect(offered[0]).toContain(SEARCH_TOOLS);
+    expect(offered[0]).toContain(CREATE_ROUTINE);
+    expect(offered[0]).not.toContain(ORDERS);
+    expect(calls).toEqual(["routines/create_routine"]);
+  });
 });

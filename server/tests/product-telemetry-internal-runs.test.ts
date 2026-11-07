@@ -19,7 +19,14 @@ import { testEnvironment } from "./support/environment";
  * Driven through the real path: the handler `mountCopilotRuntime` returns, a Bot built from a stored
  * row, and the runtime's own thread naming. The Intelligence platform underneath is the fake, REST
  * and the runner's Phoenix channel, on 127.0.0.1; the Bot's endpoint stands in for its model.
+ *
+ * The Bot is a harness this deployment runs, holding its token: the one kind of remote Bot the
+ * runtime still names a conversation on. Somebody's own agent is never run for it at all
+ * (runtime-own-runs.test.ts).
  */
+
+const MANAGED_AGENT_TOKEN = "deployment-token";
+const managedAgentToken = process.env.MANAGED_AGENT_TOKEN;
 
 const sent: LambdaSendOptions[] = [];
 const seen: { forwardedProps: unknown }[] = [];
@@ -35,6 +42,7 @@ const runtimeTelemetry = process.env.COPILOTKIT_TELEMETRY_DISABLED;
 
 beforeAll(() => {
   process.env.COPILOTKIT_TELEMETRY_DISABLED = "true";
+  process.env.MANAGED_AGENT_TOKEN = MANAGED_AGENT_TOKEN;
   endpoint = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -132,6 +140,8 @@ afterAll(() => {
   if (runtimeTelemetry === undefined)
     delete process.env.COPILOTKIT_TELEMETRY_DISABLED;
   else process.env.COPILOTKIT_TELEMETRY_DISABLED = runtimeTelemetry;
+  if (managedAgentToken === undefined) delete process.env.MANAGED_AGENT_TOKEN;
+  else process.env.MANAGED_AGENT_TOKEN = managedAgentToken;
 });
 
 async function until(done: () => boolean, what: string) {
@@ -159,7 +169,9 @@ test("naming a new conversation is not counted as an OpenBot run", async () => {
     title: "Standup Bot",
     roleDescription: "Write the standup.",
   });
-  if (!bot) throw new Error("the Bot did not parse");
+  if (bot?.type !== "remote_ag_ui") throw new Error("the Bot did not parse");
+  // What `runtime-agents.ts` attaches to an endpoint this deployment runs.
+  bot.headers = { "x-openbot-agent-token": MANAGED_AGENT_TOKEN };
   const person = { id: "colleague", name: "Colleague" };
   const runtime = mountCopilotRuntime(
     loadConfig(

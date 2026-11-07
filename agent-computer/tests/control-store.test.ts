@@ -32,7 +32,8 @@ test("atomic persisted completion remains exact across reload and later request"
   control.requestSecret({ ref: "e1", label: "private label" });
   const restored = createControl(undefined, { store });
   expect(restored.get(first.id).request?.status).toBe("completed");
-  expect(restored.get().resumeSnapshotRequired).toBe(true);
+  // The page the person handed back went with the browser that showed it.
+  expect(restored.get().resumeSnapshotRequired).toBe(false);
   expect(restored.requestHelp("Replay", "call-1").request?.id).toBe(first.id);
   restored.requestHelp("Next", "call-2");
   expect(restored.get(first.id).request?.status).toBe("completed");

@@ -10,7 +10,10 @@ import { threadAsksEveryStepQueryOptions } from "@/lib/approvals";
 import { tryClient } from "@/lib/client";
 import { failedComputerCall } from "@/lib/computers/call";
 import { useBotOfCall } from "./active-bot";
-import { frontendApprovalSnapshot } from "./approval-context";
+import {
+  frontendApprovalSnapshot,
+  WAITING_FOR_PERSON,
+} from "./approval-context";
 
 type RenderProps = { toolCallId: string; [key: string]: unknown };
 
@@ -156,7 +159,7 @@ export function useFrontendTool<T extends Record<string, unknown>>(
             copilotkit.stopAgent({ agent: context.agent });
             // Draw the card now rather than on the inbox's next poll.
             void queryClient.invalidateQueries({ queryKey: ["approvals"] });
-            return { waiting: true };
+            return WAITING_FOR_PERSON;
           }
           // Answered, not thrown: a thrown handler ends the Bot's turn with nothing said (see
           // failedComputerCall), where a failed result lets it snapshot again or try another way.

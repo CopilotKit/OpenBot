@@ -1397,6 +1397,23 @@ describe("edition", () => {
     expect(config.computer?.provider).toBe("shared");
   });
 
+  // What OpenBot Desktop writes, so an app connected over its own OAuth has an address to come
+  // back to. Loopback is this machine, so single-user mode stays on and stays this machine's.
+  test("personal edition takes the app's own loopback address as its public URL", () => {
+    const config = loadConfig({
+      ...personalEnvironment,
+      OPENBOT_IN_CONTAINER: "true",
+      OPENBOT_PUBLIC_URL: "http://127.0.0.1:3010",
+      TRUSTED_ORIGINS:
+        "http://localhost:3010,http://127.0.0.1:3010,http://[::1]:3010",
+    });
+    expect(config.publicUrl).toBe("http://127.0.0.1:3010");
+    expect(config.singleUser).toBe(true);
+    expect(config.edition).toBe("personal");
+    expect(config.browserOrigins).toContain("http://127.0.0.1:3010");
+    expect(config.browserOrigins).toContain("http://[::1]:3010");
+  });
+
   test("refuses an unknown value", () => {
     expect(() =>
       loadConfig({ ...personalEnvironment, OPENBOT_EDITION: "consumer" }),

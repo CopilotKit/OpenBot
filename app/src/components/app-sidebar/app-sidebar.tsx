@@ -49,6 +49,7 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { useSignOut } from "./use-sign-out";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
@@ -206,6 +207,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const emphasis = useMessageListEmphasis();
   const { data: currentUser } = useQuery(currentUserQueryOptions());
   const signOut = useSignOut();
+  const signOutOffered = useSignOutOffered();
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
@@ -388,15 +390,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                       {item.label}
                     </DropdownMenuItem>
                   ))}
-                <DropdownMenuItem
-                  className={userMenuItemClassName}
-                  disabled={signOut.pending}
-                  onClick={signOut.run}
-                  variant="destructive"
-                >
-                  <IconLogout />
-                  Sign out
-                </DropdownMenuItem>
+                {signOutOffered ? (
+                  <DropdownMenuItem
+                    className={userMenuItemClassName}
+                    disabled={signOut.pending}
+                    onClick={signOut.run}
+                    variant="destructive"
+                  >
+                    <IconLogout />
+                    Sign out
+                  </DropdownMenuItem>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>

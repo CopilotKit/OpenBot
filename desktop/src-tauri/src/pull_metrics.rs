@@ -202,6 +202,17 @@ pub fn pull_image(
     on_progress: impl FnMut(ImageBytes),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
+    crate::logging::timed(&format!("pull {image}"), || {
+        pull_image_now(engine, image, on_progress, on_complete)
+    })
+}
+
+fn pull_image_now(
+    engine: &Address,
+    image: &str,
+    on_progress: impl FnMut(ImageBytes),
+    on_complete: impl FnOnce(PullMetrics),
+) -> Result<(), Problem> {
     if crate::preparation::image_present(engine, image)? {
         return Ok(());
     }
@@ -576,12 +587,70 @@ fn run_with_progress(
     if output.status.success() {
         return Ok(());
     }
-    let raw = crate::quiet::said(if output.stderr.is_empty() {
-        &output.stdout
+    Err(failed_pull(&crate::quiet::said(
+        if output.stderr.is_empty() {
+            &output.stdout
+        } else {
+            &output.stderr
+        },
+    )))
+}
+
+/// A failed pull in both registers, from the error it reported.
+///
+/// Compose's JSON progress is a line for every step of every layer, and none of it is the failure.
+/// Left in, the detail opens on `"status":"Working","text":"Pulling"`, and the sentence is chosen
+/// from all of it. So both come from the error lines alone. Output with no error line in it is kept
+/// whole, so nothing is ever lost from the detail.
+fn failed_pull(raw: &str) -> Problem {
+    let errors: Vec<String> = raw.lines().filter_map(pull_error).collect();
+    let detail = if errors.is_empty() {
+        raw.to_string()
     } else {
-        &output.stderr
-    });
-    Err(Problem::with(crate::problem::said_about(&raw), raw))
+        errors.join("\n")
+    };
+    Problem::with(crate::problem::said_about(&detail), detail)
+}
+
+/// One line of a pull's output as the detail shows it: Compose's progress left out, its error
+/// events and its closing error as their text, and anything else as it was.
+fn pull_error(line: &str) -> Option<String> {
+    /// https://github.com/docker/compose/blob/v5.5.1/cmd/display/json.go. Compose 5 puts an
+    /// event's status in `status` and the error in `details`; Compose 2 put the error in `status`.
+    /// The closing error is `{"error":true,"message":...}`.
+    #[derive(Deserialize)]
+    struct Line {
+        id: Option<String>,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        text: String,
+        #[serde(default)]
+        details: String,
+        #[serde(default)]
+        error: bool,
+        message: Option<String>,
+    }
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    let Ok(parsed) = serde_json::from_str::<Line>(line) else {
+        return Some(line.to_string());
+    };
+    match (parsed.id, parsed.message) {
+        (_, Some(message)) if parsed.error => Some(message),
+        (Some(id), _) if parsed.status == "Error" || parsed.text == "Error" => {
+            let said = [parsed.details, parsed.status]
+                .into_iter()
+                .find(|said| !said.is_empty() && said != "Error")
+                .unwrap_or(parsed.text);
+            Some(format!("{id}: {said}"))
+        }
+        // A progress event.
+        (Some(_), _) => None,
+        _ => Some(line.to_string()),
+    }
 }
 
 fn read_output(
@@ -985,6 +1054,103 @@ Executing external compose provider
         assert!(run(command, Some(input), false, |metrics| reports.push(metrics)).is_ok());
         assert_eq!(reports[0].outcome, crate::telemetry::Outcome::Success);
         assert_eq!(reports[0].bytes, None);
+    }
+
+    /// Failed pulls captured from real engines, each with the error line the detail shows. The
+    /// registry did not answer and the engine did. Captured with Compose 5.5.1 (the version
+    /// Install puts on Windows) from `compose --progress json -f - pull --policy missing`, as
+    /// `pull_image` runs it, and from `podman pull` through the remote API, as Windows runs it.
+    const REGISTRY_UNREACHABLE: [(&str, &str); 5] = [
+        // Podman 5.8.9's API, a real OpenBot image, its registries resolving to a refused port.
+        // Podman answers with only the root cause once nothing has been pulled. This is the
+        // upgrade on Windows whose window said to start the engine.
+        (
+            include_str!("../test-fixtures/image-pull-failures/podman-compose-registry-refused.txt"),
+            "Error response from daemon: connection refused",
+        ),
+        (
+            include_str!(
+                "../test-fixtures/image-pull-failures/podman-compose-registry-unresolved.txt"
+            ),
+            "Error response from daemon: lookup ghcr.invalid: no such host",
+        ),
+        (
+            include_str!("../test-fixtures/image-pull-failures/podman-pull-registry-refused.txt"),
+            "pinging container registry ghcr.io: Get \"https://ghcr.io/v2/\": dial tcp 127.0.0.1:443: connect: connection refused",
+        ),
+        // Docker 29.5.2 (Docker Desktop).
+        (
+            include_str!("../test-fixtures/image-pull-failures/docker-compose-registry-refused.txt"),
+            "dial tcp 127.0.0.1:5999: connect: connection refused",
+        ),
+        (
+            include_str!(
+                "../test-fixtures/image-pull-failures/docker-compose-registry-unresolved.txt"
+            ),
+            "lookup ghcr.invalid: no such host",
+        ),
+    ];
+
+    /// The engine answered and the registry did not, so the person is told the download failed and
+    /// what to check, never to start an engine that is running. The detail is the error the pull
+    /// reported, without the progress lines above it.
+    #[test]
+    fn a_registry_the_engine_cannot_reach_is_a_failed_download_with_the_pull_error_as_detail() {
+        for (captured, error) in REGISTRY_UNREACHABLE {
+            let problem = failed_pull(&crate::quiet::said(captured.as_bytes()));
+            assert!(problem.said.contains("couldn't download"), "{problem:?}");
+            assert!(problem.said.contains("proxy or firewall"), "{problem:?}");
+            assert!(!problem.said.contains("container engine"), "{problem:?}");
+            let detail = problem.detail.unwrap();
+            assert!(detail.contains(error), "{detail}");
+            assert!(!detail.contains(r#""status":"Working""#), "{detail}");
+        }
+        // The Windows upgrade's detail, whole: the image that failed, and Compose's error.
+        let windows = failed_pull(&crate::quiet::said(REGISTRY_UNREACHABLE[0].0.as_bytes()));
+        assert_eq!(
+            windows.detail.as_deref(),
+            Some(
+                "Image ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:5ce6f82ab8c90810cb45c86c2f5e9cdf4e73bfee1aef13713c9076a0883fd54d: connection refused\n\
+                 Error response from daemon: connection refused"
+            )
+        );
+    }
+
+    /// Compose not reaching the engine at all still says to start it.
+    #[test]
+    fn an_engine_that_does_not_answer_a_pull_still_says_to_start_it() {
+        let captured =
+            include_str!("../test-fixtures/image-pull-failures/compose-engine-not-running.txt");
+        let problem = failed_pull(&crate::quiet::said(captured.as_bytes()));
+        assert!(
+            problem.said.contains("Start Docker or Podman"),
+            "{problem:?}"
+        );
+        assert!(
+            problem
+                .detail
+                .unwrap()
+                .contains("Cannot connect to the Docker daemon"),
+            "the engine's own words stay in the detail"
+        );
+    }
+
+    /// The same captured output, through the whole failed-pull path: the pull's stderr read
+    /// while it runs, and the Problem returned.
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_that_fails_on_the_registry_returns_a_failed_download() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/test-fixtures/image-pull-failures/podman-compose-registry-refused.txt"
+        );
+        let mut command = crate::quiet::command("sh");
+        command.args(["-c", "cat \"$1\" >&2; exit 1", "sh", fixture]);
+        let problem = run(command, None, true, |_| {}).unwrap_err();
+        assert!(problem.said.contains("couldn't download"), "{problem:?}");
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains("connection refused"), "{detail}");
+        assert!(!detail.contains(r#""status":"Working""#), "{detail}");
     }
 
     #[test]

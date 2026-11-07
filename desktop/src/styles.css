@@ -643,6 +643,17 @@ button.text-link.change-provider {
   height: 100%;
 }
 
+/* A plain icon where a row stands for no one vendor, drawn in the marks' ink. */
+.mark-icon {
+  padding: 6px;
+  color: var(--mark-ink);
+}
+
+.mark-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
 .mark-wordmark {
   padding: 2px;
 }
@@ -745,6 +756,53 @@ details > summary:hover {
   gap: 8px;
 }
 
+/*
+ * "Sign in with" a provider: the app's outline button with the provider's mark before its name, as
+ * the web app's sign-in page sets Google, Microsoft and Okta. Outline rather than the filled
+ * primary, because Google allows its colour G only on a light, dark or neutral button.
+ */
+button.sign-in-with {
+  gap: 10px;
+  padding-left: 12px;
+}
+
+.chosen-provider > button.sign-in-with {
+  margin-bottom: 12px;
+}
+
+.button-mark {
+  display: inline-flex;
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.button-mark img {
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * CopilotKit's logotype, leading the screens that sign in to a CopilotKit account. 30px, so the
+ * drawn logotype clears the brand's 28px minimum, with half its height kept clear below it.
+ */
+.copilotkit-logo {
+  display: block;
+  align-self: flex-start;
+  margin: 0 0 16px;
+}
+
+.copilotkit-logo img {
+  display: block;
+  height: 30px;
+  width: auto;
+}
+
+/* Under a card's heading, the same half-height kept clear above it as below. */
+.local-needs .copilotkit-logo {
+  margin-top: 12px;
+}
+
 /* The app's tabs: a muted track with the active tab raised in the card colour. */
 .segmented {
   display: inline-flex;
@@ -800,6 +858,13 @@ a:hover {
 .caution a,
 .fallback a {
   color: var(--text-primary);
+}
+
+/* The code a CopilotKit sign-in page shows, to compare letter by letter. */
+.sign-in-code {
+  font-family: var(--mono);
+  color: var(--text-primary);
+  letter-spacing: 0.04em;
 }
 
 /* A failure said inside a row: the sentence in the destructive colour, the rest as before. */
@@ -1441,5 +1506,14 @@ a:hover {
 
   .field input {
     background: color-mix(in srgb, var(--input) 30%, transparent);
+  }
+
+  /* Marks are drawn for a white ground, so on a dark button they sit on a white tile of their own. */
+  .button-mark {
+    width: 20px;
+    height: 20px;
+    padding: 2px;
+    border-radius: var(--radius-sm);
+    background: var(--mark-ground);
   }
 }

@@ -85,7 +85,7 @@ export function NewResponsibilityDialog({
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New responsibility</DialogTitle>
+          <DialogTitle>New goal</DialogTitle>
           <DialogDescription>
             An ongoing goal. The Bot works on it in the conversation you pick.
           </DialogDescription>
@@ -291,7 +291,7 @@ export function NewResponsibilityDialog({
             size="sm"
             type="submit"
           >
-            {create.isPending ? "Creating…" : "Create responsibility"}
+            {create.isPending ? "Creating…" : "Create goal"}
           </Button>
         </DialogFooter>
       </DialogContent>

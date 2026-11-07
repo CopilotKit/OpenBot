@@ -975,11 +975,7 @@ test("Record on a Bot's screen asks whether to narrate before the person's first
   const recognitions = installChrome();
   const { view, dialog, user } = await openScreen();
   // Nobody chose yet: the switch is off, and nothing listens.
-  expect(
-    await dialog.findByText(
-      "Talk through the task as you do it, and what you say is added to the recording.",
-    ),
-  ).toBeTruthy();
+  expect(await dialog.findByText("Narration is off.")).toBeTruthy();
   expect(
     dialog
       .getByRole("switch", { name: "Narration" })
@@ -1015,7 +1011,7 @@ test("Record on a Bot's screen asks whether to narrate before the person's first
   ).toMatchObject({ title: "Submit the taxi receipt" });
   // An open microphone is said in so many words, and the Bot's screen is still open behind the answered question.
   expect(
-    await dialog.findByText("Listening. Say what you're doing as you go."),
+    await dialog.findByText("Narration is on. We're capturing your voice."),
   ).toBeTruthy();
   expect(view.queryByRole("dialog", { name: /Narrate/ })).toBeNull();
   expect(view.getByRole("dialog", { name: "The Bot's screen" })).toBeTruthy();

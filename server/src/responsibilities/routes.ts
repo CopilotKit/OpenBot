@@ -37,10 +37,7 @@ export function createResponsibilityRoutes(
         timestamp: new Date().toISOString(),
       }),
     );
-    return context.json(
-      { error: "Responsibilities are unavailable. Try again." },
-      503,
-    );
+    return context.json({ error: "Goals are unavailable. Try again." }, 503);
   });
   routes.get("/", async (context) =>
     context.json({ responsibilities: await store.list(context.var.actor.id) }),
@@ -284,7 +281,7 @@ export function createResponsibilityRoutes(
     // Run now does real work, and a paused or completed responsibility never runs.
     if (goal.status !== "active")
       throw new ResponsibilityRefusedError(
-        `This responsibility is ${goal.status}. Resume it before running it.`,
+        `This goal is ${goal.status}. Resume it before running it.`,
       );
     const event = await engine.ingest({
       ownerUserId: context.var.actor.id,

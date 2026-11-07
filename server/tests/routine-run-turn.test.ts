@@ -5,6 +5,10 @@ import {
   HeadlessToolSuspension,
   OPENBOT_WAITING_METADATA,
 } from "@openbot/toolkit/headless-tools";
+import {
+  DECLINED_BY_PERSON,
+  NOT_RUN_WHILE_WAITING,
+} from "@openbot/shared/approval-outcomes";
 import type { TurnAdmission } from "@openbot/toolkit/ports";
 import {
   createTurnRunner,
@@ -128,6 +132,10 @@ function harness(options: {
   learningContainerId?: string;
   /** Defaults to the server's own, which admits everything while nothing is configured. */
   admission?: TurnAdmission;
+  /** A turn picked up again at the step it stopped on, as an approval's resume runs one. */
+  continuation?: Parameters<
+    ReturnType<typeof createTurnRunner>
+  >[0]["continuation"];
 }) {
   const order: string[] = [];
   const calls = {
@@ -266,6 +274,7 @@ function harness(options: {
       agentId: AGENT_ID,
       threadId: THREAD_ID,
       instruction: INSTRUCTION,
+      ...(options.continuation ? { continuation: options.continuation } : {}),
     });
 
   return { run, agent, calls, order, builtFor };
@@ -1194,4 +1203,153 @@ test("drawnComponents returns the charts that were drawn, never a refused or unk
   ]);
   // A turn with no catalog drew nothing, whatever its tool calls were named.
   expect(drawnComponents(messages, new Set())).toEqual([]);
+});
+
+describe("a turn picked up after the person decides one of several steps", () => {
+  /*
+   * A Bot fills in a form in one breath: four fields, four steps asked for at once. The first one
+   * needs the person (a hand-off, or Allow once / Deny), so the turn stops there, and the three after
+   * it are never run. The person says "Don't do it", and the turn is picked up with their answer.
+   *
+   * The Claude Agent SDK Bot holds every step it handed out and goes on only when each has an answer:
+   * sent the person's answer alone, it ended the run with RUN_STARTED, RUN_FINISHED and nothing said
+   * (traced live against the harness), and the person's decision was never answered.
+   */
+  const asked = ["call_name", "call_email", "call_plant", "call_note"];
+  const continuation = {
+    snapshot: {
+      runId: "run_form",
+      threadId: THREAD_ID,
+      toolCallId: "call_name",
+      toolName: "computer_type",
+      args: { ref: "e6", text: "Test Robot", snapshotId: 2 },
+      messages: [
+        {
+          id: "u1",
+          role: "user" as const,
+          content: "Sign me up on this form.",
+        },
+        {
+          id: "a1",
+          role: "assistant" as const,
+          content: "Let me fill them in.",
+          toolCalls: asked.map((id) => ({
+            id,
+            type: "function" as const,
+            function: { name: "computer_type", arguments: "{}" },
+          })),
+        },
+      ],
+      state: {},
+      context: [],
+      forwardedProps: undefined,
+    },
+    result: { content: DECLINED_BY_PERSON, error: DECLINED_BY_PERSON },
+    messageId: "approval:request_1",
+  };
+  /** The Bot as the Claude Agent SDK harness behaves: it answers once every step it asked for has an answer. */
+  const waitsForEveryStep: Driver = ({ agent, observer, request }) => {
+    const answered = new Set(
+      (
+        request.input as unknown as {
+          messages: { role: string; toolCallId?: string }[];
+        }
+      ).messages.flatMap((message) =>
+        message.role === "tool" && message.toolCallId
+          ? [message.toolCallId]
+          : [],
+      ),
+    );
+    if (asked.every((id) => answered.has(id)))
+      agent.messages = [
+        ...agent.messages,
+        {
+          id: "assistant_reply",
+          role: "assistant",
+          content: "I didn't fill in the form, because you said no.",
+        },
+      ] as typeof agent.messages;
+    observer.complete();
+  };
+
+  test("the Bot hears about every step it asked for, and answers the person", async () => {
+    const { run, calls } = harness({
+      continuation,
+      drive: waitsForEveryStep,
+    });
+
+    expect(await run()).toEqual({
+      replyText: "I didn't fill in the form, because you said no.",
+    });
+    const [first] = calls.runs;
+    if (!first) throw new Error("The turn never ran.");
+    const sent = first.input.messages as unknown as {
+      id: string;
+      role: string;
+      toolCallId?: string;
+      content?: unknown;
+    }[];
+    // The person's answer for the step that waited, and a plain "not run" for each step after it.
+    expect(
+      sent
+        .filter((message) => message.role === "tool")
+        .map((message) => [message.toolCallId, message.content]),
+    ).toEqual([
+      ["call_name", DECLINED_BY_PERSON],
+      ["call_email", NOT_RUN_WHILE_WAITING],
+      ["call_plant", NOT_RUN_WHILE_WAITING],
+      ["call_note", NOT_RUN_WHILE_WAITING],
+    ]);
+    // The steps are kept with the conversation, so it reads them as not done, not as still going.
+    expect(first.persistedInputMessages?.map((message) => message.id)).toEqual([
+      "u1",
+      "a1",
+      "approval:request_1",
+      "approval:request_1:call_email",
+      "approval:request_1:call_plant",
+      "approval:request_1:call_note",
+    ]);
+  });
+
+  test("a step answered before the turn stopped keeps its own answer", async () => {
+    const answeredFirst = {
+      ...continuation,
+      snapshot: {
+        ...continuation.snapshot,
+        toolCallId: "call_email",
+        messages: [
+          ...continuation.snapshot.messages,
+          {
+            id: "t1",
+            role: "tool" as const,
+            toolCallId: "call_name",
+            content: '{"ok":true}',
+          },
+        ],
+      },
+    };
+    const { run, calls } = harness({
+      continuation: answeredFirst,
+      drive: waitsForEveryStep,
+    });
+
+    await run();
+    const [sent] = calls.runs;
+    if (!sent) throw new Error("The turn never ran.");
+    const results = (
+      sent.input.messages as unknown as {
+        role: string;
+        toolCallId?: string;
+        content?: unknown;
+      }[]
+    )
+      .filter((message) => message.role === "tool")
+      .map((message) => [message.toolCallId, message.content]);
+    expect(results).toEqual([
+      ["call_name", '{"ok":true}'],
+      ["call_email", DECLINED_BY_PERSON],
+      ["call_plant", NOT_RUN_WHILE_WAITING],
+      ["call_note", NOT_RUN_WHILE_WAITING],
+    ]);
+  });
 });

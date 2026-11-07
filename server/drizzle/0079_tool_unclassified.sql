@@ -1,0 +1,1 @@
+ALTER TABLE "mcp_tools" ADD COLUMN "unclassified" boolean DEFAULT false NOT NULL;

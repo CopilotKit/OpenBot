@@ -164,6 +164,10 @@ async function serve(path: string, init?: RequestInit): Promise<Response> {
       user: { ...actor, name: "Dana Reyes", onboarding: null },
     });
   }
+  if (url.pathname === "/api/capabilities") {
+    // A team deployment, where people sign in, so Sign out is offered.
+    return Response.json({ localEvaluation: false, edition: "team" });
+  }
   if (url.pathname === "/api/channels") {
     return Response.json({ channels, nextCursor: null });
   }

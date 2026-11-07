@@ -360,10 +360,9 @@ if [ -z "$LEARNING_CONTAINER" ] && [ "$LEARNING_AUTO_ASSIGN" != "false" ] \
 fi
 
 # The personal edition's own browser: the person's installed Chrome or Edge, as a window on their
-# desktop with the Recorder in it, as OpenBot Desktop gives the team edition (docs/configuration.md,
-# "OpenBot Desktop runs it for the person"). Its Bots share one computer, which is no place for a
-# browser of the person's own, so this one runs on the host and runs nobody else's
-# (`COMPUTER_PEOPLE_ONLY=on`). The server finds it through `OPENBOT_BROWSER_URL`, exported so the
+# desktop with the Recorder in it (docs/personal-edition.md). It runs on the host and runs nobody
+# else's (`COMPUTER_PEOPLE_ONLY=on`). OpenBot Desktop does not do this: it shows the person's browser
+# in the page, on the one computer. The server finds it through `OPENBOT_BROWSER_URL`, exported so the
 # server started below reads it over .env. Never fatal: without Chrome or Edge, or with a Recorder
 # that will not build, OpenBot starts without the person's browser and the line says why.
 if [ "$EDITION" = "personal" ]; then

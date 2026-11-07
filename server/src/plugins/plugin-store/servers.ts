@@ -1975,6 +1975,95 @@ export function serverMethods(context: StoreContext) {
       return { tools: storable.length };
     },
 
+    /**
+     * Ask a per-person app what it offers as the person who just connected it, when nothing is held.
+     *
+     * CRITERION. Connecting the first account to an app whose tools can only be listed as a person
+     * leaves its tools listed, and offered to Bots, without anybody pressing Refresh.
+     *
+     * REASON. The refresh that runs when such an app is added has nobody to ask as, so it records a
+     * refusal and stores no tools — the honest state, as {@link refreshTools} says, until somebody
+     * has connected. Connecting is that moment, and nothing used to act on it: the app read
+     * "Connected" while every Bot was told it held none of its tools, until somebody happened to
+     * press Refresh tools.
+     *
+     * ONLY WHEN NOTHING IS HELD. Refreshing replaces the tools every Bot is offered, which is an
+     * administrator's button. Filling an empty list takes nothing from anybody; replacing a full one
+     * on every member's connect would make each of them its author.
+     *
+     * Through `this`, so the personal edition's wrapper gives every Bot the tools exactly as a
+     * Refresh would.
+     */
+    /**
+     * Bring the saved tool list of every app whose tools are this deployment's own code (Routines,
+     * Drive) up to date with the code that is running. Answers the apps it refreshed.
+     *
+     * CRITERION. After an upgrade, a Bot is offered the names, descriptions and schemas of the build
+     * it runs on, not the build that added the app.
+     *
+     * REASON. A listing is saved when an app is added and replaced only by {@link refreshTools}, which
+     * runs when an app is added, when one with no tools is connected, and when an admin presses
+     * Refresh. For a vendor's app that is right: asking costs a request, and the vendor decides what
+     * it offers. For an app whose tools are this code, the saved list is a copy of an older build, so
+     * a release that renames a tool or rewords a description never reached an existing install. The
+     * personal edition (OpenBot Desktop) has no Admin page to press Refresh on, and a team's admin
+     * has no reason to. Found when a goal's trigger tools kept telling the model about "the Bot's
+     * Responsibilities page" after the page and the code both said Goals.
+     *
+     * ONLY WHAT CHANGED, compared row by row, so an ordinary start writes nothing and leaves no trail.
+     * Refreshed through `this`, as a Refresh would be: grants are keyed by name and are not touched,
+     * an app turned off is not here to refresh, and the personal edition's wrapper gives every Bot a
+     * tool that is new. A failure is a warning, never a failed start: the saved list keeps working,
+     * and the next start tries again.
+     */
+    async refreshOwnListings(): Promise<string[]> {
+      const refreshed: string[] = [];
+      const rows = await database
+        .select({ id: mcpServers.id })
+        .from(mcpServers)
+        .orderBy(asc(mcpServers.id));
+      for (const { id } of rows) {
+        const kind = catalogueEntry(id)?.transport;
+        if (!kind || !transportFor(kind).listIsThisCode) continue;
+        try {
+          const { row, entry } = await requireServer(id);
+          const listed = await transportFor(kind).listTools({
+            url: effectiveUrl(row, entry),
+            tokenHeader: tokenHeaderFor(entry),
+          });
+          const held = await database
+            .select()
+            .from(mcpTools)
+            .where(eq(mcpTools.serverId, id));
+          if (sameListing(held, storableTools(id, listed).rows)) continue;
+          await this.refreshTools(id);
+          refreshed.push(id);
+        } catch (error) {
+          console.warn(
+            JSON.stringify({
+              type: "own-app-tools-refresh-failed",
+              serverId: id,
+              error: reasonWithoutStatement(error),
+            }),
+          );
+        }
+      }
+      return refreshed;
+    },
+
+    async discoverToolsOnConnect(
+      serverId: string,
+      userId: string,
+    ): Promise<{ tools: number } | null> {
+      const [held] = await database
+        .select({ name: mcpTools.name })
+        .from(mcpTools)
+        .where(eq(mcpTools.serverId, serverId))
+        .limit(1);
+      if (held) return null;
+      return this.refreshTools(serverId, userId);
+    },
+
     async listServers(): Promise<ServerRecord[]> {
       const rows = await database
         .select()
@@ -2319,4 +2408,43 @@ export function serverMethods(context: StoreContext) {
         .where(eq(mcpServers.id, app?.id ?? serverId));
     },
   };
+}
+
+/**
+ * Whether what is saved for an app is what its listing would save now: the same names, and for each
+ * the same words, schema and classification. Schemas are compared with their keys sorted, because
+ * PostgreSQL's `jsonb` keeps keys in an order of its own and gives them back in that order.
+ */
+function sameListing(
+  held: (typeof mcpTools.$inferSelect)[],
+  wanted: StorableTool[],
+): boolean {
+  if (held.length !== wanted.length) return false;
+  const saved = new Map(held.map((tool) => [tool.name, tool]));
+  return wanted.every((tool) => {
+    const was = saved.get(tool.name);
+    return (
+      was !== undefined &&
+      was.vendorName === tool.vendorName &&
+      was.description === tool.description &&
+      sortedJson(was.inputSchema) === sortedJson(tool.inputSchema) &&
+      was.effect === tool.effect &&
+      was.destructive === tool.destructive &&
+      was.unclassified === tool.unclassified &&
+      was.declaredRead === tool.declaredRead &&
+      was.version === tool.version
+    );
+  });
+}
+
+function sortedJson(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    inner && typeof inner === "object" && !Array.isArray(inner)
+      ? Object.fromEntries(
+          Object.entries(inner).sort(([left], [right]) =>
+            left < right ? -1 : left > right ? 1 : 0,
+          ),
+        )
+      : inner,
+  );
 }

@@ -1,7 +1,13 @@
+import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, eq } from "drizzle-orm";
 import { safetyRequirement } from "../../approvals/policy";
-import { currentApprovalContext } from "../../approvals/types";
+import {
+  ApprovalAlreadyAnsweredError,
+  ApprovalNeedsConversationError,
+  ApprovalRefusedError,
+  currentApprovalContext,
+} from "../../approvals/types";
 import { type AuditInitiator, recordAuditEvent } from "../../audit";
 import {
   evaluateActionPolicy,
@@ -159,6 +165,7 @@ export function callMethods(context: StoreContext) {
           inputSchema: mcpTools.inputSchema,
           effect: mcpTools.effect,
           destructive: mcpTools.destructive,
+          unclassified: mcpTools.unclassified,
           declaredRead: mcpTools.declaredRead,
           version: mcpTools.version,
         })
@@ -423,6 +430,9 @@ export function callMethods(context: StoreContext) {
             effect,
             scope: serverId,
             args: vendorArgs,
+            ...(advertised[0]?.destructive
+              ? { destructive: true as const }
+              : {}),
           })
         )
           ? shareTargetOf(serverId, toolName, vendorArgs)
@@ -520,27 +530,61 @@ export function callMethods(context: StoreContext) {
        * asked about exactly as before.
        */
       const gateApp = access.credential === "brokered" ? app : null;
-      const approval = await options.approvalGate?.({
-        actorId: input.actorId,
-        botId: input.botId,
-        toolRef: gateApp ? `${gateApp.id}/${toolName}` : input.ref,
-        effect,
-        scope: gateApp ? gateApp.id : serverId,
-        args: vendorArgs,
-        target: { serverId, toolName, url: row.url, effect },
-        continuation: currentApprovalContext(),
-        /*
-         * Whether this is a reviewed read of the person's own app: an app they connected with their
-         * own account, and a tool a reviewed read list names (`reviewedRead`). A label is not enough
-         * here, though a check-in trusts one: a task's conversation lets this, and only this, run
-         * unasked. Chat judges the call by `effect` alone, as before.
-         */
-        ...(access.ownCredential &&
-        advertised[0] &&
-        reviewedRead(entry, toolName, advertised[0])
-          ? { ownConnectionRead: true as const }
-          : {}),
+      /** A call the approval gate or the person turned away, as this surface's other refusals read. */
+      const refusedRow = (refusal: string, reason: string) => ({
+        eventType: "mcp.call_rejected" as const,
+        targetType: "mcp_tool",
+        targetId: input.ref,
+        ...(input.initiator ? { initiator: input.initiator } : {}),
+        payload: {
+          ...decided,
+          decision: { ...decided.decision, carriedOut: false },
+          refusal,
+          reason,
+        },
       });
+      const approval = await options
+        .approvalGate?.({
+          actorId: input.actorId,
+          botId: input.botId,
+          toolRef: gateApp ? `${gateApp.id}/${toolName}` : input.ref,
+          effect,
+          scope: gateApp ? gateApp.id : serverId,
+          args: vendorArgs,
+          target: { serverId, toolName, url: row.url, effect },
+          continuation: currentApprovalContext(),
+          /*
+           * Whether this is a reviewed read of the person's own app: an app they connected with their
+           * own account, and a tool a reviewed read list names (`reviewedRead`). A label is not enough
+           * here, though a check-in trusts one: a task's conversation lets this, and only this, run
+           * unasked. Chat judges the call by `effect` alone, as before.
+           */
+          ...(access.ownCredential &&
+          advertised[0] &&
+          reviewedRead(entry, toolName, advertised[0])
+            ? { ownConnectionRead: true as const }
+            : {}),
+          // The app marked this tool destructive when it was listed: it asks as deleting does.
+          ...(advertised[0]?.destructive ? { destructive: true as const } : {}),
+          declined: refusedRow("person_declined", DECLINED_BY_PERSON),
+        })
+        ?.catch(async (error: unknown) => {
+          /*
+           * Turned away at the gate: an equivalent call the person denied earlier in this conversation,
+           * or one already waiting for them. On the trail like any other refusal. A call that has to
+           * come again through a conversation, and the same call answered already, refuse nothing new.
+           */
+          if (
+            error instanceof ApprovalRefusedError &&
+            !(error instanceof ApprovalNeedsConversationError) &&
+            !(error instanceof ApprovalAlreadyAnsweredError)
+          )
+            await recordAuditEvent(
+              auditStore,
+              refusedRow("approval", error.message),
+            );
+          throw error;
+        });
       if (approval && "replay" in approval)
         return approval.replay as { text: string; isError: boolean };
 

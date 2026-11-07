@@ -1,6 +1,10 @@
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
+import {
+  deviceTimeZone,
+  PERSON_TIME_ZONE_PROP,
+} from "@openbot/shared/person-time-zone";
 import { useQuery } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { generativeUiProviderOptions } from "./a2ui";
 import { ActiveBotProvider } from "./active-bot";
@@ -33,12 +37,14 @@ import { SkillTools } from "./skill-tools";
  */
 export function CopilotProvider({ children }: { children: ReactNode }) {
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const properties = useMemo(() => runProperties(deviceTimeZone()), []);
 
   return (
     <CopilotKitProvider
       enableInspector={false}
       runtimeUrl="/api/copilotkit"
       credentials="include"
+      properties={properties}
       {...generativeUiProviderOptions(capabilities?.generativeUi)}
       /*
        * Passed only when this deployment actually has the capability, and this is the load-bearing
@@ -90,4 +96,13 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       </ActiveBotProvider>
     </CopilotKitProvider>
   );
+}
+
+/**
+ * What every run this browser starts carries for the server, as its `forwardedProps`: the person's
+ * IANA time zone, so a Bot's "today" and "9am" are theirs and not UTC. Nothing when the device cannot
+ * say, and the server then gives the date in UTC. See `person-time-zone.ts`.
+ */
+function runProperties(timeZone: string | undefined): Record<string, unknown> {
+  return timeZone ? { [PERSON_TIME_ZONE_PROP]: timeZone } : {};
 }

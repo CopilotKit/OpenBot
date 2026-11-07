@@ -286,6 +286,8 @@ export type GrantedPlugins = {
     toolName: string;
     description: string;
     inputSchema: Record<string, unknown>;
+    /** The app marks it destructive (`mcpTools.destructive`): OpenBot always asks before it runs. */
+    destructive: boolean;
   }[];
   skills: {
     slug: string;
@@ -727,6 +729,8 @@ export function storableTools(
        */
       effect: tool.effect ?? null,
       destructive: tool.destructive ?? false,
+      // A broker said nothing about it; see `mcpTools.unclassified`.
+      unclassified: tool.unclassified ?? false,
       // The server's own read-only label, kept apart from `effect`; see `mcpTools.declaredRead`.
       declaredRead: tool.declaredRead ?? false,
       version: tool.version?.replaceAll(NUL, "") ?? null,
@@ -745,6 +749,7 @@ export type StorableTool = {
   inputSchema: Record<string, unknown>;
   effect: "read" | "write" | null;
   destructive: boolean;
+  unclassified: boolean;
   declaredRead: boolean;
   version: string | null;
 };

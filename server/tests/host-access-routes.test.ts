@@ -2,16 +2,20 @@ import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import type { AppVariables } from "../src/auth/guards";
 import { createHostAccessBroker } from "../src/host-access/broker";
-import { createHostAccessRoutes } from "../src/host-access/routes";
+import {
+  createHostAccessRoutes,
+  DESKTOP_HOST_OFFLINE,
+  NO_DESKTOP_HOST,
+} from "../src/host-access/routes";
 
-function appFor() {
+function appFor(desktopToken: string | null = "desktop-token") {
   const broker = createHostAccessBroker();
   const app = new Hono<{ Variables: AppVariables }>();
   app.route(
     "/api/host-access",
     createHostAccessRoutes({
       broker,
-      desktopToken: "desktop-token",
+      desktopToken: desktopToken ?? undefined,
       requireUser: async (context, next) => {
         context.set("actor", {
           id: "user-a",
@@ -71,7 +75,8 @@ describe("host access routes", () => {
   });
 
   test("owner grant requests send the Bot's readable name to native", async () => {
-    const { app } = appFor();
+    const { app, broker } = appFor();
+    broker.nextDesktopOperation();
     const request = app.request("/api/host-access/grants", {
       method: "POST",
       body: JSON.stringify({ botId: "bot-a" }),
@@ -112,5 +117,40 @@ describe("host access routes", () => {
     expect(await denied.json()).toEqual({
       error: "That Bot is not available to you.",
     });
+  });
+
+  test("status says whether this OpenBot has a desktop host at all", async () => {
+    expect(
+      await (await appFor().app.request("/api/host-access")).json(),
+    ).toMatchObject({ desktop: true, connected: false });
+    expect(
+      await (await appFor(null).app.request("/api/host-access")).json(),
+    ).toMatchObject({ desktop: false, connected: false });
+  });
+
+  // A server not started by OpenBot Desktop (scripts/start.sh, a container) has no host to ask. The
+  // request used to be queued for a desktop that could never poll, and failed two minutes later.
+  test("a folder request without a desktop host is refused at once, and nothing is queued", async () => {
+    const { app, broker } = appFor(null);
+    const response = await app.request("/api/host-access/grants", {
+      method: "POST",
+      body: JSON.stringify({ botId: "bot-a" }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: NO_DESKTOP_HOST });
+    expect(broker.statusFor("user-a").pending).toEqual([]);
+  });
+
+  test("a folder request while the desktop app is offline is refused at once, and nothing is queued", async () => {
+    const { app, broker } = appFor();
+    const response = await app.request("/api/host-access/grants", {
+      method: "POST",
+      body: JSON.stringify({ botId: "bot-a" }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: DESKTOP_HOST_OFFLINE });
+    expect(broker.statusFor("user-a").pending).toEqual([]);
   });
 });

@@ -96,7 +96,7 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
       </PageShell>
     );
   }
-  // The person's own everyday browser (OpenBot Desktop) has no screen here: it is a window on their desktop.
+  // The person's own everyday browser has no screen here: it is a window on their desktop.
   if ("window" in opened && opened.window === "screen") {
     return (
       <ScreenBrowser
@@ -112,8 +112,8 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
 }
 
 /**
- * THE PERSON'S BROWSER AS A WINDOW ON THEIR DESKTOP (OpenBot Desktop): their own Chrome, or Edge, in a profile of its
- * own. The page walks the person through it in three steps (`TeachSteps`): what it does, naming the task, and opening
+ * THE PERSON'S BROWSER AS A WINDOW ON THEIR DESKTOP (a host-side computer of people's browsers, as scripts/start.sh
+ * runs one): their own Chrome, or Edge, in a profile of its own. The page walks the person through it in three steps (`TeachSteps`): what it does, naming the task, and opening
  * the browser already recording. They stop in the browser, from the Recorder's mark at the top of each page, which asks
  * whether to save the recording, or here with Stop, which saves it.
  */

@@ -261,25 +261,51 @@ test("a run sends a remote Bot its own key, and none of the request's headers", 
   ]);
 });
 
-test("a suggestion sends a remote Bot its own key, and none of the request's headers", async () => {
-  const runtime = mount([
-    await remoteBot("suggesting", "x-api-key", "the-bot's-own-key"),
-  ]);
+test("a suggestion sends a harness its own key and none of the request's headers, and never reaches somebody's own agent", async () => {
+  const managedAgentToken = process.env.MANAGED_AGENT_TOKEN;
+  process.env.MANAGED_AGENT_TOKEN = "deployment-token";
+  try {
+    // A harness this deployment runs, holding its token as `runtime-agents.ts` attaches it.
+    const harness = await remoteBot(
+      "suggesting",
+      "x-api-key",
+      "the-bot's-own-key",
+    );
+    harness.headers = {
+      ...harness.headers,
+      "x-openbot-agent-token": "deployment-token",
+    };
+    const runtime = mount([
+      harness,
+      await remoteBot("own", "x-api-key", "their-own-key"),
+    ]);
 
-  const response = await runtime.handler.fetch(
-    inbound("/agent/suggesting/suggest", "suggest-run"),
-  );
-  expect(response.status).toBe(200);
-  // The suggestion streams back on the response itself, so reading it to the end is the run.
-  expect(await response.text()).toContain("RUN_FINISHED");
+    const response = await runtime.handler.fetch(
+      inbound("/agent/suggesting/suggest", "suggest-run"),
+    );
+    expect(response.status).toBe(200);
+    // The suggestion streams back on the response itself, so reading it to the end is the run.
+    expect(await response.text()).toContain("RUN_FINISHED");
 
-  const suggesting = seen.filter((request) => request.bot === "suggesting");
-  expect(suggesting).toHaveLength(1);
-  expect(suggesting[0]?.headers["x-api-key"]).toBe("the-bot's-own-key");
-  expect(
-    suggesting.map((request) => request.headers.authorization ?? null),
-  ).toEqual([null]);
-  expect(
-    suggesting.map((request) => request.headers["x-leak"] ?? null),
-  ).toEqual([null]);
+    const suggesting = seen.filter((request) => request.bot === "suggesting");
+    expect(suggesting).toHaveLength(1);
+    expect(suggesting[0]?.headers["x-api-key"]).toBe("the-bot's-own-key");
+    expect(
+      suggesting.map((request) => request.headers.authorization ?? null),
+    ).toEqual([null]);
+    expect(
+      suggesting.map((request) => request.headers["x-leak"] ?? null),
+    ).toEqual([null]);
+
+    // Somebody's own agent is run only for what a person asked it, so nothing reaches it at all.
+    const own = await runtime.handler.fetch(
+      inbound("/agent/own/suggest", "suggest-own"),
+    );
+    expect(own.status).toBe(200);
+    await own.text();
+    expect(seen.filter((request) => request.bot === "own")).toEqual([]);
+  } finally {
+    if (managedAgentToken === undefined) delete process.env.MANAGED_AGENT_TOKEN;
+    else process.env.MANAGED_AGENT_TOKEN = managedAgentToken;
+  }
 });

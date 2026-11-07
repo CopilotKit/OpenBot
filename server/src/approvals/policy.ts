@@ -90,6 +90,8 @@ const SAFETY_REQUIREMENTS: readonly {
   reason: string;
   /** Matched on every word of the action: its tool, target, arguments and page. */
   pattern: RegExp;
+  /** Matched on the page's address without its query string and fragment (see {@link pageWithoutQuery}). */
+  pagePathOnly?: true;
   /** Matched on a connector tool's own name only (see {@link actionName}). */
   tool?: RegExp;
   /** Matched on the label of the control a browser click presses only. */
@@ -101,6 +103,13 @@ const SAFETY_REQUIREMENTS: readonly {
       "Changing a password, passcode, two-factor setting, recovery code or other credential is always done by the person.",
     pattern:
       /pass(word|code|phrase)|passwd|\b2fa\b|two[-_ ]?factor|\bmfa\b|one[-_ ]?time[-_ ]?code|\botp\b|recovery[-_ ]?(code|key|email|phone)|security[-_ ]?question|api[-_ ]?key|access[-_ ]?token|credential|sign[-_ ]?in[-_ ]?method/i,
+    /*
+     * A page is about credentials by where it is, not by what its address carries. A link signed
+     * for one download or a sign-in's return address holds `X-Amz-Credential=`, `access_token=` or
+     * `api_key=` in its query string or fragment on any page at all, and a Bot typing a name into a
+     * form there is not changing a credential. The page's path, the field and the button still count.
+     */
+    pagePathOnly: true,
   },
   {
     id: "security_settings",
@@ -156,6 +165,12 @@ const SAFETY_REQUIREMENTS: readonly {
  * A tool whose action is remove deletes, unless it takes somebody's access away ("remove
  * collaborator"), which sharing asks about. A button counts only as a confirmation: "Remove",
  * "Yes, remove", "Remove permanently", and not "Remove filter".
+ *
+ * A tool whose action is archive deletes too: HubSpot's delete is `HUBSPOT_ARCHIVE_CONTACT`, and
+ * Gmail's archive takes mail out of the inbox. Only as the name's first verb, so "list archived
+ * emails", "get archive settings" and "unarchive" are not archiving. And a tool the app itself marks
+ * destructive (MCP's `destructiveHint`, a broker's destructive flag, recorded when the app was
+ * listed) asks as deleting whatever it is called (see {@link ApprovalCandidate.destructive}).
  */
 const CONSEQUENTIAL: readonly {
   id: string;
@@ -208,7 +223,7 @@ const CONSEQUENTIAL: readonly {
  * its object, not the action.
  */
 const NOT_SENDING_VERBS =
-  "update|updates|edit|patch|modify|set|mark|unmark|approve|restore|resolve|unresolve|hide|unhide|toggle|like|likes|unlike|react|bookmark|unbookmark|pin|unpin|star|unstar|flag|report|moderate|redact|translate|make|cancel|pause|unschedule|undo|unrepost|unretweet|get|list|fetch|retrieve|search|find|read|count|lookup|export|download|remove|removes|delete|archive|unarchive|watch|mute|unmute|subscribe|unsubscribe";
+  "update|updates|edit|patch|modify|set|mark|unmark|approve|restore|resolve|unresolve|hide|unhide|toggle|like|likes|unlike|react|bookmark|unbookmark|pin|unpin|star|unstar|flag|report|moderate|redact|translate|make|cancel|pause|unschedule|undo|unrepost|unretweet|get|list|fetch|retrieve|search|find|read|count|lookup|export|download|remove|removes|delete|archive|archives|unarchive|watch|mute|unmute|subscribe|unsubscribe";
 
 /**
  * The first verb of a tool name, which is its action. The verbs above, and the ones that make,
@@ -287,6 +302,24 @@ function paysToSubscribe(
   }
 }
 
+/**
+ * The target with its page's address cut to where the page is: origin and path, without the query
+ * string or fragment. A target with no page, or an address that does not parse, is left whole, so
+ * an address this cannot read is matched as before rather than not at all.
+ */
+function pageWithoutQuery(target: unknown): unknown {
+  if (target === null || typeof target !== "object" || Array.isArray(target))
+    return target;
+  const page = (target as { pageUrl?: unknown }).pageUrl;
+  if (typeof page !== "string") return target;
+  try {
+    const url = new URL(page);
+    return { ...target, pageUrl: `${url.origin}${url.pathname}` };
+  } catch {
+    return target;
+  }
+}
+
 /** How deep a value is read. Anything nested further is not, so matching stays cheap. */
 const MAX_DEPTH = 6;
 
@@ -352,6 +385,10 @@ function plainlyEmpty(value: unknown): boolean {
 const NOT_ACCOUNT_ACTIONS =
   /^(computer_(write_file|read_file|list_files|run_command)|host\/)/;
 
+/** Why a tool its app marks destructive asks, when its name doesn't say it deletes. */
+const DESTRUCTIVE_REASON =
+  "The app marks this as deleting or overwriting something, so it always asks you first.";
+
 export function safetyRequirement(
   candidate: ApprovalCandidate,
 ): { id: string; reason: string; behaviour: "hand_off" | "ask" } | undefined {
@@ -367,12 +404,12 @@ export function safetyRequirement(
     !Array.isArray(candidate.args)
       ? { ...(candidate.args as Record<string, unknown>), text: undefined }
       : candidate.args;
-  const words = [
-    candidate.toolRef,
-    candidate.scope,
-    flatten(args),
-    flatten(candidate.target),
-  ].join(" ");
+  const wordsWith = (target: unknown) =>
+    [candidate.toolRef, candidate.scope, flatten(args), flatten(target)].join(
+      " ",
+    );
+  const words = wordsWith(candidate.target);
+  const pathWords = wordsWith(pageWithoutQuery(candidate.target));
   const named = actionName(candidate);
   const matches = (entry: {
     tool?: { test(name: string): boolean };
@@ -383,7 +420,9 @@ export function safetyRequirement(
       true;
   const handOff =
     SAFETY_REQUIREMENTS.find(
-      (entry) => entry.pattern.test(words) || matches(entry),
+      (entry) =>
+        entry.pattern.test(entry.pagePathOnly ? pathWords : words) ||
+        matches(entry),
     ) ??
     (paysToSubscribe(candidate, named)
       ? SAFETY_REQUIREMENTS.find((entry) => entry.id === "payments")
@@ -413,11 +452,13 @@ export function safetyRequirement(
       : undefined) ??
     // Last, so taking somebody's access away ("remove collaborator") is asked about as sharing.
     (named?.kind === "tool" &&
-    /^removes?$/.test(named.name.match(FIRST_VERB)?.[1] ?? "")
+    /^(removes?|archives?)$/.test(named.name.match(FIRST_VERB)?.[1] ?? "")
       ? CONSEQUENTIAL.find((entry) => entry.id === "deleting")
       : undefined);
-  return asks
-    ? { id: asks.id, reason: asks.reason, behaviour: "ask" }
+  if (asks) return { id: asks.id, reason: asks.reason, behaviour: "ask" };
+  // Whatever it is called, a tool its app marks destructive asks as deleting does.
+  return named?.kind === "tool" && candidate.destructive === true
+    ? { id: "deleting", reason: DESTRUCTIVE_REASON, behaviour: "ask" }
     : undefined;
 }
 

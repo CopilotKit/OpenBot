@@ -5,6 +5,7 @@ import {
   standardUI,
 } from "@copilotkit/react-core/v2/generative-ui";
 import { SERIES_COLOURS } from "@/components/gallery/palette";
+import { A2UITextField } from "./a2ui-text-field";
 import { A2UICode, A2UIMarkdown } from "./a2ui-markdown";
 
 /**
@@ -31,6 +32,9 @@ export const OMITTED_STANDARD_COMPONENTS = [
  * so code and prose in an interface look exactly as they do in a reply; see a2ui-markdown.tsx. An
  * override replaces only the React component: the model sees the standard `Code` and `Markdown` with
  * their descriptions and props unchanged, so what a Bot already writes keeps drawing.
+ *
+ * `TextField` is the standard one, except that a number field writes a number into the data model,
+ * so a total a Bot computes from the fields adds rather than joins text; see a2ui-text-field.tsx.
  */
 export const OPENBOT_UI = createGenerativeUI({
   id: "openbot/ui@1",
@@ -38,6 +42,7 @@ export const OPENBOT_UI = createGenerativeUI({
   overrides: {
     Code: { component: A2UICode },
     Markdown: { component: A2UIMarkdown },
+    TextField: { component: A2UITextField },
   },
   components: {},
 });

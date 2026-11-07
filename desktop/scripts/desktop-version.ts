@@ -104,6 +104,46 @@ function replaceVersion(text: string, releaseVersion: string, lock: boolean) {
   return result;
 }
 
+/**
+ * An internal build's version: `X.Y.Z-internal.<commits>.g<commit>`.
+ *
+ * Installers and the app order versions by semver, and semver compares a prerelease identifier
+ * that is a number as a number and any other as text. Named after the commit alone, two internal
+ * builds ordered by their hashes, so a later build could read as older than the one installed
+ * (`g4400ba…` sorts before `gd298de…`) and the Windows installer warned against installing it.
+ * The number of commits before the hash orders a later commit after an earlier one.
+ */
+function internalVersion(
+  releaseVersion: string,
+  commits: number,
+  sourceSha: string,
+) {
+  return `${releaseVersion}-internal.${commits}.g${sourceSha.slice(0, 12)}`;
+}
+
+/** The commits in HEAD's history. A shallow checkout has only some of them, so it is refused. */
+function commitCount() {
+  const shallow = Bun.spawnSync(
+    ["git", "rev-parse", "--is-shallow-repository"],
+    { cwd: root },
+  );
+  if (shallow.stdout.toString().trim() !== "false") {
+    throw new Error(
+      "An internal build is numbered by its commit count, and this checkout is shallow or not a repository. Check out the full history (actions/checkout with fetch-depth: 0).",
+    );
+  }
+  const count = Bun.spawnSync(["git", "rev-list", "--count", "HEAD"], {
+    cwd: root,
+  });
+  const text = count.stdout.toString().trim();
+  if (count.exitCode !== 0 || !/^[1-9][0-9]*$/.test(text)) {
+    throw new Error(
+      `Could not count the source commits: ${count.stderr.toString().trim()}`,
+    );
+  }
+  return Number(text);
+}
+
 function main(command: string | undefined) {
   if (!["sync", "check", "internal", "release"].includes(command ?? "")) {
     throw new Error(
@@ -139,7 +179,7 @@ function main(command: string | undefined) {
   }
   const buildVersion =
     command === "internal"
-      ? `${releaseVersion}-internal.g${sourceSha.slice(0, 12)}`
+      ? internalVersion(releaseVersion, commitCount(), sourceSha)
       : releaseVersion;
   const metadata = {
     version: buildVersion,

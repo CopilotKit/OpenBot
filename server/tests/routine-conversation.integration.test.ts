@@ -4,6 +4,7 @@ import {
   beforeEach,
   describe,
   expect,
+  setSystemTime,
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -188,14 +189,17 @@ async function generalAssistantAgainst(baseUrl: string) {
   return agent;
 }
 
-/** One run of the person's message in `threadId`, with the browser's choice card on offer. */
-async function ask(threadId: string) {
+/**
+ * One run of the person's message in `threadId`, with the browser's choice card on offer, and the
+ * run properties the browser sends with it (its time zone, `person-time-zone.ts`).
+ */
+async function ask(threadId: string, forwardedProps?: Record<string, unknown>) {
   const agent = await generalAssistantAgainst(endpoint?.baseUrl ?? "");
   agent.threadId = threadId;
   agent.setMessages([{ id: `person-${suite}`, role: "user", content: PERSON }]);
   const events: BaseEvent[] = [];
   await agent.runAgent(
-    { runId: `run-${randomUUID()}`, tools: [ASK_CHOICE] },
+    { runId: `run-${randomUUID()}`, tools: [ASK_CHOICE], forwardedProps },
     { onEvent: ({ event }) => void events.push(event) },
   );
   return events;
@@ -365,6 +369,34 @@ describe("a routine asked for in a conversation", () => {
     // And nobody is asked where to post it.
     expect(argumentsOf(events, "askChoice")).toEqual([]);
     expect(events.some((event) => event.type === "RUN_ERROR")).toBe(false);
+  });
+});
+
+describe("the next run, as the Bot is told it", () => {
+  afterEach(() => setSystemTime());
+
+  test("is on the person's clock and says how far away it is", async () => {
+    // Seen on a desktop install: asked at 08:54 for a routine at 09:00, the Bot was told "next
+    // 2026-11-07T09:00:00.000Z", knew the date but not the time, and told the person the first run
+    // was tomorrow "since it's already past that time". It ran six minutes later. Here the person
+    // is in California at 08:54 their time, and the recorded call asks for every 15 minutes in UTC.
+    setSystemTime(new Date("2026-11-07T16:54:00.000Z"));
+    endpoint = startOpenAICompatibleEndpoint({
+      responses: [
+        "routine-asked-in-conversation-1.sse",
+        "routine-asked-in-conversation-2.sse",
+      ],
+    });
+
+    await ask(ASKED_IN.threadId, { openbotTimeZone: "America/Los_Angeles" });
+
+    const [made] = await routinesOfOwner();
+    expect(made?.nextRunAt.toISOString()).toBe("2026-11-07T17:00:00.000Z");
+    const [answer] = toolOutputs(endpoint.conversations[1]);
+    expect(answer).toContain(
+      "next run Saturday, November 7, 2026 at 9:00 AM PST (America/Los_Angeles), 6 minutes from now",
+    );
+    expect(answer).not.toContain("2026-11-07T17:00:00.000Z");
   });
 });
 

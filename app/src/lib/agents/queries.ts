@@ -32,6 +32,11 @@ export type AgentProfile = {
    * picker; a Bot on its own framework picks its own model. Absent reads as no.
    */
   runsOnOpenBotModel?: boolean;
+  /**
+   * Whether OpenBot gives it a key for its tools on every run, because OpenBot runs it: the harness
+   * picked in setup, or the Bot in the box. It needs no key of its own. Absent reads as no.
+   */
+  keyFromOpenBot?: boolean;
   /** Whether a key is set for it. Never the key itself. */
   hasAuth: boolean;
   /**
@@ -111,7 +116,7 @@ export function agentCapabilitiesQueryOptions() {
     queryKey: agentKeys.capabilities(),
     queryFn: (): Promise<AgentCapabilities> =>
       client("/api/agents/capabilities", "capabilities", {
-        fallback: "Could not load what this deployment supports",
+        fallback: "Couldn't load what OpenBot supports.",
       }),
     // Deployment configuration, not data: it cannot change without the server restarting.
     staleTime: Number.POSITIVE_INFINITY,

@@ -212,21 +212,22 @@ function disabledFeatures(switches: string[]): string[] {
  * utility processes all have. That process answers DevTools, so stopping it is a browser that does not answer.
  */
 async function browserProcess(profile: string): Promise<number> {
-  const listing = Bun.spawnSync(["ps", "-axo", "pid=,command="]);
-  const found = listing.stdout
+  const listing = Bun.spawnSync(["ps", "-axo", "pid=,ppid=,command="]);
+  const lines = listing.stdout
     .toString()
     .split("\n")
     .filter(
       (line) =>
         line.includes(`--user-data-dir=${profile}`) &&
         !line.includes("--type="),
-    )
-    .map((line) => Number.parseInt(line.trim(), 10));
-  if (found.length !== 1)
-    throw new Error(
-      `Expected one browser on ${profile}, found ${found.length}.`,
     );
-  return found[0] as number;
+  // Each one whole when there are two: which process the second one is (its parent, its program,
+  // its switches) is what says why. It failed on CI as "found 2" and nothing else.
+  if (lines.length !== 1)
+    throw new Error(
+      `Expected one browser on ${profile}, found ${lines.length}:\n${lines.map((line) => line.trim().slice(0, 600)).join("\n")}`,
+    );
+  return Number.parseInt((lines[0] as string).trim(), 10);
 }
 
 /** Every browser the tests start, closed at the end whatever happened. */

@@ -114,14 +114,14 @@ export const ChecklistCardProps = z.object({
     .array(
       z.object({
         text: z.string(),
-        done: z.boolean().describe("Whether this one is already finished"),
+        done: z.boolean().describe("Whether this task is already finished"),
         note: z
           .string()
           .optional()
           .describe("A short aside, e.g. who it is waiting on"),
       }),
     )
-    .describe("The items, in the order they should be done"),
+    .describe("The tasks, in the order they should be done"),
 });
 
 /**
@@ -162,12 +162,15 @@ export function ChecklistCard({
             >
               {item.done ? "✓" : ""}
             </span>
+            {/*
+             * Done is the tick and a muted line, never a line through it. A strike reads as deleted,
+             * and a list whose every item is finished was drawn as an answer crossed out.
+             */}
             <span className="min-w-0">
-              <span
-                className={
-                  item.done ? "text-muted-foreground line-through" : ""
-                }
-              >
+              <span className={item.done ? "text-muted-foreground" : ""}>
+                <span className="sr-only">
+                  {item.done ? "Done: " : "To do: "}
+                </span>
                 {item.text}
               </span>
               {item.note ? (
@@ -193,19 +196,34 @@ export const NoticeCardProps = z.object({
     .describe("Supporting points, if there are any"),
 });
 
+/**
+ * The words on a notice's badge. The tone picks the badge's colour and is never its text: a notice
+ * drawn with `tone: "positive"` read "positive", a styling value shown to the person. Neutral has no
+ * badge, and so has a tone still arriving while the card draws.
+ */
+function noticeBadge(tone: string | undefined): string | null {
+  switch (tone) {
+    case "positive":
+      return "Good news";
+    case "caution":
+      return "Heads up";
+    case "negative":
+      return "Problem";
+    default:
+      return null;
+  }
+}
+
 export function NoticeCard({
   title,
   body,
   tone: noticeTone,
   points,
 }: Partial<z.infer<typeof NoticeCardProps>>) {
+  const badge = noticeBadge(noticeTone);
   return (
     <GalleryFrame
-      action={
-        noticeTone && noticeTone !== "neutral" ? (
-          <Badge tone={noticeTone}>{noticeTone}</Badge>
-        ) : undefined
-      }
+      action={badge ? <Badge tone={noticeTone}>{badge}</Badge> : undefined}
       title={title}
     >
       <p className="text-sm">{body}</p>
@@ -277,7 +295,7 @@ export const GALLERY: GalleryComponent[] = [
     title: "Checklist",
     kind: "card",
     description:
-      "Show a list of things and which are done. Reporting only, the person cannot tick these, so do not use it to ask for anything.",
+      "Show the tasks or steps of a piece of work and which are finished, such as a release plan or an onboarding list. Only for work somebody ticks off. Not for presenting information: findings, options, recommendations or a list of points go in text or a notice. The person cannot tick these here, so do not use it to ask for anything.",
     parameters: ChecklistCardProps,
     Component: ChecklistCard as GalleryComponent["Component"],
     preview: {

@@ -246,8 +246,10 @@ export const PROVENANCE_GUIDANCE = asParagraphs(PROVENANCE_GUIDANCE_LINES);
  */
 const COMPONENT_GUIDANCE_LINES = [
   "When an answer has structure, answer with a component from your tools rather than in prose.",
-  "Numbers or a comparison: a chart or headline figures. Steps, a list or a plan: a checklist or a",
-  "table. The details of one thing, such as a person, an order or an account: a record card. A choice",
+  "Numbers or a comparison: a chart or headline figures. Rows that share the same fields: a table.",
+  "Tasks or steps of a piece of work, with which are finished: a checklist. A list of points, findings",
+  "or recommendations: text or a notice, never a checklist, whose ticks would mark the answer done.",
+  "The details of one thing, such as a person, an order or an account: a record card. A choice",
   "the person has to make: a card they choose from. Use whichever of the tools you hold on this turn",
   "fits, and put a sentence or two of text around it saying what it shows or what comes next, without",
   "repeating what it already shows.",
@@ -305,23 +307,38 @@ export const ORCHESTRATION_GUIDANCE = asParagraphs(
 /**
  * Who asks the person before an action: OpenBot, not the Bot.
  *
- * OpenBot puts a card in front of the person before any delete, send, share or post, and hands any
- * payment or purchase to them, whatever their settings (`server/src/approvals/policy.ts`). A Bot told
- * by its approval card's description to ask "before sending a message" asked too, so the person was
- * asked twice for one delete. The card OpenBot shows names the exact action, so it is the one that
- * stays. Only for a Bot OpenBot runs, whose every tool goes through that gate: a remote Bot's own
- * tools do not, and nothing here is said to one.
+ * OpenBot puts a card in front of the person before any delete, archive, send, share or post, and
+ * before any app tool its app marks destructive, and hands any payment or purchase to them, whatever
+ * their settings (`server/src/approvals/policy.ts`). A Bot told by its approval card's description to
+ * ask "before sending a message" asked too, so the person was asked twice for one delete. The card
+ * OpenBot shows names the exact action, so it is the one that stays. Only for a Bot OpenBot runs,
+ * whose every tool goes through that gate: a remote Bot's own tools do not, and nothing here is said
+ * to one.
+ *
+ * A tool marked destructive can be called anything ("reset pipeline"), so the Bot can't tell it from
+ * its name. Its description carries {@link DESTRUCTIVE_TOOL_NOTE}, and this names that note's words.
+ * Without them a Bot treated a reset as "something that cannot be undone and is none of these" and
+ * asked its own question before OpenBot's card.
  */
 const APPROVAL_GUIDANCE_LINES = [
-  "OpenBot asks the person itself before you delete, send, share or post anything, and before you",
-  "pay for or buy anything, on a card that shows exactly what you are about to do. It also asks before",
-  "every change when the person has turned that on. So do not ask them first, in words or with an",
-  "approval card: say what you are going to do and do it, and they are asked once, by OpenBot. Ask",
-  "for their decision yourself only when the choice is theirs to make, or before something that",
-  "cannot be undone and is none of these.",
+  "OpenBot asks the person itself before you delete, archive, send, share or post anything, before",
+  "you use a tool that says it deletes or overwrites something, and before you pay for or buy",
+  "anything, on a card that shows exactly what you are about to do. It also asks before every change",
+  "when the person has turned that on. So do not ask them first, in words or with an approval card:",
+  "say what you are going to do and do it, and they are asked once, by OpenBot. Ask for their decision",
+  "yourself only when the choice is theirs to make, or before something that cannot be undone and is",
+  "none of these.",
 ];
 
 export const APPROVAL_GUIDANCE = asParagraphs(APPROVAL_GUIDANCE_LINES);
+
+/**
+ * Added to the description of an app tool its app marks destructive (MCP's `destructiveHint`, a
+ * broker's destructive flag), where the Bot is offered it. OpenBot always asks before one runs, so
+ * the Bot is told so on the tool itself, in the words {@link APPROVAL_GUIDANCE} names.
+ */
+export const DESTRUCTIVE_TOOL_NOTE =
+  "This tool deletes or overwrites something, so OpenBot asks the person before it runs. Don't ask them first.";
 
 const WEEKDAYS = [
   "Sunday",
@@ -341,17 +358,59 @@ const WEEKDAYS = [
  * and so waits for the person's approval. A subagent it gave the work to stopped at the same command
  * and handed it back. One line in the prompt answers all of that before it starts.
  *
- * In UTC, and said to be, because OpenBot does not know where the person is. Only the day, so the
- * prompt changes once a day and not on every run, which keeps a provider's prompt cache warm. Last
- * in the prompt for the same reason: everything before it stays a stable prefix.
+ * In the person's own time zone when the run carries it (`person-time-zone.ts`), and said to be, so
+ * "tomorrow" late on a Friday in California is Saturday and not the Sunday it already is in UTC,
+ * and "9am" is their nine o'clock. In UTC, and said to be, when it does not: a run nobody started
+ * from a browser, or a zone this runtime does not know.
+ *
+ * Only the day, so the prompt changes once a day and not on every run, which keeps a provider's
+ * prompt cache warm. Last in the prompt for the same reason: everything before it stays a stable
+ * prefix.
  */
-export function todayGuidance(now: Date): string {
+export function todayGuidance(now: Date, timeZone?: string): string {
+  const local = timeZone ? dayIn(now, timeZone) : undefined;
+  if (local) {
+    return [
+      `Today is ${local.day}, ${local.date} in the person's time zone, ${timeZone}. Use this date for`,
+      `anything relative to now, such as "tomorrow", "this quarter", "last week" or "recent", and this`,
+      `time zone for any time of day the person gives, such as "9am", unless they name another. Do`,
+      "not run a command or start a subagent to find either out.",
+    ].join(" ");
+  }
   const day = WEEKDAYS[now.getUTCDay()];
   const date = now.toISOString().slice(0, 10);
   return [
     `Today is ${day}, ${date} (UTC). Use this date for anything relative to now, such as "this quarter",`,
     `"last week" or "recent", and do not run a command or start a subagent to find it out.`,
   ].join(" ");
+}
+
+/** The weekday and ISO date `now` falls on in `timeZone`, or undefined when Intl cannot say. */
+function dayIn(
+  now: Date,
+  timeZone: string,
+): { day: string; date: string } | undefined {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "long",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((entry) => entry.type === type)?.value;
+    const [day, year, month, date] = [
+      part("weekday"),
+      part("year"),
+      part("month"),
+      part("day"),
+    ];
+    if (!day || !year || !month || !date) return undefined;
+    return { day, date: `${year}-${month}-${date}` };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

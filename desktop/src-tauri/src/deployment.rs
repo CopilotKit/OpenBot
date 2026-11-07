@@ -1,10 +1,9 @@
 //! Putting the deployment on disk, which is not what the installer carries.
 //!
-//! The installer stays small: a Tauri binary and nothing else. What it needs to run a deployment —
-//! `docker-compose.yml`, `server`, `app`, `worker`, the tenant package — is fetched on first run and
-//! kept beside it, at a version this app records. Two things follow from that split, and both are
-//! the reason for it: the download stays a download rather than becoming part of every installer,
-//! and the deployment can be moved forward on its own without shipping a new app.
+//! The installer stays small: a Tauri binary and nothing else. What it needs to run a deployment is
+//! fetched on first run and kept beside it, at a version this app records: `docker-compose.yml` and
+//! the image list for the containers (see `LAYOUT`). Everything else runs from the release's images,
+//! the server, the app, the worker, the computer, their migrations and the tenant package included.
 //!
 //! What is fetched is the release's own source tarball, at a tag. Not `main`: an app that pulls
 //! whatever is on a branch this morning is not a version anybody can be given, and the images the
@@ -215,19 +214,30 @@ pub fn record(root: &Path, version: &str, pinned: bool) -> std::io::Result<()> {
 /// stamp that matches and no manifest, and re-fetching is a better answer than an error about a
 /// file the person has never heard of.
 ///
-/// So is a stamp that laid out less than this app copies. An app that left a folder out wrote a
-/// stamp that still matches its version, and Repair would otherwise keep the gap forever.
+/// So is a stamp that laid out less than this app needs. An app that left a file out wrote a stamp
+/// that still matches its version, and Repair would otherwise keep the gap forever. A stamp that
+/// laid out more (an app that copied whole folders, `agent-computer` and `shared` among them) covers
+/// what this app needs, and is not fetched again for that.
 pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
     if !images_path(root).exists() {
         return true;
     }
     match installed(root) {
-        // A deployment laid out by an app that copied less is missing something this one runs.
         Some(found) => {
-            found.version != wanted || found.layout != layout() || predates_containers(root)
+            found.version != wanted || !covers(&found.layout) || predates_containers(root)
         }
         None => true,
     }
+}
+
+/// Whether a stamp's recorded layout includes every path this app lays out: the path itself, or a
+/// folder it is in.
+fn covers(recorded: &[String]) -> bool {
+    LAYOUT.iter().all(|path| {
+        recorded
+            .iter()
+            .any(|entry| *path == entry || path.starts_with(&format!("{entry}/")))
+    })
 }
 
 /// Whether the deployment on disk is a release from before OpenBot's server and worker were
@@ -278,53 +288,24 @@ fn compose_services(text: &str) -> Vec<&str> {
 
 /// What this app lays out, in a fixed order, as recorded in the stamp.
 fn layout() -> Vec<String> {
-    let mut entries: Vec<String> = REQUIRED
-        .iter()
-        .chain(ALSO_COPIED.iter())
-        .map(|entry| entry.to_string())
-        .collect();
+    let mut entries: Vec<String> = LAYOUT.iter().map(|entry| entry.to_string()).collect();
     entries.sort();
     entries
 }
 
-/// Everything the three host processes and Compose need from the tree.
+/// Everything a deployment runs from on this machine, out of the release's source tarball.
 ///
-/// Named rather than "the whole repository" because most of it is not needed to run: the charts, the
-/// docs, the tests and the Dockerfiles are not part of a deployment, and copying them makes the
-/// directory look like a place to develop rather than a place something runs.
-pub const REQUIRED: [&str; 4] = ["docker-compose.yml", "server", "app", "worker"];
-
-/// The rest of what a deployment needs, which is not what it is checked for.
-pub const ALSO_COPIED: [&str; 11] = [
-    "shared",
-    // The dependency patches `package.json` names in `patchedDependencies`. Without them `bun install
-    // --frozen-lockfile` stops with `Couldn't find patch file`.
-    "patches",
-    // Not a workspace, but the server imports its egress rules from `agent-computer/src` and
-    // `scripts/start-local-chrome-computer.ts` its browser runtime. Without it the server exits at
-    // start with `Cannot find module '../../../agent-computer/src/egress'`.
-    "agent-computer",
-    // A root workspace the server imports as `@openbot/toolkit`. Without it, `bun install
-    // --frozen-lockfile` stops with `Workspace not found "toolkit"`.
-    "toolkit",
-    "examples",
-    "package.json",
-    "bun.lock",
-    "scripts",
-    // Every package's tsconfig extends this one. Without it vite fails inside `parseExtends`, in a
-    // stack trace that names the parser and not the missing file.
-    "tsconfig.base.json",
-    "bunfig.toml",
-    // The Recorder, whole. Installation builds it into `extension/dist` (see
-    // `preparation::build_recorder`), and the person's browser loads that build. Its build reads
-    // its source, its public assets and its public key, and `bun install --frozen-lockfile` needs
-    // its manifest as a workspace.
-    "extension",
-];
-
-/// Single files copied from a directory that is otherwise left behind. None now: the Recorder's
-/// manifest was the one, before Desktop built the Recorder.
-pub const ALSO_COPIED_FILES: [&str; 0] = [];
+/// The containers need only the Compose file (and `.env`, `.openbot/` and `.langchain/`, which are
+/// the installation's own): every container runs from an image the release pins by digest, the
+/// server's migrations and the tenant package (`examples/`) included. So no `server`, `app`,
+/// `worker`, `toolkit`, `scripts` or `patches` is laid out, and nothing installs their packages.
+///
+/// Nothing runs from source on the host either. Earlier versions laid out `agent-computer` and the
+/// `shared` files it imports, for a browser of the person's own they ran on the desktop beside the
+/// server; the person's browser is on the one computer now, shown in the OpenBot window. A stamp that
+/// laid those out still covers this layout ([`needs_fetch`]), and Start's upgrade takes the files
+/// away with the previous version (`upgrade::KEPT`).
+pub const LAYOUT: [&str; 1] = ["docker-compose.yml"];
 
 /// Fetch the tagged tarball and lay the deployment out under `root`.
 ///
@@ -339,35 +320,26 @@ pub type Download<'a> = &'a dyn Fn(&str) -> Result<Vec<u8>, String>;
 
 /// [`fetch`], downloading through `get`.
 ///
-/// An installed release changes only through the explicit runtime update controls. At the same
-/// version this still lays the deployment out again when the stamp shows an app that copied less
-/// (#858 grew `ALSO_COPIED`) or a required path is gone, which is what Install has always done:
-/// refusing it left every installation laid out before a layout change unable to Start or Install.
+/// An installed release is never changed here: moving it to another one is Start's upgrade (see
+/// `upgrade`), which keeps the previous version and a database backup to go back to, and lays the
+/// new one out only once the previous one is out of the way. At the same version this still lays
+/// the deployment out again when the stamp shows an app that laid out less, or a path is gone,
+/// which is what Install has always done.
 pub fn fetch_with(root: &Path, version: &str, get: Download) -> Result<(), String> {
-    crate::updates::require_no_interruption(root)?;
-    let policy = crate::updates::distribution(root)?;
+    let policy = crate::deployment_release::distribution(root)?;
     // A release from before the server and worker were Compose services cannot run in this app,
-    // so `deployment_release` moves it to the latest release. That move is not a runtime update:
-    // it is the whole layout again, as for a new deployment.
+    // so `deployment_release` moves it to the latest release: the whole layout again, as for a new
+    // deployment.
     let installed = installed(root).filter(|_| !predates_containers(root));
     if let Some(installed) = installed {
         if installed.version != version {
-            return Err(
-                "Use the explicit runtime update controls to change an installed release".into(),
-            );
+            return Err(format!(
+                "{} is installed here, and only Start moves it to {version}",
+                installed.version
+            ));
         }
-        let laid_out =
-            installed.layout == layout() && REQUIRED.iter().all(|path| root.join(path).exists());
-        if laid_out {
+        if covers(&installed.layout) && LAYOUT.iter().all(|path| root.join(path).exists()) {
             return fetch_images(root, version, get);
-        }
-        // An installation the updater has a verified baseline for is laid out again from that
-        // release's checksum-verified source artifact, and its baseline grows to match. A plain
-        // installation takes the tag's tarball again, as it always has.
-        if root.join(crate::updates::BASELINE).exists() {
-            crate::updates::relay_accepted_release(root, get)?;
-            return record(root, version, false)
-                .map_err(|error| format!("could not record the version: {error}"));
         }
     }
     let source_url = format!(
@@ -468,9 +440,10 @@ fn destination_in(root: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
         .components()
         .map(|part| part.as_os_str().to_string_lossy().into_owned())
         .collect();
-    let wanted = names.first().is_some_and(|first| {
-        REQUIRED.contains(&first.as_str()) || ALSO_COPIED.contains(&first.as_str())
-    }) || ALSO_COPIED_FILES.contains(&names.join("/").as_str());
+    let path = names.join("/");
+    let wanted = LAYOUT
+        .iter()
+        .any(|kept| path == *kept || path.starts_with(&format!("{kept}/")));
     if !wanted {
         return Ok(None);
     }
@@ -516,7 +489,7 @@ pub fn unpack(root: &Path, body: &[u8]) -> Result<(), String> {
 /// Parsed here rather than at start-up so a release missing an image fails while the person is
 /// still looking at a screen that says what is being fetched, not later inside Compose's output.
 fn fetch_images(root: &Path, version: &str, get: Download) -> Result<(), String> {
-    let policy = crate::updates::distribution(root)?;
+    let policy = crate::deployment_release::distribution(root)?;
     let url = format!(
         "https://github.com/{}/releases/download/{version}/{IMAGES}",
         policy.repository
@@ -867,44 +840,138 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Finding: #858 grew `ALSO_COPIED` from 9 to 11 entries, and `fetch` then refused every
-    /// installation whose stamp recorded the older layout, so none of them could Start or Install.
-    /// Install lays the same release out again, from GitHub's own tarball shape.
-    #[test]
-    fn an_installation_laid_out_before_a_layout_change_is_laid_out_again_at_its_version() {
-        let root = crate::test_support::temp_root("deployment-older-layout");
-        std::fs::create_dir_all(&root).unwrap();
+    /// A GitHub tag tarball, with every path given its own body.
+    fn release_tarball(top: &str, paths: &[(&str, &str)]) -> Vec<u8> {
         let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         let mut tarball = tar::Builder::new(encoder);
-        for entry in REQUIRED.iter().chain(ALSO_COPIED.iter()) {
-            let body = format!("release {entry}");
+        for (path, body) in paths {
             let mut header = tar::Header::new_gnu();
             header.set_size(body.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
             tarball
-                .append_data(
-                    &mut header,
-                    format!("OpenBot-0.0.7/{entry}/release.txt"),
-                    body.as_bytes(),
-                )
+                .append_data(&mut header, format!("{top}/{path}"), body.as_bytes())
                 .unwrap();
         }
-        let tarball = tarball.into_inner().unwrap().finish().unwrap();
-        unpack(&root, &tarball).unwrap();
-        // Laid out by the app before #858, which copied neither of these.
-        for added in ["patches", "extension"] {
-            std::fs::remove_dir_all(root.join(added)).unwrap();
-        }
-        let older: Vec<String> = layout()
-            .into_iter()
-            .filter(|entry| entry != "patches" && entry != "extension")
+        tarball.into_inner().unwrap().finish().unwrap()
+    }
+
+    /// Every path in `LAYOUT` as a file in a tarball, and the rest of a release's tree beside them.
+    fn whole_release(top: &str) -> Vec<u8> {
+        let mut paths: Vec<(String, String)> = LAYOUT
+            .iter()
+            .map(|entry| match *entry {
+                "docker-compose.yml" => (
+                    entry.to_string(),
+                    "services:\n  server: {}\n  worker: {}\n".to_string(),
+                ),
+                _ => (entry.to_string(), format!("release {entry}")),
+            })
             .collect();
+        for rest in [
+            "server/src/index.ts",
+            "app/package.json",
+            "worker/src/index.ts",
+            "toolkit/package.json",
+            "examples/fintech/package.json",
+            "scripts/start.sh",
+            "patches/x.patch",
+            "package.json",
+            "bun.lock",
+            "shared/harnesses.json",
+            "shared/openbot-browser.ts",
+            "agent-computer/package.json",
+            "agent-computer/src/index.ts",
+            "extension/package.json",
+        ] {
+            paths.push((rest.into(), format!("release {rest}")));
+        }
+        let borrowed: Vec<(&str, &str)> = paths
+            .iter()
+            .map(|(path, body)| (path.as_str(), body.as_str()))
+            .collect();
+        release_tarball(top, &borrowed)
+    }
+
+    /// The containers run from images, so a deployment lays out the Compose file and nothing of the
+    /// server, the app, the worker, the computer or the root workspace. Nor the browser earlier
+    /// versions ran on the person's desktop: the person's browser is on the one computer now.
+    #[test]
+    fn only_the_compose_file_is_laid_out() {
+        let root = crate::test_support::temp_root("deployment-layout");
+        std::fs::create_dir_all(&root).unwrap();
+        unpack(&root, &whole_release("OpenBot-0.3.1")).unwrap();
+        for entry in LAYOUT {
+            assert!(root.join(entry).exists(), "{entry} is not laid out");
+        }
+        for left in [
+            "server",
+            "app",
+            "worker",
+            "toolkit",
+            "examples",
+            "scripts",
+            "patches",
+            "package.json",
+            "bun.lock",
+            "shared",
+            "agent-computer",
+            "extension",
+        ] {
+            assert!(!root.join(left).exists(), "{left} is laid out");
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// An installation laid out by an app that copied whole folders (`agent-computer`, `shared`)
+    /// already has everything this app lays out, so it is not fetched again for the new layout.
+    #[test]
+    fn an_installation_laid_out_with_whole_folders_is_not_laid_out_again() {
+        let root = crate::test_support::temp_root("deployment-whole-folders");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(images_path(&root), "{}").unwrap();
+        let earlier = [
+            "agent-computer",
+            "app",
+            "bun.lock",
+            "bunfig.toml",
+            "docker-compose.yml",
+            "examples",
+            "extension",
+            "package.json",
+            "patches",
+            "scripts",
+            "server",
+            "shared",
+            "toolkit",
+            "tsconfig.base.json",
+            "worker",
+        ];
+        std::fs::write(
+            stamp_path(&root),
+            serde_json::json!({ "version": "v0.3.0", "layout": earlier }).to_string(),
+        )
+        .unwrap();
+        assert!(!needs_fetch(&root, "v0.3.0"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Install lays the same release out again when its stamp laid out less than this app needs,
+    /// from GitHub's own tarball shape, and leaves the installation's own files alone. It never
+    /// changes the release: only Start's upgrade does.
+    #[test]
+    fn an_installation_laid_out_before_a_layout_change_is_laid_out_again_at_its_version() {
+        let root = crate::test_support::temp_root("deployment-older-layout");
+        std::fs::create_dir_all(&root).unwrap();
+        let tarball = whole_release("OpenBot-0.0.7");
+        unpack(&root, &tarball).unwrap();
+        std::fs::remove_file(root.join("docker-compose.yml")).unwrap();
+        // Laid out by an app that left the Compose file out.
         std::fs::write(
             stamp_path(&root),
             serde_json::to_string(&Installed {
                 version: "v0.0.7".into(),
-                layout: older,
+                layout: vec!["shared".into()],
                 pinned: false,
             })
             .unwrap(),
@@ -928,25 +995,23 @@ mod tests {
             }
         };
         fetch_with(&root, "v0.0.7", &get).expect("Install lays the same release out again");
-        for added in ["patches", "extension"] {
-            assert_eq!(
-                std::fs::read_to_string(root.join(added).join("release.txt")).unwrap(),
-                format!("release {added}")
-            );
-        }
+        assert_eq!(
+            std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+            "services:\n  server: {}\n  worker: {}\n"
+        );
         assert!(!needs_fetch(&root, "v0.0.7"));
         assert_eq!(
             std::fs::read_to_string(root.join(".env")).unwrap(),
             "KEY_ENCRYPTION_KEY=customer-key\n"
         );
-        // A different version still goes through the explicit update controls.
+        // A different version is Start's upgrade, never Install's.
         assert!(fetch_with(&root, "v0.0.8", &get).is_err());
         std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// A release from before the server was a container is moved to the latest release by
-    /// `deployment_release`. The runtime update guard must not refuse that move, or such an
-    /// installation could never Install or Start again.
+    /// `deployment_release`. The guard that leaves version changes to Start must not refuse that
+    /// move, or such an installation could never Install or Start again.
     #[test]
     fn a_release_whose_server_ran_on_the_host_is_laid_out_at_the_latest_version() {
         let root = crate::test_support::temp_root("deployment-host-server-move");
@@ -960,30 +1025,14 @@ mod tests {
         record(&root, "v0.0.15", false).unwrap();
         assert!(predates_containers(&root));
 
-        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        let mut tarball = tar::Builder::new(encoder);
-        for entry in REQUIRED.iter().chain(ALSO_COPIED.iter()) {
-            // The latest release's Compose file is a file, with the server and worker in it.
-            let (path, body) = if *entry == "docker-compose.yml" {
-                (
-                    format!("OpenBot-0.0.16/{entry}"),
-                    "services:\n  server: {}\n  worker: {}\n".to_string(),
-                )
-            } else {
-                (
-                    format!("OpenBot-0.0.16/{entry}/release.txt"),
-                    format!("release {entry}"),
-                )
-            };
-            let mut header = tar::Header::new_gnu();
-            header.set_size(body.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            tarball
-                .append_data(&mut header, path, body.as_bytes())
-                .unwrap();
-        }
-        let tarball = tarball.into_inner().unwrap().finish().unwrap();
+        // The latest release's Compose file has the server and worker in it.
+        let tarball = release_tarball(
+            "OpenBot-0.0.16",
+            &[(
+                "docker-compose.yml",
+                "services:\n  server: {}\n  worker: {}\n",
+            )],
+        );
         let published: Vec<&str> = IMAGE_VARIABLES.iter().map(|(name, _)| *name).collect();
         let images = serde_json::to_vec(&manifest(&published)).unwrap();
         let get = |url: &str| -> Result<Vec<u8>, String> {
@@ -1156,7 +1205,10 @@ mod tests {
     fn the_test_archive_really_carries_the_traversal() {
         // Guards the guard: if the archive did not hold `..` the next test would
         // pass for the wrong reason.
-        let archive = tarball(&[("OpenBot-0.0.8/app/../../escaped.txt", b"owned")]);
+        let archive = tarball(&[(
+            "OpenBot-0.0.8/agent-computer/src/../../../escaped.txt",
+            b"owned",
+        )]);
         let decoder = flate2::read::GzDecoder::new(&archive[..]);
         let mut tar = tar::Archive::new(decoder);
         let paths: Vec<String> = tar
@@ -1171,21 +1223,26 @@ mod tests {
                     .to_string()
             })
             .collect();
-        assert_eq!(paths, ["OpenBot-0.0.8/app/../../escaped.txt"]);
+        assert_eq!(
+            paths,
+            ["OpenBot-0.0.8/agent-computer/src/../../../escaped.txt"]
+        );
     }
 
     #[test]
     fn a_download_that_climbs_out_of_the_root_is_refused() {
-        // `root.join("app/../../x")` starts with `root` -- `Path::starts_with`
-        // compares components and does not resolve `..` -- so asking where the
-        // path landed cannot answer this. The entry sits under `app`, which is a
-        // directory a deployment wants, so the wanted-list does not stop it
-        // either.
+        // `root.join("agent-computer/src/../../../x")` starts with `root` --
+        // `Path::starts_with` compares components and does not resolve `..` -- so
+        // asking where the path landed cannot answer this. Refused before the
+        // wanted-list is asked, so it is refused whatever a deployment lays out.
         let dir = scratch("escape");
         let root = dir.join("deployment");
         std::fs::create_dir_all(&root).expect("the root is made");
 
-        let archive = tarball(&[("OpenBot-0.0.8/app/../../escaped.txt", b"owned")]);
+        let archive = tarball(&[(
+            "OpenBot-0.0.8/agent-computer/src/../../../escaped.txt",
+            b"owned",
+        )]);
         let outcome = unpack(&root, &archive);
 
         let climbed = dir.join("escaped.txt");
@@ -1205,190 +1262,21 @@ mod tests {
         let dir = scratch("ordinary");
 
         let archive = tarball(&[
-            ("OpenBot-0.0.8/app/index.ts", b"export {}"),
             ("OpenBot-0.0.8/docker-compose.yml", b"services: {}"),
             // Not part of a deployment: skipped, not refused.
+            ("OpenBot-0.0.8/agent-computer/src/index.ts", b"export {}"),
             ("OpenBot-0.0.8/docs/readme.md", b"# hi"),
         ]);
         unpack(&dir, &archive).expect("an ordinary download is laid out");
 
-        let app = std::fs::read_to_string(dir.join("app/index.ts")).ok();
         let compose = std::fs::read_to_string(dir.join("docker-compose.yml")).ok();
+        let computer = dir.join("agent-computer").exists();
         let docs = dir.join("docs").exists();
         let _ = std::fs::remove_dir_all(&dir);
 
-        assert_eq!(app.as_deref(), Some("export {}"));
         assert_eq!(compose.as_deref(), Some("services: {}"));
+        assert!(!computer, "the computer runs from its image");
         assert!(!docs, "the rest of the tree is not part of a deployment");
-    }
-
-    /// Relative module specifiers in one source file: `from "..."`, `import("...")` and
-    /// `require("...")`, with either quote. Package names are not relative and are skipped.
-    fn relative_imports(source: &str) -> Vec<String> {
-        let mut found = Vec::new();
-        for opener in [
-            "from \"",
-            "from '",
-            "import(\"",
-            "import('",
-            "require(\"",
-            "require('",
-        ] {
-            let quote = opener.chars().last().unwrap();
-            for (at, _) in source.match_indices(opener) {
-                let rest = &source[at + opener.len()..];
-                if let Some(end) = rest.find(quote) {
-                    let specifier = &rest[..end];
-                    if specifier.starts_with("./") || specifier.starts_with("../") {
-                        found.push(specifier.to_owned());
-                    }
-                }
-            }
-        }
-        found
-    }
-
-    fn sources_under(dir: &Path, into: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if path.is_dir() {
-                // Tests and build output run from a checkout, never from a deployment.
-                if !matches!(
-                    name.as_str(),
-                    "node_modules" | "dist" | "tests" | "test" | "__tests__"
-                ) {
-                    sources_under(&path, into);
-                }
-            } else if [".ts", ".tsx", ".js", ".mjs", ".cjs"]
-                .iter()
-                .any(|suffix| name.ends_with(suffix))
-                && !name.contains(".test.")
-                && !name.contains(".spec.")
-            {
-                into.push(path);
-            }
-        }
-    }
-
-    /// `#673` made the server import `../../../agent-computer/src/egress`, and the unpacker kept
-    /// copying only the folders listed here, so every new Desktop install of v0.2.0 had a server
-    /// that exited at start with `Cannot find module`. A checkout has every folder, which is why
-    /// nothing caught it. This walks the real tree: whatever the unpacked code imports by a
-    /// relative path has to be something the unpacker keeps.
-    #[test]
-    fn everything_the_unpacked_code_imports_is_unpacked_too() {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
-            .unwrap();
-        let kept: Vec<&str> = REQUIRED.iter().chain(ALSO_COPIED.iter()).copied().collect();
-        let mut files = Vec::new();
-        for top in &kept {
-            sources_under(&repo.join(top), &mut files);
-        }
-        assert!(
-            files
-                .iter()
-                .any(|file| file.starts_with(repo.join("server"))),
-            "the walk found no server sources, so it proves nothing"
-        );
-
-        let mut missing = Vec::new();
-        for file in &files {
-            let Ok(source) = std::fs::read_to_string(file) else {
-                continue;
-            };
-            for specifier in relative_imports(&source) {
-                let mut resolved = file.parent().unwrap().to_path_buf();
-                for part in Path::new(&specifier).components() {
-                    match part {
-                        std::path::Component::ParentDir => {
-                            resolved.pop();
-                        }
-                        std::path::Component::Normal(name) => resolved.push(name),
-                        _ => {}
-                    }
-                }
-                let top = resolved
-                    .strip_prefix(&repo)
-                    .ok()
-                    .and_then(|inside| inside.components().next())
-                    .map(|first| first.as_os_str().to_string_lossy().into_owned());
-                if !top.as_deref().is_some_and(|top| kept.contains(&top)) {
-                    missing.push(format!(
-                        "{} imports {specifier}",
-                        file.strip_prefix(&repo).unwrap_or(file).display()
-                    ));
-                }
-            }
-        }
-        assert!(
-            missing.is_empty(),
-            "a deployment would not contain what these import:\n{}",
-            missing.join("\n")
-        );
-    }
-
-    /// Installation builds the Recorder in the deployment, so everything its build reads is laid
-    /// out: its source, its public assets, its public key and its build script, as well as the
-    /// manifest the frozen install needs. `tests/desktop-release-tree.test.ts` runs that build in a
-    /// tree laid out from these lists.
-    #[test]
-    fn the_recorder_is_copied_whole_so_installation_can_build_it() {
-        let dir = scratch("extension");
-
-        let files = [
-            "extension/package.json",
-            "extension/src/background/index.ts",
-            "extension/public/icons/16.png",
-            "extension/keys/public-key.txt",
-            "extension/scripts/build.ts",
-            "shared/openbot-browser.ts",
-        ];
-        let entries: Vec<(String, &[u8])> = files
-            .iter()
-            .map(|file| (format!("OpenBot-0.0.8/{file}"), b"x".as_slice()))
-            .collect();
-        let archive = tarball(
-            &entries
-                .iter()
-                .map(|(name, body)| (name.as_str(), *body))
-                .collect::<Vec<_>>(),
-        );
-        unpack(&dir, &archive).expect("the download is laid out");
-
-        let missing: Vec<&str> = files
-            .iter()
-            .copied()
-            .filter(|file| !dir.join(file).is_file())
-            .collect();
-        let _ = std::fs::remove_dir_all(&dir);
-        assert!(missing.is_empty(), "not laid out: {missing:?}");
-    }
-
-    /// An app that copied only the Recorder's manifest laid out a deployment that cannot build it,
-    /// and its stamp still matches its version. It is fetched again once, like any deployment laid
-    /// out by an app that copied less.
-    #[test]
-    fn a_deployment_without_the_recorders_source_is_fetched_again() {
-        let dir = std::env::temp_dir().join(format!("openbot-dep-recorder-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(images_path(&dir), "{}").unwrap();
-        let before: Vec<String> = layout()
-            .into_iter()
-            .filter(|entry| entry != "extension")
-            .collect();
-        std::fs::write(
-            stamp_path(&dir),
-            serde_json::json!({ "version": "v0.2.0", "layout": before }).to_string(),
-        )
-        .unwrap();
-        assert!(needs_fetch(&dir, "v0.2.0"));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1405,8 +1293,8 @@ mod tests {
     }
 
     /// v0.2.0 installs were laid out by an app that did not copy `agent-computer`, and their stamp
-    /// matches the version they run, so Repair never fetched again and the server never started.
-    /// A stamp says what it laid out; one that laid out less than this app copies is fetched once.
+    /// matches the version they run, so Repair never fetched again. A stamp says what it laid out;
+    /// one that laid out less than this app needs is fetched once.
     #[test]
     fn a_deployment_laid_out_by_an_app_that_copied_less_is_fetched_again() {
         let dir = std::env::temp_dir().join(format!("openbot-dep-layout-{}", std::process::id()));
@@ -1463,42 +1351,17 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// The containers' Compose file is the one thing a deployment cannot run without.
     #[test]
-    fn the_shared_tsconfig_is_copied_or_every_package_fails_to_parse_its_own() {
-        assert!(
-            ALSO_COPIED.contains(&"tsconfig.base.json"),
-            "app, server and worker all extend it"
-        );
-    }
-
-    #[test]
-    fn what_is_required_is_what_the_stack_actually_runs() {
-        // The check in stack.rs looks for exactly these, so the two cannot drift apart.
-        for entry in ["docker-compose.yml", "server", "app", "worker"] {
-            assert!(
-                REQUIRED.contains(&entry),
-                "{entry} is not required but is checked for"
-            );
-        }
-        assert!(
-            !REQUIRED.contains(&"charts"),
-            "a deployment is not a place to develop"
-        );
-        assert!(!REQUIRED.contains(&"docs"));
-    }
-
-    #[test]
-    fn every_root_workspace_is_copied() {
-        let manifest: serde_json::Value =
-            serde_json::from_str(include_str!("../../../package.json")).unwrap();
-        for workspace in manifest["workspaces"].as_array().unwrap() {
-            let workspace = workspace.as_str().unwrap();
-            assert!(
-                REQUIRED.contains(&workspace)
-                    || ALSO_COPIED.contains(&workspace)
-                    || ALSO_COPIED_FILES.contains(&format!("{workspace}/package.json").as_str()),
-                "{workspace} is a root workspace that a frozen install needs, but is not copied"
-            );
+    fn the_compose_file_is_laid_out_and_nothing_a_container_runs_from_is() {
+        assert!(LAYOUT.contains(&"docker-compose.yml"));
+        for entry in LAYOUT {
+            for container_source in ["server", "app", "worker", "toolkit", "examples", "scripts"] {
+                assert!(
+                    !entry.starts_with(container_source),
+                    "{entry}: the containers run that from their images"
+                );
+            }
         }
     }
 }

@@ -49,9 +49,6 @@ pub struct Ports {
     pub langgraph: u16,
     pub supervisor: u16,
     pub harness: Option<u16>,
-    /// The host-side computer that runs the person's own browser, only where this machine runs one
-    /// (see `local_browser`). A host process's port, like the server's, never a container's.
-    pub browser: Option<u16>,
 }
 
 impl Default for Ports {
@@ -65,7 +62,6 @@ impl Default for Ports {
             langgraph: 4201,
             supervisor: 4500,
             harness: None,
-            browser: None,
         }
     }
 }
@@ -83,7 +79,6 @@ impl Ports {
                 "LANGGRAPH_PORT",
                 "SUPERVISOR_PORT",
                 "PICKED_HARNESS_HOST_PORT",
-                "BROWSER_PORT",
             ],
         )?;
         let mut ports = Self::default();
@@ -104,10 +99,6 @@ impl Ports {
             .get("PICKED_HARNESS_HOST_PORT")
             .map(|value| parse_port("PICKED_HARNESS_HOST_PORT", value))
             .transpose()?;
-        ports.browser = values
-            .get("BROWSER_PORT")
-            .map(|value| parse_port("BROWSER_PORT", value))
-            .transpose()?;
         Ok(ports)
     }
 
@@ -127,29 +118,24 @@ impl Ports {
         if let Some(port) = self.harness {
             settings.insert("PICKED_HARNESS_HOST_PORT".into(), port.to_string());
         }
-        if let Some(port) = self.browser {
-            settings.insert("BROWSER_PORT".into(), port.to_string());
-        }
         settings
     }
 
     /// A connect probe misses Windows excluded ports: only a bind proves a port is usable.
     /// Hold the probes until every port is chosen so allocations cannot collide with each other.
     /// Existing containers from this exact Compose project are reusable, never foreign listeners.
-    /// `browser` asks for a port for the person's browser, kept from the last run where it is free.
     /// The app and the API are among them: both are host ports of the one `server` container, so
     /// a running OpenBot keeps its own ports across a Start rather than being moved off them.
     pub fn available(
         self,
         ours: &std::collections::HashSet<u16>,
         harness: Option<u16>,
-        browser: bool,
     ) -> std::io::Result<Self> {
         let mut held = Vec::new();
         let mut chosen = std::collections::HashSet::new();
-        let mut choose = |preferred, container: bool| -> std::io::Result<u16> {
+        let mut choose = |preferred| -> std::io::Result<u16> {
             if !chosen.contains(&preferred) {
-                if container && ours.contains(&preferred) {
+                if ours.contains(&preferred) {
                     chosen.insert(preferred);
                     return Ok(preferred);
                 }
@@ -177,23 +163,15 @@ impl Ports {
             }))
         };
         Ok(Self {
-            app: choose(self.app, true)?,
-            server: choose(self.server, true)?,
-            postgres: choose(self.postgres, true)?,
-            computer: choose(self.computer, true)?,
-            bot: choose(self.bot, true)?,
-            langgraph: choose(self.langgraph, true)?,
-            supervisor: choose(self.supervisor, true)?,
+            app: choose(self.app)?,
+            server: choose(self.server)?,
+            postgres: choose(self.postgres)?,
+            computer: choose(self.computer)?,
+            bot: choose(self.bot)?,
+            langgraph: choose(self.langgraph)?,
+            supervisor: choose(self.supervisor)?,
             harness: harness
-                .map(|default| choose(self.harness.unwrap_or(default), true))
-                .transpose()?,
-            browser: browser
-                .then(|| {
-                    choose(
-                        self.browser.unwrap_or(crate::local_browser::DEFAULT_PORT),
-                        false,
-                    )
-                })
+                .map(|default| choose(self.harness.unwrap_or(default)))
                 .transpose()?,
         })
     }
@@ -213,10 +191,19 @@ fn parse_port(key: &str, value: &str) -> std::io::Result<u16> {
 }
 
 fn bind_loopbacks(port: u16) -> std::io::Result<Vec<std::net::TcpListener>> {
-    let ipv4 = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))?;
+    // Windows lets a loopback bind succeed beside another program's wildcard listener even without
+    // `SO_REUSEADDR`, so a port something already answers on is taken whatever the bind says. The
+    // bind still decides the rest: it is what catches Windows' excluded port ranges.
+    if port != 0 && something_listens(port) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            format!("something already listens on port {port}"),
+        ));
+    }
+    let ipv4 = bind_exclusive((std::net::Ipv4Addr::LOCALHOST, port).into())?;
     let port = ipv4.local_addr()?.port();
     let mut held = vec![ipv4];
-    match std::net::TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, port)) {
+    match bind_exclusive((std::net::Ipv6Addr::LOCALHOST, port).into()) {
         Ok(ipv6) => held.push(ipv6),
         Err(error)
             if matches!(
@@ -226,6 +213,40 @@ fn bind_loopbacks(port: u16) -> std::io::Result<Vec<std::net::TcpListener>> {
         Err(error) => return Err(error),
     }
     Ok(held)
+}
+
+/// Whether anything accepts a connection on this port on either loopback right now.
+fn something_listens(port: u16) -> bool {
+    [
+        std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
+        std::net::SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, port)),
+    ]
+    .iter()
+    .any(|address| {
+        std::net::TcpStream::connect_timeout(address, std::time::Duration::from_millis(250)).is_ok()
+    })
+}
+
+/**
+Bind one address the way a port check must: without `SO_REUSEADDR`.
+
+`std::net::TcpListener::bind` sets `SO_REUSEADDR` on Unix, and on macOS that lets a bind to
+`127.0.0.1:3001` succeed while another program listens on `*:3001`. A developer's own server on the
+wildcard address then looked free, OpenBot chose its port, and its server could not start.
+*/
+fn bind_exclusive(address: std::net::SocketAddr) -> std::io::Result<std::net::TcpListener> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(
+        Domain::for_address(address),
+        Type::STREAM,
+        Some(Protocol::TCP),
+    )?;
+    if address.is_ipv6() {
+        socket.set_only_v6(true)?;
+    }
+    socket.bind(&address.into())?;
+    socket.listen(16)?;
+    Ok(socket.into())
 }
 
 /**
@@ -248,10 +269,35 @@ pub fn container_address(address: &str) -> String {
             .trim_end_matches(']')
             .parse::<std::net::IpAddr>()
             .is_ok_and(|ip| ip.is_loopback());
-    if !loopback || url.set_host(Some("host.docker.internal")).is_err() {
+    if !loopback || url.set_host(Some(CONTAINER_HOST)).is_err() {
         return String::new();
     }
-    // The parser writes an empty path as `/`; given without one, it is returned without one.
+    written_as_given(&url, address)
+}
+
+/**
+An address with a `localhost` host written as `127.0.0.1`, keeping the scheme, port and path.
+
+`localhost` does not resolve the same way everywhere: Node takes `::1` first and bun `127.0.0.1`,
+and the local Intelligence stack publishes its ports on `127.0.0.1` alone, so the name reaches a
+listener or nothing depending on who dials it. The Recorder also opens a plain `ws://` gateway only
+at `127.0.0.1` or `[::1]`. Only the bare name is rewritten: a `*.localhost` name is a host name a
+service routes or keeps a session by, and `127.x.y.z`, `[::1]` and every other host are already
+what they say.
+*/
+pub fn numeric_loopback(address: &str) -> String {
+    let address = address.trim();
+    let Ok(mut url) = reqwest::Url::parse(address) else {
+        return address.to_string();
+    };
+    if url.host_str() != Some("localhost") || url.set_host(Some("127.0.0.1")).is_err() {
+        return address.to_string();
+    }
+    written_as_given(&url, address)
+}
+
+/// The parser writes an empty path as `/`; given without one, it is returned without one.
+fn written_as_given(url: &reqwest::Url, address: &str) -> String {
     let moved = url.to_string();
     match moved.strip_suffix('/') {
         Some(bare) if url.path() == "/" && !address.ends_with('/') => bare.to_string(),
@@ -259,20 +305,72 @@ pub fn container_address(address: &str) -> String {
     }
 }
 
+/**
+What the one computer relays from its own loopback (`COMPUTER_LOOPBACK_RELAYS`, read by
+agent-computer's `loopback-relay.ts`), as `<port>=<host>:<port>`, comma-separated.
+
+The Recorder in a browser there reaches OpenBot only at https or at loopback, so it is handed the
+address the person's window uses, `http://127.0.0.1:<app port>`, and a local Intelligence gateway at
+`ws://127.0.0.1:<port>`. Inside the computer's container both are the container. The app's and the
+server's ports go to the server's container on the Compose network, and a gateway on this machine's
+loopback goes to `host.docker.internal`, as the server's container reaches it. A gateway elsewhere
+is reached at its own address and is not relayed.
+*/
+fn loopback_relays(ports: &Ports, gateway_ws_url: &str) -> String {
+    let mut relays = vec![
+        format!("{}=server:3001", ports.app),
+        format!("{}=server:3001", ports.server),
+    ];
+    let gateway = reqwest::Url::parse(&container_address(gateway_ws_url))
+        .ok()
+        .and_then(|url| url.port_or_known_default());
+    if let Some(port) = gateway.filter(|port| *port != ports.app && *port != ports.server) {
+        relays.push(format!("{port}=host.docker.internal:{port}"));
+    }
+    relays.dedup();
+    relays.join(",")
+}
+
 #[cfg(test)]
 mod port_tests {
     use super::*;
     use std::collections::HashSet;
     use std::net::{TcpListener, TcpStream};
-    use std::sync::Mutex;
 
-    // These tests probe the same default ports. Keep each complete scenario exclusive,
-    // including the gap between releasing a probe and binding its simulated conflict.
-    static PORT_TEST_LOCK: Mutex<()> = Mutex::new(());
+    #[test]
+    fn a_port_another_program_holds_on_every_address_is_not_chosen() {
+        // A dev server on `*:PORT` (Bun, Node and Vite listen this way) must count as busy.
+        let _ports = crate::test_support::hold_ports();
+        for wildcard in ["0.0.0.0:0", "[::]:0"] {
+            let Ok(foreign) = TcpListener::bind(wildcard) else {
+                continue; // no IPv6 on this machine
+            };
+            let port = foreign.local_addr().unwrap().port();
+            assert!(
+                bind_loopbacks(port).is_err(),
+                "{wildcard} port {port} looked free"
+            );
+            let preferred = Ports {
+                app: port,
+                server: port,
+                postgres: port,
+                computer: port,
+                bot: port,
+                langgraph: port,
+                supervisor: port,
+                harness: None,
+            };
+            let chosen = preferred.available(&HashSet::new(), None).unwrap();
+            assert!(!chosen
+                .settings()
+                .values()
+                .any(|value| value == &port.to_string()));
+        }
+    }
 
     #[test]
     fn occupied_ports_are_replaced_with_distinct_bindable_loopback_ports() {
-        let _ports = PORT_TEST_LOCK.lock().unwrap();
+        let _ports = crate::test_support::hold_ports();
         let foreign = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = foreign.local_addr().unwrap().port();
         let preferred = Ports {
@@ -284,17 +382,14 @@ mod port_tests {
             langgraph: port,
             supervisor: port,
             harness: Some(port),
-            browser: Some(port),
         };
-        let chosen = preferred
-            .available(&HashSet::new(), Some(port), true)
-            .unwrap();
+        let chosen = preferred.available(&HashSet::new(), Some(port)).unwrap();
         let values: HashSet<u16> = chosen
             .settings()
             .values()
             .map(|value| value.parse().unwrap())
             .collect();
-        assert_eq!(values.len(), 9);
+        assert_eq!(values.len(), 8);
         assert!(!values.contains(&port));
         for value in values {
             assert!(bind_loopbacks(value).is_ok(), "port {value} is unavailable");
@@ -307,24 +402,24 @@ mod port_tests {
 
     #[test]
     fn occupied_ipv6_port_is_not_treated_as_available_ipv4_port() {
-        let _ports = PORT_TEST_LOCK.lock().unwrap();
+        let _ports = crate::test_support::hold_ports();
         let foreign = TcpListener::bind("[::1]:0").unwrap();
         let port = foreign.local_addr().unwrap().port();
         let preferred = Ports {
             postgres: port,
             ..Ports::default()
         };
-        let chosen = preferred.available(&HashSet::new(), None, false).unwrap();
+        let chosen = preferred.available(&HashSet::new(), None).unwrap();
         assert_ne!(chosen.postgres, port);
     }
 
     #[test]
     fn saved_ports_survive_reopen_and_only_a_new_conflict_moves() {
-        let _ports = PORT_TEST_LOCK.lock().unwrap();
+        let _ports = crate::test_support::hold_ports();
         let root = crate::test_support::temp_root("saved-local-ports");
         std::fs::create_dir_all(&root).unwrap();
         let chosen = Ports::default()
-            .available(&HashSet::new(), Some(4206), true)
+            .available(&HashSet::new(), Some(4206))
             .unwrap();
         std::fs::write(
             root.join(".env"),
@@ -335,15 +430,11 @@ mod port_tests {
         let reopened = Ports::read(&root).unwrap();
         assert_eq!(reopened, chosen);
         assert_eq!(
-            reopened
-                .available(&HashSet::new(), Some(4206), true)
-                .unwrap(),
+            reopened.available(&HashSet::new(), Some(4206)).unwrap(),
             chosen
         );
         let foreign = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, chosen.server)).unwrap();
-        let changed = reopened
-            .available(&HashSet::new(), Some(4206), true)
-            .unwrap();
+        let changed = reopened.available(&HashSet::new(), Some(4206)).unwrap();
         assert_ne!(changed.server, chosen.server);
         assert_eq!(
             Ports {
@@ -361,22 +452,17 @@ mod port_tests {
 
     #[test]
     fn own_published_container_ports_are_reused_but_do_not_authorize_host_port_reuse() {
-        let _ports = PORT_TEST_LOCK.lock().unwrap();
+        let _ports = crate::test_support::hold_ports();
         let owned = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = owned.local_addr().unwrap().port();
         let preferred = Ports {
             postgres: port,
             ..Ports::default()
         };
-        let chosen = preferred
-            .available(&HashSet::from([port]), None, false)
-            .unwrap();
+        let chosen = preferred.available(&HashSet::from([port]), None).unwrap();
         assert_eq!(chosen.postgres, port);
         assert_ne!(
-            preferred
-                .available(&HashSet::new(), None, false)
-                .unwrap()
-                .postgres,
+            preferred.available(&HashSet::new(), None).unwrap().postgres,
             port
         );
     }
@@ -392,13 +478,13 @@ mod port_tests {
             ..Ports::default()
         };
         let ours = HashSet::from([preferred.app, preferred.server]);
-        let chosen = preferred.available(&ours, None, false).unwrap();
+        let chosen = preferred.available(&ours, None).unwrap();
         assert_eq!(
             (chosen.app, chosen.server),
             (preferred.app, preferred.server)
         );
         // Held by somebody else, they are moved, as they always were.
-        let moved = preferred.available(&HashSet::new(), None, false).unwrap();
+        let moved = preferred.available(&HashSet::new(), None).unwrap();
         assert_ne!(moved.app, preferred.app);
         assert_ne!(moved.server, preferred.server);
     }
@@ -415,31 +501,6 @@ mod port_tests {
             );
         }
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    /// The person's browser is a host process, so a foreign listener on its port moves it, as one
-    /// on the server's port moves the server. Where this machine runs no browser, no port is held
-    /// for one and none is written.
-    #[test]
-    fn the_browser_gets_a_port_of_its_own_only_where_it_runs() {
-        let _ports = PORT_TEST_LOCK.lock().unwrap();
-        let foreign = TcpListener::bind("127.0.0.1:0").unwrap();
-        let taken = foreign.local_addr().unwrap().port();
-        let preferred = Ports {
-            browser: Some(taken),
-            ..Ports::default()
-        };
-        let chosen = preferred.available(&HashSet::new(), None, true).unwrap();
-        let port = chosen.browser.expect("a running browser is given a port");
-        assert_ne!(port, taken);
-        assert_eq!(
-            chosen.settings().get("BROWSER_PORT"),
-            Some(&port.to_string())
-        );
-
-        let none = preferred.available(&HashSet::new(), None, false).unwrap();
-        assert_eq!(none.browser, None);
-        assert!(!none.settings().contains_key("BROWSER_PORT"));
     }
 }
 
@@ -655,13 +716,18 @@ pub fn compose(
     // string, so a key copied from a provider's dashboard with the trailing space the selection
     // picked up arrives here intact. Compose keeps it, the provider rejects the key, and the Bot
     // reports that it cannot answer without ever naming the space.
+    //
+    // And at `127.0.0.1` where they say `localhost`, as the local Intelligence CLI reports its
+    // stack. The server and the person's browser both dial these (`docker-compose.yml` hands the
+    // gateway to the browser as `INTELLIGENCE_BROWSER_GATEWAY_WS_URL`), the stack publishes on
+    // `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway at no other name.
     env.insert(
         "INTELLIGENCE_API_URL".into(),
-        intelligence.api_url.trim().to_string(),
+        numeric_loopback(&intelligence.api_url),
     );
     env.insert(
         "INTELLIGENCE_GATEWAY_WS_URL".into(),
-        intelligence.gateway_ws_url.trim().to_string(),
+        numeric_loopback(&intelligence.gateway_ws_url),
     );
     /*
      * The same two addresses as the server's container reaches them.
@@ -679,6 +745,17 @@ pub fn compose(
     env.insert(
         "INTELLIGENCE_CONTAINER_GATEWAY_WS_URL".into(),
         container_address(&intelligence.gateway_ws_url),
+    );
+    /*
+     * And the same name for addresses a person types into the app.
+     *
+     * A person who runs their own agent at `http://127.0.0.1:8765/ag-ui` and registers it as a Bot
+     * means this machine, and the server dials from its container. Told this name, the server dials
+     * a loopback address through it, as `container_address` does for the addresses above.
+     */
+    env.insert(
+        THIS_MACHINE_CONTAINER_HOST_ENV.into(),
+        CONTAINER_HOST.into(),
     );
     // Explicit desktop selection must override a CLI key left in the checkout's .env.
     // Supply both names for consumers that still read the legacy variable directly.
@@ -726,12 +803,32 @@ pub fn compose(
     // arrives with an origin the other would not match, and the deployment refuses a request it
     // should have accepted. Naming all three costs nothing: they are the same machine, and the
     // question this setting answers is which origins are this deployment's own.
+    //
+    // 127.0.0.1 first, because the server also takes the first as the app's own address and sends
+    // the person's browser there after they approve an app; `localhost` may resolve to the address
+    // the engine did not publish.
     env.insert(
         "TRUSTED_ORIGINS".into(),
         format!(
-            "http://localhost:{app},http://127.0.0.1:{app},http://[::1]:{app}",
+            "http://127.0.0.1:{app},http://localhost:{app},http://[::1]:{app}",
             app = ports.app
         ),
+    );
+    /*
+     * Where a vendor sends the person back after they approve an app connected over its own OAuth
+     * (`redirectUriFor` in server/src/plugins/oauth.ts). Unset, the server refuses every such
+     * connection and tells the person to ask an admin for this setting, which on their own computer
+     * is nobody.
+     *
+     * The app's own address on this machine, because the consent finishes in the person's default
+     * browser, which is on this machine too. 127.0.0.1 rather than either other name: `localhost`
+     * may resolve to the address the engine did not publish, and `[::1]` is the one the computer's
+     * container may not have, while the Recorder there is handed this same address. Replaced on
+     * every Start, so a Start that moved the app to another port moves this with it.
+     */
+    env.insert(
+        "OPENBOT_PUBLIC_URL".into(),
+        format!("http://127.0.0.1:{}", ports.app),
     );
     env.insert(
         "AGENT_COMPUTER_URL".into(),
@@ -838,28 +935,19 @@ pub fn compose(
      *
      * The computer is started as the person's (`COMPUTER_PERSON_ID`, as `scripts/start.sh` does for
      * the personal edition), which is what lets them record in a Bot's browser.
+     *
+     * The person's own browser runs there too, shown in the OpenBot window as hosted OpenBot shows
+     * it, so no `OPENBOT_BROWSER_URL` is written: that would send the server to a browser on this
+     * machine's desktop, a separate Chrome window, which Desktop no longer runs. Start takes out
+     * the one an earlier Desktop wrote ([`REMOVED_WHEN_UNSET`]).
      */
     env.insert("COMPUTER_SUPERVISOR_URL".into(), String::new());
     env.insert("COMPUTER_SUPERVISOR_CONTAINER_URL".into(), String::new());
     env.insert("COMPUTER_PERSON_ID".into(), "personal".into());
-
-    /*
-     * The person's own browser, where this machine runs one: the host-side local Chrome computer
-     * started beside the server (see `local_browser`). The Bots keep the one computer above; only a
-     * person's browser is sent here.
-     *
-     * Left out rather than written blank where there is none, so it is not set at all. `write`
-     * keeps a line it does not own, so Start purges the value an earlier run wrote.
-     */
-    if let Some(port) = ports.browser {
-        let address = format!("http://127.0.0.1:{port}");
-        // The server is a container, and this is the host's loopback. See `container_address`.
-        env.insert(
-            BROWSER_CONTAINER_URL_ENV.into(),
-            container_address(&address),
-        );
-        env.insert(crate::local_browser::BROWSER_URL_ENV.into(), address);
-    }
+    env.insert(
+        "COMPUTER_LOOPBACK_RELAYS".into(),
+        loopback_relays(ports, &intelligence.gateway_ws_url),
+    );
 
     // The worker refuses to start without this, by design: it is a fact about where this process
     // runs, and it would rather stop than guess. `start.sh` sets it at run time, so a `.env` copied
@@ -880,7 +968,7 @@ pub fn compose(
     // The whole deployment is on this machine, so the server must be allowed to talk to it.
     //
     // The private-address floor stops a hosted deployment reaching into its own network, which is
-    // right there and wrong here: the computer, the person's browser and the Bots are all on
+    // right there and wrong here: the computer, the person's browser on it and the Bots are all on
     // loopback by design. Without this the server refuses to call its own computer and the failure
     // arrives as an Unauthorized wrapped in a 500, which names neither the address nor the rule.
     env.insert("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS".into(), "true".into());
@@ -921,8 +1009,8 @@ pub fn compose(
     // Only rootless Podman on Linux needs this; see engine.rs.
     if let Some(socket) = &engine.engine_socket {
         env.insert("ENGINE_SOCKET".into(), socket.clone());
-        // And only there is `host-gateway` not this machine's loopback, which is where the
-        // person's browser and a local Intelligence listen. See `engine::ROOTLESS_HOST_LOOPBACK`.
+        // And only there is `host-gateway` not this machine's loopback, which is where a local
+        // Intelligence listens. See `engine::ROOTLESS_HOST_LOOPBACK`.
         env.insert(
             HOST_GATEWAY_ENV.into(),
             crate::engine::ROOTLESS_HOST_LOOPBACK.into(),
@@ -1077,13 +1165,18 @@ pub const MINTED: [&str; 6] = [
 /// earlier run wrote outlives the answer that implied it: `BOT_MODEL` once asked OpenAI for a model
 /// an earlier endpoint had named, and `OPENBOT_BROWSER_URL` would send the person to a browser that
 /// no longer runs.
-pub const REMOVED_WHEN_UNSET: [&str; 8] = [
+pub const REMOVED_WHEN_UNSET: [&str; 9] = [
     "BOT_PROVIDER",
     "BOT_MODEL",
     "AGENT_BOT_MODEL",
-    crate::local_browser::BROWSER_URL_ENV,
-    BROWSER_CONTAINER_URL_ENV,
-    crate::local_browser::BROWSER_ABSENT_ENV,
+    // What earlier Desktops wrote for the host-side Chrome they ran beside the server: its port, its
+    // address (the host's and the server container's), and why there was none. Desktop runs no such
+    // browser now, and a server still pointed at one shows the person a separate window, or a port
+    // nothing answers on, rather than their browser in the OpenBot window.
+    "BROWSER_PORT",
+    "OPENBOT_BROWSER_URL",
+    "OPENBOT_BROWSER_CONTAINER_URL",
+    "OPENBOT_BROWSER_ABSENT",
     // A machine that moves from rootless Podman to Docker must go back to `host-gateway`.
     HOST_GATEWAY_ENV,
     // Written by earlier apps that could sign in through an organization's OpenBot. This app runs
@@ -1094,22 +1187,14 @@ pub const REMOVED_WHEN_UNSET: [&str; 8] = [
 /// What `docker-compose.yml` maps `host.docker.internal` to, in place of `host-gateway`.
 pub const HOST_GATEWAY_ENV: &str = "OPENBOT_HOST_GATEWAY";
 
-/// [`crate::local_browser::BROWSER_URL_ENV`] as the server's container reaches it, which
-/// `docker-compose.yml` prefers for the `server` service.
-pub const BROWSER_CONTAINER_URL_ENV: &str = "OPENBOT_BROWSER_CONTAINER_URL";
+/// The name OpenBot's containers reach this machine by. Every engine gets there through it: Docker
+/// Desktop and the Podman machines forward it, and under rootless Podman `docker-compose.yml` maps it
+/// to [`crate::engine::ROOTLESS_HOST_LOOPBACK`] through [`HOST_GATEWAY_ENV`].
+pub const CONTAINER_HOST: &str = "host.docker.internal";
 
-/// Tell the server why this machine runs no browser of the person's own (`BROWSER_ABSENT_ENV`), so
-/// the app can say it to them in a sentence of their own rather than leave it in Desktop's log.
-/// Nothing where a browser runs, and [`REMOVED_WHEN_UNSET`] then takes out what an earlier Start
-/// wrote: a Chrome installed since is no longer explained away.
-pub fn explain_browser_absence(
-    settings: &mut BTreeMap<String, String>,
-    absent: Option<crate::local_browser::Absent>,
-) {
-    if let Some(code) = absent.and_then(crate::local_browser::Absent::code) {
-        settings.insert(crate::local_browser::BROWSER_ABSENT_ENV.into(), code.into());
-    }
-}
+/// Where the server's container is told that name (`OPENBOT_THIS_MACHINE_HOST` inside it, in
+/// `docker-compose.yml`), so an agent a person registers on their own loopback is dialled here.
+pub const THIS_MACHINE_CONTAINER_HOST_ENV: &str = "OPENBOT_THIS_MACHINE_CONTAINER_HOST";
 
 const PUBLISHED: [&str; 4] = [
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -1825,6 +1910,46 @@ HTTPS_PROXY=http://proxy:8080
         );
     }
 
+    /// The Recorder in a browser on the one computer is handed this machine's loopback addresses
+    /// for OpenBot and a local gateway, which in the computer's container are the container. Before
+    /// these relays Record there connected and reached nothing; the computer now relays each port
+    /// to where its container reaches it.
+    #[test]
+    fn the_one_computer_relays_openbot_and_a_local_gateway_from_its_loopback() {
+        let compose_with = |gateway_ws_url: &str| {
+            compose(
+                &Intelligence {
+                    api_url: "http://localhost:14400".into(),
+                    gateway_ws_url: gateway_ws_url.into(),
+                    api_key: "key".into(),
+                },
+                &Model::default(),
+                &engine_status(None),
+                &Ports {
+                    app: 3011,
+                    server: 3002,
+                    ..Ports::default()
+                },
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            )
+        };
+        assert_eq!(
+            compose_with("ws://localhost:14401")
+                .get("COMPUTER_LOOPBACK_RELAYS")
+                .map(String::as_str),
+            Some("3011=server:3001,3002=server:3001,14401=host.docker.internal:14401")
+        );
+        // A gateway elsewhere is reached at its own address: only OpenBot is relayed.
+        assert_eq!(
+            compose_with("wss://realtime.example")
+                .get("COMPUTER_LOOPBACK_RELAYS")
+                .map(String::as_str),
+            Some("3011=server:3001,3002=server:3001")
+        );
+    }
+
     /// An installation from before this app ran the personal edition is moved to it by its next
     /// Start: the team settings it wrote are replaced, once each, and the person's own lines stay.
     #[test]
@@ -1876,41 +2001,6 @@ HTTPS_PROXY=http://proxy:8080
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    #[test]
-    fn the_server_finds_the_persons_browser_and_the_bots_keep_their_computers() {
-        let with = compose(
-            &intelligence(),
-            &Model::default(),
-            &engine_status(None),
-            &Ports {
-                browser: Some(4107),
-                ..Ports::default()
-            },
-            &pinned(),
-            None,
-            &BTreeMap::new(),
-        );
-        assert_eq!(
-            with.get("OPENBOT_BROWSER_URL").map(String::as_str),
-            Some("http://127.0.0.1:4107")
-        );
-        assert_eq!(with.get("BROWSER_PORT").map(String::as_str), Some("4107"));
-        let without = compose(
-            &intelligence(),
-            &Model::default(),
-            &engine_status(None),
-            &Ports::default(),
-            &pinned(),
-            None,
-            &BTreeMap::new(),
-        );
-        assert!(!without.contains_key("OPENBOT_BROWSER_URL"));
-        assert!(!without.contains_key("BROWSER_PORT"));
-        for key in ["AGENT_COMPUTER_URL", "COMPUTER_SUPERVISOR_URL"] {
-            assert_eq!(with[key], without[key], "the Bots' computer moved: {key}");
-        }
-    }
-
     /// An earlier app that could sign in through an organization wrote its address here. A Start
     /// takes it out, so the server runs for this one person; the person's own lines stay.
     #[test]
@@ -1945,85 +2035,53 @@ HTTPS_PROXY=http://proxy:8080
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Chrome uninstalled since the last Start: the server must stop being pointed at a browser that
-    /// no longer runs, or it sends the person's Browser button to a port nothing answers on.
+    /// The person's browser is shown in the OpenBot window, on the one computer, as hosted OpenBot
+    /// shows it: Desktop runs no Chrome of its own beside the server. A Start over a file an earlier
+    /// Desktop wrote, which ran one, points the server at no host-side browser (it would show the
+    /// person a separate Chrome window for Teach a Bot) and leaves none of that browser's settings.
     #[test]
-    fn a_browser_an_earlier_start_ran_is_not_left_in_the_file() {
-        let dir = temp_root("env-browser-gone");
+    fn a_start_points_the_server_at_no_host_side_browser_and_takes_out_an_earlier_ones() {
+        let dir = temp_root("env-no-host-browser");
         std::fs::create_dir_all(&dir).unwrap();
         let path = env_at(&dir);
-        let run = |browser: Option<u16>| {
-            let settings = compose(
-                &intelligence(),
-                &Model::default(),
-                &engine_status(None),
-                &Ports {
-                    browser,
-                    ..Ports::default()
-                },
-                &pinned(),
-                None,
-                &BTreeMap::new(),
-            );
-            let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
-                .iter()
-                .filter(|key| !settings.contains_key(**key))
-                .map(|key| (key.to_string(), String::new()))
-                .collect();
-            write(&path, &settings, &purge).unwrap();
-        };
-        run(Some(4107));
-        assert_eq!(
-            value_of(
-                &std::fs::read_to_string(&path).unwrap(),
-                "OPENBOT_BROWSER_URL"
-            ),
-            "http://127.0.0.1:4107"
+        std::fs::write(
+            &path,
+            "BROWSER_PORT=4107\n\
+             OPENBOT_BROWSER_URL=http://127.0.0.1:4107\n\
+             OPENBOT_BROWSER_CONTAINER_URL=http://host.docker.internal:4107\n\
+             OPENBOT_BROWSER_ABSENT=no-chrome-or-edge\n\
+             MY_OWN=kept\n",
+        )
+        .unwrap();
+        // As a Start reads the ports an earlier Start chose, and composes this one's settings.
+        let ports = Ports::read(&dir).unwrap();
+        let settings = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &ports,
+            &pinned(),
+            None,
+            &BTreeMap::new(),
         );
-        run(None);
+        let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
+            .iter()
+            .filter(|key| !settings.contains_key(**key))
+            .map(|key| (key.to_string(), String::new()))
+            .collect();
+        write(&path, &settings, &purge).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(!text.contains("OPENBOT_BROWSER_URL"), "{text}");
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// No browser of the person's own on this machine: the server is told why, so the app can say
-    /// it, and a later Start that finds one takes the reason out again.
-    #[test]
-    fn why_there_is_no_browser_is_written_and_taken_out_once_there_is_one() {
-        use crate::local_browser::{Absent, Product, BROWSER_ABSENT_ENV};
-        let dir = temp_root("env-browser-absent");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = env_at(&dir);
-        let run = |browser: Option<u16>, absent: Option<Absent>| {
-            let mut settings = compose(
-                &intelligence(),
-                &Model::default(),
-                &engine_status(None),
-                &Ports {
-                    browser,
-                    ..Ports::default()
-                },
-                &pinned(),
-                None,
-                &BTreeMap::new(),
-            );
-            explain_browser_absence(&mut settings, absent);
-            let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
-                .iter()
-                .filter(|key| !settings.contains_key(**key))
-                .map(|key| (key.to_string(), String::new()))
-                .collect();
-            write(&path, &settings, &purge).unwrap();
-            std::fs::read_to_string(&path).unwrap()
-        };
-        let flatpak = run(None, Some(Absent::FlatpakOnly(Product::Chrome)));
-        assert_eq!(value_of(&flatpak, BROWSER_ABSENT_ENV), "flatpak-chrome");
-        assert!(!flatpak.contains("OPENBOT_BROWSER_URL"), "{flatpak}");
-        let found = run(Some(4107), None);
-        assert!(!found.contains(BROWSER_ABSENT_ENV), "{found}");
-        // A release from before the browser has nothing to explain.
-        let old = run(None, Some(Absent::NotInRelease));
-        assert!(!old.contains(BROWSER_ABSENT_ENV), "{old}");
+        for key in [
+            "OPENBOT_BROWSER_URL",
+            "OPENBOT_BROWSER_CONTAINER_URL",
+            "BROWSER_PORT",
+            "OPENBOT_BROWSER_ABSENT",
+        ] {
+            assert!(!settings.contains_key(key), "{key} composed");
+            assert!(!text.contains(key), "{key} left in the file:\n{text}");
+        }
+        assert!(text.contains("MY_OWN=kept"), "{text}");
+        assert_eq!(value_of(&text, "OPENBOT_EDITION"), "personal");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -2079,6 +2137,34 @@ HTTPS_PROXY=http://proxy:8080
             Some(crate::engine::ROOTLESS_HOST_LOOPBACK)
         );
         assert!(REMOVED_WHEN_UNSET.contains(&HOST_GATEWAY_ENV));
+    }
+
+    /// The server's container is told how it reaches this machine, under every engine, so an agent
+    /// a person registers at `http://127.0.0.1:<port>` is dialled here and not at the container.
+    /// Under rootless Podman the name is the same and Compose maps it (test above).
+    #[test]
+    fn the_server_is_told_the_name_it_reaches_this_machine_by() {
+        for socket in [None, Some("/run/user/501/podman/podman.sock")] {
+            let env = compose(
+                &intelligence(),
+                &Model::default(),
+                &engine_status(socket),
+                &Ports::default(),
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            );
+            assert_eq!(
+                env.get(THIS_MACHINE_CONTAINER_HOST_ENV).map(String::as_str),
+                Some("host.docker.internal"),
+                "engine socket {socket:?}"
+            );
+        }
+        // The same name the Desktop moves its own loopback addresses to.
+        assert_eq!(
+            container_address("http://127.0.0.1:8765/ag-ui"),
+            format!("http://{CONTAINER_HOST}:8765/ag-ui")
+        );
     }
 
     #[test]
@@ -2383,6 +2469,69 @@ HTTPS_PROXY=http://proxy:8080
         );
     }
 
+    /// Connecting an app over its own OAuth (Notion, and every other first-party one) refused with
+    /// "Ask an admin to set OPENBOT_PUBLIC_URL", because nothing wrote it: the vendor sends the
+    /// person's browser back to that address, and without one there is nowhere to come back to.
+    /// An installation that ran before this was written gets it on its next Start, and a Start that
+    /// moved the app to another port moves it too, rather than keeping the address of the last one.
+    #[test]
+    fn the_public_url_is_the_app_s_own_loopback_address_and_follows_its_port() {
+        let dir = tmp("public-url");
+        let path = env_at(&dir);
+        // What an earlier Desktop left behind: no public URL, and a line the person added.
+        std::fs::write(&path, "OPENBOT_EDITION=personal\nAPP_PORT=3010\n").unwrap();
+
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            value_of(&written, "OPENBOT_PUBLIC_URL"),
+            "http://127.0.0.1:3010"
+        );
+
+        let moved = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports {
+                app: 3011,
+                ..Ports::default()
+            },
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        write(&path, &moved, &BTreeMap::new()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(
+            value_of(&written, "OPENBOT_PUBLIC_URL"),
+            "http://127.0.0.1:3011",
+            "the public URL kept the port of an earlier Start"
+        );
+        assert_eq!(
+            written
+                .lines()
+                .filter(|line| line.starts_with("OPENBOT_PUBLIC_URL="))
+                .count(),
+            1
+        );
+    }
+
+    /// After the person approves an app in their browser, Composio sends them back to the app's
+    /// own address, which the server takes from the first of `TRUSTED_ORIGINS` (`appUrl` in
+    /// server/src/config.ts). That was `http://localhost:3010`: `localhost` may resolve to the
+    /// address the engine did not publish, and OpenBot names this machine by number everywhere
+    /// else. The first is 127.0.0.1, and the other two names are still trusted.
+    #[test]
+    fn the_app_s_own_address_is_127_0_0_1_and_never_localhost() {
+        let env = fresh();
+        let origins: Vec<&str> = env["TRUSTED_ORIGINS"].split(',').collect();
+        assert_eq!(origins.first(), Some(&"http://127.0.0.1:3010"));
+        assert!(origins.contains(&"http://localhost:3010"));
+        assert!(origins.contains(&"http://[::1]:3010"));
+    }
+
     #[test]
     fn selected_harness_uses_dynamic_host_port_without_changing_image_port() {
         let ports = Ports {
@@ -2493,9 +2642,9 @@ HTTPS_PROXY=http://proxy:8080
             None,
             &BTreeMap::new(),
         );
-        // The host's own addresses stay as given: the browser reads the gateway's from these.
-        assert_eq!(env["INTELLIGENCE_API_URL"], "http://localhost:18082");
-        assert_eq!(env["INTELLIGENCE_GATEWAY_WS_URL"], "ws://localhost:14401");
+        // The host's own addresses, which the browser reads the gateway's from, at 127.0.0.1.
+        assert_eq!(env["INTELLIGENCE_API_URL"], "http://127.0.0.1:18082");
+        assert_eq!(env["INTELLIGENCE_GATEWAY_WS_URL"], "ws://127.0.0.1:14401");
         assert_eq!(
             env["INTELLIGENCE_CONTAINER_API_URL"],
             "http://host.docker.internal:18082"
@@ -2504,6 +2653,66 @@ HTTPS_PROXY=http://proxy:8080
             env["INTELLIGENCE_CONTAINER_GATEWAY_WS_URL"],
             "ws://host.docker.internal:14401"
         );
+    }
+
+    /// The local Intelligence CLI reports its stack at `localhost`, and `docker-compose.yml` hands
+    /// the gateway address to the browser as `INTELLIGENCE_BROWSER_GATEWAY_WS_URL`. The stack
+    /// publishes on `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway only at
+    /// `127.0.0.1` or `[::1]`, so `ws://localhost:51798` in the file left every recording unsaved.
+    #[test]
+    fn a_local_intelligence_is_written_at_127_0_0_1_and_nothing_written_dials_localhost() {
+        let env = compose(
+            &Intelligence {
+                api_url: "http://localhost:51796".into(),
+                gateway_ws_url: "ws://localhost:51798".into(),
+                api_key: "synthetic".into(),
+            },
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(env["INTELLIGENCE_API_URL"], "http://127.0.0.1:51796");
+        assert_eq!(env["INTELLIGENCE_GATEWAY_WS_URL"], "ws://127.0.0.1:51798");
+        assert_eq!(
+            env["COMPUTER_LOOPBACK_RELAYS"],
+            format!(
+                "{app}=server:3001,{server}=server:3001,51798=host.docker.internal:51798",
+                app = Ports::default().app,
+                server = Ports::default().server
+            )
+        );
+        for (key, value) in &env {
+            // An allowlist of origins a browser may send, compared rather than dialled.
+            if key == "TRUSTED_ORIGINS" {
+                continue;
+            }
+            assert!(!value.contains("//localhost"), "{key}={value}");
+        }
+
+        for (given, expected) in [
+            ("ws://localhost:51798", "ws://127.0.0.1:51798"),
+            ("ws://localhost:51798/", "ws://127.0.0.1:51798/"),
+            (" http://LOCALHOST:8082/api ", "http://127.0.0.1:8082/api"),
+            ("http://127.0.0.1:8082", "http://127.0.0.1:8082"),
+            ("http://[::1]:8082", "http://[::1]:8082"),
+            // A host name a service routes or keeps a session by, not a spelling of loopback.
+            ("http://cpk.localhost:8080", "http://cpk.localhost:8080"),
+            (
+                "http://localhost.evil.test:8082",
+                "http://localhost.evil.test:8082",
+            ),
+            (
+                "wss://realtime.intelligence.copilotkit.ai",
+                "wss://realtime.intelligence.copilotkit.ai",
+            ),
+            ("not a url", "not a url"),
+            ("", ""),
+        ] {
+            assert_eq!(numeric_loopback(given), expected, "{given}");
+        }
     }
 }
 

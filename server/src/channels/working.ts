@@ -28,6 +28,7 @@ import {
   like,
   lt,
   lte,
+  notExists,
   notLike,
   or,
   sql,
@@ -211,6 +212,7 @@ export async function workIn(
     });
   }
 
+  const laterRun = alias(routineRuns, "later_run");
   const runs = await database
     .select({
       runId: routineRuns.id,
@@ -234,6 +236,25 @@ export async function workIn(
         gt(
           routineRuns.startedAt,
           sql`now() - make_interval(secs => ${ROUTINE_IN_FLIGHT_MS / 1000})`,
+        ),
+        /*
+         * Only the routine's latest run, the one the Routines page shows. A dispatch the server
+         * never received (a worker back from an upgrade before its server) leaves its run open for
+         * the reaper, and the retry that then runs and succeeds is a later run of the same routine.
+         * Counted as well, that open row kept the conversation working for minutes after the reply
+         * landed and the page said the run had succeeded. Ordered as the page orders, id breaking
+         * a tie.
+         */
+        notExists(
+          database
+            .select({ id: laterRun.id })
+            .from(laterRun)
+            .where(
+              and(
+                eq(laterRun.routineId, routineRuns.routineId),
+                sql`(${laterRun.startedAt}, ${laterRun.id}) > (${routineRuns.startedAt}, ${routineRuns.id})`,
+              ),
+            ),
         ),
       ),
     );

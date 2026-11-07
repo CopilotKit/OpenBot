@@ -3,6 +3,7 @@ import { CopilotChat } from "@copilotkit/react-core/v2";
 import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { ConversationApprovals } from "@/components/approvals/inline-approval";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
@@ -177,6 +178,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
       title="Computer"
       open={watch === true}
       onClose={() => showComputer(false)}
+      waiting={threadId ? <ConversationApprovals threadId={threadId} /> : null}
       detail={<ComputerViewPanel agentId={agentId} name={name} />}
     >
       <div className="flex h-full min-h-0 flex-col">

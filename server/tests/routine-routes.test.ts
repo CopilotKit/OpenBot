@@ -21,6 +21,7 @@ function summary(overrides: Partial<RoutineSummary> = {}): RoutineSummary {
     id: "routine-1",
     agentId: "agent-1",
     instruction: "Post the weather every weekday morning.",
+    title: null,
     schedule: "Weekdays at 09:00",
     timezone: "UTC",
     enabled: true,
@@ -45,6 +46,21 @@ function fakeStore(
   const calls: StoreCall[] = [];
   const base: RoutineStore = {
     async create() {
+      throw new Error("not used by these tests");
+    },
+    async conversationFor() {
+      throw new Error("not used by these tests");
+    },
+    async startManualRun() {
+      throw new Error("not used by these tests");
+    },
+    async listRuns() {
+      throw new Error("not used by these tests");
+    },
+    async reapAbandonedRuns() {
+      throw new Error("not used by these tests");
+    },
+    async markUnschedulable() {
       throw new Error("not used by these tests");
     },
     async listFor(ownerUserId) {
@@ -127,6 +143,7 @@ describe("GET /", () => {
           schedule: "Weekdays at 09:00",
           timezone: "UTC",
           instruction: "Post the weather every weekday morning.",
+          title: null,
           channel: {
             id: "channel-1",
             name: "Assistant channel",

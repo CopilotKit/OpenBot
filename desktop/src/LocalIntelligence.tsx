@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { CopilotKitLogo } from "./CopilotKitLogo";
+import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
 import {
   cancelLocalEval,
@@ -23,6 +25,15 @@ type Call<T> = { attempt: string; answer: Promise<T> };
 
 /** What Start OpenBot is given for a local stack: its addresses. The key is in the vault. */
 export type LocalStartable = { apiUrl: string; gatewayWsUrl: string };
+
+/**
+ * What became of one Start OpenBot.
+ *
+ * `deferred` is a Start that did not run yet because something else has to happen first, such as
+ * the installation that Start found it needs. Whoever deferred it gives the go-ahead again once
+ * that is done, so it is not a failure and is never said as one.
+ */
+export type StartOutcome = "started" | "failed" | "deferred";
 
 /**
  * Between status checks while Intelligence reports that it is starting: about three minutes in
@@ -89,6 +100,13 @@ type State = {
    * would only loop.
    */
   refused: string | null;
+  /** What the running row is doing, when it says more than its label. */
+  detail: string | null;
+  /**
+   * The back end could not be updated to the release this app installs. Said, and not a stop: the
+   * release it had is still there and still runs.
+   */
+  updateFailed: string | null;
 };
 
 const idle: State = {
@@ -98,7 +116,12 @@ const idle: State = {
   blocked: null,
   problem: null,
   refused: null,
+  detail: null,
+  updateFailed: null,
 };
+
+/** The row an update that failed is said on, under the back end's. */
+const UPDATING = "Updating the back end";
 
 export type LocalSequence = State & {
   /** Set up, connected and reported ready and valid, and waiting for the go-ahead to start. */
@@ -142,8 +165,8 @@ export function useLocalSequence({
   stack: string | null;
   /** OpenBot already holds the key `local connect` gave it for this stack. */
   connected?: boolean;
-  /** Starts OpenBot against the stack; true when it started. */
-  onStart: (startable: LocalStartable) => Promise<boolean>;
+  /** Starts OpenBot against the stack, or says it failed or was deferred. */
+  onStart: (startable: LocalStartable) => Promise<StartOutcome>;
   /** A stack was set up, or connected. */
   onRecorded?: (stack: string, connected: boolean) => void;
   pollDelays?: number[];
@@ -217,6 +240,39 @@ export function useLocalSequence({
   }
 
   /**
+   * Install the release this app's CLI installs over a stack an older app set up, with the CLI's
+   * own `local update`, which keeps the stack's data and app connections. Once per wait. A failure
+   * is said and does not stop the sequence: the release the stack had is still there, and OpenBot
+   * starts on it. False only when the run was stopped meanwhile.
+   */
+  async function updateIntelligence(
+    id: string,
+    to: string,
+    from: string,
+    token: number,
+  ): Promise<boolean> {
+    update({ detail: `Updating the back end to ${to}. Its data stays.` });
+    const started = runLocalEval("update", id);
+    attempt.current = started.attempt;
+    let updated = false;
+    try {
+      updated = (await started.report).outcome === "completed";
+    } catch {
+      updated = false;
+    } finally {
+      if (attempt.current === started.attempt) attempt.current = null;
+    }
+    if (generation.current !== token) return false;
+    update({
+      detail: null,
+      updateFailed: updated
+        ? null
+        : `The back end could not be updated to ${to}, so it stays on ${from}. OpenBot tries again the next time it starts.`,
+    });
+    return true;
+  }
+
+  /**
    * Status until the CLI reports ready and valid, or anything that waiting will not change.
    * Only "starting" is waited on: unknown is what an older CLI always says. A stopped stack is
    * started once, as its own readiness row offers.
@@ -236,9 +292,36 @@ export function useLocalSequence({
       return null;
     };
     let startedIntelligence = false;
+    let updatedIntelligence = false;
     for (let tries = 0; ; tries += 1) {
       const found = await report("status");
       if (!found) return null;
+      /*
+       * A stack an older app set up runs an older release than this app installs: updated once,
+       * before OpenBot starts on it, so OpenBot runs on the release it was built with.
+       *
+       * ONLY ONCE IT IS UP. The CLI's update rolls the running stack forward and waits for each
+       * service to come back (`kubectl rollout status`, three minutes). On a stack Quit had stopped
+       * there is nothing running to roll, the wait ran out, and the update failed every time; on the
+       * same stack started first it finished in 86 seconds. So a stopped stack is started below as
+       * usual, and the update runs on the next answer, when it reports ready.
+       */
+      if (
+        found.updateTo &&
+        found.stack &&
+        !updatedIntelligence &&
+        found.readiness === "ready"
+      ) {
+        updatedIntelligence = true;
+        const going = await updateIntelligence(
+          id,
+          found.updateTo,
+          found.stack.installedRelease,
+          token,
+        );
+        if (!going) return null;
+        continue;
+      }
       if (isReady(found)) {
         if (!found.stack) {
           update({ blocked: { said: said("missing-stack"), reason: null } });
@@ -281,7 +364,7 @@ export function useLocalSequence({
   async function run(from: Phase): Promise<void> {
     halt();
     const token = generation.current;
-    update({ blocked: null, problem: null });
+    update({ blocked: null, problem: null, detail: null, updateFailed: null });
     const { root } = latest.current;
     let id = latest.current.stack;
     const stop = (reason?: { said: string; reason?: LocalReason | null }) => {
@@ -344,10 +427,13 @@ export function useLocalSequence({
       if (phase === "start") {
         const target = startable.current;
         if (!target) return run("wait");
-        if (!(await latest.current.onStart(target))) {
+        const outcome = await latest.current.onStart(target);
+        if (outcome === "failed") {
           return stop({ said: "OpenBot did not start." });
         }
         go.current = false;
+        // Waiting on something else, which gives the go-ahead again when it is done.
+        if (outcome === "deferred") return stop();
       }
     }
     stop();
@@ -414,21 +500,26 @@ export function useLocalSequence({
   const reached = state.at
     ? PHASES.findIndex(([phase]) => phase === state.at)
     : -1;
-  const steps: Progress[] = PHASES.slice(0, reached + 1).map(
-    ([, label], index) =>
-      index < reached
-        ? { step: label, ok: true, detail: "" }
-        : state.running
-          ? {
-              step: label,
-              ok: true,
-              running: true,
-              detail: "",
-              startedAt: state.since ?? undefined,
-            }
-          : stopped
-            ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
-            : { step: label, ok: true, detail: "" },
+  const steps: Progress[] = PHASES.slice(0, reached + 1).flatMap(
+    ([phase, label], index): Progress[] => {
+      const row: Progress =
+        index < reached
+          ? { step: label, ok: true, detail: "" }
+          : state.running
+            ? {
+                step: label,
+                ok: true,
+                running: true,
+                detail: state.detail ?? "",
+                startedAt: state.since ?? undefined,
+              }
+            : stopped
+              ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
+              : { step: label, ok: true, detail: "" };
+      return phase === "wait" && state.updateFailed
+        ? [row, { step: UPDATING, ok: false, detail: state.updateFailed }]
+        : [row];
+    },
   );
 
   return {
@@ -562,7 +653,8 @@ function needsPerson(sequence: LocalSequence): boolean {
 }
 
 function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
-  const [waiting, setWaiting] = useState(false);
+  /** The sign-in being waited on, if one is. */
+  const [waiting, setWaiting] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const attempt = useRef<string | null>(null);
   // Leaving stops the wait for the browser.
@@ -574,30 +666,48 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
   );
 
   async function signIn() {
-    setWaiting(true);
     setFailed(null);
     const started = signInToCopilotKit();
     attempt.current = started.attempt;
+    setWaiting(started.attempt);
     try {
-      if (await started.signedIn) onSignedIn();
+      const signedIn = await started.signedIn;
+      if (attempt.current !== started.attempt) return;
+      if (signedIn) onSignedIn();
       else setFailed("Sign-in did not finish. Try again.");
     } catch (error) {
+      if (attempt.current !== started.attempt) return;
       setFailed(
         error instanceof LocalEvalError && error.category !== "unrecognized"
           ? said(error.category)
           : "Sign-in did not finish. Try again.",
       );
     } finally {
-      attempt.current = null;
-      setWaiting(false);
+      if (attempt.current === started.attempt) {
+        attempt.current = null;
+        setWaiting(null);
+      }
     }
+  }
+
+  /** Stop the CLI's sign-in and offer it again. */
+  function cancel() {
+    const running = attempt.current;
+    attempt.current = null;
+    if (running) cancelLocalEval(running).catch(() => {});
+    setWaiting(null);
   }
 
   return (
     <div className="local-needs">
+      <CopilotKitLogo />
       <p>OpenBot's back end needs your CopilotKit account.</p>
       {waiting ? (
-        <StatusLine>Finish signing in in your browser…</StatusLine>
+        <CopilotKitSignInWait
+          attempt={waiting}
+          waiting="Finish signing in in your browser…"
+          onCancel={cancel}
+        />
       ) : (
         <div className="row">
           <button type="button" onClick={signIn}>

@@ -10,6 +10,7 @@ import { userPreferencesRoutes } from "../src/user-preferences-routes";
 function fixture() {
   const state = new Map<string, UserPreferences>();
   const store: UserPreferencesStore = {
+    claimStarterTour: async () => {},
     read: async (id) => state.get(id) ?? DEFAULT_USER_PREFERENCES,
     patch: async (id, patch) => {
       const saved = { ...DEFAULT_USER_PREFERENCES, ...state.get(id), ...patch };
@@ -97,6 +98,10 @@ test.each([
   { proactive: "sometimes" },
   { proactive: true },
   { proactive: null },
+  { starterTourDismissed: true },
+  { starterTourDismissed: false },
+  { starterTourDismissed: null },
+  { starterTourChannelId: "replacement" },
 ])("rejects invalid or extra preference fields: %j", async (body) => {
   const { appFor, state } = fixture();
   expect((await appFor("alice").request(path, patch(body))).status).toBe(400);

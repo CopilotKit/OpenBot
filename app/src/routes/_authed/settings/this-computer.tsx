@@ -1,7 +1,9 @@
+import { DOESNT_UPDATE_ITSELF } from "@openbot/shared/desktop-updates";
 import {
   IconBox,
   IconBrandDocker,
   IconCpu,
+  IconFileText,
   IconFolder,
   IconInfoCircle,
   IconSparkles,
@@ -17,6 +19,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
+import { describe } from "@/components/layout/update-banner";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -26,15 +29,20 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { desktopShell } from "@/lib/desktop/shell";
 import {
+  checkAppUpdateMutationOptions,
+  installAppUpdateMutationOptions,
   intelligenceMutationOptions,
+  openLogFolderMutationOptions,
   restartOpenBotMutationOptions,
   stopOpenBotMutationOptions,
 } from "@/lib/desktop/mutations";
+import { type PartGroup, partLabel } from "@/lib/desktop/part-names";
 import {
+  type DesktopAppUpdateCheck,
   type DesktopPart,
   type DesktopStatus,
+  desktopAppUpdateQueryOptions,
   desktopStatusQueryOptions,
   diagnostics,
   formatBytes,
@@ -42,7 +50,7 @@ import {
   intelligenceReadinessQueryOptions,
   totalMemory,
 } from "@/lib/desktop/queries";
-import { type PartGroup, partLabel } from "@/lib/desktop/part-names";
+import { desktopShell } from "@/lib/desktop/shell";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/settings/this-computer")({
@@ -342,21 +350,168 @@ function MachineSection({
             </ItemDescription>
           </ItemContent>
         </Item>
+        {status.logFolder && (
+          <>
+            <Separator />
+            <LogsRow folder={status.logFolder} />
+          </>
+        )}
         <Separator />
-        <Item size="sm">
-          <RowMark>
-            <IconInfoCircle className="size-4" />
-          </RowMark>
-          <ItemContent>
-            <ItemTitle>Version {status.version}</ItemTitle>
-            <ItemDescription className="line-clamp-none">
-              {status.build}
-            </ItemDescription>
-          </ItemContent>
-        </Item>
+        <VersionRow status={status} />
       </PageRows>
     </PageSection>
   );
+}
+
+/**
+ * Where the desktop app keeps its log, with Open log folder, so a person can share the file when
+ * they ask for help. The desktop app opens its own folder; nothing here names a path to open.
+ */
+function LogsRow({ folder }: { folder: string }) {
+  const open = useMutation(openLogFolderMutationOptions());
+  return (
+    <Item size="sm">
+      <RowMark>
+        <IconFileText className="size-4" />
+      </RowMark>
+      <ItemContent>
+        <ItemTitle>Logs</ItemTitle>
+        <ItemDescription className="line-clamp-none">
+          Logs stay on this computer and leave out your keys and messages. Share
+          them when you ask for help.
+        </ItemDescription>
+        <ItemDescription className="line-clamp-none break-all">
+          {folder}
+        </ItemDescription>
+        {open.error && (
+          <ItemDescription
+            className="line-clamp-none text-destructive"
+            role="alert"
+          >
+            Couldn't open the log folder. Find it at the path above.
+          </ItemDescription>
+        )}
+      </ItemContent>
+      <ItemActions>
+        <Button
+          disabled={open.isPending}
+          onClick={() => open.mutate()}
+          size="sm"
+          variant="outline"
+        >
+          Open log folder
+        </Button>
+      </ItemActions>
+    </Item>
+  );
+}
+
+/**
+ * The desktop app's version, with Check for updates. The same check as Check for Updates… in the
+ * tray: the app reads its update feed at once and says what it found. On Windows, which has no menu
+ * bar, this and the tray are the places to ask.
+ *
+ * A build that never updates itself (internal, candidate, or without the updater) says so up front
+ * in the setup window's words, with no button: the tray and the menus don't offer the check either.
+ */
+function VersionRow({ status }: { status: DesktopStatus }) {
+  const check = useMutation(checkAppUpdateMutationOptions(queryClient));
+  const install = useMutation(installAppUpdateMutationOptions(queryClient));
+  // The download's progress, asked twice a second from the click on, as the banner asks once it
+  // sees an install under way.
+  const offer = useQuery({
+    ...desktopAppUpdateQueryOptions(),
+    refetchInterval: install.isPending ? 500 : false,
+  });
+  const progress = offer.data?.installing ?? null;
+  const installing = install.isPending || progress !== null;
+  const found = check.data;
+  // An older desktop app doesn't say, and its check answers for itself. No button until the first
+  // answer, so a build that doesn't update itself never shows one for a moment.
+  const updatesItself = offer.data?.updatesItself !== false;
+  return (
+    <Item size="sm">
+      <RowMark>
+        <IconInfoCircle className="size-4" />
+      </RowMark>
+      <ItemContent>
+        <ItemTitle>Version {status.version}</ItemTitle>
+        <ItemDescription className="line-clamp-none">
+          {status.build}
+        </ItemDescription>
+        {!updatesItself && (
+          <ItemDescription className="line-clamp-none text-foreground">
+            {DOESNT_UPDATE_ITSELF}
+          </ItemDescription>
+        )}
+        {found && !check.isPending && (
+          <ItemDescription
+            className="line-clamp-none text-foreground"
+            role="status"
+          >
+            {checked(found)}
+          </ItemDescription>
+        )}
+        {check.error && (
+          <ItemDescription
+            className="line-clamp-none text-destructive"
+            role="alert"
+          >
+            {reason(check.error)}
+          </ItemDescription>
+        )}
+        {install.error && !installing && (
+          <ItemDescription
+            className="line-clamp-none text-destructive"
+            role="alert"
+          >
+            Couldn't install the update: {reason(install.error)}
+          </ItemDescription>
+        )}
+      </ItemContent>
+      {updatesItself && !offer.isLoading && (
+        <ItemActions>
+          {found?.found === "available" ? (
+            <Button
+              disabled={installing}
+              onClick={() => install.mutate()}
+              size="sm"
+            >
+              {installing ? describe(progress) : "Update and restart"}
+            </Button>
+          ) : (
+            <Button
+              disabled={check.isPending}
+              onClick={() => check.mutate()}
+              size="sm"
+              variant="outline"
+            >
+              {check.isPending ? "Checking…" : "Check for updates"}
+            </Button>
+          )}
+        </ItemActions>
+      )}
+    </Item>
+  );
+}
+
+/** What a check found, in a sentence. */
+function checked(found: DesktopAppUpdateCheck): string {
+  switch (found.found) {
+    case "available":
+      return `OpenBot ${found.version} is available.`;
+    case "upToDate":
+      return `OpenBot ${found.current} is up to date.`;
+    case "installing":
+      return `OpenBot is downloading ${found.version} and restarts when it's done.`;
+    case "notOffered":
+      return DOESNT_UPDATE_ITSELF;
+  }
+}
+
+/** The desktop app refuses with its own sentence, as a plain string. */
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Each container or process as a read-only row: what it is for, and its memory as the value. */

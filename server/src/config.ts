@@ -9,12 +9,7 @@ import {
   type LearningTarget,
 } from "@openbot/shared/learning";
 import { listenPort } from "@openbot/shared/listen-port";
-import {
-  BROWSER_ABSENT_ENV,
-  BROWSER_URL_ENV,
-  type BrowserAbsence,
-  isBrowserAbsence,
-} from "@openbot/shared/openbot-browser";
+import { BROWSER_URL_ENV } from "@openbot/shared/openbot-browser";
 import {
   addressesBeyondThisMachine,
   deploymentAddresses,
@@ -292,6 +287,14 @@ export type DeploymentConfig = {
    */
   agentEndpointAllowedHosts: ReadonlySet<string>;
   /**
+   * The name this server's container reaches the person's machine by, from
+   * `OPENBOT_THIS_MACHINE_HOST`. OpenBot Desktop sets it (`host.docker.internal`), because there the
+   * server runs in a container and `127.0.0.1` is the container, so an agent the person registers on
+   * their own loopback is dialled through this name (`onThisMachine` in agents/endpoint.ts). Absent
+   * wherever the server is a host process or hosted, and nothing is translated.
+   */
+  thisMachineHost?: string;
+  /**
    * What this deployment calls itself, when more than one shares an Intelligence project.
    *
    * Absent, the tenant package's id stands in, which separates deployments running different
@@ -462,18 +465,12 @@ export type DeploymentConfig = {
    */
   computer?: ComputerConfig;
   /**
-   * The computer that runs people's own OpenBot browsers here when it is not the Bots' (`OPENBOT_BROWSER_URL`): OpenBot
-   * Desktop's host-side local Chrome computer, so a person's browser is a window on their own desktop while Bots'
-   * computers stay where they are. Called with the same COMPUTER_TOKEN as every computer. Absent, the Bots' computer
-   * provider runs people's browsers too.
+   * The computer that runs people's own OpenBot browsers here when it is not the Bots' (`OPENBOT_BROWSER_URL`): a
+   * host-side local Chrome computer (`scripts/start-local-chrome-computer.ts`), so a person's browser is a window on
+   * their own desktop while Bots' computers stay where they are. Called with the same COMPUTER_TOKEN as every computer.
+   * Absent, the Bots' computer provider runs people's browsers too, shown in the page.
    */
   browser?: { url: string; token?: string };
-  /**
-   * Why OpenBot Desktop found no browser of the person's own to run on this machine (`OPENBOT_BROWSER_ABSENT`), which
-   * the person is told beside whatever browser runs for them instead. A name this server does not know is left out:
-   * Desktop and the deployment it runs are released apart, and an explanation is no reason to refuse to start.
-   */
-  browserAbsent?: BrowserAbsence;
   /** How far one Bot handing work to another may go. */
   handoff: HandoffCaps;
   /**
@@ -1300,6 +1297,27 @@ function agentEndpointAllowedHosts(
 }
 
 /**
+ * `OPENBOT_THIS_MACHINE_HOST`, as one host name. See {@link DeploymentConfig.thisMachineHost}.
+ *
+ * A scheme, port or path is refused at boot, naming the value, rather than producing addresses that
+ * silently never connect.
+ */
+function thisMachineHost(environment: NodeJS.ProcessEnv): {
+  thisMachineHost?: string;
+} {
+  const host = optional(environment, "OPENBOT_THIS_MACHINE_HOST")
+    ?.trim()
+    .toLowerCase();
+  if (!host) return {};
+  if (!/^[a-z0-9.-]+$/.test(host)) {
+    throw new Error(
+      `OPENBOT_THIS_MACHINE_HOST "${host}" must be a host name, without a scheme, port or path.`,
+    );
+  }
+  return { thisMachineHost: host };
+}
+
+/**
  * An IPv6 entry, spelled the way the endpoint check will see it.
  *
  * `namedAsAllowed` compares against `URL.hostname`, which the parser canonicalises: compressed,
@@ -1382,13 +1400,9 @@ export function durationMs(value: string): number {
 
 function browserConfig(
   environment: Environment,
-): Pick<DeploymentConfig, "browser" | "browserAbsent"> {
+): Pick<DeploymentConfig, "browser"> {
   const address = url(environment, BROWSER_URL_ENV);
-  if (!address) {
-    // Only where there is no browser of the person's own: one that runs needs no reason why it does not.
-    const absent = optional(environment, BROWSER_ABSENT_ENV);
-    return absent && isBrowserAbsence(absent) ? { browserAbsent: absent } : {};
-  }
+  if (!address) return {};
   const token = optional(environment, "COMPUTER_TOKEN");
   return { browser: { url: address, ...(token ? { token } : {}) } };
 }
@@ -1651,6 +1665,7 @@ export function loadConfig(
     ...(managedAgent ? { managedAgent } : {}),
     ...(githubApp ? { githubApp } : {}),
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
+    ...thisMachineHost(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     ...(optional(environment, "OPENBOT_BUILD_VERSION")
       ? { version: optional(environment, "OPENBOT_BUILD_VERSION") as string }

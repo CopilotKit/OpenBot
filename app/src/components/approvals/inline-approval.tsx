@@ -147,6 +147,30 @@ export function InlineApproval({
 }
 
 /**
+ * Every approval a conversation is waiting on, for a surface drawn over that conversation: the
+ * Computer or the Bot's profile in a sheet on a narrow window covers the cards in the transcript, so
+ * the sheet draws them too. The same card, from the same inbox, so answering either answers both.
+ */
+export function ConversationApprovals({ threadId }: { threadId: string }) {
+  const inbox = useQuery(approvalInboxOptions());
+  const ids = (inbox.data?.requests ?? []).flatMap((request) =>
+    request.status === "pending" &&
+    request.action.threadId === threadId &&
+    request.action.toolCallId
+      ? [request.action.toolCallId]
+      : [],
+  );
+  if (ids.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      {ids.map((id) => (
+        <InlineApproval key={id} toolCallId={id} fallback={null} />
+      ))}
+    </div>
+  );
+}
+
+/**
  * The pending approvals for a group of tool calls, for a transcript that draws those calls itself
  * rather than through each tool's renderer: the browser-activity group folds every click and field
  * into one collapsed line, so a card inside a step would never be seen. Drawn beside the group,

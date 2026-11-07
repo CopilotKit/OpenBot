@@ -2,8 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
+import { EndpointMark } from "./EndpointMark";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
-import { Mark } from "./Mark";
+import { ButtonMark, Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import { StatusLine } from "./SetupProgress";
@@ -73,19 +74,23 @@ export type HeldConfiguration = {
 
 const endpointPresets: Record<
   string,
-  { baseUrl: string; model: string; keyUrl: string }
+  // `keyLink` is written out whole: the article goes by how the name sounds ("an xAI"), not by
+  // its first letter.
+  { baseUrl: string; model: string; keyUrl: string; keyLink: string }
 > = {
   // https://ai.google.dev/gemini-api/docs/openai
   google: {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     model: "gemini-3.8-flash",
     keyUrl: "https://aistudio.google.com/apikey",
+    keyLink: "Get a Google Gemini API key",
   },
   // https://docs.x.ai/developers/model-capabilities/legacy/chat-completions
   xai: {
     baseUrl: "https://api.x.ai/v1",
     model: "grok-4.7",
     keyUrl: "https://console.x.ai/",
+    keyLink: "Get an xAI API key",
   },
 };
 
@@ -662,7 +667,11 @@ export function ProviderPicker({
                 }
               }}
             />
-            <Mark id={r.mark} name={r.name} />
+            {r.id === "openai-compatible" ? (
+              <EndpointMark />
+            ) : (
+              <Mark id={r.mark} name={r.name} />
+            )}
             <span className="tile-name">{r.name}</span>
             <span className="tile-summary">{r.summary}</span>
           </label>
@@ -710,7 +719,8 @@ export function ProviderPicker({
 
           {login === "oauth" && (
             <>
-              <p className="footnote">
+              {/* Set as the plan's description is, so its button has the same space above it. */}
+              <p className="lede">
                 {row.id === "google"
                   ? "Authorize Gemini API access using the configured Google Cloud project and its API quota."
                   : "Authorize OpenBot to use models available to your xAI account."}
@@ -739,9 +749,16 @@ export function ProviderPicker({
                 </>
               ) : null}
               {!busy && (
-                <button type="button" onClick={beginOAuth}>
+                <button
+                  type="button"
+                  className="quiet sign-in-with"
+                  onClick={beginOAuth}
+                >
+                  <ButtonMark id={row.mark} />
+                  {/* Google's guidelines allow only "Sign in with Google" beside its G. The
+                      row above already says Gemini. */}
                   Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
-                  {row.name}
+                  {row.id === "google" ? "Google" : row.name}
                 </button>
               )}
               {busy && !signInUrl && (
@@ -770,7 +787,13 @@ export function ProviderPicker({
                   Your plan will be used.
                 </p>
                 {!token && (
-                  <button type="button" disabled={busy} onClick={beginSignIn}>
+                  <button
+                    type="button"
+                    className="quiet sign-in-with"
+                    disabled={busy}
+                    onClick={beginSignIn}
+                  >
+                    <ButtonMark id={row.mark} />
                     Sign in again with {row.name}
                   </button>
                 )}
@@ -784,8 +807,10 @@ export function ProviderPicker({
                  */}
                 <p className="footnote">
                   Your Bot will use{" "}
-                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangGraph"}.
-                  It’s the one that can use this plan.
+                  {row.id === "anthropic"
+                    ? "Claude Agent SDK"
+                    : "LangChain (LangGraph)"}
+                  . It’s the one that can use this plan.
                 </p>
               </>
             ) : signInUrl ? (
@@ -831,12 +856,21 @@ export function ProviderPicker({
               </>
             ) : (
               <>
+                {/* Says what the flow below asks for: Claude's sign-in hands back a
+                    code to paste here, ChatGPT's finishes in the browser. */}
                 <p className="lede">
-                  Opens {row.name} in your browser. Nothing is typed here and no
-                  key is stored.
+                  {row.id === "anthropic"
+                    ? `${row.name} opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.`
+                    : `${row.name} opens in your browser. You won't type anything here or need an API key.`}
                 </p>
                 <div className="provider-sign-in-actions">
-                  <button type="button" disabled={busy} onClick={beginSignIn}>
+                  <button
+                    type="button"
+                    className="quiet sign-in-with"
+                    disabled={busy}
+                    onClick={beginSignIn}
+                  >
+                    <ButtonMark id={row.mark} />
                     {busy ? "Starting…" : `Sign in with ${row.name}`}
                   </button>
                   {!busy &&
@@ -980,7 +1014,7 @@ export function ProviderPicker({
               {preset && (
                 <p className="footnote">
                   <ExternalLink key={preset.keyUrl} href={preset.keyUrl}>
-                    Get a {row.name} API key
+                    {preset.keyLink}
                   </ExternalLink>
                 </p>
               )}

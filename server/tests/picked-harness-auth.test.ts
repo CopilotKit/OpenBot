@@ -220,7 +220,9 @@ async function runPicked(options: {
     expect(capabilities.status).toBe(200);
     expect(await capabilities.json()).toEqual({
       capabilities: {
-        builtInAvailable: options.bundled,
+        // A Bot made with no address runs here whether or not there is a bundled Bot: on the
+        // bundled Bot when there is one, in the server on its instructions when there is not.
+        builtInAvailable: true,
         isolationAvailable: false,
       },
     });

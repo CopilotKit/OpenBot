@@ -23,6 +23,7 @@ import {
 import type { ApprovalQuestions } from "./questions";
 import {
   type ApprovalAction,
+  ApprovalAlreadyAnsweredError,
   type ApprovalCandidate,
   type ApprovalContinuation,
   type ApprovalDecision,
@@ -194,6 +195,7 @@ export function createApprovalService(
         effect: candidate.effect,
         scope: candidate.scope,
         outcome,
+        target: candidate.target,
         ...(continuation?.initiator
           ? { initiator: continuation.initiator }
           : {}),
@@ -329,6 +331,7 @@ export function createApprovalService(
               source: "person_declined",
               reason: DECLINED_BY_PERSON,
             },
+            target: candidate.target,
             ...(continuation.initiator
               ? { initiator: continuation.initiator }
               : {}),
@@ -382,7 +385,7 @@ export function createApprovalService(
         return { replay: HANDLED_BY_PERSON, complete: async () => undefined };
       if (request.result) {
         if (request.result.error)
-          throw new ApprovalRefusedError(request.result.error);
+          throw new ApprovalAlreadyAnsweredError(request.result.error);
         let replay: unknown;
         try {
           replay = JSON.parse(request.result.content);
@@ -392,7 +395,7 @@ export function createApprovalService(
         return { replay, complete: async () => undefined };
       }
       if (request.status === "denied")
-        throw new ApprovalRefusedError(DECLINED_BY_PERSON);
+        throw new ApprovalAlreadyAnsweredError(DECLINED_BY_PERSON);
       if (
         request.status === "approved" &&
         (await store.consume(action.actorId, request.id, action.actionDigest))
@@ -410,7 +413,7 @@ export function createApprovalService(
           },
         };
       if (request.status !== "pending")
-        throw new ApprovalRefusedError(
+        throw new ApprovalAlreadyAnsweredError(
           "This approval has already been used or revoked. The action was not repeated.",
         );
       const handOff = request.action.policy?.behaviour === "hand_off";
@@ -435,12 +438,17 @@ export function createApprovalService(
       return store.decide(ownerUserId, id, decision);
     },
     revoke: (ownerUserId: string, id: string) => store.revoke(ownerUserId, id),
-    async answerQuestion(ownerUserId: string, id: string, response: string) {
+    async answerQuestion(
+      ownerUserId: string,
+      id: string,
+      response: string,
+      options?: { inConversation?: boolean },
+    ) {
       if (!questions)
         throw new ApprovalRefusedError(
           "Questions are unavailable in this deployment.",
         );
-      return questions.respond(ownerUserId, id, response);
+      return questions.respond(ownerUserId, id, response, options);
     },
     async dismissQuestion(ownerUserId: string, id: string) {
       if (!questions)

@@ -7,19 +7,29 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { DESTRUCTIVE_TOOL_NOTE } from "@openbot/shared/bot-prompt";
 import { offersStandingRule } from "@openbot/shared/standing-rule";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createApprovalService } from "../src/approvals/service";
 import { createApprovalStore } from "../src/approvals/store";
 import {
   type ApprovalCandidate,
   withApprovalContext,
 } from "../src/approvals/types";
+import { createAuditStore } from "../src/audit";
+import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
+import { agents, mcpServers, mcpTools, pluginGrants } from "../src/db/schema";
 import { approvalRequests } from "../src/db/schema/approvals";
 import { users } from "../src/db/schema/core";
+import { workItems } from "../src/db/schema/work";
 import { type Edition, setEdition } from "../src/edition";
+import { classify } from "../src/plugins/arcade";
+import { effectOf } from "../src/plugins/composio";
+import { storableTools } from "../src/plugins/plugin-store/model";
+import { createPluginStore } from "../src/plugins/store";
+import { grantedTools } from "../src/plugins/tools";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -159,6 +169,15 @@ const CONSEQUENTIAL = {
         owner: "me",
         repo: "notes",
       }),
+      // HubSpot's delete is called archive.
+      tool("composio-hubspot", "HUBSPOT_ARCHIVE_CONTACT", { contact_id: "51" }),
+      // Gmail's archive, as a Gmail MCP server names it: the mail leaves the inbox.
+      tool("gmail-mcp", "gmail_archive", { message_id: "18c" }),
+      // Named like nothing, from an app that marks it destructive (MCP's `destructiveHint`).
+      {
+        ...tool("acme-mcp", "reset_workspace", { workspace: "w1" }),
+        destructive: true,
+      },
       click("https://mail.google.com/mail/u/0/#inbox", "button", "Delete"),
       click(
         "https://drive.google.com/drive/my-drive",
@@ -305,10 +324,27 @@ const NOT_MONEY = [
 
 afterEach(() => setEdition("team"));
 afterAll(async () => {
-  if (people.length)
+  if (people.length) {
+    // A decision queues its approval to be carried out. Left behind, a later suite's resume loop
+    // spends its turns on approvals this one deleted.
+    const decided = await database
+      .select({ id: approvalRequests.id })
+      .from(approvalRequests)
+      .where(inArray(approvalRequests.ownerUserId, people));
+    if (decided.length)
+      await database.delete(workItems).where(
+        and(
+          eq(workItems.kind, "approval.resume"),
+          inArray(
+            workItems.key,
+            decided.map((request) => request.id),
+          ),
+        ),
+      );
     await database
       .delete(approvalRequests)
       .where(inArray(approvalRequests.ownerUserId, people));
+  }
   await database.delete(users).where(inArray(users.id, people));
   await database.$client.close();
 });
@@ -341,6 +377,26 @@ describe.each(EDITIONS)("the %s edition", (edition) => {
       }
     });
   }
+
+  test("an archive is answered with Allow once or Deny, each that one time", async () => {
+    setEdition(edition);
+    const archive = tool("composio-hubspot", "HUBSPOT_ARCHIVE_CONTACT", {
+      contact_id: "51",
+    });
+    const allowed = await gate(owner, archive);
+    expect(allowed?.action.policy).toMatchObject({
+      behaviour: "ask",
+      source: "safety",
+      reason: "Deleting something always asks you first.",
+    });
+    expect(
+      (await service.decide(owner, allowed?.id ?? "", "allow_once")).status,
+    ).toBe("approved");
+    const denied = await gate(owner, archive);
+    expect((await service.decide(owner, denied?.id ?? "", "deny")).status).toBe(
+      "denied",
+    );
+  });
 
   test("Allow once lets the Bot delete, send, share or publish that one time", async () => {
     setEdition(edition);
@@ -645,6 +701,52 @@ const REMOVING = {
   ],
 } as const;
 
+/** Archive is deleting as the action of a tool's name, its first verb, and nowhere else. */
+const ARCHIVING = {
+  "archiving a HubSpot contact": [
+    tool("composio-hubspot", "HUBSPOT_ARCHIVE_CONTACT", { contact_id: "51" }),
+    { category: "deleting" },
+  ],
+  "archiving a batch of HubSpot records": [
+    tool("composio-hubspot", "HUBSPOT_ARCHIVE_BATCH_OF_FEEDBACK_SUBMISSIONS", {
+      inputs: [{ id: "1" }],
+    }),
+    { category: "deleting" },
+  ],
+  "archiving a Slack conversation": [
+    tool("composio-slack", "SLACK_ARCHIVE_CONVERSATION", { channel: "C1" }),
+    { category: "deleting" },
+  ],
+  "archiving mail through a Gmail MCP server": [
+    tool("gmail-mcp", "gmail_archive", { message_id: "18c" }),
+    { category: "deleting" },
+  ],
+  "archiving mail named with a hyphen": [
+    tool("gmail-mcp", "archive-email", { id: "18c" }),
+    { category: "deleting" },
+  ],
+  "listing archived emails": [
+    tool("gmail-mcp", "list_archived_emails", { max_results: 10 }),
+    nothing,
+  ],
+  "reading archive settings": [
+    tool("gmail-mcp", "get_archive_settings", { account: "me" }),
+    nothing,
+  ],
+  "unarchiving a Slack channel": [
+    tool("composio-slack", "SLACK_UNARCHIVE_CHANNEL", { channel: "C1" }),
+    nothing,
+  ],
+  "downloading a repository archive": [
+    tool("composio-github", "GITHUB_DOWNLOAD_A_REPOSITORY_ARCHIVE_ZIP", {
+      owner: "me",
+      repo: "notes",
+      ref: "main",
+    }),
+    nothing,
+  ],
+} as const;
+
 describe.each(EDITIONS)("named words in the %s edition", (edition) => {
   let owner = "";
   beforeAll(async () => {
@@ -674,4 +776,212 @@ describe.each(EDITIONS)("named words in the %s edition", (edition) => {
     const { seen, wanted } = await outcomes(owner, REMOVING);
     expect(seen).toEqual(wanted);
   });
+
+  test("archiving asks as deleting; listing archived mail, archive settings and unarchiving don't", async () => {
+    setEdition(edition);
+    const { seen, wanted } = await outcomes(owner, ARCHIVING);
+    expect(seen).toEqual(wanted);
+  });
 });
+
+/*
+ * What the app says about a tool, through the real app call: the plugin store reads the
+ * `destructive` its listing recorded and puts it to the gate. Only the vendor is a seam.
+ */
+describe("a tool its app marks destructive, called through the app", () => {
+  const APP = `${prefix}-workspace`;
+  const BOT = `${prefix}-app-bot`;
+  const vendorCalls: string[] = [];
+  const plugins = createPluginStore({
+    brokerProvider: "composio",
+    database,
+    auditStore: createAuditStore(database),
+    credentials: createCredentialStore(database),
+    encryptionKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    policy: () => ({ mode: "enforce", allow: ["true"], deny: [] }),
+    approvalGate: (candidate) => service.gate(candidate),
+    callVendor: async (_connection, toolName) => {
+      vendorCalls.push(toolName);
+      return { text: "done", isError: false };
+    },
+  });
+  let owner = "";
+
+  beforeAll(async () => {
+    owner = await person();
+    await database.insert(mcpServers).values({
+      id: APP,
+      title: "Acme Workspace",
+      vendor: "Acme",
+      url: "https://workspace.example.test/mcp",
+      provenance: "custom",
+    });
+    // As the listing records them: `destructiveHint: true` on one, nothing said about the other.
+    await database.insert(mcpTools).values([
+      {
+        serverId: APP,
+        name: "reset_workspace",
+        vendorName: "reset_workspace",
+        inputSchema: {},
+        effect: "write",
+        destructive: true,
+      },
+      {
+        serverId: APP,
+        name: "rename_workspace",
+        vendorName: "rename_workspace",
+        inputSchema: {},
+      },
+    ]);
+    await database.insert(agents).values({
+      id: BOT,
+      name: "Workspace",
+      type: "built_in",
+      configuration: {},
+    });
+    /*
+     * As each broker's own listing records an action: Arcade's from its behaviour flags, Composio's
+     * from its labels, through the same mapping a refresh writes with.
+     */
+    const listed = (name: string, said: ReturnType<typeof classify>) => ({
+      name,
+      description: "",
+      inputSchema: {},
+      ...said,
+    });
+    await database
+      .insert(mcpTools)
+      .values(
+        storableTools(APP, [
+          listed("arcade_unflagged", classify({ behavior: {} })),
+          listed(
+            "arcade_flagged",
+            classify({ behavior: { destructive: true } }),
+          ),
+          listed("composio_unlabelled", effectOf(["openWorldHint"])),
+          listed("composio_labelled", effectOf(["destructiveHint"])),
+        ]).rows,
+      );
+    await database
+      .insert(pluginGrants)
+      .values(
+        [
+          "reset_workspace",
+          "rename_workspace",
+          ...BROKERED.flatMap(({ unsaid, flagged }) => [unsaid, flagged]),
+        ].map((name) => ({ kind: "mcp", ref: `${APP}/${name}`, agentId: BOT })),
+      );
+  });
+  afterAll(async () => {
+    await database.delete(mcpServers).where(eq(mcpServers.id, APP));
+    await database.delete(agents).where(eq(agents.id, BOT));
+  });
+
+  const call = (name: string) => {
+    const toolCallId = randomUUID();
+    return withApprovalContext(
+      {
+        runId: randomUUID(),
+        threadId: `${prefix}-app-${toolCallId}`,
+        toolCallId,
+        toolName: `mcp__${APP}__${name}`,
+        args: { workspace: "w1" },
+        messages: [{ id: "u1", role: "user", content: "Tidy the workspace." }],
+        state: {},
+        context: [],
+        forwardedProps: {},
+      },
+      () =>
+        plugins.callTool({
+          ref: `${APP}/${name}`,
+          args: { workspace: "w1" },
+          botId: BOT,
+          actorId: owner,
+        }),
+    ).then(
+      () => ({ toolCallId, asked: false }),
+      (error: unknown) => {
+        if (!(error instanceof HeadlessToolSuspension)) throw error;
+        return { toolCallId, asked: true };
+      },
+    );
+  };
+
+  test("it asks with Allow once or Deny, whatever it is called; an unmarked tool of the same app runs", async () => {
+    setEdition("personal");
+    expect(await store.enabled(owner)).toBe(false);
+
+    const reset = await call("reset_workspace");
+    expect(reset.asked).toBeTrue();
+    const [request] = (await store.list(owner)).filter(
+      (row) => row.action.toolCallId === reset.toolCallId,
+    );
+    expect(request?.action.policy).toEqual({
+      behaviour: "ask",
+      source: "safety",
+      reason:
+        "The app marks this as deleting or overwriting something, so it always asks you first.",
+    });
+    expect(offersStandingRule(request?.action ?? {})).toBeFalse();
+    expect(vendorCalls).toEqual([]);
+
+    expect((await call("rename_workspace")).asked).toBeFalse();
+    expect(vendorCalls).toEqual(["rename_workspace"]);
+  });
+
+  test("the same kind of tool is asked about the same way whichever broker listed it", async () => {
+    setEdition("personal");
+    for (const { broker, unsaid, flagged } of BROKERED) {
+      // Said nothing: an ordinary change, which runs with Ask before making changes off.
+      expect({ broker, asked: (await call(unsaid)).asked }).toEqual({
+        broker,
+        asked: false,
+      });
+      expect(vendorCalls).toContain(unsaid);
+      // Said it destroys something: always asks.
+      const destroys = await call(flagged);
+      expect({ broker, asked: destroys.asked }).toEqual({
+        broker,
+        asked: true,
+      });
+      const [request] = (await store.list(owner)).filter(
+        (row) => row.action.toolCallId === destroys.toolCallId,
+      );
+      expect(request?.action.policy).toMatchObject({
+        behaviour: "ask",
+        source: "safety",
+      });
+      expect(vendorCalls).not.toContain(flagged);
+    }
+  });
+
+  test("the Bot is offered it with a description that says OpenBot asks, so it doesn't ask first", async () => {
+    const offered = await grantedTools({
+      store: plugins,
+      botId: BOT,
+      actorId: owner,
+    });
+    const described = Object.fromEntries(
+      offered.map((tool) => [tool.ref, tool.description]),
+    );
+    expect(described[`${APP}/reset_workspace`]).toEndWith(
+      DESTRUCTIVE_TOOL_NOTE,
+    );
+    expect(described[`${APP}/rename_workspace`]).toBe("");
+    // Either broker: flagged destructive carries the note, and silence doesn't.
+    for (const { unsaid, flagged } of BROKERED) {
+      expect(described[`${APP}/${flagged}`]).toEndWith(DESTRUCTIVE_TOOL_NOTE);
+      expect(described[`${APP}/${unsaid}`]).toBe("");
+    }
+  });
+});
+
+/** One tool each broker said nothing about, and one it flagged destructive. */
+const BROKERED = [
+  { broker: "arcade", unsaid: "arcade_unflagged", flagged: "arcade_flagged" },
+  {
+    broker: "composio",
+    unsaid: "composio_unlabelled",
+    flagged: "composio_labelled",
+  },
+] as const;

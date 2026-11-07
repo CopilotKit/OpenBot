@@ -54,7 +54,7 @@ describe("the tools OpenBot offers a Bot", () => {
       "list_bots", // a literal, in a browser tool
       "show_app_access", // a constant from another package
       "remember_personal_fact", // a helper's parameter, followed to its calls
-      "pause_responsibility", // a template literal over a for...of
+      "pause_goal", // a template literal over a for...of
       "computer_screenshot", // a headless computer tool's definition
       "copilotkit_load_skill", // an AG-UI tool the runtime hands the model
       "search_tools", // a constant in the same file

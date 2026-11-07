@@ -993,14 +993,14 @@ test("the parked block precedes the transcript rows the scroller counts", () => 
   expect(firstRow).toBeGreaterThan(parkedBlock);
 });
 
-test("a responsibility turn is drawn as a compact line with the model's message behind Details", async () => {
+test("a goal's turn is drawn as a compact line with the model's message behind Details", async () => {
   const instruction = "Summarise the front page.";
   const raw = `${frameFiring(instruction)}\n\nSuccess criteria: Posted.\nProgress so far: No progress recorded yet.\nTrigger: manual/requested\nEvent data:\n{}\n\nRecord meaningful progress with report_responsibility_progress for responsibility 0b6c1a52-8d7e-4f0a-9b1f-3c2d1e0f9a8b.`;
   const message: UserMessage = { id: "firing-1", role: "user", content: raw };
   const { container, getByText } = renderTranscript([message]);
   await settleReactWork();
 
-  expect(getByText("Responsibility ran.")).toBeTruthy();
+  expect(getByText("Worked on a goal.")).toBeTruthy();
   expect(getByText(instruction)).toBeTruthy();
   expect(container.textContent).toContain("Trigger: manual");
   const details = container.querySelector("details");

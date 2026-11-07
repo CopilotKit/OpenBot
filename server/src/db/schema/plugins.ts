@@ -272,6 +272,21 @@ export const mcpTools = pgTable(
      */
     destructive: boolean("destructive").notNull().default(false),
     /**
+     * A broker listed this action and said nothing about what it does: Composio gave it no
+     * read-only, destructive, create or update label, or Arcade no behaviour flag it could read.
+     *
+     * Kept apart from {@link mcpTools.destructive}, which stays the vendor's own word. That word
+     * makes a call always ask and draws "destroys things" on a Bot's page, and nobody said it here.
+     * {@link mcpTools.effect} is `write`, so chat treats it as any change. A check-in, a task's
+     * trusted read and a memory source treat it as cautiously as a destructive action (see
+     * `mightDestroy` in `plugins/catalogue.ts`). An MCP server's silence is a null `effect`
+     * instead, which its reviewed lists decide, so this stays `false` for MCP rows.
+     *
+     * `false` for rows listed before this column existed. Arcade recorded such an action as
+     * destructive then, which asks every time, until the app's next refresh records it here.
+     */
+    unclassified: boolean("unclassified").notNull().default(false),
+    /**
      * Whether the server marked this action read-only (MCP `readOnlyHint`), as it said it.
      *
      * Its own fact, and NOT an input to {@link mcpTools.effect}: chat goes on deciding whether to ask

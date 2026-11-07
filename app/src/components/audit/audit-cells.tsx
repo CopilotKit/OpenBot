@@ -1,5 +1,9 @@
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
+import { auditActionWords, auditEventWords } from "@openbot/shared/audit-words";
+import { Fragment, type ReactNode } from "react";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
+import { atStart } from "@/lib/manage-paths";
 
 /** One row as the API returns it. */
 export type AuditEvent = {
@@ -38,12 +42,131 @@ export function whenText(event: AuditEvent): string {
   return WHEN.format(new Date(event.createdAt));
 }
 
-/** Strip the internal computer tool namespace for display. */
+const DAY = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+const TIME = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+/** The day over the time, so the column is as wide as a date rather than a date and a time. */
+export function WhenCell({ event }: { event: AuditEvent }) {
+  const at = new Date(event.createdAt);
+  return (
+    <>
+      <div>{DAY.format(at)}</div>
+      <div>{TIME.format(at)}</div>
+    </>
+  );
+}
+
+/**
+ * An identifier with a break allowed after each `.`, `/`, `_` and `-`, so `mcp.tools_discovered` or
+ * a file path wraps at its own seams when the column is narrow, and is never cut mid-word.
+ */
+function breakable(text: string): ReactNode {
+  let at = 0;
+  return text.split(/(?<=[./_-])/).map((part) => {
+    const start = at;
+    at += part.length;
+    return (
+      <Fragment key={start}>
+        {start > 0 ? <wbr /> : null}
+        {part}
+      </Fragment>
+    );
+  });
+}
+
+/**
+ * What was done, with what it was done to beneath it. One column rather than two, so the table
+ * fits the Desktop's default window: drawn side by side, What, On, Bot and Started by pushed
+ * Decision off the right edge of a 1000px window.
+ *
+ * In words. `storedName` puts the name the trail keeps it under on hover, for an admin matching a row
+ * against the export or a collector; a page anybody can open leaves it off.
+ */
+export function WhatCell({
+  event,
+  storedName = false,
+}: {
+  event: AuditEvent;
+  storedName?: boolean;
+}) {
+  return (
+    <>
+      <div
+        className="font-medium"
+        title={storedName ? whatName(event) : undefined}
+      >
+        {whatText(event)}
+      </div>
+      <OnCell event={event} />
+    </>
+  );
+}
+
+/** The Bot, with what started it beneath it, for the same reason as {@link WhatCell}. */
+export function WhoCell({
+  deployment,
+  event,
+  nameFor,
+}: {
+  /** What OpenBot itself is called here; see {@link startedByText}. */
+  deployment?: string;
+  event: AuditEvent;
+  nameFor: NameFor;
+}) {
+  return (
+    <>
+      <div>
+        <BotCell event={event} nameFor={nameFor} />
+      </div>
+      <div className="text-xs">
+        <StartedByCell
+          deployment={deployment}
+          event={event}
+          nameFor={nameFor}
+        />
+      </div>
+    </>
+  );
+}
+
+/**
+ * The action a row is about, as the trail stores it. An approval row is about an action too, and
+ * names the tool it was asked about, so it reads as the same action its other rows are; so does an
+ * app's tool call, which names its tool as its target.
+ */
+function actionOf(event: AuditEvent): string | undefined {
+  const action =
+    event.payload?.action ??
+    (event.targetType === "approval" ? event.payload?.tool : undefined);
+  if (typeof action === "string") return action;
+  if (
+    event.eventType.startsWith("mcp.call") &&
+    event.targetType === "mcp_tool" &&
+    event.targetId
+  )
+    return event.targetId;
+  return undefined;
+}
+
+/** What a row is about, in the trail's own name for it: for search, and for Admin's hover. */
+export function whatName(event: AuditEvent): string {
+  return actionOf(event) ?? event.eventType;
+}
+
+/** What a row is about, in words: "Save a file", "Choose tools for a run". See `audit-words`. */
 export function whatText(event: AuditEvent): string {
-  const action = event.payload?.action;
-  return typeof action === "string"
-    ? action.replace("computer_", "")
-    : event.eventType;
+  const action = actionOf(event);
+  return action ? auditActionWords(action) : auditEventWords(event.eventType);
 }
 
 type Element = { role?: string; name?: string } | string | undefined;
@@ -66,6 +189,13 @@ export function subjectText(event: AuditEvent): string {
   if (typeof element === "object" && element?.name)
     return element.role ? `${element.name} (${element.role})` : element.name;
   if (typeof element === "string") return element;
+  // An app's tool or a folder: where an approval row's action would have acted, when it names no file or page.
+  if (
+    event.targetType === "approval" &&
+    typeof payload.page !== "string" &&
+    typeof payload.scope === "string"
+  )
+    return payload.scope;
   return "";
 }
 
@@ -94,7 +224,16 @@ export function botText(event: AuditEvent, nameFor: NameFor): string {
   return bot ? nameFor(bot) : "";
 }
 
-export function startedByText(event: AuditEvent, nameFor: NameFor): string {
+/**
+ * Who started a row, as the row's Started by filter and its line under the Bot both say it.
+ * `deployment` is what OpenBot itself is called on this screen: "this deployment" in Admin, and
+ * "OpenBot" in the personal edition's Activity, which is anybody's page.
+ */
+export function startedByText(
+  event: AuditEvent,
+  nameFor: NameFor,
+  deployment = "this deployment",
+): string {
   switch (event.initiatorKind) {
     case "routine":
       return "A routine";
@@ -105,9 +244,9 @@ export function startedByText(event: AuditEvent, nameFor: NameFor): string {
     case "memory":
       return "A memory source";
     case "responsibility":
-      return "A responsibility";
+      return "A goal";
     case "deployment":
-      return "This deployment";
+      return atStart(deployment);
     default:
       return "A person";
   }
@@ -115,7 +254,7 @@ export function startedByText(event: AuditEvent, nameFor: NameFor): string {
 
 export function decisionText(event: AuditEvent): string {
   const payload = event.payload ?? {};
-  const outcome = outcomeOf(event.eventType);
+  const outcome = outcomeOf(event);
   /*
    * Three different things, and the difference is what somebody comes to this row to find out.
    *
@@ -134,6 +273,7 @@ export function decisionText(event: AuditEvent): string {
       : null;
   return (
     routed ??
+    approvalText(event) ??
     DECISIONS[event.eventType] ??
     (outcome === "refused"
       ? "Blocked"
@@ -141,6 +281,53 @@ export function decisionText(event: AuditEvent): string {
         ? "Did not happen"
         : "Allowed")
   );
+}
+
+/**
+ * What an approval row says: the gate asking or deciding, or the person's answer. One event type
+ * covers every answer, so the answer is read from the row, and a denial never falls through to
+ * "Allowed".
+ */
+function approvalText(event: AuditEvent): string | undefined {
+  const payload = event.payload ?? {};
+  if (event.eventType === "approval.person_decided")
+    return typeof payload.decision === "string"
+      ? PERSON_DECISIONS[payload.decision]
+      : undefined;
+  if (event.eventType === "approval.evaluated") {
+    const behaviour = (payload.outcome as { behaviour?: unknown } | undefined)
+      ?.behaviour;
+    return typeof behaviour === "string"
+      ? GATE_DECISIONS[behaviour]
+      : undefined;
+  }
+  return undefined;
+}
+
+const PERSON_DECISIONS: Record<string, string> = {
+  allow_once: "Allowed once by a person",
+  allow_always: "Always allowed by a person",
+  deny: "Denied by a person",
+  handled: "Done by a person",
+};
+
+const GATE_DECISIONS: Record<string, string> = {
+  allow: "Allowed without asking",
+  ask: "Asked a person first",
+  hand_off: "Handed to a person",
+  deny: "Blocked",
+};
+
+/**
+ * Why an action the policy allowed was refused anyway, in a person's words. The Bot is told why in
+ * sentences written for it; the shared table turns them into the ones a person reads.
+ */
+function refusalLine(payload: Record<string, unknown>): string | undefined {
+  if (payload.refusal === "person_declined")
+    return "A person denied it when asked.";
+  if (payload.refusal === "approval" && typeof payload.reason === "string")
+    return outcomeForPerson(payload.reason);
+  return undefined;
 }
 
 /** Every reason line under the decision, in the order the cell draws them. */
@@ -152,16 +339,34 @@ export function decisionDetails(event: AuditEvent): string[] {
     rule?: string | null;
     carriedOut?: boolean;
   };
-  const failed = outcomeOf(event.eventType) === "did-not-happen";
+  const failed = outcomeOf(event) === "did-not-happen";
   const lines: string[] = [];
+  const refused =
+    event.eventType === "computer.action_refused" ||
+    event.eventType === "mcp.call_rejected"
+      ? refusalLine(payload)
+      : undefined;
+  if (refused) lines.push(refused);
   // Refusal reasons mirror the conversation-facing reason.
-  if (
+  else if (
     (event.eventType === "component.refused" ||
       event.eventType === "component.function_refused" ||
       event.eventType === "mcp.call_rejected") &&
     typeof payload.reason === "string"
   )
     lines.push(payload.reason);
+  // Why the gate asked, allowed or refused, and why a request stopped waiting.
+  const gate = (payload.outcome ?? {}) as { reason?: unknown };
+  if (
+    event.eventType === "approval.evaluated" &&
+    typeof gate.reason === "string"
+  )
+    lines.push(outcomeForPerson(gate.reason));
+  if (
+    event.eventType === "approval.withdrawn" &&
+    typeof payload.reason === "string"
+  )
+    lines.push(outcomeForPerson(payload.reason));
   /*
    * Why this run was offered what it was, which is the only part of a discovery row that cannot be
    * worked out from the numbers. "Nothing declared" and "selector unavailable" both offer everything
@@ -217,13 +422,19 @@ export function decisionDetails(event: AuditEvent): string[] {
 }
 
 /** Everything on a row as one lower-cased string, for the search box. */
-export function searchTextOf(event: AuditEvent, nameFor: NameFor): string {
+export function searchTextOf(
+  event: AuditEvent,
+  nameFor: NameFor,
+  deployment?: string,
+): string {
   return [
     whatText(event),
+    // The stored name too, so a row is found by what the export and a collector call it.
+    whatName(event),
     subjectText(event),
     hostText(event),
     botText(event, nameFor),
-    startedByText(event, nameFor),
+    startedByText(event, nameFor, deployment),
     decisionText(event),
     ...decisionDetails(event),
   ]
@@ -245,24 +456,23 @@ export function OnCell({ event }: { event: AuditEvent }) {
     (NAMED_TARGETS.has(event.targetType) && !!event.targetId) ||
     typeof payload.file === "string" ||
     typeof payload.command === "string";
+  // Under the action in the What column, so a row with nothing to name draws nothing.
   return (
     <>
-      {!subject ? (
-        <span className="text-muted-foreground">-</span>
-      ) : mono ? (
-        <span className="font-mono text-xs">{subject}</span>
+      {!subject ? null : mono ? (
+        <div className="mt-0.5 font-mono text-xs">{breakable(subject)}</div>
       ) : typeof element === "object" && element?.name ? (
-        <span>
+        <div className="mt-0.5">
           {element.name}
           {element.role ? (
             <span className="text-muted-foreground"> ({element.role})</span>
           ) : null}
-        </span>
+        </div>
       ) : (
-        <span className="text-muted-foreground">{subject}</span>
+        <div className="mt-0.5 text-muted-foreground">{breakable(subject)}</div>
       )}
       {host ? (
-        <div className="text-muted-foreground text-xs">{host}</div>
+        <div className="text-muted-foreground text-xs">{breakable(host)}</div>
       ) : null}
     </>
   );
@@ -276,20 +486,20 @@ export function BotCell({
   nameFor: NameFor;
 }) {
   const bot = botIdOf(event);
-  // Keep the immutable bot id available even when names collide.
+  // The name and nothing else, a tooltip included: a person never reads a Bot's id. The CSV keeps it.
   return bot ? (
-    <span className="text-muted-foreground" title={bot}>
-      {nameFor(bot)}
-    </span>
+    <span className="text-muted-foreground">{nameFor(bot)}</span>
   ) : (
     <span className="text-muted-foreground">-</span>
   );
 }
 
 export function StartedByCell({
+  deployment,
   event,
   nameFor,
 }: {
+  deployment?: string;
   event: AuditEvent;
   nameFor: NameFor;
 }) {
@@ -306,15 +516,24 @@ export function StartedByCell({
           ? "font-medium text-amber-600 dark:text-amber-500"
           : "text-muted-foreground"
       }
-      title={unattended ? (event.initiatorId ?? undefined) : undefined}
     >
-      {startedByText(event, nameFor)}
+      {startedByLine(startedByText(event, nameFor, deployment))}
     </span>
   );
 }
 
+/**
+ * Under the Bot's name, so it says what it is: "Started by a routine", "Handed on by Scout",
+ * "Started by OpenBot". Only a leading "A" or "This" is lowered; a name keeps its capitals.
+ */
+export function startedByLine(text: string): string {
+  return text.startsWith("Handed on")
+    ? text
+    : `Started by ${text.replace(/^(A|This) /, (word) => word.toLowerCase())}`;
+}
+
 export function DecisionCell({ event }: { event: AuditEvent }) {
-  const outcome = outcomeOf(event.eventType);
+  const outcome = outcomeOf(event);
   return (
     <>
       <span
@@ -330,13 +549,13 @@ export function DecisionCell({ event }: { event: AuditEvent }) {
       </span>
       {decisionDetails(event).map((line) => (
         /*
-         * A width rather than a max-width, because the table lays itself out from its content and a
-         * max-width on a block inside a cell does not constrain that. A router's reason is a
-         * sentence a model wrote, and left unbounded in the last column it pushes the table wider
-         * than the pane.
+         * A cap on the line, not a width. A fixed 22rem held the Decision column at least that wide,
+         * and with the columns beside it pushed the table past a 1000px window. The table gives the
+         * column what is left, the sentence wraps inside it, and a long unbroken word (a URL a
+         * router quoted) breaks rather than widening the table.
          */
         <div
-          className="mt-0.5 w-[22rem] max-w-full break-words text-muted-foreground text-xs"
+          className="mt-0.5 max-w-[22rem] text-muted-foreground text-xs [overflow-wrap:anywhere]"
           key={line}
         >
           {line}
@@ -423,6 +642,9 @@ const DECISIONS: Record<string, string> = {
   "mcp.call_failed": "The server didn't answer",
   // Not "Blocked": nothing about the Bot was judged, because nothing proved which Bot it was.
   "mcp.callback_refused": "Couldn't confirm which Bot it was",
+
+  // A request closed without an answer: asking was turned off, or a rule now allows it.
+  "approval.withdrawn": "Withdrawn",
 
   "configuration.changed": "Configuration changed",
   "credential.created": "Credential saved",

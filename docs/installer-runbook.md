@@ -104,6 +104,36 @@ is older than those workflows, merge `main` into it first.
 
 5. Check the build. Do [Check a build](#4-check-a-build) before you give the installer to anybody.
 
+### On your own Mac
+
+To try a branch on your own Apple silicon Mac without waiting for the workflow, make the same
+build locally:
+
+```sh
+git commit ...                      # it builds HEAD, never uncommitted work
+desktop/scripts/local-build.sh
+```
+
+The script:
+
+1. pushes the branch to origin (never `main`, never forced), because a pinned app downloads its
+   deployment from `https://github.com/CopilotKit/OpenBot/archive/<commit>.tar.gz`;
+2. starts a registry container, `openbot-local-registry`, on `127.0.0.1:5050`;
+3. builds `server`, `supervisor`, `agent-computer` and `agent-claude-sdk` from the commit for
+   linux/arm64 and pushes them there;
+4. writes `container-images.json` with version `local-<first 12 characters of the commit>`: the
+   images it built by their local digest, every other image at the latest release's digest;
+5. builds `OpenBot.app` pinned to that manifest, with the bundled CLI, ad-hoc signed.
+
+**Expected:** it ends by printing each stage's time, the manifest, and the app's path under
+`~/.openbot-local-build/apps/`. To install it, quit OpenBot and copy the app into `/Applications`.
+
+Set `OPENBOT_LOCAL_IMAGES` to build other images (`OPENBOT_LOCAL_IMAGES="server"`), or to an empty
+string to take every image from the release. The other settings are at the top of the script.
+
+A local build is for Docker only. Podman cannot pull from a registry on the Mac's own `127.0.0.1`.
+Like any build without the update key, it never checks for a newer version, so it shows no update bar.
+
 ## 2. Make a release candidate, then the final release
 
 Use a candidate to test what will become a release. The details are in
@@ -127,13 +157,16 @@ Use a candidate to test what will become a release. The details are in
    **Expected:** a GitHub prerelease `vX.Y.Z-rc.1` with `container-images.json`, the source
    archive, the chart, the release manifest, and the Mac and Windows installers.
 5. Approve **Desktop macOS signing** and **Desktop Windows signing** when they ask. These need a
-   `macos-signing` and a `windows-signing` approver.
+   `macos-signing` and a `windows-signing` approver. For a stable release, Desktop Windows signing
+   asks a second time, for `macos-signing`, once its installer is signed: that job signs the
+   installer for the in-app updater with the updater key.
    **Expected:** the signed Apple silicon `.dmg` replaces the ad-hoc one on the release, a signed
    Intel `.dmg` is added, and the signed `-setup.exe` replaces the unsigned one. Each is attached
    under its versioned name and its fixed name. For a candidate all three are pinned to the
-   candidate's images, like the unsigned ones. A stable release also gets `latest.json`, and becomes
-   Latest when the second of the two signing runs finishes. Until then the fixed addresses keep
-   giving the previous release's signed installers.
+   candidate's images, like the unsigned ones. A stable release also gets `latest.json`, listing
+   both Mac archives and the Windows installer, and becomes Latest when the second of the two
+   signing runs finishes. Until then the fixed addresses keep giving the previous release's signed
+   installers.
 6. Test the candidate with [Install and test](#3-install-and-test) and
    [Check a build](#4-check-a-build).
 7. For a fix, merge it into `release/X.Y`, then run **Create release PR** from that branch with

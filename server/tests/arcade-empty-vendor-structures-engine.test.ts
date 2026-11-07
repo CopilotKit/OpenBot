@@ -101,7 +101,7 @@ const listed = async () => {
 };
 
 describe("an empty behavior object is the vendor saying nothing, not saying safe", () => {
-  test("a behavior object stating neither flag is read as the closed verdict", async () => {
+  test("a behavior object stating neither flag is read as unclassified", async () => {
     engine([toolRow("EmptyBehavior", { behavior: {} })]);
 
     expect(await listed()).toMatchObject([
@@ -109,7 +109,8 @@ describe("an empty behavior object is the vendor saying nothing, not saying safe
         name: "EmptyBehavior",
         vendorName: "Gmail.EmptyBehavior",
         effect: "write",
-        destructive: true,
+        destructive: false,
+        unclassified: true,
       },
     ]);
   });
@@ -122,7 +123,8 @@ describe("an empty behavior object is the vendor saying nothing, not saying safe
         name: "Idempotent",
         vendorName: "Gmail.Idempotent",
         effect: "write",
-        destructive: true,
+        destructive: false,
+        unclassified: true,
       },
     ]);
   });

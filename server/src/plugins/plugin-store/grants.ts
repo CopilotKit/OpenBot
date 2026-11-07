@@ -188,6 +188,7 @@ export function grantMethods(context: StoreContext) {
             toolName: toolNameFor(ref),
             description: row.description,
             inputSchema: row.inputSchema as Record<string, unknown>,
+            destructive: row.destructive,
           };
         });
 

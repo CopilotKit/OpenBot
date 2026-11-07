@@ -61,7 +61,7 @@ export function responsibilitiesQueryOptions() {
     queryKey: responsibilityKeys.all,
     queryFn: (): Promise<ResponsibilityRecord[]> =>
       client("/api/responsibilities", "responsibilities", {
-        fallback: "Could not load responsibilities",
+        fallback: "Could not load goals",
       }),
     refetchInterval: 10_000,
   });
@@ -71,7 +71,7 @@ export function responsibilityRunsQueryOptions(id: string) {
     queryKey: responsibilityKeys.runs(id),
     queryFn: (): Promise<ResponsibilityRunRecord[]> =>
       client(`/api/responsibilities/${encodeURIComponent(id)}/runs`, "runs", {
-        fallback: "Could not load responsibility runs",
+        fallback: "Could not load goal runs",
       }),
     refetchInterval: 10_000,
   });
@@ -99,7 +99,7 @@ export function createResponsibility(input: {
     {
       method: "POST",
       body: input,
-      fallback: "Could not create responsibility",
+      fallback: "Could not create goal",
     },
   );
 }
@@ -110,7 +110,7 @@ export function updateResponsibility(
   return client(`/api/responsibilities/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: patch,
-    fallback: "Could not update responsibility",
+    fallback: "Could not update goal",
   });
 }
 export function responsibilityAction(
@@ -119,7 +119,7 @@ export function responsibilityAction(
 ) {
   return client(`/api/responsibilities/${encodeURIComponent(id)}/${action}`, {
     method: "POST",
-    fallback: "Could not change responsibility",
+    fallback: "Could not change goal",
   });
 }
 export function createGithubBinding(repository: string, secret: string) {

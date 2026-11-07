@@ -70,14 +70,25 @@ import type { CardPlace } from "@/lib/copilot/carry-on";
 import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { markdownComponents, markdownPlugins } from "@/lib/markdown";
+import {
+  markdownComponents,
+  markdownPlugins,
+  replyRemarkPlugins,
+} from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import {
   asText,
   forDisplay,
   REFUSAL_MARKER,
   toolResultFailed,
+  UNOFFERED_TOOL_SENTENCE,
+  unofferedTool,
 } from "@/lib/plugins/tool-result";
+import {
+  RESEARCH_RESULTS_LABELS,
+  readResearchSources,
+  researchRoleOfCall,
+} from "@/lib/plugins/research-results";
 import { useResultVisibility } from "@/lib/product-telemetry";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
@@ -95,6 +106,7 @@ import type { QueuedMessage } from "./composer";
 import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
 import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
+import { ResearchResults } from "./research-results";
 import { TeamBotConsentCard } from "./team-bot-consent";
 import {
   dropRepeatedAppCards,
@@ -722,7 +734,7 @@ function ResponsibilityFiring({
       <IconClock aria-hidden className="size-4 shrink-0 translate-y-0.5" />
       <div className="min-w-0">
         <p>
-          <span className="font-medium">Responsibility ran.</span> Trigger:{" "}
+          <span className="font-medium">Worked on a goal.</span> Trigger:{" "}
           {describeTrigger(turn.trigger)}
         </p>
         <p className="whitespace-pre-wrap">{turn.instruction}</p>
@@ -882,6 +894,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
                     components={markdownComponents}
                     mode={mode}
                     plugins={markdownPlugins}
+                    remarkPlugins={replyRemarkPlugins}
                   >
                     {revealed}
                   </Streamdown>
@@ -1679,7 +1692,9 @@ export function ServerToolLine({
    */
   const answer = result === undefined ? undefined : asText(result);
   const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
-  const failed = !refused && toolResultFailed(result);
+  // Asked for a tool it was never offered: it didn't work, and what the runtime said was for the model.
+  const unoffered = unofferedTool(result);
+  const failed = !refused && (unoffered || toolResultFailed(result));
   /*
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
    * label and then "Refused." again in the first two words of the body, which is the same fact three
@@ -1708,7 +1723,33 @@ export function ServerToolLine({
    * person looks like the Bot being told off in front of them. The line still says the check
    * happened; the Bot's own reply says what it found.
    */
-  const shown = name === SHOW_APP_ACCESS_TOOL ? undefined : body;
+  const shown =
+    name === SHOW_APP_ACCESS_TOOL
+      ? undefined
+      : unoffered
+        ? UNOFFERED_TOOL_SENTENCE
+        : body;
+  /*
+   * A web search or a page read opens to the pages it found, not to the provider's JSON. The list
+   * bounds itself (a few results, each cut to a few lines), so the line does not scroll around it.
+   */
+  const role = researchRoleOfCall(name);
+  const sources =
+    role && shown && !refused && !failed ? readResearchSources(shown) : null;
+  if (role && sources)
+    return (
+      <ToolLine
+        {...(detail ? { detail } : {})}
+        bare
+        label={label}
+        running={running}
+      >
+        <ResearchResults
+          label={RESEARCH_RESULTS_LABELS[role]}
+          sources={sources}
+        />
+      </ToolLine>
+    );
   return (
     <ToolLine
       {...(detail ? { detail } : {})}

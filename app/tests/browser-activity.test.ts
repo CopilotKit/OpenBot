@@ -1,4 +1,9 @@
 import { expect, test } from "bun:test";
+import {
+  DECLINED_BY_PERSON,
+  HANDLED_BY_PERSON,
+  NOT_RUN_WHILE_WAITING,
+} from "@openbot/shared/approval-outcomes";
 import { browserStepDetails } from "../src/components/channels/browser-activity";
 import type { VisibleChatItem } from "../src/components/channels/chat-messages";
 import { groupToolSteps } from "../src/components/channels/tool-activity";
@@ -87,4 +92,40 @@ test("failed visits stay inspectable and unsafe or streaming URLs never become l
     browserStepDetails(step("throw", "computer_navigate", "Error: Failed"))
       .failed,
   ).toBe(true);
+});
+
+test("a step the person declined, or one the turn stopped before, is not drawn as done", () => {
+  // The approval's answers come back as sentences, not the computer's JSON. Read as JSON they were
+  // nothing, so a declined field and the fields never filled in all said "Filled in field".
+  const declined = browserStepDetails(
+    step("name", "computer_type", DECLINED_BY_PERSON),
+  );
+  expect(declined).toMatchObject({ failed: true, reason: "You declined it." });
+  const notRun = browserStepDetails(
+    step("email", "computer_type", NOT_RUN_WHILE_WAITING),
+  );
+  expect(notRun.failed).toBe(true);
+  expect(notRun.reason).toBe(
+    "Not done. The Bot stopped to wait for you on another step.",
+  );
+  // The person doing it themselves is done, by them; and the computer's own answers read as before.
+  expect(
+    browserStepDetails(step("note", "computer_type", HANDLED_BY_PERSON)).failed,
+  ).toBe(false);
+  expect(
+    browserStepDetails(step("plant", "computer_type", '{"ok":true}')).failed,
+  ).toBe(false);
+  expect(
+    browserStepDetails(
+      step(
+        "gone",
+        "computer_click",
+        '{"ok":false,"reason":"Not on the page."}',
+      ),
+    ),
+  ).toMatchObject({ failed: true, reason: "Not on the page." });
+  expect(
+    browserStepDetails(step("broke", "computer_click", "Error: socket closed"))
+      .reason,
+  ).toBeUndefined();
 });

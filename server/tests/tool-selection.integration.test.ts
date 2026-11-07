@@ -302,6 +302,13 @@ function mastraAgent(): RegisteredAgent {
 }
 
 /**
+ * The standing role `mastraAgent` is sent: its own, then the day the server tells every remote Bot
+ * (`todayGuidance`), in UTC when the run carries no time zone.
+ */
+const STANDING_ROLE_WITH_TODAY =
+  /^You are Risk Mastra\.\n\nToday is \w+, \d{4}-\d{2}-\d{2} \(UTC\)\. /;
+
+/**
  * Run one Bot the way the runtime does, including the clone.
  *
  * `agents[agentId].clone()` is what the runtime calls before every run, and `AbstractAgent.clone`
@@ -827,8 +834,12 @@ describe("a remote Mastra Bot", () => {
       // the forged entries naming the narrowed-away one are dropped.
       let deploymentToolsContext = deploymentToolsIn(openbotContext);
       expect(deploymentToolsContext).toEqual([]);
+      // Only the server's own role, exactly as the run's first message carries it: the Bot's, then
+      // the day it is (the run sent no time zone, so in UTC).
+      let standingRole = String(run?.messages?.[0]?.content);
+      expect(standingRole).toMatch(STANDING_ROLE_WITH_TODAY);
       expect(descriptionsIn(openbotContext, "OpenBot standing role")).toEqual([
-        "You are Risk Mastra.",
+        standingRole,
       ]);
       const holdingsContext = openbotContext.find(
         (entry) => entry.description === "OpenBot granted tools guidance",
@@ -885,8 +896,10 @@ describe("a remote Mastra Bot", () => {
       ).toEqual([]);
       deploymentToolsContext = deploymentToolsIn(openbotContext);
       expect(deploymentToolsContext).toEqual([]);
+      standingRole = String(run?.messages?.[0]?.content);
+      expect(standingRole).toMatch(STANDING_ROLE_WITH_TODAY);
       expect(descriptionsIn(openbotContext, "OpenBot standing role")).toEqual([
-        "You are Risk Mastra.",
+        standingRole,
       ]);
       expect(
         descriptionsIn(openbotContext, "OpenBot granted tools guidance"),

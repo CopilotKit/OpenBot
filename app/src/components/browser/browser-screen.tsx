@@ -110,12 +110,6 @@ export function ScreenBrowser({
           />
         </RecordingBar>
       </div>
-      {/* On OpenBot Desktop, why this is a browser in the page rather than the person's own Chrome or Edge. */}
-      {state.note ? (
-        <p className="border-b border-border px-3 py-2 text-muted-foreground text-sm">
-          {state.note}
-        </p>
-      ) : null}
       <NarrationNotice narration={narration} language={language} />
       <NarrationChoiceDialog {...recording.question} />
       <ClearBrowserDialog

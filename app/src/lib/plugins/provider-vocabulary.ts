@@ -120,14 +120,21 @@ export function brokeredConnectionDescription(
   return `Reached through ${VOCABULARY[provider].name}, which holds each person's own account.`;
 }
 
-/** The "How this is reached" row for a brokered app: its sentence and its badge. */
-export function brokeredReach(provider: PluginsProvider): {
+/**
+ * The "How this is reached" row for a brokered app: its sentence and its badge. `deployment` is
+ * what OpenBot itself is called on the page (`managePaths().deploymentName`).
+ */
+export function brokeredReach(
+  provider: PluginsProvider,
+  deployment = "this deployment",
+): {
   description: string;
   badge: string;
 } {
   const { name } = VOCABULARY[provider];
+  const sends = deployment.charAt(0).toUpperCase() + deployment.slice(1);
   return {
-    description: `${name} holds the account. This deployment sends one key and who is asking. Each person connects their own, and a Bot sees only what that person can see. There is no token to paste.`,
+    description: `${name} holds the account. ${sends} sends one key and who is asking. Each person connects their own, and a Bot sees only what that person can see. There is no token to paste.`,
     badge: `Through ${name}`,
   };
 }
@@ -137,9 +144,15 @@ export function brokeredDisconnectNote(provider: PluginsProvider): string {
   return `Disconnecting also ends the account at ${VOCABULARY[provider].name}.`;
 }
 
-/** What a person is told where the deployment has no key for the active broker. */
-export function brokeredKeyMissing(provider: PluginsProvider): string {
-  return `Set ${VOCABULARY[provider].envVar} on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.`;
+/**
+ * What a person is told where the deployment has no key for the active broker. `deployment` is what
+ * OpenBot itself is called on the page (`managePaths().deploymentName`).
+ */
+export function brokeredKeyMissing(
+  provider: PluginsProvider,
+  deployment = "this deployment",
+): string {
+  return `Set ${VOCABULARY[provider].envVar} on ${deployment}. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.`;
 }
 
 /**

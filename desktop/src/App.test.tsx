@@ -59,6 +59,10 @@ mock.module("@tauri-apps/api/event", () => ({
 
 mock.module("./Mark", () => ({
   Mark: ({ name }: { name: string }) => <span>{name}</span>,
+  // The mark a "Sign in with" button carries, by the id it was given. The real one draws that
+  // vendored file, which needs Vite's glob.
+  ButtonMark: ({ id }: { id: string | null }) =>
+    id ? <img alt="" data-mark={id} /> : null,
 }));
 
 const { App } = await import("./App");
@@ -647,6 +651,33 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   expectPlain(view);
 });
 
+test("the account step waits for a container engine Install is still setting up, rather than failing", async () => {
+  // A new Windows computer installs Podman while the person signs in, and until an engine answers
+  // the CLI says nothing about the account ("engine-not-ready"). That was shown as "Couldn't check
+  // your CopilotKit account", and Try again failed the same way until Podman was up.
+  setupRootConfiguration("/tmp/local-eval-engine-wait", async () =>
+    emptyConfiguration(),
+  );
+  let asked = 0;
+  withLocalCli({
+    local_eval_terms: () => {
+      asked += 1;
+      return asked === 1
+        ? { status: "engine-not-ready" }
+        : { status: "signed-out" };
+    },
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole(
+    "button",
+    { name: "Sign in to CopilotKit" },
+    { timeout: 6000 },
+  );
+  expect(asked).toBe(2);
+  expect(view.queryByText(/Couldn.t check your CopilotKit account/)).toBeNull();
+}, 15000);
+
 const APPS_UNAVAILABLE = {
   said: "OpenBot couldn't connect your apps. Check your connection, then choose Connect apps. If it keeps happening, ask an admin.",
 };
@@ -1110,6 +1141,94 @@ test("relaunch says it is starting while it starts, and never offers a CopilotKi
   expectPlain(view);
 });
 
+/*
+ * The bug, on a signed 0.3.2 on Windows: the stopped window's update check asked an old mechanism
+ * release builds do not carry (`check_shell_update`), and said "Signed desktop shell updates are
+ * not configured. This build does not include the optional updater feature." Both commands answer
+ * here as a release build answered them, so only the one the window asks decides what it says.
+ */
+test("the stopped window's update check asks the update feed and says this version is up to date", async () => {
+  setupConnectedLocalStack(
+    "/tmp/check-for-updates",
+    localStatus("ready", "valid"),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "0.3.2",
+        installing: null,
+        updatesItself: true,
+      };
+    if (command === "check_app_update")
+      return { found: "upToDate", current: "0.3.2" };
+    if (command === "check_shell_update")
+      return {
+        configured: false,
+        available: false,
+        version: null,
+        detail:
+          "Signed desktop shell updates are not configured. This build does not include the optional updater feature.",
+      };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  await userEvent.click(view.getByRole("button", { name: /^Check/ }));
+  await waitFor(() =>
+    expect(view.getByText("OpenBot 0.3.2 is up to date.")).toBeTruthy(),
+  );
+  expect(view.queryByText(/not configured/)).toBeNull();
+  expect(view.getByText(/^OpenBot updates itself/)).toBeTruthy();
+  expect(
+    invokeCalls.filter(
+      (call) =>
+        call.command.includes("update") && call.command !== "app_update_offer",
+    ),
+  ).toEqual([{ command: "check_app_update", args: undefined }]);
+});
+
+/*
+ * The bug, on an internal build on Windows: the stopped window's Updates section opened with
+ * "OpenBot updates itself with signed updates from its publisher", and Check for updates then said
+ * "This version of OpenBot doesn't update itself" in the same box. A build that never updates
+ * itself now says so up front, with no promise and nothing to check.
+ */
+test("the stopped window on a build that never updates itself says so and promises no updates", async () => {
+  setupConnectedLocalStack(
+    "/tmp/check-for-updates-internal",
+    localStatus("ready", "valid"),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "0.3.2-internal.731.gabc1234",
+        installing: null,
+        updatesItself: false,
+      };
+    if (command === "check_app_update")
+      return { found: "notOffered", current: "0.3.2-internal.731.gabc1234" };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  await userEvent.click(view.getByRole("button", { name: "Stop OpenBot" }));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  await view.findByText(
+    "This version of OpenBot doesn't update itself. Install a released version of OpenBot to get updates.",
+  );
+  expect(view.queryByText(/updates itself with|signed updates/)).toBeNull();
+  expect(view.queryByRole("button", { name: /^Check/ })).toBeNull();
+  expect(
+    invokeCalls.filter((call) => call.command === "check_app_update"),
+  ).toEqual([]);
+});
+
 test("Quit shows Shutting down with each part's row as it starts and ends", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-quit-screen",
@@ -1326,18 +1445,18 @@ test("relaunch starts a connected local stack that reports ready and valid", asy
   expect(view.getByRole("button", { name: "Start OpenBot" })).toBeTruthy();
 });
 
-/** Start finds the deployment on an older release than this app, and `follow_app_release` answers. */
+/** Start finds the installation on an older release than this app, and `upgrade_and_start` answers. */
 function withOlderDeployment(outcome: unknown) {
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
-    if (command === "app_release_move") return { from: "v0.3.0", to: "v0.3.1" };
-    if (command === "follow_app_release")
+    if (command === "upgrade_due") return { from: "v0.3.0", to: "v0.3.1" };
+    if (command === "upgrade_and_start")
       return typeof outcome === "function" ? outcome() : outcome;
     return previous(command, args);
   };
 }
 
-test("relaunch moves an older deployment to this app's release as part of Start, then opens OpenBot", async () => {
+test("relaunch upgrades an older installation to this app's release as part of Start, then opens OpenBot", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-older-release",
     localStatus("ready", "valid"),
@@ -1347,10 +1466,10 @@ test("relaunch moves an older deployment to this app's release as part of Start,
   const view = await renderApp();
   await waitFor(() =>
     expect(
-      invokeCalls.some((call) => call.command === "follow_app_release"),
+      invokeCalls.some((call) => call.command === "upgrade_and_start"),
     ).toBe(true),
   );
-  // Said while the move runs, which can take minutes.
+  // Said while the upgrade runs, which can take minutes.
   const said =
     "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.";
   await emitProgress({
@@ -1371,39 +1490,203 @@ test("relaunch moves an older deployment to this app's release as part of Start,
     .filter((command) =>
       [
         "run_local_eval",
-        "app_release_move",
-        "follow_app_release",
+        "upgrade_due",
+        "upgrade_and_start",
         "start_stack",
         "show_openbot",
       ].includes(command),
     );
-  // The move is the Start: nothing starts the older release first.
+  // The upgrade is the Start: nothing starts the older release first.
   expect(sequence).toEqual([
     "run_local_eval",
-    "app_release_move",
-    "follow_app_release",
+    "upgrade_due",
+    "upgrade_and_start",
     "show_openbot",
   ]);
   expect(
-    invokeCalls.find((call) => call.command === "follow_app_release")?.args,
+    invokeCalls.find((call) => call.command === "upgrade_and_start")?.args,
   ).toMatchObject({
     root: "/tmp/local-eval-older-release",
     ...LOCAL_ADDRESSES,
   });
 });
 
-test("a move that did not finish says so on the running screen before handing over", async () => {
+/*
+ * Start's rows are the back end's, and one line under them says what the upgrade is doing. The
+ * release row carries that sentence, and each upgrade step now says itself on it as it begins
+ * (`upgrade::now_said`). The install and the start report rows of their own as well, and those
+ * never take the line over. On Windows the line said "Stopping OpenBot." through a whole start,
+ * under a list where every step but the last was complete.
+ */
+test("the line under Start's rows says the upgrade step running now, never one that finished", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-upgrade-steps",
+    localStatus("ready", "valid"),
+  );
+  const moving = deferred<unknown>();
+  withOlderDeployment(() => moving.promise);
+  const view = await renderApp();
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "upgrade_and_start"),
+    ).toBe(true),
+  );
+  const lines = () =>
+    [...view.container.querySelectorAll(".status-line")].map(
+      (line) => line.textContent,
+    );
+  const release = (detail: string) => ({
+    step: "release",
+    ok: true,
+    running: true,
+    detail,
+  });
+  // What `upgrade_and_start` reports, in order: the release row as each step begins, and the
+  // install's and the start's own rows between them.
+  const upgrade: [ProgressEvent[], string][] = [
+    [
+      [
+        release(
+          "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.",
+        ),
+      ],
+      "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.",
+    ],
+    [[release("Stopping OpenBot.")], "Stopping OpenBot."],
+    [
+      [release("Backing up OpenBot's database.")],
+      "Backing up OpenBot's database.",
+    ],
+    [[release("Downloading OpenBot v0.3.1.")], "Downloading OpenBot v0.3.1."],
+    [
+      [
+        release("Installing OpenBot v0.3.1."),
+        {
+          step: "engine",
+          ok: true,
+          running: true,
+          detail: "Checking the software OpenBot needs.",
+        },
+        {
+          step: "engine",
+          ok: true,
+          running: false,
+          detail: "Docker is answering.",
+        },
+        {
+          step: "images",
+          ok: true,
+          running: true,
+          detail: "Downloading local software.",
+          downloadBytes: 1_200_000_000,
+        },
+        {
+          step: "installation",
+          ok: true,
+          running: false,
+          detail: "Installed.",
+        },
+      ],
+      "Installing OpenBot v0.3.1.",
+    ],
+    [
+      [
+        release("Starting OpenBot v0.3.1."),
+        {
+          step: "services",
+          ok: true,
+          running: true,
+          detail: "starting installed containers",
+        },
+        { step: "services", ok: true, running: false, detail: "containers up" },
+        {
+          step: "answering",
+          ok: true,
+          running: true,
+          detail: "Waiting for OpenBot to answer.",
+        },
+      ],
+      "Starting OpenBot v0.3.1.",
+    ],
+  ];
+  for (const [events, said] of upgrade) {
+    for (const event of events) await emitProgress(event);
+    expect(
+      view.getByRole("heading", { name: "Starting OpenBot" }),
+    ).toBeTruthy();
+    // One line, the step running now, with the spinner.
+    expect(lines()).toEqual([said]);
+    expectWorking(view, said);
+  }
+  // Nothing an earlier step said is left on the screen.
+  for (const finished of [
+    "Stopping OpenBot.",
+    "Backing up OpenBot's database.",
+    "Downloading OpenBot v0.3.1.",
+    "Installing OpenBot v0.3.1.",
+  ])
+    expect(view.queryByText(finished)).toBeNull();
+  await act(async () =>
+    moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+  );
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  expect(view.queryByText("Starting OpenBot v0.3.1.")).toBeNull();
+});
+
+test("an upgrade that could not put the previous version back is retried from the Retry its sentence names", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-upgrade-stuck",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "OpenBot couldn't update to v0.3.1 or put v0.3.0 back. Choose Retry to try putting it back again.";
+  let attempts = 0;
+  withOlderDeployment(() => {
+    attempts += 1;
+    if (attempts === 1)
+      throw {
+        said,
+        detail: "the database backup could not be restored",
+      };
+    // The second Start puts the previous version back, tries the update again, and keeps v0.3.0.
+    return {
+      from: "v0.3.0",
+      to: "v0.3.1",
+      moved: false,
+      notice: {
+        said: "OpenBot couldn't update to v0.3.1, so it's still on v0.3.0, with your data as it was.",
+      },
+    };
+  });
+  const view = await renderApp();
+  await view.findByText(said);
+  // The button the sentence names is the one on this screen, and there is no Start to choose.
+  expect(view.queryByRole("button", { name: /^Start/ })).toBeNull();
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await view.findByText(
+    "OpenBot couldn't update to v0.3.1, so it's still on v0.3.0, with your data as it was.",
+  );
+  expect(
+    invokeCalls.filter((call) => call.command === "upgrade_and_start"),
+  ).toHaveLength(2);
+  // Each Retry asks first, and an interrupted upgrade is always due: Start never runs around it.
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+});
+
+test("an upgrade that did not finish says so on the running screen before handing over", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-move-undone",
     localStatus("ready", "valid"),
   );
   const said =
-    "OpenBot couldn't update to v0.3.1, so it's still running v0.3.0. Your Bots, sign-ins and data are unchanged. To try again, open Runtime updates.";
+    "OpenBot couldn't update to v0.3.1, so it's still on v0.3.0, with your data as it was.";
   withOlderDeployment({
     from: "v0.3.0",
     to: "v0.3.1",
     moved: false,
-    notice: { said, detail: "The updated release could not be verified." },
+    notice: { said, detail: "The image for v0.3.1 could not be pulled." },
   });
   const view = await renderApp();
   await view.findByText(said);
@@ -1776,8 +2059,9 @@ test.each(["model", "intelligence"])(
     ).toBe(true);
     expect(view.queryByRole("button", { name: "Install" })).toBeNull();
     if (connection === "model") {
+      // The provider's fields render after the heading: wait for the one typed into.
       await userEvent.type(
-        view.getByLabelText("OpenAI API key"),
+        await view.findByLabelText("OpenAI API key"),
         "refreshed-provider-key",
       );
       await userEvent.click(view.getByRole("button", { name: "Continue" }));
@@ -1802,41 +2086,117 @@ test.each(["model", "intelligence"])(
   },
 );
 
+const INSTALL_AGAIN = {
+  said: "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.",
+  connection: "installation",
+};
+
 /**
- * The upgrade every earlier installation makes: its deployment is one this app cannot start (a
- * release from before the server ran in a container), so Start is refused until Install lays out
- * the new one. The window used to stop there with "Return to Install and try again" beside a button
- * that said Repair installation. It now goes back to Install by itself.
+ * An installation from an earlier app, saved Claude plan sign-in and all, opened by a newer one:
+ * its deployment is one this app cannot start, so Start is refused until Install lays out the new
+ * one, and the window installs again by itself.
+ *
+ * Seen on a Mac replacing OpenBot 0.3.1: Starting OpenBot, then Installing OpenBot under an alert
+ * "OpenBot did not start", then "Refresh your AI connection", though nothing about the sign-in had
+ * changed and Continue with it started OpenBot at once. The Start was only waiting on the install,
+ * and after the install it carries on with the saved sign-in.
  */
-test("a Start refused until Install runs again goes back to Install by itself", async () => {
-  const root = "/tmp/installed-upgrade";
-  // Installed with the default Bot, as the window itself installs: what it recorded as finished
-  // has to be installed again all the same.
+async function reopenAfterUpdate(
+  root: string,
+  startStack: (starts: number) => unknown,
+) {
   setupConnectedLocalStack(root, localStatus("ready", "valid"), {
+    saved: { ...savedOpenAiConfiguration().saved, model: "claude-plan" },
+    // Installed with the default Bot, as the window itself installs: what it recorded as finished
+    // has to be installed again all the same.
     launch: { harness: { id: "langgraph" } },
   });
+  const installed = deferred<null>();
   const previous = invokeHandler;
   let starts = 0;
   invokeHandler = async (command, args) => {
-    if (command === "start_stack" && starts++ === 0)
-      throw {
-        said: "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.",
-        connection: "installation",
-      };
-    if (command === "prepare_installation") return null;
+    if (command === "start_stack") return startStack(++starts);
+    if (command === "prepare_installation") return installed.promise;
     return previous(command, args);
   };
   const view = await renderApp();
-  await waitFor(() =>
-    expect(
-      invokeCalls.some((call) => call.command === "prepare_installation"),
-    ).toBe(true),
-  );
+  await view.findByRole("heading", { name: "Installing OpenBot" });
+  return { view, installed };
+}
+
+function startsMade() {
+  return invokeCalls.filter((call) => call.command === "start_stack");
+}
+
+test("a Start that waits for the install it asked for carries on with the saved sign-in", async () => {
+  const root = "/tmp/installed-upgrade";
+  const { view, installed } = await reopenAfterUpdate(root, (starts) => {
+    if (starts === 1) throw INSTALL_AGAIN;
+    return null;
+  });
+  // Waiting on the install is not a Start that failed.
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByText(/did not start/)).toBeNull();
   expect(
     invokeCalls.find((call) => call.command === "prepare_installation")?.args,
   ).toMatchObject({ root });
-  // Installed, it carries on to the AI screen, from which Start runs again.
+
+  await act(async () => installed.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  // Never asked to pick the AI it already had.
+  expect(
+    view.queryByRole("heading", { name: /AI connection|Connect your AI/ }),
+  ).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(startsMade()).toHaveLength(2);
+  expect(startsMade()[1].args).toMatchObject({
+    root,
+    ...LOCAL_ADDRESSES,
+    model: { provider: "anthropic", login: "plan", saved: true },
+  });
+  expect(
+    invokeCalls.filter((call) => call.command === "show_openbot"),
+  ).toHaveLength(1);
+  expect(
+    invokeCalls.filter((call) => call.command === "prepare_installation"),
+  ).toHaveLength(1);
+});
+
+test("a saved sign-in refused after the install sends the person to refresh it", async () => {
+  const root = "/tmp/installed-upgrade-refused-sign-in";
+  const { view, installed } = await reopenAfterUpdate(root, (starts) => {
+    if (starts === 1) throw INSTALL_AGAIN;
+    throw {
+      said: "Your Claude sign-in has expired. Sign in again.",
+      connection: "model",
+    };
+  });
+  await act(async () => installed.resolve(null));
+  await view.findByRole("heading", { name: "Refresh your AI connection" });
+  expect(
+    view
+      .getAllByRole("alert")
+      .some((alert) => alert.textContent?.includes("has expired")),
+  ).toBe(true);
+  expect(startsMade()).toHaveLength(2);
+});
+
+test("a Start refused again straight after its install says so, and does not install round in a loop", async () => {
+  const { view, installed } = await reopenAfterUpdate(
+    "/tmp/installed-upgrade-refused-again",
+    () => {
+      throw INSTALL_AGAIN;
+    },
+  );
+  await act(async () => installed.resolve(null));
+  await view.findByRole("alert", { name: "OpenBot" });
+  // The second install the refusal asks for goes to the AI screen, from which Start runs again.
   await view.findByRole("heading", { name: /AI connection|Connect your AI/ });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(startsMade()).toHaveLength(2);
+  expect(
+    invokeCalls.filter((call) => call.command === "prepare_installation"),
+  ).toHaveLength(2);
 });
 
 test("a refused provider's failure sits in the AI card and goes when another provider is chosen", async () => {
@@ -2214,80 +2574,6 @@ function emptyConfiguration() {
   };
 }
 
-test("cold reopen exposes explicit update recovery without a prepared installation", async () => {
-  const root = "/tmp/interrupted-unprepared-runtime";
-  setupRootConfiguration(root, async () => emptyConfiguration());
-  const previous = invokeHandler;
-  invokeHandler = async (command, args) => {
-    if (command === "runtime_update_status")
-      return {
-        fromVersion: "v0.2.0",
-        toVersion: "v0.3.0",
-        databaseMayHaveChanged: true,
-      };
-    if (command === "recover_runtime_update")
-      return { version: "v0.2.0", accepted: false, databaseRestored: true };
-    return previous(command, args);
-  };
-  const view = await renderApp();
-  const restore = await view.findByRole("button", {
-    name: "Restore previous release",
-  });
-  expect(view.getByRole("button", { name: "Install" })).toBeTruthy();
-  expect(
-    view.queryByRole("button", { name: "Check runtime update" }),
-  ).toBeNull();
-  expect(installationCalls()).toHaveLength(0);
-  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
-    false,
-  );
-  expect(
-    invokeCalls.some((call) => call.command === "recover_runtime_update"),
-  ).toBe(false);
-  await userEvent.click(restore);
-  expect(
-    await view.findByText(
-      /v0.2.0 is back in place, with its database restored/,
-    ),
-  ).toBeTruthy();
-  expect(
-    invokeCalls.filter((call) => call.command === "recover_runtime_update"),
-  ).toEqual([{ command: "recover_runtime_update", args: { root } }]);
-});
-
-test("fresh unprepared installation keeps update recovery hidden", async () => {
-  setupRootConfiguration("/tmp/fresh-unprepared-runtime", async () =>
-    emptyConfiguration(),
-  );
-  const previous = invokeHandler;
-  invokeHandler = async (command, args) =>
-    command === "runtime_update_status" ? null : previous(command, args);
-  const view = await renderApp();
-  await view.findByRole("button", { name: "Install" });
-  expect(view.queryByText("Runtime updates")).toBeNull();
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
-  expect(view.queryByText("Runtime updates")).toBeNull();
-});
-
-test("unprepared recovery status read failures stay visible", async () => {
-  setupRootConfiguration("/tmp/unreadable-runtime-journal", async () =>
-    emptyConfiguration(),
-  );
-  const previous = invokeHandler;
-  invokeHandler = async (command, args) => {
-    if (command === "runtime_update_status")
-      throw { said: "The update journal cannot be read." };
-    return previous(command, args);
-  };
-  const view = await renderApp();
-  expect(
-    await view.findByText("The update journal cannot be read."),
-  ).toBeTruthy();
-  expect(
-    view.queryByRole("button", { name: "Restore previous release" }),
-  ).toBeNull();
-});
-
 test("leftover database is offered as a fresh start that carries on into Start", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
@@ -2436,7 +2722,6 @@ function setupRootConfiguration(
 ) {
   invokeHandler = async (command, args) => {
     if (command === "prepare_installation") return null;
-    if (command === "runtime_update_status") return null;
     if (command === "detect_engine") {
       return {
         engine: "docker",

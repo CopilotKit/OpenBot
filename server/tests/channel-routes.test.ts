@@ -68,7 +68,16 @@ function fakeStore(
   overrides: Partial<ChannelStore> = {},
 ): ChannelStore & { calls: StoreCall[] } {
   const calls: StoreCall[] = [];
+  const unexpected = async (): Promise<never> => {
+    throw new Error("Unexpected channel store call in this test");
+  };
   const base: ChannelStore = {
+    direct: unexpected,
+    list: unexpected,
+    recordActivity: unexpected,
+    signalBusy: unexpected,
+    signalChannelBusy: unexpected,
+    signalWork: unexpected,
     async create(receivedActor, agentIds) {
       calls.push(["create", receivedActor, agentIds]);
       return channel({ agentIds });
@@ -85,6 +94,7 @@ function fakeStore(
     },
     async softDelete(receivedActor, id) {
       calls.push(["softDelete", receivedActor, id]);
+      return true;
     },
     // A read beside the one the route was asked for, so it is not a call worth asserting on.
     async workIn() {
@@ -1083,6 +1093,48 @@ describe("channel store integration", () => {
     expect((await persistentStore.get(actor, created.id))?.agentIds).toEqual(
       [earlierAgentId, laterAgentId].sort(),
     );
+  });
+
+  test("a conversation is called by its Bot's new name after the Bot is renamed", async () => {
+    const actor = await createPersistentUser();
+    const renamed = await createPersistentAgent({
+      name: "Personal Assistant",
+      owner: actor,
+    });
+    const other = await createPersistentAgent({
+      name: "Researcher",
+      owner: actor,
+    });
+    const direct = await persistentStore.create(actor, [renamed]);
+    const group = await persistentStore.create(actor, [other, renamed]);
+    createdChannelIds.push(direct.id, group.id);
+    const profile = await profileStore.get(actor, renamed);
+    if (!profile) throw new Error("Missing profile");
+    await profileStore.update(actor, renamed, {
+      name: "Personal Assistant F5",
+      title: profile.title,
+      roleDescription: profile.roleDescription,
+      visibility: profile.visibility,
+    });
+
+    // What the conversation header and the sidebar read.
+    const app = appFor(persistentStore, async (context, next) => {
+      context.set("actor", { ...actor, email: `${actor.id}@example.test` });
+      await next();
+    });
+    const opened = await json(
+      await app.request(`http://openbot.test/${direct.id}`),
+    );
+    expect(opened.channel.name).toBe("Personal Assistant F5");
+    const listed = await json(await app.request("http://openbot.test/"));
+    const names = Object.fromEntries(
+      (listed.channels as { id: string; name: string }[]).map(
+        ({ id, name }) => [id, name],
+      ),
+    );
+    expect(names[direct.id]).toBe("Personal Assistant F5");
+    // The group's other Bot keeps its place, and the renamed one follows it.
+    expect(names[group.id]).toBe("Researcher, Personal Assistant F5");
   });
 
   test("keeps a historical channel readable but inactive after a linked profile is deleted", async () => {

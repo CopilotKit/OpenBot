@@ -85,7 +85,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const allRows: Row[] = [
     {
       to: "/bots/$agentId/responsibilities",
-      title: "Responsibilities",
+      title: "Goals",
       icon: IconTargetArrow,
       summary: goals.data
         ? countLabel(

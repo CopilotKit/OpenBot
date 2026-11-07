@@ -8,7 +8,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Problem } from "./Problem";
 
-export type LocalAction = "status" | "start" | "stop";
+/** `update` installs the release this app's CLI installs over an older stack, keeping its data. */
+export type LocalAction = "status" | "start" | "stop" | "update";
 export type LocalOutcome = "completed" | "blocked" | "failed";
 
 /** Static categories from `local_eval::Failure`. None carries CLI output. */
@@ -96,6 +97,11 @@ export type LocalReport = {
   licence: LocalLicence;
   /** A strict ISO-8601 instant, or null. */
   licenceExpiresAt: string | null;
+  /**
+   * On `status`: the release this app's CLI installs, when the stack runs an older one
+   * (`local_eval::update_due`). Absent or null when there is nothing to update.
+   */
+  updateTo?: string | null;
 };
 
 /** What `local connect` answered. The key it wrote went to the credential store, not here. */
@@ -208,6 +214,21 @@ export function signInToCopilotKit(): {
   return { attempt, signedIn };
 }
 
+/** The approval page a CopilotKit sign-in is waiting on, and the code that page shows. */
+export type CopilotKitSignInPage = { url: string; userCode: string };
+
+/**
+ * The page the CLI opened for the sign-in `attempt`, once it has opened one, or null. A code that
+ * expires unapproved is replaced, so ask again while the sign-in waits.
+ */
+export function copilotKitSignInPage(
+  attempt: string,
+): Promise<CopilotKitSignInPage | null> {
+  return invoke<CopilotKitSignInPage | null>("copilotkit_sign_in_page", {
+    attempt,
+  });
+}
+
 /**
  * Connects this installation's apps with the CopilotKit sign-in the CLI now holds: CopilotKit
  * makes or replays its Composio project, and the native side keeps the key. Resolves once
@@ -245,7 +266,9 @@ export type LocalTerms =
       url: string;
       organizationName: string;
     }
-  | { status: "not-required" | "unavailable" | "signed-out" };
+  | { status: "not-required" | "unavailable" | "signed-out" }
+  /** No container engine answers yet, so the CLI says nothing about the account. */
+  | { status: "engine-not-ready" };
 
 export function localEvalTerms(): {
   attempt: string;

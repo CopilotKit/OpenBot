@@ -124,10 +124,24 @@ type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
 function frameworkName(runtime: Runtime): string {
   if (runtime.kind === "builtin") return "Assistant";
   if (runtime.harness === "byo-url") return "AG-UI agent";
-  return (
-    WEB_HARNESSES.find((harness) => harness.id === runtime.harness)?.name ??
-    "AG-UI agent"
+  const harness = WEB_HARNESSES.find(
+    (harness) => harness.id === runtime.harness,
   );
+  return harness ? harness.name : "AG-UI agent";
+}
+
+/**
+ * The subtitle under a new Bot's name: what runs it. OpenBot itself for a Bot that runs here, the
+ * framework for one picked from the list. Nothing for an agent somebody already runs, since OpenBot
+ * cannot know what is behind its address.
+ */
+function poweredBy(runtime: Runtime): string {
+  if (runtime.kind === "builtin") return "Powered by OpenBot";
+  if (runtime.harness === "byo-url") return "";
+  const framework = WEB_HARNESSES.find(
+    (harness) => harness.id === runtime.harness,
+  );
+  return framework ? `Powered by ${framework.name}` : "";
 }
 
 /**
@@ -255,7 +269,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
     const agent = await createAgent.mutateAsync(
       agentInputFrom({
         name: name.trim(),
-        title: "",
+        title: poweredBy(chosen),
         roleDescription:
           instructions.trim() || defaultInstructions(name.trim(), chosen),
         visibility: personal ? "private" : visibility,

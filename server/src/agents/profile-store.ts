@@ -257,7 +257,11 @@ function mapProfile(
     avatarSeed: row.avatarSeed,
     visibility: row.visibility,
     ownerUserId: row.ownerUserId,
-    systemOwned: row.packageId !== null,
+    // Fresh personal starters are editable defaults, even though the package seeded them.
+    systemOwned:
+      row.packageId !== null &&
+      (row.configuration as { personalStarter?: boolean } | null)
+        ?.personalStarter !== true,
     hasCallbackToken: row.callbackTokenHash !== null,
     hidden: row.hiddenAt !== null,
     pinned: row.pinnedAt !== null,
@@ -285,6 +289,24 @@ function endpointOf(configuration: unknown): string | null {
   return typeof endpoint === "string" ? endpoint : null;
 }
 
+/**
+ * Whether an edit's endpoint is the address the Bot already has.
+ *
+ * Compared as URLs, not as text. The edit form sends the stored address back unchanged, and the
+ * route stores what `new URL` makes of it, which adds a "/" to an address with no path: the
+ * installer's `http://agent-harness:4212` came back as `http://agent-harness:4212/`. Compared as
+ * text, renaming the personal starter repointed it at that copy and counted it as the person's own
+ * connection, so the next provider change left it dialling a harness that no longer runs.
+ */
+function sameAddress(edited: string, stored: string | null): boolean {
+  if (stored === null) return false;
+  try {
+    return new URL(edited).toString() === new URL(stored).toString();
+  } catch {
+    return edited === stored;
+  }
+}
+
 /** Which agent on a Mastra server this Bot means, when the row names one. */
 function remoteAgentIdOf(configuration: unknown): string | null {
   if (!configuration || typeof configuration !== "object") return null;
@@ -293,16 +315,19 @@ function remoteAgentIdOf(configuration: unknown): string | null {
 }
 
 /**
- * The instruction a Bot in the box runs on, read back out of its stored configuration.
+ * The instruction a Bot runs on, read back out of its stored configuration.
  *
  * The mirror of {@link endpointOf}, and needed for the same reason: a copy has to be made of what
  * the original actually was, and for a `built_in` coworker the prompt IS the coworker. Trimmed and
  * required to be non-empty, matching `registeredAgentFromRow`, which will not build a Bot from a
  * blank one either.
  */
-function systemPromptOf(configuration: unknown): string | null {
+function promptOf(
+  configuration: unknown,
+  key: "systemPrompt" | "standingInstructions",
+): string | null {
   if (!configuration || typeof configuration !== "object") return null;
-  const prompt = (configuration as { systemPrompt?: unknown }).systemPrompt;
+  const prompt = (configuration as Record<string, unknown>)[key];
   if (typeof prompt !== "string") return null;
   const trimmed = prompt.trim();
   return trimmed.length > 0 ? trimmed : null;
@@ -349,7 +374,7 @@ export function runForDuplicate(
   },
   managed: Record<string, unknown> | undefined,
 ): AgentRun | null {
-  const systemPrompt = systemPromptOf(source.configuration);
+  const systemPrompt = promptOf(source.configuration, "systemPrompt");
   if (source.type === "built_in" && systemPrompt) {
     return { type: "built_in", configuration: { systemPrompt } };
   }
@@ -366,16 +391,22 @@ export function runForDuplicate(
      * and a copy that forgets the name falls back to a different agent, or refuses. See
      * `pickFromRoster`.
      */
-    if (source.type === "remote_mastra") {
-      const remoteAgentId = remoteAgentIdOf(source.configuration);
-      return {
-        type: "remote_mastra",
-        configuration: remoteAgentId
-          ? { endpoint, remoteAgentId }
-          : { endpoint },
-      };
-    }
-    return { type: "remote_ag_ui", configuration: { endpoint } };
+    const standingInstructions = promptOf(
+      source.configuration,
+      "standingInstructions",
+    );
+    const remoteAgentId =
+      source.type === "remote_mastra"
+        ? remoteAgentIdOf(source.configuration)
+        : null;
+    return {
+      type: source.type === "remote_mastra" ? "remote_mastra" : "remote_ag_ui",
+      configuration: {
+        endpoint,
+        ...(remoteAgentId ? { remoteAgentId } : {}),
+        ...(standingInstructions ? { standingInstructions } : {}),
+      },
+    };
   }
 
   return managed ? { type: "remote_ag_ui", configuration: managed } : null;
@@ -636,15 +667,20 @@ export function createAgentProfileStore(
            * Only for `built_in`, and that matters. A remote Bot has no `systemPrompt` and must not
            * acquire one — its instruction travels as the standing role message instead — and the
            * tenant package's Bots, whose `system_prompt` is deliberately not their
-           * `role_description`, cannot reach this code at all: `requireManageable` above throws
-           * `ProtectedAgentError` for anything the package owns.
+           * `role_description`, remain protected except for the editable personal starter.
            */
-          const configuration = {
+          // An edit that sends the address the Bot already has leaves the stored one as it is.
+          const repointed =
+            input.endpoint !== undefined &&
+            input.endpoint !== "" &&
+            !sameAddress(input.endpoint, profile.endpoint);
+          const configuration: Record<string, unknown> = {
             ...previous,
-            ...(row?.type === "built_in"
+            ...(row?.type === "built_in" &&
+            input.roleDescription !== profile.roleDescription
               ? { systemPrompt: input.roleDescription }
               : {}),
-            ...(input.endpoint ? { endpoint: input.endpoint } : {}),
+            ...(repointed ? { endpoint: input.endpoint } : {}),
             ...(input.auth && vault
               ? {
                   auth: await storeAgentAuth({
@@ -664,6 +700,21 @@ export function createAgentProfileStore(
                 }
               : {}),
           };
+
+          // A connection edited in the profile belongs to the person, not installer setup.
+          if (
+            previous.personalStarter === true &&
+            (repointed || (input.auth && vault))
+          ) {
+            configuration.personalConnection = true;
+          }
+
+          if (
+            row?.type !== "built_in" &&
+            input.roleDescription !== profile.roleDescription
+          ) {
+            delete configuration.standingInstructions;
+          }
 
           /*
            * The key this one replaces is already retired, by the rotation above.

@@ -13,6 +13,11 @@ import { EASE_OUT } from "@/lib/motion";
  *
  * The pane is animated by width and the content inside it is given that width outright, so the
  * content is laid out once and the pane reveals it.
+ *
+ * A SHEET COVERS THE MAIN PANE, so whatever there is waiting on the person (`waiting`, an approval
+ * card) is drawn at the top of the sheet as well. A Bot's screen opens itself while the Bot works,
+ * and on a narrow window that sheet used to hide the approval the Bot then stopped for, until the
+ * person thought to close it. Beside the main pane it is already in view, and is not repeated.
  */
 
 const ANIMATION_DURATION_SECONDS = 0.3;
@@ -34,6 +39,7 @@ export function DetailPanel({
   title,
   detail,
   detailWidth = DEFAULT_DETAIL_WIDTH,
+  waiting,
   children,
 }: {
   open: boolean;
@@ -43,6 +49,8 @@ export function DetailPanel({
   detail?: ReactNode;
   /** Open width of the detail pane, in pixels. */
   detailWidth?: number;
+  /** What in the main pane waits on the person: drawn atop the sheet, which would cover it. */
+  waiting?: ReactNode;
   children: ReactNode;
 }) {
   // Reduced motion keeps the fade, which explains the change, and drops the movement.
@@ -80,6 +88,9 @@ export function DetailPanel({
               {title ?? "Details"}
             </SheetTitle>
             <div className="flex-1 min-h-0 overflow-y-auto">
+              {open && waiting ? (
+                <div className="px-4 pt-4 empty:hidden">{waiting}</div>
+              ) : null}
               {open ? detail : null}
             </div>
           </SheetContent>

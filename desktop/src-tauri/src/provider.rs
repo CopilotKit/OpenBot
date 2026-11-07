@@ -93,7 +93,9 @@ pub fn catalogue() -> Vec<Provider> {
             name: "Google Gemini".into(),
             summary: "Use a Google AI Studio key or sign in for Gemini API access.".into(),
             logins: vec![Login::Endpoint, Login::Oauth],
-            mark: None,
+            // The colour G: it is also the mark on this row's "Sign in with" button, and Google's
+            // sign-in guidelines allow only the standard colour G there.
+            mark: Some("google-color".into()),
             caution: None,
         },
         Provider {
@@ -101,7 +103,7 @@ pub fn catalogue() -> Vec<Provider> {
             name: "xAI".into(),
             summary: "Use an xAI API key or sign in to your xAI account.".into(),
             logins: vec![Login::Endpoint, Login::Oauth],
-            mark: None,
+            mark: Some("xai".into()),
             caution: None,
         },
         Provider {
@@ -110,7 +112,8 @@ pub fn catalogue() -> Vec<Provider> {
             summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.".into(),
             logins: vec![Login::Endpoint],
             // Deliberately unmarked: it stands for every provider rather than one, so any single
-            // vendor's logo here would be a lie about what the row does.
+            // vendor's logo here would be a lie about what the row does. The window draws a plain
+            // cloud in its tile instead (EndpointMark.tsx), as the web app does for this source.
             mark: None,
             caution: None,
         },
@@ -172,6 +175,33 @@ mod tests {
             assert!(
                 !provider.name.trim().is_empty(),
                 "{} has no name",
+                provider.id
+            );
+        }
+    }
+
+    /// A row that signs in to a provider shows that provider's mark, on its row and on its "Sign in
+    /// with" button, and the mark is a file that is actually vendored. Google and xAI were drawn
+    /// without one, their name alone, while their marks sat unused in shared/marks.
+    #[test]
+    fn every_provider_with_a_sign_in_carries_a_vendored_mark() {
+        for provider in catalogue() {
+            if !provider
+                .logins
+                .iter()
+                .any(|login| matches!(login, Login::Plan | Login::Oauth))
+            {
+                continue;
+            }
+            let mark = provider
+                .mark
+                .unwrap_or_else(|| panic!("{} signs in but carries no mark", provider.id));
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../shared/marks")
+                .join(format!("{mark}.svg"));
+            assert!(
+                path.exists(),
+                "{} names mark {mark}, which is not vendored",
                 provider.id
             );
         }

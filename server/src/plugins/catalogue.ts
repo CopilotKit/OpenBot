@@ -489,6 +489,12 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
       "pause_trigger",
       "resume_trigger",
       "delete_trigger",
+      "create_goal",
+      "update_goal",
+      "run_goal",
+      "pause_goal",
+      "resume_goal",
+      "complete_goal",
     ]),
     docsUrl: "https://github.com/CopilotKit/OpenBot/blob/main/docs/routines.md",
   },
@@ -651,8 +657,9 @@ export function classifyTool(
  * while chat goes on answering exactly as it did.
  *
  * WHICH LABELS COUNT, in the order they are read:
- * - The server said it destroys something (`destructiveHint`, a broker's destructive flag): never.
- *   This wins over everything, including a read-only label beside it.
+ * - The server said it destroys something (`destructiveHint`, a broker's destructive flag), or a
+ *   broker said nothing about it at all (`unclassified`): never. This wins over everything,
+ *   including a read-only label beside it. See {@link mightDestroy}.
  * - A reviewed write list names it: never. A person read that list; a label is the vendor's.
  * - {@link classifyTool} calls it a read: a broker's own read label (Composio, Arcade), or a
  *   reviewed list that names it a read or declined to call it a write.
@@ -668,14 +675,28 @@ export function labelledRead(
     /** What the vendor recorded for it, as `classifyTool` reads it. */
     effect: string | null;
     destructive: boolean;
+    unclassified?: boolean;
     /** The server's own `readOnlyHint`, as the listing recorded it. */
     declaredRead: boolean;
   },
 ): boolean {
-  if (tool.destructive) return false;
+  if (mightDestroy(tool)) return false;
   if (entry?.writeTools.includes(toolName)) return false;
   if (classifyTool(entry, toolName, true, tool.effect) === "read") return true;
   return tool.declaredRead;
+}
+
+/**
+ * Whether a background read must keep away from this tool: its vendor said it destroys something,
+ * or a broker listed it and said nothing about what it does (`mcpTools.unclassified`). The second is
+ * not a claim that it destroys anything, so it doesn't make a call always ask; it is only not a
+ * claim that it doesn't.
+ */
+export function mightDestroy(tool: {
+  destructive: boolean;
+  unclassified?: boolean;
+}): boolean {
+  return tool.destructive || tool.unclassified === true;
 }
 
 /**
@@ -691,14 +712,14 @@ export function labelledRead(
  * a vendor adds later would pass. Each of those is still a read for a check-in, which only reads.
  * In a task they ask, like any change.
  *
- * A destructive label or a reviewed write still wins over the read list.
+ * A destructive label, a broker's silence or a reviewed write still wins over the read list.
  */
 export function reviewedRead(
   entry: CatalogueEntry | null,
   toolName: string,
-  tool: { destructive: boolean },
+  tool: { destructive: boolean; unclassified?: boolean },
 ): boolean {
-  if (tool.destructive || !entry?.readTools) return false;
+  if (mightDestroy(tool) || !entry?.readTools) return false;
   if (entry.writeTools.includes(toolName)) return false;
   return entry.readTools.includes(toolName);
 }

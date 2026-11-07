@@ -618,6 +618,41 @@ test("starts the shared computer as one person's only when told whose it is", ()
   ).toBe("");
 });
 
+/**
+ * The personal edition's one computer runs the person's own browser beside their Bots, which it knows from the edition
+ * (agent-computer's person-access.ts): the edition in `.env` has to reach it, as it reaches the server.
+ */
+/**
+ * A Recorder in the shared computer is handed the laptop's loopback addresses for OpenBot and a local gateway, which in
+ * that container are the container: OpenBot Desktop names where each is reached instead, and the computer relays them
+ * (agent-computer's loopback-relay.ts). The setting, and the host the gateway's relay names, have to reach it.
+ */
+test("hands the shared computer the loopback addresses it relays, and this machine by name", () => {
+  const computer = runComposeConfig({
+    COMPUTER_LOOPBACK_RELAYS:
+      "3010=server:3001,14401=host.docker.internal:14401",
+  }).services["agent-computer"];
+  expect(computer?.environment.COMPUTER_LOOPBACK_RELAYS).toBe(
+    "3010=server:3001,14401=host.docker.internal:14401",
+  );
+  expect(computer?.extra_hosts).toEqual(["host.docker.internal=host-gateway"]);
+  expect(
+    runComposeConfig({}).services["agent-computer"]?.environment
+      .COMPUTER_LOOPBACK_RELAYS,
+  ).toBe("");
+});
+
+test("tells the shared computer which edition it runs in", () => {
+  expect(
+    runComposeConfig({ OPENBOT_EDITION: "personal" }).services["agent-computer"]
+      ?.environment.OPENBOT_EDITION,
+  ).toBe("personal");
+  expect(
+    runComposeConfig({}).services["agent-computer"]?.environment
+      .OPENBOT_EDITION,
+  ).toBe("");
+});
+
 test("gives the selected harness the same governed callback as the framework Bot", () => {
   const config = runComposeConfig({
     OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
@@ -771,8 +806,11 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
       "http://host.docker.internal:3001/api/model-provider/v1",
     INTELLIGENCE_GATEWAY_WS_URL: "ws://localhost:14401",
     INTELLIGENCE_CONTAINER_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+    OPENBOT_THIS_MACHINE_CONTAINER_HOST: "host.docker.internal",
   });
   expect(withBots.services.server.environment).toMatchObject({
+    // How the server reaches an agent the person registered on their own loopback.
+    OPENBOT_THIS_MACHINE_HOST: "host.docker.internal",
     MANAGED_AGENT_AG_UI_URL: "http://agent-langgraph:4201/ag-ui",
     PICKED_HARNESS_URL: "http://agent-harness:4202/run",
     OPENAI_BASE_URL: "http://host.docker.internal:3001/api/model-provider/v1",
@@ -787,6 +825,7 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
     PICKED_HARNESS_URL: "https://agents.example/run",
   });
   expect(without.services.server.environment).toMatchObject({
+    OPENBOT_THIS_MACHINE_HOST: "",
     MANAGED_AGENT_AG_UI_URL: "",
     PICKED_HARNESS_URL: "https://agents.example/run",
   });
@@ -816,4 +855,21 @@ test("mounts the model sign-in folder into the server, and only there", () => {
     if (name === "server") continue;
     expect(JSON.stringify(service.volumes ?? [])).not.toContain(".openbot");
   }
+});
+
+/*
+ * A Bot's shell runs `ping` on its computer. iputils' ping carries the `cap_net_raw` file
+ * capability, and a process cannot exec a file whose capabilities are outside the container's
+ * bounding set. Docker's default set has NET_RAW; Podman's (the Desktop's engine on Windows and the
+ * default everywhere) does not, so on Windows `ping 8.8.8.8` answered "Operation not permitted",
+ * even as root. The computer asks for NET_RAW itself, so both engines give it the same.
+ */
+test("the computer is given NET_RAW, so ping works on Podman as on Docker", () => {
+  const computer = (
+    parse(composeFile()) as {
+      services: Record<string, { cap_add?: string[]; cap_drop?: string[] }>;
+    }
+  ).services["agent-computer"];
+  expect(computer?.cap_add ?? []).toContain("NET_RAW");
+  expect(computer?.cap_drop ?? []).not.toContain("NET_RAW");
 });

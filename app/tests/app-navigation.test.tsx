@@ -285,3 +285,13 @@ test("in the personal edition the menu opens OpenBot for Business instead of Adm
     within(dialog).getByText("OpenBot for Business", { selector: "h2" }),
   ).toBeTruthy();
 });
+
+test("a single-person install has no Sign out, because nobody signed in", async () => {
+  // OpenBot Desktop: no identity provider, so Sign out could only ever fail with "No identity
+  // provider is configured." and leave the person where they were.
+  const { view, user } = renderSidebar("admin", "personal");
+  await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+  const menu = await view.findByRole("menu");
+  expect(within(menu).queryByRole("menuitem", { name: "Sign out" })).toBeNull();
+  expect(within(menu).getAllByRole("menuitem").length).toBeGreaterThan(0);
+});
