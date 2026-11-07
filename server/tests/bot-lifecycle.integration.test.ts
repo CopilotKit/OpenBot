@@ -36,7 +36,11 @@ import {
   proactiveSettings,
   proactiveSuggestions,
 } from "../src/db/schema/proactive";
-import { responsibilities } from "../src/db/schema/responsibilities";
+import {
+  responsibilities,
+  responsibilityEvents,
+  responsibilityRuns,
+} from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createRoutineRunner } from "../src/routines/runner";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -343,6 +347,36 @@ describe("Activity and attention", () => {
       (entry) => entry.agentId === bot,
     );
     expect(others).toMatchObject({ questions: 0, approvals: 0, unread: 2 });
+  });
+
+  test("a goal run's summary is the Bot's reply as plain text, the way the sidebar draws a reply", async () => {
+    // The reply a goal run gave on OpenBot Desktop, which the row drew with its backticks and asterisks.
+    await database.insert(responsibilityEvents).values({
+      id: `${prefix}-goal-event`,
+      ownerUserId: owner,
+      source: "manual",
+      externalId: `${prefix}-goal-event`,
+      type: "requested",
+      payload: {},
+    });
+    await database.insert(responsibilityRuns).values({
+      id: `${prefix}-goal-run`,
+      responsibilityId: `${prefix}-goal-${owner}`,
+      eventId: `${prefix}-goal-event`,
+      status: "succeeded",
+      replyText:
+        'Done. I opened example.com, saved its heading to `heading.txt`, and it reads **"Example Domain"**.\n\n- Checked: the file exists\n- [Source](https://example.com)',
+      startedAt: new Date(),
+      finishedAt: new Date(),
+    });
+    const result = await activity.forBot(owner, bot);
+    expect(
+      result.completed.find(
+        (item) => item.id === `responsibility-run:${prefix}-goal-run`,
+      )?.detail,
+    ).toBe(
+      'Done. I opened example.com, saved its heading to heading.txt, and it reads "Example Domain". Checked: the file exists Source',
+    );
   });
 
   test("stopping a delegated task finishes only that person's hop", async () => {
