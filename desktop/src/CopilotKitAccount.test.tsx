@@ -113,3 +113,34 @@ test("Cancel stops the CLI's sign-in and goes back to the start of the step", as
     screen.queryByRole("link", { name: "Open the sign-in page" }),
   ).toBeNull();
 });
+
+/** CopilotKit's logotype, light, with the reversed wordmark for a dark window. */
+function expectCopilotKitLogo(screen: ReturnType<typeof render>) {
+  const logo = screen.getByRole("img", { name: "CopilotKit" });
+  expect(logo.getAttribute("src")).toBe("/copilotkit-logo.svg");
+  expect(
+    logo
+      .closest("picture")
+      ?.querySelector('source[media="(prefers-color-scheme: dark)"]')
+      ?.getAttribute("srcset"),
+  ).toBe("/copilotkit-logo-dark.svg");
+}
+
+/*
+ * The step signs in to a CopilotKit account, so it shows CopilotKit's logotype, signed out and
+ * while the sign-in waits. It showed OpenBot's mark alone.
+ */
+test("the CopilotKit sign-in shows CopilotKit's logotype, before and while it waits", async () => {
+  waitingSignIn();
+  const screen = render(
+    <CopilotKitAccount root="/tmp/account-sign-in" onDone={() => {}} />,
+  );
+  await screen.findByRole("button", { name: "Sign in to CopilotKit" });
+  expectCopilotKitLogo(screen);
+
+  await userEvent.click(
+    screen.getByRole("button", { name: "Sign in to CopilotKit" }),
+  );
+  await screen.findByText(PAGE.userCode);
+  expectCopilotKitLogo(screen);
+});

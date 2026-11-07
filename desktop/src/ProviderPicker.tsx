@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
-import { Mark } from "./Mark";
+import { ButtonMark, Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import { StatusLine } from "./SetupProgress";
@@ -710,7 +710,8 @@ export function ProviderPicker({
 
           {login === "oauth" && (
             <>
-              <p className="footnote">
+              {/* Set as the plan's description is, so its button has the same space above it. */}
+              <p className="lede">
                 {row.id === "google"
                   ? "Authorize Gemini API access using the configured Google Cloud project and its API quota."
                   : "Authorize OpenBot to use models available to your xAI account."}
@@ -739,7 +740,12 @@ export function ProviderPicker({
                 </>
               ) : null}
               {!busy && (
-                <button type="button" onClick={beginOAuth}>
+                <button
+                  type="button"
+                  className="quiet sign-in-with"
+                  onClick={beginOAuth}
+                >
+                  <ButtonMark id={row.mark} />
                   Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
                   {row.name}
                 </button>
@@ -770,7 +776,13 @@ export function ProviderPicker({
                   Your plan will be used.
                 </p>
                 {!token && (
-                  <button type="button" disabled={busy} onClick={beginSignIn}>
+                  <button
+                    type="button"
+                    className="quiet sign-in-with"
+                    disabled={busy}
+                    onClick={beginSignIn}
+                  >
+                    <ButtonMark id={row.mark} />
                     Sign in again with {row.name}
                   </button>
                 )}
@@ -838,7 +850,13 @@ export function ProviderPicker({
                   key is stored.
                 </p>
                 <div className="provider-sign-in-actions">
-                  <button type="button" disabled={busy} onClick={beginSignIn}>
+                  <button
+                    type="button"
+                    className="quiet sign-in-with"
+                    disabled={busy}
+                    onClick={beginSignIn}
+                  >
+                    <ButtonMark id={row.mark} />
                     {busy ? "Starting…" : `Sign in with ${row.name}`}
                   </button>
                   {!busy &&

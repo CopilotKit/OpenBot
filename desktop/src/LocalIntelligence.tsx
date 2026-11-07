@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CopilotKitLogo } from "./CopilotKitLogo";
 import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
 import {
@@ -699,6 +700,7 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <div className="local-needs">
+      <CopilotKitLogo />
       <p>OpenBot's back end needs your CopilotKit account.</p>
       {waiting ? (
         <CopilotKitSignInWait
