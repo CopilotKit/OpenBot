@@ -22,6 +22,7 @@ import {
 } from "drizzle-orm";
 import { HANDOFF_KIND } from "../agents/handoff";
 import { WAKE_UP_KIND, type WakeUpPayload } from "../agents/wake-up";
+import { plainLine } from "../channels/text";
 import type { Database } from "../db/client";
 import {
   approvalRequests,
@@ -106,8 +107,14 @@ const inListedTask = (ownerUserId: string, channelId: SQL, threadId: SQL) =>
       and ${listedTask}
       and (${botTasks.channelId} = ${channelId} or ${intelligenceChannelMappings.threadId} = ${threadId})
   )`;
+/**
+ * One line of a row, as plain text. A run's reply and a follow-up's note are written by the Bot, in
+ * Markdown, and a row draws text, so `heading.txt` in backticks and **bold** showed their marks.
+ * Flattened the way the sidebar flattens a conversation's last message (`previewOf` in
+ * `channels/routes.ts`), at the same 200 characters.
+ */
 const clip = (text: string | null | undefined, max = 200) =>
-  text ? Array.from(text).slice(0, max).join("") : null;
+  (text && plainLine(text, max)) || null;
 const iso = (value: Date | string | null | undefined) =>
   value ? new Date(value).toISOString() : new Date(0).toISOString();
 
