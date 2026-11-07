@@ -6,10 +6,6 @@ import type { AppVariables } from "../auth/guards";
 import { afterExposureChange } from "../plugins/exposure-change";
 import type { SharedUseStore } from "../plugins/shared-use-store";
 import { testAgentConnection } from "./connection-test";
-import {
-  type ConversationHarnessConfig,
-  conversationHarnessFor,
-} from "./conversation-harness";
 import { checkAgentEndpoint } from "./endpoint";
 import { takesModelChoice } from "./harness-model";
 import { isolationState, mayIsolate } from "./isolation";
@@ -348,28 +344,22 @@ export function createAgentRoutes(
    * so a connection test dials an agent on their loopback where a run will. See onThisMachine.
    */
   dial?: { thisMachineHost?: string },
-  harness?: ConversationHarnessConfig,
 ) {
   const isolationAvailable = isolation?.available ?? false;
   /** The dto with the one fact only this closure knows: whether the coworker runs on our own Bot. */
-  const dto = (actor: AgentActor, agent: AgentProfile) => {
-    const conversationHarness = conversationHarnessFor(agent, harness ?? {});
-    return {
-      ...agentDto(actor, agent),
-      ...(conversationHarness ? { conversationHarness } : {}),
-      // A string comparison on purpose: two absent values must not read as "runs on our Bot".
-      builtIn:
-        typeof agent.endpoint === "string" &&
-        agent.endpoint === managedEndpoint,
-      /*
-       * Whether it runs on this deployment's model, so a person can pick the model and effort per
-       * conversation: a `built_in` Bot (no endpoint), or the harness picked in setup when it is one of
-       * OpenBot's own that takes the choice. A Bot on any other framework picks its own model.
-       */
-      runsOnOpenBotModel:
-        agent.endpoint === null || takesModelChoice(agent.endpoint),
-    };
-  };
+  const dto = (actor: AgentActor, agent: AgentProfile) => ({
+    ...agentDto(actor, agent),
+    // A string comparison on purpose: two absent values must not read as "runs on our Bot".
+    builtIn:
+      typeof agent.endpoint === "string" && agent.endpoint === managedEndpoint,
+    /*
+     * Whether it runs on this deployment's model, so a person can pick the model and effort per
+     * conversation: a `built_in` Bot (no endpoint), or the harness picked in setup when it is one of
+     * OpenBot's own that takes the choice. A Bot on any other framework picks its own model.
+     */
+    runsOnOpenBotModel:
+      agent.endpoint === null || takesModelChoice(agent.endpoint),
+  });
   /**
    * The dtos, each with whether its computer of its own is in effect now.
    *

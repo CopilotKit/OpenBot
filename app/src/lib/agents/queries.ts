@@ -32,8 +32,6 @@ export type AgentProfile = {
    * picker; a Bot on its own framework picks its own model. Absent reads as no.
    */
   runsOnOpenBotModel?: boolean;
-  /** The configured conversation harness, when OpenBot knows it. */
-  conversationHarness?: string;
   /** Whether a key is set for it. Never the key itself. */
   hasAuth: boolean;
   /**

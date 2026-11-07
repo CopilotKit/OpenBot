@@ -17,7 +17,6 @@ import {
 } from "./agents/callback-token";
 import { computerAccessCheck } from "./agents/computer-access";
 import { deploymentCanIsolate } from "./agents/isolation";
-import type { ConversationHarnessConfig } from "./agents/conversation-harness";
 import {
   type BotLifecycleServices,
   createBotLifecycleRoutes,
@@ -434,7 +433,6 @@ export function createApp(
   voiceSessions?: VoiceSessionServices,
   learning?: LearningAdminDependencies,
   coworker?: {
-    conversationHarness?: ConversationHarnessConfig;
     productTelemetry?: ProductTelemetry;
     approvals?: ApprovalService;
     /** The Recorder extension's routes and guards (recorder/wiring.ts). Absent, nothing about it is mounted. */
@@ -1596,7 +1594,6 @@ export function createApp(
         config.thisMachineHost
           ? { thisMachineHost: config.thisMachineHost }
           : undefined,
-        coworker?.conversationHarness,
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the

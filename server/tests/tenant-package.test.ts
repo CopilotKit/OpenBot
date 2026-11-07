@@ -1732,7 +1732,7 @@ describe("bundled personal starter", () => {
       expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
       expect(await profiles.get(actor, "picked-harness")).toMatchObject({
         name: "Personal Assistant",
-        title: "Everyday Life",
+        title: `Everyday Life · Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}`,
         roleDescription:
           "Help with email, your calendar, research, planning and everyday errands.",
       });
@@ -1768,7 +1768,7 @@ describe("bundled personal starter", () => {
     expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       name: "Personal Assistant",
-      title: "Everyday Life",
+      title: "Everyday Life · Powered by Claude Agent SDK",
       endpoint: langchain,
     });
     await synchronizeTenantPackage(database, await loadStarter(tenantId, ""));
@@ -1781,6 +1781,30 @@ describe("bundled personal starter", () => {
       "skill-creator",
     ]);
     expect(await channelBots()).toEqual(["picked-harness"]);
+  });
+
+  test("starter attribution can be removed and stays edited after restart and harness switch", async () => {
+    const tenantId = starterTestTenant();
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    await database
+      .update(agentProfiles)
+      .set({ title: "My everyday helper" })
+      .where(eq(agentProfiles.agentId, "picked-harness"));
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, claude),
+    );
+    await synchronizeTenantPackage(
+      database,
+      await loadStarter(tenantId, langchain),
+    );
+    expect(await profiles.get(actor, "picked-harness")).toMatchObject({
+      title: "My everyday helper",
+      endpoint: langchain,
+    });
   });
 
   test("source installs keep the built-in fallback if a harness later appears", async () => {

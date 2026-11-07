@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import type { ConversationHarnessConfig } from "../src/agents/conversation-harness";
 import {
   AgentNotFoundError,
   AgentNotManageableError,
@@ -116,125 +115,9 @@ function appFor(
   return app;
 }
 
-function routesWithHarness(
-  store: AgentProfileStore,
-  harness: ConversationHarnessConfig,
-) {
-  return createAgentRoutes(
-    store,
-    requireUser,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    harness,
-  );
-}
-
 async function json(response: Response) {
   return response.json();
 }
-
-test.each([
-  {
-    image: "ghcr.io/openbot/openbot-agent-claude-sdk:latest",
-    expected: "Claude Agent SDK",
-  },
-  {
-    image: "ghcr.io/openbot/openbot-agent-langgraph-agui@sha256:abc",
-    expected: "LangChain",
-  },
-])(
-  "attributes the configured conversation harness: $expected",
-  async ({ image, expected }) => {
-    const installed = "http://agent-harness:4206";
-    const store = fakeStore({
-      async list() {
-        return [
-          profile({
-            id: "remote",
-            name: "My Assistant",
-            endpoint: installed,
-            runtimeType: "remote_ag_ui",
-          }),
-          profile({
-            id: "builtin",
-            name: "Claude Agent SDK",
-            runtimeType: "built_in",
-          }),
-          profile({
-            id: "other",
-            name: expected,
-            endpoint: "https://example.test/agent",
-            runtimeType: "remote_ag_ui",
-          }),
-        ];
-      },
-    });
-    const routes = routesWithHarness(store, {
-      picked: { endpoint: new URL(installed), image, source: "installed" },
-    });
-    const response = await routes.request("http://openbot.test/");
-    expect(response.status).toBe(200);
-    const { agents } = await json(response);
-    expect(agents[0]).toMatchObject({
-      id: "remote",
-      conversationHarness: expected,
-    });
-    expect(agents[1]).toMatchObject({
-      id: "builtin",
-      conversationHarness: "CopilotKit",
-    });
-    expect(agents[2]).toMatchObject({ id: "other", name: expected });
-    expect(agents[2]).not.toHaveProperty("conversationHarness");
-  },
-);
-
-test.each([
-  ["claude", "CopilotKit with Claude Agent SDK"],
-  ["chatgpt", "CopilotKit with LangChain"],
-] as const)(
-  "a built-in Bot on the %s plan names both layers",
-  async (plan, expected) => {
-    const installed = "http://agent-harness:4206";
-    const store = fakeStore({
-      async list() {
-        return [
-          profile({ id: "builtin", runtimeType: "built_in" }),
-          profile({
-            id: "byo",
-            name: "LangChain",
-            endpoint: installed,
-            runtimeType: "remote_ag_ui",
-          }),
-        ];
-      },
-    });
-    const routes = routesWithHarness(store, {
-      plan,
-      picked: {
-        endpoint: new URL(installed),
-        image: "agent-langgraph-agui",
-        source: "byo",
-      },
-    });
-    const response = await routes.request("http://openbot.test/");
-    expect(response.status).toBe(200);
-    const { agents } = await json(response);
-    expect(agents[0]).toMatchObject({
-      id: "builtin",
-      conversationHarness: expected,
-    });
-    expect(agents[1]).toMatchObject({ id: "byo", name: "LangChain" });
-    expect(agents[1]).not.toHaveProperty("conversationHarness");
-  },
-);
 
 describe("agent input parser", () => {
   test.each([[null], [[]], ["input"], [42], [true]])(

@@ -2934,18 +2934,6 @@ const app = createApp(
     manage: learningProbeIntelligence.experimental.learning,
   },
   {
-    conversationHarness: {
-      plan: runtimeModel.plan?.provider,
-      ...(config.managedAgent?.alsoRun && process.env.PICKED_HARNESS_IMAGE
-        ? {
-            picked: {
-              endpoint: config.managedAgent.alsoRun,
-              image: process.env.PICKED_HARNESS_IMAGE,
-              source: process.env.PICKED_HARNESS_SOURCE?.trim(),
-            },
-          }
-        : {}),
-    },
     productTelemetry,
     approvals: approvalService,
     shared: { modes: accountModes, use: sharedUseStore },

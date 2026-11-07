@@ -212,7 +212,6 @@ const joinedProjection = {
   /* The hash, only so a surface can say whether one exists. It never leaves this module. */
   callbackTokenHash: agentProfiles.callbackTokenHash,
   configuration: agents.configuration,
-  runtimeType: agents.type,
 };
 
 function joinedProfiles(executor: DatabaseExecutor, actor: AgentActor) {
@@ -266,7 +265,6 @@ function mapProfile(
     deletedAt: row.deletedAt,
     isolated: row.isolated,
     endpoint: endpointOf(row.configuration),
-    runtimeType: row.runtimeType,
     // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
     // wipe one by saving an unrelated edit; showing the value would put a secret in a screenshot.
     hasAuth: authFromConfiguration(row.configuration) !== null,

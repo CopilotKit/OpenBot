@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { displayNameFor, HARNESSES } from "@openbot/shared/harnesses";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { parse } from "yaml";
@@ -851,10 +852,22 @@ function personalStarterSeed(
     ({ id }) => id !== PERSONAL_ASSISTANT && id !== PICKED_HARNESS,
   );
   if (fresh && fallback) {
+    const harness =
+      picked && HARNESSES.find(({ name }) => name === picked.name);
+    // Starter copy is ordinary editable profile text, written only on the first seed.
+    const harnessName = picked
+      ? harness
+        ? displayNameFor(harness)
+        : null
+      : "CopilotKit";
+    const title = harnessName
+      ? `${fallback.title} · Powered by ${harnessName}`
+      : fallback.title;
     agents.unshift(
       picked
         ? {
             ...fallback,
+            title,
             id: picked.id,
             type: picked.type,
             configuration: {
@@ -863,7 +876,7 @@ function personalStarterSeed(
               personalStarter: true,
             },
           }
-        : fallback,
+        : { ...fallback, title },
     );
   }
   const channels = tenantPackage.channels.flatMap((channel) => {

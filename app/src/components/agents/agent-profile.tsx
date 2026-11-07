@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
-import { BotHarness } from "@/components/agents/bot-harness";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -105,7 +104,6 @@ export function AgentProfile({
         <p className="text-sm whitespace-pre-wrap text-pretty">
           {profile.roleDescription}
         </p>
-        <BotHarness name={profile.conversationHarness} />
       </section>
 
       <div className="flex flex-col gap-2">
