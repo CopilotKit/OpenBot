@@ -174,7 +174,7 @@ export function AuditTable({
         </TableHeader>
         <TableBody>
           {rows.map((row) => {
-            const outcome = outcomeOf(row.original.eventType);
+            const outcome = outcomeOf(row.original);
             return (
               <TableRow
                 className={OUTCOME_ROW[outcome]}
@@ -312,7 +312,7 @@ function auditColumns(
   return [
     {
       id: "mark",
-      accessorFn: (event) => OUTCOME_LABEL[outcomeOf(event.eventType)],
+      accessorFn: (event) => OUTCOME_LABEL[outcomeOf(event)],
       filterFn: anyOf,
       header: () => <span className="sr-only">Outcome</span>,
       cell: ({ row }) => (
@@ -320,7 +320,7 @@ function auditColumns(
           aria-hidden
           className={cn(
             "mt-1 block size-2.5 rounded-[3px]",
-            OUTCOME_MARK[outcomeOf(row.original.eventType)],
+            OUTCOME_MARK[outcomeOf(row.original)],
           )}
         />
       ),
