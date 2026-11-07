@@ -203,12 +203,16 @@ function ActivitySection({
 /** How many running or scheduled items the Bot's page shows before "All activity". */
 const GLANCE = 3;
 
-/** Running work first, then what is lined up, as many as the Bot's page shows. */
+/**
+ * Running work first, then what is lined up, then the goals that wait to be asked, as many as the
+ * Bot's page shows.
+ */
 function upcomingOf(activity: BotActivity | undefined) {
   return activity
     ? [
         ...activity.inProgress.map((item) => ({ item, live: true })),
         ...activity.scheduled.map((item) => ({ item, live: false })),
+        ...(activity.onDemand ?? []).map((item) => ({ item, live: false })),
       ].slice(0, GLANCE)
     : [];
 }
@@ -301,15 +305,18 @@ function AllActivityItem({
 }
 
 /**
- * The Bot page's one line about its activity: what is running and what is lined up, the two that
- * might want a look. Finished work is only counted when there is nothing else to say.
+ * The Bot page's one line about its activity: what is running, what is lined up and which goals
+ * wait to be asked. Finished work is only counted when there is nothing else to say. A goal that
+ * runs only when asked is never "scheduled": it was, and a Bot with one routine read "2 scheduled".
  */
 export function activitySummary(activity: BotActivity): string {
+  const onDemand = activity.onDemand?.length ?? 0;
   const parts = [
     activity.inProgress.length
       ? `${activity.inProgress.length} in progress`
       : null,
     activity.scheduled.length ? `${activity.scheduled.length} scheduled` : null,
+    onDemand ? `${onDemand} on demand` : null,
   ].filter(Boolean);
   if (parts.length) return parts.join(" · ");
   return activity.completed.length
@@ -344,6 +351,15 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
         items={activity.data.scheduled}
         title="Scheduled"
       />
+      {/* Only when there is one: most Bots have no goal waiting to be asked. */}
+      {activity.data.onDemand?.length ? (
+        <ActivitySection
+          agentId={agentId}
+          empty=""
+          items={activity.data.onDemand}
+          title="On demand"
+        />
+      ) : null}
       <ActivitySection
         agentId={agentId}
         empty="No tasks, routines or goals have finished yet."

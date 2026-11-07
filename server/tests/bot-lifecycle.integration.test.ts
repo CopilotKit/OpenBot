@@ -40,6 +40,7 @@ import {
   responsibilities,
   responsibilityEvents,
   responsibilityRuns,
+  responsibilityTriggers,
 } from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createRoutineRunner } from "../src/routines/runner";
@@ -298,11 +299,52 @@ describe("pause", () => {
 describe("Activity and attention", () => {
   const activity = createActivityStore(database);
 
+  /*
+   * FOUND ON WINDOWS: a goal that only runs when asked was listed under Scheduled, and the Bot page
+   * said "2 scheduled" for one routine and that goal. Nothing starts it on its own, so it is on
+   * demand; a trigger on it wakes it, and puts it back with what is lined up.
+   */
+  test("a goal that runs only when asked is on demand, not scheduled", async () => {
+    const goal = `responsibility:${prefix}-goal-${owner}`;
+    const asked = await activity.forBot(owner, bot);
+    expect(asked.onDemand).toEqual([
+      expect.objectContaining({ id: goal, detail: "Runs when asked" }),
+    ]);
+    expect(asked.scheduled.some((item) => item.id === goal)).toBe(false);
+
+    const trigger = `${prefix}-trigger`;
+    await database.insert(responsibilityTriggers).values({
+      id: trigger,
+      ownerUserId: owner,
+      responsibilityId: `${prefix}-goal-${owner}`,
+      kind: "webhook",
+      config: { kind: "webhook", filter: { eventTypes: [] } },
+    });
+    try {
+      const woken = await activity.forBot(owner, bot);
+      expect(woken.onDemand).toEqual([]);
+      expect(woken.scheduled).toContainEqual(
+        expect.objectContaining({ id: goal, detail: "Wakes on webhook" }),
+      );
+      await database
+        .update(responsibilityTriggers)
+        .set({ enabled: false })
+        .where(eq(responsibilityTriggers.id, trigger));
+      const paused = await activity.forBot(owner, bot);
+      expect(paused.onDemand.map((item) => item.id)).toEqual([goal]);
+    } finally {
+      await database
+        .delete(responsibilityTriggers)
+        .where(eq(responsibilityTriggers.id, trigger));
+    }
+  });
+
   test("sections hold the owner's work and nobody else's", async () => {
     const result = await activity.forBot(owner, bot);
     const all = [
       ...result.inProgress,
       ...result.scheduled,
+      ...result.onDemand,
       ...result.completed,
     ];
     expect(all.some((item) => item.title === "Not yours")).toBe(false);
