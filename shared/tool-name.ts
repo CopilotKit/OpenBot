@@ -41,8 +41,20 @@ export function readToolName(name: string, running = false): ToolName {
     };
 
   const [, rawServer, ...rest] = parts;
+  /*
+   * OpenBot's own Routines app also carries a goal's tools for a conversation. They are the tools a
+   * goal's run holds, so they read in its words, "Created a goal", and not "Create goal" beside
+   * "routines".
+   */
+  if (rawServer === ROUTINES_APP) {
+    const goal = ownToolLabel(rest.join("__"), running);
+    if (goal) return { label: goal };
+  }
   return appToolName(rawServer ?? "", rest.join("__"));
 }
+
+/** The key of OpenBot's own Routines app (`ALWAYS_ON_APP` on the server). */
+const ROUTINES_APP = "routines";
 
 /**
  * One app's tool, from its server key and the tool's own name: what `readToolName` reads out of an

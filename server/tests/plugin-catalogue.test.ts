@@ -413,6 +413,12 @@ describe("Routines", () => {
       "pause_trigger",
       "resume_trigger",
       "delete_trigger",
+      "create_goal",
+      "update_goal",
+      "run_goal",
+      "pause_goal",
+      "resume_goal",
+      "complete_goal",
     ]);
   });
 

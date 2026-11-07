@@ -47,6 +47,21 @@ function fakeStore(
     async create() {
       throw new Error("not used by these tests");
     },
+    async conversationFor() {
+      throw new Error("not used by these tests");
+    },
+    async startManualRun() {
+      throw new Error("not used by these tests");
+    },
+    async listRuns() {
+      throw new Error("not used by these tests");
+    },
+    async reapAbandonedRuns() {
+      throw new Error("not used by these tests");
+    },
+    async markUnschedulable() {
+      throw new Error("not used by these tests");
+    },
     async listFor(ownerUserId) {
       calls.push(["listFor", ownerUserId]);
       return [summary()];

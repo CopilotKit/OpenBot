@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Asked in a conversation for a goal, a Bot makes one, where it said it had no goals tool and set up
+  a routine instead. Every Bot holds `create_goal`, `list_goals` and the other goal tools in Routines.
 - A goal that runs only when asked is counted "on demand" on a Bot's page and listed under On demand
   on its Activity page. It was counted and listed as scheduled.
 - A notice a Bot draws in a conversation labels its badge "Good news", "Heads up" or "Problem".
