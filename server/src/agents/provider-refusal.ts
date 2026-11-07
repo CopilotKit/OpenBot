@@ -26,6 +26,7 @@ import {
   bodyMessage,
   chain,
 } from "../model-billing";
+import { currentEdition } from "../edition";
 import { isModelUnavailableMessage } from "../model-rejection";
 
 /** What went wrong, as far as a person needs to know. */
@@ -231,7 +232,10 @@ export function refusalSentence(
     case "provider_down":
       return `${provider} is having problems right now. Wait a few minutes, then try again.`;
     case "other":
-      return `${provider} turned down the request. Try again, or ask an admin if it keeps happening.`;
+      // The personal edition has no admin to ask: the one person there can choose the model.
+      return currentEdition() === "personal"
+        ? `${provider} turned down the request. Try again, or choose another model if it keeps happening.`
+        : `${provider} turned down the request. Try again, or ask an admin if it keeps happening.`;
   }
 }
 
