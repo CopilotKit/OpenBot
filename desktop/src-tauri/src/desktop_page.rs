@@ -2,7 +2,8 @@
 //!
 //! The same facts and actions as the Status window, reached from the app instead: what is running,
 //! how much memory each part takes, Restart and Stop for OpenBot, and Start, Stop and status for
-//! the local Intelligence stack. Also the update banner's offer, close and install. An inline plugin, so each command carries a permission of its own,
+//! the local Intelligence stack. Also the update banner's offer, close and install, and Check for
+//! updates. An inline plugin, so each command carries a permission of its own,
 //! granted at runtime to the exact origin of the OpenBot this app started and to nothing else.
 //!
 //! And narration's speech recognition, on this computer (`speech`): the window's web view has none
@@ -14,13 +15,14 @@ use tauri::Manager;
 pub const PLUGIN: &str = "openbot-desktop";
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 12] = [
+pub const PERMISSIONS: [&str; 13] = [
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
     "openbot-desktop:allow-stop",
     "openbot-desktop:allow-intelligence",
     "openbot-desktop:allow-update-offer",
+    "openbot-desktop:allow-check-update",
     "openbot-desktop:allow-dismiss-update",
     "openbot-desktop:allow-install-update",
     "openbot-desktop:allow-speech-available",
@@ -99,6 +101,14 @@ async fn update_offer(app: tauri::AppHandle) -> app_update::Status {
     crate::app_update_status(&app)
 }
 
+/// Settings → This computer's Check for updates: the update feed read now, and what it found.
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> Result<app_update::Asked, String> {
+    crate::check_app_update_for_page(app)
+        .await
+        .map_err(|problem| problem.said)
+}
+
 /// The banner's close button: hidden until a newer version than `version` comes out.
 #[tauri::command]
 async fn dismiss_update(app: tauri::AppHandle, version: String) -> Result<(), String> {
@@ -151,6 +161,7 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             stop,
             intelligence,
             update_offer,
+            check_update,
             dismiss_update,
             install_update,
             speech_available,

@@ -2667,6 +2667,12 @@
           "markdownDescription": "Enables the appearance command without any pre-configured scope."
         },
         {
+          "description": "Enables the check_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-check-update",
+          "markdownDescription": "Enables the check_update command without any pre-configured scope."
+        },
+        {
           "description": "Enables the dismiss_update command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-dismiss-update",
@@ -2737,6 +2743,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-appearance",
           "markdownDescription": "Denies the appearance command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-check-update",
+          "markdownDescription": "Denies the check_update command without any pre-configured scope."
         },
         {
           "description": "Denies the dismiss_update command without any pre-configured scope.",

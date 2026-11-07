@@ -19,8 +19,8 @@ use openbot_desktop_lib::{
     acquire, app_update, deployment, deployment_release, docker_config, engine, env as openbot_env,
     harness, host_access, install, local_eval, local_eval_state, preparation,
     problem::{LeftoverReset, Problem},
-    provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install,
-    shell_updates, stack, telemetry, tray, upgrade, windows as win,
+    provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
+    telemetry, tray, upgrade, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -1002,101 +1002,13 @@ async fn put_back_interrupted_upgrade(app: &tauri::AppHandle, root: &Path) -> Re
     .map_err(|e| Problem::from(e.to_string()))?
 }
 
-#[tauri::command]
-async fn check_shell_update(app: tauri::AppHandle) -> Result<shell_updates::Status, Problem> {
-    #[cfg(not(feature = "shell-updater"))]
-    {
-        let _ = app;
-        Ok(shell_updates::unavailable("Signed desktop shell updates are not configured. This build does not include the optional updater feature."))
-    }
-    #[cfg(feature = "shell-updater")]
-    {
-        if shell_updates::compiled_trust()?.is_none() {
-            return Ok(shell_updates::unavailable("Signed desktop shell updates are not configured. Distributor public key and HTTPS endpoint are missing."));
-        }
-        let update = shell_updates::candidate(&app).await?;
-        Ok(shell_updates::Status {
-            configured: true,
-            available: update.is_some(),
-            version: update.map(|u| u.version),
-            detail:
-                "The shell update uses this build's configured distributor and signed artifacts."
-                    .into(),
-        })
-    }
-}
-#[tauri::command]
-async fn apply_shell_update(
-    app: tauri::AppHandle,
-    root: String,
-    version: String,
-    restart_acknowledged: bool,
-) -> Result<(), Problem> {
-    #[cfg(not(feature = "shell-updater"))]
-    {
-        let _ = (app, root, version, restart_acknowledged);
-        Err(Problem::plain(
-            "Signed desktop shell updates are not configured in this build.",
-        ))
-    }
-    #[cfg(feature = "shell-updater")]
-    {
-        if !restart_acknowledged {
-            return Err(Problem::plain("Acknowledge stopping OpenBot and restarting the native application before installation."));
-        }
-        let _update = RuntimeUpdateGuard::begin(&app)?;
-        let root = stack::root_from(&root);
-        require_update_root(&app.state::<Shell>(), &root)?;
-        let update = shell_updates::candidate(&app)
-            .await?
-            .ok_or("No native shell update is available.")?;
-        if update.version != version {
-            return Err(Problem::plain(
-                "The available shell release changed. Check and review it again before installing.",
-            ));
-        }
-        // Download verifies the artifact signature before any owned runtime is stopped.
-        let bytes = update
-            .download(|_, _| {}, || {})
-            .await
-            .map_err(|e| Problem::from(e.to_string()))?;
-        if app
-            .state::<Shell>()
-            .update_cancelled
-            .load(std::sync::atomic::Ordering::SeqCst)
-        {
-            return Err(Problem::plain(
-                "Shell update was cancelled by Stop before installation.",
-            ));
-        }
-        let handle = app.clone();
-        let target = root.clone();
-        tauri::async_runtime::spawn_blocking(move || stop_for_update(&handle, &target))
-            .await
-            .map_err(|e| Problem::from(e.to_string()))??;
-        app.emit("runtime:update-stopped", ())
-            .map_err(|e| Problem::from(e.to_string()))?;
-        tauri::async_runtime::spawn_blocking(move || update.install(bytes))
-            .await
-            .map_err(|e| Problem::from(e.to_string()))?
-            .map_err(|e| Problem::from(e.to_string()))?;
-        app.restart();
-    }
-}
-
 /// Read the update feed at launch and every six hours, on a thread of its own, when this build is
 /// offered updates at all: a stable, unpinned build with the updater (see `app_update`). Any other
 /// build never reads the feed.
 fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    let version = &app.package_info().version;
-    let Some(current) = app_update::offered_against(version, deployment::pinned().is_some()) else {
-        eprintln!("[app update] {version} is a pinned build; no update check");
-        return;
-    };
-    let (Some(endpoints), Some(platform)) = (
-        app_update::endpoints(app.config().plugins.0.get("updater")),
-        app_update::platform(),
-    ) else {
+    let Some(feed) = app_update_feed(app) else {
+        let version = &app.package_info().version;
+        eprintln!("[app update] {version} is offered no updates; no update check");
         return;
     };
     let handle = app.clone();
@@ -1111,7 +1023,7 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                     true
                 },
                 || {
-                    let answer = app_update::check(&current, &endpoints, &platform);
+                    let answer = feed.read();
                     if let Err(error) = &answer {
                         eprintln!("[app update] could not read the update feed: {error}");
                     }
@@ -1122,6 +1034,98 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Err(error) = watching {
         eprintln!("[app update] could not start checking for updates: {error}");
     }
+}
+
+/// This build's update feed, or `None` when it is offered no updates (see `app_update::Feed::of`).
+/// The schedule, the windows' Check for updates and the menus' Check for Updates… all ask this.
+fn app_update_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<app_update::Feed> {
+    app_update::Feed::of(
+        &app.package_info().version,
+        deployment::pinned().is_some(),
+        app.config().plugins.0.get("updater"),
+    )
+}
+
+/// Read the update feed now, because somebody asked, and keep the answer for the banner too.
+async fn check_app_update_now<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<app_update::Asked, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app_update::ask(
+            app_update_feed(&app).as_ref(),
+            &app.package_info().version,
+            &app.state::<Shell>().app_update,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// What a window's Check for updates shows. Unlike the schedule's, a check that fails is said.
+async fn check_app_update_for_page<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<app_update::Asked, Problem> {
+    check_app_update_now(app).await.map_err(|error| {
+        eprintln!("[app update] could not read the update feed: {error}");
+        Problem::with(
+            "OpenBot couldn't check for updates. Check your internet connection and try again.",
+            error,
+        )
+    })
+}
+
+/// Check for Updates… in the tray or the OpenBot menu. Always answers, in a native dialog: the
+/// offer with Update and restart, up to date, or couldn't check. Not now closes the offer on that
+/// version, as it does in the windows.
+fn check_for_updates_from_menu(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let asked = check_app_update_now(app.clone()).await;
+        if let Err(error) = &asked {
+            eprintln!("[app update] could not read the update feed: {error}");
+        }
+        let offered = match &asked {
+            Ok(app_update::Asked::Available { version, .. }) => Some(version.clone()),
+            _ => None,
+        };
+        let answering = app.clone();
+        show_prompt(&app, app_update::prompt(&asked), move |update| {
+            let Some(version) = offered else {
+                return;
+            };
+            if !update {
+                if let Err(problem) = dismiss_app_update_for(&answering, &version) {
+                    eprintln!("[app update] could not close the offer: {}", problem.said);
+                }
+                return;
+            }
+            tauri::async_runtime::spawn(async move {
+                // Returns only when it failed: on success the app restarts into the new version.
+                if let Err(problem) = install_app_update_now(answering.clone()).await {
+                    show_prompt(
+                        &answering,
+                        app_update::install_failed(&problem.said),
+                        |_| {},
+                    );
+                }
+            });
+        });
+    });
+}
+
+fn show_prompt(
+    app: &tauri::AppHandle,
+    prompt: app_update::Prompt,
+    answered: impl FnOnce(bool) + Send + 'static,
+) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+    let dialog = app.dialog().message(prompt.message).title(prompt.title);
+    let dialog = match prompt.buttons {
+        Some((yes, no)) => {
+            dialog.buttons(MessageDialogButtons::OkCancelCustom(yes.into(), no.into()))
+        }
+        None => dialog,
+    };
+    dialog.show(answered);
 }
 
 /// What the banner and the setup window offer: the newer version, unless this person closed it.
@@ -1286,6 +1290,14 @@ fn quit_done_for_restart(quit: &QuitState) {
 #[tauri::command]
 async fn app_update_offer(app: tauri::AppHandle) -> app_update::Status {
     app_update_status(&app)
+}
+
+/// The setup window's Check for updates: the feed read now, and what it found.
+#[tauri::command]
+async fn check_app_update<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<app_update::Asked, Problem> {
+    check_app_update_for_page(app).await
 }
 
 #[tauri::command]
@@ -4498,7 +4510,12 @@ mod app_page_tests {
                 format!("plugin:openbot-desktop|{name}")
             })
             .collect();
-        for update in ["update_offer", "dismiss_update", "install_update"] {
+        for update in [
+            "update_offer",
+            "check_update",
+            "dismiss_update",
+            "install_update",
+        ] {
             assert!(commands.contains(&format!("plugin:openbot-desktop|{update}")));
         }
         let foreign = "http://127.0.0.1:3011/";
@@ -6475,7 +6492,7 @@ fn settle_menu_stop(shell: &Shell, fallback_root: &Path, stopped: Stopped) -> Op
     Some(problem)
 }
 
-/// What each of the three items does, wherever it was chosen from.
+/// What each menu item does, wherever it was chosen from.
 ///
 /// The tray and the window menu carry the same items, so they share one function: two copies would
 /// be two chances for Stop to mean something different depending on where somebody clicked.
@@ -6486,6 +6503,7 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone()),
         "status" => show_status_window(app),
+        app_update::MENU_ID => check_for_updates_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
         "quit" => {
@@ -6634,6 +6652,18 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
     // The menu bar menu follows the system's appearance; its icons are drawn for each.
     let dark = system_is_dark(app);
     let running = app.state::<Shell>().root.lock().unwrap().is_some();
+    // Check for Updates… only in a build offered updates: anywhere else it could only say no.
+    let updates = app_update_feed(app).is_some();
+    let check_for_updates = || {
+        MenuItem::with_id(
+            app,
+            app_update::MENU_ID,
+            app_update::MENU_LABEL,
+            true,
+            None::<&str>,
+        )
+        .map(MenuEntry::Plain)
+    };
 
     /*
      * The menu bar's menu, laid out as Mac menu bar apps have theirs: what is running, with a
@@ -6683,6 +6713,9 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
             Some("About"),
             Some(about_openbot()),
         )?));
+        if updates {
+            entries.push(check_for_updates()?);
+        }
         entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
         entries.push(MenuEntry::Icon(IconMenuItem::with_id(
             app,
@@ -6705,6 +6738,10 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
             Some("About OpenBot"),
             Some(about_openbot()),
         )?)];
+        // Where every Mac app keeps it: under About.
+        if updates {
+            entries.push(check_for_updates()?);
+        }
         entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
@@ -7157,6 +7194,7 @@ fn main() {
     #[cfg(feature = "shell-updater")]
     let context = {
         let mut context = context;
+        use openbot_desktop_lib::shell_updates;
         shell_updates::configure_plugin(
             &mut context.config_mut().plugins,
             shell_updates::compiled_trust().ok().flatten().as_ref(),
@@ -7188,8 +7226,7 @@ fn main() {
             windows_restart,
             prepare_engine,
             prepare_installation,
-            check_shell_update,
-            apply_shell_update,
+            check_app_update,
             app_update_offer,
             dismiss_app_update,
             install_app_update,
@@ -7431,6 +7468,165 @@ mod background_launch_tests {
             main.background_throttling,
             Some(BackgroundThrottlingPolicy::Disabled),
         );
+    }
+}
+
+#[cfg(test)]
+mod check_for_updates_tests {
+    use super::*;
+    use tauri::test::MockRuntime;
+
+    /// A feed on 127.0.0.1 that answers every read with a release at `version` for this machine.
+    fn feed_at(version: &str) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!(
+            "http://127.0.0.1:{}/latest/latest.json",
+            listener.local_addr().unwrap().port()
+        );
+        let mut platforms = serde_json::Map::new();
+        platforms.insert(
+            app_update::platform().unwrap(),
+            serde_json::json!({
+                "url": "https://downloads.copilotkit.ai/OpenBot.tar.gz",
+                "signature": "signed"
+            }),
+        );
+        let body = serde_json::json!({ "version": version, "platforms": platforms }).to_string();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut request = [0u8; 4096];
+                let _ = std::io::Read::read(&mut stream, &mut request);
+                let _ = std::io::Write::write_all(
+                    &mut stream,
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        url
+    }
+
+    /// An app configured as a signed release is (`tauri.windows-signing.conf.json`'s updater block),
+    /// its feed read from `feed`; with no feed, a build without the updater, as internal builds are.
+    fn app(feed: Option<&str>) -> (tauri::App<MockRuntime>, tauri::WebviewWindow<MockRuntime>) {
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        if let Some(feed) = feed {
+            let overlay: serde_json::Value =
+                serde_json::from_str(include_str!("../tauri.windows-signing.conf.json")).unwrap();
+            let mut updater = overlay["plugins"]["updater"].clone();
+            updater["endpoints"] = serde_json::json!([feed]);
+            updater["dangerousInsecureTransportProtocol"] = true.into();
+            context
+                .config_mut()
+                .plugins
+                .0
+                .insert("updater".into(), updater);
+        }
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .invoke_handler(tauri::generate_handler![check_app_update])
+            .build(context)
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        (app, window)
+    }
+
+    fn check(
+        window: &tauri::WebviewWindow<MockRuntime>,
+    ) -> Result<serde_json::Value, serde_json::Value> {
+        tauri::test::get_ipc_response(
+            window,
+            tauri::webview::InvokeRequest {
+                cmd: "check_app_update".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: if cfg!(windows) {
+                    "http://tauri.localhost"
+                } else {
+                    "tauri://localhost"
+                }
+                .parse()
+                .unwrap(),
+                body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+                headers: Default::default(),
+                invoke_key: tauri::test::INVOKE_KEY.into(),
+            },
+        )
+        .map(|body| body.deserialize().unwrap())
+    }
+
+    /// The bug: on a signed 0.3.2, the setup window's Check desktop shell update asked an old
+    /// mechanism release builds do not carry, and said "Signed desktop shell updates are not
+    /// configured." A release build now answers from the feed its updater installs from.
+    #[test]
+    fn a_release_build_answers_check_for_updates_from_its_update_feed() {
+        let (_app, window) = app(Some(&feed_at("0.1.0")));
+        assert_eq!(
+            check(&window),
+            Ok(serde_json::json!({ "found": "upToDate", "current": "0.1.0" }))
+        );
+        let (app, window) = app(Some(&feed_at("0.3.3")));
+        assert_eq!(
+            check(&window),
+            Ok(serde_json::json!({ "found": "available", "version": "0.3.3", "current": "0.1.0" }))
+        );
+        // Kept, so the banner offers the same version.
+        assert_eq!(
+            app_update_status(app.handle()).version.as_deref(),
+            Some("0.3.3")
+        );
+    }
+
+    #[test]
+    fn a_build_without_the_updater_says_it_does_not_update_itself() {
+        let (_app, window) = app(None);
+        assert_eq!(
+            check(&window),
+            Ok(serde_json::json!({ "found": "notOffered", "current": "0.1.0" }))
+        );
+    }
+
+    #[test]
+    fn a_feed_that_cannot_be_read_is_said_in_a_sentence() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let feed = format!("http://{}/latest.json", closed.local_addr().unwrap());
+        drop(closed);
+        let (_app, window) = app(Some(&feed));
+        let failure = check(&window).unwrap_err();
+        assert_eq!(
+            failure["said"],
+            "OpenBot couldn't check for updates. Check your internet connection and try again."
+        );
+        assert!(failure["detail"].as_str().is_some_and(|d| !d.is_empty()));
+    }
+
+    /// One way to ask, in every place OpenBot offers it: the windows' command is the feed's, the old
+    /// shell update commands are gone, and both menus carry Check for Updates…, which the menu
+    /// handler routes to the same check. AppKit menus cannot be built under the mock runtime (see
+    /// `refresh_menus`), so this reads the shell's own wiring.
+    #[test]
+    fn every_way_to_ask_for_an_update_reads_the_update_feed() {
+        let main = include_str!("main.rs");
+        let handler = &main[main.find("\nfn main() {").unwrap()..];
+        let handler = &handler[handler.find(".invoke_handler(").unwrap()..];
+        let handler = &handler[..handler.find("])").unwrap()];
+        assert!(handler.contains("check_app_update,"));
+        for gone in ["check_shell", "apply_shell"] {
+            assert!(!main.contains(&format!("{gone}_update")), "{gone}_update");
+        }
+        let menus = &main[main.find("fn install_menus").unwrap()..];
+        let menus = &menus[..menus.find("app.set_menu(").unwrap()];
+        assert_eq!(
+            menus.matches("entries.push(check_for_updates()?);").count(),
+            2
+        );
+        assert!(main.contains("app_update::MENU_ID => check_for_updates_from_menu(app.clone()),"));
     }
 }
 
