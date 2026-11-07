@@ -196,19 +196,34 @@ export const NoticeCardProps = z.object({
     .describe("Supporting points, if there are any"),
 });
 
+/**
+ * The words on a notice's badge. The tone picks the badge's colour and is never its text: a notice
+ * drawn with `tone: "positive"` read "positive", a styling value shown to the person. Neutral has no
+ * badge, and so has a tone still arriving while the card draws.
+ */
+function noticeBadge(tone: string | undefined): string | null {
+  switch (tone) {
+    case "positive":
+      return "Good news";
+    case "caution":
+      return "Heads up";
+    case "negative":
+      return "Problem";
+    default:
+      return null;
+  }
+}
+
 export function NoticeCard({
   title,
   body,
   tone: noticeTone,
   points,
 }: Partial<z.infer<typeof NoticeCardProps>>) {
+  const badge = noticeBadge(noticeTone);
   return (
     <GalleryFrame
-      action={
-        noticeTone && noticeTone !== "neutral" ? (
-          <Badge tone={noticeTone}>{noticeTone}</Badge>
-        ) : undefined
-      }
+      action={badge ? <Badge tone={noticeTone}>{badge}</Badge> : undefined}
       title={title}
     >
       <p className="text-sm">{body}</p>
