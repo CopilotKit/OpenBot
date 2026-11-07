@@ -98,6 +98,10 @@ mock.module("@tauri-apps/api/event", () => ({
 
 mock.module("./Mark", () => ({
   Mark: ({ name }: { name: string }) => <span>{name}</span>,
+  // The mark a "Sign in with" button carries, by the id it was given. The real one draws that
+  // vendored file, which needs Vite's glob.
+  ButtonMark: ({ id }: { id: string | null }) =>
+    id ? <img alt="" data-mark={id} /> : null,
 }));
 
 const { ProviderPicker } = await import("./ProviderPicker");
@@ -168,6 +172,54 @@ async function pick(view: ReturnType<typeof render>, name: RegExp) {
   if (change) await userEvent.click(change);
   await userEvent.click(await view.findByRole("radio", { name }));
 }
+
+/*
+ * Every "Sign in with" button carries the mark of the provider it signs in to, as the web app's
+ * sign-in buttons do. They carried none, and Google's and xAI's rows had no mark to carry.
+ */
+test("every Sign in with button carries its provider's mark", async () => {
+  const marked: Provider[] = [
+    { ...providers[0], mark: "openai" },
+    { ...providers[1], mark: "anthropic" },
+    {
+      id: "google",
+      name: "Google Gemini",
+      summary: "Use an API key or sign in.",
+      logins: ["endpoint", "oauth"],
+      mark: "google-color",
+      caution: null,
+    },
+    {
+      id: "xai",
+      name: "xAI",
+      summary: "Use an API key or sign in.",
+      logins: ["endpoint", "oauth"],
+      mark: "xai",
+      caution: null,
+    },
+  ];
+  invokeHandler = async (command) => {
+    if (command === "providers") return marked;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPickerWithHeld({
+    saved: { modelSessions: { anthropic: true } },
+  });
+
+  for (const provider of marked) {
+    await pick(view, new RegExp(`^${provider.name}`));
+    if (provider.logins.includes("oauth"))
+      await userEvent.click(view.getByRole("tab", { name: "Sign in" }));
+    const name =
+      provider.id === "anthropic"
+        ? "Sign in again with Anthropic"
+        : `Sign in with ${provider.name}`;
+    const button = view.getByRole("button", { name });
+    expect(button.querySelector("img")?.getAttribute("data-mark")).toBe(
+      provider.mark,
+    );
+  }
+});
 
 test("a completed plan sign-in enables and submits only its issuing provider", async () => {
   const choices: unknown[] = [];

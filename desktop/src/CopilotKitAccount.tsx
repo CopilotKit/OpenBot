@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { CopilotKitLogo } from "./CopilotKitLogo";
 import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
 import {
@@ -192,8 +193,9 @@ export function CopilotKitAccount({
   return (
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
-          CopilotKit is named where that is true: the account and the agreement's own title. */}
+          The account is CopilotKit's, so its logotype leads the step itself. */}
       <Sections at="Account" />
+      <CopilotKitLogo />
       <h1>
         {agreement
           ? "Accept the license agreement"

@@ -59,6 +59,10 @@ mock.module("@tauri-apps/api/event", () => ({
 
 mock.module("./Mark", () => ({
   Mark: ({ name }: { name: string }) => <span>{name}</span>,
+  // The mark a "Sign in with" button carries, by the id it was given. The real one draws that
+  // vendored file, which needs Vite's glob.
+  ButtonMark: ({ id }: { id: string | null }) =>
+    id ? <img alt="" data-mark={id} /> : null,
 }));
 
 const { App } = await import("./App");
