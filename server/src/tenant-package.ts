@@ -207,6 +207,16 @@ type TenantChannel = {
 
 export type TenantPackage = {
   tenantId: string;
+  /**
+   * Ids this package was published under before `tenantId` (`tenant.former_ids` in brand.yaml).
+   *
+   * A deployment set up under one of them holds its Bots and channels under that id, and a package
+   * may not take over a Bot another package seeded (see the refusal in
+   * {@link synchronizeTenantPackage}). So a renamed package would stop its own deployments booting.
+   * Naming the old id here says those rows are this package's: the synchronise carries them over,
+   * and {@link deploymentNameOf} keeps the deployment's name.
+   */
+  formerTenantIds: string[];
   productName: string;
   stylesheet: string | null;
   agents: TenantAgent[];
@@ -629,8 +639,23 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
     },
   );
 
+  const tenantId = requiredString(tenant.id, "tenant.id");
+  const formerTenantIds =
+    tenant.former_ids === undefined
+      ? []
+      : stringArray(tenant.former_ids, "tenant.former_ids");
+  for (const formerId of formerTenantIds) {
+    requiredString(formerId, "tenant.former_ids[]");
+    if (formerId === tenantId) {
+      throw new Error(
+        `tenant.former_ids names "${formerId}", which is this package's own tenant.id`,
+      );
+    }
+  }
+
   return {
-    tenantId: requiredString(tenant.id, "tenant.id"),
+    tenantId,
+    formerTenantIds,
     productName: requiredString(tenant.product_name, "tenant.product_name"),
     stylesheet: skin
       ? requiredString(skin.stylesheet, "skin.stylesheet")
@@ -920,20 +945,38 @@ export async function synchronizeTenantPackage(
       throw new Error("Tenant package could not be synchronized");
     }
 
-    // Older personal releases used their own tenant ID. The former row also means the installation
-    // has already been seeded, regardless of whether its Bots have been carried to the new row.
-    const [formerPersonal] = bundledPersonal
-      ? await transaction
-          .select({ id: deploymentPackages.id })
-          .from(deploymentPackages)
-          .where(
-            and(
-              eq(deploymentPackages.tenantId, "personal"),
-              ne(deploymentPackages.id, deploymentPackage.id),
-            ),
-          )
-      : [];
-    const freshPersonal = Boolean(initial && !formerPersonal);
+    const formerPackages =
+      tenantPackage.formerTenantIds.length > 0
+        ? await transaction
+            .select({ id: deploymentPackages.id })
+            .from(deploymentPackages)
+            .where(
+              inArray(
+                deploymentPackages.tenantId,
+                tenantPackage.formerTenantIds,
+              ),
+            )
+        : [];
+    const formerPackageIds = formerPackages.map(({ id }) => id);
+
+    /*
+     * A deployment set up under one of this package's former ids. Its Bots and channels are this
+     * package's, so they move to this package's row before the seeding below, which would otherwise
+     * refuse them as another package's and stop the deployment booting. The former row itself stays,
+     * owning nothing, because it is how `deploymentNameOf` knows this deployment's name.
+     */
+    if (formerPackageIds.length > 0) {
+      await transaction
+        .update(agentTable)
+        .set({ packageId: deploymentPackage.id })
+        .where(inArray(agentTable.packageId, formerPackageIds));
+      await transaction
+        .update(channelTable)
+        .set({ packageId: deploymentPackage.id })
+        .where(inArray(channelTable.packageId, formerPackageIds));
+    }
+
+    const freshPersonal = Boolean(initial && formerPackageIds.length === 0);
     const personal = bundledPersonal
       ? personalStarterSeed(tenantPackage, freshPersonal)
       : undefined;
@@ -968,10 +1011,7 @@ export async function synchronizeTenantPackage(
             ne(agentTable.type, "built_in"),
             sql`(${stored}->'personalStarter' = 'true'::jsonb
               or ${stored}->>'endpoint' ~ '^http://agent-harness:[0-9]+([/?]|$)')`,
-            inArray(agentTable.packageId, [
-              deploymentPackage.id,
-              ...(formerPersonal ? [formerPersonal.id] : []),
-            ]),
+            eq(agentTable.packageId, deploymentPackage.id),
             inArray(
               agentTable.id,
               transaction
@@ -1268,6 +1308,30 @@ export async function synchronizeTenantPackage(
 
     return deploymentPackage;
   });
+}
+
+/**
+ * What this deployment calls itself when `DEPLOYMENT_ID` is unset: the package's tenant id, unless
+ * the deployment was set up under one of the package's former ids, in which case that one.
+ *
+ * The name goes into every thread id the deployment mints (channels/thread-identity.ts) and into the
+ * vendor identity of an account made Shared, so it has to outlive a package rename. Read from the
+ * former package rows the synchronise keeps, in the order the package lists them.
+ */
+export async function deploymentNameOf(
+  database: Database,
+  tenantPackage: Pick<TenantPackage, "tenantId" | "formerTenantIds">,
+): Promise<string> {
+  if (tenantPackage.formerTenantIds.length === 0) return tenantPackage.tenantId;
+  const rows = await database
+    .select({ tenantId: deploymentPackages.tenantId })
+    .from(deploymentPackages)
+    .where(inArray(deploymentPackages.tenantId, tenantPackage.formerTenantIds));
+  const present = new Set(rows.map((row) => row.tenantId));
+  return (
+    tenantPackage.formerTenantIds.find((id) => present.has(id)) ??
+    tenantPackage.tenantId
+  );
 }
 
 export function createPackageStatusReader(

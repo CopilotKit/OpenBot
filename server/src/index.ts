@@ -316,6 +316,7 @@ import {
 } from "./telemetry/product-boundaries";
 import {
   createPackageStatusReader,
+  deploymentNameOf,
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
@@ -449,9 +450,11 @@ const agentProfileStore = createAgentProfileStore(
 // Read here rather than beside the synchronise below, because the package names the deployment and
 // the channel store needs that name before it can mint a thread id.
 const tenantPackage = await loadTenantPackage(config.tenantPackageDirectory);
-const threadIdentity = createThreadIdentity(
-  config.deploymentId ?? tenantPackage.tenantId,
-);
+// The package's id unless DEPLOYMENT_ID says otherwise, and the id the deployment was set up under if
+// the package has since been renamed. See `deploymentNameOf`.
+const deploymentId =
+  config.deploymentId ?? (await deploymentNameOf(database, tenantPackage));
+const threadIdentity = createThreadIdentity(deploymentId);
 const baseChannelStore = createChannelStore(
   database,
   agentProfileStore,
@@ -1081,7 +1084,7 @@ await ensureSingleUserIdentity(database, {
 const pluginStore = withPersonalDefaults(
   createPluginStore({
     database,
-    deploymentId: config.deploymentId ?? tenantPackage.tenantId,
+    deploymentId,
     auditStore: bootAuditStore,
     credentials: credentialStore,
     encryptionKey: config.keyEncryptionKey,
@@ -1126,7 +1129,7 @@ const accountModes = createAccountModeSwitch({
   store: pluginStore,
   sharedUse: sharedUseStore,
   teamRules: approvalService.store.policy,
-  deploymentId: config.deploymentId ?? tenantPackage.tenantId,
+  deploymentId,
   audit: bootAuditStore,
 });
 
