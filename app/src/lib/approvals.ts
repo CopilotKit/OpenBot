@@ -3,6 +3,7 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
+import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { client } from "@/lib/client";
 export type ApprovalDecision =
   | "allow_once"
@@ -272,7 +273,26 @@ export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>
       response: string;
       inConversation?: boolean;
     }) => answerPersonQuestion(id, response, inConversation),
-    onSuccess: settle(queryClient),
+    /*
+     * Answered is answered, whatever the turn that carries the answer comes to: the question's card
+     * goes at once, and the badge that counted it is read again rather than on its next poll.
+     */
+    onSuccess: (_continueHere, { id }) => {
+      queryClient.setQueryData<ApprovalInboxData>(approvalsKey, (inbox) =>
+        inbox
+          ? {
+              ...inbox,
+              questions: inbox.questions.filter(
+                (question) => question.id !== id,
+              ),
+            }
+          : inbox,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: botLifecycleKeys.attention,
+      });
+      return settle(queryClient)();
+    },
   });
 
 /** Put a question down unanswered. Everything is read again: a task waiting on it moves on too. */

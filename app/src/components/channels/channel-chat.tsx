@@ -11,6 +11,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import {
   answerMessage,
+  askedSinceLastMessage,
+  conversationQuestion,
   QuestionNotice,
   shownAnswer,
   useConversationQuestion,
@@ -31,7 +33,10 @@ import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { answerPersonQuestionMutationOptions } from "@/lib/approvals";
+import {
+  answerPersonQuestionMutationOptions,
+  approvalInboxOptions,
+} from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
   recordChannelActivityMutationOptions,
@@ -1071,7 +1076,9 @@ export function ChannelChat({
          */
         if (
           (event as { outcome?: { type?: unknown } } | undefined)?.outcome
-            ?.type === "interrupt"
+            ?.type === "interrupt" ||
+          // And a run that ended on a question to the person, the same way.
+          askedSinceLastMessage(agent.messages)
         )
           void queryClient.invalidateQueries({ queryKey: ["approvals"] });
         const wasOurs = awaitingReply.current;
@@ -1120,14 +1127,28 @@ export function ChannelChat({
    * race.
    */
   const question = useConversationQuestion(channel.id, channel.threadId);
+  /*
+   * The question a message sent now answers. The inbox above is polled, so a person who answers the
+   * moment the Bot asks can be ahead of it: their answer went as a plain message, the question stayed
+   * open, and its card and badge came back after the turn it should have closed. So when the
+   * transcript shows the Bot asked since the person last spoke, the inbox is read again first.
+   */
+  const waitingQuestion = async () => {
+    if (question || !askedSinceLastMessage(agentRef.current.messages))
+      return question;
+    const inbox = await queryClient
+      .fetchQuery({ ...approvalInboxOptions(), staleTime: 0 })
+      .catch(() => undefined);
+    return conversationQuestion(inbox, channel.id, channel.threadId);
+  };
   const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
   const [answeredId, setAnsweredId] = useState<string | null>(null);
-  const answerTo = async (text: string) => {
-    if (!question) return;
-    const sent = answerMessage(question, text);
+  const answerTo = async (text: string, asked = question) => {
+    if (!asked) return;
+    const sent = answerMessage(asked, text);
     const idle = turnsRef.current === 0 && !agentRef.current.isRunning;
     const continueHere = await answer.mutateAsync({
-      id: question.id,
+      id: asked.id,
       response: text,
       inConversation: idle,
     });
@@ -1388,12 +1409,12 @@ export function ChannelChat({
               );
 
               // An answer is words only: a draft carrying files or a skill is sent as a turn.
-              if (
-                question &&
-                draft.attachments.length === 0 &&
-                skillInstructions.length === 0
-              ) {
-                await answerTo(draft.text);
+              const asked =
+                draft.attachments.length === 0 && skillInstructions.length === 0
+                  ? await waitingQuestion()
+                  : undefined;
+              if (asked) {
+                await answerTo(draft.text, asked);
                 return;
               }
               await say(draft.text, skillInstructions, draft.attachments);

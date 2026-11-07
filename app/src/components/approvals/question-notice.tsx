@@ -36,10 +36,38 @@ export function useConversationQuestion(
   threadId: string,
 ): WaitingQuestion | undefined {
   const inbox = useQuery(approvalInboxOptions());
-  return inbox.data?.questions.find(
+  return conversationQuestion(inbox.data, channelId, threadId);
+}
+
+/** The newest open question asked in this conversation, from an inbox read. */
+export function conversationQuestion(
+  inbox: ApprovalInboxData | undefined,
+  channelId: string,
+  threadId: string,
+): WaitingQuestion | undefined {
+  return inbox?.questions.find(
     (question) =>
       question.channelId === channelId && question.threadId === threadId,
   );
+}
+
+/**
+ * Whether the Bot asked the person something since they last spoke: an `ask_person` call in what it
+ * said after their last message. The transcript knows this the moment the asking run ends; the inbox
+ * that holds the question is polled, so an answer typed straight away can arrive before the inbox
+ * has been read again, and must not be taken for a new message because of it.
+ */
+export function askedSinceLastMessage(messages: readonly Message[]): boolean {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (!message || message.role === "user") return false;
+    if (
+      message.role === "assistant" &&
+      message.toolCalls?.some((call) => call.function.name === "ask_person")
+    )
+      return true;
+  }
+  return false;
 }
 
 /**

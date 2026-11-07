@@ -6,7 +6,9 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { ChannelChat } from "@/components/channels/channel-chat";
+import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -65,9 +67,16 @@ const ASKED: Message[] = [
   },
 ];
 const WORKING = "Looking up what's on in Chicago this weekend";
+const PUT_TO_PERSON =
+  "Put to the person in the source conversation; the question is saved awaiting their reply";
 
 let originalFetch: typeof fetch;
+/** Whether the question is waiting on the person, as the server's inbox and badge count it. */
 let open = true;
+/** The thread's stored messages, as a reload reads them. */
+let history: Message[] = ASKED;
+/** The next run asks the question (and saves it, as the server does) rather than working. */
+let nextRunAsks = false;
 let answers: unknown[] = [];
 let runs: RunAgentInput[] = [];
 let stopRequests: string[] = [];
@@ -77,8 +86,72 @@ function frames(events: unknown[]) {
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
 }
 
+/**
+ * A run that asks the person, as the Bot's first turn does. The call streams first; the server saves
+ * the question when it carries the call out, a moment later, and the run then ends on its result.
+ */
+function asks(input: RunAgentInput): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const encoder = new TextEncoder();
+      controller.enqueue(
+        encoder.encode(
+          frames([
+            {
+              type: "RUN_STARTED",
+              threadId: input.threadId,
+              runId: input.runId,
+            },
+            {
+              type: "TOOL_CALL_START",
+              toolCallId: "ask-call",
+              toolCallName: "ask_person",
+              parentMessageId: "asks",
+            },
+            {
+              type: "TOOL_CALL_ARGS",
+              toolCallId: "ask-call",
+              delta: JSON.stringify({ question: QUESTION }),
+            },
+            { type: "TOOL_CALL_END", toolCallId: "ask-call" },
+          ]),
+        ),
+      );
+      setTimeout(() => {
+        open = true;
+        controller.enqueue(
+          encoder.encode(
+            frames([
+              {
+                type: "TOOL_CALL_RESULT",
+                messageId: "asked",
+                toolCallId: "ask-call",
+                content: PUT_TO_PERSON,
+                role: "tool",
+              },
+              {
+                type: "RUN_FINISHED",
+                threadId: input.threadId,
+                runId: input.runId,
+              },
+            ]),
+          ),
+        );
+        controller.close();
+      }, 200);
+    },
+  });
+  return new NativeResponse(body, {
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
 /** A run that streams the start of its work and waits, as a Bot still working does. */
 function run(input: RunAgentInput): Response {
+  if (nextRunAsks) {
+    nextRunAsks = false;
+    return asks(input);
+  }
   runs.push(input);
   const messageId = `reply-${input.runId}`;
   const opening = [
@@ -139,6 +212,24 @@ beforeAll(() => {
         });
       if (url.pathname === `/api/components/for-agent/${BOT}`)
         return NativeResponse.json({ components: [] });
+      if (url.pathname === "/api/bots/attention")
+        return NativeResponse.json({
+          lastPingId: null,
+          bots: [
+            {
+              agentId: BOT,
+              name: channel.name,
+              questions: open ? 1 : 0,
+              approvals: 0,
+              handoffs: 0,
+              unread: 0,
+              paused: false,
+              notify: "none",
+              items: 0,
+              tasks: { needsInput: 0, ready: 0, failed: 0 },
+            },
+          ],
+        });
       if (url.pathname === "/api/admin/enterprise/me")
         return NativeResponse.json({ capabilities: {}, enforced: false });
       // The question the Bot is waiting on, in this conversation, until it is answered.
@@ -200,7 +291,7 @@ beforeAll(() => {
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/threads\/[^/]+\/messages$/.test(url.pathname))
-        return NativeResponse.json({ messages: ASKED });
+        return NativeResponse.json({ messages: history });
       throw new Error(`Unexpected fixture request: ${url.pathname}`);
     },
     {
@@ -214,6 +305,8 @@ afterEach(() => {
   cleanup();
   queryClient.clear();
   open = true;
+  history = ASKED;
+  nextRunAsks = false;
   answers = [];
   runs = [];
   stopRequests = [];
@@ -247,6 +340,7 @@ function conversation() {
   return render(
     <QueryClientProvider client={queryClient}>
       <CopilotKitProvider runtimeUrl="http://localhost/api/copilotkit">
+        <BotsNavBadge />
         <ChannelChat channel={channel} runtimeAgentId={BOT} />
       </CopilotKitProvider>
     </QueryClientProvider>,
@@ -297,4 +391,54 @@ test("the Bot's work on an answer streams in the conversation, and Stop stops it
     ).toBeNull(),
   );
   expect(runs).toHaveLength(1);
+});
+
+/*
+ * The person answered the moment the Bot asked, before the inbox that lists the question was read
+ * again, and then stopped the turn their answer started. Their answer went as a plain message, so the
+ * question stayed open: once the inbox and the badge were read again, the card asked for an answer
+ * already given and the sidebar said a Bot still needed them.
+ */
+test("an answer given the moment the Bot asks closes the question, even when its turn is stopped", async () => {
+  open = false;
+  history = [];
+  nextRunAsks = true;
+  const view = conversation();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  const box = await view.findByRole("textbox", { name: "Message" });
+  await user.type(box, "Find weekend plans");
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  // The Bot asks, and its run ends on the question.
+  await waitFor(() => expect(open).toBe(true));
+  await waitFor(() =>
+    expect(view.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+  // The badge's own poll comes round and counts it.
+  await queryClient.invalidateQueries({ queryKey: botLifecycleKeys.attention });
+  await view.findByRole("img", { name: "1 thing needs you" });
+
+  // Straight away.
+  await user.type(box, "Chicago");
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(runs).toHaveLength(1));
+  expect(runs[0]?.messages.at(-1)?.id).toBe("person-response:q-1");
+  await view.findByText(WORKING);
+  await user.click(await view.findByRole("button", { name: "Stop the Bot" }));
+  await waitFor(() => expect(stopRequests).toEqual([channel.threadId]));
+
+  // Answered, though the turn it started was stopped: nothing asks again, and nothing counts it.
+  expect(answers).toEqual([{ response: "Chicago", inConversation: true }]);
+  expect(open).toBe(false);
+  // The badge goes now, not on its next poll.
+  await waitFor(() =>
+    expect(view.queryByRole("img", { name: /needs? you/ })).toBeNull(),
+  );
+  // And everything read again still says so.
+  await queryClient.refetchQueries();
+  expect(
+    view.queryByRole("region", {
+      name: `${channel.name} is waiting on your answer`,
+    }),
+  ).toBeNull();
+  expect(view.queryByRole("img", { name: /needs? you/ })).toBeNull();
 });
