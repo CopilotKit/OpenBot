@@ -1,4 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  useNavigate,
+  useSearch,
+} from "@tanstack/react-router";
 import { z } from "zod";
 import { AuditPage } from "@/components/manage/audit-page";
 
@@ -8,13 +12,17 @@ export const Route = createFileRoute("/_authed/settings/_personal/activity")({
   component: ActivityPage,
 });
 
+/**
+ * Read without `strict`, so the page also renders where it is mounted on a route of another name,
+ * as the audit tests do. The route's own `validateSearch` has already checked it.
+ */
 function ActivityPage() {
-  const { bot } = Route.useSearch();
-  const navigate = Route.useNavigate();
+  const { bot } = useSearch({ strict: false }) as { bot?: string };
+  const navigate = useNavigate();
   return (
     <AuditPage
       bot={bot}
-      onClearBot={() => navigate({ search: { bot: undefined } })}
+      onClearBot={() => navigate({ to: "/settings/activity" })}
     />
   );
 }
