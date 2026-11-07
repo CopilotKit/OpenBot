@@ -643,6 +643,17 @@ button.text-link.change-provider {
   height: 100%;
 }
 
+/* A plain icon where a row stands for no one vendor, drawn in the marks' ink. */
+.mark-icon {
+  padding: 6px;
+  color: var(--mark-ink);
+}
+
+.mark-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
 .mark-wordmark {
   padding: 2px;
 }
