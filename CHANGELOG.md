@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- With reduced motion turned on in the operating system, a step a Bot is still running shows its
+  words again, in the same muted tone as a finished step, instead of only its ▸.
 - Pressing + for a new conversation opens the To: picker with the caret in it every time. A second
   press used to leave it closed. With nobody in To:, Enter or Send keeps the message, opens To: and
   says "Choose a Bot first." where it used to do nothing.
