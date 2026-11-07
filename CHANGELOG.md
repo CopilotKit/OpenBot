@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A goal's summary on a Bot's Activity page is plain text. The Bot's reply showed there with its
+  Markdown marks ("Saved `heading.txt` with **Example Domain**"); it now reads "Saved heading.txt
+  with Example Domain.", the way the sidebar shows a conversation's last message.
 - When a Bot's turn fails after it has used the browser, the conversation now says so under the
   turn, as it does for a turn that fails at once.
 - A Claude Agent SDK Bot answers after you decide a step it asked about (Don't do it, I did it
