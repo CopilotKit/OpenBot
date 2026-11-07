@@ -731,8 +731,17 @@ impl DesktopSteps {
 }
 
 impl upgrade::Steps for DesktopSteps {
+    /// The release row's sentence, which is the line under Start's rows while it upgrades.
+    fn now(&mut self, now: upgrade::Now) {
+        report_running(
+            &self.app,
+            "release",
+            upgrade::now_said(now, &self.root, &upgrade::own()),
+            None,
+        );
+    }
+
     fn stop(&mut self) -> Result<(), Problem> {
-        report_running(&self.app, "release", "Stopping OpenBot.", None);
         self.own_containers();
         stop_for_update(&self.app, &self.root)
             .map_err(|error| Problem::with("OpenBot could not stop to update.", error))
@@ -748,7 +757,6 @@ impl upgrade::Steps for DesktopSteps {
     }
 
     fn back_up(&mut self, to: &Path) -> Result<(), Problem> {
-        report_running(&self.app, "release", "Backing up OpenBot's database.", None);
         self.with_database(|engine, root, secrets| {
             stack::backup_runtime_database(engine, root, secrets, to)
         })
@@ -762,12 +770,6 @@ impl upgrade::Steps for DesktopSteps {
 
     fn lay_out(&mut self) -> Result<(), Problem> {
         let own = upgrade::own();
-        report_running(
-            &self.app,
-            "deployment",
-            format!("Downloading OpenBot {}.", own.version),
-            None,
-        );
         match deployment::pinned() {
             Some(pin) => deployment::fetch_pinned(&self.root, &pin),
             None => deployment::fetch(&self.root, &own.version),
@@ -805,12 +807,6 @@ impl upgrade::Steps for DesktopSteps {
     }
 
     fn restore(&mut self, from: &Path) -> Result<(), Problem> {
-        report_running(
-            &self.app,
-            "release",
-            "Putting OpenBot's database back.",
-            None,
-        );
         self.with_database(|engine, root, secrets| {
             stack::start_runtime_database(engine, root, secrets)?;
             stack::restore_runtime_database(engine, root, secrets, from)
@@ -879,7 +875,8 @@ async fn upgrade_and_start(
                 harness: chosen,
                 start: Some(with),
             };
-            if upgrade::interrupted(&target) {
+            let recovering = upgrade::interrupted(&target);
+            if recovering {
                 report_running(
                     &handle,
                     "release",
@@ -891,6 +888,11 @@ async fn upgrade_and_start(
                 })?;
             }
             let Some(planned) = upgrade::due(&target, &upgrade::own()) else {
+                // Put back, and nothing to move: an ordinary Start, with no step of putting back
+                // still said under its rows.
+                if recovering {
+                    report(&handle, "release", true, upgrade::put_back_said(&target));
+                }
                 return Ok::<_, Problem>(None);
             };
             report_running(&handle, "release", upgrade::moving_said(&planned), None);
@@ -980,14 +982,18 @@ async fn put_back_interrupted_upgrade(app: &tauri::AppHandle, root: &Path) -> Re
         let saved = preparation::saved_engine(&target);
         let address = tauri::async_runtime::block_on(engine_ready(&handle, saved))?.pin()?;
         let mut steps = DesktopSteps {
-            app: handle,
+            app: handle.clone(),
             root: target.clone(),
             address,
             harness: None,
             start: None,
         };
         upgrade::recover(&target, &mut steps)
-            .map(|_| ())
+            .map(|_| {
+                // Install goes on from the version that is back, with no step of putting back
+                // still said as its own.
+                report(&handle, "release", true, upgrade::put_back_said(&target));
+            })
             .map_err(|problem| {
                 Problem::with(UPGRADE_INTERRUPTED_INSTALL, upgrade::detail(&problem))
             })

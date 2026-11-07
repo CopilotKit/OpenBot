@@ -139,6 +139,10 @@ pub fn previous_version(root: &Path) -> Option<String> {
 /// What an upgrade does, each step as Install and Start do it. A trait so the order, the files and
 /// the way back are one piece of code whether a window or a test drives them.
 pub trait Steps {
+    /// Say which step runs next, just before it runs (see `now_said`). Start's window shows one
+    /// line for the whole upgrade, and a step that said nothing left the one before it on that line:
+    /// "Stopping OpenBot." under the rows through a whole download, install and start.
+    fn now(&mut self, _now: Now) {}
     /// Stop OpenBot: every container and host process of this installation. Volumes stay.
     fn stop(&mut self) -> Result<(), Problem>;
     /// Whether the installation has a database to back up. One that never started has none, and
@@ -159,6 +163,42 @@ pub trait Steps {
     fn restore(&mut self, from: &Path) -> Result<(), Problem>;
 }
 
+/// The step an upgrade is on, said as it begins (see `Steps::now`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Now {
+    Stopping,
+    BackingUp,
+    Downloading,
+    Installing,
+    Starting,
+    Restoring,
+}
+
+/// What the line under Start's rows says while `now` runs. Downloading and installing name the
+/// release `own` lays out, and starting names the one laid out now: the new release, or the
+/// previous one an upgrade that failed put back.
+pub fn now_said(now: Now, root: &Path, own: &Own) -> String {
+    match now {
+        Now::Stopping => "Stopping OpenBot.".into(),
+        Now::BackingUp => "Backing up OpenBot's database.".into(),
+        Now::Downloading => format!("Downloading OpenBot {}.", own.version),
+        Now::Installing => format!("Installing OpenBot {}.", own.version),
+        Now::Starting => match deployment::installed(root) {
+            Some(found) => format!("Starting OpenBot {}.", found.version),
+            None => "Starting OpenBot.".into(),
+        },
+        Now::Restoring => "Putting OpenBot's database back.".into(),
+    }
+}
+
+/// An upgrade the app stopped part way is back on the version it was updating from.
+pub fn put_back_said(root: &Path) -> String {
+    match deployment::installed(root) {
+        Some(found) => format!("OpenBot is back on {}.", found.version),
+        None => "OpenBot is back on the version it was updating from.".into(),
+    }
+}
+
 /// How an upgrade ended.
 #[derive(Debug)]
 pub enum Ran {
@@ -176,7 +216,7 @@ pub enum Ran {
 /// Upgrade the installation in `root`. See the module documentation for the steps.
 pub fn run(root: &Path, steps: &mut dyn Steps) -> Ran {
     let previous = root.join(PREVIOUS);
-    if let Err(failed) = steps.stop() {
+    if let Err(failed) = said(steps, Now::Stopping, |steps| steps.stop()) {
         return restart(steps, failed);
     }
     // A folder left by an earlier upgrade is the caller's to put back (`recover`) first. One that
@@ -193,7 +233,9 @@ pub fn run(root: &Path, steps: &mut dyn Steps) -> Ran {
     // No database, no dump: `undo` then restores nothing, and nothing here creates one.
     let backed_up = steps.has_database().and_then(|has| {
         if has {
-            steps.back_up(&previous.join(DUMP))
+            said(steps, Now::BackingUp, |steps| {
+                steps.back_up(&previous.join(DUMP))
+            })
         } else {
             Ok(())
         }
@@ -215,10 +257,9 @@ pub fn run(root: &Path, steps: &mut dyn Steps) -> Ran {
             },
         };
     }
-    let upgraded = steps
-        .lay_out()
-        .and_then(|()| steps.install())
-        .and_then(|()| steps.start());
+    let upgraded = said(steps, Now::Downloading, |steps| steps.lay_out())
+        .and_then(|()| said(steps, Now::Installing, |steps| steps.install()))
+        .and_then(|()| said(steps, Now::Starting, |steps| steps.start()));
     match upgraded {
         Ok(()) => {
             finish(&previous);
@@ -245,7 +286,7 @@ pub fn recover(root: &Path, steps: &mut dyn Steps) -> Result<bool, Problem> {
 /// anything had moved, and clear `PREVIOUS`. On failure `PREVIOUS` stays for the next try.
 fn undo(root: &Path, steps: &mut dyn Steps) -> Result<(), Problem> {
     let previous = root.join(PREVIOUS);
-    steps.stop()?;
+    said(steps, Now::Stopping, |steps| steps.stop())?;
     let moved = put_back(root).map_err(|error| {
         Problem::with(
             "OpenBot could not put its previous version's files back.",
@@ -254,17 +295,28 @@ fn undo(root: &Path, steps: &mut dyn Steps) -> Result<(), Problem> {
     })?;
     let dump = previous.join(DUMP);
     if moved && dump.is_file() {
-        steps.restore(&dump)?;
+        said(steps, Now::Restoring, |steps| steps.restore(&dump))?;
     }
     finish(&previous);
     Ok(())
 }
 
 fn restart(steps: &mut dyn Steps, failed: Problem) -> Ran {
-    match steps.start() {
+    match said(steps, Now::Starting, |steps| steps.start()) {
         Ok(()) => Ran::Kept(failed),
         Err(start) => Ran::Back { failed, start },
     }
+}
+
+/// Run one step, saying it first. Every step goes through here, so none runs under the sentence of
+/// the one before it.
+fn said(
+    steps: &mut dyn Steps,
+    now: Now,
+    step: impl FnOnce(&mut dyn Steps) -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    steps.now(now);
+    step(steps)
 }
 
 const UNCHANGED: &str = "OpenBot could not set its previous version aside, so nothing changed.";
@@ -594,11 +646,15 @@ mod tests {
         database: String,
         /// Whether the installation has a database at all. One that never started has none.
         has_database: bool,
+        /// What the line under Start's rows says now, and what it said as each step ran.
+        line: Option<String>,
+        lines: Vec<Option<String>>,
     }
 
     impl Recorded {
         fn step(&mut self, name: &'static str) -> Result<(), Problem> {
             self.ran.push(name.into());
+            self.lines.push(self.line.clone());
             if self.fail == Some(name) {
                 return Err(Problem::with("failed", name));
             }
@@ -607,6 +663,9 @@ mod tests {
     }
 
     impl Steps for Recorded {
+        fn now(&mut self, now: Now) {
+            self.line = Some(now_said(now, &self.root, &released(&self.version)));
+        }
         fn stop(&mut self) -> Result<(), Problem> {
             self.step("stop")
         }
@@ -670,6 +729,8 @@ mod tests {
             fail: None,
             database: "rows at v0.3.0".into(),
             has_database: true,
+            line: None,
+            lines: Vec::new(),
         };
         (root, steps)
     }
@@ -702,6 +763,81 @@ mod tests {
         // The browser an earlier version ran on the desktop went with its files: this one runs none.
         assert!(!root.join("agent-computer").exists());
         untouched(&root);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Start's window shows one line under its rows for the whole upgrade, and it says the step
+    /// that runs now. Each step used to say itself only if it was the stop, the backup or the
+    /// restore, so "Stopping OpenBot." or "Backing up OpenBot's database." stayed on that line
+    /// through the download, the install and the start that came after them.
+    #[test]
+    fn every_step_of_an_upgrade_runs_under_its_own_sentence() {
+        let lines = |steps: &Recorded| -> Vec<(String, String)> {
+            steps
+                .ran
+                .iter()
+                .cloned()
+                .zip(
+                    steps
+                        .lines
+                        .iter()
+                        .map(|line| line.clone().unwrap_or_default()),
+                )
+                .collect()
+        };
+        let said = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+            pairs
+                .iter()
+                .map(|(step, line)| (step.to_string(), line.to_string()))
+                .collect()
+        };
+
+        let (root, mut steps) = installation();
+        assert!(matches!(run(&root, &mut steps), Ran::Moved));
+        assert_eq!(
+            lines(&steps),
+            said(&[
+                ("stop", "Stopping OpenBot."),
+                ("back_up", "Backing up OpenBot's database."),
+                ("lay_out", "Downloading OpenBot v0.3.1."),
+                ("install", "Installing OpenBot v0.3.1."),
+                ("start", "Starting OpenBot v0.3.1."),
+            ])
+        );
+        std::fs::remove_dir_all(root).unwrap();
+
+        // No database: the stop's sentence is not left there for the rest of the upgrade.
+        let (root, mut steps) = installation();
+        steps.has_database = false;
+        assert!(matches!(run(&root, &mut steps), Ran::Moved));
+        assert_eq!(
+            lines(&steps),
+            said(&[
+                ("stop", "Stopping OpenBot."),
+                ("lay_out", "Downloading OpenBot v0.3.1."),
+                ("install", "Installing OpenBot v0.3.1."),
+                ("start", "Starting OpenBot v0.3.1."),
+            ])
+        );
+        std::fs::remove_dir_all(root).unwrap();
+
+        // A failed install puts v0.3.0 back, and the start says that is the version starting.
+        let (root, mut steps) = installation();
+        steps.fail = Some("install");
+        assert!(matches!(run(&root, &mut steps), Ran::Kept(_)));
+        assert_eq!(
+            lines(&steps),
+            said(&[
+                ("stop", "Stopping OpenBot."),
+                ("back_up", "Backing up OpenBot's database."),
+                ("lay_out", "Downloading OpenBot v0.3.1."),
+                ("install", "Installing OpenBot v0.3.1."),
+                ("stop", "Stopping OpenBot."),
+                ("restore", "Putting OpenBot's database back."),
+                ("start", "Starting OpenBot v0.3.0."),
+            ])
+        );
+        assert_eq!(put_back_said(&root), "OpenBot is back on v0.3.0.");
         std::fs::remove_dir_all(root).unwrap();
     }
 

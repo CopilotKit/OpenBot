@@ -1419,6 +1419,128 @@ test("relaunch upgrades an older installation to this app's release as part of S
   });
 });
 
+/*
+ * Start's rows are the back end's, and one line under them says what the upgrade is doing. The
+ * release row carries that sentence, and each upgrade step now says itself on it as it begins
+ * (`upgrade::now_said`). The install and the start report rows of their own as well, and those
+ * never take the line over. On Windows the line said "Stopping OpenBot." through a whole start,
+ * under a list where every step but the last was complete.
+ */
+test("the line under Start's rows says the upgrade step running now, never one that finished", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-upgrade-steps",
+    localStatus("ready", "valid"),
+  );
+  const moving = deferred<unknown>();
+  withOlderDeployment(() => moving.promise);
+  const view = await renderApp();
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "upgrade_and_start"),
+    ).toBe(true),
+  );
+  const lines = () =>
+    [...view.container.querySelectorAll(".status-line")].map(
+      (line) => line.textContent,
+    );
+  const release = (detail: string) => ({
+    step: "release",
+    ok: true,
+    running: true,
+    detail,
+  });
+  // What `upgrade_and_start` reports, in order: the release row as each step begins, and the
+  // install's and the start's own rows between them.
+  const upgrade: [ProgressEvent[], string][] = [
+    [
+      [
+        release(
+          "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.",
+        ),
+      ],
+      "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.",
+    ],
+    [[release("Stopping OpenBot.")], "Stopping OpenBot."],
+    [
+      [release("Backing up OpenBot's database.")],
+      "Backing up OpenBot's database.",
+    ],
+    [[release("Downloading OpenBot v0.3.1.")], "Downloading OpenBot v0.3.1."],
+    [
+      [
+        release("Installing OpenBot v0.3.1."),
+        {
+          step: "engine",
+          ok: true,
+          running: true,
+          detail: "Checking the software OpenBot needs.",
+        },
+        {
+          step: "engine",
+          ok: true,
+          running: false,
+          detail: "Docker is answering.",
+        },
+        {
+          step: "images",
+          ok: true,
+          running: true,
+          detail: "Downloading local software.",
+          downloadBytes: 1_200_000_000,
+        },
+        {
+          step: "installation",
+          ok: true,
+          running: false,
+          detail: "Installed.",
+        },
+      ],
+      "Installing OpenBot v0.3.1.",
+    ],
+    [
+      [
+        release("Starting OpenBot v0.3.1."),
+        {
+          step: "services",
+          ok: true,
+          running: true,
+          detail: "starting installed containers",
+        },
+        { step: "services", ok: true, running: false, detail: "containers up" },
+        {
+          step: "answering",
+          ok: true,
+          running: true,
+          detail: "Waiting for OpenBot to answer.",
+        },
+      ],
+      "Starting OpenBot v0.3.1.",
+    ],
+  ];
+  for (const [events, said] of upgrade) {
+    for (const event of events) await emitProgress(event);
+    expect(
+      view.getByRole("heading", { name: "Starting OpenBot" }),
+    ).toBeTruthy();
+    // One line, the step running now, with the spinner.
+    expect(lines()).toEqual([said]);
+    expectWorking(view, said);
+  }
+  // Nothing an earlier step said is left on the screen.
+  for (const finished of [
+    "Stopping OpenBot.",
+    "Backing up OpenBot's database.",
+    "Downloading OpenBot v0.3.1.",
+    "Installing OpenBot v0.3.1.",
+  ])
+    expect(view.queryByText(finished)).toBeNull();
+  await act(async () =>
+    moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+  );
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  expect(view.queryByText("Starting OpenBot v0.3.1.")).toBeNull();
+});
+
 test("an upgrade that could not put the previous version back is retried from the Retry its sentence names", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-upgrade-stuck",
