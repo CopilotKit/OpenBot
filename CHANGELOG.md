@@ -1859,6 +1859,18 @@ its token-protected API reachable from the local network. `COMPUTER_BIND=127.0.0
 the machine. Unset, nothing changes; a computer driving a native Chrome (OpenBot Desktop's) always
 listens on loopback.
 
+### A responsibility's run reads only its own earlier runs
+
+Every responsibility of one Bot in one conversation runs in that conversation, and each run was sent
+the whole conversation as context: every earlier run of every responsibility there, and everything
+the person said in it. So a run's input grew with every run in the conversation, by a whole run each
+time (about 1,800 tokens per run, measured with four pull-request watches), until after roughly a
+hundred runs it no longer fit the model's context. A responsibility's run is now sent only its own
+earlier runs and what the Bot did in each, with its instruction, success criteria and recorded
+progress as before. The conversation itself is unchanged: every message stays in it and the person
+still reads all of them. A responsibility's run no longer sees messages typed in the conversation; to
+change what a responsibility does, edit its instruction or success criteria.
+
 ### Each Bot keeps a fact it formed, even when another Bot formed it first
 
 A memory a Bot forms from what it read was deduplicated per person, but each Bot recalls only the

@@ -1,6 +1,7 @@
 import { productHeadlessBoundary } from "../telemetry/product-boundaries";
 import { buildResponsibilityTurn } from "@openbot/shared/responsibility-turn";
 import type { ComponentCatalog } from "@openbot/toolkit/ports";
+import { responsibilityHistory } from "@openbot/toolkit/responsibility-history";
 import {
   createTurnRunner,
   type IntelligenceLike,
@@ -155,6 +156,9 @@ export function createServerResponsibilityEngine(deps: {
           threadId: context.threadId,
           initiator,
           signal: context.signal,
+          // The thread is shared by every goal of this Bot in this conversation; send this one's own.
+          historyFilter: (history) =>
+            responsibilityHistory(history, context.responsibilityId),
           ...(snapshot && toolResult
             ? {
                 continuation: {
