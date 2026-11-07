@@ -59,6 +59,10 @@ function fakeStore(
     async serverAddress(serverId: string) {
       return added.includes(serverId) ? { id: serverId } : undefined;
     },
+    // What it refreshes is the plugin store's business; see own-app-tools-refresh.integration.test.ts.
+    async refreshOwnListings() {
+      return [];
+    },
     async listForAgent(agentId: string) {
       return grants.filter((grant) => grant.startsWith(`${agentId}:`));
     },
