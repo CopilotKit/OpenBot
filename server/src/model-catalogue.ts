@@ -110,6 +110,12 @@ export type AvailableModels = {
 /** What one run answers on: the model, and the effort to send, if any. */
 export type RunChoice = {
   model: string;
+  /**
+   * The model's name as the composer's model picker shows it ("GPT-6.1 Terra"), read from the same
+   * catalogue entry, so the Bot names its model the way the person sees it named. `choose` always
+   * says it; absent, the Bot is told no model name.
+   */
+  label?: string;
   /** Only ever one the model takes. Absent: send none, so the model thinks on its own default. */
   effort?: string;
   /** Whether the model came from a listing that was read, rather than the configured fallback. */
@@ -921,7 +927,12 @@ export function createModelCatalogue(options: {
       saved?.effort && model?.efforts?.includes(saved.effort)
         ? saved.effort
         : undefined;
-    return { model: id, ...(effort ? { effort } : {}), listed };
+    return {
+      model: id,
+      label: model?.label ?? modelLabel(id),
+      ...(effort ? { effort } : {}),
+      listed,
+    };
   }
 
   let lastEarly = Number.NEGATIVE_INFINITY;
