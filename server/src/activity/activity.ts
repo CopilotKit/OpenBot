@@ -191,7 +191,9 @@ export function createActivityStore(database: Database) {
           activity.scheduled.push({
             id: `routine:${routine.id}`,
             kind: "routine",
-            title: clip(routine.instruction, 120) ?? "Routine",
+            // Whole: the page shortens it to fit and shows it all on hover. The store caps an
+            // instruction at 2,000 characters.
+            title: routine.instruction || "Routine",
             // In words, by the helper the Routines page uses, so the two screens say it the same way.
             detail: `${describeCron(routine.cron)} (${routine.timezone})`,
             status: "scheduled",
@@ -217,7 +219,7 @@ export function createActivityStore(database: Database) {
           const item: ActivityItem = {
             id: `routine-run:${run.id}`,
             kind: "routine",
-            title: clip(routine.instruction, 120) ?? "Routine",
+            title: routine.instruction || "Routine",
             detail: clip(run.error),
             status: run.status ?? "running",
             at: iso(run.finishedAt ?? run.startedAt),
