@@ -143,9 +143,9 @@ test("an answer to a responsibility's question resumes it with its own tools, ru
       return async (input) => {
         turn = input;
         const report = tools.find(
-          (tool) => tool.name === "report_responsibility_progress",
+          (tool) => tool.name === "report_goal_progress",
         );
-        if (!report) throw new Error("report_responsibility_progress missing");
+        if (!report) throw new Error("report_goal_progress missing");
         await report.execute({
           id: goal.id,
           summary: "Lunch: ramen",
@@ -261,7 +261,7 @@ test("an answer cannot be pointed at another person's responsibility or another 
       responsibilities: store,
       responsibilityTurn: never,
     }),
-  ).rejects.toThrow("does not belong to this responsibility");
+  ).rejects.toThrow("does not belong to this goal");
 });
 
 test("other questions keep the initiator they were asked under", async () => {

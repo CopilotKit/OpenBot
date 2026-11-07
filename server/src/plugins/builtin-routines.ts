@@ -406,7 +406,7 @@ export async function callTool(
         return failure(error.message);
       if (error instanceof ResponsibilityNotFoundError)
         return failure(
-          "There is no trigger or responsibility of yours with that id for me.",
+          "There is no trigger or goal of yours with that id for me.",
         );
       const message = error instanceof Error ? error.message : String(error);
       return failure(Array.from(message).slice(0, MAX_RUN_ERROR).join(""));
