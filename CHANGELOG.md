@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- In the personal edition, a Bot names the app card's real buttons: Turn on, then Connect.
 - OpenBot Desktop's Claude plan sign-in says you'll paste back a code, not that nothing is typed.
 - At every start the server brings the saved tools of OpenBot's own apps, Routines and Google Drive,
   up to date with the release it runs, so a tool a release renames, rewords or adds reaches an
