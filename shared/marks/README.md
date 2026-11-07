@@ -11,6 +11,10 @@ own repository:
 | `agno.svg` | [`agno-agi/docs`](https://github.com/agno-agi/docs) `favicon.png`, embedded unchanged in an SVG |
 | `langroid.svg` | [`langroid/langroid`](https://github.com/langroid/langroid) `public/logo_light.png`, scaled to 128 px and embedded in an SVG |
 
+Google has two from that set. `google.svg` is the single-colour G the model rows use.
+`google-color.svg` is the standard colour G, and it is the one that goes beside a sign-in: Google's
+sign-in guidelines allow no other G on a "Sign in with" button, so the desktop's Google row uses it.
+
 The two PNGs sit inside an SVG wrapper only so every mark is one file type: both apps resolve a
 mark by globbing `*.svg`, and a second extension would mean a second rule in each.
 
