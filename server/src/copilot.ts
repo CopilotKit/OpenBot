@@ -80,6 +80,7 @@ import {
   type StoredAttachment,
 } from "./channels/attachment-parts";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
+import { sayingWhenUnreachable } from "./agents/unreachable";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
@@ -1661,15 +1662,18 @@ async function remoteTransport(
     : agentFetch;
 
   if (agent.type === "remote_ag_ui") {
-    return withoutGenerativeUIEnvelope(
-      new HttpAgent({
-        url: agent.endpoint,
-        agentId: agent.id,
-        // The customer's own key, if their agent sits behind one. `HttpAgentConfig` is
-        // `{ url, headers?, fetch? }`, verified against @ag-ui/client 0.0.57.
-        ...(agent.headers ? { headers: agent.headers } : {}),
-        ...(dial ? { fetch: dial } : {}),
-      }),
+    return sayingWhenUnreachable(
+      withoutGenerativeUIEnvelope(
+        new HttpAgent({
+          url: agent.endpoint,
+          agentId: agent.id,
+          // The customer's own key, if their agent sits behind one. `HttpAgentConfig` is
+          // `{ url, headers?, fetch? }`, verified against @ag-ui/client 0.0.57.
+          ...(agent.headers ? { headers: agent.headers } : {}),
+          ...(dial ? { fetch: dial } : {}),
+        }),
+      ),
+      agent,
     );
   }
 
@@ -1712,8 +1716,11 @@ async function remoteTransport(
   });
 
   const picked = pickFromRoster(Object.keys(roster), agent);
-  return withoutGenerativeUIEnvelope(
-    quotingConversationSystemRows(roster[picked] as AbstractAgent),
+  return sayingWhenUnreachable(
+    withoutGenerativeUIEnvelope(
+      quotingConversationSystemRows(roster[picked] as AbstractAgent),
+    ),
+    agent,
   );
 }
 
