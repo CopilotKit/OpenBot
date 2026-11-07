@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop's link under xAI's API key field reads "Get an xAI API key", where it read "Get a
+  xAI API key".
 - A Claude Agent SDK Bot whose step was refused by Claude Code before it ran, such as a table sent
   with broken data, goes on to retry or answer in words. The turn used to stop there in silence.
 - A Bot that creates, changes or lists a routine is told its next run on the person's clock and how

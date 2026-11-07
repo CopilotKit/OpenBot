@@ -74,19 +74,23 @@ export type HeldConfiguration = {
 
 const endpointPresets: Record<
   string,
-  { baseUrl: string; model: string; keyUrl: string }
+  // `keyLink` is written out whole: the article goes by how the name sounds ("an xAI"), not by
+  // its first letter.
+  { baseUrl: string; model: string; keyUrl: string; keyLink: string }
 > = {
   // https://ai.google.dev/gemini-api/docs/openai
   google: {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     model: "gemini-3.8-flash",
     keyUrl: "https://aistudio.google.com/apikey",
+    keyLink: "Get a Google Gemini API key",
   },
   // https://docs.x.ai/developers/model-capabilities/legacy/chat-completions
   xai: {
     baseUrl: "https://api.x.ai/v1",
     model: "grok-4.7",
     keyUrl: "https://console.x.ai/",
+    keyLink: "Get an xAI API key",
   },
 };
 
@@ -1010,7 +1014,7 @@ export function ProviderPicker({
               {preset && (
                 <p className="footnote">
                   <ExternalLink key={preset.keyUrl} href={preset.keyUrl}>
-                    Get a {row.name} API key
+                    {preset.keyLink}
                   </ExternalLink>
                 </p>
               )}
