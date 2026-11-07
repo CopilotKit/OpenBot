@@ -120,7 +120,11 @@ async function chooseFolder(
   return ((await response.json()) as { grant: { id: string } }).grant.id;
 }
 
-/** The person's folder rows, oldest first, as the reader returns them. */
+/**
+ * The person's folder rows, oldest first, as the reader returns them, with only the fields each
+ * row holds: a row with no folder has no `folder` key, so the expected rows below name what is
+ * there and nothing that is not.
+ */
 async function folderRows(bot?: string) {
   const { events } = await reader.list({
     limit: 50,
@@ -128,13 +132,17 @@ async function folderRows(bot?: string) {
     targetType: "host_access",
     ...(bot ? { bot } : {}),
   });
-  return events.reverse().map((event) => ({
-    change: event.payload.change,
-    bot: event.payload.bot,
-    folder: event.payload.folder,
-    folders: event.payload.folders,
-    initiatorKind: event.initiatorKind,
-  }));
+  return events.reverse().map((event) =>
+    Object.fromEntries(
+      Object.entries({
+        change: event.payload.change,
+        bot: event.payload.bot,
+        folder: event.payload.folder,
+        folders: event.payload.folders,
+        initiatorKind: event.initiatorKind,
+      }).filter(([, value]) => value !== undefined),
+    ),
+  );
 }
 
 describe("a person's folders for a Bot", () => {
@@ -158,28 +166,24 @@ describe("a person's folders for a Bot", () => {
         change: "host_folder_granted",
         bot: BOT,
         folder: "share",
-        folders: undefined,
         initiatorKind: "person",
       },
       {
         change: "host_folder_granted",
         bot: OTHER_BOT,
         folder: "Documents",
-        folders: undefined,
         initiatorKind: "person",
       },
       {
         change: "host_folder_revoked",
         bot: BOT,
         folder: "share",
-        folders: undefined,
         initiatorKind: "person",
       },
       // Only Documents was still open, so stopping ended it, for its one Bot.
       {
         change: "host_access_stopped",
         bot: OTHER_BOT,
-        folder: undefined,
         folders: ["Documents"],
         initiatorKind: "person",
       },
