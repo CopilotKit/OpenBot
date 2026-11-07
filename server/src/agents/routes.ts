@@ -297,10 +297,11 @@ export function createAgentRoutes(
     canHandOn?: (agentId: string) => Promise<boolean | undefined>;
   },
   /**
-   * Whether a coworker can run on this deployment's own Bot, i.e. be created with no endpoint.
+   * Whether a coworker can be created with no endpoint, i.e. run here.
    *
-   * The store already refuses such a create on a deployment with no managed Bot; this exists so a
-   * screen can say so before somebody fills in three steps of a form that was always going to fail.
+   * It runs on the managed Bot when there is one, and otherwise in this server on its role
+   * description (`create`'s `built_in` branch). This exists so a screen can say so before somebody
+   * fills in three steps of a form that was always going to fail.
    */
   builtInAvailable = false,
   /**

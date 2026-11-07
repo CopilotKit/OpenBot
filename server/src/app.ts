@@ -1568,9 +1568,11 @@ export function createApp(
               canHandOn: (agentId) => pluginStore.agentCanHandOn(agentId),
             }
           : undefined,
-        // Whether "built-in" is a kind of coworker this deployment can actually make: the create
-        // path falls back to the managed Bot's endpoint, so without one it can only refuse.
-        config.managedAgent?.endpoint !== undefined,
+        // Whether a Bot made with no address can run here. Always: with a managed Bot it runs there,
+        // and without one `create` makes a `built_in` Bot that runs in this server on the person's
+        // instructions, as the personal edition's Personal Assistant does. Answering "is there a
+        // managed Bot" told OpenBot Desktop, which has none, that nobody could make a Bot at all.
+        true,
         // The managed Bot's address, so a coworker created without an endpoint — which creation
         // stores as running at this address — can be told apart from one a person hosts.
         config.managedAgent?.endpoint?.toString(),
