@@ -573,6 +573,8 @@ test("Enter with no Bot chosen keeps the message, says so, and opens the To: pic
 
   const hint = await view.findByText("Choose a Bot first.");
   expect(hint.getAttribute("role")).toBe("status");
+  // Inset to the composer's text, not flush with the column's edge.
+  expect(hint.className).toContain("px-3.5");
   await expectPickerOpenAndFocused(view);
   const editor = await view.findByRole("textbox", {
     hidden: true,
