@@ -1034,8 +1034,15 @@ export function ChannelChat({
   };
 
   useEffect(() => {
-    const fail = (message: string) => {
-      if (!awaitingReply.current) return;
+    /*
+     * `laterRun` is a RUN_ERROR from a run of a turn still going here after its first run has
+     * finished. A turn that touches the browser is several runs, and `awaitingReply` comes down when
+     * the first one ends on its browser step, so a Bot that failed in the run after it (out of time
+     * nine steps into a form) ended the turn with its steps on screen and nothing said. Only a
+     * RUN_ERROR counts there: the Bot said it failed, where a Stop ends a run as finished, cancelled.
+     */
+    const fail = (message: string, laterRun = false) => {
+      if (!awaitingReply.current && !(laterRun && turnsRef.current > 0)) return;
       awaitingReply.current = false;
       // Both halves of one fact: the sentence the transcript shows, and the reason `deliver` throws
       // so the draft behind the turn is restored rather than counted as sent. See `turnFailure`.
@@ -1045,7 +1052,7 @@ export function ChannelChat({
     const subscription = agent.subscribe?.({
       // Both surfaces fall back to the same sentence, from the same place, so a person who uses
       // both is not told two different things about the same silence.
-      onRunErrorEvent: ({ event }) => fail(stoppedReason(event?.message)),
+      onRunErrorEvent: ({ event }) => fail(stoppedReason(event?.message), true),
       onRunFailed: ({ error }) => fail(stoppedReason(error)),
       onRunFinishedEvent: ({ event }) => {
         /*
