@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot that clicked a dropdown open, typed its choice and then pressed Enter keeps the choice.
+  Enter used to put the dropdown back to its first option, so the form was sent without it.
 - A Bot whose click or Enter on a button could not finish is told why: the page refused to send its
   form, something covers the button, or the page is still loading. It was told the button was "not
   on the page any more", and clicked it again and again.
