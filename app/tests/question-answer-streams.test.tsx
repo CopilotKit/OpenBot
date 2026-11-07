@@ -1,4 +1,11 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
 import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
@@ -300,6 +307,16 @@ beforeAll(() => {
       },
     },
   );
+});
+/*
+ * A fresh cache before each case as well as after it. The cache is the app's own module, shared with
+ * every test file bun walks into this process first, and one of those can leave a read of the inbox
+ * in flight that never settles: a new screen then waits on that read rather than making its own, and
+ * never learns the Bot asked anything. That is how this file failed in CI, where the walk order
+ * differs from a Mac's.
+ */
+beforeEach(() => {
+  queryClient.clear();
 });
 afterEach(() => {
   cleanup();
