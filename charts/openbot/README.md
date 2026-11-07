@@ -620,7 +620,7 @@ kubectl -n openbot rollout restart deployment/openbot-intelligence-learning-agen
 It runs by itself after
 15 finished conversations and after every 15 more, and keeps what it learns in an object store the
 release runs (`intelligence.localObjectStorage`). Trajectories, the sessions the Recorder captures, are
-on as well, which needs the licence's `trajectories` feature.
+on as well, which any valid licence allows.
 
 Intelligence's own dashboard is not installed, so Admin → Automatic learning is where its work is
 reviewed: the skills it proposes, each one's SKILL.md and the conversations it was learned from,

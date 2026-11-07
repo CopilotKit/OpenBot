@@ -63,17 +63,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   calling the words its own.
 - Every Bot knows its own name. "Ask the Knowledge Bot for one sentence on Helm", sent to
   Knowledge, is answered by Knowledge, instead of Knowledge saying it can't reach the Knowledge Bot.
-- The Helm chart installs Intelligence 0.16.0-rc.8 instead of rc.5. A run that fails shows its own
+- The Helm chart installs Intelligence 0.16.0-rc.9 instead of rc.5. A run that fails shows its own
   error in the chat instead of "Runner connection dropped". A first install logs no PostgreSQL
   errors. Intelligence's services, Learning and its jobs stay up while PostgreSQL restarts, as the
   bundled one does on an upgrade that changes its image. The Learning agent reads its model key from
   a mounted file before every run, so a new `secrets.modelApiKey` reaches it on its next run after
   `helm upgrade`, without a restart. The skills Learning proposes have descriptions that read
-  correctly.
-- OpenBot Desktop's local Intelligence is 0.16.0-rc.8, the same release the Helm chart installs.
-  The app carries the Intelligence CLI built from the rc.8 commit to install exactly that release
-  (`copilotkit` 4.33.1-pre.90163f5, from 4.33.1-pre.256cc68), where the stable CLI would install
-  the newest stable Intelligence, 0.15.1.
+  correctly. Trajectories, the sessions the Recorder captures, run on any valid licence: the
+  licence no longer has to carry a `trajectories` feature.
+- OpenBot Desktop's local Intelligence is 0.16.0-rc.9, the same release the Helm chart installs.
+  The app carries the Intelligence CLI built from the rc.9 commit to install exactly that release
+  (`copilotkit` 4.34.0-pre.48a3863, from 4.33.1-pre.256cc68), where the stable CLI (4.34.0)
+  would install the newest stable Intelligence, 0.15.1.
 - The Job that installs Learning's queue in the bundled Intelligence waits up to 15 minutes for
   Intelligence's PostgreSQL, up from Intelligence's own 5
   (`intelligence.learning.queue.migration.activeDeadlineSeconds: 900`). An upgrade that moves the
