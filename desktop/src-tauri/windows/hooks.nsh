@@ -21,11 +21,16 @@
 ; $INSTDIR\cli-bundle\runtime\node.exe, and the uninstaller failed on exactly that. Before either, stop every
 ; process running from this installation's own cli-bundle, and nothing else: another node.exe is never touched.
 ; Intelligence brings the service back the next time it starts.
+; The installer is a 32-bit program, so the powershell.exe it starts is the 32-bit one (WOW64 redirects System32 to
+; SysWOW64), while node.exe is 64-bit. A 32-bit PowerShell's Get-Process has no Path for a 64-bit process, and the
+; stop used to match nothing; WMI's Win32_Process has the ExecutablePath at either bitness, so the processes are found
+; there. Stop-Process returns before a process has exited, and node.exe stays locked until it has, so the hook waits
+; for each one it stopped (30 seconds at most) before the installer goes on to replace the file.
 ; The folder reaches PowerShell as data, in OPENBOT_CLI_BUNDLE, never inside the script: a profile folder like
 ; C:\Users\O'Brien would end a quoted string there, and [ and ] are wildcards to -like.
 !macro OPENBOT_STOP_BUNDLED_CLI
   System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("OPENBOT_CLI_BUNDLE", "$INSTDIR\cli-bundle")'
-  nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$bundle = $$env:OPENBOT_CLI_BUNDLE.TrimEnd('\') + '\'; Get-Process -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and $$_.Path.StartsWith($$bundle, [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue"`
+  nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$bundle = $$env:OPENBOT_CLI_BUNDLE.TrimEnd('\') + '\'; Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$bundle, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Get-Process -Id $$_.ProcessId -ErrorAction SilentlyContinue } | Stop-Process -Force -PassThru -ErrorAction SilentlyContinue | ForEach-Object { $$null = $$_.WaitForExit(30000) }"`
   Pop $0
 !macroend
 
