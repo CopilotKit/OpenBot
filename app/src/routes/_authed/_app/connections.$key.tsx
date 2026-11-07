@@ -38,6 +38,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useManagePaths } from "@/lib/manage-paths";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   brokeredProvenance,
@@ -153,6 +154,7 @@ function AppConnectionPage() {
     from: "/_authed/_app/connections/$key",
   });
   const { action } = Route.useSearch();
+  const paths = useManagePaths();
   /*
    * `?action=` IS READ ONCE HERE AND DROPPED FROM THE URL BELOW, BUT IT FEEDS TWO THINGS.
    *
@@ -517,6 +519,7 @@ function AppConnectionPage() {
           <PageRows className="mt-0">
             <BrokeredAccountRow
               account={brokeredAccount}
+              deployment={paths.deploymentName}
               /* Said beside the button rather than after it: disconnecting ends the account at
                  Composio, so what it undoes is not the row here but the grant on your own mailbox,
                  and connecting again is a fresh consent. */
