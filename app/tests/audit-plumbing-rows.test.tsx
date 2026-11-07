@@ -33,6 +33,10 @@ afterAll(async () => {
 
 const BOT = "personal-assistant";
 
+/** What Activity asks the server to leave out, as the page writes it into its query. */
+const LEAVE_OUT =
+  "excludeEventType=mcp.tools_discovered%2Cchannel.routed%2Ccomponent.published%2Ccomputer.policy_loaded%2Ccomputer.isolation_loaded";
+
 function row(
   id: string,
   minute: number,
@@ -120,8 +124,8 @@ test("Activity leaves out choosing tools for a run, in every view", async () => 
    * exactly that, which is what lets a page of 50 be 50 rows a person reads.
    */
   const view = await renderPage("personal", {
-    "?excludeEventType=mcp.tools_discovered": [READ],
-    "?initiatorKind=routine%2Chandoff%2Cresponsibility%2Cmemory&excludeEventType=mcp.tools_discovered":
+    [`?${LEAVE_OUT}`]: [READ],
+    [`?initiatorKind=routine%2Chandoff%2Cresponsibility%2Cmemory&${LEAVE_OUT}`]:
       [],
   });
   expect(drawn(view.container)).toEqual([
@@ -186,7 +190,7 @@ const FOLDER_ROWS = [
 
 test("a folder given to a Bot, taken away or stopped reads in words, with the Bot and the folder", async () => {
   const view = await renderPage("personal", {
-    "?excludeEventType=mcp.tools_discovered": FOLDER_ROWS,
+    [`?${LEAVE_OUT}`]: FOLDER_ROWS,
   });
   const person = "Started by a person";
   const changed = ["Configuration changed"];

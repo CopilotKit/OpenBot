@@ -257,6 +257,8 @@ const CHANGES: Readonly<Record<string, string>> = {
   host_folder_granted: "Give a Bot a folder",
   host_folder_revoked: "Take a folder from a Bot",
   host_access_stopped: "Stop folder access",
+  // OpenBot choosing the Learning space every Bot learns into, at its first start.
+  default_container_assigned_automatically: "Set up Learning",
 };
 
 /** How many of an app's tools a row names one by one before it says how many more. */

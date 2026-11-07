@@ -91,10 +91,16 @@ const startedByOpenBot = {
   actorUserId: null,
   initiatorKind: "deployment",
   initiatorId: null,
-  eventType: "computer.policy_loaded",
-  targetType: "computer",
-  targetId: "shared",
-  payload: {},
+  // Every Bot given Routines' tools at a start; Activity leaves the computer's start-up rows out.
+  eventType: "configuration.changed",
+  targetType: "mcp_server",
+  targetId: "routines",
+  payload: {
+    change: "plugin_granted",
+    kind: "mcp",
+    refs: ["routines/create_goal", "routines/list_goals"],
+    actor: "openbot:always-on",
+  },
   createdAt: "2026-11-07T11:00:00Z",
 };
 

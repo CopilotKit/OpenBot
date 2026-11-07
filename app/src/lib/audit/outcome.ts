@@ -105,14 +105,34 @@ export const COMPUTER_ACTION_EVENT_TYPES = [
 ] as const;
 
 /**
- * OpenBot's own working, which the personal edition's Activity leaves out.
- *
- * Choosing which tools to offer a run is written on every turn ("Choose tools for a run, 96 of 96
- * tools"), and none of it is something a Bot did or a person can act on: everything offered was
- * already the Bot's, and a run that is offered too many says so on its own row
- * (`agent.tool_limit_refused`). Admin keeps it, for an admin tuning which skills declare which tools.
+ * OpenBot's own working, which the personal edition's Activity leaves out. None of it is something
+ * a Bot did or a person can act on, and Admin keeps all of it.
  */
-export const OPENBOT_WORKING_EVENT_TYPES = ["mcp.tools_discovered"] as const;
+export const OPENBOT_WORKING_EVENT_TYPES = [
+  /*
+   * Which tools a run was offered, written on every turn ("Choose tools for a run, 96 of 96 tools").
+   * Everything offered was already the Bot's, and a run offered too many says so on its own row
+   * (`agent.tool_limit_refused`). Admin keeps it for tuning which skills declare which tools.
+   */
+  "mcp.tools_discovered",
+  /*
+   * Which Bot a message went to, written on every message ("Sent to the default Bot, fallback:
+   * one-candidate"). The conversation already shows which Bot answered, and a person picks another
+   * with @. Admin keeps it for tuning the router.
+   */
+  "channel.routed",
+  /*
+   * A build's components, published as OpenBot first sees them. The personal edition has no way for
+   * a person to publish or withdraw one, so every such row is OpenBot setting itself up.
+   */
+  "component.published",
+  /*
+   * The computer's boundary and isolation as the server read them at start-up, two rows at every
+   * start. The personal edition has one computer and no admin setting either.
+   */
+  "computer.policy_loaded",
+  "computer.isolation_loaded",
+] as const;
 
 export type AuditOutcome = "refused" | "did-not-happen" | "allowed";
 
