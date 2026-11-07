@@ -406,7 +406,7 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
           <strong>Reset</strong> deletes the Bot's browser profile and signs it
           out of everything. Both show in{" "}
           <Link className="underline" {...paths.audit()}>
-            Activity
+            {paths.auditLabel}
           </Link>
           .
         </p>
@@ -419,7 +419,7 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
           computer runs an older image. It moves the computer to the new one and
           keeps its files and sign-ins. All three show in{" "}
           <Link className="underline" {...paths.audit()}>
-            Audit
+            {paths.auditLabel}
           </Link>
           .
         </p>
@@ -544,7 +544,7 @@ function HostFoldersSection({
             {stopping ? "Stopping…" : "Stop folder access"}
           </Button>
           <Link className="underline" {...paths.audit()}>
-            View audit
+            Open {paths.auditLabel}
           </Link>
         </div>
       </div>

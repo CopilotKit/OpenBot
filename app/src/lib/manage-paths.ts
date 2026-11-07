@@ -39,6 +39,13 @@ export function managePaths(edition: "team" | "personal") {
       credentials: () => linkOptions({ to: "/settings/credentials" }),
       newCredential: () => linkOptions({ to: "/settings/credentials/new" }),
       computers: () => linkOptions({ to: "/settings/computer" }),
+      /*
+       * What the trail is called, on its page, in the sidebar and wherever another page sends a
+       * person to it. Activity here, where one person reads what their own Bots did; Audit under
+       * Admin, where an admin reviews everybody's Bots for policy. Two names, each kept the same
+       * everywhere in its edition, so a page never reads "Audit" under a sidebar entry "Activity".
+       */
+      auditLabel: "Activity",
       audit: () => linkOptions({ to: "/settings/activity" }),
     };
   }
@@ -69,6 +76,7 @@ export function managePaths(edition: "team" | "personal") {
     credentials: () => linkOptions({ to: "/admin/credentials" }),
     newCredential: () => linkOptions({ to: "/admin/credentials/new" }),
     computers: () => linkOptions({ to: "/admin/computers" }),
+    auditLabel: "Audit",
     audit: () => linkOptions({ to: "/admin/audit" }),
   };
 }

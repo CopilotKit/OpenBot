@@ -17,6 +17,7 @@ import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useBotNames } from "@/lib/agents/bot-names";
+import { useManagePaths } from "@/lib/manage-paths";
 import {
   COMPUTER_ACTION_EVENT_TYPES,
   DID_NOT_HAPPEN_EVENT_TYPES,
@@ -75,21 +76,29 @@ export function withBot(search: string, bot: string | undefined): string {
   return `?${params.toString()}`;
 }
 
+/** What the page says under its title in Admin, where an admin reviews every Bot against policy. */
+const ADMIN_DESCRIPTION =
+  "Review Bot actions and actions blocked by this deployment’s policy.";
+
 /**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's
- * controls for these). The personal edition's Settings renders this page with none.
+ * controls for these). The personal edition's Settings renders this page with none, and with its
+ * own `description`, because a page anybody can open does not talk about a deployment.
  *
  * `bot` narrows every view to one Bot's rows, asked of the server; `onClearBot` takes it off.
  */
 export function AuditPage({
   bot,
   children,
+  description = ADMIN_DESCRIPTION,
   onClearBot,
 }: {
   bot?: string;
   children?: ReactNode;
+  description?: string;
   onClearBot?: () => void;
 } = {}) {
+  const paths = useManagePaths();
   const [view, setView] = useState<string>(FILTERS[0].search);
   const search = withBot(view, bot);
   const [query, setQuery] = useState("");
@@ -114,7 +123,7 @@ export function AuditPage({
     setExportCapped(null);
     try {
       const response = await client(auditExportUrl(search), {
-        fallback: "Couldn't export audit events. Try again.",
+        fallback: "Couldn't export these events. Try again.",
       });
       // A file that stopped early must say so, or it reads as the whole trail.
       const capped = Number(response.headers.get("x-audit-export-truncated"));
@@ -132,7 +141,7 @@ export function AuditPage({
       setExportError(
         error instanceof Error
           ? error.message
-          : "Couldn't export audit events. Try again.",
+          : "Couldn't export these events. Try again.",
       );
     } finally {
       setExporting(false);
@@ -145,11 +154,7 @@ export function AuditPage({
      * height; the title stays put and the rows scroll inside the log. With recording controls
      * below it, the log is bounded so the page can scroll down to those controls too.
      */
-    <PageShell
-      description="Review Bot actions and actions blocked by this deployment’s policy."
-      title="Audit"
-      width="full"
-    >
+    <PageShell description={description} title={paths.auditLabel} width="full">
       {/* With admin settings below the log, the page scrolls and the log keeps its own bounded
           viewport. Without settings, the table fills the panel as before. */}
       <div className={children ? "min-h-0 flex-1 overflow-y-auto" : "contents"}>
@@ -158,7 +163,7 @@ export function AuditPage({
         >
           {events.isPending ? null : events.isError ? (
             <p className="px-4 text-destructive text-sm" role="alert">
-              Couldn't load the audit log. Reload the page.
+              Couldn't load these events. Reload the page.
             </p>
           ) : (
             <AuditTable
