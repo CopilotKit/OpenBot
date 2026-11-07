@@ -6,7 +6,7 @@ import {
   IconTool,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { useState } from "react";
 import {
@@ -304,9 +304,27 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
     ...setOwnerGrantsMutationOptions(queryClient),
     ...report,
   });
+  const navigate = useNavigate();
   const remove = useMutation({
     ...removePluginServerMutationOptions(queryClient),
     ...report,
+    /*
+     * BACK TO THE LIST FOR AN APP THIS PAGE CAN'T TURN BACK ON, the way Connections itself treats
+     * one. A catalogue app is listed there on or off, and its page, off, offers Connect. An app
+     * added from a broker's directory, or by its address, is listed only while it is on, and is
+     * added from the directory, which says what adding it means first. With its row gone this page
+     * had nothing left to draw and said "Not an app" about the app just turned off.
+     *
+     * Asked of the catalogue as it stood when the switch was pressed. Awaited, because the
+     * mutation runs its own `onSettled` refetch only after this returns: started any sooner, the
+     * refetch landed before the navigation and the page drew "Not an app" on its way out.
+     */
+    onSuccess: async (_data, serverId) => {
+      const listed = queryClient
+        .getQueryData(pluginsPageQueryOptions().queryKey)
+        ?.catalogue.some((item) => item.key === serverId);
+      if (!listed) await navigate(paths.plugins());
+    },
   });
   const connectSelf = useMutation({
     // Back to this page afterwards, not to the personal settings screen.

@@ -249,6 +249,10 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   written for the model ("You are a personal assistant for one person..."). Those are now their own
   Instructions row on its Setup page. An existing one is put right at the next start and keeps the
   instructions it runs on, edits included.
+- **Turning off an app you added from Composio's or Arcade's directory takes you back to
+  Connections**, where you can add it again from the directory. Its page said "Not an app. There is
+  no app with that name." An app Connections always lists, such as Notion, still stays on its page,
+  off, with Connect.
 
 ### The Bot's browser
 
