@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Claude Agent SDK Bot whose step was refused by Claude Code before it ran, such as a table sent
+  with broken data, goes on to retry or answer in words. The turn used to stop there in silence.
 - A Bot that creates, changes or lists a routine is told its next run on the person's clock and how
   far away it is ("Saturday, November 7, 2026 at 9:00 AM UTC, 6 minutes from now"), so it no longer
   tells the person that a run due in minutes is tomorrow.
