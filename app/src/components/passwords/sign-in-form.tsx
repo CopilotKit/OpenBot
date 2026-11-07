@@ -48,7 +48,14 @@ import { queryClient } from "@/query-client";
  * one, the server reports `code_required` and this form asks for that code alone, then sends it on
  * its own, cleared from state the same way.
  */
-export function SignInForm({ requestId }: { requestId: string }) {
+export function SignInForm({
+  requestId,
+  inDialog = false,
+}: {
+  requestId: string;
+  /** Drawn in the chat's sign-in dialog rather than on the page of its own. */
+  inDialog?: boolean;
+}) {
   const request = useQuery({
     ...signInRequestQueryOptions(requestId),
     // Polled so a takeover finishing elsewhere, or the request expiring, shows here.
@@ -70,6 +77,11 @@ export function SignInForm({ requestId }: { requestId: string }) {
   const [code, setCode] = useState("");
   const [save, setSave] = useState(false);
   const id = useId();
+  /*
+   * In a dialog the sections stack in its body's own 16px rhythm. The 48px a page puts above each
+   * section, to keep unrelated decisions apart, left the dialog mostly empty space above each heading.
+   */
+  const section = inDialog ? "mt-0" : undefined;
 
   if (request.isPending) return null;
   if (request.error)
@@ -96,7 +108,10 @@ export function SignInForm({ requestId }: { requestId: string }) {
 
   if (FINAL_SIGN_IN.includes(data.status))
     return (
-      <PageSection title={data.status === "signed_in" ? "Signed in" : "Closed"}>
+      <PageSection
+        className={section}
+        title={data.status === "signed_in" ? "Signed in" : "Closed"}
+      >
         <p className="text-muted-foreground text-sm">
           {data.outcome ?? "This sign-in has ended."}
         </p>
@@ -106,11 +121,12 @@ export function SignInForm({ requestId }: { requestId: string }) {
   if (data.status === "code_required")
     return (
       <PageSection
+        className={section}
         title="Enter the verification code"
         description="The site sent a verification code. Enter it to finish signing in."
       >
         <form
-          className="flex flex-col gap-3"
+          className="mt-4 flex flex-col gap-3"
           autoComplete="off"
           onSubmit={(event) => {
             event.preventDefault();
@@ -173,10 +189,11 @@ export function SignInForm({ requestId }: { requestId: string }) {
   if (data.status === "taken_over")
     return (
       <PageSection
+        className={section}
         title="Sign in by hand"
         description="Open the Bot's browser and sign in yourself. Then choose I've signed in and the Bot carries on."
       >
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button
             size="sm"
             variant="ghost"
@@ -219,6 +236,7 @@ export function SignInForm({ requestId }: { requestId: string }) {
       ) : null}
       {data.savedLogins.length > 0 ? (
         <PageSection
+          className={section}
           title="Use a saved login"
           description={`Pick one to use it for this sign-in to ${data.origin}.`}
         >
@@ -255,11 +273,12 @@ export function SignInForm({ requestId }: { requestId: string }) {
         </PageSection>
       ) : null}
       <PageSection
+        className={section}
         title="Enter your login"
         description="This goes straight into the Bot's browser. The Bot only learns whether it worked."
       >
         <form
-          className="flex flex-col gap-3"
+          className="mt-4 flex flex-col gap-3"
           autoComplete="off"
           onSubmit={(event) => {
             event.preventDefault();
