@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Settings › This computer on an OpenBot Desktop build that doesn't update itself, such as an
+  internal build, says so up front with no Check for updates button, in the same words as the
+  setup window. It offered the check and then said the build doesn't update itself.
 - The Setup page of a Bot on the harness OpenBot Desktop runs, such as the personal starter, says
   "OpenBot runs this Bot, so it can use its tools without a key." It said the Bot "can't use tools"
   and offered a key, while the Bot used its tools.

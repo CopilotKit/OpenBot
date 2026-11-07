@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { DOESNT_UPDATE_ITSELF } from "../../shared/desktop-updates";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 import { type AppUpdate, describe } from "./UpdateOffer";
 
@@ -107,10 +108,7 @@ export function CheckForUpdates() {
     return (
       <details>
         <summary>Updates</summary>
-        <p>
-          This version of OpenBot doesn't update itself. Install a released
-          version of OpenBot to get updates.
-        </p>
+        <p>{DOESNT_UPDATE_ITSELF}</p>
       </details>
     );
   }
@@ -162,10 +160,7 @@ export function CheckForUpdates() {
         </p>
       )}
       {checked?.found === "notOffered" && (
-        <p role="status">
-          This version of OpenBot doesn't update itself. Install a released
-          version of OpenBot to get updates.
-        </p>
+        <p role="status">{DOESNT_UPDATE_ITSELF}</p>
       )}
       {failure && <InlineFailure problem={failure} />}
     </details>
