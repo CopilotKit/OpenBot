@@ -112,7 +112,7 @@ fn context(version: &str) -> Option<telemetry::Context> {
     })
 }
 
-/// Run on a blocking worker after account sign-in and before starting the runtime.
+/// Run on a worker alongside startup preparation, before the runtime reads its identity.
 /// Alias failures never prevent opening OpenBot; the next launch retries the same binding.
 pub fn link_account<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(state) = app.try_state::<DesktopTelemetry>() else {
@@ -122,7 +122,7 @@ pub fn link_account<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         return;
     };
     if link_account_with(&state, local_eval::link_telemetry_installed).is_err() {
-        eprintln!("[telemetry] account link deferred until the next sign-in or launch");
+        eprintln!("[telemetry] account link deferred until the next launch");
     }
 }
 
@@ -142,6 +142,15 @@ fn link_account_with(
         let account = state.emitter.bound_account();
         match link(&installation, account.as_deref()).map_err(|_| ())? {
             local_eval::TelemetryIdentity::Skipped => return Ok(()),
+            local_eval::TelemetryIdentity::SignedOut => {
+                state.emitter.clear_account().map_err(|_| ())?;
+                state
+                    .runtime_env
+                    .lock()
+                    .map_err(|_| ())?
+                    .extend(state.emitter.runtime_env());
+                return Ok(());
+            }
             local_eval::TelemetryIdentity::Linked { account_id }
                 if account.as_deref() == Some(&account_id) =>
             {
@@ -342,6 +351,23 @@ mod tests {
         })
         .is_ok());
         assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn signed_out_receipt_clears_binding_and_updates_runtime_environment() {
+        let state = identity_state(true);
+        state.emitter.bind_account(&"a".repeat(64)).unwrap();
+        let old = state.emitter.install_id();
+        assert!(link_account_with(&state, |_, _| {
+            local_eval::normalize_telemetry_identity(0, br#"{"type":"signed_out"}"#)
+        })
+        .is_ok());
+        assert_eq!(state.emitter.bound_account(), None);
+        assert_ne!(state.emitter.install_id(), old);
+        assert_eq!(
+            state.runtime_env.lock().unwrap().get("CPK_TELEMETRY_ID"),
+            state.emitter.install_id().as_ref()
+        );
     }
 
     #[test]

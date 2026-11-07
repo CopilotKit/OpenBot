@@ -2691,12 +2691,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
     // and reading the model screen twice could not be relied on to give the same answer.
     let credential = start_stack_credential(&root, model)?;
     let identity_app = app.clone();
-    if tauri::async_runtime::spawn_blocking(move || desktop_telemetry::link_account(&identity_app))
-        .await
-        .is_err()
-    {
-        eprintln!("[telemetry] account link worker did not complete");
-    }
+    // Run alongside engine and image preparation. Only the runtime environment needs the
+    // resulting identity, so optional telemetry does not delay the preceding setup work.
+    let identity_link = std::thread::Builder::new()
+        .name("openbot-account-link".into())
+        .spawn(move || desktop_telemetry::link_account(&identity_app));
 
     /*
      * A PLAN CHOOSES ITS OWN BOT, because only one Bot can spend it.
@@ -2965,6 +2964,13 @@ async fn start_stack_inner<R: tauri::Runtime>(
             if let Some(value) = settings.get(key) {
                 secrets.insert(key.into(), value.clone());
             }
+        }
+        // Join only at the identity handoff, after vault, port and image preparation.
+        if identity_link
+            .map(|worker| worker.join().is_err())
+            .unwrap_or(true)
+        {
+            eprintln!("[telemetry] account link worker did not complete");
         }
         // Handed to Compose with the rest; a service receives only what the Compose file names.
         secrets.extend(desktop_telemetry::runtime_env(&app));
@@ -6393,11 +6399,7 @@ async fn sign_in_to_copilotkit(
     let root = selected_root_or_default(&app);
     tauri::async_runtime::spawn_blocking(move || {
         know_cli_engine(&root);
-        let result = local_eval::account_sign_in_installed(&attempt)?;
-        if result.signed_in {
-            desktop_telemetry::link_account(&app);
-        }
-        Ok(result)
+        local_eval::account_sign_in_installed(&attempt)
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)?

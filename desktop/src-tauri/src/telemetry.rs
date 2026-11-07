@@ -185,11 +185,20 @@ impl Telemetry {
                 "invalid account binding".into(),
             ));
         }
+        self.change_account(Some(account))
+    }
+
+    /// Rotate a previously linked installation on sign-out, retaining queued attribution.
+    pub fn clear_account(&self) -> Result<()> {
+        self.change_account(None)
+    }
+
+    fn change_account(&self, account: Option<&str>) -> Result<()> {
         let mut guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
         let Some(current) = guard.as_ref() else {
             return Ok(());
         };
-        if current.account_id.as_deref() == Some(account) {
+        if current.account_id.as_deref() == account {
             return Ok(());
         }
         let mut next = current.clone();
@@ -201,7 +210,7 @@ impl Telemetry {
             }
             next.install_id = new_uuid();
         }
-        next.account_id = Some(account.to_owned());
+        next.account_id = account.map(str::to_owned);
         write_state(&self.state_path, &next)?;
         *guard = Some(next);
         Ok(())
@@ -1077,6 +1086,57 @@ mod tests {
         // An old on-disk queue did not carry per-event installation IDs.
         telemetry.state.lock().unwrap().as_mut().unwrap().queue[0].installation_id = None;
         telemetry.bind_account(&"b".repeat(64)).unwrap();
+        let new_id = telemetry.install_id().unwrap();
+        assert_ne!(old_id, new_id);
+        assert_eq!(
+            telemetry.runtime_env().get("CPK_TELEMETRY_ID"),
+            Some(&new_id)
+        );
+        telemetry
+            .record(EventData::HarnessChosen {
+                harness: Harness::ByoUrl,
+            })
+            .unwrap();
+        let server = thread::spawn(move || {
+            [
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        telemetry.flush().unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains(&old_id));
+        assert!(!requests[0].contains(&new_id));
+        assert!(requests[1].contains(&new_id));
+        for request in requests {
+            assert!(!request.contains("account_id"));
+        }
+        assert!(telemetry.snapshot().unwrap().queue.is_empty());
+    }
+
+    #[test]
+    fn sign_out_sends_later_events_under_a_fresh_anonymous_identity() {
+        let _ports = crate::test_support::hold_ports();
+        let dir = temp_dir("account-sign-out");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let old_id = telemetry.install_id().unwrap();
+        telemetry.bind_account(&"a".repeat(64)).unwrap();
+        telemetry.record(EventData::Activated).unwrap();
+        // An old on-disk queue did not carry per-event installation IDs.
+        telemetry.state.lock().unwrap().as_mut().unwrap().queue[0].installation_id = None;
+        telemetry.clear_account().unwrap();
+        assert_eq!(telemetry.bound_account(), None);
+        let signed_out_id = telemetry.install_id();
+        telemetry.clear_account().unwrap();
+        assert_eq!(telemetry.install_id(), signed_out_id);
         let new_id = telemetry.install_id().unwrap();
         assert_ne!(old_id, new_id);
         assert_eq!(
