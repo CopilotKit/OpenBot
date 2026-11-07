@@ -6,10 +6,11 @@ import {
   auditEventWords,
 } from "@openbot/shared/audit-words";
 import { isOpenBotActor } from "@openbot/shared/openbot-actor";
-import { connectorName } from "@openbot/shared/tool-name";
+import { connectorName, humanise } from "@openbot/shared/tool-name";
 import { Fragment, type ReactNode } from "react";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
+import { galleryComponent } from "@/lib/copilot/gallery-registry";
 import { atStart } from "@/lib/manage-paths";
 
 /** One row as the API returns it. */
@@ -246,6 +247,36 @@ function appSubjectWords(event: AuditEvent): string | undefined {
 }
 
 /**
+ * What a row is about in words, for a page anybody can open, where Admin shows the name or id the
+ * trail stores: an app or its tools (above), a component by the name the Components gallery gives
+ * it ("Data table", not `showTable`), a skill by its name in words (`find-a-document` reads "Find a
+ * document"), and a saved key by its provider and key ID, never the key's id. Undefined for
+ * anything else, which reads as it does in Admin.
+ */
+function subjectWords(event: AuditEvent): string | undefined {
+  const app = appSubjectWords(event);
+  if (app !== undefined) return app;
+  const payload = event.payload ?? {};
+  const target = event.targetId;
+  if (event.targetType === "component" && target) return componentName(target);
+  if (event.targetType === "skill" && target) return humanise(target);
+  if (event.targetType === "credential") {
+    if (typeof payload.server === "string")
+      return connectorName(payload.server);
+    const named = [payload.provider, payload.keyId].filter(
+      (part): part is string => typeof part === "string" && part !== "",
+    );
+    return named.join(" · ");
+  }
+  return undefined;
+}
+
+/** A component by its name in the Components gallery, or its stored name in words. */
+function componentName(name: string): string {
+  return galleryComponent(name)?.title ?? humanise(name);
+}
+
+/**
  * The row's subject, the part of "On" that is not the page host. Admin (`storedNames`) reads a tool
  * or an app by the name the trail stores it under; a page anybody can open reads it in words.
  */
@@ -258,7 +289,7 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
       ? `${payload.offered} of ${payload.granted} tools`
       : "";
   if (!storedNames) {
-    const words = appSubjectWords(event);
+    const words = subjectWords(event);
     if (words !== undefined) return words;
   } else if (
     event.eventType === "configuration.changed" &&
@@ -461,8 +492,24 @@ function refusalLine(payload: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-/** Every reason line under the decision, in the order the cell draws them. */
-export function decisionDetails(event: AuditEvent): string[] {
+/**
+ * Why a component was not shown, for a page anybody can open. The stored reason is the one the Bot
+ * is given, which names the component and its data by their ids and sends the person to an admin.
+ */
+const COMPONENT_REFUSALS: Record<string, string> = {
+  "component.refused": "This Bot can't show it.",
+  "component.function_refused": "It isn't allowed to read that data.",
+};
+
+/**
+ * Every reason line under the decision, in the order the cell draws them. Admin (`storedNames`)
+ * reads each as recorded; a page anybody can open says a component's refusal in words and leaves
+ * out the policy rule that decided an action, which is an admin's expression.
+ */
+export function decisionDetails(
+  event: AuditEvent,
+  storedNames = true,
+): string[] {
   const payload = event.payload ?? {};
   const decision = (payload.decision ?? {}) as {
     allowed?: boolean;
@@ -478,6 +525,8 @@ export function decisionDetails(event: AuditEvent): string[] {
       ? refusalLine(payload)
       : undefined;
   if (refused) lines.push(refused);
+  else if (!storedNames && Object.hasOwn(COMPONENT_REFUSALS, event.eventType))
+    lines.push(COMPONENT_REFUSALS[event.eventType] as string);
   // Refusal reasons mirror the conversation-facing reason.
   else if (
     (event.eventType === "component.refused" ||
@@ -544,7 +593,8 @@ export function decisionDetails(event: AuditEvent): string[] {
     event.eventType === "agent.stream_stalled" ? silenceOf(payload) : null;
   if (silence) lines.push(silence);
   // Show concrete policy rules, but suppress the uninformative default `true` allow rule.
-  if (decision.rule && decision.rule !== "true") lines.push(decision.rule);
+  if (storedNames && decision.rule && decision.rule !== "true")
+    lines.push(decision.rule);
   if (
     decision.mode === "dry-run" &&
     decision.allowed === false &&
@@ -571,7 +621,9 @@ export function searchTextOf(
     botText(event, nameFor),
     startedByText(event, nameFor, deployment),
     decisionText(event),
+    // Both ways a reason is said, as for the subject above.
     ...decisionDetails(event),
+    ...decisionDetails(event, false),
   ]
     .join(" ")
     .toLowerCase();
@@ -593,7 +645,7 @@ export function OnCell({
    * Named targets, tool counts, files and commands are identifiers and read in mono; a page element
    * is a label and does not, and nor is a tool or an app said in words.
    */
-  const inWords = !storedNames && appSubjectWords(event) !== undefined;
+  const inWords = !storedNames && subjectWords(event) !== undefined;
   const mono =
     event.eventType === "mcp.tools_discovered" ||
     (NAMED_TARGETS.has(event.targetType) && !!event.targetId && !inWords) ||
@@ -682,7 +734,14 @@ export function startedByLine(text: string): string {
     : `Started by ${text.replace(/^(A|This) /, (word) => word.toLowerCase())}`;
 }
 
-export function DecisionCell({ event }: { event: AuditEvent }) {
+export function DecisionCell({
+  event,
+  storedNames = true,
+}: {
+  event: AuditEvent;
+  /** Whether reasons read as recorded, as Admin's do; see {@link decisionDetails}. */
+  storedNames?: boolean;
+}) {
   const outcome = outcomeOf(event);
   return (
     <>
@@ -697,7 +756,7 @@ export function DecisionCell({ event }: { event: AuditEvent }) {
       >
         {decisionText(event)}
       </span>
-      {decisionDetails(event).map((line) => (
+      {decisionDetails(event, storedNames).map((line) => (
         /*
          * A cap on the line, not a width. A fixed 22rem held the Decision column at least that wide,
          * and with the columns beside it pushed the table past a 1000px window. The table gives the

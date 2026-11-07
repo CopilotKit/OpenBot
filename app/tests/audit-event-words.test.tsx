@@ -14,6 +14,7 @@ import {
   withoutOpenBotWorking,
 } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
+import { OPENBOT_WORKING_EVENT_TYPES } from "@/lib/audit/outcome";
 import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { settleReactWork } from "./settle-react-work";
@@ -98,6 +99,16 @@ const STORED = [
   "computer.policy_loaded",
 ];
 
+/** What Activity's query leaves out: OpenBot's own working. */
+const LEFT_OUT = new Set<string>(OPENBOT_WORKING_EVENT_TYPES);
+
+/** Each row's words and stored name, for the rows Activity is answered with. */
+const ACTIVITY = ROWS.map((row, index) => ({
+  type: row.eventType,
+  words: WORDS[index],
+  stored: STORED[index],
+})).filter((row) => !LEFT_OUT.has(row.type));
+
 async function renderAs(edition: "team" | "personal") {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -113,7 +124,7 @@ async function renderAs(edition: "team" | "personal") {
   // Activity asks without OpenBot's own working, and the server answers without it.
   if (edition === "personal")
     queryClient.setQueryData([...auditKeys.all, withoutOpenBotWorking("")], {
-      events: ROWS.filter((row) => row.eventType !== "mcp.tools_discovered"),
+      events: ROWS.filter((row) => !LEFT_OUT.has(row.eventType)),
     });
   else queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
   queryClient.setQueryData(agentKeys.list(false), [
@@ -141,10 +152,12 @@ const whats = (container: HTMLElement) =>
 test("each row says in words what it was about, and no stored name shows in Activity", async () => {
   const view = await renderAs("personal");
   const lines = whats(view.container);
-  // Every row but choosing tools for a run, which Activity leaves out.
-  expect(lines.map((line) => line.textContent)).toEqual(WORDS.slice(1));
+  // Every row but OpenBot's own working (choosing tools, choosing a Bot, starting the computer).
+  expect(lines.map((line) => line.textContent)).toEqual(
+    ACTIVITY.map((row) => row.words),
+  );
   expect(lines.map((line) => line.getAttribute("title"))).toEqual(
-    STORED.slice(1).map(() => null),
+    ACTIVITY.map(() => null),
   );
   const table = view.container.querySelector("tbody")?.textContent ?? "";
   for (const stored of ["mcp.tools_discovered", "write_file", "read_file"])
@@ -164,11 +177,11 @@ test("the search box still finds a row by its stored name", async () => {
     .setup({ document })
     .type(
       view.getByRole("searchbox", { name: "Search events" }),
-      "channel.routed",
+      "parallel/web_search",
     );
   await waitFor(() =>
     expect(whats(view.container).map((line) => line.textContent)).toEqual([
-      "Choose a Bot for a message",
+      "Search the web",
     ]),
   );
 });
