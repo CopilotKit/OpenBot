@@ -1493,8 +1493,9 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
             <DialogHeader>
               <DialogTitle>Grant tools</DialogTitle>
               <DialogDescription>
-                Each grant is its own row in Audit. Tools that change things are
-                still checked against the boundaries on every call.
+                Each grant is its own row in {paths.auditLabel}. Tools that
+                change things are still checked against the boundaries on every
+                call.
               </DialogDescription>
             </DialogHeader>
             <DialogBody className="mt-4 space-y-5">

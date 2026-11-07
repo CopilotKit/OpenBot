@@ -30,6 +30,7 @@ import {
 import { desktopShell } from "@/lib/desktop/shell";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { managePaths } from "@/lib/manage-paths";
 import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
@@ -133,7 +134,7 @@ const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     linkOptions: { to: "/settings/computer" },
   },
   {
-    title: "Activity",
+    title: managePaths("personal").auditLabel,
     icon: IconHistory,
     linkOptions: { to: "/settings/activity" },
   },

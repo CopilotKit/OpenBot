@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The personal edition's Settings > Activity page is titled Activity, as its sidebar entry is, where it
+  was titled Audit and spoke of "this deployment's policy". Admin keeps Audit.
 - Activity and Audit say what each row was about in words, such as "Choose tools for a run" and "Save
   a file", where they showed "mcp.tools_discovered" and "write_file". The export keeps those names.
 - Activity names a Bot and never shows its id: hovering a Bot showed "picked-harness", a Bot's
