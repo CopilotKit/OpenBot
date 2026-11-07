@@ -14,6 +14,8 @@
  * held to the same rules. Not `report_goal_progress`: progress is recorded by the run working on a
  * goal, against that run.
  */
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import type { AuditInitiator } from "../audit";
 import type { ResponsibilityEngine } from "./engine";
 import { responsibilityTools } from "./tools";
 import { type ResponsibilityStore, responsibilitySources } from "./types";
@@ -175,6 +177,31 @@ export const GOAL_WRITE_TOOLS = [
 
 export const isGoalTool = (name: string) =>
   GOAL_TOOLS.some((tool) => tool.name === name);
+
+/** The key of OpenBot's own Routines app, which serves these (`ALWAYS_ON_APP`). */
+const ROUTINES_APP = "routines";
+
+/**
+ * A Bot's tools for a run, less the Routines app's goal tools when the run is a goal's own.
+ *
+ * A goal's run is handed the goal's own tools (`tools.ts`: `create_goal` and the rest, bound to that
+ * goal's conversation, and `report_goal_progress` for its run), and every Bot also holds these copies
+ * through Routines. Both reached the model, so it saw `create_goal` beside
+ * `mcp__routines__create_goal`: two tools for each job, under two names and two descriptions. The
+ * run keeps its own, which are the ones its turn names, and these leave it. Every other run, a
+ * conversation above all, keeps them: they are the only goal tools it has.
+ */
+export function withoutGoalCopiesInGoalRun(
+  initiator: AuditInitiator | undefined,
+  load: (botId: string) => Promise<GrantedTool[]>,
+): (botId: string) => Promise<GrantedTool[]> {
+  if (initiator?.kind !== "responsibility") return load;
+  return async (botId) =>
+    (await load(botId)).filter((tool) => {
+      const [app, name] = tool.ref.split("/");
+      return !(app === ROUTINES_APP && name !== undefined && isGoalTool(name));
+    });
+}
 
 /** The fields that were given. A blank string is not a value, as for a routine's arguments. */
 function given(value: unknown): Record<string, unknown> {
