@@ -1,6 +1,6 @@
 # Windows desktop signing
 
-Builds use the root OpenBot release number plus `-internal.g<commit>`, or the plain release
+Builds use the root OpenBot release number plus `-internal.<commits>.g<commit>`, or the plain release
 number when the run is on a release tag. The workflow verifies
 that both the packaged app and installer embed that version, and includes `build-version.json`
 with the binaries. See [desktop build versions](releasing.md#desktop-build-versions).
