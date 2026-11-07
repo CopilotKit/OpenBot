@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot page's Activity list says a routine's schedule in words, as the Routines page does: "Every
+  day at 09:00 (UTC)", where it showed "Repeats on 0 9 * * * (UTC)".
 - OpenBot Desktop's Check for updates says "OpenBot 0.3.2 is up to date." or offers the newer
   version with Update and restart, where a signed release said updates were not configured. It is
   also Check for Updates… in the tray menu on every platform and under About in the Mac's OpenBot
