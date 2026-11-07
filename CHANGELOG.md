@@ -10,6 +10,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 - OpenBot Desktop on Windows names its folder `C:\Users\you\OpenBot` under Installed in, where it
   said `\\?\C:\Users\you\OpenBot`, and its folder-access approvals name folders the same way.
+- OpenBot Desktop's Windows installer shows OpenBot's orb on its Welcome and Finish pages, in each
+  page's header and as its icon, where it showed NSIS's stock blue artwork. The uninstaller has the
+  same icon.
 - OpenBot Desktop's sign-ins show whose account they are: CopilotKit's logo on the CopilotKit
   sign-in, Google's and xAI's marks in the AI provider list, and each provider's mark on its
   "Sign in with" button. Google's button reads "Sign in with Google".
