@@ -5777,14 +5777,28 @@ where
             format!("{}: {}", env_file.display(), error.kind()),
         ))
     })?;
+    /*
+     * Compared and kept at `127.0.0.1` where the CLI says `localhost`, as Start writes them
+     * (`numeric_loopback`), so a file Start already rewrote still matches the stack it names, and
+     * the address the browser is handed never says `localhost`.
+     */
     let addresses = [
-        ("INTELLIGENCE_API_URL", &stack.urls.api),
-        ("INTELLIGENCE_GATEWAY_WS_URL", &stack.urls.gateway),
+        (
+            "INTELLIGENCE_API_URL",
+            openbot_env::numeric_loopback(&stack.urls.api),
+        ),
+        (
+            "INTELLIGENCE_GATEWAY_WS_URL",
+            openbot_env::numeric_loopback(&stack.urls.gateway),
+        ),
     ];
-    if addresses
-        .iter()
-        .any(|(name, reported)| written.get(*name) != Some(*reported))
-    {
+    if addresses.iter().any(|(name, reported)| {
+        written
+            .get(*name)
+            .map(|value| openbot_env::numeric_loopback(value))
+            .as_ref()
+            != Some(reported)
+    }) {
         return Err(unconnected(
             "The connection settings do not match the back end that was set up. OpenBot did not use them.",
         ));
@@ -5798,7 +5812,7 @@ where
             remember(root, "INTELLIGENCE_API_KEY", key).map_err(ConnectError::Unconnected)?;
             let settings = addresses
                 .iter()
-                .map(|(name, value)| ((*name).to_owned(), (*value).clone()))
+                .map(|(name, value)| ((*name).to_owned(), value.clone()))
                 .collect();
             let purge = [(LOCAL_EVAL_CONNECTED_KEY.to_owned(), String::new())].into();
             openbot_env::write(&env_file, &settings, &purge).map_err(|error| {
@@ -11550,9 +11564,10 @@ mod tests {
         let env = std::fs::read_to_string(root.join(".env")).unwrap();
         assert!(!env.contains(LOCAL_KEY), "{env}");
         assert!(!env.contains("CPK_INTELLIGENCE_API_KEY"), "{env}");
+        // Kept at 127.0.0.1 where the CLI wrote `localhost`: the browser is handed the gateway's.
         for line in [
-            "INTELLIGENCE_API_URL=http://localhost:64770",
-            "INTELLIGENCE_GATEWAY_WS_URL=ws://localhost:64772",
+            "INTELLIGENCE_API_URL=http://127.0.0.1:64770",
+            "INTELLIGENCE_GATEWAY_WS_URL=ws://127.0.0.1:64772",
             "SL_ENABLED=true",
             "SERVER_PORT=3001",
         ] {
@@ -11598,8 +11613,8 @@ mod tests {
         // Start's own write: the same addresses as settings, its credentials purged to the vault.
         let (settings, secrets) = openbot_desktop_lib::vault::split(
             [
-                ("INTELLIGENCE_API_URL", "http://localhost:64770"),
-                ("INTELLIGENCE_GATEWAY_WS_URL", "ws://localhost:64772"),
+                ("INTELLIGENCE_API_URL", "http://127.0.0.1:64770"),
+                ("INTELLIGENCE_GATEWAY_WS_URL", "ws://127.0.0.1:64772"),
                 ("INTELLIGENCE_API_KEY", LOCAL_KEY),
                 ("SERVER_PORT", "3001"),
             ]
@@ -11776,6 +11791,18 @@ mod tests {
         vault
             .borrow_mut()
             .insert("INTELLIGENCE_API_KEY".into(), LOCAL_KEY.into());
+        assert_eq!(
+            connect_with_vault(&root, &vault, completed())
+                .unwrap()
+                .outcome,
+            local_eval::Outcome::Completed
+        );
+        // Start wrote the CLI's `localhost` addresses as 127.0.0.1: still this stack's own.
+        std::fs::write(
+            root.join(".env"),
+            "INTELLIGENCE_API_URL=http://127.0.0.1:64770\nINTELLIGENCE_GATEWAY_WS_URL=ws://127.0.0.1:64772\n",
+        )
+        .unwrap();
         assert_eq!(
             connect_with_vault(&root, &vault, completed())
                 .unwrap()
