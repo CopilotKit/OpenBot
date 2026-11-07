@@ -446,6 +446,7 @@ describe("the default and the thinking levels, from the providers' own data", ()
     // A run on the default is sent the plan's model, never the stale configured one.
     expect(await catalogue.choose(null)).toEqual({
       model: "gpt-6.1-terra",
+      label: "GPT-6.1 Terra",
       listed: true,
     });
   });
@@ -506,7 +507,7 @@ describe("the default and the thinking levels, from the providers' own data", ()
     // Picked with an effort it does not declare, none is sent.
     expect(
       await catalogue.choose({ model: "gpt-7-nova", effort: "high" }),
-    ).toEqual({ model: "gpt-7-nova", listed: true });
+    ).toEqual({ model: "gpt-7-nova", label: "GPT-7 Nova", listed: true });
   });
 
   test("without models.dev the provider's own data still applies, and the default is the configured model", async () => {
@@ -638,6 +639,7 @@ describe("a run's model and effort", () => {
   test("nothing picked: the default, and no effort, so the model thinks on its own default", async () => {
     expect(await (await openAI()).choose(null)).toEqual({
       model: "gpt-6.1-terra",
+      label: "GPT-6.1 Terra",
       listed: true,
     });
   });
@@ -645,23 +647,33 @@ describe("a run's model and effort", () => {
   test("a pick and an effort the model takes are used", async () => {
     expect(
       await (await openAI()).choose({ model: "gpt-6.1-sol", effort: "xhigh" }),
-    ).toEqual({ model: "gpt-6.1-sol", effort: "xhigh", listed: true });
+    ).toEqual({
+      model: "gpt-6.1-sol",
+      label: "GPT-6.1 Sol",
+      effort: "xhigh",
+      listed: true,
+    });
   });
 
   test("an effort the model does not take is never sent", async () => {
     // GPT-6.1 Sol takes no `none`, and GPT-4o takes no effort at all.
     expect(
       await (await openAI()).choose({ model: "gpt-6.1-sol", effort: "none" }),
-    ).toEqual({ model: "gpt-6.1-sol", listed: true });
+    ).toEqual({ model: "gpt-6.1-sol", label: "GPT-6.1 Sol", listed: true });
     expect(
       await (await openAI()).choose({ model: "gpt-4o", effort: "high" }),
-    ).toEqual({ model: "gpt-4o", listed: true });
+    ).toEqual({ model: "gpt-4o", label: "GPT-4o", listed: true });
   });
 
   test("a model no longer offered falls back to the default, with an effort only if the default takes it", async () => {
     expect(
       await (await openAI()).choose({ model: "gpt-4-0613", effort: "max" }),
-    ).toEqual({ model: "gpt-6.1-terra", effort: "max", listed: true });
+    ).toEqual({
+      model: "gpt-6.1-terra",
+      label: "GPT-6.1 Terra",
+      effort: "max",
+      listed: true,
+    });
   });
 });
 
@@ -759,7 +771,12 @@ describe("keeping the list current without a release", () => {
     // A conversation still on the retired model now runs on the default.
     expect(
       await catalogue.choose({ model: "gpt-6.1-terra", effort: "max" }),
-    ).toEqual({ model: "gpt-6.2-terra", effort: "max", listed: true });
+    ).toEqual({
+      model: "gpt-6.2-terra",
+      label: "GPT-6.2 Terra",
+      effort: "max",
+      listed: true,
+    });
   });
 
   test("a model past the shutdown date OpenAI lists drops out on its own", async () => {
@@ -1183,6 +1200,7 @@ describe("the catalogue a deployment offers", () => {
     });
     expect(await catalogue.choose({ model: "gpt-6-sol" })).toEqual({
       model: "gpt-6-sol",
+      label: "GPT-6 Sol",
       listed: true,
     });
     listing.data = listing.data.filter((model) => model.id !== "gpt-6-sol");
@@ -1192,6 +1210,7 @@ describe("the catalogue a deployment offers", () => {
     ]);
     expect(await catalogue.choose({ model: "gpt-6-sol" })).toEqual({
       model: "gpt-5.5",
+      label: "GPT-5.5",
       listed: true,
     });
   });

@@ -277,6 +277,7 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 
 ### Smaller changes
 
+- Asked which AI model it runs on, a Bot names the one the composer's model picker shows, such as "GPT-6.1 Terra", and the new one after you pick another, where it said it couldn't see its model's name.
 - On a Claude or ChatGPT plan, Auto-review and the choice of which Bot an untagged message goes to now run on the plan. Auto-review asked about every action instead, and every such message went to your default Bot. Auto-review still asks you when the plan errors or does not answer in time.
 - A Bot on a framework (the starter Bot in OpenBot Desktop) is never sent more than 128 tools in one request, counting the ones your browser adds, so with an OpenAI key it answers where every message failed with "array too long ... maximum length 128". OpenBot's own tools come first, then the app tools closest to what you asked. On a Claude or ChatGPT plan, OpenBot now chooses which tools a message needs on the plan itself; it could not choose before and offered every tool.
 - The sidebar shows the OpenBot release the server runs, such as "v0.3.3", in small grey type under

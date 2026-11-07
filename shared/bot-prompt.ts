@@ -355,6 +355,19 @@ const WEEKDAYS = [
 ] as const;
 
 /**
+ * Which model the Bot is answering on, named as the composer's model picker names it.
+ *
+ * Asked which model and framework it ran on, a Bot on the LangGraph harness named its framework
+ * (its standing role says "Powered by ...") and said it had no access to its model's name, while
+ * the picker under its answer read GPT-6.1 Terra. The model is the person's pick for the
+ * conversation, or the default, and can change from one message to the next, so it is said on every
+ * run, beside the date, and the Bot is told to trust this line over an earlier answer.
+ */
+export function modelGuidance(label: string): string {
+  return `The AI model you are running on is ${label}. If you are asked which model you are, that is the answer. The model can change between messages, so trust this line over anything said earlier in the conversation.`;
+}
+
+/**
  * What day it is, which a model cannot know.
  *
  * Without it a Bot asked for announcements "this quarter" guessed a quarter from its training data,

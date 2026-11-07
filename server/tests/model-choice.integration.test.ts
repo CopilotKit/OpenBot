@@ -120,6 +120,7 @@ describe("a person's model pick for a conversation", () => {
     expect(await store.read(userId, channelId)).toEqual(NOTHING);
     expect(await store.forRun(userId, threadId)).toEqual({
       model: "gpt-6.1-terra",
+      label: "GPT-6.1 Terra",
       listed: true,
     });
 
@@ -135,6 +136,7 @@ describe("a person's model pick for a conversation", () => {
     });
     expect(await store.forRun(userId, threadId)).toEqual({
       model: "gpt-6.1-sol",
+      label: "GPT-6.1 Sol",
       effort: "high",
       listed: true,
     });
@@ -149,6 +151,7 @@ describe("a person's model pick for a conversation", () => {
     ).toEqual({ model: null, effort: "max" });
     expect(await store.forRun(userId, threadId)).toEqual({
       model: "gpt-6.1-terra",
+      label: "GPT-6.1 Terra",
       effort: "max",
       listed: true,
     });
@@ -168,6 +171,7 @@ describe("a person's model pick for a conversation", () => {
     ).toEqual(NOTHING);
     expect(await store.forRun(userId, threadId)).toEqual({
       model: "gpt-6.1-terra",
+      label: "GPT-6.1 Terra",
       listed: true,
     });
   });
@@ -213,6 +217,7 @@ describe("a person's model pick for a conversation", () => {
     on = false;
     expect(await store.forRun(userId, threadId)).toEqual({
       model: "gpt-6.1-terra",
+      label: "GPT-6.1 Terra",
       listed: true,
     });
     expect(await store.read(userId, channelId)).toEqual(NOTHING);

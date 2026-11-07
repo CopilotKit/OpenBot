@@ -15,6 +15,7 @@ import {
   APPROVAL_GUIDANCE,
   COMPONENT_GUIDANCE,
   type ComputerGuidance,
+  modelGuidance,
   ORCHESTRATION_GUIDANCE,
   PROVENANCE_GUIDANCE,
   todayGuidance,
@@ -366,6 +367,12 @@ export type RuntimeModel = {
   effort?: string;
   /** Whether `defaultModel` came from the provider's listing rather than configuration. */
   listed?: boolean;
+  /**
+   * What the composer's model picker calls `defaultModel`, for a run whose model the catalogue
+   * chose (`modelForRun`). The Bot is told it (`modelGuidance`). Absent where nothing chose it: a
+   * plan whose own listing was not read leaves its harness to its own model, which OpenBot can't name.
+   */
+  label?: string;
   /**
    * Whether an operator named `defaultModel` (`BOT_MODEL`, the Desktop setup screen). Named, it is
    * the default while the credential lists it; otherwise the middle of the provider's line is.
@@ -723,6 +730,11 @@ export function builtInAgentConfiguration(
         ? [computerGuidance({ search: holdsWebSearch(tools) })]
         : []),
       ...(learnedSkills?.catalog ? [learnedSkills.catalog] : []),
+      /*
+       * The model it answers on, as the person sees it named. Near the end with the date: it changes
+       * only when the model does, and a new model starts a new cache anyway.
+       */
+      ...(model.label ? [modelGuidance(model.label)] : []),
       // Last, so everything above stays one prefix a provider can cache. See `todayGuidance`.
       todayGuidance(now, timeZone),
     ].join("\n\n"),
@@ -1350,6 +1362,7 @@ async function buildAgent(
             return {
               model: choice.model,
               ...(choice.effort ? { reasoningEffort: choice.effort } : {}),
+              ...(choice.label ? { label: choice.label } : {}),
             };
           }
         : undefined,
@@ -1990,12 +2003,19 @@ function remoteAgentWithStandingRole(
   holdsTools?: HoldsTools,
   /**
    * The model and effort this run answers on, for a harness this deployment runs that takes them
-   * (`takesModelChoice`). Sent as `forwardedProps.openbotModel`. Absent for every other remote Bot,
-   * which picks its own model.
+   * (`takesModelChoice`). Sent as `forwardedProps.openbotModel`, and the model's `label` named in
+   * the standing role (`modelGuidance`). Absent for every other remote Bot, which picks its own
+   * model, so OpenBot names none.
    */
-  chooseModel?: (
-    input: RunAgentInput,
-  ) => Promise<{ model: string; reasoningEffort?: string } | undefined>,
+  chooseModel?: (input: RunAgentInput) => Promise<
+    | {
+        model: string;
+        reasoningEffort?: string;
+        /** What the composer's model picker calls it. Never sent on `openbotModel`. */
+        label?: string;
+      }
+    | undefined
+  >,
   /** Who answered, by Bot id, for another Bot's answer in this one's thread. See {@link buildAgents}. */
   botNames: ReadonlyMap<string, string> = new Map(),
   /**
@@ -2170,20 +2190,33 @@ function remoteAgentWithStandingRole(
         chooseModel?.(input),
       ]),
     ).pipe(
-      switchMap(([messages, chosenModel]) => {
+      switchMap(([messages, chosen]) => {
+        // The harness is sent the model and effort; the name is for the Bot, in its role below.
+        const label = chosen?.label;
+        const chosenModel = chosen && {
+          model: chosen.model,
+          ...(chosen.reasoningEffort
+            ? { reasoningEffort: chosen.reasoningEffort }
+            : {}),
+        };
         /*
          * The standing role with what day it is, in the person's time zone when this run carries it,
          * as the last paragraph. A Bot at another endpoint is told the date the way a built-in one
          * is (`todayGuidance`), and in the one message every framework reads as its instructions:
          * told nothing, the Claude Agent SDK harness answered "tomorrow" for the day after the
          * person's. Only the day, so the role still changes once a day at most.
+         *
+         * Before it, the model this run is sent, where this deployment chose it: the role's first
+         * line names the framework ("Powered by ..."), and the Bot is told its model the way a
+         * built-in one is (`modelGuidance`). A Bot that picks its own model is told none.
          */
         const standingMessage = {
           ...agent.standingMessage,
-          content: `${agent.standingMessage.content}\n\n${todayGuidance(
-            new Date(),
-            runTimeZone(input.forwardedProps),
-          )}`,
+          content: [
+            agent.standingMessage.content,
+            ...(label ? [modelGuidance(label)] : []),
+            todayGuidance(new Date(), runTimeZone(input.forwardedProps)),
+          ].join("\n\n"),
         };
         const prepared: RunAgentInput = {
           ...input,
@@ -2531,12 +2564,15 @@ export async function modelForRun(
   const choice = await pickedModel(input);
   if (!choice) return model;
   if (model.plan && !choice.listed) return model;
+  // The deployment's own model still gets its name, so the Bot can say what it runs on.
+  const label = choice.label ? { label: choice.label } : {};
   if (choice.model === model.defaultModel && !choice.effort && !model.plan)
-    return model;
+    return { ...model, ...label };
   return {
     ...model,
     defaultModel: choice.model,
     listed: choice.listed,
+    ...label,
     ...(choice.effort ? { effort: choice.effort } : {}),
   };
 }
