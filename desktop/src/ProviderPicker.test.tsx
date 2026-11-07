@@ -400,6 +400,47 @@ test("a ChatGPT sign-in that finished is not cancelled when the screen moves on"
   ).toBe(false);
 });
 
+test.each([
+  {
+    name: "Anthropic",
+    signIn: "claude",
+    says: "Anthropic opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.",
+    asksForCode: true,
+  },
+  {
+    name: "OpenAI",
+    signIn: "chatgpt",
+    says: "OpenAI opens in your browser. You won't type anything here or need an API key.",
+    asksForCode: false,
+  },
+])(
+  "$name's plan sign-in says beforehand whether it will ask for a code",
+  async ({ name, signIn, says, asksForCode }) => {
+    const finished = deferred<string>();
+    invokeHandler = async (command) => {
+      if (command === "providers") return providers;
+      if (command === `begin_${signIn}_sign_in`)
+        return "https://sign-in.example";
+      if (command === `finish_${signIn}_sign_in`) return finished.promise;
+      if (command === `cancel_${signIn}_sign_in`) return null;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const view = await renderPicker();
+    await pick(view, new RegExp(name));
+
+    const promise = view.getByText(/in your browser\./);
+    expect(promise.textContent).toBe(says);
+
+    await userEvent.click(
+      view.getByRole("button", { name: `Sign in with ${name}` }),
+    );
+    await view.findByText("Open the sign-in page");
+    expect(Boolean(view.queryByLabelText("Code from your browser"))).toBe(
+      asksForCode,
+    );
+  },
+);
+
 test("a saved provider-scoped plan session enables continue without exposing a token", async () => {
   const choices: unknown[] = [];
   invokeHandler = async (command) => {
