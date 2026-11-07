@@ -3818,9 +3818,11 @@ fn show_openbot_on<R: tauri::Runtime>(
     if recovery_required_or_pending_quit_notice(&shell, &root) {
         return Err("Part of OpenBot needs recovery. Try starting OpenBot once more.".into());
     }
-    let url = owned_app_url(&shell, &root, ports).ok_or_else(|| {
+    let (url, address) = owned_app(&shell, &root, ports).ok_or_else(|| {
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
+    hold_shown_deployment(&shell, &root, address);
+    refresh_menus(&app);
     // Only the owned app itself.
     trust_owned_app(&app, &url);
     let destination = url;
@@ -4649,9 +4651,11 @@ fn read_desktop_status<R: tauri::Runtime>(
         None => (Vec::new(), Vec::new()),
     };
     let ports = ports_for_shell(app).ok();
-    let answering = ports
-        .as_ref()
-        .is_some_and(|ports| owned_app_url(&shell, &root, ports).is_some());
+    // Whether this installation's OpenBot answers, shown in the window or not: one behind this app
+    // that waits for Start to upgrade it is still running.
+    let answering = ports.as_ref().is_some_and(|ports| {
+        app_url_published_by(held_engine(&shell, &root).as_ref(), &root, ports).is_some()
+    });
     DesktopStatus {
         openbot_running: held || answering,
         openbot_held: held,
@@ -4789,15 +4793,56 @@ fn already_running_at(shell: &Shell, root: &Path, ports: &openbot_env::Ports) ->
 
 /// Neither an owned API nor an answering app port alone authorizes showing a deployment: this
 /// root's own `server` container has to be the one publishing both.
+///
+/// Nor does a deployment an earlier app left running (an installer that closed the app without its
+/// Quit, a crash, a force quit) that is behind this app's release: Start upgrades it first
+/// (`upgrade::due`), and showing it as it is kept the person on the old release for good. One this
+/// session holds is shown whatever its release, because Start decided it: a failed upgrade starts
+/// the previous version again on purpose.
 fn owned_app_url(shell: &Shell, root: &Path, ports: &openbot_env::Ports) -> Option<String> {
-    let owned = shell
+    owned_app(shell, root, ports).map(|(url, _)| url)
+}
+
+/// [`owned_app_url`], with the engine whose `server` container publishes it.
+fn owned_app(
+    shell: &Shell,
+    root: &Path,
+    ports: &openbot_env::Ports,
+) -> Option<(String, engine::Address)> {
+    let held = held_engine(shell, root);
+    if held.is_none() && upgrade::due(root, &upgrade::own()).is_some() {
+        return None;
+    }
+    app_published_by(held.as_ref(), root, ports)
+}
+
+/// The engine this session holds `root`'s containers on, when it holds them.
+fn held_engine(shell: &Shell, root: &Path) -> Option<engine::Address> {
+    shell
         .containers
         .lock()
         .unwrap()
         .as_ref()
         .filter(|owned| owned.root == root)
-        .map(|owned| owned.address.clone());
-    app_url_published_by(owned.as_ref(), root, ports)
+        .map(|owned| owned.address.clone())
+}
+
+/// A deployment the window shows as its own is this session's from then on, as one Start raised
+/// is: the menus say it is running, and Stop, Restart and Quit take its containers down. Shown and
+/// not held, one an earlier app left running stayed up through Quit and was shown again at the next
+/// launch. Called holding `Shell::startup`, with the engine that verified the deployment; a session
+/// that already holds a deployment keeps it.
+fn hold_shown_deployment(shell: &Shell, root: &Path, address: engine::Address) {
+    let free = shell.containers.lock().unwrap().is_none();
+    let free = free && shell.root.lock().unwrap().is_none();
+    if !free {
+        return;
+    }
+    *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+        root: root.to_path_buf(),
+        address,
+    });
+    *shell.root.lock().unwrap() = Some(root.to_path_buf());
 }
 
 /// [`owned_app_url`] without a window: the Recorder's native host is a process of its own, started
@@ -4807,17 +4852,28 @@ fn app_url_published_by(
     root: &Path,
     ports: &openbot_env::Ports,
 ) -> Option<String> {
+    app_published_by(owned, root, ports).map(|(url, _)| url)
+}
+
+/// The app's address, with the engine whose `server` container publishes it and the API.
+fn app_published_by(
+    owned: Option<&engine::Address>,
+    root: &Path,
+    ports: &openbot_env::Ports,
+) -> Option<(String, engine::Address)> {
     // An interrupted upgrade outranks surviving process ownership after a shell crash. Every
     // passive adoption, tray restore and Recorder handoff shares this boundary.
     if upgrade::interrupted(root) {
         return None;
     }
+    let mut publisher = None;
     if !already_running_on(root, ports.server, |root, server| {
-        server_container_publishes(owned, root, &[server, ports.app])
+        publisher = server_container_publisher(owned, root, &[server, ports.app])?;
+        Ok(publisher.is_some())
     }) {
         return None;
     }
-    stack::app_url(ports.app)
+    Some((stack::app_url(ports.app)?, publisher?))
 }
 
 /// An address the Recorder's native host answers in place of a Desktop deployment's own, so a test
@@ -4918,36 +4974,51 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
     }
 }
 
-/// Whether `root`'s `server` container publishes `ports`, asked of the engine this session raised
-/// it on when there is one, and otherwise of whichever engine answers: an OpenBot left running by
-/// an earlier session is still this deployment's, and its restart policy kept it up.
+/// The engine on which `root`'s `server` container publishes `ports`, if it does: asked of the
+/// engine this session raised it on when there is one, and otherwise of whichever engine answers:
+/// an OpenBot left running by an earlier session is still this deployment's, and its restart policy
+/// kept it up.
 #[cfg(not(test))]
-fn server_container_publishes(
+fn server_container_publisher(
     owned: Option<&engine::Address>,
     root: &Path,
     ports: &[u16],
-) -> Result<bool, Problem> {
+) -> Result<Option<engine::Address>, Problem> {
     let address = match owned {
         Some(address) => address.clone(),
         None => {
             let status = engine::detect();
             match status.address.filter(|_| status.responding) {
                 Some(address) => address,
-                None => return Ok(false),
+                None => return Ok(None),
             }
         }
     };
-    stack::server_publishes(&address, root, ports)
+    Ok(stack::server_publishes(&address, root, ports)?.then_some(address))
 }
 
-/// Tests never ask a real engine. They say which roots' server containers publish which ports.
+/// Tests never ask a real engine. They say which roots' server containers publish which ports, on
+/// the engine this session holds or else the plain Docker one (`tests::fake_engine`'s).
+#[cfg(test)]
+fn server_container_publisher(
+    owned: Option<&engine::Address>,
+    root: &Path,
+    ports: &[u16],
+) -> Result<Option<engine::Address>, Problem> {
+    Ok(tests::published_by_server(root, ports).then(|| {
+        owned
+            .cloned()
+            .unwrap_or_else(|| engine::Address::new(engine::Engine::Docker, None))
+    }))
+}
+
 #[cfg(test)]
 fn server_container_publishes(
-    _owned: Option<&engine::Address>,
+    owned: Option<&engine::Address>,
     root: &Path,
     ports: &[u16],
 ) -> Result<bool, Problem> {
-    Ok(tests::published_by_server(root, ports))
+    Ok(server_container_publisher(owned, root, ports)?.is_some())
 }
 
 /// What stopped the stack, if anything did, and forget it once it has been read.
@@ -6145,10 +6216,12 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     // A successful app-port response alone may belong to another installation or application.
     let destination = startup.as_ref().and_then(|_| {
         let root = cleanup_root(&shell, &stack::default_root());
-        if let Some(url) = (!recovery_required_or_pending_quit_notice(&shell, &root))
-            .then(|| owned_app_url(&shell, &root, ports))
+        if let Some((url, address)) = (!recovery_required_or_pending_quit_notice(&shell, &root))
+            .then(|| owned_app(&shell, &root, ports))
             .flatten()
         {
+            hold_shown_deployment(&shell, &root, address);
+            refresh_menus(app);
             trust_owned_app(app, &url);
             url.parse().ok()
         } else {
@@ -13859,6 +13932,12 @@ fn main() {
             let owned = base.join("owned");
             write_installed_deployment(&selected);
             write_installed_deployment(&owned);
+            // Running on this app's own release, as a deployment it installed and started is. One
+            // behind it is not shown as it is (`owned_app_url`), and the tests about that say so.
+            let own = upgrade::own();
+            for root in [&selected, &owned] {
+                deployment::record(root, &own.version, own.pinned).unwrap();
+            }
             let source = base.join("listener.rs");
             std::fs::write(&source, r#"
 use std::io::{Read, Write};
@@ -14230,6 +14309,106 @@ fn main() {
                 .as_str(),
             "tauri://localhost/"
         );
+    }
+
+    /// An installer that closed the app without its Quit, a crash or a force quit leaves the
+    /// containers up. The newer app that opens next must not show that server as its own: Start
+    /// upgrades it (`upgrade::due`), and showing it kept the person on the old release for good.
+    #[test]
+    fn a_deployment_left_running_behind_this_app_is_left_to_start_to_upgrade() {
+        let f = RestoreFixture::new();
+        openbot_env::write(
+            &f.owned.join(".env"),
+            &f.ports.settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        let own = upgrade::own();
+        let root = f.owned.to_string_lossy().into_owned();
+        let shown = format!("http://127.0.0.1:{}/", f.ports.app);
+        let window_url = |app: &tauri::App<tauri::test::MockRuntime>| {
+            app.get_webview_window("main")
+                .unwrap()
+                .url()
+                .unwrap()
+                .to_string()
+        };
+
+        // Behind this app: the window stays on setup, whose Start upgrades it.
+        deployment::record(&f.owned, "v0.0.1", false).unwrap();
+        assert!(upgrade::due(&f.owned, &own).is_some());
+        let app = f.app(&f.owned, "tauri://localhost/");
+        assert!(!already_running_now(app.handle(), &root));
+        assert!(show_openbot_on(app.handle().clone(), &f.ports).is_err());
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(window_url(&app), "tauri://localhost/");
+
+        // On this app's release, or newer (never moved back): shown as it is.
+        for version in [own.version.as_str(), "v999.0.0"] {
+            deployment::record(&f.owned, version, own.pinned).unwrap();
+            assert!(upgrade::due(&f.owned, &own).is_none());
+            let app = f.app(&f.owned, "tauri://localhost/");
+            assert!(already_running_now(app.handle(), &root), "{version}");
+            show_openbot_on(app.handle().clone(), &f.ports).unwrap();
+            assert_eq!(window_url(&app), shown, "{version}");
+        }
+
+        // Behind, but this session raised it: a failed upgrade started the previous version again,
+        // and the window shows it.
+        deployment::record(&f.owned, "v0.0.1", false).unwrap();
+        let app = f.app(&f.owned, "tauri://localhost/");
+        *app.state::<Shell>().containers.lock().unwrap() = Some(ContainerDeployment {
+            root: f.owned.clone(),
+            address: engine::Address::new(engine::Engine::Docker, None),
+        });
+        show_openbot_on(app.handle().clone(), &f.ports).unwrap();
+        assert_eq!(window_url(&app), shown);
+    }
+
+    /// A deployment shown as the window's own is this session's, as one Start raised is: the menus
+    /// say it is running, and Quit takes its containers down. Shown and not held, the tray said
+    /// "Not running", Quit left every container up, and the next launch showed them again.
+    #[test]
+    fn a_deployment_shown_at_launch_is_held_so_the_menus_and_quit_act_on_it() {
+        if crate::test_support::isolated_process(
+            "tests::a_deployment_shown_at_launch_is_held_so_the_menus_and_quit_act_on_it",
+        ) {
+            return;
+        }
+        let _path = SerializedPath::set();
+        let record = temp_root("openbot-adopted-quit-record").join("commands.log");
+        let _engine = fake_engine(&record);
+        let f = RestoreFixture::new();
+        openbot_env::write(
+            &f.owned.join(".env"),
+            &f.ports.settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        let app = f.app(&f.owned, "tauri://localhost/");
+        let shell = app.state::<Shell>();
+        assert!(already_running_now(
+            app.handle(),
+            &f.owned.to_string_lossy()
+        ));
+        show_openbot_on(app.handle().clone(), &f.ports).unwrap();
+
+        // What the tray and the menu bar read for "Running".
+        assert_eq!(
+            shell.root.lock().unwrap().as_deref(),
+            Some(f.owned.as_path())
+        );
+        let stopped = exit_cleanup_then(
+            &shell,
+            &f.owned,
+            |_| Ok(0),
+            |root| down_containers_on_quit(&shell, root),
+            |_| Ok(()),
+        );
+        assert!(stopped.openbot.is_empty(), "{:?}", stopped.openbot);
+        assert_compose_down_ran_under(&record, &f.owned);
+        assert!(shell.root.lock().unwrap().is_none());
+        assert!(shell.containers.lock().unwrap().is_none());
     }
 
     #[test]
