@@ -44,6 +44,13 @@ export const OUTCOME_UNKNOWN =
   "This action was started but its outcome is unknown. It was not repeated. Check whether it happened before asking the person again.";
 /** An approved step that was turned away by the check just before it ran, with no reason of its own. */
 export const NOT_DONE = "Not done.";
+/**
+ * A step asked for in the same breath as one that waited for the person, which the turn stopped
+ * before running. The turn picks up again with an answer for every step it asked for, so a Bot that
+ * waits for all of them before it goes on (the Claude Agent SDK's does) is not left waiting for ever.
+ */
+export const NOT_RUN_WHILE_WAITING =
+  "Not done: the turn stopped before this step to wait for the person on another step asked for at the same time. Run it again if it is still needed.";
 
 /**
  * An approved step that the check just before it ran turned away. `why` is one sentence, with its
@@ -64,6 +71,10 @@ const FOR_PERSON = new Map<string, string>([
   [WITHDRAWN_APPROVALS_OFF, "Withdrawn. You turned off asking before changes."],
   [WITHDRAWN_RULE_ALLOWS, "Withdrawn. A rule you saved now allows it."],
   [HANDLED_BY_PERSON, "You did it yourself."],
+  [
+    NOT_RUN_WHILE_WAITING,
+    "Not done. The Bot stopped to wait for you on another step.",
+  ],
   [
     OUTCOME_UNKNOWN,
     "It started, but OpenBot can't tell whether it finished. It wasn't run again.",

@@ -387,6 +387,14 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             if turn is not None and turn.task.done():
                 self._turns.pop(thread_id)
                 turn = None
+            if turn is not None and all(
+                turn.result(tool_id).done() for tool_id in turn.delivered
+            ):
+                # Nothing it handed out is still waiting for a result, so this query can take no
+                # more: it ran out of time while the browser or the person had the step, and is
+                # still shutting down. A run only ever finds a live query between its client steps.
+                await self.interrupt(thread_id)
+                turn = None
             # An SDK query keeps the tools it started with. On the model endpoint the server
             # decides each step's tools, and a step that is sent other tools than the running
             # query holds is answered by a fresh query replaying the real collected results:
@@ -437,15 +445,12 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     yield RunFinishedEvent(thread_id=thread_id, run_id=run_id)
                     return
             else:
-                if (
-                    not replaced
-                    and input_data.messages
-                    and input_data.messages[-1].role == "tool"
-                ):
-                    yield RunErrorEvent(
-                        message="The Claude query for this tool result is no longer running. Start a new message."
-                    )
-                    return
+                # A tool result whose query is no longer running is answered by a fresh query that
+                # replays the thread, the call and its result included, as a replaced model step is.
+                # A query is bounded (`run_replayed_query`), and the person deciding a step OpenBot
+                # asked them about routinely takes longer than that bound; a restart ends one too.
+                # Refused, the run ended with an error nobody was shown and the Bot never answered
+                # the person's decision.
                 chosen = run_model(input_data.forwarded_props)
                 turn = _Turn(
                     tool_names={tool.name for tool in input_data.tools},
@@ -512,7 +517,10 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             if turn is None:
                 continue
             turn.cancelled = True
-            await super().interrupt(current)
+            # Only this thread's own worker. Upstream interrupts every thread's worker when it is
+            # given a thread it no longer holds, which a query that ended on its own no longer is.
+            if current in self._workers:
+                await super().interrupt(current)
             for result in turn.results.values():
                 if not result.done():
                     result.cancel()

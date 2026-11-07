@@ -1,4 +1,6 @@
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { ownToolLabel } from "@openbot/shared/tool-name";
+import { readOutcome } from "@/lib/computers/activity";
 import type { VisibleChatItem } from "./chat-messages";
 
 type BrowserStep = Extract<VisibleChatItem, { kind: "tool" }>;
@@ -17,6 +19,15 @@ const BROWSER_STEPS: ReadonlySet<string> = new Set([
 /** Whether a tool call is one of the browser steps a tool group draws with its page link. */
 export function isBrowserStep(item: BrowserStep): boolean {
   return BROWSER_STEPS.has(item.toolCall.function.name);
+}
+
+function isJson(value: string): boolean {
+  try {
+    JSON.parse(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function objectOf(value: string | undefined): Record<string, unknown> {
@@ -66,10 +77,22 @@ export function browserStepDetails(step: BrowserStep) {
   } catch {
     /* A partial streaming URL is not a link yet. */
   }
+  /*
+   * A sentence rather than the computer's JSON is the approval's answer for a step the Bot did not
+   * carry out: the person declined it, or the turn stopped before it to wait for them. Read as the
+   * Computer panel reads it (`readOutcome`), so the transcript does not draw it as done.
+   */
+  const sentence =
+    step.result !== undefined &&
+    !isJson(step.result) &&
+    !step.result.startsWith("Error:")
+      ? readOutcome(step.result)
+      : null;
   const failed =
     result.ok === false ||
     result.refused === true ||
-    step.result?.startsWith("Error:") === true;
+    step.result?.startsWith("Error:") === true ||
+    sentence?.ok === false;
   return {
     label: ownToolLabel(step.toolCall.function.name) ?? undefined,
     href: url?.href,
@@ -78,7 +101,12 @@ export function browserStepDetails(step: BrowserStep) {
         ? result.title
         : url?.hostname,
     failed,
-    reason: typeof result.reason === "string" ? result.reason : undefined,
+    reason:
+      typeof result.reason === "string"
+        ? result.reason
+        : sentence?.ok === false && typeof sentence.reason === "string"
+          ? outcomeForPerson(sentence.reason)
+          : undefined,
     visited: navigation && result.ok === true,
     pending: step.result === undefined,
   };
