@@ -7940,6 +7940,7 @@ mod tests {
 
     include!("stop_ipc_tests.rs");
     include!("composio_ipc_tests.rs");
+    include!("logging_file_tests.rs");
 
     // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
     #[cfg(debug_assertions)]

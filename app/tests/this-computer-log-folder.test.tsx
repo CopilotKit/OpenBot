@@ -95,11 +95,10 @@ test("Open log folder opens the desktop app's log folder", async () => {
   const view = renderPage();
   fireEvent.click(await view.findByRole("button", { name: "Open log folder" }));
   await waitFor(() => expect(opened).toEqual([LOG_FOLDER]));
-  const open = calls.find(
-    (call) => call.command === "plugin:openbot-desktop|open_logs",
-  );
   // The page asks; it never hands the desktop app a path to open.
-  expect(open?.args).toBeUndefined();
+  expect(
+    calls.filter((call) => call.command === "plugin:openbot-desktop|open_logs"),
+  ).toEqual([{ command: "plugin:openbot-desktop|open_logs" }]);
   expect(view.getByText(LOG_FOLDER)).toBeTruthy();
   expect(
     view.getByText(

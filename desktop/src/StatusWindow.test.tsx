@@ -130,10 +130,10 @@ test("Open log folder asks the desktop app to open its own log folder", async ()
   await userEvent.click(
     await view.findByRole("button", { name: "Open log folder" }),
   );
-  const open = invokeCalls.find((call) => call.command === "open_log_folder");
   // The window asks; the desktop app opens the folder it writes to, never one it is handed.
-  expect(open).toBeTruthy();
-  expect(open?.args).toBeUndefined();
+  expect(
+    invokeCalls.filter((call) => call.command === "open_log_folder"),
+  ).toEqual([{ command: "open_log_folder" }]);
   expect(
     view.container.querySelector(".status-details")?.textContent,
   ).toContain(`Logs${logFolder}`);
