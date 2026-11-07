@@ -337,6 +337,11 @@ pub fn tool(engine: Engine) -> Command {
 }
 
 fn command_at(engine: Engine, binary: &Path) -> Command {
+    command_configured(engine, binary, crate::docker_config::owned())
+}
+
+/// `command_at`, with OpenBot's Docker configuration kept in `docker_config`.
+fn command_configured(engine: Engine, binary: &Path, docker_config: Option<&Path>) -> Command {
     let mut built = command(binary);
     let mut path = tools_dir()
         .map(|dir| path_with(dir))
@@ -372,6 +377,13 @@ fn command_at(engine: Engine, binary: &Path) -> Command {
     }
     if let Some(path) = path {
         built.env("PATH", path);
+    }
+    // A pull through the person's own configuration runs Docker Desktop's credential helper,
+    // which macOS stops to ask about when OpenBot runs it. See `docker_config`.
+    if let Some(dir) = docker_config.and_then(|owned| {
+        crate::docker_config::for_commands_in(owned, |name| std::env::var_os(name))
+    }) {
+        built.env("DOCKER_CONFIG", dir);
     }
     built
 }
@@ -700,6 +712,47 @@ fn main() {
         );
         assert_eq!(output.stdout, b"configured helper used\n");
         assert_eq!(std::fs::read(config).unwrap(), original);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Install's `docker compose pull` and a `docker run` of an image not here yet read Docker's
+    /// configuration, and Docker Desktop's names `docker-credential-desktop`, which macOS stops to
+    /// ask about when OpenBot runs it. OpenBot's commands get its own configuration instead: no
+    /// credential store, the person's context.
+    #[cfg(unix)]
+    #[test]
+    fn engine_commands_run_without_the_persons_docker_credential_helper() {
+        if crate::test_support::isolated_process(
+            "engine::tests::engine_commands_run_without_the_persons_docker_credential_helper",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("engine docker config");
+        let home = root.join("home");
+        std::fs::create_dir_all(home.join(".docker/contexts/meta")).unwrap();
+        std::fs::write(
+            home.join(".docker/config.json"),
+            r#"{"auths":{"ghcr.io":{}},"credsStore":"desktop","currentContext":"desktop-linux"}"#,
+        )
+        .unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("DOCKER_CONFIG");
+        let owned = root.join("docker-config");
+
+        let command = command_configured(Engine::Docker, Path::new("docker"), Some(&owned));
+
+        let config = command
+            .get_envs()
+            .find(|(key, _)| *key == "DOCKER_CONFIG")
+            .and_then(|(_, value)| value);
+        assert_eq!(config, Some(owned.as_os_str()));
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(owned.join("config.json")).unwrap()).unwrap();
+        assert_eq!(
+            written,
+            serde_json::json!({"currentContext": "desktop-linux"})
+        );
+        assert!(owned.join("contexts/meta").is_dir());
         std::fs::remove_dir_all(root).unwrap();
     }
 
