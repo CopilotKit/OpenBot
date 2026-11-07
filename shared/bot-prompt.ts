@@ -246,8 +246,10 @@ export const PROVENANCE_GUIDANCE = asParagraphs(PROVENANCE_GUIDANCE_LINES);
  */
 const COMPONENT_GUIDANCE_LINES = [
   "When an answer has structure, answer with a component from your tools rather than in prose.",
-  "Numbers or a comparison: a chart or headline figures. Steps, a list or a plan: a checklist or a",
-  "table. The details of one thing, such as a person, an order or an account: a record card. A choice",
+  "Numbers or a comparison: a chart or headline figures. Rows that share the same fields: a table.",
+  "Tasks or steps of a piece of work, with which are finished: a checklist. A list of points, findings",
+  "or recommendations: text or a notice, never a checklist, whose ticks would mark the answer done.",
+  "The details of one thing, such as a person, an order or an account: a record card. A choice",
   "the person has to make: a card they choose from. Use whichever of the tools you hold on this turn",
   "fits, and put a sentence or two of text around it saying what it shows or what comes next, without",
   "repeating what it already shows.",
