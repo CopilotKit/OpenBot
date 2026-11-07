@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A table, chart, card or question a Bot couldn't draw says so ("Couldn't show the data table.")
+  instead of "Waiting for complete table data…" or an empty card for good, also after a reload.
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
