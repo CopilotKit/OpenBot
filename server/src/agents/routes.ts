@@ -359,6 +359,15 @@ export function createAgentRoutes(
      */
     runsOnOpenBotModel:
       agent.endpoint === null || takesModelChoice(agent.endpoint),
+    /*
+     * Whether OpenBot gives it a key on every run, as it does at every address it runs itself: the
+     * Bot in the box and the harness picked in setup (see runtime-agents.ts). Such a Bot uses its
+     * tools with no key of its own, so its Setup page must not say it can't.
+     */
+    keyFromOpenBot:
+      typeof agent.endpoint === "string" &&
+      managedRun !== undefined &&
+      isManagedEndpoint(agent.endpoint, managedRun.endpoints),
   });
   /**
    * The dtos, each with whether its computer of its own is in effect now.
