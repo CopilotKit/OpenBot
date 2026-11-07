@@ -162,6 +162,17 @@ export function createTabBar(options: { navigationTimeoutMs: number }) {
     error: unknown,
   ): Promise<BarOutcome> => {
     const message = error instanceof Error ? error.message : String(error);
+    /*
+     * Playwright's own account, in the log only. The person is answered with a sentence that says
+     * which address did not load, and that alone could not tell an interrupted navigation from a
+     * refused or a slow one when the bar's back, forward or reload failed in a test.
+     */
+    console.info(
+      JSON.stringify({
+        type: "computer-bar-navigation-failed",
+        error: error instanceof Error ? `${error.name}: ${message}` : message,
+      }),
+    );
     if (/net::ERR_/.test(message) && !/net::ERR_ABORTED/.test(message)) {
       // A document committed since the navigation began, and it is the error page: a reload of a
       // page that had already failed is on one before its own commits.

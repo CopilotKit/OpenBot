@@ -52,6 +52,10 @@ const VANISHING = `<!doctype html><title>Vanishing</title>
 <button onclick="document.getElementById('go').remove()">Remove it</button>
 <button id="go">Sign up</button>`;
 
+/** One button, clicked until the browser draws (see `untilTheBrowserDraws`). */
+const READY = `<!doctype html><title>Ready</title>
+<button>Ready</button>`;
+
 const html = (body: string) =>
   new Response(body, {
     headers: { "content-type": "text/html; charset=utf-8" },
@@ -102,6 +106,7 @@ beforeAll(async () => {
       }
       if (pathname === "/covered") return html(COVERED);
       if (pathname === "/vanishing") return html(VANISHING);
+      if (pathname === "/ready") return html(READY);
       if (pathname === "/signed-up" && request.method === "POST") {
         signUps.push(new URLSearchParams(await request.text()));
         return html(
@@ -121,7 +126,8 @@ beforeAll(async () => {
   process.env.WORKSPACE_DIR = join(root, "workspace");
   await mkdir(process.env.PROFILES_DIR, { recursive: true });
   await import(`../src/index?headed=${Date.now()}`);
-});
+  await untilTheBrowserDraws();
+}, 120_000);
 
 afterAll(async () => {
   if (!asked) return;
@@ -149,15 +155,43 @@ describe.skipIf(!asked)("a browser a person can take over", () => {
 type Element = { ref: string; role: string; name: string; value?: string };
 type Snapshot = { snapshotId: number; elements: Element[] };
 
-async function post(path: string, body: unknown) {
+type Answer = {
+  path: string;
+  status: number;
+  body: Record<string, unknown>;
+  /** The body as sent, for a failure message: it may not be JSON. */
+  text: string;
+};
+
+async function post(path: string, body: unknown): Promise<Answer> {
   const response = await api(path, {
     method: "POST",
     body: JSON.stringify(body),
   });
-  return {
-    status: response.status,
-    body: (await response.json()) as Record<string, unknown>,
-  };
+  const text = await response.text();
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    // Not JSON: `text` carries it into the failure message.
+  }
+  return { path, status: response.status, body: parsed, text };
+}
+
+/**
+ * The status an action was expected to answer, and when it is another, what the computer said.
+ *
+ * A 502's body is the computer's account of the failure: for a click, Playwright's error with its
+ * call log, which says which wait ran out (actionability, the click itself, or what it set off).
+ * Asserting the status alone left a CI failure reading "Expected: 200, Received: 502" and nothing
+ * else, with no way to tell those apart.
+ */
+function expectStatus(answer: Answer, status: number) {
+  if (answer.status !== status) {
+    throw new Error(
+      `${answer.path} answered ${answer.status}, expected ${status}. The computer said:\n${answer.text}`,
+    );
+  }
 }
 
 /** Open a page of the test site and take the snapshot a Bot would act from. */
@@ -165,13 +199,13 @@ async function open(path: string) {
   const navigated = await post("/navigate", {
     url: `http://127.0.0.1:${site?.port}${path}`,
   });
-  expect(navigated.status).toBe(200);
+  expectStatus(navigated, 200);
   return snapshot();
 }
 
 async function snapshot() {
   const taken = await post("/snapshot", {});
-  expect(taken.status).toBe(200);
+  expectStatus(taken, 200);
   const page = taken.body as unknown as Snapshot;
   return {
     ...page,
@@ -184,6 +218,37 @@ async function snapshot() {
       return page.elements.find((element) => element.name === name)?.value;
     },
   };
+}
+
+/**
+ * Start the browser and click until it has drawn, before any case times an action.
+ *
+ * A click first waits for its element to be stable, which takes two animation frames, and a headed
+ * browser's frames come from its GPU process. Navigating, reading and typing need none. So the first
+ * click of a browser whose GPU process is not drawing yet waits for it, and the first case's dropdown
+ * click was that first click: on CI runners whose headed launch took 7.7 to 9 seconds, it ran out
+ * the 3 seconds this file gives an action and answered 502, while every later case passed. Holding
+ * the GPU process as the browser starts gives the same failure, with the call log stopped at
+ * "waiting for element to be visible, enabled and stable".
+ *
+ * The cases pin what the computer answers, not how soon a cold browser draws, so the browser is
+ * brought that far here. Every click that has to wait is printed with what the computer said, so a
+ * slow start stays visible in the log.
+ */
+async function untilTheBrowserDraws() {
+  const ready = await open("/ready");
+  const deadline = Date.now() + 90_000;
+  for (;;) {
+    const clicked = await post("/click", {
+      ref: ready.ref("Ready"),
+      snapshotId: ready.snapshotId,
+    });
+    if (clicked.status === 200) return;
+    if (Date.now() > deadline) expectStatus(clicked, 200);
+    console.info(
+      `The browser has not drawn yet. The click answered ${clicked.status}:\n${clicked.text}`,
+    );
+  }
 }
 
 /**
@@ -209,7 +274,7 @@ describe.skipIf(!asked)("a Bot sending a form", () => {
         snapshotId: form.snapshotId,
         text,
       });
-      expect(typed.status).toBe(200);
+      expectStatus(typed, 200);
     }
     // As the Bot did: click the dropdown first, which opens its list over the note and the button,
     // then type the choice.
@@ -217,13 +282,13 @@ describe.skipIf(!asked)("a Bot sending a form", () => {
       ref: form.ref("Favourite plant"),
       snapshotId: form.snapshotId,
     });
-    expect(clicked.status).toBe(200);
+    expectStatus(clicked, 200);
     const chosen = await post("/type", {
       ref: form.ref("Favourite plant"),
       snapshotId: form.snapshotId,
       text: "Basil",
     });
-    expect(chosen.status).toBe(200);
+    expectStatus(chosen, 200);
 
     const checked = await snapshot();
     expect(checked.value("Favourite plant")).toBe("Basil");
@@ -231,8 +296,8 @@ describe.skipIf(!asked)("a Bot sending a form", () => {
       ref: checked.ref("Sign up"),
       snapshotId: checked.snapshotId,
     });
-    expect(sent.body.error).toBeUndefined();
-    expect(sent.status).toBe(200);
+    // The status with the whole body, which the error alone would leave out.
+    expectStatus(sent, 200);
     expect(String(sent.body.url)).toContain("/signed-up");
 
     const arrived = signUps.at(-1);
@@ -262,7 +327,7 @@ describe.skipIf(!asked)("a Bot sending a form", () => {
         how === "click"
           ? await post("/click", target)
           : await post("/key", { ...target, key: "Enter" });
-      expect(sent.status).toBe(409);
+      expectStatus(sent, 409);
       expect(sent.body.unfinished).toBe("refused");
       const said = String(sent.body.error);
       expect(said).toContain("refused to send the form");
@@ -281,7 +346,7 @@ describe.skipIf(!asked)("a Bot sending a form", () => {
       ref: page.ref("Sign up"),
       snapshotId: page.snapshotId,
     });
-    expect(clicked.status).toBe(409);
+    expectStatus(clicked, 409);
     expect(clicked.body.unfinished).toBe("covered");
     const said = String(clicked.body.error);
     expect(said).toContain("covering");
@@ -310,7 +375,7 @@ describe.skipIf(!asked)("a Bot sending a form", () => {
         how === "click"
           ? await post("/click", target)
           : await post("/key", { ...target, key: "Enter" });
-      expect(sent.status).toBe(409);
+      expectStatus(sent, 409);
       expect(sent.body.unfinished).toBe("loading");
       expect(String(sent.body.error)).toContain("Don't do it again");
       expect(String(sent.body.error)).not.toContain("not on the page");
@@ -324,12 +389,12 @@ describe.skipIf(!asked)("a Bot sending a form", () => {
       ref: page.ref("Remove it"),
       snapshotId: page.snapshotId,
     });
-    expect(removed.status).toBe(200);
+    expectStatus(removed, 200);
     const clicked = await post("/click", {
       ref: page.ref("Sign up"),
       snapshotId: page.snapshotId,
     });
-    expect(clicked.status).toBe(409);
+    expectStatus(clicked, 409);
     expect(clicked.body.stale).toBe(true);
     expect(clicked.body.unfinished).toBeUndefined();
   }, 30_000);
@@ -348,13 +413,13 @@ async function formWithListOpen() {
       snapshotId: form.snapshotId,
       text,
     });
-    expect(typed.status).toBe(200);
+    expectStatus(typed, 200);
   }
   const opened = await post("/click", {
     ref: form.ref("Favourite plant"),
     snapshotId: form.snapshotId,
   });
-  expect(opened.status).toBe(200);
+  expectStatus(opened, 200);
   return form;
 }
 
@@ -365,7 +430,7 @@ async function signUp() {
     ref: page.ref("Sign up"),
     snapshotId: page.snapshotId,
   });
-  expect(sent.status).toBe(200);
+  expectStatus(sent, 200);
   return signUps.at(-1);
 }
 
@@ -386,8 +451,8 @@ describe.skipIf(!asked)(
         snapshotId: form.snapshotId,
         text: "Basil",
       });
-      expect(chosen.status).toBe(200);
-      expect((await post("/key", { key: "Enter" })).status).toBe(200);
+      expectStatus(chosen, 200);
+      expectStatus(await post("/key", { key: "Enter" }), 200);
 
       expect((await snapshot()).value("Favourite plant")).toBe("Basil");
       const arrived = await signUp();
@@ -408,7 +473,7 @@ describe.skipIf(!asked)(
         snapshotId: form.snapshotId,
         key: "Enter",
       });
-      expect(pressed.status).toBe(200);
+      expectStatus(pressed, 200);
       expect((await snapshot()).value("Favourite plant")).toBe("Basil");
 
       form = await formWithListOpen();
@@ -418,14 +483,14 @@ describe.skipIf(!asked)(
         text: "Basil",
         submit: true,
       });
-      expect(submitted.status).toBe(200);
+      expectStatus(submitted, 200);
       expect((await snapshot()).value("Favourite plant")).toBe("Basil");
     }, 60_000);
 
     test("choosing in the open list with the arrow keys and Enter still works as it does for a person", async () => {
       await formWithListOpen();
       for (const key of ["ArrowDown", "ArrowDown", "Enter"]) {
-        expect((await post("/key", { key })).status).toBe(200);
+        expectStatus(await post("/key", { key }), 200);
       }
       expect((await snapshot()).value("Favourite plant")).toBe("Basil");
       expect((await signUp())?.get("plant")).toBe("Basil");
