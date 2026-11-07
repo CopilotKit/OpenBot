@@ -25,6 +25,7 @@ import { navigationRender } from "@/components/edition/team-features-dialog";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
@@ -59,6 +60,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
   const channels = useInfiniteQuery(channelListQueryOptions());
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
+  const signOutOffered = useSignOutOffered();
   const navigation = useNavigationItems();
   const [search, setSearch] = useState("");
   const body = useRef<HTMLDivElement>(null);
@@ -156,20 +158,24 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
             />
           ))}
         </div>
-        <MuseButton
-          className="self-start"
-          danger
-          disabled={signOut.isPending}
-          icon={IconLogout}
-          onClick={async () => {
-            await signOut.mutateAsync();
-            await navigate({ to: "/sign" });
-          }}
-          small
-        >
-          Sign out
-        </MuseButton>
-        <ErrorNotice error={signOut.error?.message} />
+        {signOutOffered ? (
+          <>
+            <MuseButton
+              className="self-start"
+              danger
+              disabled={signOut.isPending}
+              icon={IconLogout}
+              onClick={async () => {
+                await signOut.mutateAsync();
+                await navigate({ to: "/sign" });
+              }}
+              small
+            >
+              Sign out
+            </MuseButton>
+            <ErrorNotice error={signOut.error?.message} />
+          </>
+        ) : null}
       </div>
     </MuseSheet>
   );
