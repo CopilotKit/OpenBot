@@ -68,7 +68,16 @@ function fakeStore(
   overrides: Partial<ChannelStore> = {},
 ): ChannelStore & { calls: StoreCall[] } {
   const calls: StoreCall[] = [];
+  const unexpected = async (): Promise<never> => {
+    throw new Error("Unexpected channel store call in this test");
+  };
   const base: ChannelStore = {
+    direct: unexpected,
+    list: unexpected,
+    recordActivity: unexpected,
+    signalBusy: unexpected,
+    signalChannelBusy: unexpected,
+    signalWork: unexpected,
     async create(receivedActor, agentIds) {
       calls.push(["create", receivedActor, agentIds]);
       return channel({ agentIds });
@@ -85,6 +94,7 @@ function fakeStore(
     },
     async softDelete(receivedActor, id) {
       calls.push(["softDelete", receivedActor, id]);
+      return true;
     },
     // A read beside the one the route was asked for, so it is not a call worth asserting on.
     async workIn() {

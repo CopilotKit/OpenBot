@@ -14,6 +14,7 @@ import {
 } from "@/components/channels/composer";
 import { BusinessLink } from "@/components/edition/business-link";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
+import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
@@ -56,7 +57,7 @@ function RouteComponent() {
     isError: failed,
   } = useQuery(agentListQueryOptions());
   const explore = agents?.filter(isSharedWithYou);
-  const { start, startChosen } = useStartChannel();
+  const { start, startChosen, pending } = useStartChannel();
   const router = useRouter();
   const navigate = useNavigate();
   // A start that failed behind its placeholder comes back here: its words in the box, its reason
@@ -186,6 +187,14 @@ function RouteComponent() {
             typed.current = true;
           }}
         >
+          <StarterSuggestions
+            agentId={fallback?.id}
+            disabled={pending}
+            onSelect={async (message) => {
+              if (!fallback) return;
+              await startChosen(fallback.id, message);
+            }}
+          />
           <Composer
             agents={toAgentOptions(agents)}
             commands={skillCommands}

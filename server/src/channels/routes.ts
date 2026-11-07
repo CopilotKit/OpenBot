@@ -1,3 +1,5 @@
+import { readFiring } from "@openbot/shared/routine-firing";
+import { isStarterTourAgent } from "@openbot/shared/starter-tour";
 import {
   and,
   asc,
@@ -11,7 +13,6 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { readFiring } from "@openbot/shared/routine-firing";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -29,8 +30,10 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  users,
 } from "../db/schema";
 import { parsePageLimit } from "../paging";
+import type { UserPreferencesStore } from "../user-preferences";
 import {
   CHANNEL_ACTIVITY_TOPIC,
   type ChannelActivityEvent,
@@ -223,7 +226,11 @@ export type ChannelStore = {
    * True when this call deleted the channel; false when it was already deleted. A repeat is a
    * no-op, so it announces nothing and its route records nothing.
    */
-  softDelete(actor: AgentActor, channelId: string): Promise<boolean>;
+  softDelete(
+    actor: AgentActor,
+    channelId: string,
+    discardFailedStart?: boolean,
+  ): Promise<boolean>;
   recordActivity(
     actor: AgentActor,
     channelId: string,
@@ -790,7 +797,7 @@ export function createChannelStore(
       if (updated.length === 0) throw new ChannelNotFoundError(channelId);
     },
 
-    async softDelete(actor, channelId) {
+    async softDelete(actor, channelId, discardFailedStart = false) {
       return await database.transaction(
         async (transaction) => {
           const [row] = await transaction
@@ -815,13 +822,33 @@ export function createChannelStore(
             .update(channels)
             .set({ deletedAt: new Date(), updatedAt: new Date() })
             .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
-            .returning({ id: channels.id });
+            .returning({
+              id: channels.id,
+              lastMessageAt: channels.lastMessageAt,
+            });
           /*
            * And the rest of the no-op: a repeat changed nothing, so nothing is announced. Without
            * this, every repeat told every member again, and the route wrote another
            * `channel.deleted` row to an append-only trail for a deletion that had not happened.
            */
           if (stamped.length === 0) return false;
+
+          // A failed start can delete its newly created, still-empty conversation.
+          // Release only that account's matching claim, never a used tour.
+          if (discardFailedStart && stamped[0]?.lastMessageAt === null) {
+            await transaction
+              .update(users)
+              .set({
+                preferences: sql`${users.preferences} - 'starterTourChannelId'`,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(users.id, actor.id),
+                  sql`${users.preferences}->>'starterTourChannelId' = ${channelId}`,
+                ),
+              );
+          }
 
           // Read on this transaction, so the members told are the ones the channel had when it was
           // hidden. Soft leaves the membership rows in place, so this reads the same list a repeat
@@ -1197,6 +1224,7 @@ export function createChannelRoutes(
   events?: ChannelEventHub,
   /** Where a channel's removal is written. Absent in tests that do not care about the trail. */
   auditStore?: AuditStore,
+  preferences?: Pick<UserPreferencesStore, "claimStarterTour">,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -1280,6 +1308,24 @@ export function createChannelRoutes(
         context.var.actor,
         parsed.value.agentIds,
       );
+      if (
+        preferences &&
+        channel.agentIds.length === 1 &&
+        isStarterTourAgent(channel.agentIds[0] ?? "")
+      ) {
+        try {
+          await preferences.claimStarterTour(context.var.actor.id, channel.id);
+        } catch (error) {
+          // Creation already succeeded. A preference failure must not invite a duplicate retry.
+          console.error(
+            JSON.stringify({
+              type: "starter-tour-claim-failed",
+              channelId: channel.id,
+              error: String(error),
+            }),
+          );
+        }
+      }
       return context.json({ channel: channelDto(channel) }, 201);
     } catch (error) {
       return mapStoreError(context, error);
@@ -1400,7 +1446,11 @@ export function createChannelRoutes(
   routes.delete("/:channelId", requireUser, async (context) => {
     const channelId = context.req.param("channelId");
     try {
-      const deleted = await store.softDelete(context.var.actor, channelId);
+      const deleted = await store.softDelete(
+        context.var.actor,
+        channelId,
+        context.req.query("discardFailedStart") === "true",
+      );
       // A repeat is still 204, but it deleted nothing, and the trail records acts, not attempts.
       if (deleted !== false) await recordDeleted(context, channelId);
       return context.body(null, 204);

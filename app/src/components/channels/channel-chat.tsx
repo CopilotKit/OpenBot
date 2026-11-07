@@ -29,6 +29,7 @@ import {
 } from "@/components/channels/transcript-messages";
 import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
+import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { answerPersonQuestionMutationOptions } from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
@@ -1219,6 +1220,28 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            starterSuggestions={
+              channel.agentIds.length === 1 ? (
+                <StarterSuggestions
+                  agentId={runtimeAgentId}
+                  channelId={channel.id}
+                  disabled={
+                    !channel.active ||
+                    historyLoading ||
+                    agent.isRunning ||
+                    turnsInFlight > 0 ||
+                    Boolean(question) ||
+                    call.active ||
+                    runModel.saving
+                  }
+                  onSelect={async (text) => {
+                    await runModel.beforeSend();
+                    // The transcript already reports a failed turn through runError.
+                    await sayRef.current(text).catch(() => undefined);
+                  }}
+                />
+              ) : undefined
+            }
             intro={
               /* From the roster this screen already reads; nothing while it loads. */
               botProfile ? <ConversationIntro agent={botProfile} /> : undefined
