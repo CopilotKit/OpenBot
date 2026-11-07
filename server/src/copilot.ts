@@ -149,6 +149,11 @@ type RegisteredBuiltInAgent = {
   name: string;
   type: "built_in";
   systemPrompt: string;
+  /**
+   * The subtitle under its name, which says what runs it ("Everyday life. Powered by OpenBot.").
+   * Told to the Bot with its name (`identityGuidance`), as a remote Bot's standing role tells it.
+   */
+  title?: string;
 };
 
 type RegisteredRemoteAgentFacts = {
@@ -241,11 +246,21 @@ export function selfAddressGuidance(name: string): string {
 }
 
 /**
- * The first thing a built-in Bot reads: its name. A Bot's prompt is whatever somebody wrote about
- * its job, and the package's own Knowledge prompt never says what it is called.
+ * The first thing a built-in Bot reads: its name, and the subtitle under it. A Bot's prompt is
+ * whatever somebody wrote about its job, and the package's own Knowledge prompt never says what it
+ * is called.
+ *
+ * The subtitle says what runs it ("Everyday life. Powered by OpenBot."), the way a remote Bot's
+ * standing role says it (`standingRoleMessage`), so asked which framework it runs on, a Bot here
+ * answers as one on LangGraph does. Absent, it is told its name only.
  */
-function identityGuidance(name: string): string {
-  return `You are ${name}, a Bot in OpenBot. ${selfAddressGuidance(name)}`;
+function identityGuidance(name: string, title?: string): string {
+  const subtitle = title?.trim();
+  return [
+    `You are ${name}, a Bot in OpenBot.`,
+    ...(subtitle ? [/[.!?]$/.test(subtitle) ? subtitle : `${subtitle}.`] : []),
+    selfAddressGuidance(name),
+  ].join(" ");
 }
 
 /**
@@ -500,6 +515,7 @@ export function registeredAgentFromRow(
           name: row.name,
           type: "built_in",
           systemPrompt: trimmedSystemPrompt,
+          ...(row.title.trim() ? { title: row.title.trim() } : {}),
         }
       : null;
   }
@@ -704,7 +720,7 @@ export function builtInAgentConfiguration(
        */
       ...(agent.systemPrompt.includes(selfAddressGuidance(agent.name))
         ? []
-        : [identityGuidance(agent.name)]),
+        : [identityGuidance(agent.name, agent.title)]),
       agent.systemPrompt,
       ...(standing ? [standing] : []),
       /*

@@ -8,11 +8,18 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { HttpAgent, type RunAgentInput } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { of } from "rxjs";
-import { buildAgents, type RuntimeModel } from "../src/copilot";
+import {
+  buildAgents,
+  type RegisteredAgent,
+  type RuntimeModel,
+  registeredAgentFromRow,
+} from "../src/copilot";
 import { createModelCatalogue } from "../src/model-catalogue";
+import { loadTenantPackage } from "../src/tenant-package";
 
 /*
  * A Bot knows the model it answers on, by the name the composer's model picker shows.
@@ -74,16 +81,18 @@ beforeEach(() => {
   saved = null;
 });
 
-async function builtInBot(model: RuntimeModel, catalogue: Catalogue) {
+async function builtInBot(
+  model: RuntimeModel,
+  catalogue: Catalogue,
+  bot: RegisteredAgent = {
+    id: "assistant",
+    name: "Personal Assistant",
+    type: "built_in",
+    systemPrompt: "Help with everyday life.",
+  },
+) {
   const agents = await buildAgents(
-    [
-      {
-        id: "assistant",
-        name: "Personal Assistant",
-        type: "built_in",
-        systemPrompt: "Help with everyday life.",
-      },
-    ],
+    [bot],
     model,
     model.plan ? null : "synthetic-key",
     undefined,
@@ -104,7 +113,7 @@ async function builtInBot(model: RuntimeModel, catalogue: Catalogue) {
     undefined,
     () => catalogue.choose(saved),
   );
-  const agent = agents.assistant?.clone();
+  const agent = agents[bot.id]?.clone();
   if (!agent) throw new Error("Bot missing");
   agent.setMessages([
     {
@@ -190,6 +199,41 @@ describe("a Bot on OpenBot's own harness, on an API key", () => {
       expect(sent).not.toContain(first);
     },
   );
+
+  /*
+   * The starter that ships in the personal edition runs here, and its subtitle says so ("Powered
+   * by OpenBot"). A Bot on LangGraph is told its framework in its standing role; one here was told
+   * only its name, so asked which framework it ran on it had nothing to go by. Read from the package
+   * and through `registeredAgentFromRow`, as the runtime loader reads it back from its row.
+   */
+  test("the personal starter names the framework its subtitle names, and the model the chip shows", async () => {
+    const picked = process.env.PICKED_HARNESS_URL;
+    delete process.env.PICKED_HARNESS_URL;
+    try {
+      const { agents } = await loadTenantPackage(
+        fileURLToPath(new URL("../../examples/personal", import.meta.url)),
+      );
+      const starter = agents.find((agent) => agent.id === "personal-assistant");
+      if (!starter) throw new Error("the personal package ships no starter");
+      expect(starter.title).toContain("Powered by OpenBot");
+      const registered = registeredAgentFromRow(starter);
+      if (!registered) throw new Error("the starter does not register");
+
+      const model: RuntimeModel = {
+        provider: "openai",
+        defaultModel: "gpt-5.5",
+      };
+      const catalogue = catalogueFor(model);
+      await builtInBot(model, catalogue, registered);
+      const sent = wire.join("\n");
+      expect(sent).toContain(
+        `You are Personal Assistant, a Bot in OpenBot. ${starter.title}`,
+      );
+      expect(sent).toContain(told(await chipLabel(catalogue)));
+    } finally {
+      if (picked !== undefined) process.env.PICKED_HARNESS_URL = picked;
+    }
+  });
 });
 
 /**
