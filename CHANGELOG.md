@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The first-use starter tasks step aside while a Bot waits on your answer, where they covered the
+  bottom of its question.
 - A Bot's step reads in words from the moment it starts, even for a tool with no label of its own:
   "Web search", where it showed "web_search" until the Bot's next step joined it.
 - OpenBot Desktop offers "Use a saved ChatGPT sign-in", "Use a saved OpenAI API key" and "Use a
