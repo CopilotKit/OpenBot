@@ -58,6 +58,13 @@ export type EscalationRoute = (input: {
 /**
  * One decision inside a question, with the answers the Bot expects when it can name them. The person
  * can always answer in their own words instead, so `options` are a shortcut, never a limit.
+ *
+ * NO LOWER BOUND ON `options`. It used to take two at least, and a free-text decision (which city,
+ * what name) has no likely answers to name: models send it with `options: []`, which that bound
+ * refused before anybody was asked, so the first-use "Find weekend plans" starter drew its city
+ * question as Blocked. An empty list is the same question as one with no list, and `freeText` below
+ * drops it before the question travels. One option is kept: it is a suggestion the person can take
+ * with one click or answer past, and refusing it would leave the person unasked over a hint.
  */
 export const questionPartSchema = z.object({
   header: z
@@ -74,14 +81,21 @@ export const questionPartSchema = z.object({
     .describe("This one decision, as a question"),
   options: z
     .array(z.string().trim().min(1).max(120))
-    .min(2)
     .max(6)
     .optional()
     .describe(
-      "The likely answers, when you can name them; leave out when you cannot",
+      "Optional. The likely answers, when you can name them. Leave this out for an answer the " +
+        "person types, such as a city, a name or a date",
     ),
 });
 export type QuestionPart = z.infer<typeof questionPartSchema>;
+
+/** A decision with an empty `options` list is a free-text one: it travels without the list. */
+function freeText(part: QuestionPart): QuestionPart {
+  if (part.options?.length) return part;
+  const { options: _none, ...rest } = part;
+  return rest;
+}
 
 /**
  * The route this template ships with: the person who is already here.
@@ -150,8 +164,9 @@ export function escalationTool(options: {
       "they can make, a fact only they know, permission you do not hold. Prefer this to guessing, " +
       "and prefer it to asking another Bot when no other Bot could settle it either. Say what you " +
       "need and why, then stop and wait for their answer. Put each decision in `parts`, one " +
-      "entry each, with `options` when you can name the likely answers: one decision is a " +
-      "single entry, and several are separate entries rather than numbered inside one sentence.",
+      "entry each: one decision is a single entry, and several are separate entries rather than " +
+      "numbered inside one sentence. `options` is optional: give it when you can name the likely " +
+      "answers, and leave it out when the person types the answer, such as a city, a name or a date.",
     parameters,
     execute: async (args: unknown) => {
       const parsed = parameters.safeParse(args);
@@ -211,7 +226,9 @@ export function escalationTool(options: {
           ...(from.initiator ? { initiator: from.initiator } : {}),
           question,
           ...(parsed.data.why ? { why: parsed.data.why } : {}),
-          ...(parsed.data.parts ? { parts: parsed.data.parts } : {}),
+          ...(parsed.data.parts
+            ? { parts: parsed.data.parts.map(freeText) }
+            : {}),
         });
       } catch (error) {
         /*

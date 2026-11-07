@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's question that you answer in your own words, such as which city you're in, reaches you
+  with a field to type the answer. On the "Find weekend plans" starter it showed "Blocked: Asked
+  you", and you were never asked.
 - A routine can have a title in the person's words, such as "Morning briefing", shown on the
   Routines page and in a Bot page's Activity. A Bot asked for one said it couldn't, and Bots no
   longer read a routine's internal id out to the person.
