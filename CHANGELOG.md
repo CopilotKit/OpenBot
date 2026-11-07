@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Pressing + for a new conversation opens the To: picker with the caret in it every time. A second
+  press used to leave it closed. With nobody in To:, Enter or Send keeps the message, opens To: and
+  says "Choose a Bot first." where it used to do nothing.
 - OpenBot Desktop on Windows names its folder `C:\Users\you\OpenBot` under Installed in, where it
   said `\\?\C:\Users\you\OpenBot`, and its folder-access approvals name folders the same way.
 - OpenBot Desktop's sign-ins show whose account they are: CopilotKit's logo on the CopilotKit
