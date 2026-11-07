@@ -172,6 +172,12 @@ export type ComposerProps = {
    */
   disabled?: boolean;
   /**
+   * The message can be written but has nowhere to go yet: a new conversation with nobody in To:.
+   * Enter and Send call this instead of sending and leave the words in the box, so the caller can
+   * say what is missing. Unlike `disabled`, it does not stop anybody writing.
+   */
+  onSendHeld?: () => void;
+  /**
    * A turn is in flight. It gates sending, not writing: a channel is `pending` while it is still
    * connecting and restoring its history, and the composer is on screen throughout.
    */
@@ -332,6 +338,7 @@ export function Composer({
   onQueue,
   onStop,
   disabled = false,
+  onSendHeld,
   pending = false,
   autoFocus = false,
   channelId,
@@ -1123,6 +1130,12 @@ export function Composer({
         return;
       }
 
+      // Before anything is cleared or parked: a held send keeps every word where it was typed.
+      if (onSendHeld) {
+        onSendHeld();
+        return;
+      }
+
       /*
        * A TURN IS IN FLIGHT, AND THIS IS THE FORK THE WHOLE AFFORDANCE HANGS ON.
        *
@@ -1251,6 +1264,7 @@ export function Composer({
       dismissRejections,
       isBusy,
       onQueue,
+      onSendHeld,
       onSubmit,
       releaseStagedRows,
       removeAttachment,
