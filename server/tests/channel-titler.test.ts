@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import type { RunAgentInput } from "@ag-ui/client";
 import { createChannelTitler } from "../src/channels/titler";
+import { runtimeModelForEnvironment } from "../src/copilot";
+import { resolveModelApiKey } from "../src/credentials";
 
 function respondWith(body: unknown, status = 200) {
   const calls: { url: string; body: Record<string, unknown> }[] = [];
@@ -197,4 +200,117 @@ describe("a deployment whose Bots run on Anthropic", () => {
       "https://gateway.internal/v1/messages",
     ]);
   });
+});
+
+describe("a deployment signed in to a model plan instead of a key", () => {
+  /*
+   * OpenBot Desktop signed in to a Claude plan writes CLAUDE_CODE_OAUTH_TOKEN and no model key, and a
+   * ChatGPT plan writes CHATGPT_AUTH_FILE and none either. The built-in Bots answer through the
+   * plan's own harness, but the titler only ever asked a provider with a key, found none, and named
+   * nothing: every conversation in the sidebar kept the start of its first message as its name.
+   */
+  test.each(["claude", "chatgpt"] as const)(
+    "names the conversation through the %s plan's own harness, with no API key",
+    async (provider) => {
+      const requests: RunAgentInput[] = [];
+      const harness = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        async fetch(request) {
+          // The harness OpenBot installed for the plan, on its model-only route, with its token.
+          expect(new URL(request.url).pathname).toBe(
+            provider === "claude" ? "/model" : "/",
+          );
+          expect(request.headers.get("x-openbot-agent-token")).toBe(
+            "owned-harness-token",
+          );
+          const body: RunAgentInput = await request.json();
+          requests.push(body);
+          return new Response(
+            [
+              {
+                type: "RUN_STARTED",
+                threadId: body.threadId,
+                runId: body.runId,
+              },
+              {
+                type: "TEXT_MESSAGE_START",
+                messageId: "reply",
+                role: "assistant",
+              },
+              {
+                type: "TEXT_MESSAGE_CONTENT",
+                messageId: "reply",
+                delta: "Lisbon trip planning",
+              },
+              { type: "TEXT_MESSAGE_END", messageId: "reply" },
+              {
+                type: "RUN_FINISHED",
+                threadId: body.threadId,
+                runId: body.runId,
+              },
+            ]
+              .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+              .join(""),
+            { headers: { "content-type": "text/event-stream" } },
+          );
+        },
+      });
+      try {
+        // What the Desktop writes for the plan, read the way `server/src/index.ts` reads it.
+        const environment = {
+          ...(provider === "claude"
+            ? { CLAUDE_CODE_OAUTH_TOKEN: "synthetic-plan-token" }
+            : { CHATGPT_AUTH_FILE: "/synthetic/auth.json" }),
+          PICKED_HARNESS_IMAGE:
+            provider === "claude"
+              ? "openbot-agent-claude-sdk:test"
+              : "openbot-agent-langgraph-agui:test",
+          PICKED_HARNESS_URL: harness.url.origin,
+          MANAGED_AGENT_TOKEN: "owned-harness-token",
+        };
+        const model = runtimeModelForEnvironment(
+          { provider: "openai", defaultModel: "gpt-test" },
+          environment,
+        );
+        const title = createChannelTitler({
+          provider: model.provider,
+          model: model.defaultModel,
+          ...(model.plan ? { plan: model.plan } : {}),
+          environment,
+          resolveApiKey: () =>
+            resolveModelApiKey({
+              encryptionKey: Buffer.alloc(32, 7).toString("base64"),
+              // Nothing stored either: a plan is the whole credential.
+              reader: { readModelSecret: async () => null },
+              provider: model.provider,
+              keyId: "primary-model",
+              environment,
+            }),
+        });
+
+        expect(await title("Asked: plan three days in Lisbon.")).toBe(
+          "Lisbon trip planning",
+        );
+        expect(await title("Asked: plan three days in Porto.")).toBe(
+          "Lisbon trip planning",
+        );
+
+        expect(requests).toHaveLength(2);
+        // Each title is its own question, never a turn in a conversation the harness keeps.
+        expect(requests[0]?.threadId).not.toBe(requests[1]?.threadId);
+        for (const request of requests) {
+          expect(request.tools).toEqual([]);
+          expect(request.forwardedProps.openbotModelOnly).toBe(true);
+          expect(JSON.stringify(request.context)).toContain(
+            "You name conversations",
+          );
+          expect(JSON.stringify(request.messages)).toContain("Asked: plan");
+          expect(JSON.stringify(request)).not.toContain("synthetic-plan-token");
+        }
+      } finally {
+        await harness.stop(true);
+      }
+    },
+  );
 });

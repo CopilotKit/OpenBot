@@ -2707,6 +2707,7 @@ const channelSummaries = {
   title: createChannelTitler({
     provider: runtimeModel.provider,
     model: runtimeModel.defaultModel,
+    ...(runtimeModel.plan ? { plan: runtimeModel.plan } : {}),
     resolveApiKey: resolveRuntimeModelApiKey,
   }),
   owner: workOwner("summariser"),
