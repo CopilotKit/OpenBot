@@ -8,173 +8,277 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- The sidebar shows which OpenBot release is running, in small grey type under your name at the
-  bottom left (in OpenDots, under your name in the account menu and the phone drawer). It is the
-  server's own version, so it names what is deployed, and nothing shows when the server has none,
-  as in development.
-- OpenBot Desktop keeps a log file on every platform, with each Start, Stop, update, container
-  command, update check and error, timestamped. Open it from Open log folder in Settings > This
-  computer or the Status window. It stays on your computer, rotates at 5 MB with four older files
-  kept, and leaves out keys, tokens, passwords, email addresses and messages. It wrote a few
-  untimestamped lines to nowhere, so a problem on your computer left nothing to share.
-- You're asked once before a Bot uses an app tool its app marks destructive, on OpenBot's Allow once
-  or Deny card. A Bot asked to reset a CRM pipeline put its own question in front of OpenBot's card,
-  because nothing told it OpenBot asks about a tool whose name doesn't say it deletes. Bots are now
-  told so, and such a tool's description says it.
-- A goal's run started while its conversation is busy, such as "create a goal, then run it now",
-  waits for the conversation and then runs. It failed with the platform's 409 response as its reason.
-- An Arcade action that publishes no behaviour flags, such as every AirtableApi and GithubApi action,
-  is an ordinary change again. It asks only when Ask before making changes or a rule says so, and
-  its Bot page no longer says "destroys things". It was recorded as destructive, so every call asked
-  with Allow once or Deny. A Composio action with no label is recorded the same way, and check-ins,
-  tasks and memory still never call either on their own. Actions Arcade does flag destructive, such
-  as `Attio.RemoveFromList`, still always ask. An app's existing actions are recorded this way on its
-  next refresh.
-- The personal edition calls the product OpenBot: Activity says "Started by OpenBot" where it said
-  "Started by this deployment", and Connections, Keys and Computer say what OpenBot does. Admin keeps
-  "this deployment".
-- Settings › This computer on an OpenBot Desktop build that doesn't update itself, such as an
-  internal build, says so up front with no Check for updates button, in the same words as the
-  setup window. It offered the check and then said the build doesn't update itself.
-- The Setup page of a Bot on the harness OpenBot Desktop runs, such as the personal starter, says
-  "OpenBot runs this Bot, so it can use its tools without a key." It said the Bot "can't use tools"
-  and offered a key, while the Bot used its tools.
-- OpenBot Desktop lets a Bot use folders on your computer: choose one for a Bot in Settings >
-  Computer. A folder is read-only, the desktop app asks before each change or command, every call
-  is in Activity, and access ends when OpenBot stops. Choose folder was refused with "Local computer
-  access" isn't part of OpenBot Personal. A personal edition started with `scripts/start.sh` says
-  the folders need OpenBot Desktop, where it said the desktop app was offline.
-- Deleting always asks, with Allow once or Deny, when an app calls its delete "archive", such as
-  HubSpot's `HUBSPOT_ARCHIVE_CONTACT` or a Gmail archive, and for any app tool its app marks
-  destructive (MCP's `destructiveHint`, or Composio's and Arcade's own flag), whatever the tool is
-  called. A Bot asked to delete a HubSpot contact archived it without asking. Listing archived mail,
-  reading archive settings and unarchiving still don't ask.
-- A goal's run is offered one tool for each goal job. It was also given Routines' copies, so it saw
-  `create_goal` beside `mcp__routines__create_goal` and the same for each goal tool.
-- A Bot that can't be reached says so in words: "Couldn't reach Personal Assistant. Check that
-  it's running and that its address on its Setup page is right, then try again." A conversation
-  showed "ECONNREFUSED: Unable to connect. Is the computer able to access the url?". The error itself
-  goes to the server log.
-- A Bot's question that you answer in your own words, such as which city you're in, reaches you
-  with a field to type the answer. On the "Find weekend plans" starter it showed "Blocked: Asked
-  you", and you were never asked.
-- A routine can have a title in the person's words, such as "Morning briefing", shown on the
-  Routines page and in a Bot page's Activity. A Bot asked for one said it couldn't, and Bots no
-  longer read a routine's internal id out to the person.
-- A renamed Bot's conversations go by its new name in the sidebar, the conversation header and
-  routines, including conversations started before the rename. They kept the name it had then.
-- OpenBot Desktop's Updates section on a build that doesn't update itself, such as an internal
-  build, says so up front. It promised signed updates and then said the opposite after Check for
-  updates.
-- When OpenBot Desktop changes AI provider, the personal starter Bot's subtitle names the new one
-  ("Powered by LangChain (LangGraph)"), keeping the rest of a subtitle the person wrote. It went on
-  naming the provider it was moved off.
-- Renaming the personal starter Bot on its Setup page no longer keeps it on the old AI provider's
-  harness after a provider change, where every message then failed to connect. A starter already
-  caught this way follows the installer again on upgrade.
-- Asked in a conversation for a goal, a Bot makes one, where it said it had no goals tool and set up
-  a routine instead. Every Bot holds `create_goal`, `list_goals` and the other goal tools in Routines.
-- A goal that runs only when asked is counted "on demand" on a Bot's page and listed under On demand
-  on its Activity page. It was counted and listed as scheduled.
-- A notice a Bot draws in a conversation labels its badge "Good news", "Heads up" or "Problem".
-  It showed the tone's own name, such as "positive".
-- A Bot's step that asked for a tool the Bot doesn't have says so in one sentence and reads "didn't
-  work". It opened to the runtime's error for the model, listing every tool the Bot has by its raw name.
-- The personal edition's Settings > Activity page is titled Activity, as its sidebar entry is, where it
-  was titled Audit and spoke of "this deployment's policy". Admin keeps Audit.
-- Activity and Audit say what each row was about in words, such as "Choose tools for a run" and "Save
-  a file", where they showed "mcp.tools_discovered" and "write_file". The export keeps those names.
-- Activity names a Bot and never shows its id: hovering a Bot showed "picked-harness", a Bot's
-  avatar in a conversation was labelled with it, and a deleted Bot now reads "A Bot no longer here".
-- The first-use starter tasks step aside while a Bot waits on your answer, where they covered the
-  bottom of its question.
-- A Bot's step reads in words from the moment it starts, even for a tool with no label of its own:
-  "Web search", where it showed "web_search" until the Bot's next step joined it.
-- OpenBot Desktop offers "Use a saved ChatGPT sign-in", "Use a saved OpenAI API key" and "Use a
-  saved Anthropic API key" only when one is saved. On a computer with nothing saved, choosing one
-  lit Continue and Start then said the plan was not signed in to.
-- OpenBot Desktop's link under xAI's API key field reads "Get an xAI API key", where it read "Get a
-  xAI API key".
-- A Claude Agent SDK Bot whose step was refused by Claude Code before it ran, such as a table sent
-  with broken data, goes on to retry or answer in words. The turn used to stop there in silence.
-- A Bot that creates, changes or lists a routine is told its next run on the person's clock and how
-  far away it is ("Saturday, November 7, 2026 at 9:00 AM UTC, 6 minutes from now"), so it no longer
-  tells the person that a run due in minutes is tomorrow.
-- A routine's title in a Bot page's Activity list is its whole instruction, kept to one line with an
-  ellipsis and shown in full on hover. It was cut at 120 characters, mid-word and with nothing to
-  say so.
-- A Bot page's Activity list says a routine's schedule in words, as the Routines page does: "Every
-  day at 09:00 (UTC)", where it showed "Repeats on 0 9 * * * (UTC)".
-- OpenBot Desktop's Check for updates says "OpenBot 0.3.2 is up to date." or offers the newer
-  version with Update and restart, where a signed release said updates were not configured. It is
-  also Check for Updates… in the tray menu on every platform and under About in the Mac's OpenBot
-  menu, and Check for updates on the Version row of Settings › This computer, so Windows, which has
-  no menu bar, has a way to ask.
-- On the new-conversation screen, "Choose a Bot first." and an error in the same place line up with
-  the message box's text, where they sat against the column's left edge.
-- In the personal edition, a Bot names the app card's real buttons: Turn on, then Connect.
-- OpenBot Desktop's Claude plan sign-in says you'll paste back a code, not that nothing is typed.
-- At every start the server brings the saved tools of OpenBot's own apps, Routines and Google Drive,
-  up to date with the release it runs, so a tool a release renames, rewords or adds reaches an
-  existing installation without anybody pressing Refresh (OpenBot Desktop has no Admin page to press
-  it on). A start where nothing changed writes nothing, and which Bots hold an app, and which apps
-  are on, stay as they were.
-- A goal's run is told "goal", the word every screen uses, so a Bot no longer says it "marked the
-  responsibility complete". Its tools are now `create_goal`, `list_goals`, `update_goal`,
-  `report_goal_progress`, `run_goal`, `pause_goal`, `resume_goal` and `complete_goal` (they were
-  `*_responsibility`), the trigger tools point at the Goals page and take `goalId`
-  (`responsibilityId` still works), and the refusals a goal's tools and routes give say goal. The
-  conversation names a goal's steps "Checked goals", "Marked a goal complete" and so on. Routes,
-  APIs and the database are unchanged.
-- On OpenBot Desktop signed in with a Claude or ChatGPT plan, conversations get a generated name in
-  the sidebar. With no model key, nothing named them, so each showed the start of its first message.
-  The name now comes from the plan's own model, as the built-in Bots' answers do; a Bot you brought
-  yourself is never run to name one.
-- A goal's summary on a Bot's Activity page is plain text. The Bot's reply showed there with its
-  Markdown marks ("Saved `heading.txt` with **Example Domain**"); it now reads "Saved heading.txt
-  with Example Domain.", the way the sidebar shows a conversation's last message.
-- When a Bot's turn fails after it has used the browser, the conversation now says so under the
-  turn, as it does for a turn that fails at once.
-- A Claude Agent SDK Bot answers after you decide a step it asked about (Don't do it, I did it
-  myself, Deny or Allow once), also when it asked for several steps at once or you decided after
-  five minutes. A long browser task is no longer cut off after five minutes with no reply.
-- A Bot filling in an ordinary form on a page whose address carries a signature or token in its
-  query string (an S3 presigned link's `X-Amz-Credential=`, a sign-in's `access_token=`) is no
-  longer stopped with "This needs you" as if it were changing a credential. A password field, a
-  Change password button or a security page's path still hands off.
-- A Bot that clicked a dropdown open, typed its choice and then pressed Enter keeps the choice.
-  Enter used to put the dropdown back to its first option, so the form was sent without it.
-- A Bot whose click or Enter on a button could not finish is told why: the page refused to send its
-  form, something covers the button, or the page is still loading. It was told the button was "not
-  on the page any more", and clicked it again and again.
-- The Audit table fits OpenBot Desktop's default window: what an action acted on sits under it
-  and who started it under the Bot, so Decision shows without scrolling sideways.
-- A Bot's Activity page says it lists the Bot's tasks, routines and goals, and links to every
-  action the Bot took, in Settings, Activity (Admin, Audit for an admin) narrowed to that Bot.
-- Settings, Activity and Admin, Audit show an action the person denied as Blocked, never as
-  Allowed, and list it under Blocked; the person's answer reads "Denied by a person" or "Allowed
-  once by a person", and an action that failed shows once, as "Did not happen".
-- A table, chart, card or question a Bot couldn't draw says so ("Couldn't show the data table.")
-  instead of "Waiting for complete table data…" or an empty card for good, also after a reload.
+**Before upgrading.** Two migrations each add one column: `0078_routine_title` adds a nullable
+`routines.title`, and `0079_tool_unclassified` adds `mcp_tools.unclassified`, false on every
+existing row. The database moves to `0079_tool_unclassified`. Seven things change for an existing
+deployment:
+- A goal's tools are named for goals. `create_responsibility`, `list_responsibilities`,
+  `update_responsibility`, `report_responsibility_progress`, `run_responsibility`,
+  `pause_responsibility`, `resume_responsibility` and `complete_responsibility` are now
+  `create_goal`, `list_goals`, `update_goal`, `report_goal_progress`, `run_goal`, `pause_goal`,
+  `resume_goal` and `complete_goal`, and `create_trigger` takes `goalId`. The old names are gone, so
+  update any Bot instructions, skills or goals that mention them. API routes and the database are
+  unchanged.
+- At the first start, the saved tools of OpenBot's own apps, Routines and Google Drive (where it is
+  added), are brought up to this release's, and every Bot gets Routines' seven new goal tools
+  (below). After that, a start changes them only when a release does.
+- An app tool whose action is archive, and any app tool its app marks destructive, asks with
+  **Allow once** or **Deny** every time, whatever your settings (below). This starts at once, with
+  nothing to refresh.
+- An Arcade action that publishes no behaviour flags, listed before this release, is still recorded
+  as destructive. Until an admin presses **Refresh tools** on that app's page, every call to one
+  asks with **Allow once** or **Deny**, and its Bot is told it deletes or overwrites something.
+  After the refresh it is an ordinary change (below).
+- The audit trail records a person's denial as the action's own refusal (`computer.action_refused`
+  or `mcp.call_rejected`), and an approved computer action as one `computer.action_allowed`, where
+  it wrote up to three. Counts taken from the export or a log collector change. Rows recorded before
+  the upgrade keep their old shape.
+- A Bot you run at your own address that hands `ask_person` or `message_bot` back to OpenBot
+  unanswered now has OpenBot carry it out: the person is asked, or the message is delivered. A Bot
+  that calls OpenBot's tools itself is unchanged.
+- An existing personal edition keeps its Bots. On OpenBot Desktop the Personal Assistant and the
+  Bot picked in setup stay two Bots, and the Personal Assistant is no longer rewritten from the
+  package at each Start. The picked Bot's subtitle says "Powered by" and its framework where it
+  repeated the framework's name, and a picked Bot named "LangGraph" becomes "LangChain (LangGraph)".
+  An OpenBot Desktop installation still on 0.3.1 that becomes the personal edition with this release
+  keeps its Bots and gets no Personal Assistant, where 0.3.2 added one.
+
+### Bots ask before archiving or deleting in your apps
+
+- **Archiving asks as deleting does.** An app tool whose action is archive, such as HubSpot's
+  `HUBSPOT_ARCHIVE_CONTACT`, archiving a Slack conversation or archiving mail in Gmail, asks with
+  **Allow once** or **Deny** every time. Listing archived items, reading archive settings and
+  unarchiving don't ask. Archiving used to ask only where any change would.
+- **So does any tool its app marks destructive**, whatever it is called: an MCP server's
+  `destructiveHint`, Composio's destructive tag or Arcade's destructive flag, such as
+  `Attio.RemoveFromList`. The flag used to make no difference to asking.
+- **You're asked once.** Bots are told OpenBot asks before these, and a destructive tool's
+  description says so, so a Bot no longer asks you itself first.
+- **An action its app says nothing about is an ordinary change.** An Arcade action that publishes
+  no behaviour flags, such as every AirtableApi and GithubApi action, or a Composio action with no
+  label, asks only where any change would (**Ask before making changes**, or a rule). Check-ins,
+  tasks and memory still never call one on their own. On an app's page for a Bot, such an Arcade
+  action no longer says "destroys things". It is recorded this way on its app's next refresh
+  (above).
+
+### Goals and routines
+
+- **Ask a Bot for a goal in a conversation and it sets one up.** It used to say it had no goals
+  tool and set up a routine instead. Every Bot has the goal tools in Routines, all but
+  `report_goal_progress`. A goal made this way reports into the conversation it was asked in, or
+  another the person names, and shows on the Bot's Goals page. Creating, changing, running, pausing,
+  resuming and completing a goal ask first while **Ask before making changes** is on.
+- **Bots say goal**, the word every screen uses, and no longer tell you they "marked the
+  responsibility complete". The tools are renamed (above), `create_trigger` sends you to the goal's
+  card on the Bot's Goals page, and a goal's steps in a conversation read "Created a goal",
+  "Checked goals", "Marked a goal complete" and so on, also in conversations from before.
+- **A goal's run waits for a busy conversation.** A run that starts while its conversation is in
+  use, such as **Run now** while the Bot is still answering there, waits and then runs. After about
+  9 minutes it gives up with "This goal's conversation was busy for about 9 minutes, so the run
+  never started and nothing was done. Run the goal again when the conversation is free." It failed
+  at once, with the platform's 409 error as its reason.
+- **A goal that runs only when asked** is counted "on demand" on a Bot's page and listed under On
+  demand on its Activity page, where it was counted and listed as scheduled. A goal a trigger wakes
+  says so ("Wakes on webhook"), where it said "Runs when asked".
+- **A routine can have a title.** A Bot asked to name a routine ("call it Morning briefing") gives
+  it that title, up to 100 characters, where it said it couldn't. The title heads the routine's row
+  on the Routines page, with its schedule under it, and names it in a Bot's Activity. Bots are told
+  a routine's id is for their tools only, and not to read it out.
+- **Bots tell you a routine's next run on your clock**: a Bot that creates, changes or lists a
+  routine is told "Saturday, November 7, 2026 at 9:00 AM UTC, 6 minutes from now", where it was told
+  "2026-11-07T09:00:00.000Z", so it no longer says a run due in minutes is tomorrow.
+- **A Bot page's Activity list reads in words.** A routine's schedule reads "Every day at 09:00
+  (UTC)", as on the Routines page, where it read "Repeats on 0 9 * * * (UTC)". Each title stays on
+  one line with an ellipsis and shows whole on hover, and a routine's row carries its whole
+  instruction, where it was cut at 120 characters. A goal's summary, an error, a question, a
+  follow-up and a delegated task show as plain text, without Markdown marks.
+- **OpenBot's own apps keep up with the release.** At every start the server brings the saved tools
+  of Routines and Google Drive (where it is added) up to date with the release it runs, so a tool a
+  release renames, rewords or adds reaches an existing installation without anybody pressing
+  **Refresh tools**. A start where nothing changed writes nothing, and which Bots have an app, and
+  which apps are on, stay as they were. Apps from MCP servers, Composio and Arcade are not refreshed
+  at start.
+
+### Questions reach you, and answers show as they happen
+
+- **A question with no answers to pick from**, such as which city you're in, reaches you with a
+  field to type the answer. It was refused before you were asked, and the step read "Blocked: Asked
+  you", as on the "Find weekend plans" starter.
+- **A Claude Agent SDK Bot's question reaches you** above the message box, and your answer goes back
+  to the Bot. It showed only as a step, and what you typed back was lost. Its messages to another
+  Bot are delivered the same way.
+- **Your answer's work streams in the conversation, with Stop.** When a Bot asks you something in a
+  conversation and you answer there, its work on your answer appears step by step and can be
+  stopped. It showed "Personal Assistant is reading your answer…" (with the Bot's name), with no
+  steps and no Stop, until the turn was over. An answer sent the moment the Bot asks always answers
+  it, where it could go as a new message and leave the question, and its "1 thing needs you" badge,
+  open. A question a routine, a goal or another Bot asked is still answered in the background.
+- **A step you declined stays declined** after you write again, and the Bot is told you declined
+  it. It turned into "Saved file" on your next message, and read as done when the conversation was
+  opened again. A blocked step says what was tried, its target and why ("Blocked: Save file",
+  "notes.txt · You declined it."), and a step that never ran because the Bot stopped to wait for you
+  reads "Not done. The Bot stopped to wait for you on another step.", where it read as done.
+- **The first-use starter tasks step aside** while a Bot waits on your answer, where they covered
+  the bottom of its question.
+
+### Claude Agent SDK Bots
+
+- **They answer after you decide** a step they asked about (**Allow once**, **Deny**, **Don't do
+  it** or **I did it myself**), also when they asked for several steps at once or you decided more
+  than five minutes later. A long browser task is no longer cut off five minutes in: the limit is
+  five minutes without progress. Any Bot is told which of the steps it asked for never ran.
+- **They answer what you write while one of their steps is still open**, such as after Stop or a
+  reload, and your message stays in the conversation. They carried on as if you had said nothing,
+  and your message was missing when the conversation was opened again.
+- **A step Claude Code refuses before it runs**, such as a table sent with broken data, no longer
+  ends the turn in silence. The Bot goes on to retry or answer in words.
+
+### Activity and Audit
+
+Activity (Settings → Activity in the personal edition) and Audit (Admin → Audit):
+
+- **A denied action reads Blocked.** A Bot's computer action or app call that a person denied
+  shows as Blocked ("A person denied it when asked.") and is listed under Blocked, where it read
+  Allowed. The person's answer reads "Denied by a person", "Allowed once by a person" and so on.
+- **One row per action.** A computer action that failed or was stopped shows once, as "Did not
+  happen", and Computer actions lists blocked, failed and stopped actions as well as allowed ones.
+- **Rows say what they were about in words**, such as "Choose tools for a run" and "Save a file",
+  where they showed "mcp.tools_discovered" and "write_file". Admin shows the stored name on hover,
+  and the export keeps it.
+- **Bots are named, never shown by id**, here and on the Computers page. A Bot hidden from the
+  sidebar is named, a deleted Bot reads "A Bot no longer here", and hovering a Bot no longer shows
+  its id. The export keeps the ids.
+- **The table fits a 1000-pixel window**, OpenBot Desktop's default: what an action acted on sits
+  under it, and who started it under the Bot, so Decision shows without scrolling sideways.
+- **The personal edition's page is titled Activity**, as its sidebar entry is, where it was titled
+  Audit and spoke of "this deployment's policy". A row OpenBot started reads "Started by OpenBot",
+  where it read "Started by this deployment". Admin keeps Audit.
+- **A Bot's Activity page links to "Every action this Bot took"**, which opens this page narrowed
+  to that Bot until you clear the filter. The link shows in the personal edition, and for admins.
+  The page also says it lists the Bot's tasks, routines and goals.
+
+### OpenBot Desktop
+
+- **A new installation starts with one Bot**, the Personal Assistant, running on the framework
+  picked in setup. It started with the Personal Assistant and a second Bot named after the
+  framework. Its subtitle says what runs it ("Everyday life. Powered by LangChain (LangGraph)."),
+  and its name, subtitle and instructions can be changed on its Setup page. After a change of AI
+  provider it moves to the new framework, even after you rename it, and the "Powered by" part of its
+  subtitle names the new one, keeping any words you wrote around it. Its Setup page says "OpenBot
+  runs this Bot, so it can use its tools without a key." A personal edition started with
+  `scripts/start.sh` starts with the Personal Assistant subtitled "Everyday life. Powered by
+  OpenBot.", which can be changed the same way.
+- **Bots can read folders on your computer.** Press **Choose folder** on a Bot's row under Folders
+  on this computer in Settings → Computer. A folder is read-only. The desktop app asks in its own
+  dialog before each file change, and before each command unless Settings → Approvals says
+  otherwise. Every folder chosen and every call is recorded in Activity, and access ends when
+  OpenBot stops. **Choose folder** was refused with ""Local computer access" isn't part of OpenBot
+  Personal, so that wasn't done." An OpenBot that OpenBot Desktop didn't start, such as one started
+  with `scripts/start.sh` or a team deployment, says "Needs OpenBot Desktop" there, where it said
+  the desktop app was offline.
+- **Check for updates works on a signed release.** It says "OpenBot 0.3.3 is up to date." (naming
+  the version you run) or names the newer one with **Update and restart**. The setup window's
+  Updates section said signed updates were not configured. You can also ask from **Check for
+  Updates…** in the tray menu, under About OpenBot in the OpenBot menu on a Mac, and from **Check
+  for updates** on the Version row of Settings → This computer. A build that doesn't update itself,
+  such as an internal build, says so up front ("This version of OpenBot doesn't update itself.
+  Install a released version of OpenBot to get updates."), with no button.
+- **A log file you can send.** OpenBot Desktop keeps a log file on every platform: each Start,
+  Stop, update, container command and update check, and every error, with a UTC timestamp.
+  Settings → This computer and the Status window show its folder under Logs, with **Open log
+  folder**. It stays on your computer, rotates at 5 MB keeping four older files, and hides keys,
+  tokens, passwords, cookies, sign-in codes and email addresses. It used to keep no log file.
+- **Conversations on a Claude or ChatGPT plan get a title** in the sidebar, from the plan's own
+  model, as the built-in Bots' answers are. With no model key nothing titled them, so each showed
+  the start of its first message. A Bot you brought yourself is never run to title one.
+- **The setup window offers a saved sign-in only when there is one.** "Use a saved ChatGPT
+  sign-in", "Use a saved OpenAI API key" and "Use a saved Anthropic API key" show only when one is
+  saved. On a computer with nothing saved they were offered anyway, and Start then failed.
+- **The setup window's sign-ins show whose account they are**: CopilotKit's logo on the CopilotKit
+  sign-in, Google's and xAI's marks in the "Connect your AI" list, a cloud icon beside "Any
+  OpenAI-compatible endpoint", and each provider's mark on its "Sign in with" button. Google's
+  button reads "Sign in with Google", where it read "Sign in with Google Gemini".
+- **The Claude plan sign-in** says to approve the request in your browser and paste back the code it
+  shows, where it said nothing is typed in the window. The link under xAI's API key field reads "Get
+  an xAI API key", where it read "Get a xAI API key".
+- **The Windows installer shows OpenBot's orb** down the side of its Welcome and Finish pages, in
+  the header of its other pages and as its icon, where it showed NSIS's stock artwork. The
+  uninstaller has the same icon.
+- **On Windows, folders read `C:\Users\you\OpenBot`** under Installed in and in the desktop app's
+  approval dialogs, where they read `\\?\C:\Users\you\OpenBot`.
+
+### Personal edition
+
+- **Sign out is gone where nobody signs in**: every personal edition, OpenBot Desktop included,
+  and any deployment with `OPENBOT_SINGLE_USER`. Pressing it said "No identity provider is
+  configured." and left you where you were.
+- **OpenBot, not "this deployment".** An app's page under Connections, Add credential under Keys
+  and the Computer page's update dialog say OpenBot where they said "this deployment". Admin keeps
+  "this deployment". In both editions, messages anybody can see say OpenBot too, such as "Voice
+  calls are unavailable. Check OpenBot's voice configuration."
+- **Settings → Setup no longer lists Slack and Teams**, which said "Needs setup" and counted in the
+  number beside Setup in the Settings sidebar.
+- **A Bot names the app card's real button**: Turn on (then Connect, if the card offers it),
+  Connect, Set up for an app that takes a key, or Set it up. It always said to press Connect, which
+  the card doesn't show for an app that has to be turned on first.
+
+### The Bot's browser
+
+- **A click, key press or typing that can't finish says why**: the page refused to send its form,
+  something covers the element, it is hidden or turned off, or the page is still loading. The Bot
+  was told the element was "not on the page any more", and tried the same thing again.
+- **A dropdown keeps the Bot's choice.** A Bot that opened a dropdown, typed its choice and pressed
+  Enter keeps the choice. Enter put the dropdown back to the option it showed when opened, such as
+  "Choose one", so the form was sent without it.
+- **A token in a page's address no longer counts as changing a credential.** A Bot filling in an
+  ordinary form on a page whose address carries a signature or token after its path (an S3
+  presigned link's `X-Amz-Credential=`, a sign-in's `access_token=`) is no longer handed to you. A
+  password field, a Change password button or a security page's path still hands it to you.
+
+### Smaller changes
+
+- The sidebar shows the OpenBot release the server runs, such as "v0.3.3", in small grey type under
+  your name at the bottom left. In OpenDots it is under your name in the account menu and the phone
+  drawer. Nothing shows when the server has no version, as in development.
+- A Bot made with **New Bot** says what runs it under its name: "Powered by OpenBot" for one that
+  runs in OpenBot, "Powered by" and the framework for one on a framework from the list, and nothing
+  for an agent you already run. Its subtitle was empty. LangGraph is called "LangChain (LangGraph)"
+  in that list and in OpenBot Desktop's setup window.
+- In an interface a Bot draws, such as the "Build a trip budget" starter task, a total adds up the
+  numbers you type, where it joined them as text ("Total $10025080"). A number box you clear counts
+  as zero.
+- The "Find weekend plans" starter task asks the Bot to check each event's date and any price on its
+  source page, and to leave out what it can't confirm.
+- A Bot's step reads in words from the moment it starts, whatever the tool: "Drawing an interface",
+  then "Drew an interface", where it showed "render_ui", and "Web search" for a tool with no label
+  of its own, where it showed "web_search" until the Bot's next step joined it.
+- A Bot that can't be reached says so by name: "Couldn't reach Personal Assistant. Check that it's
+  running and that its address on its Setup page is right, then try again." The conversation showed
+  the connection error, such as "ECONNREFUSED: Unable to connect. Is the computer able to access the
+  url?", which now goes to the server log.
+- A Bot's step that asked for a tool the Bot doesn't have reads "didn't work" and opens to "This Bot
+  asked for a tool it doesn't have, so it carried on without it." It opened to the error written for
+  the model, listing every tool the Bot has by its raw name.
+- A table, chart, card or question a Bot couldn't draw says so in its own card ("Couldn't show the
+  data table.") and says to ask the Bot to try again. It showed "Waiting for complete table data…"
+  or an empty card for good, also after a reload.
+- When a Bot's turn fails partway, after steps such as using its computer, the conversation says so
+  under the turn, as it does for a turn that fails at once. It ended on the steps with nothing said.
+- A reply that arrives while OpenBot Desktop's window is covered, or while the tab is in the
+  background, is drawn in full. It stayed cut off mid-sentence until the window was back in view.
+- A notice a Bot draws labels its badge "Good news", "Heads up" or "Problem", where it showed the
+  tone's own name, such as "positive".
 - With reduced motion turned on in the operating system, a step a Bot is still running shows its
-  words again, in the same muted tone as a finished step, instead of only its ▸.
-- Pressing + for a new conversation opens the To: picker with the caret in it every time. A second
-  press used to leave it closed. With nobody in To:, Enter or Send keeps the message, opens To: and
-  says "Choose a Bot first." where it used to do nothing.
-- OpenBot Desktop on Windows names its folder `C:\Users\you\OpenBot` under Installed in, where it
-  said `\\?\C:\Users\you\OpenBot`, and its folder-access approvals name folders the same way.
-- OpenBot Desktop's Windows installer shows OpenBot's orb on its Welcome and Finish pages, in each
-  page's header and as its icon, where it showed NSIS's stock blue artwork. The uninstaller has the
-  same icon.
-- OpenBot Desktop's sign-ins show whose account they are: CopilotKit's logo on the CopilotKit
-  sign-in, Google's and xAI's marks in the AI provider list, and each provider's mark on its
-  "Sign in with" button. Google's button reads "Sign in with Google".
-- OpenBot Desktop's "Connect your AI" list shows a plain cloud icon beside "Any OpenAI-compatible
-  endpoint", the one row that had nothing beside its name. It is the icon OpenBot's admin page uses
-  for the same choice.
-- The private sign-in dialog in a conversation no longer leaves large empty gaps above "Use a
-  saved login" and "Enter your login". Its sections are spaced as a dialog's are, and the fields
-  sit a step below the sentence that introduces them, here and on the sign-in page.
+  words, in the same muted tone as a finished step. It showed only its ▸, or nothing.
+- Pressing + for a new conversation opens the To: picker with the caret in it every time, where a
+  second press left it closed. You can write the message before choosing a Bot. Enter or Send with
+  nobody in To: keeps the message, opens To: and says "Choose a Bot first."
+- A renamed Bot's conversations go by its new name in the sidebar, the conversation header and the
+  lists you pick a conversation from, including conversations started before the rename. They kept
+  the name the Bot had when each began.
+- The sign-in dialog that **Open private sign-in** opens no longer leaves large empty gaps above
+  "Use a saved login" and "Enter your login". Its fields sit just below the sentence that
+  introduces them, in the dialog and on the sign-in page.
 
 ## 0.3.2
 
