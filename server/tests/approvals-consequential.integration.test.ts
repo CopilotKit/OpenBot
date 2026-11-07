@@ -7,6 +7,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { DESTRUCTIVE_TOOL_NOTE } from "@openbot/shared/bot-prompt";
 import { offersStandingRule } from "@openbot/shared/standing-rule";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { and, eq, inArray } from "drizzle-orm";
@@ -28,6 +29,7 @@ import { classify } from "../src/plugins/arcade";
 import { effectOf } from "../src/plugins/composio";
 import { storableTools } from "../src/plugins/plugin-store/model";
 import { createPluginStore } from "../src/plugins/store";
+import { grantedTools } from "../src/plugins/tools";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -950,6 +952,26 @@ describe("a tool its app marks destructive, called through the app", () => {
         source: "safety",
       });
       expect(vendorCalls).not.toContain(flagged);
+    }
+  });
+
+  test("the Bot is offered it with a description that says OpenBot asks, so it doesn't ask first", async () => {
+    const offered = await grantedTools({
+      store: plugins,
+      botId: BOT,
+      actorId: owner,
+    });
+    const described = Object.fromEntries(
+      offered.map((tool) => [tool.ref, tool.description]),
+    );
+    expect(described[`${APP}/reset_workspace`]).toEndWith(
+      DESTRUCTIVE_TOOL_NOTE,
+    );
+    expect(described[`${APP}/rename_workspace`]).toBe("");
+    // Either broker: flagged destructive carries the note, and silence doesn't.
+    for (const { unsaid, flagged } of BROKERED) {
+      expect(described[`${APP}/${flagged}`]).toEndWith(DESTRUCTIVE_TOOL_NOTE);
+      expect(described[`${APP}/${unsaid}`]).toBe("");
     }
   });
 });

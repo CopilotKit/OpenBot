@@ -286,6 +286,8 @@ export type GrantedPlugins = {
     toolName: string;
     description: string;
     inputSchema: Record<string, unknown>;
+    /** The app marks it destructive (`mcpTools.destructive`): OpenBot always asks before it runs. */
+    destructive: boolean;
   }[];
   skills: {
     slug: string;
