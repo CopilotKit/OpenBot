@@ -165,6 +165,12 @@ const SAFETY_REQUIREMENTS: readonly {
  * A tool whose action is remove deletes, unless it takes somebody's access away ("remove
  * collaborator"), which sharing asks about. A button counts only as a confirmation: "Remove",
  * "Yes, remove", "Remove permanently", and not "Remove filter".
+ *
+ * A tool whose action is archive deletes too: HubSpot's delete is `HUBSPOT_ARCHIVE_CONTACT`, and
+ * Gmail's archive takes mail out of the inbox. Only as the name's first verb, so "list archived
+ * emails", "get archive settings" and "unarchive" are not archiving. And a tool the app itself marks
+ * destructive (MCP's `destructiveHint`, a broker's destructive flag, recorded when the app was
+ * listed) asks as deleting whatever it is called (see {@link ApprovalCandidate.destructive}).
  */
 const CONSEQUENTIAL: readonly {
   id: string;
@@ -217,7 +223,7 @@ const CONSEQUENTIAL: readonly {
  * its object, not the action.
  */
 const NOT_SENDING_VERBS =
-  "update|updates|edit|patch|modify|set|mark|unmark|approve|restore|resolve|unresolve|hide|unhide|toggle|like|likes|unlike|react|bookmark|unbookmark|pin|unpin|star|unstar|flag|report|moderate|redact|translate|make|cancel|pause|unschedule|undo|unrepost|unretweet|get|list|fetch|retrieve|search|find|read|count|lookup|export|download|remove|removes|delete|archive|unarchive|watch|mute|unmute|subscribe|unsubscribe";
+  "update|updates|edit|patch|modify|set|mark|unmark|approve|restore|resolve|unresolve|hide|unhide|toggle|like|likes|unlike|react|bookmark|unbookmark|pin|unpin|star|unstar|flag|report|moderate|redact|translate|make|cancel|pause|unschedule|undo|unrepost|unretweet|get|list|fetch|retrieve|search|find|read|count|lookup|export|download|remove|removes|delete|archive|archives|unarchive|watch|mute|unmute|subscribe|unsubscribe";
 
 /**
  * The first verb of a tool name, which is its action. The verbs above, and the ones that make,
@@ -379,6 +385,10 @@ function plainlyEmpty(value: unknown): boolean {
 const NOT_ACCOUNT_ACTIONS =
   /^(computer_(write_file|read_file|list_files|run_command)|host\/)/;
 
+/** Why a tool its app marks destructive asks, when its name doesn't say it deletes. */
+const DESTRUCTIVE_REASON =
+  "The app marks this as deleting or overwriting something, so it always asks you first.";
+
 export function safetyRequirement(
   candidate: ApprovalCandidate,
 ): { id: string; reason: string; behaviour: "hand_off" | "ask" } | undefined {
@@ -442,11 +452,13 @@ export function safetyRequirement(
       : undefined) ??
     // Last, so taking somebody's access away ("remove collaborator") is asked about as sharing.
     (named?.kind === "tool" &&
-    /^removes?$/.test(named.name.match(FIRST_VERB)?.[1] ?? "")
+    /^(removes?|archives?)$/.test(named.name.match(FIRST_VERB)?.[1] ?? "")
       ? CONSEQUENTIAL.find((entry) => entry.id === "deleting")
       : undefined);
-  return asks
-    ? { id: asks.id, reason: asks.reason, behaviour: "ask" }
+  if (asks) return { id: asks.id, reason: asks.reason, behaviour: "ask" };
+  // Whatever it is called, a tool its app marks destructive asks as deleting does.
+  return named?.kind === "tool" && candidate.destructive === true
+    ? { id: "deleting", reason: DESTRUCTIVE_REASON, behaviour: "ask" }
     : undefined;
 }
 

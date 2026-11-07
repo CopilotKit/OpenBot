@@ -429,6 +429,9 @@ export function callMethods(context: StoreContext) {
             effect,
             scope: serverId,
             args: vendorArgs,
+            ...(advertised[0]?.destructive
+              ? { destructive: true as const }
+              : {}),
           })
         )
           ? shareTargetOf(serverId, toolName, vendorArgs)
@@ -560,6 +563,8 @@ export function callMethods(context: StoreContext) {
           reviewedRead(entry, toolName, advertised[0])
             ? { ownConnectionRead: true as const }
             : {}),
+          // The app marked this tool destructive when it was listed: it asks as deleting does.
+          ...(advertised[0]?.destructive ? { destructive: true as const } : {}),
           declined: refusedRow("person_declined", DECLINED_BY_PERSON),
         })
         ?.catch(async (error: unknown) => {
