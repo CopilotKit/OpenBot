@@ -1,7 +1,14 @@
+import { randomUUID } from "node:crypto";
+import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { z } from "zod";
 import {
+  ApprovalAlreadyAnsweredError,
+  ApprovalRefusedError,
+} from "../approvals/types";
+import {
+  type AuditEventType,
   type AuditInitiator,
   type AuditStore,
   recordAuditEvent,
@@ -39,78 +46,114 @@ function resultText(result: unknown): string {
   return JSON.stringify(result ?? {});
 }
 
+/** What the desktop answers when the person presses Deny on its own dialog (`desktop_host_access.rs`). */
+const DENIED_ON_DESKTOP = "The local owner denied this operation.";
+
+type Outcome = "allowed" | "refused" | "failed" | "stopped";
+
+/**
+ * A folder action is an action on a computer, this one, and is recorded as one: the same event
+ * types and payload a cloud computer's actions have, under the `host/` names Activity, Approvals and
+ * Action Recording already read (`host/read_file` reads "Read a file"). Recorded as
+ * `configuration.changed`, every file a Bot read and every command it ran read "Change a setting",
+ * started by a person, and a person's Deny was missing from Blocked.
+ */
+const EVENT_FOR: Record<Outcome, AuditEventType> = {
+  allowed: "computer.action_allowed",
+  refused: "computer.action_refused",
+  failed: "computer.action_failed",
+  stopped: "computer.action_stopped",
+};
+
+type HostAudit = {
+  auditStore?: AuditStore;
+  initiator?: AuditInitiator;
+  actorId: string;
+  botId: string;
+  operation: string;
+  grantId?: string;
+  /** The file, relative to the folder granted. Never its contents. */
+  file?: string;
+  /** The command, in full, as a computer's is. Never its output. */
+  command?: string;
+};
+
 async function auditHostAccess(
-  options: {
-    auditStore?: AuditStore;
-    initiator?: AuditInitiator;
-    actorId: string;
-    botId: string;
-  },
+  options: HostAudit,
   input: {
-    operation: string;
-    outcome: "requested" | "succeeded" | "refused" | "failed" | "stopped";
-    grantId?: string;
+    outcome: Outcome;
+    /** One id for the row written as the action went to the desktop and the one that ends it. */
+    attempt?: string;
     reason?: string;
   },
 ) {
   if (!options.auditStore) return;
+  const reason = input.reason?.slice(0, 240);
   await recordAuditEvent(options.auditStore, {
-    eventType: "configuration.changed",
+    eventType: EVENT_FOR[input.outcome],
     targetType: "host_access",
-    ...(input.grantId ? { targetId: input.grantId } : {}),
+    ...(options.grantId ? { targetId: options.grantId } : {}),
     actorUserId: options.actorId,
     ...(options.initiator ? { initiator: options.initiator } : {}),
     payload: {
-      change: "host_access_tool_call",
-      operation: input.operation,
+      action: `host/${options.operation}`,
       bot: options.botId,
       actor: options.actorId,
-      ...(input.grantId ? { grant: input.grantId } : {}),
-      outcome: input.outcome,
-      ...(input.reason ? { reason: input.reason.slice(0, 240) } : {}),
+      ...(options.grantId ? { grant: options.grantId } : {}),
+      ...(options.file ? { file: options.file } : {}),
+      ...(options.command ? { command: options.command } : {}),
+      ...(input.attempt ? { attempt: input.attempt } : {}),
+      // A person's Deny, on the desktop or in the conversation, reads as theirs.
+      ...(input.outcome === "refused" &&
+      (input.reason === DENIED_ON_DESKTOP ||
+        input.reason === DECLINED_BY_PERSON)
+        ? { refusal: "person_declined" }
+        : {}),
+      ...(input.outcome === "refused" && reason ? { reason } : {}),
+      ...((input.outcome === "failed" || input.outcome === "stopped") && reason
+        ? { failure: reason }
+        : {}),
     },
   });
 }
 
+/**
+ * Runs one folder action and records it: a row as it goes to the desktop, after every check has
+ * passed, and a second with the same `attempt` only when the desktop refused it, it failed or it was
+ * stopped. A refusal before it reached the desktop is one refused row. A turn that stops to ask the
+ * person writes nothing until it is answered.
+ */
 async function answer(
-  audit: {
-    auditStore?: AuditStore;
-    initiator?: AuditInitiator;
-    actorId: string;
-    botId: string;
-    operation: string;
-    grantId?: string;
-  },
-  run: () => Promise<unknown>,
+  audit: HostAudit,
+  run: (hooks: { onDispatch: () => Promise<void> }) => Promise<unknown>,
 ): Promise<string> {
-  await auditHostAccess(audit, {
-    operation: audit.operation,
-    grantId: audit.grantId,
-    outcome: "requested",
-  });
+  let attempt: string | undefined;
   try {
-    const result = await run();
-    await auditHostAccess(audit, {
-      operation: audit.operation,
-      grantId: audit.grantId,
-      outcome: "succeeded",
+    const result = await run({
+      onDispatch: () => {
+        attempt = randomUUID();
+        return auditHostAccess(audit, { outcome: "allowed", attempt });
+      },
     });
     return resultText(result);
   } catch (error) {
     if (error instanceof HeadlessToolSuspension) throw error;
     const reason =
       error instanceof Error ? error.message : "That host operation failed.";
-    await auditHostAccess(audit, {
-      operation: audit.operation,
-      grantId: audit.grantId,
-      outcome:
-        error instanceof HostAccessRefusedError
-          ? reason.toLowerCase().includes("stop")
-            ? "stopped"
-            : "refused"
-          : "failed",
-      reason,
-    });
+    // Answered already, as it was then. Nothing new was turned away, so nothing new is recorded.
+    if (!(error instanceof ApprovalAlreadyAnsweredError))
+      await auditHostAccess(audit, {
+        outcome:
+          error instanceof HostAccessRefusedError
+            ? reason.toLowerCase().includes("stop")
+              ? "stopped"
+              : "refused"
+            : error instanceof ApprovalRefusedError
+              ? "refused"
+              : "failed",
+        ...(attempt ? { attempt } : {}),
+        reason,
+      });
     if (error instanceof HostAccessRefusedError) {
       return `${REFUSAL_MARKER} ${error.message}`;
     }
@@ -130,13 +173,20 @@ export function hostAccessTools(options: {
   const grants = status.grants.filter(
     (grant) => grant.botId === botId && !grant.revoked,
   );
-  const audit = (operation: string, grantId?: string) => ({
+  const audit = (
+    operation: string,
+    grantId?: string,
+    target: { file?: string; command?: string } = {},
+  ): HostAudit => ({
     auditStore: options.auditStore,
     initiator: options.initiator,
     actorId,
     botId,
     operation,
     ...(grantId ? { grantId } : {}),
+    // The folder itself is no file to name.
+    ...(target.file && target.file !== "." ? { file: target.file } : {}),
+    ...(target.command ? { command: target.command } : {}),
   });
 
   const tools: GrantedTool[] = [
@@ -149,16 +199,12 @@ export function hostAccessTools(options: {
       execute: async () => {
         if (grants.length === 0) {
           await auditHostAccess(audit("list_folders"), {
-            operation: "list_folders",
             outcome: "refused",
             reason: "No host folders are granted to this Bot.",
           });
           return `${REFUSAL_MARKER} No host folders are granted to this Bot.`;
         }
-        await auditHostAccess(audit("list_folders"), {
-          operation: "list_folders",
-          outcome: "succeeded",
-        });
+        await auditHostAccess(audit("list_folders"), { outcome: "allowed" });
         return JSON.stringify({
           connected: status.connected,
           folders: grants.map((grant) => ({
@@ -181,14 +227,19 @@ export function hostAccessTools(options: {
       parameters: grantPath,
       execute: async (args) => {
         const parsed = grantPath.parse(args ?? {});
-        return answer(audit("list_files", parsed.grantId), () =>
-          broker.callHost({
-            kind: "list_files",
-            botId,
-            actorId,
-            grantId: parsed.grantId,
-            relativePath: parsed.path ?? ".",
-          }),
+        return answer(
+          audit("list_files", parsed.grantId, { file: parsed.path }),
+          (hooks) =>
+            broker.callHost(
+              {
+                kind: "list_files",
+                botId,
+                actorId,
+                grantId: parsed.grantId,
+                relativePath: parsed.path ?? ".",
+              },
+              hooks,
+            ),
         );
       },
     },
@@ -200,14 +251,19 @@ export function hostAccessTools(options: {
       parameters: readFile,
       execute: async (args) => {
         const parsed = readFile.parse(args ?? {});
-        return answer(audit("read_file", parsed.grantId), () =>
-          broker.callHost({
-            kind: "read_file",
-            botId,
-            actorId,
-            grantId: parsed.grantId,
-            relativePath: parsed.path,
-          }),
+        return answer(
+          audit("read_file", parsed.grantId, { file: parsed.path }),
+          (hooks) =>
+            broker.callHost(
+              {
+                kind: "read_file",
+                botId,
+                actorId,
+                grantId: parsed.grantId,
+                relativePath: parsed.path,
+              },
+              hooks,
+            ),
         );
       },
     },
@@ -219,15 +275,20 @@ export function hostAccessTools(options: {
       parameters: writeFile,
       execute: async (args) => {
         const parsed = writeFile.parse(args ?? {});
-        return answer(audit("write_file", parsed.grantId), () =>
-          broker.callHost({
-            kind: "write_file",
-            botId,
-            actorId,
-            grantId: parsed.grantId,
-            relativePath: parsed.path,
-            content: parsed.content,
-          }),
+        return answer(
+          audit("write_file", parsed.grantId, { file: parsed.path }),
+          (hooks) =>
+            broker.callHost(
+              {
+                kind: "write_file",
+                botId,
+                actorId,
+                grantId: parsed.grantId,
+                relativePath: parsed.path,
+                content: parsed.content,
+              },
+              hooks,
+            ),
         );
       },
     },
@@ -239,16 +300,21 @@ export function hostAccessTools(options: {
       parameters: runCommand,
       execute: async (args) => {
         const parsed = runCommand.parse(args ?? {});
-        return answer(audit("run_command", parsed.grantId), () =>
-          broker.callHost({
-            kind: "run_command",
-            botId,
-            actorId,
-            grantId: parsed.grantId,
-            relativePath: parsed.path,
-            command: parsed.command,
-            writable: parsed.writable === true,
-          }),
+        return answer(
+          audit("run_command", parsed.grantId, { command: parsed.command }),
+          (hooks) =>
+            broker.callHost(
+              {
+                kind: "run_command",
+                botId,
+                actorId,
+                grantId: parsed.grantId,
+                relativePath: parsed.path,
+                command: parsed.command,
+                writable: parsed.writable === true,
+              },
+              hooks,
+            ),
         );
       },
     },

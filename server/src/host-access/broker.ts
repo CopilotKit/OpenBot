@@ -261,16 +261,26 @@ export function createHostAccessBroker(
       grants.set(grant.id, publicGrant(grant));
     },
 
-    async callHost(input: {
-      kind: "list_files" | "read_file" | "write_file" | "run_command";
-      botId: string;
-      actorId: string;
-      grantId: string;
-      relativePath?: string;
-      content?: string;
-      command?: string;
-      writable?: boolean;
-    }): Promise<unknown> {
+    async callHost(
+      input: {
+        kind: "list_files" | "read_file" | "write_file" | "run_command";
+        botId: string;
+        actorId: string;
+        grantId: string;
+        relativePath?: string;
+        content?: string;
+        command?: string;
+        writable?: boolean;
+      },
+      hooks?: {
+        /**
+         * Called as the operation goes to the desktop, after every check here has passed and never
+         * for one refused or answered from storage. The Bot's tools write the action's Activity row
+         * here, so the row is on the trail before the desktop can act, as a computer's is.
+         */
+        onDispatch?: () => Promise<void>;
+      },
+    ): Promise<unknown> {
       expireDesktopLeaseIfNeeded();
       try {
         requireGrant({
@@ -317,7 +327,10 @@ export function createHostAccessBroker(
       if (approval && "replay" in approval) return approval.replay;
       // The owner may revoke the grant while approval storage was being consulted.
       requireGrant(input);
-      const result = await enqueue<unknown>({
+      // Started before the operation is queued and awaited with it, so the queueing itself stays in
+      // this tick (see above).
+      const dispatched = hooks?.onDispatch?.();
+      const queued = enqueue<unknown>({
         operationId: randomUUID(),
         kind: input.kind,
         botId: input.botId,
@@ -329,6 +342,7 @@ export function createHostAccessBroker(
         ...(input.writable === true ? { writable: true } : {}),
         ...(commandPolicy ? { commandPolicy } : {}),
       });
+      const [result] = await Promise.all([queued, dispatched]);
       await approval?.complete(result);
       return result;
     },

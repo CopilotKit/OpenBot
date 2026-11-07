@@ -124,6 +124,15 @@ export function outcomeOf(row: string | Row): AuditOutcome {
     typeof row === "string" ? { eventType: row, payload: undefined } : row;
   if (REFUSED.has(eventType)) return "refused";
   if (DID_NOT_HAPPEN.has(eventType)) return "did-not-happen";
+  // A folder action recorded before it was a computer's says how it went in its payload.
+  if (
+    eventType === "configuration.changed" &&
+    payload?.change === "host_access_tool_call"
+  ) {
+    if (payload.outcome === "refused") return "refused";
+    if (payload.outcome === "failed" || payload.outcome === "stopped")
+      return "did-not-happen";
+  }
   if (eventType === "approval.person_decided" && payload?.decision === "deny")
     return "refused";
   if (
@@ -136,18 +145,25 @@ export function outcomeOf(row: string | Row): AuditOutcome {
 }
 
 /**
- * The rows to draw, with each failed or stopped action shown once.
+ * The rows to draw, with each failed, stopped or refused action shown once.
  *
  * The computer writes an action's row before it acts, so there is no way to act off the trail, and a
  * second row when the action then fails or is stopped. Both carry the same `attempt` id. Drawn as they
  * were, a read of a missing file was two rows, "Allowed" and "Did not happen", and the first is the
  * one a reader believes. The failure row carries everything the first did, so the first is left out
  * when its failure is loaded beside it. The trail itself, and the CSV export, keep both.
+ *
+ * A refusal can end an attempt too: a folder action on the person's own computer is written as it
+ * goes to the desktop, which then asks them, and their Deny is the refused row that ends it.
  */
 export function oneRowPerAction<T extends Row>(events: T[]): T[] {
   const ended = new Set(
     events
-      .filter((event) => DID_NOT_HAPPEN.has(event.eventType))
+      .filter(
+        (event) =>
+          DID_NOT_HAPPEN.has(event.eventType) ||
+          event.eventType === "computer.action_refused",
+      )
       .map((event) => event.payload?.attempt)
       .filter((attempt): attempt is string => typeof attempt === "string"),
   );

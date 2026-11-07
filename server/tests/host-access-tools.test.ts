@@ -143,7 +143,7 @@ describe("host access tools", () => {
     expect(await answer).toContain("ok");
   });
 
-  test("host operations audit request and outcome without content command or raw path", async () => {
+  test("host operations are recorded as a computer's actions, naming the file and never its content", async () => {
     const broker = createHostAccessBroker();
     broker.rememberGrant({
       id: "grant-1",
@@ -179,24 +179,22 @@ describe("host access tools", () => {
     });
     await answer;
 
-    expect(events.map((event) => event.payload.outcome)).toEqual([
-      "requested",
-      "succeeded",
+    // One row, written as it went to the desktop; a success adds nothing to it.
+    expect(events.map((event) => event.eventType)).toEqual([
+      "computer.action_allowed",
     ]);
     expect(JSON.stringify(events)).not.toContain("do not log");
-    expect(JSON.stringify(events)).not.toContain("secret.txt");
     expect(events[0]).toMatchObject({
-      eventType: "configuration.changed",
+      eventType: "computer.action_allowed",
       targetType: "host_access",
       targetId: "grant-1",
       actorUserId: "user-a",
       initiator: { kind: "handoff", id: "run-1" },
       payload: {
-        change: "host_access_tool_call",
-        operation: "write_file",
+        action: "host/write_file",
         bot: "bot-a",
         grant: "grant-1",
-        outcome: "requested",
+        file: "secret.txt",
       },
     });
   });
@@ -228,9 +226,12 @@ describe("host access tools", () => {
     })[0]!;
     const text = await list.execute({});
     expect(text).toContain("No host folders");
-    expect(events.at(-1)?.payload).toMatchObject({
-      operation: "list_folders",
-      outcome: "refused",
+    expect(events.at(-1)).toMatchObject({
+      eventType: "computer.action_refused",
+      payload: {
+        action: "host/list_folders",
+        reason: "No host folders are granted to this Bot.",
+      },
     });
   });
 });
