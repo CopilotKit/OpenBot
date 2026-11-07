@@ -51,6 +51,14 @@ tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 # Probing a local port without SO_REUSEADDR, which std sets on Unix. See `env::bind_loopbacks`.
 socket2 = "0.6"
+# The log file a person can send us: timestamped, levelled, rotated at a size cap, in the
+# platform's own log folder. The official Tauri plugin, over the `log` facade. See `logging.rs`.
+tauri-plugin-log = "2.10.1"
+log = "0.4"
+# Redacting anything shaped like a key or a token before a line reaches that file.
+regex = "1"
+# The log's UTC timestamps, and the local offset its first line says. The version Tauri already uses.
+time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

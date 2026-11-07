@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop keeps a log file on every platform, with each Start, Stop, update, container
+  command, update check and error, timestamped. Open it from Open log folder in Settings > This
+  computer or the Status window. It stays on your computer, rotates at 5 MB with four older files
+  kept, and leaves out keys, tokens, passwords, email addresses and messages. It wrote a few
+  untimestamped lines to nowhere, so a problem on your computer left nothing to share.
 - You're asked once before a Bot uses an app tool its app marks destructive, on OpenBot's Allow once
   or Deny card. A Bot asked to reset a CRM pipeline put its own question in front of OpenBot's card,
   because nothing told it OpenBot asks about a tool whose name doesn't say it deletes. Bots are now

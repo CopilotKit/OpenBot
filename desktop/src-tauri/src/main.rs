@@ -17,7 +17,7 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, app_update, deployment, deployment_release, docker_config, engine, env as openbot_env,
-    harness, host_access, install, local_eval, local_eval_state, preparation,
+    harness, host_access, install, local_eval, local_eval_state, logging, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
     telemetry, tray, upgrade, windows as win,
@@ -394,6 +394,14 @@ fn report<R: tauri::Runtime>(
     ok: bool,
     detail: impl Into<String>,
 ) {
+    let detail = detail.into();
+    // Every row setup shows goes in the log too, so the file reads as the window did.
+    if ok {
+        log::info!("[step {step}] {detail}");
+    } else {
+        log::error!("[step {step}] failed: {detail}");
+    }
+    forget_running_logged();
     if !ok {
         let error_class = match step {
             "install-engine" => telemetry::SetupErrorClass::EngineInstallFailed,
@@ -410,12 +418,22 @@ fn report<R: tauri::Runtime>(
         Progress {
             step: step.into(),
             ok,
-            detail: detail.into(),
+            detail,
             running: false,
             download_bytes: None,
             downloads: None,
         },
     );
+}
+
+/// The running step last written to the log, so a step that says the same thing on every poll
+/// (an engine that is still starting) is one entry rather than one a second.
+static RUNNING_LOGGED: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+fn forget_running_logged() {
+    *RUNNING_LOGGED
+        .lock()
+        .unwrap_or_else(|held| held.into_inner()) = None;
 }
 
 fn report_running<R: tauri::Runtime>(
@@ -424,12 +442,23 @@ fn report_running<R: tauri::Runtime>(
     detail: impl Into<String>,
     download_bytes: Option<u64>,
 ) {
+    let detail = detail.into();
+    {
+        let mut logged = RUNNING_LOGGED
+            .lock()
+            .unwrap_or_else(|held| held.into_inner());
+        let now = (step.to_owned(), detail.clone());
+        if logged.as_ref() != Some(&now) {
+            log::info!("[step {step}] {detail}");
+            *logged = Some(now);
+        }
+    }
     let _ = app.emit(
         "setup:progress",
         Progress {
             step: step.into(),
             ok: true,
-            detail: detail.into(),
+            detail,
             running: true,
             download_bytes,
             downloads: None,
@@ -844,6 +873,34 @@ async fn upgrade_and_start(
     model: ChosenModel,
     harness: Option<harness::HarnessChoice>,
 ) -> Result<upgrade::Outcome, Problem> {
+    let asked = std::time::Instant::now();
+    log::info!("[update] asked to update the installation in {root} and start it");
+    let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness).await;
+    if let Ok(outcome) = &ran {
+        log::info!(
+            "[update] {} from {} to {}{}",
+            if outcome.moved { "moved" } else { "stayed" },
+            outcome.from,
+            outcome.to,
+            outcome
+                .notice
+                .as_ref()
+                .map(|notice| format!(": {}", logging::Failure::described(notice)))
+                .unwrap_or_default()
+        );
+    }
+    logging::outcome("update", asked, &ran);
+    ran
+}
+
+async fn upgrade_and_start_now(
+    app: tauri::AppHandle,
+    root: String,
+    api_url: String,
+    gateway_ws_url: String,
+    model: ChosenModel,
+    harness: Option<harness::HarnessChoice>,
+) -> Result<upgrade::Outcome, Problem> {
     let selected = stack::root_from(&root);
     if app
         .state::<Shell>()
@@ -1008,7 +1065,7 @@ async fn put_back_interrupted_upgrade(app: &tauri::AppHandle, root: &Path) -> Re
 fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(feed) = app_update_feed(app) else {
         let version = &app.package_info().version;
-        eprintln!("[app update] {version} is offered no updates; no update check");
+        log::info!("[app update] {version} is offered no updates; no update check");
         return;
     };
     let handle = app.clone();
@@ -1024,15 +1081,19 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                 },
                 || {
                     let answer = feed.read();
-                    if let Err(error) = &answer {
-                        eprintln!("[app update] could not read the update feed: {error}");
+                    match &answer {
+                        Ok(Some(newer)) => log::info!("[app update] {newer} is available"),
+                        Ok(None) => log::info!("[app update] up to date"),
+                        Err(error) => {
+                            log::warn!("[app update] could not read the update feed: {error}")
+                        }
                     }
                     handle.state::<Shell>().app_update.record(&answer);
                 },
             )
         });
     if let Err(error) = watching {
-        eprintln!("[app update] could not start checking for updates: {error}");
+        log::error!("[app update] could not start checking for updates: {error}");
     }
 }
 
@@ -1050,7 +1111,7 @@ fn app_update_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<app_u
 async fn check_app_update_now<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<app_update::Asked, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let asked = tauri::async_runtime::spawn_blocking(move || {
         app_update::ask(
             app_update_feed(&app).as_ref(),
             &app.package_info().version,
@@ -1058,7 +1119,11 @@ async fn check_app_update_now<R: tauri::Runtime>(
         )
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
+    if let Ok(found) = &asked {
+        log::info!("[app update] checked when asked: {found:?}");
+    }
+    asked
 }
 
 /// What a window's Check for updates shows. Unlike the schedule's, a check that fails is said.
@@ -1066,7 +1131,7 @@ async fn check_app_update_for_page<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<app_update::Asked, Problem> {
     check_app_update_now(app).await.map_err(|error| {
-        eprintln!("[app update] could not read the update feed: {error}");
+        log::warn!("[app update] could not read the update feed: {error}");
         Problem::with(
             "OpenBot couldn't check for updates. Check your internet connection and try again.",
             error,
@@ -1081,7 +1146,7 @@ fn check_for_updates_from_menu(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let asked = check_app_update_now(app.clone()).await;
         if let Err(error) = &asked {
-            eprintln!("[app update] could not read the update feed: {error}");
+            log::warn!("[app update] could not read the update feed: {error}");
         }
         let offered = match &asked {
             Ok(app_update::Asked::Available { version, .. }) => Some(version.clone()),
@@ -1094,7 +1159,7 @@ fn check_for_updates_from_menu(app: tauri::AppHandle) {
             };
             if !update {
                 if let Err(problem) = dismiss_app_update_for(&answering, &version) {
-                    eprintln!("[app update] could not close the offer: {}", problem.said);
+                    log::warn!("[app update] could not close the offer: {}", problem.said);
                 }
                 return;
             }
@@ -1176,6 +1241,21 @@ minisign signature does not match the public key compiled into this build.
 async fn install_app_update_now<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<(), Problem> {
+    log::info!("[app update] asked to install the update");
+    // Returns only when it failed: on success the app has restarted.
+    let installed = install_app_update_steps(app).await;
+    if let Err(problem) = &installed {
+        log::error!(
+            "[app update] install failed: {}",
+            logging::Failure::described(problem)
+        );
+    }
+    installed
+}
+
+async fn install_app_update_steps<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<(), Problem> {
     use tauri_plugin_updater::UpdaterExt;
     // The one condition the updater plugin is registered on (see `setup`).
     if !app.config().plugins.0.contains_key("updater") {
@@ -1198,6 +1278,7 @@ async fn install_app_update_now<R: tauri::Runtime>(
         .await
         .map_err(|e| Problem::from(e.to_string()))?
         .ok_or_else(|| Problem::plain("OpenBot is already up to date."))?;
+    log::info!("[app update] downloading {}", update.version);
     app.state::<Shell>().app_update.begin_install();
     let installed = async {
         let bytes = update
@@ -1229,7 +1310,7 @@ async fn install_app_update_now<R: tauri::Runtime>(
             // windows and tray were taken down for the exit. Tauri allows nothing after that but
             // an exit, so start this same version again; its Start brings OpenBot back, and the
             // offer stays.
-            eprintln!(
+            log::error!(
                 "[app update] the installer did not start: {}",
                 problem.detail.as_deref().unwrap_or(&problem.said)
             );
@@ -1247,9 +1328,10 @@ async fn install_app_update_now<R: tauri::Runtime>(
         Ok(Ok(())) => {}
         // The new version is already installed, and restarting into it is still right: its Start
         // finds whatever is left running.
-        Ok(Err(error)) => eprintln!("[app update] stopping OpenBot before the restart: {error}"),
-        Err(error) => eprintln!("[app update] stopping OpenBot before the restart: {error}"),
+        Ok(Err(error)) => log::warn!("[app update] stopping OpenBot before the restart: {error}"),
+        Err(error) => log::warn!("[app update] stopping OpenBot before the restart: {error}"),
     }
+    log::info!("[app update] installed; restarting into it");
     restart_into_update(&app)
 }
 
@@ -1265,7 +1347,7 @@ starts the new version, whose Start moves the installation to its release (`foll
 fn stop_before_installer<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Err(error) = stop_for_update(app, &stack::default_root()) {
         // The installer runs either way: the new version's Start finds whatever is left running.
-        eprintln!("[app update] stopping OpenBot before the installer: {error}");
+        log::warn!("[app update] stopping OpenBot before the installer: {error}");
     }
     app.cleanup_before_exit();
 }
@@ -1313,13 +1395,15 @@ async fn install_app_update(app: tauri::AppHandle) -> Result<(), Problem> {
 
 #[tauri::command]
 async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, Problem> {
+    let asked = std::time::Instant::now();
     let saved = {
         let shell = app.state::<Shell>();
         let root = shell.selected_root.lock().unwrap().clone();
         preparation::saved_engine(&root.unwrap_or_else(stack::default_root))
     };
-    let address = engine_ready(&app, saved).await?;
-    Ok(engine::detect_saved(Some(address.engine)))
+    let ready = engine_ready(&app, saved).await;
+    logging::outcome("engine", asked, &ready);
+    Ok(engine::detect_saved(Some(ready?.engine)))
 }
 
 /// Complete all local software acquisition before either authentication screen is available.
@@ -1338,10 +1422,19 @@ async fn prepare_installation(
             "OpenBot is updating. Wait for it to finish before repairing.",
         ));
     }
+    let asked = std::time::Instant::now();
+    log::info!(
+        "[install] asked in {root}, Bot {}",
+        harness.as_ref().map_or("none", |chosen| chosen.id.as_str())
+    );
     let selected = stack::root_from(&root);
     // Repair after an interrupted upgrade prepares the version that is back.
-    put_back_interrupted_upgrade(&app, &selected).await?;
-    prepare_installation_inner(app, root, harness).await
+    let prepared = match put_back_interrupted_upgrade(&app, &selected).await {
+        Ok(()) => prepare_installation_inner(app, root, harness).await,
+        Err(problem) => Err(problem),
+    };
+    logging::outcome("install", asked, &prepared);
+    prepared
 }
 
 async fn prepare_installation_inner(
@@ -2272,6 +2365,27 @@ async fn start_stack<R: tauri::Runtime>(
     // Both registers on the way out: see `problem.rs`. Anything that still returns a bare string
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
+    let asked = std::time::Instant::now();
+    // The choices, never the values: which provider and how, not the key or the address.
+    log::info!(
+        "[start] asked in {root}: model {} by {}, Bot {}",
+        model.provider,
+        model.login,
+        harness.as_ref().map_or("none", |chosen| chosen.id.as_str())
+    );
+    let started = start_stack_now(app, root, api_url, gateway_ws_url, model, harness).await;
+    logging::outcome("start", asked, &started);
+    started
+}
+
+async fn start_stack_now<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: String,
+    api_url: String,
+    gateway_ws_url: String,
+    model: ChosenModel,
+    harness: Option<harness::HarnessChoice>,
+) -> Result<(), Problem> {
     if app
         .state::<Shell>()
         .updating
@@ -2696,25 +2810,18 @@ async fn start_stack_inner<R: tauri::Runtime>(
         let carried = deployment::reference(&root, "agent-computer")
             .and_then(|image| stack::carry_over_person_computers(&found, &root, &image));
         match carried {
+            // How many, never whose: the person and their volumes are named after them.
             Ok(carried) => {
-                for person in carried {
-                    eprintln!(
-                        "{}",
-                        serde_json::json!({
-                            "type": "computer-carried-over",
-                            "person": person.person,
-                            "workspace": person.workspace,
-                            "profiles": person.profile,
-                            "note": "The old volumes are left in place.",
-                        })
+                if !carried.is_empty() {
+                    log::info!(
+                        "[start] carried {} people's Bots' files and sign-ins into the shared \
+                         computer; the old volumes are left in place",
+                        carried.len()
                     );
                 }
             }
             Err(error) => {
-                eprintln!(
-                    "{}",
-                    serde_json::json!({ "type": "computer-carry-over-failed", "error": error })
-                );
+                log::warn!("[start] could not carry Bots' files and sign-ins over: {error}");
                 report(
                     &app,
                     "carry-over",
@@ -2836,13 +2943,18 @@ async fn stop_stack<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     root: String,
 ) -> Result<(), String> {
+    let asked = std::time::Instant::now();
+    log::info!("[stop] asked in {root}");
     // Inventory, held-child cleanup and Compose all block. Keep the complete shutdown off both
     // Tauri's event loop and its async workers, and resolve IPC only when shutdown has finished.
-    tauri::async_runtime::spawn_blocking(move || {
+    let stopped = tauri::async_runtime::spawn_blocking(move || {
         stop_everything(&app, &stack::root_from(&root)).into_result()
     })
     .await
-    .map_err(|error| format!("the shutdown did not run: {error}"))?
+    .map_err(|error| format!("the shutdown did not run: {error}"))
+    .and_then(|stopped| stopped);
+    logging::outcome("stop", asked, &stopped);
+    stopped
 }
 
 #[cfg(test)]
@@ -3035,6 +3147,7 @@ fn show_shutting_down<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 }
 
 fn report_quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>, step: QuitStep, state: QuitStepState) {
+    log::info!("[quit] {step:?}: {state:?}");
     let status = {
         let shell = app.state::<Shell>();
         let mut status = shell.quit.status.lock().unwrap();
@@ -3409,7 +3522,7 @@ fn persist_start_environment(
             STARTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
         if let Err(problem) = connect_apps(root, &attempt) {
-            eprintln!("[apps] {}", problem.said);
+            log::warn!("[apps] {}", problem.said);
         }
     }
     /*
@@ -3422,7 +3535,7 @@ fn persist_start_environment(
      */
     match openbot_desktop_lib::composio::resolve(root) {
         Ok(brokers) => secrets.extend(brokers.runtime()),
-        Err(problem) => eprintln!("[apps] {}", problem.said),
+        Err(problem) => log::warn!("[apps] {}", problem.said),
     }
     Ok((settings, secrets))
 }
@@ -3858,12 +3971,16 @@ where
 /// same way on every operating system, which is the whole reason both are asked.
 #[tauri::command]
 async fn show_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let asked = std::time::Instant::now();
+    let shown = tauri::async_runtime::spawn_blocking(move || {
         let ports = ports_for_shell(&app)?;
         show_openbot_on(app, &ports)
     })
     .await
-    .map_err(|error| Problem::with("OpenBot could not open its window.", error.to_string()))?
+    .map_err(|error| Problem::with("OpenBot could not open its window.", error.to_string()))
+    .and_then(|shown| shown);
+    logging::outcome("show", asked, &shown);
+    shown
 }
 
 fn ports_for_shell<R: tauri::Runtime>(
@@ -3900,7 +4017,7 @@ fn show_openbot_on<R: tauri::Runtime>(
     // Only the owned app itself.
     trust_owned_app(&app, &url);
     let destination = url;
-    eprintln!("[show] navigating to the owned OpenBot app");
+    log::info!("[show] navigating to the owned OpenBot app");
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there to show it in")?;
@@ -3911,7 +4028,7 @@ fn show_openbot_on<R: tauri::Runtime>(
                 .map_err(|_| "OpenBot returned an invalid app destination.".to_string())?,
         )
         .map_err(|_| Problem::plain("OpenBot could not navigate to its app."));
-    eprintln!("[show] navigate returned {outcome:?}");
+    log::info!("[show] navigate returned {outcome:?}");
     outcome
 }
 
@@ -4395,7 +4512,7 @@ fn allow_app_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url
     }
     match app.add_capability(capability) {
         Ok(()) => granted.push(origin),
-        Err(error) => eprintln!("[window] could not let the app page drag the window: {error}"),
+        Err(error) => log::warn!("[window] could not let the app page drag the window: {error}"),
     }
 }
 
@@ -4516,6 +4633,8 @@ mod app_page_tests {
             "check_update",
             "dismiss_update",
             "install_update",
+            // Open log folder opens the shell's own folder, but only for its own OpenBot.
+            "open_logs",
         ] {
             assert!(commands.contains(&format!("plugin:openbot-desktop|{update}")));
         }
@@ -4531,6 +4650,33 @@ mod app_page_tests {
                 Ok(serde_json::Value::Null),
                 "{command}"
             );
+        }
+    }
+
+    /// Open log folder (the Status window's and Settings → This computer's) opens the folder the log
+    /// plugin writes to (`TargetKind::LogDir`): where each platform keeps an application's logs,
+    /// under this app's identifier. Pinned per platform, since that is what support asks for.
+    #[test]
+    fn the_log_folder_is_the_platforms_own_log_folder_for_this_app() {
+        let (app, _) = app();
+        let folder = logging::folder(app.handle()).unwrap();
+        assert_eq!(folder, app.path().app_log_dir().unwrap());
+        let identifier = app.config().identifier.clone();
+        assert_eq!(identifier, "ai.copilotkit.openbot.desktop");
+        let home = PathBuf::from(
+            std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap(),
+        );
+        if cfg!(target_os = "macos") {
+            assert_eq!(folder, home.join("Library").join("Logs").join(&identifier));
+        } else if cfg!(windows) {
+            let local = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
+            assert_eq!(folder, local.join(&identifier).join("logs"));
+        } else {
+            let data = std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .filter(|data| data.is_absolute())
+                .unwrap_or_else(|| home.join(".local").join("share"));
+            assert_eq!(folder, data.join(&identifier).join("logs"));
         }
     }
 
@@ -4598,7 +4744,7 @@ fn show_status_window(app: &tauri::AppHandle) {
         .min_inner_size(520.0, 480.0)
         .build();
     if let Err(error) = built {
-        eprintln!("[status] could not open the Status window: {error}");
+        log::warn!("[status] could not open the Status window: {error}");
     }
 }
 
@@ -4664,6 +4810,9 @@ pub(crate) struct DesktopStatus {
     app_port: Option<u16>,
     version: &'static str,
     build: String,
+    /// The folder this app's log file is in (`logging`), for Open log folder. Absent from a desktop
+    /// app older than the log, so a page can tell the button would have nothing to open.
+    log_folder: Option<String>,
 }
 
 #[tauri::command]
@@ -4751,7 +4900,26 @@ fn read_desktop_status<R: tauri::Runtime>(
             env!("OPENBOT_BUILD_BRANCH"),
             env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
         ),
+        log_folder: logging::folder(app)
+            .ok()
+            .map(|folder| folder.display().to_string()),
     }
+}
+
+/// Open log folder, in the Status window and in Settings → This computer: the folder the log file
+/// is in, in the system's file manager, so a person can send us the file.
+#[tauri::command]
+async fn open_log_folder<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    open_log_folder_now(&app)
+}
+
+fn open_log_folder_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
+    let folder = logging::folder(app).map_err(|error| error.to_string())?;
+    log::info!("[logs] opening the log folder");
+    logging::open_folder(&folder, |folder| {
+        tauri_plugin_opener::open_path(folder, None::<&str>).map_err(|error| error.to_string())
+    })
+    .inspect_err(|error| log::warn!("[logs] could not open the log folder: {error}"))
 }
 
 /**
@@ -4761,10 +4929,15 @@ Only an OpenBot this session started, whose engine it knows.
 */
 #[tauri::command]
 async fn restart_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    let asked = std::time::Instant::now();
+    log::info!("[restart] asked");
     // Compose takes seconds to restart a container. Off Tauri's threads, as Stop is.
-    tauri::async_runtime::spawn_blocking(move || restart_openbot_now(&app))
+    let restarted = tauri::async_runtime::spawn_blocking(move || restart_openbot_now(&app))
         .await
-        .map_err(|error| format!("the restart did not run: {error}"))?
+        .map_err(|error| format!("the restart did not run: {error}"))
+        .and_then(|restarted| restarted);
+    logging::outcome("restart", asked, &restarted);
+    restarted
 }
 
 fn restart_openbot_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
@@ -4948,17 +5121,17 @@ fn serve_shown_deployment<R: tauri::Runtime>(
     let token = match server_host_token(&address, root) {
         Ok(Some(token)) => token,
         Ok(None) => {
-            eprintln!("[show] the server was given no host token: local folder access and the connection watcher are off until Start");
+            log::warn!("[show] the server was given no host token: local folder access and the connection watcher are off until Start");
             return;
         }
         Err(error) => {
-            eprintln!("[show] could not read the server's host token, so local folder access and the connection watcher are off until Start: {error}");
+            log::warn!("[show] could not read the server's host token, so local folder access and the connection watcher are off until Start: {error}");
             return;
         }
     };
     match start_host_access(app, root, server_port, address, token.clone()) {
         Ok(broker) => *shell.host_access.lock().unwrap() = Some(broker),
-        Err(problem) => eprintln!("[show] {}", problem_detail(problem)),
+        Err(problem) => log::warn!("[show] {}", problem_detail(problem)),
     }
     let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
     watch_connections(
@@ -5053,7 +5226,7 @@ fn show_test_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
     };
     trust_owned_app(app, address);
     if let Err(error) = window.navigate(url) {
-        eprintln!("[window] could not show the test OpenBot: {error}");
+        log::warn!("[window] could not show the test OpenBot: {error}");
     }
 }
 
@@ -6303,7 +6476,7 @@ fn watch_connections<R: tauri::Runtime>(
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let Ok(client) = desktop_connection::client().map_err(|error| {
-            eprintln!("[watch] {error}");
+            log::warn!("[watch] {error}");
         }) else {
             return;
         };
@@ -6331,14 +6504,14 @@ fn watch_connections<R: tauri::Runtime>(
                     match publish_connection_failure(&app, &root, generation, connection) {
                         Ok(published) => notice_sent = published,
                         Err(error) => {
-                            eprintln!("[watch] could not show connection refresh: {error}")
+                            log::warn!("[watch] could not show connection refresh: {error}")
                         }
                     }
                 }
                 Ok(None) => poll_failed = false,
                 Err(error) => {
                     if !poll_failed {
-                        eprintln!("[watch] {error}");
+                        log::warn!("[watch] {error}");
                     }
                     poll_failed = true;
                 }
@@ -6357,7 +6530,7 @@ fn show_whichever_applies(app: &tauri::AppHandle) {
         Err(problem) => {
             *app.state::<Shell>().last_failure.lock().unwrap() = Some(problem);
             if let Err(error) = show_setup_and_focus(app.clone()) {
-                eprintln!("{error}");
+                log::warn!("[window] could not show setup: {error}");
             }
         }
     }
@@ -6425,7 +6598,7 @@ fn restore_after_second_instance(app: &tauri::AppHandle) {
     if let Err(error) = schedule_second_instance_restore(app, |app| {
         show_whichever_applies(&app);
     }) {
-        eprintln!("[single-instance] restore scheduling failed: {error}");
+        log::warn!("[single-instance] restore scheduling failed: {error}");
         report(
             &reporting_app,
             "open",
@@ -6452,20 +6625,20 @@ fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     std::thread::spawn(move || {
         let root = default_root();
         let root_path = PathBuf::from(&root);
-        eprintln!("[menu] stopping the stack under {root}");
+        log::info!("[menu] stopping the stack under {root}");
         let stopped = stop_everything(&app, &root_path);
         refresh_menus(&app);
         match settle_menu_stop(&app.state::<Shell>(), &root_path, stopped) {
             None => {
-                eprintln!("[menu] stopped");
+                log::info!("[menu] stopped");
                 report(&app, "stopped", true, "OpenBot has been stopped");
             }
             // Said rather than swallowed. A menu item that fails silently is worse than one
             // that is not there: the person believes the stack is down and it is not.
             Some(problem) => {
-                eprintln!(
+                log::error!(
                     "[menu] stop failed: {}",
-                    problem.detail.as_deref().unwrap_or_default()
+                    logging::Failure::described(&problem)
                 );
                 report(&app, "stopped", false, problem.said);
             }
@@ -6609,6 +6782,37 @@ fn about_openbot() -> tauri::menu::AboutMetadata<'static> {
         comments: Some(built),
         ..Default::default()
     }
+}
+
+/// The first entry of each launch in the log file: which build, on what, where the log's UTC times
+/// stand against the person's clock, and where the file is.
+fn log_launch<R: tauri::Runtime>(app: &tauri::AppHandle<R>, local_offset: Option<time::UtcOffset>) {
+    let local = local_offset.map_or_else(
+        || "unknown".to_owned(),
+        |offset| {
+            let (hours, minutes, _) = offset.as_hms();
+            format!(
+                "UTC{}{:02}:{:02}",
+                if offset.is_negative() { '-' } else { '+' },
+                hours.unsigned_abs(),
+                minutes.unsigned_abs()
+            )
+        },
+    );
+    let folder = logging::folder(app)
+        .map(|folder| folder.display().to_string())
+        .unwrap_or_else(|error| format!("unknown ({error})"));
+    log::info!(
+        "[launch] OpenBot Desktop {} ({}) on {} {}; local time is {local}; logs in {folder}",
+        env!("CARGO_PKG_VERSION"),
+        build_description(
+            env!("OPENBOT_BUILD_COMMIT"),
+            env!("OPENBOT_BUILD_BRANCH"),
+            env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
+        ),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    );
 }
 
 /// "Built 2026-10-22 06:40 UTC from 397d98a on dustywusty/local-eval-test-question".
@@ -6986,7 +7190,7 @@ fn refresh_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let menus_app = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Err(error) = install_menus(&menus_app) {
-            eprintln!("[menu] could not update the menus: {error}");
+            log::warn!("[menu] could not update the menus: {error}");
         }
     });
 }
@@ -7195,6 +7399,9 @@ fn main() {
             }
         });
     }
+    // The local time's offset from UTC, for the log's first line. Read now, while this is the only
+    // thread: on macOS and Linux the time crate refuses to read it once there are others.
+    let local_offset = time::UtcOffset::current_local_offset().ok();
     let context = tauri::generate_context!();
     // A `shell-updater` build with compiled trust supplies `plugins.updater` when no bundled block
     // (such as the signed Mac overlay) already does. Registration itself happens once, in `setup`.
@@ -7215,6 +7422,9 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             restore_after_second_instance(app);
         }))
+        // The log file, before anything that logs. After the single-instance plugin, so a second
+        // launch, which that plugin ends, never opens (or rotates) the file the first one writes.
+        .plugin(logging::plugin())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -7273,6 +7483,7 @@ fn main() {
             desktop_status,
             restart_openbot,
             stop_openbot_from_status,
+            open_log_folder,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
@@ -7326,7 +7537,8 @@ fn main() {
             }
             _ => {}
         })
-        .setup(|app| {
+        .setup(move |app| {
+            log_launch(app.handle(), local_offset);
             // A signed Mac or Windows build updates itself. The window asks once at launch and
             // installs only if the person says yes; the plugin refuses anything whose minisign
             // signature does not match the public key compiled in from the signing overlay
@@ -7342,7 +7554,7 @@ fn main() {
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
             } else {
-                eprintln!("[updater] not configured in this build; no update check");
+                log::info!("[updater] not configured in this build; no update check");
             }
             // The banner and the setup window's offer both read this, never the network.
             watch_for_app_updates(app.handle());
@@ -7416,7 +7628,7 @@ fn main() {
                         QuitDiagnostics {
                             sink: move |failures: Vec<String>| {
                                 for failure in &failures {
-                                    eprintln!("{failure}");
+                                    log::error!("[quit] {failure}");
                                 }
                                 let shell = notice_app.state::<Shell>();
                                 let root = cleanup_root(&shell, &stack::default_root());
@@ -7434,7 +7646,7 @@ fn main() {
                                 .map(|_| ())
                         },
                     ) {
-                        eprintln!("[exit] could not start cleanup: {error}");
+                        log::error!("[exit] could not start cleanup: {error}");
                         report(
                             app,
                             "quit",

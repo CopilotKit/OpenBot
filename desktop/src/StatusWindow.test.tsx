@@ -123,6 +123,48 @@ test("Restart OpenBot restarts its processes; Stop Intelligence stops only the s
   ).toBe(false);
 });
 
+test("Open log folder asks the desktop app to open its own log folder", async () => {
+  const logFolder = "/Users/someone/Library/Logs/ai.copilotkit.openbot.desktop";
+  invokeHandler = answers({ desktop_status: { ...running, logFolder } });
+  const view = render(<StatusWindow readEveryMs={60_000} />);
+  await userEvent.click(
+    await view.findByRole("button", { name: "Open log folder" }),
+  );
+  const open = invokeCalls.find((call) => call.command === "open_log_folder");
+  // The window asks; the desktop app opens the folder it writes to, never one it is handed.
+  expect(open).toBeTruthy();
+  expect(open?.args).toBeUndefined();
+  expect(
+    view.container.querySelector(".status-details")?.textContent,
+  ).toContain(`Logs${logFolder}`);
+});
+
+test("a log folder that couldn't be opened says where to find it", async () => {
+  invokeHandler = async (command) => {
+    if (command === "open_log_folder") throw "no file manager answered";
+    return answers({
+      desktop_status: {
+        ...running,
+        logFolder: "/Users/someone/Library/Logs/x",
+      },
+    })(command);
+  };
+  const view = render(<StatusWindow readEveryMs={60_000} />);
+  await userEvent.click(
+    await view.findByRole("button", { name: "Open log folder" }),
+  );
+  await view.findByText(
+    "Couldn't open the log folder. Find it under Logs below.",
+  );
+});
+
+test("a desktop app without a log offers no Open log folder", async () => {
+  invokeHandler = answers();
+  const view = render(<StatusWindow readEveryMs={60_000} />);
+  await view.findByRole("region", { name: "App" });
+  expect(view.queryByRole("button", { name: "Open log folder" })).toBeNull();
+});
+
 test("diagnostics carry versions, places and memory, and nothing secret", () => {
   const text = diagnostics(running, "ready");
   expect(text).toContain("OpenBot Desktop 0.2.0");

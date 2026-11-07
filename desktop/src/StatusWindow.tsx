@@ -26,6 +26,8 @@ export type DesktopStatus = {
   appPort: number | null;
   version: string;
   build: string;
+  /** Where this app writes its log file. */
+  logFolder?: string | null;
 };
 
 /** "1.2 GB", "340 MB": decimal, as macOS reports memory and disk. */
@@ -341,6 +343,12 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                   <dd>{status.intelligenceStack}</dd>
                 </>
               )}
+              {status.logFolder && (
+                <>
+                  <dt>Logs</dt>
+                  <dd>{status.logFolder}</dd>
+                </>
+              )}
             </dl>
 
             <div className="row">
@@ -365,6 +373,25 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
               >
                 {copied ? "Copied" : "Copy diagnostics"}
               </button>
+              {/* The log stays on this computer; this is how a person finds it to share it. */}
+              {status.logFolder && (
+                <button
+                  type="button"
+                  className="quiet"
+                  onClick={async () => {
+                    setSaid(null);
+                    try {
+                      await invoke("open_log_folder");
+                    } catch {
+                      setSaid(
+                        "Couldn't open the log folder. Find it under Logs below.",
+                      );
+                    }
+                  }}
+                >
+                  Open log folder
+                </button>
+              )}
             </div>
           </>
         )}

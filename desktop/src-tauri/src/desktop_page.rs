@@ -8,6 +8,9 @@
 //!
 //! And narration's speech recognition, on this computer (`speech`): the window's web view has none
 //! that stays on the device, so the page's narration listens through these instead.
+//!
+//! And Open log folder (`open_logs`): the folder of this app's log file, in the system's file
+//! manager. The page never names a path; the shell opens its own log folder and nothing else.
 
 use openbot_desktop_lib::{app_update, local_eval, local_eval_state, speech, stack};
 use tauri::Manager;
@@ -15,7 +18,7 @@ use tauri::Manager;
 pub const PLUGIN: &str = "openbot-desktop";
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 13] = [
+pub const PERMISSIONS: [&str; 14] = [
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
@@ -29,6 +32,7 @@ pub const PERMISSIONS: [&str; 13] = [
     "openbot-desktop:allow-speech-start",
     "openbot-desktop:allow-speech-stop",
     "openbot-desktop:allow-speech-abort",
+    "openbot-desktop:allow-open-logs",
 ];
 
 /**
@@ -152,6 +156,13 @@ async fn speech_abort(session: u64) {
     speech::control(session, speech::Control::Abort);
 }
 
+/// Settings → This computer's Open log folder: the shell's own log folder, which the page cannot
+/// choose.
+#[tauri::command]
+async fn open_logs(app: tauri::AppHandle) -> Result<(), String> {
+    crate::open_log_folder_now(&app)
+}
+
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new(PLUGIN)
         .invoke_handler(tauri::generate_handler![
@@ -167,7 +178,8 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             speech_available,
             speech_start,
             speech_stop,
-            speech_abort
+            speech_abort,
+            open_logs
         ])
         .build()
 }

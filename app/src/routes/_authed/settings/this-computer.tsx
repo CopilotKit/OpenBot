@@ -3,6 +3,7 @@ import {
   IconBox,
   IconBrandDocker,
   IconCpu,
+  IconFileText,
   IconFolder,
   IconInfoCircle,
   IconSparkles,
@@ -28,14 +29,15 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { desktopShell } from "@/lib/desktop/shell";
 import {
   checkAppUpdateMutationOptions,
   installAppUpdateMutationOptions,
   intelligenceMutationOptions,
+  openLogFolderMutationOptions,
   restartOpenBotMutationOptions,
   stopOpenBotMutationOptions,
 } from "@/lib/desktop/mutations";
+import { type PartGroup, partLabel } from "@/lib/desktop/part-names";
 import {
   type DesktopAppUpdateCheck,
   type DesktopPart,
@@ -48,7 +50,7 @@ import {
   intelligenceReadinessQueryOptions,
   totalMemory,
 } from "@/lib/desktop/queries";
-import { type PartGroup, partLabel } from "@/lib/desktop/part-names";
+import { desktopShell } from "@/lib/desktop/shell";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/settings/this-computer")({
@@ -348,10 +350,59 @@ function MachineSection({
             </ItemDescription>
           </ItemContent>
         </Item>
+        {status.logFolder && (
+          <>
+            <Separator />
+            <LogsRow folder={status.logFolder} />
+          </>
+        )}
         <Separator />
         <VersionRow status={status} />
       </PageRows>
     </PageSection>
+  );
+}
+
+/**
+ * Where the desktop app keeps its log, with Open log folder, so a person can share the file when
+ * they ask for help. The desktop app opens its own folder; nothing here names a path to open.
+ */
+function LogsRow({ folder }: { folder: string }) {
+  const open = useMutation(openLogFolderMutationOptions());
+  return (
+    <Item size="sm">
+      <RowMark>
+        <IconFileText className="size-4" />
+      </RowMark>
+      <ItemContent>
+        <ItemTitle>Logs</ItemTitle>
+        <ItemDescription className="line-clamp-none">
+          Logs stay on this computer and leave out your keys and messages. Share
+          them when you ask for help.
+        </ItemDescription>
+        <ItemDescription className="line-clamp-none break-all">
+          {folder}
+        </ItemDescription>
+        {open.error && (
+          <ItemDescription
+            className="line-clamp-none text-destructive"
+            role="alert"
+          >
+            Couldn't open the log folder. Find it at the path above.
+          </ItemDescription>
+        )}
+      </ItemContent>
+      <ItemActions>
+        <Button
+          disabled={open.isPending}
+          onClick={() => open.mutate()}
+          size="sm"
+          variant="outline"
+        >
+          Open log folder
+        </Button>
+      </ItemActions>
+    </Item>
   );
 }
 

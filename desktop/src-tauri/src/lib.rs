@@ -14,6 +14,7 @@ pub mod host_access;
 pub mod install;
 pub mod local_eval;
 pub mod local_eval_state;
+pub mod logging;
 pub mod paths;
 pub mod plan;
 pub mod preparation;
