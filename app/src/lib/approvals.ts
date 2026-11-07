@@ -158,12 +158,25 @@ export const revokeTeamApprovalRule = (id: string) =>
     method: "DELETE",
     fallback: "The team rule could not be removed.",
   });
-export const answerPersonQuestion = (id: string, response: string) =>
-  client(`/api/approvals/questions/${encodeURIComponent(id)}/respond`, {
-    method: "POST",
-    body: { response },
-    fallback: "Your answer could not be saved.",
-  });
+/**
+ * Answer a question a Bot asked. Given in the open conversation (`inConversation`), it may be that
+ * conversation's to carry on: true means the question is closed and the conversation runs the answer
+ * as its own next turn; false means the server resumes the run that asked.
+ */
+export const answerPersonQuestion = async (
+  id: string,
+  response: string,
+  inConversation = false,
+) =>
+  (await client<boolean | undefined>(
+    `/api/approvals/questions/${encodeURIComponent(id)}/respond`,
+    "continueHere",
+    {
+      method: "POST",
+      body: inConversation ? { response, inConversation } : { response },
+      fallback: "Your answer could not be saved.",
+    },
+  )) === true;
 export const dismissPersonQuestion = (id: string) =>
   client(`/api/approvals/questions/${encodeURIComponent(id)}/dismiss`, {
     method: "POST",
@@ -250,8 +263,15 @@ export const decideApprovalMutationOptions = (queryClient: QueryClient) =>
 /** Answer a question a Bot asked mid-run; the run resumes with the answer. */
 export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
-    mutationFn: ({ id, response }: { id: string; response: string }) =>
-      answerPersonQuestion(id, response),
+    mutationFn: ({
+      id,
+      response,
+      inConversation,
+    }: {
+      id: string;
+      response: string;
+      inConversation?: boolean;
+    }) => answerPersonQuestion(id, response, inConversation),
     onSuccess: settle(queryClient),
   });
 
