@@ -61,8 +61,19 @@ test("the Bot picked in OpenBot Desktop's setup joins it once there is an addres
   ]);
   expect(agents[1]).toMatchObject({
     name: "LangGraph",
+    // What runs it under its name, not its name a second time.
+    title: "Powered by LangGraph",
     type: "remote_ag_ui",
     configuration: { endpoint: "http://127.0.0.1:4206/ag-ui" },
+  });
+});
+
+test("the Bot that ships says it runs on OpenBot itself", async () => {
+  const { agents } = await loadTenantPackage(personal);
+  expect(agents[0]).toMatchObject({
+    name: "Personal Assistant",
+    title: "Powered by OpenBot",
+    type: "built_in",
   });
 });
 

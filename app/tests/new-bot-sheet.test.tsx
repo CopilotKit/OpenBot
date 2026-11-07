@@ -231,9 +231,10 @@ test("Create fills in what was left blank, then hands over", async () => {
 
   expect(await view.findByText("Expense Review is ready")).toBeTruthy();
   expect(creates).toHaveLength(1);
+  // Its subtitle says what runs it: OpenBot itself.
   expect(creates[0]).toMatchObject({
     name: "Expense Review",
-    title: "",
+    title: "Powered by OpenBot",
     visibility: "private",
     endpoint: "",
   });
@@ -275,7 +276,8 @@ test("checks the connection then creates with its saved name and key", async () 
     name: "Expense Review",
     endpoint: "https://agent.example.com/ag-ui",
     auth: { header: "Authorization", value: "Bearer secret" },
-    title: "",
+    // The framework picked from the list, by the name the list showed.
+    title: "Powered by LangChain (LangGraph)",
   });
 });
 
@@ -467,4 +469,10 @@ test("personal Bot creation hides team visibility and isolation controls and lin
   await view.findByText("Personal Research is ready");
   expect(creates).toHaveLength(1);
   expect(creates[0]).toMatchObject({ visibility: "private", isolated: false });
+});
+
+test("LangGraph is offered under LangChain's name, the one people know it by", async () => {
+  const { view } = await customFlow();
+  const framework = view.getByRole("button", { name: /LangGraph/ });
+  expect(framework.textContent).toContain("LangChain (LangGraph)");
 });
