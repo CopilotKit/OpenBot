@@ -25,6 +25,7 @@ import type { AppVariables } from "../auth/guards";
 import type { Database } from "../db/client";
 import {
   agentProfiles,
+  agents,
   botTasks,
   channelAgents,
   channelMemberships,
@@ -308,6 +309,29 @@ function channelName(names: string[]) {
   return `${codePoints.slice(0, MAX_CHANNEL_NAME_CODE_POINTS - 1).join("")}…`;
 }
 
+/**
+ * What a conversation is called: what its Bots are called now.
+ *
+ * A conversation's stored name is its Bots' names when it was made, and nothing wrote it again, so
+ * a Bot renamed on its Setup page went on under its old name in the conversation header, the sidebar
+ * and every list of conversations. Read here from the Bots instead, cut the way {@link channelName}
+ * cuts. A group's Bots keep the order its stored name gives them, and one renamed since goes last.
+ * A package's conversations are named by the package and keep that name.
+ */
+export const conversationName = sql<string>`case when ${channels.packageId} is null then coalesce((
+  select case when char_length(named.joined) <= ${MAX_CHANNEL_NAME_CODE_POINTS}::int then named.joined
+    else left(named.joined, ${MAX_CHANNEL_NAME_CODE_POINTS - 1}::int) || '…' end
+  from (
+    select string_agg(${agents.name}, ', ' order by
+      nullif(strpos(', ' || ${channels.name} || ', ', ', ' || ${agents.name} || ', '), 0) nulls last,
+      ${channelAgents.agentId}) as joined
+    from ${channelAgents}
+    inner join ${agents} on ${agents.id} = ${channelAgents.agentId}
+    where ${channelAgents.channelId} = ${channels.id}
+  ) named
+  where named.joined is not null
+), ${channels.name}) else ${channels.name} end`;
+
 export function createChannelStore(
   database: Database,
   profileStore: AgentProfileStore,
@@ -525,7 +549,7 @@ export function createChannelStore(
       const rows = await database
         .select({
           id: channels.id,
-          name: channels.name,
+          name: conversationName,
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
           lastMessageAt: channels.lastMessageAt,
@@ -631,7 +655,7 @@ export function createChannelStore(
       const rows = await database
         .select({
           id: channels.id,
-          name: channels.name,
+          name: conversationName,
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
           deletedAt: agentProfiles.deletedAt,
