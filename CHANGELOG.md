@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- With reduced motion turned on in the operating system, a step a Bot is still running shows its
+  words again, in the same muted tone as a finished step, instead of only its ▸.
+
 ## 0.3.2
 
 **Before upgrading.** There are no migrations: the database stays at `0077_channel_opening`.
