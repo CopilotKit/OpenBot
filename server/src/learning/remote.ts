@@ -18,6 +18,9 @@ const RESERVED_TOOLS = new Set([
   "copilotkit_load_skill",
   "copilotkit_read_skill_file",
 ]);
+
+/** The tools this middleware adds to a run, at most: what a run's tool budget leaves room for. */
+export const LEARNED_SKILL_TOOL_COUNT = RESERVED_TOOLS.size;
 const MAX_SKILL_STEPS = 10;
 
 /**

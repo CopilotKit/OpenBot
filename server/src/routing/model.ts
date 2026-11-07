@@ -1,3 +1,4 @@
+import { PlanModel, type PlanModelConfig } from "../agents/plan-model";
 import type { RuntimeModel } from "../copilot";
 
 /**
@@ -21,8 +22,15 @@ export function createModelCompleter(deps: {
    * model allowlist) applies to the next call and not the next restart.
    */
   fastModel?: string | (() => string | undefined);
+  /**
+   * The plan the deployment signed in to instead of a key (a Claude or ChatGPT plan on OpenBot
+   * Desktop). Present, the call is asked of the plan's own harness, the way the built-in Bots and a
+   * conversation's title are: a plan holds no key, so without this every call threw "no model key".
+   */
+  plan?: PlanModelConfig;
 }): (prompt: string, signal?: AbortSignal) => Promise<string> {
   return async (prompt: string, signal?: AbortSignal) => {
+    if (deps.plan) return askPlan(deps.plan, prompt, signal);
     const fast =
       typeof deps.fastModel === "function" ? deps.fastModel() : deps.fastModel;
     const models =
@@ -98,6 +106,97 @@ export function createModelCompleter(deps: {
       );
     }
   };
+}
+
+/**
+ * Pass one of tool selection: which skills a message needs, on the model the built-in Bots run on.
+ *
+ * ON A CLAUDE OR CHATGPT PLAN THERE IS NO KEY, so it is asked of the plan's own harness, as the Bots
+ * are answered. Asked for a key there, it threw on every turn: Activity said "Couldn't choose, so all
+ * were offered" for each message, and a Bot with ninety tools was handed all of them every time.
+ */
+export function createSkillChooser(
+  model: RuntimeModel,
+  resolveApiKey: () => Promise<string | null>,
+): (prompt: string, signal?: AbortSignal) => Promise<string> {
+  const complete = createModelCompleter({
+    model,
+    resolveApiKey,
+    ...(model.plan ? { plan: model.plan } : {}),
+  });
+  /*
+   * Why it could not choose, in the log, once for each reason. The run carries on with every tool
+   * that fits (see `fitToolLimit`) and its Activity row says it could not choose, but not why, and
+   * a reason that holds for every turn is worth one line rather than one per turn.
+   */
+  const said = new Set<string>();
+  return async (prompt, signal) => {
+    try {
+      return await complete(prompt, signal);
+    } catch (error) {
+      if (!signal?.aborted) {
+        const reason = (error instanceof Error ? error.message : String(error))
+          .replace(/\s+/g, " ")
+          .slice(0, 300);
+        if (!said.has(reason)) {
+          said.add(reason);
+          console.warn(
+            JSON.stringify({
+              type: "tool-selection-unavailable",
+              reason,
+              ...(model.plan ? { plan: model.plan.provider } : {}),
+            }),
+          );
+        }
+      }
+      throw error;
+    }
+  };
+}
+
+/**
+ * How long one call to a plan's harness may take. Longer than a key's ten seconds, since a plan's
+ * harness starts a query of its own for each call; the same bound a voice summary on a plan has.
+ */
+const PLAN_CALL_TIMEOUT_MS = 20_000;
+
+/**
+ * One answer from the plan's own harness: model only, no tools, and a conversation of its own each
+ * time, so the call is never a turn in somebody's thread. Throws on no text, as the key path does.
+ */
+async function askPlan(
+  plan: PlanModelConfig,
+  prompt: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  signal?.throwIfAborted();
+  // Aborted by hand: `AbortSignal.timeout` makes HttpAgent's cleanup rethrow a TimeoutError that
+  // nothing catches. The same reason `channels/titler.ts` gives.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PLAN_CALL_TIMEOUT_MS);
+  const stop = () => controller.abort();
+  signal?.addEventListener("abort", stop, { once: true });
+  try {
+    const result = await new PlanModel(
+      plan,
+      "openbot-model-call",
+      { threadId: crypto.randomUUID() },
+      new Set(),
+      controller.signal,
+    ).doGenerate({
+      prompt: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+      abortSignal: controller.signal,
+    });
+    const answer = result.content
+      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("");
+    if (!answer.trim()) throw new Error("plan model returned no text");
+    return answer;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+    controller.abort();
+  }
 }
 
 /** The small model each provider's router asks first when nothing names one. */
