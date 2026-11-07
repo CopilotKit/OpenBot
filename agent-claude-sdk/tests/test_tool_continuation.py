@@ -27,6 +27,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.adapter import OpenBotClaudeAgentAdapter
 
 
+# Under the bound the slow-turn test sets, and three of them over it.
+SLOW_STEP_SECONDS = 0.1
+
+
 def request(thread="thread-a", run="run-1", results=(), tool_count=1, tool_name="computer_navigate"):
     return RunAgentInput.model_validate(
         {
@@ -111,11 +115,16 @@ def sdk(monkeypatch, tool_name):
                 self.input_messages = [message async for message in prompt]
                 # Model mode supplies structured user input and image blocks.
                 # This fixture's requested tool count is in the last labelled user turn.
+                last = None
                 for part in self.input_messages[0]["message"]["content"]:
                     if part["type"] == "text" and part["text"].startswith("{"):
                         item = json.loads(part["text"])
+                        last = item.get("role")
                         if item.get("role") == "user":
                             prompt = item.get("content", "")
+                # A replay that ends on a tool's result is answered, as Claude answers one.
+                if last == "tool":
+                    prompt = "0"
             self.queries.append((prompt, session_id))
 
         async def receive_response(self):
@@ -125,7 +134,7 @@ def sdk(monkeypatch, tool_name):
                     content=[], model="controlled-sdk", error="authentication_failed"
                 )
                 return
-            count = int(prompt) if prompt.isdigit() else 0
+            count = 1 if prompt == "slow" else int(prompt) if prompt.isdigit() else 0
             if self.options.tools == [] and not self.options.allowed_tools:
                 count = 0
             calls = [
@@ -207,6 +216,14 @@ def sdk(monkeypatch, tool_name):
                     for id, result in self.results.items()
                 ]
             )
+            if prompt == "slow":
+                # A Bot still working: a step's worth of thinking between each thing it says.
+                for _ in range(3):
+                    await asyncio.sleep(SLOW_STEP_SECONDS)
+                    yield AssistantMessage(
+                        content=[TextBlock(text="Still working.")],
+                        model="controlled-sdk",
+                    )
             yield AssistantMessage(
                 content=[TextBlock(text=json.dumps(self.results))],
                 model="controlled-sdk",
@@ -404,8 +421,10 @@ def test_disconnected_event_consumer_cancels_the_sdk_query(sdk):
         stale = await events(
             adapter, request(run="stale", results=[("thread-a-tool-0", "late result")])
         )
-        assert stale[-1].type == "RUN_ERROR"
-        assert len(sdk) == 1
+        # The cancelled query never receives it; a fresh query answers it from the thread.
+        assert not sdk[0].results
+        assert stale[-1].type == "RUN_FINISHED"
+        assert len(sdk) == 2
         await adapter.shutdown()
 
     asyncio.run(scenario())
@@ -428,6 +447,71 @@ def test_query_timeout_interrupts_sdk_before_abandoning_client_result(sdk, model
             assert "thread-a" not in adapter._workers, (
                 "timed-out SDK worker must not be reused"
             )
+        finally:
+            await adapter.shutdown()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("model_only", [False, True])
+def test_a_result_after_its_query_ended_is_answered_from_the_thread(sdk, model_only):
+    """The person decides a step OpenBot asked them about after the query that asked has ended.
+
+    A query is bounded, and a hand-off or an approval routinely takes longer than the bound. The
+    decision still reaches the Bot: a fresh query replays the thread, the call and the person's
+    answer included, and the Bot says what came of it. It used to end the run with an error nobody
+    was shown, so the person who answered never heard back.
+    """
+
+    async def scenario():
+        adapter = OpenBotClaudeAgentAdapter(
+            name="test", query_timeout_seconds=0.02, model_only=model_only
+        )
+        try:
+            first = await events(adapter, request())
+            assert any(event.type == "TOOL_CALL_END" for event in first)
+            await asyncio.wait_for(sdk[0].disconnected_event.wait(), 2)
+            declined = "The person declined this action when you asked for their approval, so it was not done."
+            answer = await events(
+                adapter, request(run="decided", results=[("thread-a-tool-0", declined)])
+            )
+            assert [event.message for event in answer if event.type == "RUN_ERROR"] == []
+            assert answer[-1].type == "RUN_FINISHED"
+            assert any(event.type == "TEXT_MESSAGE_CONTENT" for event in answer), (
+                "the Bot answers the decision"
+            )
+            assert not sdk[0].results, "nothing reaches the query that ended"
+            assert len(sdk) == 2
+            replayed = json.dumps(sdk[1].input_messages)
+            assert "thread-a-tool-0" in replayed and "declined this action" in replayed
+        finally:
+            await adapter.shutdown()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("model_only", [False, True])
+def test_a_query_that_keeps_working_is_not_cut_off_at_the_bound(sdk, model_only):
+    """The bound ends a query that has stopped moving, not one that is still working.
+
+    Counted from the start, it ended a Bot nine browser steps into a form, mid-turn, with an error
+    the person never saw. Each event now pushes the deadline back.
+    """
+
+    async def scenario():
+        adapter = OpenBotClaudeAgentAdapter(
+            name="test", query_timeout_seconds=0.25, model_only=model_only
+        )
+        try:
+            first = await events(adapter, request(tool_count="slow"))
+            assert any(event.type == "TOOL_CALL_END" for event in first)
+            finished = await events(
+                adapter,
+                request(run="run-2", tool_count="slow", results=[("thread-a-tool-0", "done")]),
+            )
+            assert [event.message for event in finished if event.type == "RUN_ERROR"] == []
+            assert finished[-1].type == "RUN_FINISHED"
+            assert len(sdk) == 1, "the same query carried on to the end"
         finally:
             await adapter.shutdown()
 
