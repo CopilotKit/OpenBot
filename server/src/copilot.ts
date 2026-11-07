@@ -247,6 +247,7 @@ function identityGuidance(name: string): string {
  */
 export function standingRoleMessage(
   profile: AgentStandingProfile,
+  instructions?: string,
 ): StandingRoleMessage {
   return {
     id: `${STANDING_ROLE_ID_PREFIX}${profile.id}`,
@@ -254,11 +255,11 @@ export function standingRoleMessage(
     content: [
       `You are ${profile.name}, ${profile.title}. ${selfAddressGuidance(profile.name)}`,
       profile.roleDescription,
+      ...(instructions ? [instructions] : []),
       "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
       /*
-       * Here rather than in the package, because for a remote Bot the standing role is the only
-       * instruction there is: `role_description` is one sentence somebody wrote about what it is
-       * for, and nothing else reaches it. The compliance Bot that answered a filing question with
+       * Shared by every remote Bot. Its own role describes the work, and OpenBot adds this
+       * guidance to the same message. The compliance Bot that answered a filing question with
        * thresholds and deadlines and no source was a `remote-ag-ui` agent whose entire prompt was
        * "Investigate policies, transaction monitoring, and control evidence."
        */
@@ -502,7 +503,12 @@ export function registeredAgentFromRow(
         ...(typeof remoteAgentId === "string" && remoteAgentId.length > 0
           ? { remoteAgentId }
           : {}),
-        standingMessage: standingRoleMessage(row),
+        standingMessage: standingRoleMessage(
+          row,
+          typeof configuration.standingInstructions === "string"
+            ? configuration.standingInstructions.trim()
+            : undefined,
+        ),
       }
     : null;
 }
