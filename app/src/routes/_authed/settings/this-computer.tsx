@@ -1,3 +1,4 @@
+import { DOESNT_UPDATE_ITSELF } from "@openbot/shared/desktop-updates";
 import {
   IconBox,
   IconBrandDocker,
@@ -358,6 +359,9 @@ function MachineSection({
  * The desktop app's version, with Check for updates. The same check as Check for Updates… in the
  * tray: the app reads its update feed at once and says what it found. On Windows, which has no menu
  * bar, this and the tray are the places to ask.
+ *
+ * A build that never updates itself (internal, candidate, or without the updater) says so up front
+ * in the setup window's words, with no button: the tray and the menus don't offer the check either.
  */
 function VersionRow({ status }: { status: DesktopStatus }) {
   const check = useMutation(checkAppUpdateMutationOptions(queryClient));
@@ -371,6 +375,9 @@ function VersionRow({ status }: { status: DesktopStatus }) {
   const progress = offer.data?.installing ?? null;
   const installing = install.isPending || progress !== null;
   const found = check.data;
+  // An older desktop app doesn't say, and its check answers for itself. No button until the first
+  // answer, so a build that doesn't update itself never shows one for a moment.
+  const updatesItself = offer.data?.updatesItself !== false;
   return (
     <Item size="sm">
       <RowMark>
@@ -381,6 +388,11 @@ function VersionRow({ status }: { status: DesktopStatus }) {
         <ItemDescription className="line-clamp-none">
           {status.build}
         </ItemDescription>
+        {!updatesItself && (
+          <ItemDescription className="line-clamp-none text-foreground">
+            {DOESNT_UPDATE_ITSELF}
+          </ItemDescription>
+        )}
         {found && !check.isPending && (
           <ItemDescription
             className="line-clamp-none text-foreground"
@@ -406,26 +418,28 @@ function VersionRow({ status }: { status: DesktopStatus }) {
           </ItemDescription>
         )}
       </ItemContent>
-      <ItemActions>
-        {found?.found === "available" ? (
-          <Button
-            disabled={installing}
-            onClick={() => install.mutate()}
-            size="sm"
-          >
-            {installing ? describe(progress) : "Update and restart"}
-          </Button>
-        ) : (
-          <Button
-            disabled={check.isPending}
-            onClick={() => check.mutate()}
-            size="sm"
-            variant="outline"
-          >
-            {check.isPending ? "Checking…" : "Check for updates"}
-          </Button>
-        )}
-      </ItemActions>
+      {updatesItself && !offer.isLoading && (
+        <ItemActions>
+          {found?.found === "available" ? (
+            <Button
+              disabled={installing}
+              onClick={() => install.mutate()}
+              size="sm"
+            >
+              {installing ? describe(progress) : "Update and restart"}
+            </Button>
+          ) : (
+            <Button
+              disabled={check.isPending}
+              onClick={() => check.mutate()}
+              size="sm"
+              variant="outline"
+            >
+              {check.isPending ? "Checking…" : "Check for updates"}
+            </Button>
+          )}
+        </ItemActions>
+      )}
     </Item>
   );
 }
@@ -440,7 +454,7 @@ function checked(found: DesktopAppUpdateCheck): string {
     case "installing":
       return `OpenBot is downloading ${found.version} and restarts when it's done.`;
     case "notOffered":
-      return "This version of OpenBot doesn't update itself. Install a released version to get updates.";
+      return DOESNT_UPDATE_ITSELF;
   }
 }
 

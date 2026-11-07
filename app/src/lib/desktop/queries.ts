@@ -58,6 +58,11 @@ export type DesktopAppUpdate = {
     total: number | null;
     restarting: boolean;
   } | null;
+  /**
+   * False on a build that never updates itself: an internal or candidate build, or one without the
+   * updater. Absent from a desktop app older than the field, which still answers a check.
+   */
+  updatesItself?: boolean;
 };
 
 /**
