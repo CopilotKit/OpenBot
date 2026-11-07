@@ -117,7 +117,7 @@ export function BotProfile({
                 <ItemDescription>
                   {lifecycle.data.paused
                     ? "Paused. Nothing runs for you until you turn it back on."
-                    : "Runs its routines, responsibilities, hand-offs and follow-ups for you."}
+                    : "Works on its goals, routines, hand-offs and follow-ups for you."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
