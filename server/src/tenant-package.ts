@@ -861,7 +861,7 @@ function personalStarterSeed(
         : null
       : "CopilotKit";
     const title = harnessName
-      ? `${fallback.title} · Powered by ${harnessName}`
+      ? `${fallback.title}. Powered by ${harnessName}`
       : fallback.title;
     agents.unshift(
       picked

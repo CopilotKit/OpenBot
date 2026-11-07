@@ -1732,7 +1732,7 @@ describe("bundled personal starter", () => {
       expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
       expect(await profiles.get(actor, "picked-harness")).toMatchObject({
         name: "Personal Assistant",
-        title: `Everyday Life · Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}`,
+        title: `Everyday Life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}`,
         roleDescription:
           "Help with email, your calendar, research, planning and everyday errands.",
       });
@@ -1768,7 +1768,7 @@ describe("bundled personal starter", () => {
     expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       name: "Personal Assistant",
-      title: "Everyday Life · Powered by Claude Agent SDK",
+      title: "Everyday Life. Powered by Claude Agent SDK",
       endpoint: langchain,
     });
     await synchronizeTenantPackage(database, await loadStarter(tenantId, ""));
