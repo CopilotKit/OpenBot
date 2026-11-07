@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/sheet";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { untitledLine } from "@/lib/channels/label";
@@ -99,6 +100,7 @@ export function MenuSheet({
   const navigate = useNavigate();
   const { data: user } = useQuery(currentUserQueryOptions());
   const signOut = useMutation(signOutMutationOptions(queryClient));
+  const signOutOffered = useSignOutOffered();
   const channels = useInfiniteQuery(channelListQueryOptions());
   const [manageOpen, setManageOpen] = useState(() =>
     rememberedOpen(MANAGE_STORAGE_KEY),
@@ -248,19 +250,21 @@ export function MenuSheet({
                 {settings.label}
               </Link>
             ) : null}
-            <button
-              className={ROW}
-              disabled={signOut.isPending}
-              onClick={async () => {
-                await signOut.mutateAsync();
-                close();
-                await navigate({ to: "/sign" });
-              }}
-              type="button"
-            >
-              <IconLogout size={22} stroke={1.8} />
-              {signOut.isPending ? "Signing out…" : "Sign out"}
-            </button>
+            {signOutOffered ? (
+              <button
+                className={ROW}
+                disabled={signOut.isPending}
+                onClick={async () => {
+                  await signOut.mutateAsync();
+                  close();
+                  await navigate({ to: "/sign" });
+                }}
+                type="button"
+              >
+                <IconLogout size={22} stroke={1.8} />
+                {signOut.isPending ? "Signing out…" : "Sign out"}
+              </button>
+            ) : null}
           </div>
         </nav>
       </SheetContent>
