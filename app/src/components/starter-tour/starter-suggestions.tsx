@@ -108,22 +108,26 @@ function StarterSuggestionChoices({
   return (
     <section
       aria-label="Starter tasks"
-      className="relative mb-3 w-full max-w-2xl pr-8 [&>div]:bg-transparent"
+      className="relative mb-2 w-full max-w-2xl pr-6 [&>div]:gap-1 [&>div]:bg-transparent"
     >
       <Button
         variant="ghost"
         size="icon"
-        className="absolute right-0 top-0 size-7 text-muted-foreground"
+        className="absolute right-0 top-0 size-6 text-muted-foreground"
         aria-label="Hide starter tasks"
         title="Hide starter tasks"
         disabled={dismiss.isPending}
         onClick={() => dismiss.mutate({ starterTourDismissed: true })}
       >
-        <IconX className="size-3.5" />
+        <IconX className="size-3" />
       </Button>
       <CopilotChatSuggestionView
         suggestions={STARTER_SUGGESTIONS}
-        suggestion={{ disabled: disabled || sending || dismiss.isPending }}
+        suggestion={{
+          disabled: disabled || sending || dismiss.isPending,
+          className:
+            "px-2 py-1 text-xs leading-4 text-muted-foreground bg-transparent",
+        }}
         onSelectSuggestion={(_suggestion, index) => {
           void choose(index);
         }}

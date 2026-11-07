@@ -22,12 +22,12 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChannelChat } from "@/components/channels/channel-chat";
+import { STARTER_SUGGESTIONS } from "@/components/starter-tour/suggestions";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
-import { STARTER_SUGGESTIONS } from "@/components/starter-tour/suggestions";
-import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
+import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 import { settleReactWork } from "./settle-react-work";
 
 /** Real home/new routes hand the selected starter prompt to real ChannelChat and its HTTP run. */
