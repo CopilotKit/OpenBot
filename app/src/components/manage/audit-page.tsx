@@ -17,7 +17,6 @@ import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useBotNames } from "@/lib/agents/bot-names";
-import { useManagePaths } from "@/lib/manage-paths";
 import {
   COMPUTER_ACTION_EVENT_TYPES,
   DID_NOT_HAPPEN_EVENT_TYPES,
@@ -28,6 +27,7 @@ import {
 import { auditEventsQueryOptions, auditExportUrl } from "@/lib/audit/queries";
 import { client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useManagePaths } from "@/lib/manage-paths";
 import { cn } from "@/lib/utils";
 
 /**
@@ -167,6 +167,7 @@ export function AuditPage({
             </p>
           ) : (
             <AuditTable
+              deploymentName={paths.deploymentName}
               events={rows}
               nameFor={nameFor}
               query={query}

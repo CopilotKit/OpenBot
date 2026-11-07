@@ -95,12 +95,15 @@ const FACETS = [
 ] as const;
 
 export function AuditTable({
+  deploymentName = "this deployment",
   events,
   nameFor,
   query,
   storedNames = false,
   toolbar,
 }: {
+  /** What OpenBot itself is called in a row it started: "this deployment" in Admin. */
+  deploymentName?: string;
   events: AuditEvent[];
   nameFor: NameFor;
   query: string;
@@ -118,8 +121,8 @@ export function AuditTable({
   const [sorting, setSorting] = useState<SortingState>(INITIAL_SORT);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const columns = useMemo(
-    () => auditColumns(nameFor, storedNames),
-    [nameFor, storedNames],
+    () => auditColumns(nameFor, storedNames, deploymentName),
+    [nameFor, storedNames, deploymentName],
   );
   const table = useTable({
     features,
@@ -321,6 +324,7 @@ function countLabel(shown: number, total: number): string {
 function auditColumns(
   nameFor: NameFor,
   storedNames: boolean,
+  deployment: string,
 ): ColumnDef<typeof features, AuditEvent>[] {
   return [
     {
@@ -379,12 +383,18 @@ function auditColumns(
       accessorFn: (event) => botText(event, nameFor) || "None",
       filterFn: anyOf,
       header: "Bot",
-      cell: ({ row }) => <WhoCell event={row.original} nameFor={nameFor} />,
+      cell: ({ row }) => (
+        <WhoCell
+          deployment={deployment}
+          event={row.original}
+          nameFor={nameFor}
+        />
+      ),
       enableSorting: false,
     },
     {
       id: "startedBy",
-      accessorFn: (event) => startedByText(event, nameFor),
+      accessorFn: (event) => startedByText(event, nameFor, deployment),
       filterFn: anyOf,
       header: () => null,
       cell: () => null,
@@ -398,7 +408,7 @@ function auditColumns(
     },
     {
       id: "search",
-      accessorFn: (event) => searchTextOf(event, nameFor),
+      accessorFn: (event) => searchTextOf(event, nameFor, deployment),
       header: () => null,
       cell: () => null,
       enableSorting: false,

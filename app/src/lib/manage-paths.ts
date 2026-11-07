@@ -47,6 +47,12 @@ export function managePaths(edition: "team" | "personal") {
        */
       auditLabel: "Activity",
       audit: () => linkOptions({ to: "/settings/activity" }),
+      /*
+       * What a sentence calls the product itself. The person running OpenBot alone reads its name;
+       * an admin reads "this deployment", the exact word Admin is allowed (see `openbot-copy`).
+       * Mid-sentence; `atStart` capitalises it where it opens one.
+       */
+      deploymentName: "OpenBot",
     };
   }
   return {
@@ -78,7 +84,13 @@ export function managePaths(edition: "team" | "personal") {
     computers: () => linkOptions({ to: "/admin/computers" }),
     auditLabel: "Audit",
     audit: () => linkOptions({ to: "/admin/audit" }),
+    deploymentName: "this deployment",
   };
+}
+
+/** A name from these paths at the start of a sentence: "This deployment", and "OpenBot" as it is. */
+export function atStart(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export type ManagePaths = ReturnType<typeof managePaths>;
