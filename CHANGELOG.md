@@ -279,6 +279,10 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 - The sign-in dialog that **Open private sign-in** opens no longer leaves large empty gaps above
   "Use a saved login" and "Enter your login". Its fields sit just below the sentence that
   introduces them, in the dialog and on the sign-in page.
+- Settings → Components gallery says what each component shows, such as "Shows what your Bots
+  have been doing and what was refused, read from OpenBot's own records." It showed the text
+  written for the model ("Show what this deployment has actually been doing..."). In the personal
+  edition its intro says every Bot can use all of them, where it said an admin controls them.
 
 ## 0.3.2
 

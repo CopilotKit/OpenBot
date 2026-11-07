@@ -246,6 +246,8 @@ export const GALLERY: GalleryComponent[] = [
     name: "showRecord",
     title: "Record",
     kind: "card",
+    summary:
+      "Shows one thing and its details, such as an order, a person or a ticket.",
     description:
       "Show one thing and its fields, an order, a person, a ticket. Use instead of describing a record in prose.",
     parameters: RecordCardProps,
@@ -266,6 +268,7 @@ export const GALLERY: GalleryComponent[] = [
     name: "showMetrics",
     title: "Headline figures",
     kind: "card",
+    summary: "Shows up to six headline figures and how each one has changed.",
     description:
       "Show up to six headline figures, each with an optional movement. Use for a summary somebody reads at a glance.",
     parameters: MetricsCardProps,
@@ -294,6 +297,8 @@ export const GALLERY: GalleryComponent[] = [
     name: "showChecklist",
     title: "Checklist",
     kind: "card",
+    summary:
+      "Shows the steps of a piece of work and which ones are done, such as a release plan.",
     description:
       "Show the tasks or steps of a piece of work and which are finished, such as a release plan or an onboarding list. Only for work somebody ticks off. Not for presenting information: findings, options, recommendations or a list of points go in text or a notice. The person cannot tick these here, so do not use it to ask for anything.",
     parameters: ChecklistCardProps,
@@ -312,6 +317,8 @@ export const GALLERY: GalleryComponent[] = [
     name: "showNotice",
     title: "Notice",
     kind: "card",
+    summary:
+      "Shows a headline with a short explanation and a few supporting points.",
     description:
       "Show a headline, a short explanation and optional supporting points. Use instead of writing several paragraphs of prose.",
     parameters: NoticeCardProps,
