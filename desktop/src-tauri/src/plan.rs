@@ -589,11 +589,14 @@ def answer(client, status, heading, message):
     finally:
         client.close()
 
+# The whole head, through its blank line, not only the request line. A page the relay answers itself
+# ends in a close, and a close with part of the request still unread resets the connection: the
+# browser shows a reset instead of the page.
 def request_head(client):
     data = b""
     client.settimeout(60)
     try:
-        while b"\r\n" not in data and len(data) < 16384:
+        while b"\r\n\r\n" not in data and len(data) < 16384:
             chunk = client.recv(4096)
             if not chunk:
                 break
@@ -634,11 +637,12 @@ def serve(client):
         answer(client, "400 Bad Request", "This sign-in link is out of date",
                "OpenBot started a newer sign-in. Finish it in the newest tab OpenBot opened, or close this one.")
         return
+    claimed = False
     if is_callback:
         with claim:
-            first = not received.is_set()
+            claimed = not received.is_set()
             received.set()
-        if not first:
+        if not claimed:
             answer(client, "200 OK", "OpenBot already has this sign-in",
                    "You can close this tab and go back to OpenBot.")
             return
@@ -648,7 +652,9 @@ def serve(client):
         try:
             upstream = socket.create_connection(("127.0.0.1", __LOOPBACK_PORT__), timeout=10)
         except OSError:
-            if received.is_set():
+            # Some other request's callback went through and the vendor's server has closed. Not
+            # when this is that callback: it waits for the server like any request.
+            if received.is_set() and not claimed:
                 answer(client, "200 OK", "OpenBot already has this sign-in",
                        "You can close this tab and go back to OpenBot.")
                 return
@@ -1744,12 +1750,34 @@ fn run(args: &[String], here: &Path) {
         Ok(reply)
     }
 
+    /// A callback whose request head is longer than one read, as a browser's can be with its
+    /// cookies, sent whole. The reply is read a moment later, once any reset has arrived.
+    #[cfg(unix)]
+    fn crowded_callback_on(port: u16, code: &str, state: &str) -> std::io::Result<String> {
+        let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        let mut stream = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(2))?;
+        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+        let cookie = "c".repeat(6000);
+        stream.write_all(
+            format!(
+                "GET /auth/callback?code={code}&scope=openid&state={state} HTTP/1.1\r\n\
+                 Host: localhost:{port}\r\nCookie: session={cookie}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )?;
+        std::thread::sleep(Duration::from_millis(100));
+        let mut reply = String::new();
+        stream.read_to_string(&mut reply)?;
+        Ok(reply)
+    }
+
     /**
     The vendor's `login_chatgpt`, keeping every part of the real one (langchain-openai 1.6.1) the
-    relay meets: it prints the authorize link, binds an `HTTPServer` on `localhost:port`, handles
-    one request at a time until one carries a code or an error, answers that one with its success
-    page, closes, and only then checks the `state`, failing the whole sign-in on one that is not its
-    own. The token exchange with OpenAI is a pause; the store lands under the home directory.
+    relay meets: it prints the authorize link, binds an `HTTPServer` on `localhost:port` a moment
+    later, handles one request at a time until one carries a code or an error, answers that one
+    with its success page, closes, and only then checks the `state`, failing the whole sign-in on
+    one that is not its own. The token exchange with OpenAI is a pause; the store lands under the
+    home directory.
     */
     #[cfg(unix)]
     const FAKE_CHATGPT_OAUTH: &str = r#"
@@ -1781,6 +1809,9 @@ def login_chatgpt(*, store_path=None, host="localhost", port=1455, callback_path
         def log_message(self, format, *args):
             return
 
+    # Long enough that the attempt's own callback reaches the relay before this server listens. The
+    # relay must hold it until the server is up, not answer it as a second one.
+    time.sleep(0.5)
     server = http.server.HTTPServer((host, port), Handler)
     server.timeout = 1.0
     deadline = time.monotonic() + timeout
@@ -1817,6 +1848,11 @@ def login_chatgpt(*, store_path=None, host="localhost", port=1455, callback_path
     A redirect from an earlier attempt's tab used to reach that server, take the one request it
     serves, show "You're signed in" and then fail the sign-in the person was in the middle of. A
     second redirect after the first used to get a connection closed with nothing said.
+
+    The attempt's own redirect, arriving before that server listened, used to be told "OpenBot
+    already has this sign-in" and never reach it, so the sign-in never finished. And a page the
+    relay answers itself used to close the connection with part of the request unread, which reset
+    it: the browser showed a reset, not the page.
     */
     #[test]
     #[cfg(unix)]
@@ -1882,6 +1918,11 @@ def login_chatgpt(*, store_path=None, host="localhost", port=1455, callback_path
         assert!(
             earlier.contains("This sign-in link is out of date"),
             "{earlier}"
+        );
+        let crowded = crowded_callback_on(relay, "ac.crowded", "from-an-earlier-attempt").unwrap();
+        assert!(
+            crowded.contains("This sign-in link is out of date"),
+            "{crowded}"
         );
 
         let first = callback_on(relay, "ac.first", &state).unwrap();

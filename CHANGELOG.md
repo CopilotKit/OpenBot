@@ -220,6 +220,11 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 - **The setup window offers a saved sign-in only when there is one.** "Use a saved ChatGPT
   sign-in", "Use a saved OpenAI API key" and "Use a saved Anthropic API key" show only when one is
   saved. On a computer with nothing saved they were offered anyway, and Start then failed.
+- **The ChatGPT sign-in's own pages show, not a reset connection.** "This sign-in link is out of
+  date" and "OpenBot already has this sign-in" came up as a reset connection when the browser's
+  request was long, as it is with many `localhost` cookies. And a browser that came back before
+  the sign-in was listening was told "OpenBot already has this sign-in" while the sign-in never
+  finished; the sign-in now waits for it.
 - **The setup window's sign-ins show whose account they are**: CopilotKit's logo on the CopilotKit
   sign-in, Google's and xAI's marks in the "Connect your AI" list, a cloud icon beside "Any
   OpenAI-compatible endpoint", and each provider's mark on its "Sign in with" button. Google's
