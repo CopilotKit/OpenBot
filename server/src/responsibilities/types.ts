@@ -198,6 +198,11 @@ export type ResponsibilityStore = {
     options?: { recovered: boolean },
   ): Promise<ResponsibilityRunContext | null>;
   settleRun(runId: string, outcome: ResponsibilityRunOutcome): Promise<void>;
+  /**
+   * Put a run that started back in the queue, unrun: its conversation was busy, so nothing happened.
+   * False when it is no longer running.
+   */
+  requeueRun(runId: string): Promise<boolean>;
   resumeWaiting(
     ownerUserId: string,
     runId: string,

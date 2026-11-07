@@ -54,6 +54,9 @@ function fixture(
       async settleRun(_id, outcome) {
         outcomes.push(outcome);
       },
+      async requeueRun() {
+        return false;
+      },
     },
     queue: {
       async claim() {
@@ -65,6 +68,9 @@ function fixture(
       async finish(input) {
         finished.push(input.key);
         return true;
+      },
+      async release() {
+        return false;
       },
     },
     runTurn,

@@ -23,6 +23,30 @@ export function isLockConflict(error: unknown): boolean {
 }
 
 /**
+ * Whether a run could not take a conversation's lock because another run holds it, and the platform
+ * says to try again.
+ *
+ * Intelligence refuses the acquire with 409 `THREAD_LOCK_FAILED`, `retryable: true`, while a run is
+ * going in that conversation: a goal started from a conversation, by a Bot that is still writing
+ * its answer there, is refused this way. Nothing has run yet when it is, so waiting and trying again
+ * is safe. The flag is respected: a refusal the platform marks as not retryable is not one.
+ *
+ * Read from the error's fields, and from the response body in its message, which is where the
+ * runtime's request errors carry the code (`Intelligence platform error 409: {"error":{...}}`).
+ */
+export function isThreadBusy(error: unknown): boolean {
+  if (!isLockConflict(error)) return false;
+  const { retryable, code, message } = error as Error & {
+    retryable?: unknown;
+    code?: unknown;
+  };
+  if (retryable !== true) return false;
+  return (
+    code === "THREAD_LOCK_FAILED" || message.includes('"THREAD_LOCK_FAILED"')
+  );
+}
+
+/**
  * No renewal has succeeded for nearly as long as the lock lives, so it will have lapsed before the
  * next one could land, whatever the reason was.
  */
