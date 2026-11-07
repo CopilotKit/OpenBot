@@ -272,6 +272,11 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   running and that its address on its Setup page is right, then try again." The conversation showed
   the connection error, such as "ECONNREFUSED: Unable to connect. Is the computer able to access the
   url?", which now goes to the server log.
+- When the model provider refuses a turn, the conversation says so in words, names the provider and
+  says what to do, such as "OpenAI didn't accept the API key. Check that it's set, correct and still
+  active, then try again." It showed the provider's error, such as "Error code: 400 - Invalid
+  'tools': array too long", which now goes to the log. A Claude Agent SDK Bot's refusal no longer
+  reads as its answer.
 - A Bot's step that asked for a tool the Bot doesn't have reads "didn't work" and opens to "This Bot
   asked for a tool it doesn't have, so it carried on without it." It opened to the error written for
   the model, listing every tool the Bot has by its raw name.

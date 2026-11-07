@@ -16,7 +16,7 @@
  */
 
 /** What the providers say when the money has run out, in any of their spellings. */
-const BILLING =
+export const BILLING =
   /(no credits remaining|credit[_ ]balance|insufficient[_ ]quota|used all available credits|spending limit|exceeded your current quota|usage limits?|purchase (more )?credits)/i;
 
 /** Who a person is told refused, by the model list's source. */
@@ -40,7 +40,7 @@ export function providerName(source: string | undefined): string {
 }
 
 /** The provider's own message from a response body, in the shapes the providers use. */
-function bodyMessage(body: unknown): string | undefined {
+export function bodyMessage(body: unknown): string | undefined {
   if (typeof body !== "string" || !body.trim()) return undefined;
   try {
     const parsed = JSON.parse(body) as Record<string, unknown>;
@@ -62,7 +62,7 @@ function bodyMessage(body: unknown): string | undefined {
 }
 
 /** Every error this one carries: a retry's attempts, a cause, a wrapped error. */
-function chain(error: unknown): Record<string, unknown>[] {
+export function chain(error: unknown): Record<string, unknown>[] {
   const found: Record<string, unknown>[] = [];
   const queue: unknown[] = [error];
   while (queue.length > 0 && found.length < 16) {

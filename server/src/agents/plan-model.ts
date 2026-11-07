@@ -417,6 +417,9 @@ export class PlanModel implements PlanLanguageModel {
                   }
                   case "RUN_ERROR": {
                     const error = new Error(event.message);
+                    // The harness's code, so the run can say a provider's refusal in words. See
+                    // `provider-refusal.ts`.
+                    if (event.code) Object.assign(error, { code: event.code });
                     if (event.code === "OPENBOT_MODEL_AUTH_REQUIRED") {
                       error.name = "OpenBotModelAuthenticationError";
                       recordDesktopConnectionFailure({
