@@ -1,3 +1,4 @@
+import { declaredHarness } from "@openbot/shared/harnesses";
 import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { capabilityRefusal } from "../admin/capabilities";
 import type { CredentialStore } from "../credentials";
@@ -423,12 +424,20 @@ export function runForDuplicate(
       source.type === "remote_mastra"
         ? remoteAgentIdOf(source.configuration)
         : null;
+    const harness =
+      source.configuration && typeof source.configuration === "object"
+        ? declaredHarness(
+            (source.configuration as Record<string, unknown>).harness,
+          )?.id
+        : undefined;
     return {
       type: source.type === "remote_mastra" ? "remote_mastra" : "remote_ag_ui",
       configuration: {
         endpoint,
         ...(remoteAgentId ? { remoteAgentId } : {}),
         ...(standingInstructions ? { standingInstructions } : {}),
+        // The same agent at the same address runs on the same framework. See `frameworkOf`.
+        ...(harness ? { harness } : {}),
       },
     };
   }
@@ -583,6 +592,10 @@ export function createAgentProfileStore(
             // auth-header.ts for why a bearer token must not sit next to the endpoint.
             configuration: {
               ...endpoint,
+              // The framework they named, for an address they gave. See `frameworkOf`.
+              ...(input.endpoint && input.harness
+                ? { harness: input.harness }
+                : {}),
               ...(input.auth && vault
                 ? {
                     auth: await storeAgentAuth({

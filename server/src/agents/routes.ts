@@ -1,3 +1,4 @@
+import { declaredHarness } from "@openbot/shared/harnesses";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AuditEventType, AuditStore } from "../audit";
@@ -39,6 +40,7 @@ type AgentInputObject = {
   auth?: unknown;
   isolated?: unknown;
   instructions?: unknown;
+  harness?: unknown;
 };
 
 /**
@@ -140,6 +142,21 @@ export function parseAgentInput(
   }
   const isolated = input.isolated;
 
+  /*
+   * The framework a person named for an agent they run themselves, by its id in the harness list.
+   * Kept only with an address: a Bot with none runs here, on OpenBot. See `frameworkOf`.
+   */
+  let harness: string | undefined;
+  if (input.harness !== undefined && input.harness !== "") {
+    const named = declaredHarness(input.harness);
+    if (!named)
+      return {
+        ok: false,
+        error: "OpenBot doesn't know that framework. Pick one from the list.",
+      };
+    if (endpoint) harness = named.id;
+  }
+
   // Absent leaves them as they are. Only the personal starter keeps instructions apart from what
   // it does, and the same limit holds for them as held when they were edited as that text.
   let instructions: string | undefined;
@@ -164,6 +181,7 @@ export function parseAgentInput(
       auth,
       ...(isolated === undefined ? {} : { isolated }),
       ...(instructions === undefined ? {} : { instructions }),
+      ...(harness === undefined ? {} : { harness }),
     },
   };
 }

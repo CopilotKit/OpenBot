@@ -254,6 +254,8 @@ test("Create fills in what was left blank, then hands over", async () => {
     visibility: "private",
     endpoint: "",
   });
+  // It runs on OpenBot, which the server knows without being told.
+  expect(creates[0]).not.toHaveProperty("harness");
   // For a Bot that runs here this is its system prompt, so it has to be something it can act on.
   expect(String(creates[0]?.roleDescription)).toStartWith(
     "You are Expense Review.",
@@ -294,6 +296,8 @@ test("checks the connection then creates with its saved name and key", async () 
     auth: { header: "Authorization", value: "Bearer secret" },
     // The framework picked from the list, by the name the list showed.
     title: "Powered by LangChain (LangGraph)",
+    // And by its id, so the Bot is told what runs it whatever its subtitle becomes.
+    harness: "langgraph",
   });
 });
 

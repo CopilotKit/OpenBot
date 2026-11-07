@@ -368,6 +368,17 @@ export function modelGuidance(label: string): string {
 }
 
 /**
+ * Which agent framework the Bot runs on, by the name the app gives it ("OpenBot", "LangChain
+ * (LangGraph)", "Claude Agent SDK").
+ *
+ * Decided by what runs the Bot, never by its subtitle: a subtitle is the person's to write, and the
+ * starter asked which framework it ran on could only go by one that happened to say "Powered by".
+ */
+export function frameworkGuidance(name: string): string {
+  return `The agent framework you run on is ${name}. If you are asked which framework you run on, that is the answer.`;
+}
+
+/**
  * What day it is, which a model cannot know.
  *
  * Without it a Bot asked for announcements "this quarter" guessed a quarter from its training data,
