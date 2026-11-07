@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot that can't be reached says so in words: "Couldn't reach Personal Assistant. Check that
+  it's running and that its address on its Setup page is right, then try again." A conversation
+  showed "ECONNREFUSED: Unable to connect. Is the computer able to access the url?". The error itself
+  goes to the server log.
 - A renamed Bot's conversations go by its new name in the sidebar, the conversation header and
   routines, including conversations started before the rename. They kept the name it had then.
 - OpenBot Desktop's Updates section on a build that doesn't update itself, such as an internal
