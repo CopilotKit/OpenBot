@@ -156,6 +156,7 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 - **The personal edition's page is titled Activity**, as its sidebar entry is, where it was titled
   Audit and spoke of "this deployment's policy". A row OpenBot started reads "Started by OpenBot",
   where it read "Started by this deployment". Admin keeps Audit.
+- **What OpenBot does by itself reads "Started by OpenBot"**, one row per Bot naming the tools and the app in words: every Bot given Routines' new goal tools at an upgrade's first start, and a build's new components. It read "Change a setting" over each tool's internal name, one row per tool, started by a person. A tool call shows the app's name under it, where it showed the tool's internal name.
 - **A Bot's Activity page links to "Every action this Bot took"**, which opens this page narrowed
   to that Bot until you clear the filter. The link shows in the personal edition, and for admins.
   The page also says it lists the Bot's tasks, routines and goals.

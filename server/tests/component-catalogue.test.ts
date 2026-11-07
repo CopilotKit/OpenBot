@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import type { AuditEventInput, AuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createComponentRoutes } from "../src/components/routes";
 import type { CatalogueEntry, ComponentStore } from "../src/components/store";
@@ -24,6 +25,12 @@ const asSignedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
 
 function harness() {
   const published: CatalogueEntry[] = [];
+  const trail: AuditEventInput[] = [];
+  const auditStore: AuditStore = {
+    insert: async (event) => {
+      trail.push(event);
+    },
+  };
   const store = {
     syncCatalogue: async (entries: CatalogueEntry[]) => {
       published.push(...entries);
@@ -33,11 +40,12 @@ function harness() {
 
   const app = new Hono().route(
     "/components",
-    createComponentRoutes(store, asSignedIn, undefined, async () => true),
+    createComponentRoutes(store, asSignedIn, auditStore, async () => true),
   );
 
   return {
     published,
+    trail,
     announce: (components: unknown[]) =>
       app.request("http://openbot.local/components/catalogue", {
         method: "PUT",
@@ -104,6 +112,26 @@ describe("a build announcing what it can draw", () => {
         "Component at index 0 needs a name, a title, a kind and a description.",
     });
     expect(published).toEqual([]);
+  });
+
+  test("records a component a build brought as published by OpenBot, not by whoever's page announced it", async () => {
+    // A first start, or an upgrade with a new component, filled Activity with "Publish a component,
+    // Started by a person" the first time anybody opened a page.
+    const { trail, announce } = harness();
+    await announce([entry()]);
+    expect(
+      trail.map((row) => ({
+        eventType: row.eventType,
+        targetId: row.targetId,
+        initiator: row.initiator,
+      })),
+    ).toEqual([
+      {
+        eventType: "component.published",
+        targetId: "weatherPanel",
+        initiator: { kind: "deployment" },
+      },
+    ]);
   });
 
   test("still refuses a list that is not a list", async () => {

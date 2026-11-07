@@ -1,8 +1,8 @@
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { BotAccessCheck } from "../agents/profile-policy";
-import type { AuditStore } from "../audit";
-import { recordAuditEvent } from "../audit";
+import type { AuditInitiator, AuditStore } from "../audit";
+import { DEPLOYMENT_INITIATOR, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
 import { DATA_FUNCTIONS, dataFunction } from "./functions";
@@ -64,6 +64,7 @@ export function createComponentRoutes(
     eventType: Parameters<typeof recordAuditEvent>[1]["eventType"],
     targetId: string,
     payload: Record<string, unknown>,
+    initiator?: AuditInitiator,
   ) => {
     if (!auditStore) return;
     const actor = context.var.actor;
@@ -71,6 +72,7 @@ export function createComponentRoutes(
       eventType,
       targetType: "component",
       targetId,
+      ...(initiator ? { initiator } : {}),
       ...(actor?.id && actor.email !== DEV_ACTOR_EMAIL
         ? { actorUserId: actor.id }
         : {}),
@@ -163,11 +165,18 @@ export function createComponentRoutes(
 
     const { added } = await store.syncCatalogue(valid);
     // Only arrivals are recorded. Announcing happens on every page load, and a row per load would
-    // bury the trail it is written into.
+    // bury the trail it is written into. Started by OpenBot: a build's component is published on
+    // arrival by OpenBot's own rule, and whoever's page happened to announce it decided nothing.
     for (const name of added) {
-      await audit(context, "component.published", name, {
-        note: "First seen in a build, published and available to every Bot.",
-      });
+      await audit(
+        context,
+        "component.published",
+        name,
+        {
+          note: "First seen in a build, published and available to every Bot.",
+        },
+        DEPLOYMENT_INITIATOR,
+      );
     }
     return context.json({ added });
   });

@@ -51,6 +51,14 @@ function fakeStore(
       grants.push(`${agentId}:${ref}`);
       grantedBy.set(`${agentId}:${ref}`, by);
     },
+    async grantTools(
+      _app: string,
+      refs: string[],
+      agentId: string,
+      by: string,
+    ) {
+      for (const ref of refs) await this.grant("mcp", ref, agentId, by);
+    },
     /** Methods call each other through `this`, as the real store's do. */
     async addServer(input: { key: string; by: string }) {
       added.push(input.key);
