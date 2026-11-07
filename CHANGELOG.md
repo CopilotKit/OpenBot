@@ -150,6 +150,9 @@ deployment:
   and your message was missing when the conversation was opened again.
 - **A step Claude Code refuses before it runs**, such as a table sent with broken data, no longer
   ends the turn in silence. The Bot goes on to retry or answer in words.
+- **They answer once when the reply's connection to Claude breaks partway.** Claude Code recovers
+  by itself, and the Bot used to answer a second time under its first reply, or leave a cut-off
+  fragment above it, or lose the answer and keep only the fragment.
 
 ### Activity and Audit
 
