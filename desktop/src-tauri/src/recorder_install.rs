@@ -1108,10 +1108,33 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn the_bundled_cli_stop_ends_only_what_runs_from_this_installations_cli_bundle() {
+        bundled_cli_stop_under("System32");
+    }
+
+    /// The installer is a 32-bit program, so the powershell.exe its hook starts is the 32-bit one
+    /// in SysWOW64, and the bundled node.exe is a 64-bit process. Get-Process in a 32-bit
+    /// PowerShell has no Path for a 64-bit process: the stop matched nothing, node.exe stayed
+    /// locked, and an upgrade of a Desktop that had run Intelligence stopped at "Error opening file
+    /// for writing". The fixture here is 64-bit too, as cargo builds it on x64 Windows.
+    #[cfg(windows)]
+    #[test]
+    fn the_bundled_cli_stop_works_from_the_32_bit_powershell_the_installer_starts() {
+        bundled_cli_stop_under("SysWOW64");
+    }
+
+    /// Runs the hook's script with the Windows PowerShell in %SystemRoot%\`system`. When it
+    /// returns, the process from cli-bundle must already be gone and its file free to replace: the
+    /// installer writes node.exe right after the hook, and a process still exiting keeps it locked.
+    #[cfg(windows)]
+    fn bundled_cli_stop_under(system: &str) {
         let script = bundled_cli_stop_script().replace("$$", "$");
+        let powershell = Path::new(&std::env::var_os("SystemRoot").unwrap())
+            .join(system)
+            .join(r"WindowsPowerShell\v1.0\powershell.exe");
+        assert!(powershell.is_file(), "{}", powershell.display());
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("target")
-            .join(format!("hook-test-{}", std::process::id()))
+            .join(format!("hook-test-{system}-{}", std::process::id()))
             .join("O'Brien [OpenBot]");
         let runtime = base.join("cli-bundle").join("runtime");
         std::fs::create_dir_all(&runtime).unwrap();
@@ -1127,7 +1150,7 @@ mod tests {
         std::fs::copy(&inside, &beside).unwrap();
         let mut bundled = std::process::Command::new(&inside).spawn().unwrap();
         let mut other = std::process::Command::new(&beside).spawn().unwrap();
-        let status = std::process::Command::new("powershell.exe")
+        let status = std::process::Command::new(&powershell)
             .args([
                 "-NoProfile",
                 "-NonInteractive",
@@ -1139,20 +1162,25 @@ mod tests {
             .env("OPENBOT_CLI_BUNDLE", base.join("cli-bundle"))
             .status()
             .unwrap();
-        assert!(status.success(), "{script}");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-        while bundled.try_wait().unwrap().is_none() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
         let stopped = bundled.try_wait().unwrap().is_some();
+        let replaceable = std::fs::remove_file(&inside);
         let spared = other.try_wait().unwrap().is_none();
         let _ = bundled.kill();
         let _ = other.kill();
         let _ = bundled.wait();
         let _ = other.wait();
         let _ = std::fs::remove_dir_all(base.parent().unwrap());
-        assert!(stopped, "the process under cli-bundle is still running");
-        assert!(spared, "a process outside cli-bundle was stopped");
+        let shell = powershell.display();
+        assert!(status.success(), "{shell}: {script}");
+        assert!(
+            stopped,
+            "{shell}: the process under cli-bundle is still running"
+        );
+        assert!(
+            replaceable.is_ok(),
+            "{shell}: the bundled node.exe is still locked: {replaceable:?}"
+        );
+        assert!(spared, "{shell}: a process outside cli-bundle was stopped");
     }
 
     #[test]
