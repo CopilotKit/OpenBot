@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- In a new conversation with two or more Bots in To:, typing @ before the first message lists those Bots, and a first message addressed to one goes to that Bot only. Before, @ said "No Bots in this conversation" until something had been sent.
+- In OpenBot Personal, a Bot's "What it can do" lists every skill you wrote on Settings, Skills under Your skills, with its switch. They were stored as nobody's, so the section read "No skills yet"; skills written before this become yours the next time OpenBot starts.
+- In the personal edition, Settings, Setup no longer mentions memory or an admin: the Back end row reads "Keeps your conversations and skills", More apps compares with the apps OpenBot comes with, and its links name Keys and Computer.
+- Settings, Computer lists the Teach a Bot browser as your OpenBot browser, with Clear browser data, not as "A Bot no longer here"; Admin, Computers names whose OpenBot browser each one is.
+- Onboarding's Welcome says what always asks (deleting, sending, sharing, posting) above the approvals switch, which is now "Always ask before making changes" there and in Settings, Approvals, with the same words in both.
+- A conversation shows the Bot is still working through a run of tool calls: the step still running
+  shimmers like the line above it, and once every step has its answer "Thinking" shows under them
+  until the reply starts. Before, a run of finished steps sat still and read as a Bot that had died.
 - OpenBot Desktop updates and sets up its local back end on a slow connection. Before the back
   end's update (a new one, or the next Start's retry of one that did not finish) or a setup that
   resumes, it downloads the back end's images itself, one at a time and with no fixed time limit,

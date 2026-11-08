@@ -470,8 +470,22 @@ export function ConversationView({
           working={working}
         />
       </div>
+      {/*
+       * THE TRANSCRIPT'S SIDE INSET IN A NARROW PANE, AND THE SAME 768px COMPOSER IN A WIDE ONE.
+       *
+       * The composer had no inset of its own, so in a pane narrower than its 768px column it ran to
+       * the pane's border, and the starter tasks above it with it, while the transcript kept 16px a
+       * side. Now the column always pads `px-4`, as the transcript's does, and is allowed 2rem more
+       * than `max-w-3xl` to pay for it: from an 800px pane up the composer is 768px wide exactly as
+       * before, and below that it stands 16px off each edge.
+       *
+       * A width, not a breakpoint, on purpose. A viewport breakpoint does not know how much of the
+       * window the sidebar takes, and a container query would need `@container` on an ancestor of
+       * the composer, which is layout containment: it would become the containing block for the @
+       * menu, which is `position: fixed` at the caret (see `DictationSurface`).
+       */}
       <div
-        className="max-w-3xl mx-auto w-full px-0 pb-4 shrink-0"
+        className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
         data-slot="composer-column"
       >
         {notice}

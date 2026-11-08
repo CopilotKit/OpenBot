@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AuditInitiator } from "./initiator";
+import { providerSafeSchema } from "./tool-schema";
 
 /** Where a call came from, for a tool that needs more than its arguments. */
 export type ToolExecution = { toolCallId?: string; signal?: AbortSignal };
@@ -51,7 +52,11 @@ export type GrantedTool = {
  */
 export function parametersFor(inputSchema: Record<string, unknown>): z.ZodType {
   try {
-    const converted = z.fromJSONSchema(inputSchema as never);
+    // Every app's schema reaches every harness and the built-in runtime through here, so this is
+    // the one place it is cut down to what the model providers accept (see `./tool-schema`).
+    const converted = z.fromJSONSchema(
+      providerSafeSchema(inputSchema) as never,
+    );
     if (converted instanceof z.ZodObject) return converted;
   } catch {}
   return z.object({}).catchall(z.unknown());
