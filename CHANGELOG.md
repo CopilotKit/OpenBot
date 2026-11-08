@@ -16,6 +16,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   says whether the back end stopped with an error partway, quit without saying why, or could not
   be run, where all three said "The back end could not start."
 
+- **CopilotKit Intelligence 0.16.0-rc.10.** OpenBot Desktop's back end and the Helm chart move to
+  Intelligence 0.16.0-rc.10 (CLI `copilotkit@647a03b`). A first back end setup now downloads its
+  images through downloads.copilotkit.ai too, because the CLI's own pulls read the cluster's
+  mirrors, and a setup step that fails now reports its own error instead of only that the command
+  did not finish.
+
 ## 0.3.4
 
 **Before upgrading.** One migration: `0083_learning_skill_approvals` creates the table
