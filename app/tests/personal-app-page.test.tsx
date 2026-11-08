@@ -303,9 +303,7 @@ describe("Gmail's page in the personal edition", () => {
     expect(row.textContent).toContain("changes things");
     expect(view.getByText("Send email")).toBeTruthy();
     expect(view.getByText("Get draft")).toBeTruthy();
-    expect(
-      view.getByText("Retrieves a single Gmail draft by its ID."),
-    ).toBeTruthy();
+    expect(view.getByText("Retrieves a single Gmail draft.")).toBeTruthy();
     // A first sentence that names an id is left out, and the row keeps its words and its marker.
     const profile = view
       .getByText("Get profile")
@@ -342,6 +340,83 @@ describe("Gmail's page in the personal edition", () => {
     ).toBeTruthy();
     expect(view.container.textContent).not.toContain("documents");
   });
+});
+
+/**
+ * Gmail's tools whose first sentence read as text for a model: "Tool to", a word in capitals, and how
+ * the tool finds a thing by its ID. Composio's own descriptions, as main bdb3a3df lists them.
+ */
+const gmailToolsForModels = {
+  ...gmailServer,
+  tools: [
+    gmailTool(
+      "GMAIL_CREATE_FILTER",
+      "write",
+      "Tool to create a new Gmail filter with specified criteria and actions. Use when the user wants to automatically organize incoming messages based on sender, subject, size, or other criteria. Note: you can only create a maximum of 1,000 filters per account.",
+    ),
+    gmailTool(
+      "GMAIL_DELETE_FILTER",
+      "write",
+      "Tool to permanently delete a Gmail filter by its ID. Use when you need to remove an existing email filtering rule.",
+    ),
+    gmailTool(
+      "GMAIL_DELETE_THREAD",
+      "write",
+      "Tool to immediately and permanently delete a specified thread and all its messages. This operation cannot be undone. Use threads.trash instead for reversible deletion.",
+    ),
+    gmailTool(
+      "GMAIL_DELETE_LABEL",
+      "write",
+      "Permanently DELETES a user-created Gmail label from the account (not from a message). WARNING: This action DELETES the label definition itself, removing it from all messages. System labels (INBOX, SENT, UNREAD, etc.) cannot be deleted. To add/remove labels from specific messages, use GMAIL_ADD_LABEL_TO_EMAIL action instead.",
+    ),
+    gmailTool(
+      "GMAIL_BATCH_DELETE_MESSAGES",
+      "write",
+      "Permanently deletes multiple Gmail messages by ID, bypassing Trash. A successful request does not confirm individual messages existed or were deleted.",
+    ),
+    gmailTool(
+      "GMAIL_INSERT_MESSAGE",
+      "write",
+      "Tool to insert a message into the user's mailbox similar to IMAP APPEND. Use when you need to add an email directly to a mailbox bypassing most scanning and classification. This does not send a message.",
+    ),
+  ],
+} as unknown as PluginServer;
+
+test("Gmail's page says what each tool does as a person would, not as its description tells a model", async () => {
+  const view = draw("personal", [gmailToolsForModels], "composio-gmail");
+  const said = (name: string) =>
+    (view.getByText(name).closest("[data-slot=item]") as HTMLElement)
+      .textContent;
+  await view.findByText("Create filter");
+  expect(said("Create filter")).toContain(
+    "Create a new Gmail filter with specified criteria and actions.",
+  );
+  expect(said("Delete filter")).toContain("Permanently delete a Gmail filter.");
+  expect(said("Delete thread")).toContain(
+    "Immediately and permanently delete a specified thread and all its messages.",
+  );
+  expect(said("Delete label")).toContain(
+    "Permanently deletes a user-created Gmail label from the account (not from a message).",
+  );
+  expect(said("Batch delete messages")).toContain(
+    "Permanently deletes multiple Gmail messages, bypassing Trash.",
+  );
+  // A name written in capitals is not a word said loudly.
+  expect(said("Insert message")).toContain(
+    "Insert a message into the user's mailbox similar to IMAP append.",
+  );
+  const text = view.container.textContent ?? "";
+  expect(text).not.toMatch(/Tool to|DELETES|by (its )?ID/);
+  expect(view.getAllByText("changes things")).toHaveLength(6);
+});
+
+test("team Admin keeps the descriptions as the app wrote them", async () => {
+  const view = draw("team", [gmailToolsForModels], "composio-gmail");
+  expect(
+    await view.findByText(
+      /^Tool to permanently delete a Gmail filter by its ID\./,
+    ),
+  ).toBeTruthy();
 });
 
 /**
