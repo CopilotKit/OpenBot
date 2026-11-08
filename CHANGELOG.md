@@ -8,6 +8,24 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Teach a Bot reads as one page: its title and how in one sentence, the browser, and your
+  recordings under it, all as wide as the browser. The browser is drawn as a window (tabs on its
+  frame, a pill address bar with a lock, a start page for an empty tab), sized to its page so no
+  blank band sits under it, and the page is laid out while the browser opens. Record is one button
+  at the toolbar's end that asks for the task's name and narration in a popover, with an (i) saying
+  what narration is for; the narration status bar shows only while recording. Your recordings links
+  to Settings, Learning, where what a recording teaches shows up.
+- The Bot's browser beside a conversation is a 360px glimpse with the address it is on and Take
+  control on the picture, and its full-size view fits its window to the page.
+- The sidebar's + opens a new conversation with To: empty and the Bot menu open, instead of a Bot
+  already picked. A Bot's own Message link still starts with that Bot.
+- Home says which Bot is working, with a way to it; a conversation says "Working" in the sidebar
+  while its Bot works; a Bot's browsing reads "Browsed example.com" instead of "Browsed 1 page". The
+  personal edition's Home no longer shows an empty Explore Bots box.
+- The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
+  OpenBot's name, and the app is set in Atkinson Hyperlegible Next. A skin keeps its own faces.
+- Settings, General lists your answers as rows that open a dialog. Settings, Notifications shows a
+  switch only for channels that are set up, and says how to set them up (or that your admin does).
 - A Bot asked to read a day of Gmail reads all of it. Listing emails used to bring back each
   message's raw MIME, tens of thousands of characters per email, so the answer was cut inside the
   first message, the Bot could not page on, and a large page failed at Composio as too large. A
