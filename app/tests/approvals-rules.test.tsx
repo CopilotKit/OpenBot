@@ -480,7 +480,7 @@ test("personal approvals keep the person's controls without team-only explanatio
   expect(view.queryByText(/Team rules are locked/)).toBeNull();
   expect(view.queryByText("Shared Bots")).toBeNull();
   expect(
-    view.getByRole("switch", { name: "Ask before making changes" }),
+    view.getByRole("switch", { name: "Always ask before making changes" }),
   ).toBeTruthy();
   expect(view.getByRole("switch", { name: "Auto-review" })).toBeTruthy();
 });
@@ -491,12 +491,13 @@ test("team approvals still show the shared Bot account controls", async () => {
 });
 
 /*
- * What always asks, said where the switches are, and only what is true: a Bot deleting a file on
- * its own computer is an ordinary change (server/src/approvals/policy.ts, NOT_ACCOUNT_ACTIONS), so
- * the page must not promise that every delete asks.
+ * What always asks, said where the switches are, in the words onboarding uses, and only what is
+ * true: a Bot deleting a file in its own workspace is an ordinary change
+ * (server/src/approvals/policy.ts, NOT_ACCOUNT_ACTIONS), so the page must not promise that every
+ * delete asks. The switch says it adds every change on top.
  */
 test.each(["team", "personal"] as const)(
-  "the %s edition says what always asks, and that a Bot's own computer is its scratch space",
+  "the %s edition says what always asks, and that a Bot's own workspace is left out of it",
   async (edition) => {
     inboxOverride = {
       teamRules: [],
@@ -506,14 +507,15 @@ test.each(["team", "personal"] as const)(
     await view.findByText("Rules for every Bot");
     const said = view.container.textContent ?? "";
     for (const sentence of [
-      "Payments, passwords and security settings are always handed to you.",
-      "Deleting, sending, sharing and posting in your apps and on websites always ask first.",
-      "So does every edit or command in a folder on your own computer.",
-      "A Bot's own computer is its scratch space, so what it does there asks only when your settings or rules say so.",
+      "Bots always ask for your approval before deleting, sending, sharing, or posting content in your apps or on websites.",
+      "They also ask before every edit or command in a folder on your own computer.",
+      "Bots leave payments and account security changes for you to do yourself.",
+      "Bots can create, edit, and delete files in their own workspace without asking, unless your settings or rules say so.",
+      "Require your approval for every change to your apps, websites, and files, including routine edits and updates.",
     ])
       expect(said.replace(/\s+/g, " ")).toContain(sentence);
     expect(said).not.toContain(
-      "Deleting, sending, sharing and posting always ask first.",
+      "Review a Bot's changes to websites, connected apps, and files.",
     );
   },
 );
