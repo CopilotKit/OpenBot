@@ -104,7 +104,27 @@ def conversation_content(messages, model_only=True):
         )
     for _, blocks in entries[start:]:
         content.extend(blocks)
+    if _read_as_a_command(content[-1]):
+        content.append({"type": "text", "text": HISTORY_ENDS})
     return content
+
+
+# Closes a replay that would otherwise end on a block Claude Code takes for a command.
+HISTORY_ENDS = "That is the end of the conversation history."
+
+
+def _read_as_a_command(block):
+    """Whether Claude Code would take this block, last in its prompt, for one of its own commands.
+
+    Claude Code reads the last text block of the prompt it is sent as what was typed at its prompt,
+    and one that starts with `/` as a slash command of its own. It holds none of a skill's name, so
+    it answered "Unknown command: /tide-report" itself and never asked the model. A message that
+    arrives as parts (the server's model endpoint sent every user message that way) puts each part
+    in a block of its own, so the person's words were that last block whenever they started with
+    the command the `/` menu put there. Leading
+    whitespace is counted too, in case a later Claude Code trims it before it looks.
+    """
+    return block["type"] == "text" and block["text"].lstrip().startswith("/")
 
 
 def _entry_blocks(message, strict):

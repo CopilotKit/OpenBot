@@ -222,12 +222,12 @@ for (const provider of ["chatgpt", "claude"] as const) {
     expect(step?.body.context.map((entry) => entry.value)).toEqual([
       "Find insights in these conversations.",
     ]);
+    // Words alone go to the harness as one string, the shape a browser sends every Bot: a text
+    // part of their own would end the Claude harness's replay on them (see plan-model.ts).
     expect(step?.body.messages).toEqual([
       expect.objectContaining({
         role: "user",
-        content: [
-          { type: "text", text: "Thread 1: the refund took three tries." },
-        ],
+        content: "Thread 1: the refund took three tries.",
       }),
     ]);
 
