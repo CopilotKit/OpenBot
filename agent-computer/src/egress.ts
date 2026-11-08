@@ -843,6 +843,16 @@ function refuse(socket: Socket, reason: string) {
 const PROXY_CHALLENGE =
   'HTTP/1.1 407 Proxy Authentication Required\r\nproxy-authenticate: Basic realm="OpenBot"\r\ncontent-type: text/plain\r\nconnection: close\r\ncontent-length: 0\r\n\r\n';
 
+/**
+ * The host a browser asks the filter for once as it starts, so that it holds the filter's credentials
+ * before anything Playwright does not answer for asks it anything (`holdFilterCredentials`). A name no
+ * network has (RFC 2606 reserves `.invalid`), answered by the filter itself once the credentials are
+ * in the request, before any policy, lookup or upstream proxy, so the question never leaves the
+ * computer.
+ * https://www.rfc-editor.org/rfc/rfc2606#section-2
+ */
+export const FILTER_CREDENTIALS_HOST = "openbot-egress-credentials.invalid";
+
 /** Open a tunnel to host:port, through the upstream proxy when there is one. */
 function tunnel(
   target: { host: string; port: number; addresses?: readonly string[] },
@@ -1029,6 +1039,11 @@ export async function startEgressFilter(
     }
     if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
       refuse(client, "A CONNECT names host:port.");
+      return;
+    }
+    // The browser asking only so that it holds its credentials: answered here, and nothing is reached.
+    if (asks && normalizeHost(host) === FILTER_CREDENTIALS_HOST) {
+      refuse(client, "Nothing is here: the browser now holds its credentials.");
       return;
     }
     const upstream = upstreamFor(botId ?? "", env);

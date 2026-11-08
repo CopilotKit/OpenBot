@@ -14,8 +14,14 @@ import type { NarrationProblem } from "@/lib/browser/narration";
 import type { NarrationChoice } from "./narration-choice";
 import type { NarrationControls } from "./use-narration";
 
-/** All narration ever says (David): it is on and capturing the voice, or it is off. */
-export const NARRATION_ON = "Narration is on. We're capturing your voice.";
+/**
+ * All narration ever says (David): it is on and capturing the voice, or it is off. Capturing is said only while a
+ * recording runs and narration hears the person; on with nothing to capture yet (before Record, or while it starts),
+ * it says only that it is on.
+ */
+export const NARRATION_CAPTURING =
+  "Narration is on. We're capturing your voice.";
+export const NARRATION_ON = "Narration is on.";
 export const NARRATION_OFF = "Narration is off.";
 
 /** Narration that cannot hear the person is simply off. */
@@ -31,8 +37,9 @@ export function downloadingSentence(_language: string): string {
   return NARRATION_OFF;
 }
 
-/** What the Desktop narration row says, from the Recorder's own report of whether it hears the person. */
+/** What the Desktop narration row says while a recording runs, from the Recorder's own report of whether it hears the person. */
 function nativeNarrationSentence(voice: LauncherState["voice"]): string {
+  if (voice === "listening") return NARRATION_CAPTURING;
   return voice === "muted" || voice === "unavailable"
     ? NARRATION_OFF
     : NARRATION_ON;
@@ -185,18 +192,23 @@ export function NarrationNotice({
 }
 
 /**
- * Narration is off when the browser cannot hear the person; null when it is simply on or off as they set it.
+ * Narration is off when the browser cannot hear the person, or they turned it off. It is capturing only while it hears
+ * them, which is only while a recording runs (`useNarration` has no status otherwise); else it is simply on.
  */
 function narrationNoticeSentence(
   narration: NarrationControls,
   _language: string,
 ): string | null {
-  return narration.supported &&
-    narration.on &&
-    narration.status?.state !== "failed" &&
-    narration.status?.state !== "downloading"
-    ? NARRATION_ON
-    : NARRATION_OFF;
+  if (
+    !narration.supported ||
+    !narration.on ||
+    narration.status?.state === "failed" ||
+    narration.status?.state === "downloading"
+  )
+    return NARRATION_OFF;
+  return narration.status?.state === "listening"
+    ? NARRATION_CAPTURING
+    : NARRATION_ON;
 }
 
 /**
