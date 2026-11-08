@@ -1295,6 +1295,7 @@ useGoalTools({
   // Read when a goal is run, long after the engine further down is made.
   engine: { ingest: (event) => responsibilityEngine.ingest(event) },
   conversationFor: routineStore.conversationFor,
+  linkRoutine: routineStore.linkGoal,
 });
 
 /**

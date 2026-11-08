@@ -120,8 +120,10 @@ const TOOLS: readonly McpTool[] = Object.freeze([
       "Without one, a routine that runs one of your goals carries that goal's title, and any other is",
       "named by its instruction.",
       "",
-      "To run one of your goals on a schedule, name the goal in the `instruction` by its title or its id",
-      '(`Run the goal "Track OpenBot releases"`) and leave `title` out unless the person named the routine.',
+      "To run one of your goals on a schedule, pass the goal's id, from `create_goal` or `list_goals`, as",
+      '`goalId`, and write the `instruction` as running it (`Run the goal "Track OpenBot releases"`). The',
+      "routine is then the goal's: the goal repeats, so none of its runs completes it, and the Bot's page lists",
+      "the two together. Leave `title` out unless the person named the routine.",
       "",
       "It takes no owner and no Bot. The routine belongs to the person you are talking to and runs as you;",
       "both are taken from the run itself, and there is no field for either.",
@@ -138,6 +140,11 @@ const TOOLS: readonly McpTool[] = Object.freeze([
           type: "string",
           description:
             "The name the person gave the routine, in their words, such as `Morning briefing`. At most 100 characters. Omit it unless they named it; never make one up. Omitted, a routine that runs one of your goals carries the goal's title.",
+        },
+        goalId: {
+          type: "string",
+          description:
+            "The id of the goal this routine runs, from `create_goal` or `list_goals`. Pass it whenever the routine is there to run one of your goals.",
         },
         cron: {
           type: "string",
@@ -209,6 +216,11 @@ const TOOLS: readonly McpTool[] = Object.freeze([
         timezone: {
           type: "string",
           description: "A new IANA timezone, such as `America/New_York`.",
+        },
+        goalId: {
+          type: "string",
+          description:
+            "The id of the goal this routine runs from now on, from `list_goals`.",
         },
         channelId: {
           type: "string",
@@ -575,6 +587,7 @@ export async function callTool(
         agentId,
         instruction,
         title: stringArg(args, "title"),
+        goalId: stringArg(args, "goalId")?.trim(),
         cron,
         /*
          * The Bot's zone, else the person's own: the one their browser said for the run making this
@@ -629,6 +642,8 @@ export async function callTool(
       if (timezone !== undefined) patch.timezone = timezone;
       const channelId = stringArg(args, "channelId");
       if (channelId !== undefined) patch.channelId = channelId;
+      const goalId = stringArg(args, "goalId")?.trim();
+      if (goalId !== undefined) patch.goalId = goalId;
       if (typeof args.enabled === "boolean") patch.enabled = args.enabled;
 
       // An empty patch is not a change, and sending it would answer "changed" having changed

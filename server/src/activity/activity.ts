@@ -282,8 +282,7 @@ export function createActivityStore(database: Database) {
          */
         const runBy = ownedRoutines
           .filter(
-            (routine) =>
-              routine.enabled && routineRunsGoal(routine.instruction, goal),
+            (routine) => routine.enabled && routineRunsGoal(routine, goal),
           )
           .sort(
             (first, second) =>
