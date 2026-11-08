@@ -24,6 +24,7 @@ import {
   learningModelEndpointFor,
   mountLearningModelEndpoint,
 } from "../src/learning/model-endpoint";
+import { clearDesktopConnectionFailure } from "../src/desktop-connection-failure";
 
 const LEARNING_SECRET = "per-install-learning-secret";
 const DEPLOYMENT_TOKEN = "deployment-agent-token";
@@ -43,6 +44,9 @@ type HarnessRun = {
 const stops: (() => void)[] = [];
 afterEach(() => {
   for (const stop of stops.splice(0)) stop();
+  // A refused sign-in is recorded for Desktop process-wide (`plan-model.ts`), and the suites share
+  // this process: left set, the next suite to read the connection failure reads this one.
+  clearDesktopConnectionFailure("model");
 });
 
 /** The plan's harness: one scripted answer per model step, as AG-UI events. */
