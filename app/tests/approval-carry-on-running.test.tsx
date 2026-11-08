@@ -2,12 +2,14 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import type { Message } from "@ag-ui/core";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { OPENBOT_WAITING_METADATA } from "@openbot/shared/waiting";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChannelChat } from "@/components/channels/channel-chat";
-import { carryingOnAfterApproval } from "@/lib/approvals";
+import {
+  type ApprovalInboxData,
+  carryingOnAfterApproval,
+} from "@/lib/approvals";
 import { type AgentChannel, channelKeys } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
@@ -101,17 +103,14 @@ const said = (content: string) =>
 let stops: string[] = [];
 let originalFetch: typeof fetch;
 
-function sse(events: unknown[]) {
-  return new NativeResponse(
-    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
-    { headers: { "content-type": "text/event-stream" } },
-  );
-}
+/** Requests the server's turn opened after the first, as the inbox lists them. */
+let later: ApprovalInboxData["requests"] = [];
 
-function inbox() {
+function inbox(): ApprovalInboxData {
   return {
     enabled: true,
     requests: [
+      ...later,
       {
         id: "approval-1",
         status,
@@ -184,40 +183,22 @@ beforeAll(() => {
         return NativeResponse.json({
           version: "fixture",
           agents: { "maps-bot": { description: "Fixture", capabilities: {} } },
-          mode: "sse",
+          /*
+           * Intelligence mode, as a deployment runs: the core then stops a run over the agent's own
+           * channel, for a run this tab started, and sends nothing for a turn it did not. In SSE mode
+           * its Stop happened to post the thread's stop itself, which hid that this tab never did.
+           * Nothing answers on the socket, so the conversation is restored from its history.
+           */
+          mode: "intelligence",
+          intelligence: { wsUrl: "ws://127.0.0.1:9/client" },
           telemetryDisabled: true,
         });
-      // The conversation's last run, replayed: it looked up the address, then stopped to ask.
+      /*
+       * Intelligence's connect: nothing running on the thread, so no join. The conversation is
+       * drawn from its history, which ends on the step the run stopped on to ask.
+       */
       if (url.pathname.endsWith("/connect"))
-        return sse([
-          { type: "RUN_STARTED", threadId: channel.threadId, runId: "maps" },
-          {
-            type: "MESSAGES_SNAPSHOT",
-            messages: [ask, geocode, geocoded, search],
-          },
-          {
-            type: "RUN_FINISHED",
-            threadId: channel.threadId,
-            runId: "maps",
-            outcome: {
-              type: "interrupt",
-              interrupts: [
-                {
-                  id: "call-search",
-                  reason: "human_input",
-                  message: "This action is waiting for your approval.",
-                  metadata: {
-                    [OPENBOT_WAITING_METADATA]: {
-                      kind: "approval",
-                      approvalId: "approval-1",
-                      requestId: "approval-1",
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        ]);
+        return new NativeResponse(null, { status: 204 });
       // Stop, with no run of this tab's to name: the thread's, which reaches the server's turn.
       if (
         /\/agent\/[^/]+\/stop\/[^/]+$/.test(url.pathname) &&
@@ -256,6 +237,7 @@ afterAll(async () => {
 function mounting() {
   status = "pending";
   decidedAt = null;
+  later = [];
   stored = [ask, geocode, geocoded, search];
   decisions = [];
   stops = [];
@@ -442,4 +424,60 @@ test("a reply first read half written is shown whole once a later read holds all
   });
   expect(await view.findByText(WHOLE)).toBeTruthy();
   expect(view.queryByText(half)).toBeNull();
+}, 20_000);
+
+/*
+ * Found on the Mac: the turn the server carried on reached a second action that needed the person,
+ * opened its request, and the conversation never showed it. The server now ends that turn there and
+ * finishes the first decision; the conversation then reads its history, which ends on the new step,
+ * and draws its card.
+ */
+test("a second approval the server's turn stops on is asked in the conversation", async () => {
+  const view = mounting();
+  const directions = {
+    id: "asking-directions",
+    role: "assistant",
+    content: "",
+    toolCalls: [
+      {
+        id: "call-directions",
+        type: "function",
+        function: {
+          name: "mcp__google-maps__maps_directions",
+          arguments: '{"destination":"Blue Bottle"}',
+        },
+      },
+    ],
+  } satisfies Message;
+  const [first] = inbox().requests;
+  if (!first) throw new Error("No first request.");
+  later = [
+    {
+      ...first,
+      id: "approval-2",
+      status: "pending",
+      decidedAt: null,
+      action: {
+        ...first.action,
+        toolRef: "google-maps/maps_directions",
+        toolCallId: "call-directions",
+        args: { destination: "Blue Bottle" },
+      },
+    },
+  ];
+  await carriedOnThenEnded(view, [
+    ask,
+    geocode,
+    geocoded,
+    search,
+    searched,
+    directions,
+  ]);
+
+  // Asked again, in the conversation, and nothing says the Bot is still going.
+  expect(
+    await view.findByRole("region", { name: "Waiting for your approval" }),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Allow once" })).toBeTruthy();
+  expect(view.container.querySelector(STOP)).toBeNull();
 }, 20_000);

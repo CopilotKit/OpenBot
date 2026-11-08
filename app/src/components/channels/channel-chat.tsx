@@ -37,6 +37,7 @@ import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
   carryingOnAfterApproval,
+  stopCarriedOnMutationOptions,
 } from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
@@ -1232,9 +1233,22 @@ export function ChannelChat({
       return answer;
     },
   });
+  const stopCarriedOn = useMutation(stopCarriedOnMutationOptions(queryClient));
   const stopTask = () => {
     awaitingReply.current = false;
     stopEpoch.current++;
+    /*
+     * The server's turn, when it is the only one going: this tab has no run of its own for the core
+     * to stop, and in Intelligence mode the core's Stop never leaves the tab without one. So the
+     * thread's stop is sent here, to the route the server's turn listens on.
+     */
+    if (carryingOn && !agent.isRunning && runsInFlight === 0) {
+      stopCarriedOn.mutate({
+        agentId: runtimeAgentId,
+        threadId: channel.threadId,
+      });
+      return;
+    }
     copilotkit.stopAgent({ agent });
   };
 
