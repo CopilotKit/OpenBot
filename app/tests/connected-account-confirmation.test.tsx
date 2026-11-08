@@ -313,18 +313,24 @@ for (const connected of [true, false]) {
       if (connected && configured) await view.findByText(/googledocs/);
       const rendered = everythingRendered(view);
       expect(rendered).not.toMatch(/composio/i);
-      if (!configured) expect(rendered).toContain("ARCADE_API_KEY");
+      // A person's own page names neither the broker nor the variable an admin sets.
+      if (!configured) {
+        expect(rendered).toContain("Ask an admin to set it up.");
+        expect(rendered).not.toContain("ARCADE_API_KEY");
+      }
     });
   }
 }
 
-test("where a screen does name the broker, the vocabulary names the active one", () => {
-  expect(brokeredDisconnectNote("arcade")).toBe(
-    "Disconnecting also ends the account at Arcade.",
-  );
-  expect(brokeredDisconnectNote("composio")).toBe(
-    "Disconnecting also ends the account at Composio.",
-  );
+test("no screen names the broker, and only an admin is told the variable to set", () => {
+  for (const provider of ["arcade", "composio"] as const) {
+    expect(brokeredDisconnectNote(provider)).toBe(
+      "Disconnecting also removes OpenBot's access to your account.",
+    );
+    expect(brokeredKeyMissing(provider, "this deployment", "person")).toBe(
+      "Connecting apps isn't set up yet, so this account can't be connected or disconnected here. Ask an admin to set it up.",
+    );
+  }
   expect(brokeredKeyMissing("arcade")).toBe(
     "Set ARCADE_API_KEY on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.",
   );

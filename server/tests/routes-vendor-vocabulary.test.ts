@@ -13,11 +13,12 @@
  * the word Composio anywhere. The Composio half is the evidence that nothing about that deployment
  * moved — the same sentence, word for word, but for the vendor's name.
  *
- * TWO AUDIENCES, TWO RULES. The two admin sentences (removing and enabling an app) name the broker,
- * because the admin is the one who holds its key. The connect, confirm, re-check and disconnect
- * sentences answer whoever pressed the button, and since the copy pass they name NO broker at all
- * (see `.claude/skills/openbot-copy/SKILL.md`): the broker is an internal that person cannot act
- * on. Neither rule lets a deployment read the other vendor's name.
+ * TWO AUDIENCES, ONE RULE ABOUT THE BROKER. No sentence names it: a person, the admin included,
+ * connects apps through OpenBot (see `.claude/skills/openbot-copy/SKILL.md`). The two admin
+ * sentences (removing and enabling an app) still name the ACTIVE provider's variable, because the
+ * admin is the one who sets it. The connect, confirm, re-check and disconnect sentences answer
+ * whoever pressed the button, and name no variable either. Neither lets a deployment read the
+ * other provider's variable.
  */
 import { describe, expect, test } from "bun:test";
 import { Hono, type MiddlewareHandler } from "hono";
@@ -39,10 +40,10 @@ const ROW: Record<BrokerProvider, { url: string; toolkit: string }> = {
   arcade: { url: "arcade://Gmail", toolkit: "Gmail" },
 };
 
-/** The vendor name a deployment on each provider is entitled to read. */
-const VENDOR: Record<BrokerProvider, string> = {
-  composio: "Composio",
-  arcade: "Arcade",
+/** The variable an admin on each provider is told to check. */
+const ENV_VAR: Record<BrokerProvider, string> = {
+  composio: "COMPOSIO_API_KEY",
+  arcade: "ARCADE_API_KEY",
 };
 
 const SERVER_ID = "brokered-gmail";
@@ -226,7 +227,7 @@ function deployment(provider: BrokerProvider, wiring: Wiring = {}) {
   };
 }
 
-/** The admin's sentences, which name the broker, as the request that produces each. */
+/** The admin's sentences, which name the variable they set, as the request that produces each. */
 const ADMIN_CASES: Record<
   string,
   (provider: BrokerProvider) => Promise<Response>
@@ -306,23 +307,18 @@ async function sentenceOf(
   return body.error as string;
 }
 
-describe("an Arcade deployment's admin refusals name Arcade and never Composio", () => {
+describe("an admin's refusals name no broker, and only their own provider's variable", () => {
   for (const name of Object.keys(ADMIN_CASES)) {
-    test(name, async () => {
-      const sentence = await sentenceOf("arcade", name);
-      expect(sentence).not.toContain("Composio");
-      expect(sentence).toContain(VENDOR.arcade);
-    });
-  }
-});
-
-describe("and a Composio deployment's admin refusals name Composio and never Arcade", () => {
-  for (const name of Object.keys(ADMIN_CASES)) {
-    test(name, async () => {
-      const sentence = await sentenceOf("composio", name);
-      expect(sentence).not.toContain("Arcade");
-      expect(sentence).toContain(VENDOR.composio);
-    });
+    for (const provider of ["composio", "arcade"] as const) {
+      test(`${name} (${provider})`, async () => {
+        const sentence = await sentenceOf(provider, name);
+        expect(sentence).not.toMatch(/\b(Composio|Arcade)\b/);
+        expect(sentence).toContain(ENV_VAR[provider]);
+        expect(sentence).not.toContain(
+          ENV_VAR[provider === "arcade" ? "composio" : "arcade"],
+        );
+      });
+    }
   }
 });
 
@@ -338,16 +334,17 @@ describe("a person's refusals name no broker on either deployment", () => {
 });
 
 /**
- * And the two sentences differ in NOTHING but the vendor's name — which is what says the fix was a
- * substitution rather than a rewrite. Written as the Arcade sentence with "Arcade" put back to
- * "Composio", compared against the Composio deployment's own answer.
+ * And the two sentences differ in NOTHING but the variable's name. Written as the Arcade sentence
+ * with its variable put back to Composio's, compared against the Composio deployment's own answer.
  */
-describe("the two deployments' sentences differ only in the vendor's name", () => {
+describe("the two deployments' sentences differ only in the variable's name", () => {
   for (const name of Object.keys(CASES)) {
     test(name, async () => {
       const arcade = await sentenceOf("arcade", name);
       const composio = await sentenceOf("composio", name);
-      expect(arcade.replaceAll("Arcade", "Composio")).toBe(composio);
+      expect(arcade.replaceAll(ENV_VAR.arcade, ENV_VAR.composio)).toBe(
+        composio,
+      );
     });
   }
 });

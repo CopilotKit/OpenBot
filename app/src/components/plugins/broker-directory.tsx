@@ -64,7 +64,7 @@ const LOADING_ROWS = ["a", "b", "c", "d", "e", "f"];
 
 export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   const paths = useManagePaths();
-  const { name, directoryLabel } = providerVocabulary(provider);
+  const { directoryLabel } = providerVocabulary(provider);
   const [search, setSearch] = React.useState("");
   /*
    * Debounced, as on People, and for a stronger reason: every distinct term is a cache key of its
@@ -132,7 +132,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   return (
     <PageShell
       backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
-      description={`${name}'s app directory. Add an app to make its tools available to Bots. Each person still connects their own account before it reads anything.`}
+      description="Add an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything."
       title={directoryLabel}
     >
       <PageSection
@@ -146,7 +146,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
         ) : null}
 
         <Input
-          aria-label={`Search ${name} apps`}
+          aria-label="Search apps"
           className="mt-4"
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search by app name"
@@ -193,8 +193,8 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
             title={query ? "No matches" : "No apps"}
           >
             {query
-              ? `No ${name} app matches "${query}".`
-              : `${name} returned no apps.`}
+              ? `No app matches "${query}".`
+              : "No apps to show yet. Reload the page to try again."}
           </PageEmpty>
         ) : (
           <>

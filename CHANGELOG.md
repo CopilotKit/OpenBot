@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Work apps are connected through OpenBot. Connections, an app's page, the app directory, chat
+  connect cards and admin Plugins no longer name the connector provider ("Browse Composio" is now
+  "Browse apps"). Admin pages still name the setting an admin sets, such as `COMPOSIO_API_KEY`.
+  Where a connect, re-check or disconnect fails for a reason only an operator can fix, the person
+  reads the route's own sentence and the operator's detail goes to the server log.
+
 ## 0.3.3
 
 **Before upgrading.** Five migrations add columns: `0078_routine_title` adds a nullable

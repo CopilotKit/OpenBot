@@ -520,6 +520,7 @@ function AppConnectionPage() {
             <BrokeredAccountRow
               account={brokeredAccount}
               deployment={paths.deploymentName}
+              reader="person"
               /* Said beside the button rather than after it: disconnecting ends the account at
                  Composio, so what it undoes is not the row here but the grant on your own mailbox,
                  and connecting again is a fresh consent. */

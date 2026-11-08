@@ -80,18 +80,18 @@ const EXPECTED: Record<
 > = {
   composio: {
     unavailable:
-      "Composio would not answer with its app directory, and said nothing about why. Check that COMPOSIO_API_KEY is this project's key, and check Composio's status if it persists.",
-    notListed: "nope is not an app Composio lists for this deployment.",
+      "Couldn't load the apps you can connect, and no reason was given. Check that COMPOSIO_API_KEY is this project's key, and try again in a moment.",
+    notListed: "nope isn't one of the apps you can connect.",
   },
   arcade: {
     unavailable:
-      "Arcade would not answer with its app directory, and said nothing about why. Check that ARCADE_API_KEY is this project's key, and check Arcade's status if it persists.",
-    notListed: "nope is not an app Arcade lists for this deployment.",
+      "Couldn't load the apps you can connect, and no reason was given. Check that ARCADE_API_KEY is this project's key, and try again in a moment.",
+    notListed: "nope isn't one of the apps you can connect.",
   },
 };
 
 for (const provider of ["composio", "arcade"] as const) {
-  describe(`a ${provider} deployment names its own vendor`, () => {
+  describe(`a ${provider} deployment names its own variable and no vendor`, () => {
     test("the directory read", async () => {
       const response = await deployment(provider, down).read();
       expect(response.status).toBe(502);
@@ -126,7 +126,7 @@ describe("an Arcade operator is never told about Composio", () => {
       await (await none.enable("nope")).text(),
     ];
     for (const body of bodies) {
-      expect(body).toMatch(/Arcade/);
+      expect(body).not.toMatch(/Arcade/);
       expect(body).not.toMatch(/composio/i);
     }
   });
