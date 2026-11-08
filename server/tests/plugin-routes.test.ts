@@ -1643,6 +1643,7 @@ function brokeredApp(
     account: AccountRef;
     toolkit: string;
     returnUrl: string;
+    another?: boolean;
   }> = [];
   const queried: Array<{ toolkit: string; account: AccountRef }> = [];
   const confirmed: Array<{ toolkit: string; account: AccountRef; by: string }> =
@@ -1935,6 +1936,7 @@ function brokeredApp(
               account: AccountRef;
               toolkit: string;
               returnUrl: string;
+              another?: boolean;
             }) => {
               // Recorded BEFORE the throw, so a test about a failing broker can still say the
               // address it was asked with was this deployment's own.
@@ -2172,29 +2174,31 @@ describe("connecting a brokered app", () => {
     expect(authorized).toEqual([]);
   });
 
-  test("a second connection is refused with the step to take", async () => {
+  test("a second connection asks for another account rather than refusing", async () => {
+    /*
+     * A PERSON MAY HOLD SEVERAL ACCOUNTS AT ONE APP. A press over a standing connection used to be
+     * a 409 telling them to disconnect first, which left anybody with a work and a personal account
+     * able to give their Bots only one. The link is minted for the same person, and says another
+     * account is wanted so the vendor adds one beside the one that stands.
+     */
     const { authorized, connect } = brokeredApp({
       connectedAt: "2026-02-02T00:00:00.000Z",
     });
 
     const response = await connect({});
 
-    expect(response.status).toBe(409);
-    const refusal = (await response.json()).error as string;
-    // Naming the remedy rather than only refusing: the person has an account attached already, and
-    // the only way to a new link is through disconnecting the one they have.
-    expect(refusal.toLowerCase()).toContain("disconnect");
-    /*
-     * THE APP'S TITLE, AND NOT THE ROW'S ID. "Linear" is the name of the thing this person
-     * connected; `composio-linear` is how this deployment keys a table, which they have never seen
-     * and cannot act on. The second assertion is not the first one twice: a sentence that named the
-     * app and then quoted the row id beside it would satisfy one and fail the other.
-     */
-    expect(refusal).toContain("Linear");
-    expect(refusal).not.toContain("composio-linear");
-    // And nothing was minted, which is the half that matters: a link handed out here would attach
-    // a second account behind a row that already says connected.
-    expect(authorized).toEqual([]);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authorizationUrl: AUTHORIZATION_URL,
+    });
+    expect(authorized).toEqual([
+      {
+        account: ADMIN_ACCOUNT,
+        toolkit: "linear",
+        returnUrl: RETURN_URL,
+        another: true,
+      },
+    ]);
   });
 
   test("a deployment with no broker is told which setting to set", async () => {
@@ -2752,12 +2756,10 @@ describe("connecting an app whose secret a person types", () => {
     });
   });
 
-  test("an account already connected is refused before the form is drawn", async () => {
+  test("an account already connected still gets the form, to add another key", async () => {
     /*
-     * THE ONE-ACCOUNT GUARD STILL RUNS FIRST, which is the ordering both branches were put after on
-     * purpose. Drawing the form for somebody who already has an account attached invites them to
-     * type a key that would be refused after they had entered it, and asking Composio what the app
-     * wants is a call made on behalf of a request that is going to be refused anyway.
+     * A SECOND KEY IS A SECOND ACCOUNT, as a second consent is. The form is drawn for somebody who
+     * already has an account at the app, so they can connect another one beside it.
      */
     const { asked, submitted, connectFields } = brokeredApp({
       connectedAt: "2026-02-02T00:00:00.000Z",
@@ -2765,13 +2767,8 @@ describe("connecting an app whose secret a person types", () => {
 
     const response = await connectFields();
 
-    expect(response.status).toBe(409);
-    const refusal = (await response.json()).error as string;
-    expect(refusal.toLowerCase()).toContain("disconnect");
-    // The app's name rather than the row's id, as on the consent half above.
-    expect(refusal).toContain("Firecrawl");
-    expect(refusal).not.toContain("composio-firecrawl");
-    expect(asked).toEqual([]);
+    expect(response.status).toBe(200);
+    expect(asked).toEqual([{ toolkit: "firecrawl", authScheme: "API_KEY" }]);
     expect(submitted).toEqual([]);
   });
 

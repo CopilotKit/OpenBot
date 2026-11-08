@@ -1274,6 +1274,8 @@ export type PluginStoreOptions = {
       actorId?: string;
       botId?: string;
       threadId?: string;
+      /** Which of the person's accounts the call runs in; see `VendorTransport.callTool`. */
+      accountId?: string;
     },
     toolName: string,
     args: Record<string, unknown>,

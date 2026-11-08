@@ -141,6 +141,7 @@ export function consentMethods(
       account,
       toolkit,
       returnUrl,
+      another,
     }): Promise<{ redirectUrl: string; authorizationId: string | null }> {
       const userId = account.vendorUserId;
       /*
@@ -331,19 +332,14 @@ export function consentMethods(
        * about this deployment's own pages. It is never logged and never quoted in the refusal
        * below, for the reason the url itself is not.
        *
-       * NO `allowMultiple`, WHICH LEAVES THE VENDOR ENFORCING THE RULE THIS DEPLOYMENT ALREADY
-       * STATES. One person holds one account per app here, because the call that runs an action
-       * names the person and not the account — so with two accounts attached, which mailbox a Bot
-       * reads would be Composio's choice and nothing here could say which one it had been. The
-       * route refuses a second connection before it ever reaches this method, and that refusal is
-       * the sentence a person reads; this is the same rule one layer further down, where the
-       * vendor is the only party that can still see an account this deployment's rows have lost
-       * track of. What it raises there is {@link BrokerAccountHeldError}, and the route answers
-       * that by recording the account the vendor holds, so the person who pressed Connect is
-       * connected through it and is not told to disconnect an account their page never showed.
-       * `toolkits.authorize` passed `allowMultiple: true` unconditionally — the SDK
-       * calls it a "magic function" for exactly that — which is the opposite of what this
-       * deployment wants.
+       * `allowMultiple` ONLY FOR A SECOND ACCOUNT THE PERSON ASKED FOR. A person may hold several
+       * accounts for one app, and a call names the one it runs in (`connected_account_id`), so a
+       * second mailbox is no longer Composio's choice to make. Without the flag the vendor still
+       * refuses a link for a person who holds an account, and that refusal is how a press with no
+       * row here reaches {@link BrokerAccountHeldError}: the route records the account the vendor
+       * holds, so the person is connected through it and not told to disconnect an account their
+       * page never showed. `toolkits.authorize` passed `allowMultiple: true` unconditionally, which
+       * would end that adoption, so this method decides per press.
        *
        * THE ANSWER IS AN OBJECT BY CONSTRUCTION AND ITS ONE FIELD IS NOT. `link` builds what it
        * returns with `createConnectionRequest(client, response.connected_account_id, INITIATED,
@@ -363,6 +359,12 @@ export function consentMethods(
         () =>
           vendor.connectedAccounts.link(userId, config.id, {
             callbackUrl: returnUrl,
+            /*
+             * A SECOND ACCOUNT ONLY WHEN ONE WAS ASKED FOR. The connect route sets `another` where
+             * the person's connection row stands, so a press with no row still meets the SDK's
+             * refusal and adopts the account the vendor holds (see above).
+             */
+            ...(another ? { allowMultiple: true } : {}),
           }),
       );
 

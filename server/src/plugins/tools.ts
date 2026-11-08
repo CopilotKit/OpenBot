@@ -10,6 +10,7 @@ import { SEARCH_TOOLS, systemOf } from "../agents/tool-search";
 import { ApprovalRefusedError } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
 import { markUntrusted } from "../untrusted-content";
+import { withAccountArgument } from "./account-argument";
 import {
   type CatalogueEntry,
   catalogueEntry,
@@ -324,6 +325,50 @@ export async function grantedTools(options: {
   const { store, botId, actorId, initiator, credentialActorFor } = options;
   const granted = await store.listForAgent(botId);
 
+  /*
+   * WHICH ACCOUNTS THE PERSON HOLDS AT EACH APP, so a Bot holding Gmail tools knows there are two
+   * mailboxes and what they are called. Asked about the person whose accounts the call opens, which
+   * for a Team Bot is its owner. Only an app with more than one account changes a tool: the schema
+   * gains an `account` argument listing them (see `./account-argument`), and the call path checks
+   * whatever comes back against the same person's accounts.
+   */
+  const servers = [
+    ...new Set(granted.tools.map((tool) => tool.ref.split("/")[0] ?? "")),
+  ].filter(Boolean);
+  const opensAsFor = new Map<string, string>();
+  for (const tool of granted.tools) {
+    opensAsFor.set(
+      tool.ref,
+      credentialActorFor ? await credentialActorFor(tool.ref) : actorId,
+    );
+  }
+  const choicesByPerson = new Map<
+    string,
+    Awaited<ReturnType<PluginStore["accountChoicesForServers"]>>
+  >();
+  for (const person of new Set(opensAsFor.values())) {
+    /*
+     * A list that cannot be read leaves every tool as the app wrote it: the call still runs in the
+     * person's default account, and nothing about which tools a Bot holds depends on this read.
+     */
+    let held: Awaited<ReturnType<PluginStore["accountChoicesForServers"]>>;
+    try {
+      held = await store.accountChoicesForServers(person, servers);
+    } catch {
+      held = new Map();
+    }
+    choicesByPerson.set(person, held);
+  }
+  const schemaFor = (tool: (typeof granted.tools)[number]) => {
+    const server = tool.ref.split("/")[0] ?? "";
+    const held = choicesByPerson
+      .get(opensAsFor.get(tool.ref) ?? actorId)
+      ?.get(server);
+    return held
+      ? withAccountArgument(tool.inputSchema, held.title, held.choices)
+      : tool.inputSchema;
+  };
+
   return granted.tools.map((tool) => ({
     name: tool.toolName,
     ref: tool.ref,
@@ -336,7 +381,7 @@ export async function grantedTools(options: {
           .filter(Boolean)
           .join("\n\n")
       : tool.description,
-    parameters: parametersFor(tool.inputSchema),
+    parameters: parametersFor(schemaFor(tool)),
     execute: async (args: unknown) => {
       try {
         const result = await store.callTool({

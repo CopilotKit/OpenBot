@@ -1217,6 +1217,13 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
     submittingFields: false,
     verified: false,
     verifiedAt: null,
+    serverId: "gmail",
+    fieldsSubmitted: false,
+    connectAnother: () => {},
+    connectingAnother: false,
+    makeDefault: () => {},
+    disconnectAccount: () => {},
+    changingAccount: null,
     ...overrides,
   };
 }
@@ -1224,13 +1231,15 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
 /** The row with both screens' arguments filled in, so only the account differs between cases. */
 function renderRow(account: BrokeredAccount) {
   return render(
-    <BrokeredAccountRow
-      account={account}
-      connectedDescription="A Bot granted its tools reads your Gmail as you."
-      disconnectedDescription="No Bot can read this as you."
-      provider="composio"
-      title="Gmail"
-    />,
+    <QueryClientProvider client={queryClient()}>
+      <BrokeredAccountRow
+        account={account}
+        connectedDescription="A Bot granted its tools reads your Gmail as you."
+        disconnectedDescription="No Bot can read this as you."
+        provider="composio"
+        title="Gmail"
+      />
+    </QueryClientProvider>,
   );
 }
 
@@ -2667,4 +2676,99 @@ test("a re-check that spent nothing leaves the rejection the record still names"
   expect(view.getByText(/Your account is still connected/)).toBeTruthy();
   // Never the absolution, which is the other app's state and not this one's.
   expect(view.queryByText(/hasn't been checked with Gmail/)).toBeNull();
+});
+
+/**
+ * A person's accounts at the app, as `/servers/:id/accounts` answers them, for the cases below.
+ * Every other request is a 404, so nothing here can be answered by accident.
+ */
+function answerAccounts(body: unknown) {
+  global.fetch = (async (input: RequestInfo | URL) => {
+    const requested = typeof input === "string" ? input : String(input);
+    const path = requested.split("?")[0] ?? requested;
+    if (path.endsWith("/accounts")) {
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(null, { status: 404 });
+  }) as typeof fetch;
+}
+
+test("several accounts are listed by name, each with its own Disconnect, and another can be connected", async () => {
+  answerAccounts({
+    accounts: [
+      {
+        id: "a1",
+        identity: "dana@work.example",
+        label: "dana@work.example",
+        isDefault: true,
+        connectedAt: "2026-10-01T09:00:00.000Z",
+      },
+      {
+        id: "a2",
+        identity: "dana.home@gmail.example",
+        label: "dana.home@gmail.example",
+        isDefault: false,
+        connectedAt: "2026-10-20T09:00:00.000Z",
+      },
+    ],
+    canAddAnother: true,
+  });
+  const pressed: string[] = [];
+  const view = renderRow(
+    accountState({
+      connected: true,
+      kind: "consent",
+      connectAnother: () => pressed.push("another"),
+      makeDefault: (id) => pressed.push(`default:${id}`),
+      disconnectAccount: (id) => pressed.push(`disconnect:${id}`),
+    }),
+  );
+
+  expect(await view.findByText("dana@work.example")).toBeTruthy();
+  expect(view.getByText("dana.home@gmail.example")).toBeTruthy();
+  expect(view.getByText("Your accounts")).toBeTruthy();
+  expect(
+    view.getByText(
+      "Default. Bots use this account unless you ask for another.",
+    ),
+  ).toBeTruthy();
+  // One Disconnect per account, and none for the app as a whole.
+  expect(view.getAllByRole("button", { name: "Disconnect" })).toHaveLength(2);
+  expect(view.getAllByRole("button", { name: "Make default" })).toHaveLength(1);
+
+  await userEvent.click(
+    view.getByRole("button", { name: /Connect another account/ }),
+  );
+  await userEvent.click(view.getByRole("button", { name: "Make default" }));
+  await userEvent.click(
+    view.getAllByRole("button", { name: "Disconnect" })[1] as HTMLElement,
+  );
+  expect(pressed).toEqual(["another", "default:a2", "disconnect:a2"]);
+});
+
+test("one account is named in the row, which keeps its Disconnect and offers another", async () => {
+  answerAccounts({
+    accounts: [
+      {
+        id: "a1",
+        identity: "dana@work.example",
+        label: "dana@work.example",
+        isDefault: true,
+        connectedAt: null,
+      },
+    ],
+    canAddAnother: true,
+  });
+  const view = renderRow(accountState({ connected: true, kind: "consent" }));
+
+  expect(
+    await view.findByText(/Signed in with Gmail as dana@work\.example\./),
+  ).toBeTruthy();
+  expect(view.getByText("Your account")).toBeTruthy();
+  expect(view.getAllByRole("button", { name: "Disconnect" })).toHaveLength(1);
+  expect(
+    view.getByRole("button", { name: /Connect another account/ }),
+  ).toBeTruthy();
 });

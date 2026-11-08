@@ -16,6 +16,7 @@ import {
 } from "../../computer/policy";
 import { withoutStatement } from "../../db/query-failure";
 import {
+  brokeredAccounts,
   brokeredConnections,
   mcpTools,
   pluginGrants,
@@ -28,12 +29,14 @@ import {
   reviewedRead,
   tokenHeaderFor,
 } from "../catalogue";
+import { accountArgumentFor } from "../account-argument";
 import { VERSION_ARG } from "../composio";
 import { inspectToolArguments } from "../content-governance";
 import { shareTargetOf } from "../share-target";
-import type { AccountMode } from "../shared-accounts";
+import { type AccountMode, filedUnderPerson } from "../shared-accounts";
 import { transportFor } from "../transport";
 import { withVendorDeadline } from "../vendor-deadline";
+import { accountBook, type PinnedAccount } from "./accounts";
 import type { StoreContext } from "./context";
 import {
   effectiveUrl,
@@ -57,7 +60,9 @@ export function callMethods(context: StoreContext) {
     requireServer,
     broker,
     brokerProvider,
+    personAccountOf,
   } = context;
+  const accounts = accountBook(context);
   return {
     /**
      * May this Bot use this plugin?
@@ -249,10 +254,90 @@ export function callMethods(context: StoreContext) {
        * its refusal hold rather than guessing — a guessed version is a call against an action's
        * other behaviour.
        */
-      const { [VERSION_ARG]: _dropped, ...modelArgs } = args;
+      /*
+       * WHICH OF THE PERSON'S ACCOUNTS, WHERE THE MODEL NAMED ONE. A brokered app's tools take an
+       * optional `account` (see `../account-argument`), and it is taken out of the arguments here,
+       * before anything else reads them, so it never reaches the vendor as one of the action's own
+       * parameters. It is only ever a NAME, matched below against the accounts of the person whose
+       * account this call opens. An action whose own schema has an `account` keeps it.
+       */
+      const accountArg =
+        access.credential === "brokered"
+          ? accountArgumentFor(
+              advertised[0]?.inputSchema as Record<string, unknown> | undefined,
+            )
+          : null;
+      const namedAccount =
+        accountArg !== null && Object.hasOwn(args, accountArg)
+          ? args[accountArg]
+          : undefined;
+      const callArgs =
+        accountArg !== null && Object.hasOwn(args, accountArg)
+          ? Object.fromEntries(
+              Object.entries(args).filter(([key]) => key !== accountArg),
+            )
+          : args;
+
+      const { [VERSION_ARG]: _dropped, ...modelArgs } = callArgs;
       const vendorArgs = advertised[0]?.version
         ? { ...modelArgs, [VERSION_ARG]: advertised[0].version }
         : modelArgs;
+
+      /*
+       * THE ACCOUNT THIS CALL RUNS IN, PICKED FROM THE ACCOUNTS OF THE PERSON IN THE SESSION.
+       *
+       * Whose accounts are asked about is `credentialActorId ?? actorId`, the same person the call
+       * opens below, and never anything in `args`. The name the model passed is matched against
+       * those accounts' labels and nothing else, so a name that is not theirs is refused here,
+       * before the policy, the approval or the vendor. With no name the person's default account is
+       * used. A person with no accounts recorded here (a connection from before they were listed)
+       * gets no pin, and the call runs as it always did.
+       *
+       * A Shared app has one team account and nothing to pick.
+       */
+      let pinned: PinnedAccount | null = null;
+      const opensAs = input.credentialActorId ?? input.actorId;
+      if (access.credential === "brokered" && access.toolkit && opensAs) {
+        if (app?.accountMode === "shared") {
+          if (
+            namedAccount !== undefined &&
+            namedAccount !== null &&
+            namedAccount !== ""
+          )
+            throw new PluginRefusedError(
+              `${row.title} uses one shared account, so there's no account to choose. Leave the account out.`,
+              null,
+            );
+        } else {
+          const person = await personAccountOf(opensAs);
+          if (person.holder === "person") {
+            try {
+              pinned = await accounts.pick({
+                toolkit: access.toolkit,
+                title: row.title,
+                account: person,
+                named: namedAccount,
+              });
+            } catch (error) {
+              if (error instanceof PluginRefusedError)
+                await recordAuditEvent(auditStore, {
+                  eventType: "mcp.call_rejected",
+                  targetType: "mcp_tool",
+                  targetId: input.ref,
+                  ...(input.initiator ? { initiator: input.initiator } : {}),
+                  payload: {
+                    actor: auditActor,
+                    bot: input.botId,
+                    server: serverId,
+                    tool: toolName,
+                    refusal: "unknown_account",
+                  },
+                });
+              throw error;
+            }
+          }
+        }
+      }
 
       /**
        * The same policy the computer actions are judged by, asked about a tool call.
@@ -320,6 +405,11 @@ export function callMethods(context: StoreContext) {
           access,
           input.credentialActorId ?? input.actorId,
         ),
+        /*
+         * Which of that person's accounts, where they hold more than one recorded here: the label
+         * the person and the model know it by, never the vendor's id for it.
+         */
+        ...(pinned ? { reachedAccount: pinned.label } : {}),
         decision: {
           allowed: verdict.allowed,
           mode: verdict.mode,
@@ -614,6 +704,25 @@ export function callMethods(context: StoreContext) {
           access,
           gatedMode,
         );
+        /*
+         * THE PICKED ACCOUNT MUST BE FILED UNDER THE PERSON THIS CALL OPENS. It was read from that
+         * person's own rows, so this holds by construction; it is checked again against the id the
+         * connection row names, so no row of anybody else's can ever be the account a call runs in.
+         */
+        if (
+          pinned &&
+          vendorUserId !== undefined &&
+          !filedUnderPerson(pinned.vendorUserId, vendorUserId)
+        ) {
+          throw new PluginRefusedError(
+            `That ${row.title} account isn't yours, so nothing was done.`,
+            null,
+          );
+        }
+        const runsAs =
+          pinned && vendorUserId !== undefined
+            ? pinned.vendorUserId
+            : vendorUserId;
         const vendor =
           injectedVendor ?? transportFor(access.transport).callTool;
         const result = await vendor(
@@ -621,7 +730,10 @@ export function callMethods(context: StoreContext) {
             url: effectiveUrl(row, entry),
             token,
             tokenHeader: tokenHeaderFor(entry),
-            actorId: vendorUserId ?? input.credentialActorId ?? input.actorId,
+            actorId: runsAs ?? input.credentialActorId ?? input.actorId,
+            ...(pinned?.accountId && runsAs !== undefined
+              ? { accountId: pinned.accountId }
+              : {}),
             botId: input.botId,
             threadId: input.threadId ?? currentApprovalContext()?.threadId,
           },
@@ -674,7 +786,7 @@ export function callMethods(context: StoreContext) {
          */
         if (!result.accountGone && !result.actionNotAllowed) return answer;
         refused = result.accountGone ? "account" : "action";
-        reachedVendorAs = vendorUserId;
+        reachedVendorAs = runsAs;
       } catch (error) {
         /*
          * Recorded, then rethrown unchanged. The caller's behaviour is unaffected — what changes is
@@ -766,7 +878,33 @@ export function callMethods(context: StoreContext) {
        * not connected for everybody, which is the truth and the state whose button fixes it. Like
        * the confirm's, the delete files no trail entry: nobody disconnected anything here.
        */
-      if (gone && access.credential === "brokered" && access.toolkit)
+      /*
+       * ONE OF SEVERAL ACCOUNTS GONE ENDS THAT ACCOUNT ONLY. The person still holds the others, so
+       * the connection row stays and only the account the call ran in is forgotten; the next call
+       * runs in their default, and the page lists what is left.
+       */
+      let othersRemain = false;
+      if (gone && pinned && access.toolkit && gatedMode !== "shared") {
+        const held = await accounts.rowsFor(access.toolkit, opensAs);
+        const ended = held.find(
+          (candidate) =>
+            candidate.vendorUserId === pinned?.vendorUserId &&
+            candidate.accountId === (pinned?.accountId ?? ""),
+        );
+        othersRemain = held.length > 1 && ended !== undefined;
+        if (othersRemain && ended) {
+          await database
+            .delete(brokeredAccounts)
+            .where(eq(brokeredAccounts.id, ended.id));
+          await accounts.settleDefault(access.toolkit, opensAs);
+        }
+      }
+      if (
+        gone &&
+        !othersRemain &&
+        access.credential === "brokered" &&
+        access.toolkit
+      )
         await database
           .delete(brokeredConnections)
           .where(
@@ -798,7 +936,9 @@ export function callMethods(context: StoreContext) {
           message: gone
             ? gatedMode === "shared"
               ? `The shared ${row.title} account is no longer connected, so this wasn't done. Ask an admin to reconnect it.`
-              : `Your ${row.title} account is no longer connected, so this wasn't done. Reconnect it and ask again.`
+              : othersRemain && pinned
+                ? `Your ${row.title} account ${pinned.label} is no longer connected, so this wasn't done. Reconnect it, or ask again with another account.`
+                : `Your ${row.title} account is no longer connected, so this wasn't done. Reconnect it and ask again.`
             : gatedMode === "shared"
               ? `The shared ${row.title} account doesn't allow this yet, so this wasn't done. Ask an admin to reconnect it.`
               : `Your ${row.title} account doesn't allow this yet, so this wasn't done. Reconnect it and ask again.`,

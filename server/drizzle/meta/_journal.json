@@ -589,6 +589,13 @@
       "when": 1794110188202,
       "tag": "0083_learning_skill_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1794154009098,
+      "tag": "0084_brokered_accounts",
+      "breakpoints": true
     }
   ]
 }
