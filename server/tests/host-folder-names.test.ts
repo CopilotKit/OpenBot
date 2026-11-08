@@ -49,15 +49,16 @@ async function asked(
   return candidate;
 }
 
-test("the card names the folder an edit or a command is in, never the grant's id", async () => {
+test("the card names the file and the folder an edit is in, and the folder a command runs in, never the grant's id", async () => {
   const edit = await asked("host_write_file", {
     grantId: GRANT,
     path: "notes.txt",
     content: "FOLDER-EDITED-43",
   });
+  // Found on Windows: the card named the folder ("share") and not the file.
   expect(approvalWords(edit)).toEqual({
     action: "write file",
-    place: "folder-test",
+    place: "notes.txt in folder-test",
   });
   const command = await asked("host_run_command", {
     grantId: GRANT,

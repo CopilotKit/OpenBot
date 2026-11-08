@@ -11,8 +11,8 @@ import {
   users,
   vendorNameOf,
 } from "../../db/schema";
+import { appsPage } from "../../edition";
 import { BROKERED_PROFILE, toolkitOfFor } from "../access";
-import { mightDestroy } from "../catalogue";
 import {
   BrokerRefusalError,
   BrokerUnconfiguredError,
@@ -20,6 +20,7 @@ import {
   isFieldScheme,
   type SchemeKind,
 } from "../broker";
+import { mightDestroy } from "../catalogue";
 import {
   asksForArguments,
   askAction as composioAskAction,
@@ -2339,7 +2340,7 @@ export function connectionMethods(context: StoreContext) {
       const authScheme = await brokeredAppScheme(input.toolkit);
       if (!isFieldScheme(authScheme)) {
         throw new BrokerRefusalError(
-          `${input.toolkit} is not an app this deployment connects with values somebody types, so nothing was sent. Open the app on the Plugins page and connect it the way it asks for; if it is not listed there at all, an administrator has to enable it first.`,
+          `${input.toolkit} is not an app this deployment connects with values somebody types, so nothing was sent. Open the app on the ${appsPage()} page and connect it the way it asks for; if it is not listed there at all, an administrator has to enable it first.`,
         );
       }
 
@@ -2531,7 +2532,7 @@ export function connectionMethods(context: StoreContext) {
          * presses that end it either way.
          */
         throw new PluginRefusedError(
-          `${input.toolkit} was connected, and the check this deployment then ran against it did not come back clean: ${probed.sentence} That may be the key, and it may be the app — what came back does not say which — so the account is left standing and recorded as unchecked. Re-check it on the Plugins page once, and if it still will not answer, disconnect it and connect it again with a fresh key.`,
+          `${input.toolkit} was connected, and the check this deployment then ran against it did not come back clean: ${probed.sentence} That may be the key, and it may be the app — what came back does not say which — so the account is left standing and recorded as unchecked. Re-check it on the ${appsPage()} page once, and if it still will not answer, disconnect it and connect it again with a fresh key.`,
           null,
         );
       }
@@ -2755,7 +2756,7 @@ export function connectionMethods(context: StoreContext) {
       >;
       if ((await brokeredAppKind(input.toolkit)) !== "key") {
         throw new PluginRefusedError(
-          `${input.toolkit} is not an app this deployment holds a key for, so there is nothing here to re-check. It was connected at ${input.toolkit}'s own sign-in screen, and if it has stopped working, disconnecting it on the Plugins page and connecting it again is what fixes it.`,
+          `${input.toolkit} is not an app this deployment holds a key for, so there is nothing here to re-check. It was connected at ${input.toolkit}'s own sign-in screen, and if it has stopped working, disconnecting it on the ${appsPage()} page and connecting it again is what fixes it.`,
           null,
         );
       }
@@ -2771,7 +2772,7 @@ export function connectionMethods(context: StoreContext) {
 
       if (!held) {
         throw new PluginRefusedError(
-          `You have no connection to ${input.toolkit} here, so there is nothing to re-check. Connect it on the Plugins page and it will be checked as it is made.`,
+          `You have no connection to ${input.toolkit} here, so there is nothing to re-check. Connect it on the ${appsPage()} page and it will be checked as it is made.`,
           null,
         );
       }
@@ -2872,7 +2873,7 @@ export function connectionMethods(context: StoreContext) {
        */
       if (!wrote) {
         throw new PluginRefusedError(
-          `Your connection to ${input.toolkit} was disconnected while this check was still running, so nothing was recorded about it: what the check found is about an account you no longer have here. Connect ${input.toolkit} again on the Plugins page if that was not what you meant.`,
+          `Your connection to ${input.toolkit} was disconnected while this check was still running, so nothing was recorded about it: what the check found is about an account you no longer have here. Connect ${input.toolkit} again on the ${appsPage()} page if that was not what you meant.`,
           null,
         );
       }

@@ -94,3 +94,29 @@ export function parseEdition(raw: string | undefined): Edition {
 export function editionHasMemory(edition: Edition): boolean {
   return edition !== "personal";
 }
+
+/**
+ * The name of the page where apps are turned on and set up, for a sentence the browser shows:
+ * Admin's Plugins in the team edition, Connections in the personal one, which has no Plugins page.
+ * The browser names the same two pages (`pluginsLabel` in the app's `lib/manage-paths.ts`).
+ */
+export function appsPage(): "Plugins" | "Connections" {
+  return currentEdition() === "personal" ? "Connections" : "Plugins";
+}
+
+/** One app's own page, as a sentence names it: "its Plugins page", or "its page under Connections". */
+export function itsAppPage(): string {
+  return currentEdition() === "personal"
+    ? "its page under Connections"
+    : "its Plugins page";
+}
+
+/**
+ * A step only an admin can take, in a sentence the browser shows. The personal edition has no
+ * admin to ask: the one person takes the step, so it is said to them.
+ */
+export function askAdminTo(step: string): string {
+  return currentEdition() === "personal"
+    ? `${step.charAt(0).toUpperCase()}${step.slice(1)}`
+    : `Ask an admin to ${step}`;
+}

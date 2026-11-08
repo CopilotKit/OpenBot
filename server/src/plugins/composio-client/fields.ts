@@ -1,3 +1,4 @@
+import { itsAppPage } from "../../edition";
 import {
   type BrokerField,
   BrokerRefusalError,
@@ -195,7 +196,7 @@ export function fieldMethods(context: ClientContext) {
        */
       if (mode === undefined || mode === null) {
         throw new BrokerRefusalError(
-          `Composio no longer publishes a ${authScheme} connection for ${toolkit}, and ${toolkit}'s authorization config here was created as ${authScheme}, so there is nothing to ask this person for — and an empty form is a box they cannot fill in and a connection carrying no credential at all. An administrator removing the app on its Plugins page and adding it again is what records the scheme Composio publishes for it now.`,
+          `Composio no longer publishes a ${authScheme} connection for ${toolkit}, and ${toolkit}'s authorization config here was created as ${authScheme}, so there is nothing to ask this person for — and an empty form is a box they cannot fill in and a connection carrying no credential at all. An administrator removing the app on ${itsAppPage()} and adding it again is what records the scheme Composio publishes for it now.`,
         );
       }
       /*
@@ -515,7 +516,7 @@ export function fieldMethods(context: ClientContext) {
           );
         }
         throw new BrokerRefusalError(
-          `This deployment has no authorization config at Composio for ${toolkit}, so there is nothing to connect an account against and nothing was sent. An administrator removing the app on its Plugins page and adding it again creates one.`,
+          `This deployment has no authorization config at Composio for ${toolkit}, so there is nothing to connect an account against and nothing was sent. An administrator removing the app on ${itsAppPage()} and adding it again creates one.`,
         );
       }
 
@@ -556,7 +557,7 @@ export function fieldMethods(context: ClientContext) {
         const disabled = ours.length - unsettled.length;
         if (disabled > 0) {
           left.push(
-            `Composio calls ${disabled} of this deployment's ${ours.length} authorization configs for ${toolkit} disabled, and an administrator can enable it in Composio's dashboard, or remove the app on its Plugins page and add it again.`,
+            `Composio calls ${disabled} of this deployment's ${ours.length} authorization configs for ${toolkit} disabled, and an administrator can enable it in Composio's dashboard, or remove the app on ${itsAppPage()} and add it again.`,
           );
         }
         if (unsettled.length > 0) {
