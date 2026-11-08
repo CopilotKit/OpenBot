@@ -5869,6 +5869,13 @@ fn copilotkit_sign_in_page(attempt: String) -> Option<local_eval::SignInPage> {
     local_eval::shown_sign_in_page(&attempt)
 }
 
+/// How much of the back end's download the setup or update `attempt` has, of how much,
+/// while it downloads, so its row can show a slow line moving. Bytes only.
+#[tauri::command]
+fn local_eval_download(attempt: String) -> Option<openbot_desktop_lib::local_images::Download> {
+    local_eval::downloading(&attempt)
+}
+
 /// The evaluation agreement local setup needs accepted, for the window to show before Accept.
 #[tauri::command]
 async fn local_eval_terms(
@@ -7539,6 +7546,7 @@ fn main() {
             set_up_local_eval,
             sign_in_to_copilotkit,
             copilotkit_sign_in_page,
+            local_eval_download,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,

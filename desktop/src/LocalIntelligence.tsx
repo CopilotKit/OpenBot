@@ -6,12 +6,14 @@ import {
   cancelLocalEval,
   chatGate,
   connectLocalEval,
+  downloadSaid,
   type LocalConnection,
   LocalEvalError,
   type LocalFailure,
   type LocalReason,
   type LocalReport,
   type LocalTerms,
+  localEvalDownload,
   localEvalTerms,
   onInstalledRelease,
   runLocalEval,
@@ -50,6 +52,9 @@ export type StartOutcome = "started" | "failed" | "deferred";
  * all, then the person is told and can check again.
  */
 const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
+
+/** How often a running setup or update asks how far its download has got. */
+const DOWNLOAD_EVERY_MS = 1_000;
 
 const unreadable: Problem = {
   said: "OpenBot did not understand its back end's answer.",
@@ -236,6 +241,47 @@ export function useLocalSequence({
     }
   }
 
+  /**
+   * While `attempt` runs, its row says how much of the back end's download has arrived, so a slow
+   * line can be told from a stuck one. OpenBot downloads the images before the CLI pulls them; the
+   * row says `after` once that is over, and when following stops. Returns what stops it.
+   */
+  function followDownload(
+    attempt: string,
+    token: number,
+    saying: string,
+    after: string | null,
+  ): () => void {
+    let following = true;
+    let shown = false;
+    let next: ReturnType<typeof setTimeout> | null = null;
+    const ask = () => {
+      localEvalDownload(attempt)
+        .then(
+          (found) => {
+            if (!following || generation.current !== token) return;
+            if (found) {
+              shown = true;
+              update({ detail: `${saying}: ${downloadSaid(found)}` });
+            } else if (shown) {
+              shown = false;
+              update({ detail: after });
+            }
+          },
+          () => {},
+        )
+        .finally(() => {
+          if (following) next = setTimeout(ask, DOWNLOAD_EVERY_MS);
+        });
+    };
+    ask();
+    return () => {
+      following = false;
+      if (next) clearTimeout(next);
+      if (shown && generation.current === token) update({ detail: after });
+    };
+  }
+
   function pause(ms: number, token: number): Promise<boolean> {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -262,15 +308,27 @@ export function useLocalSequence({
     from: string,
     token: number,
   ): Promise<boolean> {
-    update({ detail: `Updating the back end to ${to}. Its data stays.` });
+    const updating = `Updating the back end to ${to}. Its data stays.`;
+    update({ detail: updating });
     const started = runLocalEval("update", id);
     attempt.current = started.attempt;
+    const unfollow = followDownload(
+      started.attempt,
+      token,
+      "Downloading the back end update",
+      updating,
+    );
     let updated = false;
+    let stalled = false;
     try {
       updated = (await started.report).outcome === "completed";
-    } catch {
+    } catch (error) {
       updated = false;
+      stalled =
+        error instanceof LocalEvalError &&
+        error.category === "download-stalled";
     } finally {
+      unfollow();
       if (attempt.current === started.attempt) attempt.current = null;
     }
     if (generation.current !== token) return false;
@@ -278,7 +336,9 @@ export function useLocalSequence({
       detail: null,
       updateFailed: updated
         ? null
-        : `The back end could not be updated to ${to}, so it stays on ${from}. OpenBot tries again the next time it starts.`,
+        : stalled
+          ? `The back end update stopped downloading, so the back end stays on ${from}. OpenBot continues the download where it left off the next time it starts.`
+          : `The back end could not be updated to ${to}, so it stays on ${from}. OpenBot tries again the next time it starts.`,
     });
     return true;
   }
@@ -418,10 +478,17 @@ export function useLocalSequence({
       if (phase === "setup") {
         const carried = accepted.current;
         const started = setUpLocalEval(root, carried);
+        // A setup that resumes a stack downloads the images it still needs first.
+        const unfollow = followDownload(
+          started.attempt,
+          token,
+          "Downloading the back end",
+          null,
+        );
         const report = await call(
           { attempt: started.attempt, answer: started.report },
           token,
-        );
+        ).finally(unfollow);
         if (!report) return stop();
         update({
           refused:
