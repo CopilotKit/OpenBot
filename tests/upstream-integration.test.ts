@@ -382,6 +382,6 @@ describe("release workflow invariants", () => {
     );
     expect(source).toContain("release-assets/release-manifest.json");
     expect(source).toContain("release-assets/openbot-source.tar.gz");
-    expect(source).toContain("container-images.json release-assets/*");
+    expect(source).toContain("container-images.json desktop-images.json release-assets/*");
   });
 });
