@@ -13,7 +13,7 @@ import { browserStateQueryOptions } from "@/lib/browser/queries";
 import { recorderKeys } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
 import { TEACH_A_BOT } from "./browser-nav-item";
-import { ScreenBrowser } from "./browser-screen";
+import { OpeningBrowser, ScreenBrowser } from "./browser-screen";
 import { TeachSteps } from "./teach-steps";
 import { recordingOnItsWay, YourRecordings } from "./your-recordings";
 
@@ -75,7 +75,13 @@ export function BrowserPage() {
     if (was && !waiting)
       queryClient.invalidateQueries({ queryKey: recorderKeys.recordings() });
   }, [waiting]);
-  if (state.isPending) return null;
+  // While the browser's state is first read, the page as it will be (`OpeningBrowser`), not a blank pane.
+  if (state.isPending)
+    return (
+      <OpeningBrowser heading={<TeachHeading />}>
+        <YourRecordings action={<LearnedLink />} variant="pane" />
+      </OpeningBrowser>
+    );
   // Branched on the data rather than the error: a poll that fails after the page has opened keeps the browser on
   // screen, where tearing it down would open it all over again.
   if (state.data === undefined) {
@@ -130,10 +136,24 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
   if (!opened) {
     // A browser that is there and not answering says so while it is asked to open, rather than leaving the page empty.
     const said = state.problem ?? open.error?.message;
+    if (!recordingsOnly)
+      // Opening: the page as it will be, its browser saying it is opening (`OpeningBrowser`), or why it has not.
+      return (
+        <OpeningBrowser
+          heading={<TeachHeading />}
+          onRetry={open.error ? () => open.mutate() : undefined}
+          problem={said}
+        >
+          <YourRecordings
+            action={<LearnedLink />}
+            variant="pane"
+            waiting={recordingOnItsWay(state.recorder?.lastStopped)}
+          />
+        </OpeningBrowser>
+      );
+    // The Recorder's link to the list opens no browser on arrival: the list, and Open browser to open one.
     return (
       <PageShell title={TITLE} description={DESCRIPTION}>
-        {/* While it opens, nothing: OpenBot draws no loading placeholder (openbot-data-access), and what arrives is the
-            browser itself. */}
         {recordingsOnly && !said ? (
           <div className="mt-6">
             <Button onClick={() => open.mutate()} size="sm" variant="outline">

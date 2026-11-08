@@ -2026,8 +2026,9 @@ test("on OpenBot Desktop a window that is not answering says so", async () => {
   expect((await view.findByRole("alert")).textContent).toBe(NOT_ANSWERING);
 });
 
-test("while a browser in the page opens on arrival, the page shows no loading placeholder, then the browser itself", async () => {
-  // The data-access rule: no loading text, spinner or skeleton; what arrives is the answer.
+test("while a browser in the page opens on arrival, the page is laid out as it will be and says the browser is opening, then shows it", async () => {
+  // An exception to the data-access rule (no loading placeholder), asked for: a browser takes seconds to open, and the
+  // page left blank or half drawn meanwhile read as broken. The frame has nothing to press.
   state = screenState();
   openAnswer = answerFor("screen");
   let launched = () => {};
@@ -2041,11 +2042,13 @@ test("while a browser in the page opens on arrival, the page shows no loading pl
   // Strict mode runs the opening effect twice; the browser is still opened once.
   await waitFor(() => expect(opens()).toBe(1));
   await settleReactWork();
-  expect(view.queryByText(/Opening/)).toBeNull();
-  expect(view.queryByRole("status")).toBeNull();
+  expect(await view.findByText("Opening your browser…")).toBeTruthy();
   expect(view.queryByLabelText(SCREEN)).toBeNull();
+  expect(view.queryByRole("button", { name: "Record" })).toBeNull();
+  expect(view.queryByRole("textbox", { name: "Address" })).toBeNull();
   launched();
   expect(await view.findByLabelText(SCREEN)).toBeTruthy();
+  expect(view.queryByText("Opening your browser…")).toBeNull();
 });
 
 test("where OpenBot cannot run a browser for the person, the page says so and opens nothing", async () => {
