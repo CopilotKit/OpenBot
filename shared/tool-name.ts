@@ -2,6 +2,7 @@ import { OFFER_CHECK_IN_TOOL } from "./check-in-offer";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
 import { RESEARCH_ROLE_LABELS, researchRoleOfTool } from "./research";
 import { SUBAGENT_TOOL } from "./subagent";
+import { lowerFirst, nameInWords } from "./tool-name-words";
 import { SEARCH_TOOLS } from "./tool-search";
 
 /**
@@ -81,7 +82,9 @@ export function appToolName(server: string, tool: string): ToolName {
     const leads = appWords.every((word, index) => toolWords[index] === word);
     const action = leads ? toolWords.slice(appWords.length) : toolWords;
     return {
-      label: action.length > 0 ? humanise(action.join(" ")) : humanise(tool),
+      label: nameInWords(
+        action.length > 0 ? humanise(action.join(" ")) : humanise(tool),
+      ),
       detail: connectorName(server),
     };
   }
@@ -96,7 +99,7 @@ export function appToolName(server: string, tool: string): ToolName {
     serverLead.every((word, index) => toolLead[index] === word)
   )
     return {
-      label: humanise(toolLead.slice(serverLead.length).join(" ")),
+      label: nameInWords(humanise(toolLead.slice(serverLead.length).join(" "))),
       detail: connectorName(server),
     };
   const label = humanise(tool);
@@ -127,7 +130,8 @@ export function appToolName(server: string, tool: string): ToolName {
   const wordsActedOn = labelWords.slice(1);
   const serverWords = wordsOf(server).map(singular);
   const named = containsPhrase(wordsActedOn, serverWords);
-  return named ? { label } : { label, detail: server };
+  const said = nameInWords(label);
+  return named ? { label: said } : { label: said, detail: server };
 }
 
 /**
@@ -165,7 +169,7 @@ export function approvalWords(action: {
   if (slash > 0 && app === action.scope) {
     const { label } = appToolName(app, action.toolRef.slice(slash + 1));
     return {
-      action: label.charAt(0).toLowerCase() + label.slice(1),
+      action: lowerFirst(label),
       place: connectorName(app),
     };
   }
