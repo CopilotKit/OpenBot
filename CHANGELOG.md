@@ -389,6 +389,11 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   back to Connections (Admin → Plugins for an admin), where you can add it again. Its page said "Not
   an app. There is no app with that name." An app always listed there, such as Notion, still stays
   on its page, off.
+- OpenBot Desktop offers **Sign in with Unbiased AI** on the Connect your AI screen. Signing in opens
+  Unbiased AI's approval page in the browser, where a person signs in or creates an account, and
+  OpenBot receives an API key for the `pareto` model on Unbiased AI's OpenAI-compatible gateway. The
+  key is stored on this computer the way a typed endpoint key is, and an Unbiased AI API key can be
+  pasted instead. See [Model provider OAuth](desktop/PROVIDER_OAUTH.md#unbiased-ai).
 
 ## 0.3.2
 

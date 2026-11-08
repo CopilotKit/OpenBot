@@ -1,7 +1,9 @@
 //! The model provider screen's list, as data.
 //!
 //! OpenAI and Anthropic offer plan sign-in alongside API keys. Google and xAI use named endpoint
-//! presets with API keys; their official addresses are supplied by the frontend.
+//! presets with API keys; their official addresses are supplied by the frontend. Unbiased AI signs in
+//! through its own device authorization, which ends in an API key for the same named endpoint
+//! shape, so the key is then carried like a typed one.
 //!
 //! The row that asks for a URL is the last one, and it is the only one that asks. Keeping it there
 //! is what keeps a base URL off the main path, which the audience rule at the top of the build doc
@@ -107,6 +109,22 @@ pub fn catalogue() -> Vec<Provider> {
             caution: None,
         },
         Provider {
+            id: "unbiased".into(),
+            name: "Unbiased AI".into(),
+            summary: "Sign in with Unbiased AI to use Pareto, or use an API key.".into(),
+            /*
+             * Sign-in first, because it is the whole point of the row: the person signs in or
+             * creates an account in the browser and comes back holding a key they never saw.
+             * The sign-in is a device authorization that ends in an API key for Unbiased AI's
+             * OpenAI-compatible gateway, so what it produces is exactly what the API key tab
+             * takes, and the key travels the same way from here on. The key tab is for somebody
+             * who already made one in the Unbiased AI dashboard.
+             */
+            logins: vec![Login::Oauth, Login::Endpoint],
+            mark: Some("unbiased".into()),
+            caution: None,
+        },
+        Provider {
             id: "openai-compatible".into(),
             name: "Any OpenAI-compatible endpoint".into(),
             summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.".into(),
@@ -132,7 +150,10 @@ mod tests {
             .filter(|p| p.logins.contains(&Login::Endpoint))
             .map(|p| p.id)
             .collect();
-        assert_eq!(asking, vec!["google", "xai", "openai-compatible"]);
+        assert_eq!(
+            asking,
+            vec!["google", "xai", "unbiased", "openai-compatible"]
+        );
         for provider in catalogue()
             .into_iter()
             .filter(|provider| provider.logins.contains(&Login::Endpoint))
@@ -159,13 +180,31 @@ mod tests {
 
     /// Named providers stay ahead of the custom endpoint escape hatch.
     #[test]
-    fn four_named_providers_and_one_custom_endpoint() {
+    fn five_named_providers_and_one_custom_endpoint() {
         let rows = catalogue();
         let ids: Vec<&str> = rows.iter().map(|provider| provider.id.as_str()).collect();
         assert_eq!(
             ids,
-            vec!["openai", "anthropic", "google", "xai", "openai-compatible"]
+            vec![
+                "openai",
+                "anthropic",
+                "google",
+                "xai",
+                "unbiased",
+                "openai-compatible"
+            ]
         );
+    }
+
+    /// Unbiased AI's sign-in mints an API key, so the row leads with it and never asks for a plan.
+    #[test]
+    fn unbiased_signs_in_before_asking_for_a_key() {
+        let unbiased = catalogue()
+            .into_iter()
+            .find(|p| p.id == "unbiased")
+            .expect("unbiased is not offered");
+        assert_eq!(unbiased.logins, vec![Login::Oauth, Login::Endpoint]);
+        assert_eq!(unbiased.name, "Unbiased AI");
     }
 
     /// Every row is readable without recognising a logo.
