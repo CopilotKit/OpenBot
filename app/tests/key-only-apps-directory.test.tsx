@@ -12,6 +12,7 @@ import {
 import { cleanup, render, waitFor } from "@testing-library/react";
 import type { ComposioApp } from "@/lib/plugins/queries";
 import { Route as ComposioRoute } from "@/routes/_authed/admin/plugins/composio";
+import { displayName } from "../../server/src/plugins/app-names";
 import captured from "../../server/tests/fixtures/composio-key-apps.json";
 
 /**
@@ -47,7 +48,8 @@ const VERDICT: Record<string, ComposioApp["connection"]["kind"]> = {
 function directory(): ComposioApp[] {
   return captured.catalogue.map((row) => ({
     slug: row.slug,
-    name: row.name,
+    // The server's own naming, so 1Password arrives as its brand spells it and not "1password".
+    name: displayName(row.slug, row.name),
     description: row.meta.description,
     logo: null,
     categories: [],
@@ -140,7 +142,9 @@ test("a key-only app says it needs a key before Add, and a sign-in app does not"
   const view = renderDirectory();
 
   const onePassword = await view.findByTestId("directory-_1password");
-  expect(onePassword.textContent).toContain("Needs a key from 1password");
+  expect(onePassword.textContent).toContain("Needs a key from 1Password");
+  // Composio's catalogue spells it "1password"; the row never does.
+  expect(onePassword.textContent).not.toContain("1password");
   expect((await view.findByTestId("directory-posthog")).textContent).toContain(
     "Needs a key from PostHog",
   );

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildComposioClient } from "../src/plugins/composio-adapter";
-import { connectionOf } from "../src/plugins/composio-vendor";
+import { displayName } from "../src/plugins/app-names";
+import { appOf, connectionOf } from "../src/plugins/composio-vendor";
 import {
   connectionGuide,
   fieldsForPerson,
@@ -195,5 +196,31 @@ describe("the broker's name never reaches the form", () => {
       expect(`${slug}: ${text}`).not.toMatch(/composio/i);
       expect(new URL(guide.url).protocol).toBe("https:");
     }
+  });
+});
+
+describe("an app is named as its brand spells it", () => {
+  /*
+   * Composio's catalogue names 1Password "1password", and the directory row said "Needs a key
+   * from 1password". Enabling the app stores its title from the same name, so the tile and the
+   * app page would have said it too.
+   */
+  test("the directory names 1Password with its capitals, and leaves PostHog alone", () => {
+    expect(row("_1password").name).toBe("1password");
+    expect(appOf(row("_1password"), 0).name).toBe("1Password");
+    expect(appOf(row("posthog"), 0).name).toBe("PostHog");
+    expect(appOf(row("hubspot"), 0).name).toBe("HubSpot");
+  });
+
+  /*
+   * The other lowercase names in the catalogue on 2026-11-08: a plain word gets a capital, and a
+   * domain-style brand written lowercase on purpose is left as it is.
+   */
+  test("a lowercase word gets a capital; a domain-style name is left as written", () => {
+    expect(displayName("mailfloss", "mailfloss")).toBe("Mailfloss");
+    expect(displayName("bexio", "bexio")).toBe("Bexio");
+    expect(displayName("incident_io", "incident.io")).toBe("incident.io");
+    expect(displayName("urlscanio", "urlscan.io")).toBe("urlscan.io");
+    expect(displayName("7shifts", "7shifts")).toBe("7shifts");
   });
 });

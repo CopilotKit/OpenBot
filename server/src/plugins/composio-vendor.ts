@@ -1,4 +1,5 @@
 import { itsAppPage } from "../edition";
+import { displayName } from "./app-names";
 import {
   BrokerAccountGoneError,
   BrokerAccountHeldError,
@@ -1099,7 +1100,8 @@ export function appOf(row: VendorToolkit, position: number): BrokerApp {
 
   return {
     slug,
-    name,
+    // The brand's own spelling where the catalogue lowercased it. See `./app-names`.
+    name: displayName(slug, name),
     description,
     logo,
     categories,
