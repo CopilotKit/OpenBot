@@ -1023,6 +1023,13 @@ function Setup() {
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
         <h1>{displayedFailure ? "OpenBot stopped" : "OpenBot is running"}</h1>
+        {/* The back end runs the release it had: information, said where the lede goes. Nothing
+          failed, so it is not drawn as a failure and offers no help. */}
+        {!displayedFailure && backEndNotice && (
+          <p className="lede" role="status">
+            {backEndNotice}
+          </p>
+        )}
         {!displayedFailure && !releaseNotice && !backEndNotice && (
           <p className="lede">
             OpenBot is open in this window. You can also show it or stop it from
@@ -1032,9 +1039,6 @@ function Setup() {
         {/* Start went back to the version this installation had. Said before handing over. */}
         {!displayedFailure && releaseNotice && (
           <InlineFailure problem={releaseNotice} />
-        )}
-        {!displayedFailure && backEndNotice && (
-          <InlineFailure problem={{ said: backEndNotice }} />
         )}
         <SetupProgress steps={steps} />
         {displayedFailure && <Failure problem={displayedFailure} />}

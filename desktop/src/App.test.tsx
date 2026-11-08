@@ -1788,7 +1788,10 @@ function localActions() {
 async function startedOnKeptRelease(
   view: Awaited<ReturnType<typeof renderApp>>,
 ) {
-  await view.findByText(KEPT_RELEASE);
+  // Information, not a failure: said as a status, with no alert and no setup help beside it.
+  expect((await view.findByRole("status")).textContent).toBe(KEPT_RELEASE);
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByRole("link", { name: "Get setup help" })).toBeNull();
   expect(
     view.getByRole("heading", { name: "OpenBot is running" }),
   ).toBeTruthy();
