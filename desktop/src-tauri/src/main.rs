@@ -7054,6 +7054,13 @@ page waits for it: `open_waiting_notice_page` opens it once OpenBot's page has l
 */
 fn open_notice_page(app: &tauri::AppHandle, path: Option<String>) {
     show_whichever_applies(app);
+    #[cfg(windows)]
+    if let Some(hwnd) = app
+        .get_webview_window("main")
+        .and_then(|window| window.hwnd().ok())
+    {
+        notice::bring_to_front(hwnd.0 as *mut core::ffi::c_void);
+    }
     let Some(path) = path else {
         return;
     };
@@ -7071,7 +7078,7 @@ fn open_notice_page(app: &tauri::AppHandle, path: Option<String>) {
         *app.state::<Shell>().waiting_notice_page.lock().unwrap() = Some(path);
         return;
     }
-    navigate_to_notice_page(&current, &path, |target| window.navigate(target));
+    navigate_to_notice_page(&current, &path, |script| window.eval(script));
 }
 
 /// The page a click asked for before OpenBot's page was there, now that it is.
@@ -7084,20 +7091,26 @@ fn open_waiting_notice_page<R: tauri::Runtime>(window: &tauri::Webview<R>, loade
         .unwrap()
         .take();
     if let Some(path) = waiting {
-        navigate_to_notice_page(loaded, &path, |target| window.navigate(target));
+        navigate_to_notice_page(loaded, &path, |script| window.eval(script));
     }
 }
 
-/// Goes to `path` on the OpenBot at `current`, unless it is there already or `path` is not one of
-/// its pages (`notification_destination`).
+/**
+Goes to `path` on the OpenBot at `current`, unless it is there already or `path` is not one of its
+pages (`notification_destination`).
+
+As a route change in the page (`notice::open_script`), never by loading the page again: a click on a
+notice used to reload OpenBot and lose what the person was in the middle of. A page from before the
+page handled it is loaded at the target instead.
+*/
 fn navigate_to_notice_page(
     current: &tauri::Url,
     path: &str,
-    navigate: impl FnOnce(tauri::Url) -> tauri::Result<()>,
+    eval: impl FnOnce(String) -> tauri::Result<()>,
 ) {
     if let Some(target) = notification_destination(current, true, Some(path)) {
         if &target != current {
-            if let Err(error) = navigate(target) {
+            if let Err(error) = eval(notice::open_script(path, target.as_str())) {
                 log::warn!("[notification] could not open the page it named: {error}");
             }
         }
@@ -7887,6 +7900,12 @@ fn install_recorder_host_at_start() -> Option<std::thread::JoinHandle<()>> {
 
 fn main() {
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    // Windows opening a notification's link: pass the foreground on, before the single-instance plugin
+    // hands the link to the OpenBot already running and this launch exits. See `notice.rs`.
+    #[cfg(windows)]
+    if notice::launched_by_link(args.iter().map(|arg| arg.to_string_lossy().into_owned())) {
+        notice::let_running_openbot_come_forward();
+    }
     // Chrome, Edge or Chromium starting the Recorder's native messaging host: answer it and exit, before
     // anything of the app (the single-instance plugin would forward this launch to a running app).
     if let Some(origin) = recorder_host::caller_origin(&args) {

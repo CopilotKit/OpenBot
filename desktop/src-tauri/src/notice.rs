@@ -35,6 +35,68 @@ pub fn path_of(link: &tauri::Url) -> Option<String> {
         .map(|(_, path)| path.into_owned())
 }
 
+/**
+The script that opens `path` in OpenBot's page as a route change: it dispatches `openbot:open`,
+which the page's router handles and cancels (`app/src/lib/desktop/open-requests.ts`). A page that
+leaves it uncancelled, from before that, is loaded at `url` instead.
+*/
+pub fn open_script(path: &str, url: &str) -> String {
+    let path = serde_json::to_string(path).expect("a string serialises");
+    let url = serde_json::to_string(url).expect("a string serialises");
+    format!(
+        "(() => {{ const event = new CustomEvent(\"openbot:open\", {{ detail: {{ path: {path} }}, cancelable: true }}); if (window.dispatchEvent(event)) window.location.assign({url}); }})();"
+    )
+}
+
+/**
+Whether this launch of OpenBot is Windows opening a notification's link: a click on a toast starts
+OpenBot.exe with `openbot://…`, and the single-instance plugin hands it to the OpenBot already
+running.
+*/
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn launched_by_link<I: IntoIterator<Item = String>>(args: I) -> bool {
+    args.into_iter()
+        .skip(1)
+        .any(|arg| arg.starts_with(&format!("{SCHEME}:")))
+}
+
+/**
+WINDOWS' FOREGROUND LOCK. Only the process the person last acted in may bring a window to the front.
+MEASURED: after a click on a toast, OpenBot opened the page but stayed behind the app in front, or,
+minimised, came back with a grey title bar, inactive; the foreground stayed with the shell's
+notification host. The launch Windows starts for the click has the right, and the OpenBot already
+running does not, so the launch passes it on before it hands its link over and exits
+(`AllowSetForegroundWindow`, "a process that can set the foreground window can enable another
+process to set the foreground window"). The running OpenBot then restores and activates its window
+(`bring_to_front`).
+*/
+#[cfg(windows)]
+pub fn let_running_openbot_come_forward() {
+    use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+    if let Err(error) = unsafe { AllowSetForegroundWindow(ASFW_ANY) } {
+        log::warn!("[notification] could not pass on the foreground: {error}");
+    }
+}
+
+/// Restores the window if it is minimised and makes it the foreground window, with the right a
+/// notification's launch passed on (`let_running_openbot_come_forward`).
+#[cfg(windows)]
+pub fn bring_to_front(hwnd: *mut core::ffi::c_void) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
+    };
+    let hwnd = HWND(hwnd);
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        if !SetForegroundWindow(hwnd).as_bool() {
+            log::warn!("[notification] Windows kept another window in front");
+        }
+    }
+}
+
 /// The few characters XML text and attributes cannot carry as they are.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn escape(text: &str) -> String {
@@ -146,6 +208,41 @@ mod tests {
         assert!(xml.contains("<text>R&amp;D &lt;Bot&gt; needs you</text>"));
         assert!(xml.contains("<text>Approve &quot;Q3&quot; &amp; &apos;Q4&apos;?</text>"));
         assert!(!toast_xml("a\u{0}b", "", "").contains('\u{0}'));
+    }
+
+    /// A click on a notice opens its page as a route change, the page's to cancel; the path and the
+    /// fallback address reach the page as JavaScript strings, never as code.
+    #[test]
+    fn a_notices_page_opens_as_a_route_change_with_a_load_only_as_the_fallback() {
+        let script = open_script(
+            "/channel/c-1?x=\"</script>",
+            "http://127.0.0.1:3010/channel/c-1",
+        );
+        assert!(script.contains("new CustomEvent(\"openbot:open\""));
+        assert!(script.contains("cancelable: true"));
+        assert!(script.contains(r#"path: "/channel/c-1?x=\"</script>""#));
+        assert!(script.contains(
+            "if (window.dispatchEvent(event)) window.location.assign(\"http://127.0.0.1:3010/channel/c-1\")"
+        ));
+    }
+
+    /// Only a launch Windows makes for a toast's link passes the foreground on: a person opening
+    /// OpenBot from the Start menu, or the Desktop restarting itself, does not.
+    #[test]
+    fn only_a_launch_for_a_notices_link_passes_the_foreground_on() {
+        let args = |rest: &[&str]| {
+            std::iter::once("C:\\OpenBot\\OpenBot.exe")
+                .chain(rest.iter().copied())
+                .map(String::from)
+                .collect::<Vec<_>>()
+        };
+        assert!(launched_by_link(args(&[
+            "openbot://open?path=%2Fchannel%2Fc-1"
+        ])));
+        assert!(!launched_by_link(args(&[])));
+        assert!(!launched_by_link(args(&["--restarted"])));
+        // The executable's own path is never the link, whatever folder it is in.
+        assert!(!launched_by_link(vec!["openbot:\\OpenBot.exe".to_owned()]));
     }
 
     /// A conversation's tag reaches the toast as it is, so its next notice replaces it; a tag too
