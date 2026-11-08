@@ -75,7 +75,7 @@ test("OpenBot Desktop never offers notifications: not on opening, not on coming 
   expect(reopened.queryByText(OFFER)).toBeNull();
 });
 
-test("in OpenBot Desktop a Bot that starts needing the person is shown by the system, through the plugin", async () => {
+test("in OpenBot Desktop a Bot that starts needing the person is shown by the system, through the plugin, naming the page a click opens", async () => {
   const desktop = launch();
   let questions = 0;
   globalThis.fetch = (async () =>
@@ -121,6 +121,8 @@ test("in OpenBot Desktop a Bot that starts needing the person is shown by the sy
         title: "Expenses needs you",
         body: "1 question",
         tag: "openbot-attention-expenses",
+        // The page a click opens (`open_from_notification` in the shell).
+        extra: { path: "/bots/expenses" },
       },
     ]),
   );

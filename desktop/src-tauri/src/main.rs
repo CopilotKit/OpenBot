@@ -4797,6 +4797,83 @@ mod app_page_tests {
         );
     }
 
+    /// A click on a Bot's notification opens the page it names, on the OpenBot the window shows,
+    /// and nowhere else: not another site, not another port, and not while the window shows setup.
+    #[test]
+    fn a_click_on_a_notification_opens_only_a_page_of_the_shown_openbot() {
+        let current: tauri::Url = "http://127.0.0.1:3010/channel/c-1".parse().unwrap();
+        let open = |owned, path| {
+            notification_destination(&current, owned, path).map(|url| url.to_string())
+        };
+        assert_eq!(
+            open(true, Some("/bots/expenses")).as_deref(),
+            Some("http://127.0.0.1:3010/bots/expenses")
+        );
+        assert_eq!(
+            open(true, Some("/bots")).as_deref(),
+            Some("http://127.0.0.1:3010/bots")
+        );
+        for path in [
+            "//example.com/bots",
+            "https://example.com/",
+            "http://127.0.0.1:3011/bots",
+            "bots",
+            "/\\example.com",
+            "javascript:alert(1)",
+        ] {
+            assert_eq!(open(true, Some(path)), None, "{path}");
+        }
+        assert_eq!(open(true, None), None);
+        assert_eq!(open(false, Some("/bots")), None);
+    }
+
+    /// A toast from an app Windows did not install from a package is shown under the app whose
+    /// AppUserModelID it names, and only when a Start menu shortcut carries that ID. The
+    /// notification plugin names the bundle identifier in an installed app (`desktop.rs`,
+    /// `notification.app_id(&self.identifier)`), and Tauri's own NSIS template stamps the same
+    /// `${BUNDLEID}` on the Start menu shortcut it names after the product (`installer.nsi`,
+    /// `SetLnkAppUserModelId`). So a toast reads "OpenBot" as long as the installer is that template
+    /// and the identifier and product name stay what they are.
+    #[test]
+    fn windows_toasts_name_the_app_the_start_menu_shortcut_carries() {
+        let (app, _) = app();
+        let config = app.config();
+        assert_eq!(config.identifier, "ai.copilotkit.openbot.desktop");
+        assert_eq!(config.product_name.as_deref(), Some("OpenBot"));
+        // Read from the files the installer is built from, the base and every overlay a build
+        // passes with --config: the app's runtime config leaves the bundle settings out.
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut checked = 0;
+        for entry in std::fs::read_dir(folder).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if !(name.starts_with("tauri.") && name.ends_with(".json")) {
+                continue;
+            }
+            let file: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let nsis = &file["bundle"]["windows"]["nsis"];
+            assert!(
+                nsis.get("template").is_none(),
+                "{name}: a custom NSIS template has to stamp the Start menu shortcut's \
+                 AppUserModelID itself"
+            );
+            if let Some(identifier) = file.get("identifier") {
+                assert_eq!(identifier, "ai.copilotkit.openbot.desktop", "{name}");
+            }
+            if let Some(product) = file.get("productName") {
+                assert_eq!(product, "OpenBot", "{name}");
+            }
+            checked += 1;
+        }
+        assert!(checked >= 2, "found {checked} Tauri config files");
+        let hooks = std::fs::read_to_string(folder.join("windows/hooks.nsh")).unwrap();
+        assert!(
+            !hooks.contains("CreateShortcut"),
+            "a shortcut the hooks make carries no AppUserModelID"
+        );
+    }
+
     /// Narration listens through the shell's speech recognition from OpenBot's own page, and from
     /// no other: a page that could start it could listen to the person.
     #[test]
@@ -6736,6 +6813,62 @@ where
         .spawn(move || restore(context))
 }
 
+/**
+Where a click on one of a Bot's notifications takes the window: the page the notice names
+(`extra.path`, which OpenBot's page sets as it posts it), on the OpenBot the window shows. Nothing
+when the window shows anything else, or for a path that is not one of that OpenBot's own pages.
+*/
+fn notification_destination(
+    current: &tauri::Url,
+    owned: bool,
+    path: Option<&str>,
+) -> Option<tauri::Url> {
+    let path = path.filter(|path| owned && path.starts_with('/') && !path.starts_with("//"))?;
+    if path.contains('\\') {
+        return None;
+    }
+    let target = current.join(path).ok()?;
+    (target.origin() == current.origin()).then_some(target)
+}
+
+/**
+A click on one of a Bot's notifications: OpenBot comes forward, as it does for a second launch, at
+the page the notice is about. The notification plugin reports a click (`tap`) on macOS and on
+Windows, there only while the toast is on screen; a click in Windows' notification centre starts
+OpenBot.exe from its Start menu shortcut, which the single-instance plugin turns into the same
+restore.
+*/
+fn open_from_notification(
+    app: &tauri::AppHandle,
+    performed: &tauri_plugin_notification::ActionPerformed,
+) {
+    if performed.action_id() != "tap" {
+        return;
+    }
+    show_whichever_applies(app);
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(current) = window.url() else {
+        return;
+    };
+    let owned = matches!(
+        window_page(app, &current),
+        WindowPage::OwnedApp | WindowPage::LocalApp
+    );
+    let path = performed
+        .notification()
+        .and_then(|notification| notification.extra().get("path"))
+        .and_then(serde_json::Value::as_str);
+    if let Some(target) = notification_destination(&current, owned, path) {
+        if target != current {
+            if let Err(error) = window.navigate(target) {
+                log::warn!("[notification] could not open the page it named: {error}");
+            }
+        }
+    }
+}
+
 fn restore_after_second_instance(app: &tauri::AppHandle) {
     let app = app.clone();
     let reporting_app = app.clone();
@@ -7684,6 +7817,12 @@ fn main() {
         })
         .setup(move |app| {
             log_launch(app.handle(), local_offset);
+            {
+                use tauri_plugin_notification::NotificationExt;
+                let handle = app.handle().clone();
+                app.notification()
+                    .on_action(move |performed| open_from_notification(&handle, performed))?;
+            }
             // A signed Mac or Windows build updates itself. The window asks once at launch and
             // installs only if the person says yes; the plugin refuses anything whose minisign
             // signature does not match the public key compiled in from the signing overlay
