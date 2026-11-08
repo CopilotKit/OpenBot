@@ -159,8 +159,12 @@ jobs:
       # The app's real-browser tests, here because this job has the browser: a running step's words
       # under reduced motion, and where onboarding's Back lands beside the Mac window's buttons, which
       # only a browser's layout resolves. The root playwright-core is the same version as
-      # agent-computer's playwright, so it finds the Chromium installed above.
-      - run: bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx
+      # agent-computer's playwright, so it finds the Chromium installed above. The onboarding frame
+      # reads the generated app config, which `bun test` alone doesn't write (the test script's
+      # pretest does).
+      - run: |
+          bun run generate:app-config
+          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx
         env:
           OPENBOT_APP_BROWSER: '1'
       # Headed is the default for hosted computers, so it is tested as one: the computer starting its
