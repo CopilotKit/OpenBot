@@ -38,6 +38,20 @@ export const OPENBOT_WORKING_EVENT_TYPES = [
 ] as const;
 
 /**
+ * Routines calls whose change the routine store records itself (`routine.created`, `routine.updated`
+ * and `routine.deleted`, in `auditRoutineStore` on the server). A Bot creating a routine wrote two
+ * rows for one action: "Create routine / Called on this Bot's behalf" for the call, and "Create a
+ * routine / Allowed" for the routine it made. Activity leaves the call's row out when it succeeded,
+ * and shows the change, which is written whoever made it, a Bot or a person on the Routines page. A
+ * call that failed made no change and keeps its row.
+ */
+export const CALLS_RECORDED_AS_CHANGES = [
+  "routines/create_routine",
+  "routines/update_routine",
+  "routines/delete_routine",
+] as const;
+
+/**
  * The rows that end an action's attempt: a computer's or a folder's action that failed, was stopped
  * or was refused after its first row was written. Each carries the `attempt` id of that first row.
  */

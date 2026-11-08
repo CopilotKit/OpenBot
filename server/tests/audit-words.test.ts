@@ -3,8 +3,11 @@ import {
   AUDIT_EVENT_WORDS,
   auditActionWords,
   auditEventWords,
+  DATA_FUNCTION_WORDS,
+  dataWords,
 } from "@openbot/shared/audit-words";
 import { auditEventTypes } from "../src/audit";
+import { DATA_FUNCTIONS } from "../src/components/functions";
 
 /**
  * Every event the trail records has words for Activity and Audit.
@@ -23,6 +26,16 @@ test("every registered audit event has words, and nothing else does", () => {
     (type) => !(auditEventTypes as readonly string[]).includes(type),
   );
   expect(stale).toEqual([]);
+});
+
+test("every data function a component can read has words, so a grant or a read names it", () => {
+  const missing = DATA_FUNCTIONS.map(({ name }) => name).filter(
+    (name) => !Object.hasOwn(DATA_FUNCTION_WORDS, name),
+  );
+  expect(missing).toEqual([]);
+  expect(dataWords(["botActivity", "recentRefusals"])).toBe(
+    "your Bots' activity and what was refused",
+  );
 });
 
 test("no event's words are its stored name, or carry one", () => {
