@@ -11,7 +11,9 @@
  * - `aws s3api head-object` fails with exit 254 and `(404)` for a missing key, and reports
  *   ChecksumSHA256 only with `--checksum-mode ENABLED` and only for an object uploaded with one.
  * - `aws s3api put-object --checksum-sha256` refuses a body that does not hash to it (BadDigest).
- * - `aws cloudfront create-invalidation` answers with the new invalidation's Id.
+ * - `aws cloudfront create-invalidation` takes every path after one `--paths` and answers with the
+ *   new invalidation's Id.
+ * - `crane` (go-containerregistry) prints a manifest or a blob as the registry served it.
  */
 import {
   chmodSync,
@@ -138,13 +140,17 @@ while [ "$#" -gt 0 ]; do
     --checksum-sha256) checksum="$2"; shift ;;
     --checksum-mode) mode="$2"; shift ;;
     --distribution-id) distribution="$2"; shift ;;
-    --paths) paths+=("$2"); shift ;;
+    --paths)
+      while [ "$#" -gt 1 ] && [[ "$2" != --* ]]; do paths+=("$2"); shift; done
+      ;;
     --output) shift ;;
     *) echo "fake aws: unexpected argument $1" >&2; exit 252 ;;
   esac
   shift
 done
 object="$FAKE_STATE/s3/$bucket/$key"
+# A key ending in / (the registry's v2/) is an object, not a folder, as it is in S3.
+if [[ "$key" == */ ]]; then object="$object.slash-object"; fi
 meta="$FAKE_STATE/s3-meta/$bucket/$key.json"
 case "$service $command" in
   "s3api head-object")
@@ -188,6 +194,31 @@ case "$service $command" in
     exit 252
     ;;
 esac
+`;
+
+/**
+ * `crane manifest <ref>` prints the manifest's bytes exactly as the registry serves them, and
+ * `crane blob <repo>@<digest>` the blob's; both fail with the registry's error for what is not
+ * there. Served from a pretend registry, `registry/<host>/<repo>/{manifests,blobs}/<reference>`.
+ */
+const CRANE = `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "crane $*" >> "$FAKE_LOG"
+ref="$2"
+case "$1" in
+  manifest)
+    if [[ "$ref" == *@* ]]; then repo="\${ref%@*}"; reference="\${ref##*@}"
+    else repo="\${ref%:*}"; reference="\${ref##*:}"; fi
+    file="$FAKE_STATE/registry/$repo/manifests/$reference" ;;
+  blob)
+    file="$FAKE_STATE/registry/\${ref%@*}/blobs/\${ref##*@}" ;;
+  *) echo "fake crane: unexpected call: crane $*" >&2; exit 1 ;;
+esac
+if [ ! -f "$file" ]; then
+  echo "Error: MANIFEST_UNKNOWN: manifest unknown; \${ref}" >&2
+  exit 1
+fi
+cat "$file"
 `;
 
 export type S3Object = {
@@ -234,8 +265,10 @@ export function fakeDownloads(): FakeDownloads {
   mkdirSync(join(state, "s3-meta", BUCKET), { recursive: true });
   writeFileSync(join(bin, "gh"), GH);
   writeFileSync(join(bin, "aws"), AWS);
+  writeFileSync(join(bin, "crane"), CRANE);
   chmodSync(join(bin, "gh"), 0o755);
   chmodSync(join(bin, "aws"), 0o755);
+  chmodSync(join(bin, "crane"), 0o755);
   writeFileSync(join(state, "latest"), "");
   writeFileSync(join(state, "invalidations"), "");
   const log = join(dir, "calls.log");
@@ -290,14 +323,17 @@ export function fakeDownloads(): FakeDownloads {
     setLatest: (tag) => writeFileSync(join(state, "latest"), tag),
     bucket: () =>
       Object.fromEntries(
-        keys(objects).map((key) => {
+        keys(objects).map((stored) => {
+          const key = stored.endsWith("/.slash-object")
+            ? stored.slice(0, -".slash-object".length)
+            : stored;
           const meta = JSON.parse(
             readFileSync(join(metas, `${key}.json`), "utf8"),
           );
           return [
             key,
             {
-              content: readFileSync(join(objects, key), "utf8"),
+              content: readFileSync(join(objects, stored), "utf8"),
               cacheControl: meta.CacheControl,
               contentType: meta.ContentType,
               sha256: meta.ChecksumSHA256 !== "",

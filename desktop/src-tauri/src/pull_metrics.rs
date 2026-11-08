@@ -1,6 +1,6 @@
 //! Metrics for an explicit image pull, before containers or provider sign-in start.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{sync_channel, SyncSender};
@@ -329,26 +329,125 @@ fn download_bytes(stdout: &[u8], stderr: &[u8]) -> Option<u64> {
 /// Pull a provider sign-in image without starting its CLI or creating a container.
 /// A tiny stdin Compose project gives the same missing-only policy and JSON progress as setup.
 /// Older Compose providers use an explicit native pull after a local presence check.
+/// An image on ghcr.io comes from OpenBot's mirror first: see `image_mirror`.
 pub fn pull_image(
     engine: &Address,
     image: &str,
     on_progress: impl FnMut(LayerProgress),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
+    pull_image_from(
+        engine,
+        image,
+        &crate::image_mirror::Mirror::openbot(),
+        on_progress,
+        on_complete,
+    )
+}
+
+/// [`pull_image`], asking `mirror` first.
+pub fn pull_image_from(
+    engine: &Address,
+    image: &str,
+    mirror: &crate::image_mirror::Mirror,
+    on_progress: impl FnMut(LayerProgress),
+    on_complete: impl FnOnce(PullMetrics),
+) -> Result<(), Problem> {
     crate::logging::timed(&format!("pull {image}"), || {
-        pull_image_now(engine, image, on_progress, on_complete)
+        pull_image_now(engine, image, mirror, on_progress, on_complete)
     })
 }
 
 fn pull_image_now(
     engine: &Address,
     image: &str,
-    on_progress: impl FnMut(LayerProgress),
+    mirror: &crate::image_mirror::Mirror,
+    mut on_progress: impl FnMut(LayerProgress),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
     if crate::preparation::image_present(engine, image)? {
         return Ok(());
     }
+    let Some(mirrored) = mirror.mirrored(image) else {
+        return fetch(engine, image, on_progress, on_complete);
+    };
+    // The layers the mirror sent. If the registry has to finish the job and finds them here, they
+    // stay counted as downloaded, so the bytes never go back.
+    let mut downloaded = HashSet::new();
+    let mut from_mirror = None;
+    let pulled = fetch(
+        engine,
+        &mirrored,
+        |layer| {
+            if layer.event != LayerEvent::Cached {
+                downloaded.insert(layer.id.clone());
+            }
+            on_progress(layer)
+        },
+        |metrics| from_mirror = Some(metrics),
+    );
+    match &pulled {
+        Ok(()) if mirror.adopt(engine, &mirrored, image) => {
+            log::info!("[pull] {image} came from {}", mirror.mirror);
+            if let Some(metrics) = from_mirror {
+                on_complete(metrics);
+            }
+            return Ok(());
+        }
+        Ok(()) => log::info!(
+            "[pull] {image} came from {}; {} records its name",
+            mirror.mirror,
+            mirror.upstream
+        ),
+        Err(problem) => log::warn!(
+            "[pull] {mirrored} could not be pulled, so {image} comes from {}: {}",
+            mirror.upstream,
+            problem.detail.as_deref().unwrap_or(&problem.said)
+        ),
+    }
+    let mut from_upstream = None;
+    let result = fetch(
+        engine,
+        image,
+        |layer| {
+            if !(layer.event == LayerEvent::Cached && downloaded.contains(&layer.id)) {
+                on_progress(layer)
+            }
+        },
+        |metrics| from_upstream = Some(metrics),
+    );
+    if result.is_ok() && pulled.is_ok() {
+        mirror.forget(engine, &mirrored, image);
+    }
+    if let Some(metrics) = combined(from_mirror, from_upstream) {
+        on_complete(metrics);
+    }
+    result
+}
+
+/// One image's pull metrics over both its tries, the mirror's and then the registry's.
+fn combined(first: Option<PullMetrics>, last: Option<PullMetrics>) -> Option<PullMetrics> {
+    let (first, last) = match (first, last) {
+        (Some(first), Some(last)) => (first, last),
+        (one, other) => return other.or(one),
+    };
+    Some(PullMetrics {
+        outcome: last.outcome,
+        duration_ms: first.duration_ms.saturating_add(last.duration_ms),
+        bytes: match (first.bytes, last.bytes) {
+            (Some(first), Some(last)) => Some(first.saturating_add(last)),
+            (one, other) => one.or(other),
+        },
+    })
+}
+
+/// One pull of `image` as it is named, with nothing tried first.
+fn fetch(
+    engine: &Address,
+    image: &str,
+    on_progress: impl FnMut(LayerProgress),
+    on_complete: impl FnOnce(PullMetrics),
+) -> Result<(), Problem> {
     let Some(json_progress) = compose_pull_progress(engine) else {
         let mut command = engine.command();
         command.args(["pull", image]);
