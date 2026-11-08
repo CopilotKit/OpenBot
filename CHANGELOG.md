@@ -8,95 +8,277 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- OpenBot Desktop downloads everything from downloads.copilotkit.ai first, and from GitHub or
-  Docker Hub only when that fails: OpenBot's images and the back end's images (named as their
-  ghcr.io or Docker Hub images, so nothing downloads them again), the release's source and image
-  list, the latest release, and the Podman and Compose builds it installs.
-- downloads.copilotkit.ai now serves everything OpenBot Desktop downloads for the Latest release,
-  not only its installers: every container image the app pulls (its own and the bundled back
-  end's and its k3s cluster's, copied from GitHub's registry and Docker Hub under their own
-  paths), the release's `container-images.json`, Mac updater archives and source archive, and the
-  Podman and Compose installers the app pins. Each release lists its images in
-  `desktop-images.json`, written by the app's own code.
-- A Bot asked to read a day of Gmail reads all of it. Listing emails used to bring back each
-  message's raw MIME, tens of thousands of characters per email, so the answer was cut inside the
-  first message, the Bot could not page on, and a large page failed at Composio as too large. A
-  listing now asks Gmail for sender, recipients, subject, time, labels and snippet, 20 messages per
-  call with the page token to the next, and says how many of the matches the page holds; a message
-  or a thread read whole keeps each decoded body, Cc and Reply-To and drops the raw MIME. Any app's
-  answer that is still too long for a Bot is cut between
-  whole records, with the call that reads the rest, instead of mid-record ending "[truncated]".
-- OpenBot Desktop's Status window, Settings, This computer, Copy diagnostics and About name the version of the build that is installed, as the installer and Windows do: an internal build after 0.3.3 says `0.3.4-internal.892.g0c140734ecf0`, not 0.3.3. A release still says exactly its own version.
-- Activity, a conversation's steps and approvals name an app's tool in the words its page uses ("Get IMAP settings", not "Settings get imap"), and the app's page in the personal edition lists its tools in the order of those names.
-- After you answer an approval in a conversation, it shows the Bot working until the Bot has carried on and finished, and its reply arrives whole. If the Bot then needs another approval, it stops and asks in the conversation, and does nothing more until you decide. It used to look idle while the Bot was still going, could cut its reply off until the conversation was opened again, and could answer past an action you had not approved.
-- OpenBot Desktop keeps trying when GitHub stops sending the new version during an update. A
-  download that gets nothing for 30 seconds is tried again, six times in all with longer waits
-  between, for about four minutes. Before, three tries in a minute and a half gave up and put the
-  update back, though opening OpenBot again two minutes later downloaded it in seconds. A download
-  that keeps arriving is never cut off, however slow.
-- Opening a conversation shows each of the Bot's replies once and whole. A reply could appear twice
-  in one bubble ("...I'll wait for your answer.I've asked: ... I'll wait for your answer."), and a
-  reply the Bot was still writing when you opened the conversation stopped mid-word, both until a
-  reload.
-- In the personal edition, an app's tools are named as a person would name them ("Get IMAP settings", not "Settings get imap"; "Fetch thread messages", not "Fetch message by thread id"; "Who am I"), each sentence says what the tool does ("Creates a new Gmail filter"), and a Bot's What it can do lists every app's tools the same way, so Routines reads "Complete goal, Create goal" and not "Marked a goal complete, Created a goal".
-- In the personal edition, a Bot's page names what runs it ("Runs on LangChain (LangGraph)") instead of the address of the harness OpenBot started for it, and its Pinned, Hidden, Reset and Delete rows no longer mention other people: Delete says you can still read your conversations with it.
-- In the personal edition, Settings, Setup says the Bot computer is Ready whenever the computer answers, including after a Bot has used it and its browser has closed. Before, it said "Not checked" and that a computer starts when a Bot first needs one.
-- In a narrow window, the sidebar closes when you pick a conversation, Bots, Connections, Teach a Bot, or an item in your account menu. Before, it stayed open over the page you opened until you clicked outside it.
-- OpenBot Desktop's Status window says the back end is "On this computer" instead of its stack id ("local-08ff56ec…"). The id is still in Copy diagnostics, for support.
-- On Windows, Ctrl+Q in the OpenBot Desktop window quits OpenBot, as the tray menu's Quit says. Before, Ctrl+Q in the window did nothing.
-- A skill picked from the `/` menu works for a built-in Bot on a Claude plan. The Bot answered
-  "Unknown command: /tide-report" without asking the model, because Claude Code took the message,
-  which starts with the skill's command, for a slash command of its own.
-- In the personal edition, the sentence under each tool on an app's page reads as a person would say it: no leading "Tool to", no words in capitals ("Permanently deletes", not "Permanently DELETES"), and no "by its ID" where the tool finds a thing by an ID nobody has to hand.
-- In the personal edition, an app's page names each tool in words, as Activity does ("Add label to email", not GMAIL_ADD_LABEL_TO_EMAIL), with the first sentence of what it does, and says "Connect your Gmail account so your Bots can use it" instead of a sentence about your documents; team Admin names the app's own account there too.
-- In a new conversation with two or more Bots in To:, typing @ before the first message lists those Bots, and a first message addressed to one goes to that Bot only. Before, @ said "No Bots in this conversation" until something had been sent.
-- In OpenBot Personal, a Bot's "What it can do" lists every skill you wrote on Settings, Skills under Your skills, with its switch. They were stored as nobody's, so the section read "No skills yet"; skills written before this become yours the next time OpenBot starts.
-- In the personal edition, Settings, Setup no longer mentions memory or an admin: the Back end row reads "Keeps your conversations and skills", More apps compares with the apps OpenBot comes with, and its links name Keys and Computer.
-- Settings, Computer lists the Teach a Bot browser as your OpenBot browser, with Clear browser data, not as "A Bot no longer here"; Admin, Computers names whose OpenBot browser each one is.
-- Onboarding's Welcome says what always asks (deleting, sending, sharing, posting) above the approvals switch, which is now "Always ask before making changes" there and in Settings, Approvals, with the same words in both.
-- A conversation shows the Bot is still working through a run of tool calls: the step still running
-  shimmers like the line above it, and once every step has its answer "Thinking" shows under them
-  until the reply starts. Before, a run of finished steps sat still and read as a Bot that had died.
-- OpenBot Desktop updates and sets up its local back end on a slow connection. Before the back
-  end's update (a new one, or the next Start's retry of one that did not finish) or a setup that
-  resumes, it downloads the back end's images itself, one at a time and with no fixed time limit,
-  and the row says how much has arrived ("Downloading the back end update: 48 of 147 MB"). A
-  download stops only after three minutes with no new bytes, and Retry, or the next Start,
-  continues where it left off.
-- OpenBot Desktop opens OpenBot when an update to its local back end does not finish. A back end
-  whose update stopped (on a slow connection, at the image download) still runs the release it had,
-  with every check passing; the window said it was not healthy and stopped OpenBot. It now says
-  which release the back end runs and that the update did not finish, and the person opens OpenBot
-  from there. The next Start tries the update again, including after Quit, where the back end used
-  to refuse to start until the update was resumed by hand. A back end whose checks fail is still
-  not healthy.
-- Windows lists OpenBot Desktop's publisher as CopilotKit in Settings > Apps and in Programs and
-  Features, where it said "copilotkit".
-- OpenBot Personal's Settings, Browsers says recordings go to your own Learning space, with no organization.
-- OpenBot Personal's New Bot sheet lists every app the new Bot gets, not only Routines.
-- A Bot's question in a conversation with several Bots now waits in that conversation and is answered there, as in a conversation with one Bot.
-- Teach a Bot: narration that can't hear you (no microphone) stays off after Stop until you turn it on, and "We're capturing your voice" shows only while a recording is hearing you.
-- Work apps are connected through OpenBot. Connections, an app's page, the app directory, chat
-  connect cards and admin Plugins no longer name the connector provider ("Browse Composio" is now
-  "Browse apps"). Admin pages still name the setting an admin sets, such as `COMPOSIO_API_KEY`.
-  Where a connect, re-check or disconnect fails for a reason only an operator can fix, the person
-  reads the route's own sentence and the operator's detail goes to the server log.
-- In OpenBot Personal every Bot takes part in Automatic Learning, including Bots made later. A Bot
-  that settings carried over from a team deployment left out is taken back in at the next start (or
-  its first run), with one audit row naming the Bots. Every Bot still gets every skill once, and a
-  skill switched off for one Bot stays off. The team edition is unchanged.
-- A Bot's "What it can do" (Skills and access) page draws each of your skills' switches from the
-  Bot's own grants. A Bot made a moment ago in OpenBot Personal is given every skill the first time
-  it is listed, and its switches showed off until the page was opened again.
-- Skills learned from a person's recordings can be reviewed in OpenBot. An admin chooses who approves
-  them under Admin → Automatic learning: admins, or each person for their own Bots, and a skill a
-  person approves reaches only their own Bots until an admin approves sharing it. Settings → Learning
-  shows what is waiting for review, and Teach a Bot lists your recordings, which needs the back end
-  at 0.16 with recordings switched on. In the personal edition, Settings → Learning is now there, and
-  it approves new skills automatically until you turn that off. See [Automatic Learning](docs/automatic-learning.md#reviewing-learned-skills).
-- A recording the Recorder cannot send yet no longer reads "Saving" on Teach a Bot for the half hour it
-  retries: the page says it wasn't saved yet, and why. Your recordings are listed by when you made them,
-  and one the Recorder sends later shows up in the list when it lands, without leaving the page.
+**Before upgrading.** One migration: `0083_learning_skill_approvals` creates the table
+`learning_skill_approvals`, which records who approved a skill learned from a person's recordings
+and whether sharing it was asked for. It starts empty and changes no existing row. The database
+moves to `0083_learning_skill_approvals`. Six things change for an existing deployment:
+- OpenBot Desktop downloads from downloads.copilotkit.ai first, and from GitHub, ghcr.io or Docker
+  Hub only when that fails:
+  - OpenBot's container images, and the Podman and Compose it installs.
+  - A release's source archive and image list, and the lookup of the latest release for a new
+    installation.
+  - The back end's images when it updates or resumes a setup. Its node is set to pull from
+    downloads.copilotkit.ai first: a new one from its first start, an existing one at its next
+    download, unless it has a mirror setting of its own. A first setup's own back end images, and
+    the k3s and k3d images its cluster starts from, still come from ghcr.io and Docker Hub.
+
+  OpenBot Desktop's own updates still download from GitHub. A failed try at downloads.copilotkit.ai
+  goes straight to the original. Nothing new has to be allowed through a firewall, but allowing
+  downloads.copilotkit.ai for OpenBot Desktop, its container engine and its back end gives the
+  faster path, and GitHub, ghcr.io and Docker Hub are still needed. Self-hosted Compose and Helm
+  deployments are not affected.
+- The personal edition has no memory (below). Memories and memory sources your Bots already have
+  stay in the database but are no longer shown, used or synced. Upgrading deletes nothing, and a
+  Bot's Reset still deletes them.
+- In the personal edition, **Approve new skills automatically** in Settings → Learning is on. About
+  ten seconds after the first start it approves and publishes every skill proposal already waiting
+  in your Learning spaces, and your Bots start using them. It then runs every 15 minutes.
+- At each start, the personal edition rewrites two things, with one audit row each, and writes
+  nothing when there is nothing to change. A Bot that Learning settings carried over from a team
+  deployment left out of Automatic Learning is taken back in. Skills you wrote on Settings → Skills,
+  which were stored as nobody's, become yours. Skills OpenBot ships stay OpenBot's.
+- On OpenBot Desktop, Automatic Learning runs on the model you signed in with, set at each Start,
+  so its analysis is paid for by your API key or plan (below). `docker-compose.yml` passes a new,
+  optional `OPENBOT_LEARNING_MODEL_TOKEN`, which only OpenBot Desktop sets.
+- Going back to 0.3.3 after an admin sets **Who approves skills learned from people's
+  recordings**, or after **Approve new skills automatically** is switched in the personal edition,
+  makes every conversation fail on 0.3.3, which can't read the saved Learning settings. Restore the
+  backup taken before the upgrade instead.
+
+### OpenBot Desktop
+
+- **Updates finish on a slow connection.** Before its back end updates, or resumes a setup an
+  earlier attempt left, OpenBot Desktop downloads the back end's images itself, one at a time. A
+  download stops only after three minutes with no new bytes, or an hour on one image, and the next
+  attempt continues where it left off. Each image used to get the back end's own ten minutes, and
+  on a slow line the update failed every time.
+- **Downloads show how much has arrived.** Install shows its download in bytes ("1.2 GB of 3.4 GB ·
+  1 of 5 items remaining"), where it showed only how many items remained. The back end's download
+  shows a bar and its size under "Downloading the back end update" or, on a first setup,
+  "Downloading the back end", also as a Back end download card on the Install and Connect your AI
+  screens. A download that stops says so and that Retry, or the next Start, continues where it left
+  off.
+- **OpenBot opens when a back end update did not finish.** A back end that still answers on the
+  release it had counts as ready: the window says which release it runs and that the update did not
+  finish, and **Show OpenBot** opens it. It used to say "The back end is running but not healthy."
+  and stop. The next Start tries the update again, also after Quit, where the back end used to
+  refuse to start. A back end whose checks fail is still not healthy.
+- **Downloads from GitHub keep trying when they stall**: OpenBot's own files at Install and at an
+  update, and the Podman and Compose it installs. An attempt that gets nothing for 30 seconds is
+  tried again, six attempts in all with longer waits between, about four minutes at most. A download
+  that keeps arriving is never cut off. It used to give up after three attempts in about a minute
+  and a half, and an update put the previous version back.
+- **OpenBot keeps its address when you quit and open it again straight away.** Start waits up to 30
+  seconds for its own ports to free up. It used to move OpenBot to another port, so a tab or
+  bookmark on the old address stopped working. A port another program holds still moves.
+- **Notifications go through the system.** OpenBot Desktop no longer offers to turn notifications
+  on, because they are on. On a Mac, Enable notifications did nothing and the offer kept coming
+  back. Clicking a notification brings OpenBot to the front at the conversation it is about, on
+  Windows from the notification centre too, through `openbot://` links the app registers.
+- **Setup says what Docker Desktop is doing.** When setup opens Docker Desktop, every setup screen
+  says "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in,
+  do that there. OpenBot comes back when Docker is ready.", and after 45 seconds that Docker may be
+  waiting for you there. OpenBot comes back to the front once Docker answers, after Podman's
+  password prompt or the Windows Subsystem for Linux step, and when Install fails or finishes. It
+  used to stay behind Docker's window, saying only "Checking your CopilotKit account…".
+- **Opening OpenBot Desktop after a restart starts what the back end runs on first**: Docker
+  Desktop, or OpenBot's Podman machine on a Mac or Windows. It used to stop at Waiting for the back
+  end with "The back end cannot start until the software it runs on is running."
+- **Automatic Learning runs on the model you signed in with**: your OpenAI or Anthropic API key, or
+  your Claude or ChatGPT plan through OpenBot. With any other sign-in, Settings → Learning says
+  Learning can't run on it and what to sign in with instead, and a failed Learning run says why.
+  Learning on OpenBot Desktop used to have no model and learned nothing.
+- **Recordings reach OpenBot after it moves to another port.** The Recorder used to keep sending to
+  the old port, and the recordings stayed in the browser.
+- **A Bot's steps in a folder on your computer name the file and the folder** the same way on the
+  approval card, on the step and in Activity ("todo.txt in share"). The card used to read "Write
+  file on host-grant-…". A step you declined on the card reads "Blocked: Save a file", with the file
+  and "You declined it.", where it read "Saved a file", also when the conversation is opened again.
+  Opened, "Checked your folders" reads "Folders it can read: share." instead of JSON, and no folder
+  step shows the folder's internal id.
+- **The Status window and Settings → This computer name every part** of the back end: its setup
+  container reads "Setup helper" and an earlier team install's identity service "Bot computer
+  identity", where both said "Other part". The Status window says the back end is "On this
+  computer" instead of its stack id, which is still in Copy diagnostics.
+- At launch, OpenBot Desktop moves its window up when its bottom edge is past the screen's work
+  area. On Windows it opened a little lower each time, until the sidebar's account row was behind
+  the taskbar.
+- Windows lists OpenBot Desktop's publisher as CopilotKit in Settings → Apps and in Programs and
+  Features, where it said "copilotkit". Ctrl+Q in the window quits OpenBot, as the tray menu's Quit
+  says, where it did nothing.
+- On a Mac, onboarding keeps Back below the window's buttons, and its top strip moves the window.
+
+### Automatic Learning and Teach a Bot
+
+- **Review learned skills in OpenBot.** On Admin → Automatic learning, **Who approves skills
+  learned from people's recordings** is **Admins** (the default) or **Each person, for their own
+  Bots**. Admins review under **From people's recordings**, and a person sees what waits on
+  Settings → Learning. A skill a person approves reaches only their own Bots until they press **Ask
+  to share** and an admin approves it under **Sharing requests**. Skills published before the
+  upgrade keep reaching the Bots they reached. See
+  [Automatic Learning](docs/automatic-learning.md#reviewing-learned-skills).
+- **Your recordings on Teach a Bot.** Teach a Bot lists your recordings, newest first, with how each
+  ended, and one the Recorder sends later appears without leaving the page. The Recorder's popup
+  links to it. The list needs Intelligence 0.16 with recordings switched on.
+- **The personal edition has Settings → Learning**, with **Learn now** and **Approve new skills
+  automatically**, which is on: it approves what OpenBot proposes from your recordings and
+  conversations shortly after each start, every 15 minutes, and when you open the page. Turn it off
+  to review each skill yourself.
+- **Learned skills read in words.** Each is named in words where it showed its hyphenated name, and
+  its steps show without the SKILL.md file name or the Recorder's notes such as "(tag=a)". Opening
+  one of your skills lists the recordings it was learned from under **Learned from**. What a Bot
+  uses is unchanged.
+- A recording the Recorder can't send yet says it wasn't saved to your Learning space yet, and why.
+  It used to read "Saving" for the half hour the Recorder retries.
+- A recording made right after OpenBot's computer starts is saved. In the browser shown inside
+  OpenBot, the computer's network filter used to turn the Recorder away until a page had loaded,
+  and the recording was held ("Learning capture is paused") and tried again only every five minutes.
+- Narration that can't hear you (no microphone, or the browser refused it) stays off after Stop
+  and the next Record until you turn it on, and "We're capturing your voice" shows only while a
+  recording hears you; otherwise it reads "Narration is on." Narration used to turn itself back on
+  after Stop and say it was capturing your voice with nothing recording.
+- Teach a Bot's description says to press **Record**, the button the page shows, where it said
+  "Start recording".
+
+### Apps and connections
+
+- **An app's tools are named in words everywhere you read them**: Activity, Admin → Audit, a
+  conversation's steps, approvals and a Bot's "What it can do" say "Get IMAP settings", not
+  "Settings get imap", and "Fetch thread messages", not "Fetch message by thread id". "What it can
+  do" lists every app's tools as commands, so Routines reads "Complete goal, Create goal". In the
+  personal edition an app's page lists its tools by those names, in order, where it showed stored
+  names such as `GMAIL_ADD_LABEL_TO_EMAIL`, each with the first sentence of what it does in plain
+  words ("Permanently deletes a Gmail filter.", where it read "Tool to permanently delete a Gmail
+  filter by its ID"). Admin's app page keeps the stored names.
+- **Work apps are connected through OpenBot.** Connections, an app's page, the app directory, a
+  conversation's connect cards and Admin → Plugins no longer name Composio or Arcade ("Browse
+  Composio" is now "Browse apps", "Through Composio" is now "Through OpenBot"). Admin pages still
+  name the setting to set, such as `COMPOSIO_API_KEY`. When connecting, re-checking or
+  disconnecting fails with a message that names Composio, you read a plain sentence and the full
+  message goes to the server log. The directory no longer lists Composio's own toolkits (Composio,
+  Composio Search and Browser Tool); one already turned on keeps working.
+- **A Bot can read a whole day of Gmail** connected through Composio. A listing returns sender,
+  recipients, subject, time, labels and Gmail's snippet for up to 20 messages per call, with the
+  token for the next page, and says how many of the matches it holds when there is another page. A
+  message or thread read whole keeps its decoded body, Cc and Reply-To. Listings used to carry each
+  message's raw MIME, tens of thousands of characters per email, so a Bot saw part of the first
+  email and a large page failed as too large. For any app connected through Composio or Arcade, a
+  list over the 20,000-character limit is cut between whole records, with a note naming the call
+  that reads the rest, where it was cut mid-record.
+- **A conversation's Connect card opens the app's sign-in on the first press**, Notion included,
+  and says "Opening sign-in…" while it does. In the personal edition the first press used to only
+  turn the app on, and Notion's card refused with "Notion has no tools to give yet". Messages that
+  sent you to Plugins or to an admin now name Connections and the step to take.
+
+### Conversations
+
+- **A skill picked from the `/` menu reaches the Bot.** OpenBot gives the Bot that skill's
+  instructions for that message, for built-in Bots and Bots at their own address, in a new
+  conversation and in one with several Bots. The Bot used to get only the command and guess what
+  the skill was, and a built-in Bot on a Claude plan answered "Unknown command" without asking the
+  model. A command in the middle of a message, or for a skill the Bot doesn't have, does nothing.
+- **After you answer an approval, the conversation shows the Bot working** until it has carried on
+  and finished, and its reply arrives whole. If the Bot then reaches another action that needs your
+  approval, it stops and asks in the conversation, and does nothing more until you decide. The
+  conversation used to look idle while the Bot was still going, the reply could stop part way until
+  the conversation was opened again, and a second approval was never shown while the Bot was run
+  again and could reply without it. The action itself was not carried out.
+- **Opening a conversation shows each reply once and whole**, also when you come back while the Bot
+  is answering. A reply could appear twice in one bubble, and one the Bot was still writing stopped
+  mid-word, both until a reload.
+- **The Bot shows it is still working through a run of steps**: the step still running shimmers,
+  and once every step has its answer "Thinking" shows under them until the reply starts. The steps
+  used to sit still with nothing under them, as if the Bot had stopped.
+- **A Bot signed in to a ChatGPT plan works with every app it has.** ChatGPT refused the whole
+  request when one of the Bot's tools took an email address (HubSpot's and Google Calendar's, for
+  example) or used a lookahead pattern, and the conversation ended with "Remote agent ended without
+  a terminal event." OpenBot now sends every model only the parts of an app's tool description that
+  OpenAI and Anthropic document as supported, and the app still checks what the Bot sends. Some
+  tools that reached the model with no arguments named now have their arguments.
+- **A run that ends without an answer says so**: "The Bot stopped before it finished answering. Try
+  again.", and a model provider's refusal says which provider turned the request down, where the
+  conversation showed "Remote agent ended without a terminal event."
+- **In a conversation with several Bots, a Bot's question waits above the message box**, as it does
+  with one Bot, and what you send next answers it, unless you @ another Bot. The Bot then replies in
+  the conversation. The question used to never reach you there.
+- In a new conversation, typing @ before the first message lists the Bots in To:, and with two or
+  more, a first message addressed to one goes to that Bot only. @ used to say "No Bots in this
+  conversation" until something had been sent, and the first message went to every Bot.
+- **Notifications say what happened.** When a Bot set to notify you of everything replies while
+  OpenBot is out of sight, a notification gives its name, "replied" and the first line of its reply,
+  once its turn is over. If the turn ends waiting on you, the notification says the Bot needs you
+  and opens the waiting conversation, where it opened the Bot's page. Neither appears while you are
+  looking at OpenBot.
+- **A Bot waiting on an approval, choice or form card shows under Needs you**, in its Activity and
+  as needing input on a task's conversation, and you get its "needs you" notification. Nothing used
+  to show it was waiting.
+- Text a Bot writes into a card (a notice, a record, a checklist, a quotation, an approval, a
+  table) is drawn the way its replies are: links can be clicked, and bold, lists and inline code are
+  formatted. Cards used to show the raw markdown, such as `[Sender](https://mail.google.com/...)`.
+  Titles and labels stay plain.
+- The starter tasks in your first conversation are Chart Hacker News (a web search drawn as a bar
+  chart), Browse Google Maps (the Bot's own browser looks up opening hours and walking directions),
+  Triage my inbox (the two emails from the past 24 hours that most need you, changing nothing, with
+  Gmail's connect card first if Gmail isn't connected) and Build a trip budget. Summarize email,
+  Find weekend plans, Read a webpage and Try a browser task are gone.
+
+### Personal edition
+
+- **No memory.** The Memory rows on the Bots page and on a Bot's page are gone, and a Bot's
+  check-ins move to its What it can do page. Bots are offered no memory tools and bring no memory
+  into a conversation, check-ins no longer form memories, and connected apps are no longer read as
+  memory sources. Settings → This computer, Settings → Setup and OpenBot Desktop's Status window no
+  longer say the back end keeps memory (above).
+- **Your skills show on a Bot's What it can do**, the ones you wrote on Settings → Skills, each with
+  its switch, on for a Bot made a moment ago too. It read "No skills yet".
+- **A Bot's page speaks to one person.** Setup names what runs the Bot ("Runs on LangChain
+  (LangGraph)") instead of the address of the harness OpenBot started for it. Pinned, Hidden and
+  the Bots list's Hidden section drop "Only your list changes." Reset reads "Delete your
+  conversations with it and its scheduled work", and its notice no longer mentions other people's
+  conversations or memories. Delete says you can still read your conversations with it, where it
+  said "Deletes it for everyone."
+- **An app's page speaks to you**: "Connect your Gmail account so your Bots can use it", "You sign
+  in to Gmail in your browser. OpenBot never sees your password.", and summaries such as "Your pages
+  and databases.". An app whose tools list only after sign-in says "Connect your Notion account
+  above to list its tools.", where it printed raw `[connect-app]` text, which Admin no longer shows
+  either. Where connecting apps isn't set up, it points to Settings → Setup, and notices after a
+  sign-in no longer say to ask an admin.
+- The New Bot sheet lists every app that is turned on, which every Bot gets, with nothing to untick.
+  It listed only some of them as ticked boxes, often Routines alone.
+- Settings → Setup no longer mentions memory or an admin: the Back end row reads "Keeps your
+  conversations and skills", More apps compares with the apps OpenBot comes with, and its links name
+  Keys and Computer.
+- Settings → Browsers says a recording goes to your own Learning space in OpenBot's back end and is
+  used only for your own Skills, evaluations and insights, where it said your organization's.
+- Settings → Computer lists the Teach a Bot browser as "Your OpenBot browser", with Stop browser and
+  Clear browser data, where it read "A Bot no longer here". Admin → Computers names whose OpenBot
+  browser each one is.
+- In Activity, what OpenBot gives the Activity report is one row naming what it reads ("your Bots'
+  activity and what was refused"), where it was two identical rows that named neither. A routine a
+  Bot creates, changes or deletes shows once, where the Bot's call to Routines was a second row.
+
+### Smaller changes
+
+- Settings → Setup says the Bot computer is Ready whenever the one shared computer answers (the
+  personal edition's, or a team deployment's without `COMPUTER_SUPERVISOR_URL`), before a Bot has
+  used it and after its browser has closed. It said "Not checked" and that a computer starts when a
+  Bot first needs one.
+- Onboarding's Welcome says what always asks (deleting, sending, sharing, posting) above the
+  approvals switch, which is now "Always ask before making changes" there and in Settings →
+  Approvals, with the same words in both.
+- Every OpenBot for Business link in the app (Book a call on the self-host banner, Talk to us, Meet
+  OpenBot for Business, and the New Bot and Bot Setup links) opens https://open.bot/business. On a
+  single-user install, onboarding's Talk to us step is now Book a demo, with the OpenBot for
+  Business booking calendar (Calendly) in the step. If it can't load within 20 seconds, the step
+  offers Book a call, which opens open.bot/business.
+- When OpenBot can't read its saved Learning settings, conversations carry on without Learning and
+  the server logs it. Every conversation used to fail.
+- In a narrow window, the sidebar closes when you pick a conversation, New conversation, Bots,
+  Connections, Teach a Bot, or an item in your account menu, where it stayed open over the page.
+- In a narrow window the message box keeps the same margin from the pane's edges as the
+  conversation above it, and the starter tasks line up with its text, where both ran to the edge.
+- Onboarding's name step leaves room above the orb, so the header with the step dashes no longer
+  cuts off its top.
 
 ## 0.3.3
 
@@ -386,10 +568,6 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   Activity lists for that Bot. In both editions the report names each Bot and says what was refused
   in words, where it showed ids, and one request writes one row, where a refused one wrote up to
   three.
-- **What OpenBot gave the Activity report reads once, and says what.** "Let a component read data /
-  Activity report · your Bots' activity and what was refused" is one row, where it was two identical
-  rows; rows already written each name their own data. A Bot creating, changing or deleting a
-  routine shows once, as the routine under its Bot, where its call to Routines was a second row.
 
 ### The Bot's browser
 
