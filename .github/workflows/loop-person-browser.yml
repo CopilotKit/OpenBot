@@ -31,21 +31,49 @@ jobs:
       - name: Put back the test as main has it
         if: matrix.which == 'before'
         run: git show origin/main:agent-computer/tests/person-browser.test.ts > agent-computer/tests/person-browser.test.ts
-      - name: Run the installed-Chrome variant 50 times
+      # Samples the process table every few milliseconds while the test runs, and for each person
+      # profile asks both rules how many browsers it has: main's (every process on the profile with
+      # no --type) and this branch's (browsersOnProfile).
+      - name: Write the sampler
+        working-directory: agent-computer
+        run: |
+          cat > sampler.ts <<'TS'
+          import { browsersOnProfile } from "./tests/fixtures/browser-process";
+          const seen = new Map<number, string>();
+          let samples = 0, oldMore = 0, newMore = 0;
+          const stop = Date.now() + Number(process.argv[2] ?? "60000");
+          while (Date.now() < stop) {
+            const listing = Bun.spawnSync(["ps", "-axo", "pid=,ppid=,command="]).stdout.toString();
+            samples += 1;
+            const profiles = new Set(
+              [...listing.matchAll(/--user-data-dir=(\S*openbot-person-browser\S*)/g)].map((m) => m[1] as string),
+            );
+            for (const profile of profiles) {
+              const old = listing.split("\n").filter(
+                (line) => line.includes(`--user-data-dir=${profile}`) && !line.includes("--type="),
+              );
+              if (old.length > 1) oldMore += 1;
+              if (browsersOnProfile(listing, profile).length > 1) newMore += 1;
+            }
+            for (const line of listing.split("\n"))
+              if (line.includes("--product-version") && line.includes("openbot-person-browser")) {
+                const pid = Number.parseInt(line.trim(), 10);
+                if (!seen.has(pid)) seen.set(pid, line.trim().split(/\s+/).slice(0, 3).join(" "));
+              }
+            await Bun.sleep(3);
+          }
+          console.log(`SAMPLER samples=${samples} oldRuleSawTwo=${oldMore} newRuleSawTwo=${newMore} productVersionChildren=${seen.size} ${[...seen.values()].join(" | ")}`);
+          TS
+      # The sampler on its own, for the whole of one run each time, so its line is printed.
+      - name: Sample the process table across 30 runs
         working-directory: agent-computer
         env:
           OPENBOT_COMPUTER_BROWSER: '1'
           COMPUTER_BROWSER_MODE: headless
         run: |
-          failed=0; found2=0; ran=0
-          for i in $(seq 1 50); do
+          for i in $(seq 1 30); do
+            bun sampler.ts 40000 &
+            sampler=$!
             bun test tests/person-browser.test.ts -t "Desktop: installed" > run.log 2>&1 || true
-            ran=$((ran + 1))
-            if grep -q "(fail) Desktop: installed Google Chrome, headless here > a browser that stops answering" run.log; then
-              failed=$((failed + 1))
-              grep -q "found 2" run.log && found2=$((found2 + 1))
-              grep -A3 "found 2" run.log | cut -c1-400 || true
-            fi
-            grep -q "(pass) Desktop: installed Google Chrome, headless here > a browser that stops answering" run.log || grep -q "(fail) Desktop: installed Google Chrome, headless here > a browser that stops answering" run.log || { echo "iteration $i did not run the test"; tail -30 run.log; }
+            wait $sampler
           done
-          echo "RESULT ${{ matrix.which }}: ran=$ran failed=$failed found2=$found2"
