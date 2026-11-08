@@ -250,7 +250,11 @@ export function createLauncher(
     return {
       connected: connection !== null,
       ...(connection
-        ? { userId: connection.user.id, connectionId: connection.connectionId }
+        ? {
+            userId: connection.user.id,
+            connectionId: connection.connectionId,
+            openbotUrl: connection.openbotUrl,
+          }
         : {}),
       phase: state.phase,
       ...(state.recordingId ? { recordingId: state.recordingId } : {}),

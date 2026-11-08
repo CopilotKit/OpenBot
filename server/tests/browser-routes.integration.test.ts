@@ -262,6 +262,8 @@ const computer = Bun.serve<{ bot: string }>({
                   connected: true,
                   userId: holds.user.id,
                   connectionId: holds.connectionId,
+                  // As an origin, the form the Recorder stores it in (extension/src/background/launcher.ts).
+                  openbotUrl: new URL(holds.openbotUrl).origin,
                   phase: "idle",
                   actions: 0,
                   ...narration,
@@ -2455,6 +2457,7 @@ describe("who hears the person, as every answer says it", () => {
           connected: true,
           userId: ada.id,
           connectionId: handed(ada.id).connectionId,
+          openbotUrl: PUBLIC,
           phase: "idle",
           actions: 0,
           ...expected[window],
@@ -2802,6 +2805,57 @@ describe("a single-user OpenBot, where the person is its admin", () => {
       method: "POST",
       headers: WINDOW,
     });
+  });
+
+  test("a Recorder kept at the app's old port is handed a connection at the new one", async () => {
+    // David, 2026-11-07: a new Desktop build installed while port 3010 was held moved APP_PORT to 58092
+    // (desktop/src-tauri/src/env.rs, `Ports::available`). The Recorder in the person's browser still held its
+    // connection at 3010, OpenBot kept that connection as one that stands, and every capture pass went to a port
+    // nothing relayed any more, so no recording was saved.
+    /** OpenBot as one Desktop Start runs it: the personal edition, with its app on `port`. */
+    const startedOn = (port: number) =>
+      build(
+        {
+          ...SINGLE_USER,
+          OPENBOT_EDITION: "personal",
+          APP_PORT: String(port),
+        },
+        {
+          provider: createSharedComputerProvider({
+            baseUrl: `http://127.0.0.1:${COMPUTER_PORT}`,
+            token: COMPUTER_TOKEN,
+          }),
+        },
+      );
+    const computerId = personBrowserId(DEV_ACTOR.id);
+    /** Browser in the window at `port`, then the connection the Recorder holds and whether it was handed a new one. */
+    const browseAt = async (openbot: OpenBot, port: number) => {
+      const before = recorderKeeps.get(computerId);
+      const origin = `http://127.0.0.1:${port}`;
+      const opening = await call(openbot, "/api/browser/open", {
+        method: "POST",
+        headers: { origin },
+      });
+      expect(opening.status).toBe(200);
+      const holds = recorderKeeps.get(computerId) as LauncherConnection;
+      await call(openbot, "/api/browser/close", {
+        method: "POST",
+        headers: { origin },
+      });
+      return { holds, handedNew: holds.token !== before?.token };
+    };
+
+    const first = startedOn(3010);
+    expect((await browseAt(first, 3010)).holds.openbotUrl).toBe(
+      "http://127.0.0.1:3010",
+    );
+    // Browser again on the same Start: the connection stands and is kept.
+    expect((await browseAt(first, 3010)).handedNew).toBe(false);
+
+    // Desktop starts again with the app on 58092, and the Recorder in the person's browser still holds 3010.
+    const moved = await browseAt(startedOn(58092), 58092);
+    expect(moved.handedNew).toBe(true);
+    expect(moved.holds.openbotUrl).toBe("http://127.0.0.1:58092");
   });
 
   beforeAll(async () => {
