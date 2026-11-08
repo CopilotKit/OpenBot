@@ -63,6 +63,8 @@ fn main() {
                     "speech_abort",
                     // Open log folder: the shell's own log folder. See `src/logging.rs`.
                     "open_logs",
+                    // Ctrl+Q in the window on Windows. See `src/quit-shortcut.js`.
+                    "quit",
                 ]),
             ),
     )

@@ -5,6 +5,7 @@
   "windows": ["main", "status"],
   "permissions": [
     "core:event:default",
+    "openbot-desktop:allow-quit",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://*" }, { "url": "http://*" }]

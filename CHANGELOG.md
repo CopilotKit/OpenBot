@@ -13,6 +13,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   between, for about four minutes. Before, three tries in a minute and a half gave up and put the
   update back, though opening OpenBot again two minutes later downloaded it in seconds. A download
   that keeps arriving is never cut off, however slow.
+- In a narrow window, the sidebar closes when you pick a conversation, Bots, Connections, Teach a Bot, or an item in your account menu. Before, it stayed open over the page you opened until you clicked outside it.
+- OpenBot Desktop's Status window says the back end is "On this computer" instead of its stack id ("local-08ff56ec…"). The id is still in Copy diagnostics, for support.
+- On Windows, Ctrl+Q in the OpenBot Desktop window quits OpenBot, as the tray menu's Quit says. Before, Ctrl+Q in the window did nothing.
 - A skill picked from the `/` menu works for a built-in Bot on a Claude plan. The Bot answered
   "Unknown command: /tide-report" without asking the model, because Claude Code took the message,
   which starts with the skill's command, for a slash command of its own.

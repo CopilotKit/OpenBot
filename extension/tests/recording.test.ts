@@ -2011,6 +2011,11 @@ test("a signed-out answer the popup gets from OpenBot forgets the connection and
     kind: "signed-out",
     reason: "revoked",
   });
+  // Stopped once the document says it stored the outcome, so it is not closed mid-store.
+  await until(
+    async () => (await state()).phase === "idle",
+    "the recording stops",
+  );
   expect(await state()).toMatchObject({ phase: "idle", error: SIGNED_OUT });
   expect(network.running.size).toBe(0);
   expect(drains()).toMatchObject([
@@ -2025,7 +2030,10 @@ test("a signed-out answer to the Learning space does the same", async () => {
   const answer = await page({ type: "page.learning" });
   expect(answer.ok).toBe(false);
   expect(storedConnection()).toBeUndefined();
-  expect((await state()).phase).toBe("idle");
+  await until(
+    async () => (await state()).phase === "idle",
+    "the recording stops",
+  );
   expect(drains()[0]?.kept?.waitingForReconnect).toBe(true);
 });
 
