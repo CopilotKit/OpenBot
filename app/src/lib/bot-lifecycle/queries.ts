@@ -29,6 +29,11 @@ export type BotAttention = {
   items: number;
   /** Its tasks that wait on the person: an approval or a question, a reply to read, or a failure. */
   tasks: { needsInput: number; ready: number; failed: number };
+  /**
+   * The conversation of the newest thing it waits on the person for, where a notice about it
+   * opens. Null when it waits on nothing in a conversation; absent from a server older than this app.
+   */
+  waitingIn?: string | null;
 };
 
 /**

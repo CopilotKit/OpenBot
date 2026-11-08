@@ -69,6 +69,11 @@ function app() {
         },
       ],
       lastPing: async () => "ping-7",
+      waitingIn: async () =>
+        new Map([
+          ["bot-1", "channel-asking"],
+          ["hidden-bot", "channel-hidden"],
+        ]),
     },
     tasks: {
       counts: async () => [
@@ -194,6 +199,7 @@ describe("Bot lifecycle routes", () => {
           notify: "all",
           items: 3,
           tasks: { needsInput: 1, ready: 2, failed: 0 },
+          waitingIn: "channel-asking",
         },
       ],
       lastPingId: "ping-7",

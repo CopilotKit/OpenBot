@@ -129,6 +129,17 @@ export function pingNotice(
 }
 
 /**
+ * Where a "needs you" notice opens: the conversation that is waiting, when there is one, so the
+ * person lands on the question or the card itself. Otherwise the Bot's page, which lists what it
+ * waits on.
+ */
+export function noticePath(bot: BotAttention): string {
+  return bot.waitingIn
+    ? `/channel/${encodeURIComponent(bot.waitingIn)}`
+    : `/bots/${encodeURIComponent(bot.agentId)}`;
+}
+
+/**
  * A browser notification when a Bot starts needing this person for a question, an approval, a
  * stalled hand-off or a task waiting on them, if they allowed notifications and did not mute this
  * Bot. Badges show either way; this is the interruption, and it is opt-in.
@@ -153,7 +164,7 @@ function useAttentionNotifications(bots: BotAttention[] | undefined) {
         title: `${bot.name} needs you`,
         body: attentionSummary(bot),
         tag: `openbot-attention-${bot.agentId}`,
-        path: `/bots/${encodeURIComponent(bot.agentId)}`,
+        path: noticePath(bot),
       });
     }
   }, [bots]);
