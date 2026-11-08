@@ -1,4 +1,5 @@
 import { cutAtCodeUnits } from "../channels/text";
+import { appsPage, itsAppPage } from "../edition";
 import { BrokerAccountGoneError, brokerSentence, flagOf } from "./broker";
 import { type ListedTool, MAX_RESULT_CHARS, type McpCallResult } from "./mcp";
 
@@ -794,7 +795,7 @@ export async function listTools(connection: {
   const toolkit = toolkitOf(connection.url);
   if (!toolkit) {
     throw new Error(
-      `${connection.url} does not name a Composio app, so nothing was asked what it offers. A row reached through this transport is one whose provenance says composio, and its url has to be composio:// followed by an app slug; correct the url on the Plugins page.`,
+      `${connection.url} does not name a Composio app, so nothing was asked what it offers. A row reached through this transport is one whose provenance says composio, and its url has to be composio:// followed by an app slug; correct the url on the ${appsPage()} page.`,
     );
   }
   if (!installed) {
@@ -1904,7 +1905,7 @@ export async function askAction(
      * condition under which it helps, which is the part nobody in this deployment controls.
      */
     return unreached(
-      `${toolName} has no recorded version, so it cannot be called: Composio requires a specific one and rejects "latest", so there is nothing to fall back on. Refreshing this app's tools on its Plugins page recovers it only if Composio publishes a version for this action. Where Composio publishes none, no refresh will make it callable.`,
+      `${toolName} has no recorded version, so it cannot be called: Composio requires a specific one and rejects "latest", so there is nothing to fall back on. Refreshing this app's tools on ${itsAppPage()} recovers it only if Composio publishes a version for this action. Where Composio publishes none, no refresh will make it callable.`,
     );
   }
 

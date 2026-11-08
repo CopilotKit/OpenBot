@@ -1,8 +1,8 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import type { AppVariables } from "../auth/guards";
 import type { DeploymentConfig } from "../config";
-import type { Edition } from "../edition";
 import type { CredentialStatusReader } from "../credentials";
+import type { Edition } from "../edition";
 import { entitlementWarning } from "../intelligence-entitlement-check";
 import type { ModelCheckOutcome } from "../model-availability-check";
 import type { BrokerProvider } from "../plugins/access";
@@ -323,9 +323,10 @@ function intelligenceRow(
 }
 
 /**
- * The Bot computer row. Not checked is the usual state of one that is set up: a computer starts
- * when a Bot first needs one, and until then none is running to ask. Its fix is the page where
- * computers show up, because the variables are already set.
+ * The Bot computer row. Not checked is the usual state of one that is set up where a provider
+ * makes computers: a computer starts when a Bot first needs one, and until then none is running to
+ * ask. The one shared computer always answers, so it is never this (`createComputerCheck`). Its fix
+ * is the page where computers show up, because the variables are already set.
  */
 function computerRow(status: SetupStatus, personal: boolean) {
   const readyDetail = "Bots can browse the web and work with files.";

@@ -29,6 +29,7 @@ import {
   teamBotPublications,
   users,
 } from "../src/db/schema";
+import { setEdition } from "../src/edition";
 import type { AppAccess } from "../src/plugins/app-access";
 import type { BrokerApp } from "../src/plugins/broker";
 import type { AppAccessRequestRecord } from "../src/plugins/plugin-store/app-access";
@@ -1123,6 +1124,49 @@ describe("an administrator's one press on a card", () => {
       direct: true,
     });
     expect(eventsOf("app_access.approved")).toHaveLength(0);
+  });
+
+  /*
+   * OpenBot Personal has no Plugins page: its apps are set up under Connections, and a sentence
+   * sending the one person to Plugins sends them to a page they cannot find.
+   */
+  test("names the page apps are set up on, for the edition", async () => {
+    const said = async () =>
+      (await json<{ error: string }>(await press("google-drive"))).error;
+    expect(await said()).toContain("on its page under Plugins");
+    setEdition("personal");
+    try {
+      const personal = await said();
+      expect(personal).toContain("on its page under Connections");
+      expect(personal).not.toContain("Plugins");
+    } finally {
+      setEdition("team");
+    }
+  });
+
+  /*
+   * Notion lists its tools only for a person who has signed in. In the team edition an admin's
+   * press is the grant itself, so it still refuses to give a Bot an app with nothing listed, after
+   * asking Notion again itself. It does not send the admin to refresh what it just refreshed.
+   */
+  test("an app with nothing listed is asked again, then refused in the team edition", async () => {
+    try {
+      const response = await press("notion");
+      expect(response.status).toBe(409);
+      const { error } = await json<{ error: string }>(response);
+      expect(error).toBe(
+        "Notion has no tools to give yet. Open its page under Plugins to see why, then try again.",
+      );
+      expect(eventsOf("app_access.refused").at(-1)?.payload).toMatchObject({
+        reason: "no_tools",
+      });
+    } finally {
+      await database
+        .delete(appAccessRequests)
+        .where(eq(appAccessRequests.appKey, "notion"));
+      await database.delete(mcpTools).where(eq(mcpTools.serverId, "notion"));
+      await database.delete(mcpServers).where(eq(mcpServers.id, "notion"));
+    }
   });
 
   test("a request of theirs already waiting is put back as it was", async () => {

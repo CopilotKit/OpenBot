@@ -2985,6 +2985,12 @@
           "markdownDescription": "Enables the open_logs command without any pre-configured scope."
         },
         {
+          "description": "Enables the quit command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-quit",
+          "markdownDescription": "Enables the quit command without any pre-configured scope."
+        },
+        {
           "description": "Enables the restart command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-restart",
@@ -3073,6 +3079,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-open-logs",
           "markdownDescription": "Denies the open_logs command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the quit command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-quit",
+          "markdownDescription": "Denies the quit command without any pre-configured scope."
         },
         {
           "description": "Denies the restart command without any pre-configured scope.",

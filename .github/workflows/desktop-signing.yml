@@ -171,6 +171,15 @@ jobs:
       # endpoints as the Mac's, so a signed Windows app is offered and installs updates the way a
       # Mac does. Not `createUpdaterArtifacts`: the updater key is not in this environment, and the
       # file the Windows updater installs is this installer itself, signed for it by `sign-update`.
+      # Tauri downloads NSIS from GitHub the first time it bundles, once and with no retry, and a 504
+      # there fails the release. This puts the same pinned, checksummed toolset desktop-build.yml
+      # fetches where Tauri looks first, so the build below downloads nothing. Not a cache: the
+      # files come from their releases on every run and are checked against pins in the tree.
+      - name: Fetch Tauri's bundling tools
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: desktop/scripts/prefetch-tauri-tools.sh windows
       - name: Build and sign
         id: build
         env:

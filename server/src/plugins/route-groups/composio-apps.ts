@@ -1,5 +1,6 @@
 import { requireAdmin } from "../../auth/guards";
 import { reasonWithoutStatement } from "../../db/query-failure";
+import { appsPage } from "../../edition";
 import { BROKERED_PROFILE } from "../access";
 import {
   type BrokerApp,
@@ -338,7 +339,7 @@ export async function enableComposioApp(
     if (error instanceof CatalogueEntryUnknownError) {
       return {
         ok: false,
-        error: `${app.name} was added, and then could not be read back out of this deployment's own servers — so the row and its trail entry stand, and what is on this page may be missing it. Reload the Plugins page: if ${app.name} is there it is enabled and there is nothing to redo, and if it is not, adding it again is safe.`,
+        error: `${app.name} was added, and then could not be read back out of this deployment's own servers — so the row and its trail entry stand, and what is on this page may be missing it. Reload the ${appsPage()} page: if ${app.name} is there it is enabled and there is nothing to redo, and if it is not, adding it again is safe.`,
         status: 409,
       };
     }

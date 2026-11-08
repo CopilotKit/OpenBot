@@ -65,6 +65,8 @@ fn main() {
                     "open_logs",
                     // A Bot's notification, opening OpenBot at a page when clicked. See `src/notice.rs`.
                     "notify",
+                    // Ctrl+Q in the window on Windows. See `src/quit-shortcut.js`.
+                    "quit",
                 ]),
             ),
     )

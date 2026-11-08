@@ -41,8 +41,21 @@ import {
   botResetPlanQueryOptions,
   type ResetPlan,
 } from "@/lib/bot-lifecycle/queries";
-import { useOffersMemory } from "@/lib/deployment/queries";
+import {
+  deploymentCapabilitiesQueryOptions,
+  useOffersMemory,
+} from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
+
+/**
+ * Whether this is the personal edition, where one person uses OpenBot. Nobody else has a Bots list
+ * or a conversation with a Bot there, so the rows below say nothing about other people.
+ */
+function usePersonal(): boolean {
+  return (
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal"
+  );
+}
 
 /** Each count the notice lists, in the words the person reads, skipping the kinds with nothing. */
 function resetLines(plan: ResetPlan): string[] {
@@ -77,6 +90,7 @@ function ResetDialog({
   });
   const reset = useMutation(resetBotMutationOptions(queryClient));
   const memory = useOffersMemory();
+  const personal = usePersonal();
   const lines = plan.data ? resetLines(plan.data) : [];
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -84,8 +98,9 @@ function ResetDialog({
         <DialogHeader>
           <DialogTitle>Reset {agent.name}?</DialogTitle>
           <DialogDescription>
-            This deletes what {agent.name} has with you. Other people's
-            conversations and data stay. You can't undo this.
+            {personal
+              ? `This deletes what ${agent.name} has with you. You can't undo this.`
+              : `This deletes what ${agent.name} has with you. Other people's conversations and data stay. You can't undo this.`}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
@@ -156,7 +171,8 @@ function ResetDialog({
 
 /**
  * What can be done to a Bot: pin and hide (the person's own list only), duplicate, reset what it
- * has with this person, and — for whoever may manage it — delete it.
+ * has with this person, and, for whoever may manage it, delete it. The personal edition has one
+ * person, so there the rows don't mention anybody else's list or conversations.
  *
  * Navigation is the caller's: hiding and deleting leave the page, duplicating opens the copy.
  */
@@ -178,6 +194,9 @@ export function ManageSection({
   const [resetOpen, setResetOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const memory = useOffersMemory();
+  const personal = usePersonal();
+  // Said only where somebody else has a list of their own.
+  const onlyYours = personal ? "" : " Only your list changes.";
   const error = setPinned.error ?? setHidden.error ?? duplicate.error;
   // An administrator put it in this person's list; it stays pinned and cannot be hidden.
   const assigned = agent.assignedToMe === true;
@@ -200,8 +219,8 @@ export function ManageSection({
               {assigned
                 ? "An admin assigned it to you. It stays at the top of your Bots list."
                 : agent.pinned
-                  ? "At the top of your Bots list. Only your list changes."
-                  : "Keep it at the top of your Bots list. Only your list changes."}
+                  ? `At the top of your Bots list.${onlyYours}`
+                  : `Keep it at the top of your Bots list.${onlyYours}`}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
@@ -226,8 +245,8 @@ export function ManageSection({
               {assigned
                 ? "An admin assigned it to you. You can't hide it."
                 : agent.hidden
-                  ? "Under Hidden on your Bots list. Only your list changes."
-                  : "Take it off your Bots list. Only your list changes."}
+                  ? `Under Hidden on your Bots list.${onlyYours}`
+                  : `Take it off your Bots list.${onlyYours}`}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
@@ -301,7 +320,10 @@ export function ManageSection({
               <ItemContent>
                 <ItemTitle>Delete</ItemTitle>
                 <ItemDescription>
-                  Deletes it for everyone. You can't undo this.
+                  {/* A deleted Bot's conversations stay readable (channel-chat.tsx says so there). */}
+                  {personal
+                    ? "Deletes it. You can still read your conversations with it. You can't undo this."
+                    : "Deletes it for everyone. You can't undo this."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -317,7 +339,9 @@ export function ManageSection({
           <DialogHeader>
             <DialogTitle>Delete {agent.name}?</DialogTitle>
             <DialogDescription>
-              It's deleted for everyone. You can't undo this.
+              {personal
+                ? "You can still read your conversations with it, but it can't reply. You can't undo this."
+                : "It's deleted for everyone. You can't undo this."}
             </DialogDescription>
           </DialogHeader>
           {remove.error ? (
