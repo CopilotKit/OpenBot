@@ -872,16 +872,31 @@ test("a successful same-message refresh is not overwritten by later unavailable 
   await act(async () => currentAgent().addMessage(local));
   const beforeRefresh = historyReads.length;
   let refreshReads = 0;
+  const lastRetry = delayedResponse();
   history = async () => {
     refreshReads += 1;
-    return refreshReads === 1
-      ? stored([initial, broken])
-      : new NativeResponse("failed", { status: 500 });
+    if (refreshReads === 1) return stored([initial, broken]);
+    if (refreshReads === 2)
+      return new NativeResponse("failed", { status: 500 });
+    return lastRetry.promise;
   };
 
   await announce(1);
   await view.findByText(oneHole);
-  await new Promise((resolve) => setTimeout(resolve, 2300));
+  /*
+   * The refresh retries at 0, 750 and 1500 ms after each read, so its last read lands about 2250 ms
+   * after the first. This used to sleep 2300 ms and then count, a margin of about 45 ms: on a busy
+   * runner the retry timers fire late, the sleep ended before the third read, and the count came out
+   * 2. So it waits for the third read itself, then answers it here, inside act, so the failure that
+   * read reports has been handled before the notice is checked.
+   */
+  await waitFor(() => expect(historyReads.length - beforeRefresh).toBe(3), {
+    timeout: 4000,
+  });
+  await act(async () => {
+    lastRetry.resolve(new NativeResponse("failed", { status: 500 }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 
   expect(historyReads.length - beforeRefresh).toBe(3);
   expect(view.getByText(oneHole)).toBeTruthy();
