@@ -261,6 +261,30 @@ const CHANGES: Readonly<Record<string, string>> = {
   default_container_assigned_automatically: "Set up Learning",
 };
 
+/**
+ * What each of a component's data functions reads, in a person's words. `server/tests/audit-words.test.ts`
+ * fails on a function the server ships without words here.
+ */
+export const DATA_FUNCTION_WORDS: Readonly<Record<string, string>> = {
+  botActivity: "your Bots' activity",
+  recentRefusals: "what was refused",
+};
+
+/**
+ * The data a component was given or read, in words: "your Bots' activity and what was refused".
+ * A function with no words of its own is split into words, never shown as stored.
+ */
+export function dataWords(functions: readonly string[]): string {
+  const words = functions.map((name) =>
+    Object.hasOwn(DATA_FUNCTION_WORDS, name)
+      ? (DATA_FUNCTION_WORDS[name] as string)
+      : humanise(name).toLowerCase(),
+  );
+  return words.length > 1
+    ? `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`
+    : (words[0] ?? "");
+}
+
 /** How many of an app's tools a row names one by one before it says how many more. */
 const TOOLS_NAMED = 2;
 
