@@ -100,7 +100,13 @@ export function OnboardingFrame({
       className="grid min-h-svh w-full min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_1fr_auto] bg-background text-foreground lg:h-svh lg:grid-cols-[minmax(28rem,40rem)_minmax(0,1fr)] lg:grid-rows-[auto_auto_1fr_auto]"
       data-onboarding-frame=""
     >
-      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background lg:col-start-1 pt-[env(safe-area-inset-top)] lg:static lg:bg-transparent lg:px-10 lg:pt-10">
+      {/*
+       * In OpenBot Desktop on macOS the window's buttons sit over the page's top-left corner, where
+       * the one-column layout puts Back (a 1000px window is one column). The desktop marks the page
+       * (`data-desktop-titlebar`, macOS only), and the header then starts below the buttons' 28px
+       * strip, as the app's sidebar does (styles.css). Two columns start 40px down already.
+       */}
+      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background lg:col-start-1 pt-[env(safe-area-inset-top)] max-lg:in-data-[desktop-titlebar=overlay]:pt-7 lg:static lg:bg-transparent lg:px-10 lg:pt-10">
         {/*
          * The phone's chrome. Back is not drawn on the first step, rather than drawn disabled: there
          * is nowhere behind it, and a control that does nothing is one more thing a screen reader

@@ -1,3 +1,4 @@
+import { itsAppPage } from "../../edition";
 import {
   BrokerRefusalError,
   type ComposioBroker,
@@ -188,7 +189,7 @@ export function consentMethods(
           );
         }
         throw new BrokerRefusalError(
-          `This deployment has no authorization config at Composio for ${toolkit}, so there is nothing to connect an account against. An administrator removing the app on its Plugins page and adding it again creates one.`,
+          `This deployment has no authorization config at Composio for ${toolkit}, so there is nothing to connect an account against. An administrator removing the app on ${itsAppPage()} and adding it again creates one.`,
         );
       }
 
@@ -265,7 +266,7 @@ export function consentMethods(
         const disabled = ours.length - unsettled.length;
         if (disabled > 0) {
           left.push(
-            `Composio calls ${disabled} of this deployment's ${ours.length} authorization configs for ${toolkit} disabled, and an administrator can enable it in Composio's dashboard, or remove the app on its Plugins page and add it again.`,
+            `Composio calls ${disabled} of this deployment's ${ours.length} authorization configs for ${toolkit} disabled, and an administrator can enable it in Composio's dashboard, or remove the app on ${itsAppPage()} and add it again.`,
           );
         }
         if (unsettled.length > 0) {

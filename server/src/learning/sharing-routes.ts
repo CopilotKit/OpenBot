@@ -2,6 +2,7 @@ import {
   isLearnedSkillName,
   isLearningSharingMode,
   type LearnedSkillContent,
+  type LearnedSkillDetail,
   type LearningSource,
   type PersonalLearningSharing,
   type PersonalReview,
@@ -22,15 +23,19 @@ import {
   learningFailure,
   readProposal,
   readProposals,
+  readSkillRecordings,
   requestFailure,
   reviewProposal,
   runSummary,
 } from "./review";
+import type { LearningModelCalls } from "./model-endpoint";
 import type { LearningSettingsStore } from "./settings";
 import type { LearningSharingStore } from "./sharing";
 
 export type PersonalLearningRouteDeps = {
   store: LearningSharingStore;
+  /** What became of the Learning endpoint's calls, on a plan, so a failed run says why. */
+  modelCalls?: LearningModelCalls;
   /** Who approved each skill in the person's space and where a request to share it stands. */
   approvals: SkillApprovalStore;
   /** The Skills in this person's own space, read the way a run reads them (learning/runtime.ts `personalSkills`). */
@@ -342,7 +347,7 @@ export function createPersonalLearningRoutes(
           proposals.value?.filter(
             (entry) => entry.status === "pending_review",
           ) ?? null,
-        latestRun: latest ? runSummary(latest) : null,
+        latestRun: latest ? runSummary(latest, deps.modelCalls) : null,
       };
     });
     const answer: PersonalReview = {
@@ -525,11 +530,15 @@ export function createPersonalLearningRoutes(
     return context.json({ run: { id: run.id, status: run.status } });
   });
 
-  /** The first space with a Skill by that name; undefined when no space could be read and none had it. */
+  /**
+   * The first space with a Skill by that name, and that space; undefined when no space could be read and none had it.
+   */
   const findInSpaces = async (
     spaces: NonNullable<Awaited<ReturnType<typeof skillSpaces>>>,
     name: string,
-  ): Promise<LearnedSkillContent | null | undefined> => {
+  ): Promise<
+    { skill: LearnedSkillContent; scope: LearningSource } | null | undefined
+  > => {
     let anyRead = false;
     for (const scope of spaces.scopes) {
       const read = await spaces
@@ -538,9 +547,47 @@ export function createPersonalLearningRoutes(
       if (!read || !("skills" in read)) continue;
       anyRead = true;
       const found = read.skills.find((skill) => skill.name === name);
-      if (found) return found;
+      if (found) return { skill: found, scope };
     }
     return anyRead ? null : undefined;
+  };
+
+  /**
+   * The person's own recordings a Skill in their recordings space was learned from, with their titles: the same for a
+   * Skill they approved and one approved automatically (`readSkillRecordings`). A recording that is not theirs is left
+   * out. Undefined where the sources can't be read, which never stops the Skill itself from opening.
+   */
+  const recordingsOf = async (
+    actor: AuthenticatedActor,
+    scope: LearningSource,
+    name: string,
+  ): Promise<LearnedSkillDetail["recordings"]> => {
+    const { manage, recordingTitles } = deps;
+    if (scope.kind !== "recordings" || !manage || !recordingTitles)
+      return undefined;
+    try {
+      const cited = await readSkillRecordings(manage, scope.containerId, name);
+      if (cited.length === 0) return [];
+      const titles = await recordingTitles(
+        actor.id,
+        cited.map((recording) => recording.id),
+      );
+      return cited.flatMap((recording) =>
+        titles.has(recording.id)
+          ? [{ ...recording, title: titles.get(recording.id) ?? null }]
+          : [],
+      );
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "learning-skill-sources-unread",
+          containerId: scope.containerId,
+          code: requestFailure(error).code ?? null,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return undefined;
+    }
   };
 
   routes.get("/skills/:name", async (context) => {
@@ -548,14 +595,18 @@ export function createPersonalLearningRoutes(
     if (!isLearnedSkillName(name)) {
       return context.json({ error: "Name a skill to read." }, 400);
     }
-    const spaces = await skillSpaces(context.var.actor);
+    const actor = context.var.actor;
+    const spaces = await skillSpaces(actor);
     let skill: LearnedSkillContent | null | undefined;
+    let scope: LearningSource | null = null;
     if (spaces) {
-      skill = await findInSpaces(spaces, name);
+      const found = await findInSpaces(spaces, name);
+      skill = found ? found.skill : found;
+      scope = found ? found.scope : null;
     } else if (deps.skillOf) {
-      skill = await deps
-        .skillOf(context.var.actor.id, name)
-        .catch(() => undefined);
+      skill = await deps.skillOf(actor.id, name).catch(() => undefined);
+      // Outside the personal edition the Skill is read from the person's own space, which their recordings join.
+      scope = (await sourceFor(actor, undefined)) ?? null;
     } else {
       // No reader is wired here, so trying again can't help.
       return context.json(
@@ -575,7 +626,14 @@ export function createPersonalLearningRoutes(
     if (skill === null) {
       return context.json({ error: "You have no skill by that name." }, 404);
     }
-    return context.json({ skill });
+    const recordings = scope
+      ? await recordingsOf(actor, scope, name)
+      : undefined;
+    const detail: LearnedSkillDetail = {
+      ...skill,
+      ...(recordings ? { recordings } : {}),
+    };
+    return context.json({ skill: detail });
   });
 
   routes.put("/mode", smallBody, async (context) => {

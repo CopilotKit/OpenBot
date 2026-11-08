@@ -262,11 +262,18 @@ export function useLocalSequence({
     let following = true;
     let shown = false;
     let next: ReturnType<typeof setTimeout> | null = null;
+    /*
+     * Only while the run it reports on is current. Halting it (the window closed, or Cancel) only asks the CLI to stop,
+     * and the call it followed settles once the CLI has, so a poll that waited for that went on asking every second from
+     * a window no longer there.
+     */
+    const current = () => following && generation.current === token;
     const ask = () => {
+      if (!current()) return;
       localEvalDownload(attempt)
         .then(
           (found) => {
-            if (!following || generation.current !== token) return;
+            if (!current()) return;
             if (found) {
               shown = true;
               // The row's bar and "48.0 MB of 147.0 MB", as Install shows its own download.
@@ -282,7 +289,7 @@ export function useLocalSequence({
           () => {},
         )
         .finally(() => {
-          if (following) next = setTimeout(ask, DOWNLOAD_EVERY_MS);
+          if (current()) next = setTimeout(ask, DOWNLOAD_EVERY_MS);
         });
     };
     ask();

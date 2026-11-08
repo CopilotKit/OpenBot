@@ -11,7 +11,8 @@
 #
 # Release assets come through the REST API's release-asset endpoint, which was answering while
 # github.com's download page was not, authenticated with GH_TOKEN when it is set, and from the
-# github.com download URL if the API fails. Each request retries 5xx and connection errors. Every
+# github.com download URL if the API fails. Each request goes through download.sh, which retries
+# 5xx, connection errors and a download that stalls, the way the app downloads. Every
 # file is checked against a pinned sha256 before it is put in place, and a mismatch fails at once
 # rather than trying the next source.
 #
@@ -40,7 +41,9 @@ tools="${2:-}"
 api="${PREFETCH_TAURI_API:-https://api.github.com}"
 github="${PREFETCH_TAURI_GITHUB:-https://github.com}"
 raw="${PREFETCH_TAURI_RAW:-https://raw.githubusercontent.com}"
-retries="${PREFETCH_TAURI_RETRIES:-5}"
+DOWNLOAD_RETRIES="${PREFETCH_TAURI_RETRIES:-${DOWNLOAD_RETRIES:-5}}"
+# shellcheck source-path=SCRIPTDIR source=download.sh
+source "$(dirname "${BASH_SOURCE[0]}")/download.sh"
 
 # Sent to the API only. curl does not carry a custom Authorization header to another host when it
 # follows the API's redirect to the file itself.
@@ -73,8 +76,7 @@ get() {
         ;;
       *) url="$source" ;;
     esac
-    if curl -fsSL --retry "$retries" --retry-all-errors ${headers[@]+"${headers[@]}"} \
-      -o "$out" "$url"; then
+    if download ${headers[@]+"${headers[@]}"} -o "$out" "$url"; then
       got="$(sha256 "$out")"
       if [ "$got" = "$want" ]; then return 0; fi
       echo "::error::$url served a file with sha256 $got, expected $want."

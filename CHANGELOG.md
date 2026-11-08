@@ -8,6 +8,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop keeps trying when GitHub stops sending the new version during an update. A
+  download that gets nothing for 30 seconds is tried again, six times in all with longer waits
+  between, for about four minutes. Before, three tries in a minute and a half gave up and put the
+  update back, though opening OpenBot again two minutes later downloaded it in seconds. A download
+  that keeps arriving is never cut off, however slow.
+- In the personal edition, an app's tools are named as a person would name them ("Get IMAP settings", not "Settings get imap"; "Fetch thread messages", not "Fetch message by thread id"; "Who am I"), each sentence says what the tool does ("Creates a new Gmail filter"), and a Bot's What it can do lists every app's tools the same way, so Routines reads "Complete goal, Create goal" and not "Marked a goal complete, Created a goal".
+- In the personal edition, a Bot's page names what runs it ("Runs on LangChain (LangGraph)") instead of the address of the harness OpenBot started for it, and its Pinned, Hidden, Reset and Delete rows no longer mention other people: Delete says you can still read your conversations with it.
+- In the personal edition, Settings, Setup says the Bot computer is Ready whenever the computer answers, including after a Bot has used it and its browser has closed. Before, it said "Not checked" and that a computer starts when a Bot first needs one.
+- In a narrow window, the sidebar closes when you pick a conversation, Bots, Connections, Teach a Bot, or an item in your account menu. Before, it stayed open over the page you opened until you clicked outside it.
+- OpenBot Desktop's Status window says the back end is "On this computer" instead of its stack id ("local-08ff56ec…"). The id is still in Copy diagnostics, for support.
+- On Windows, Ctrl+Q in the OpenBot Desktop window quits OpenBot, as the tray menu's Quit says. Before, Ctrl+Q in the window did nothing.
+- A skill picked from the `/` menu works for a built-in Bot on a Claude plan. The Bot answered
+  "Unknown command: /tide-report" without asking the model, because Claude Code took the message,
+  which starts with the skill's command, for a slash command of its own.
+- In the personal edition, the sentence under each tool on an app's page reads as a person would say it: no leading "Tool to", no words in capitals ("Permanently deletes", not "Permanently DELETES"), and no "by its ID" where the tool finds a thing by an ID nobody has to hand.
+- In the personal edition, an app's page names each tool in words, as Activity does ("Add label to email", not GMAIL_ADD_LABEL_TO_EMAIL), with the first sentence of what it does, and says "Connect your Gmail account so your Bots can use it" instead of a sentence about your documents; team Admin names the app's own account there too.
 - In a new conversation with two or more Bots in To:, typing @ before the first message lists those Bots, and a first message addressed to one goes to that Bot only. Before, @ said "No Bots in this conversation" until something had been sent.
 - In OpenBot Personal, a Bot's "What it can do" lists every skill you wrote on Settings, Skills under Your skills, with its switch. They were stored as nobody's, so the section read "No skills yet"; skills written before this become yours the next time OpenBot starts.
 - In the personal edition, Settings, Setup no longer mentions memory or an admin: the Back end row reads "Keeps your conversations and skills", More apps compares with the apps OpenBot comes with, and its links name Keys and Computer.

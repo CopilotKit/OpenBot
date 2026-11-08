@@ -27,6 +27,7 @@ import {
 } from "@/components/layout/page-shell";
 import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { ProposalDialog } from "@/components/learning/proposal-dialog";
+import { skillTitle } from "@/lib/learning/display";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -416,6 +417,11 @@ export function LearningPage() {
                       ? "Choose a Bot, or set a default container."
                       : "No Learning container is assigned."}
               </p>
+              {snapshot.modelProblem && (
+                <p role="alert" className="text-destructive text-sm">
+                  {snapshot.modelProblem}
+                </p>
+              )}
               <dl className="grid grid-cols-2 gap-4 rounded-lg border p-4 text-sm">
                 {(
                   [
@@ -612,7 +618,9 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
                   <IconSparkles />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>{proposal.title}</ItemTitle>
+                  <ItemTitle>
+                    {skillTitle(proposal.title, proposal.description)}
+                  </ItemTitle>
                   <ItemDescription>{proposal.description}</ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -799,7 +807,9 @@ function PublishedSkills({ agentId }: { agentId?: string }) {
                   <IconSparkles />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>{skill.name}</ItemTitle>
+                  <ItemTitle>
+                    {skillTitle(skill.name, skill.description)}
+                  </ItemTitle>
                   <ItemDescription>{skill.description}</ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -812,6 +822,13 @@ function PublishedSkills({ agentId }: { agentId?: string }) {
       )}
       <LearnedSkillDialog
         name={open}
+        title={(() => {
+          // The title its row showed.
+          const shown = skills.data?.skills.find(
+            (skill) => skill.name === open,
+          );
+          return shown ? skillTitle(shown.name, shown.description) : undefined;
+        })()}
         onClose={() => setOpen(null)}
         source={{ kind: "admin", agentId }}
       />

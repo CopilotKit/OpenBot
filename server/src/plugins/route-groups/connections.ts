@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import type { AppVariables } from "../../auth/guards";
 import { reasonWithoutStatement } from "../../db/query-failure";
+import { appsPage, askAdminTo } from "../../edition";
 import { normalizeArcadeError } from "../arcade-adapter";
 import {
   BrokerAccountHeldError,
@@ -432,7 +433,7 @@ export function mountConnectionRoutes({
         if (published.length === 0) {
           return context.json(
             {
-              error: `${row.title} doesn't ask for anything to connect with, so no account was made. Ask an admin to remove it under Plugins and add it again.`,
+              error: `${row.title} doesn't ask for anything to connect with, so no account was made. ${askAdminTo(`remove it under ${appsPage()} and add it again`)}.`,
             },
             400,
           );
@@ -510,7 +511,7 @@ export function mountConnectionRoutes({
           const optional = published.map((field) => field.name).join(", ");
           return context.json(
             {
-              error: `${row.title} marks nothing as required (only ${optional}), so no account was made. Ask an admin to remove it under Plugins and add it again.`,
+              error: `${row.title} marks nothing as required (only ${optional}), so no account was made. ${askAdminTo(`remove it under ${appsPage()} and add it again`)}.`,
             },
             400,
           );
@@ -693,7 +694,7 @@ export function mountConnectionRoutes({
       if (kind === "unreadable") {
         return context.json(
           {
-            error: `OpenBot can't tell how ${row.title} connects, so no account was made. Ask an admin to remove it under Plugins and add it again.`,
+            error: `OpenBot can't tell how ${row.title} connects, so no account was made. ${askAdminTo(`remove it under ${appsPage()} and add it again`)}.`,
           },
           400,
         );

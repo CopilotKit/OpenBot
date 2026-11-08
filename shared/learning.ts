@@ -47,6 +47,8 @@ export type LearningOverview = {
     candidates: string | null;
     runs: string | null;
   };
+  /** Why Learning can't run on this machine's model, and what to do. Absent when it can. */
+  modelProblem?: string;
 };
 
 /** A Skill change Intelligence proposed, as Admin → Automatic learning and Settings → Learning list it. */
@@ -239,6 +241,8 @@ export type LearningRunSummary = {
   proposals: number | null;
   insights: number | null;
   failureCode: string | null;
+  /** Why a failed run stopped, said for the person, with what to do. Null or absent unless it failed. */
+  failure?: string | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -249,6 +253,25 @@ export type LearnedSkillContent = {
   name: string;
   description: string;
   files: { path: string; text: string | null }[];
+};
+
+/** A recording of the person's own that a published Skill was learned from. */
+export type LearnedSkillRecording = {
+  /** Intelligence's id for the recording (its trajectory). */
+  id: string;
+  /** The recording's title, or null when it has none or it could not be read. */
+  title: string | null;
+  /** False when Intelligence no longer has the recording. */
+  available: boolean;
+};
+
+/**
+ * One published Skill as Settings, Learning opens it. `recordings` names the person's own recordings it was learned
+ * from, read through the proposals Intelligence published it from; absent where that could not be read or does not
+ * apply (a skill learned from conversations, or an admin's view).
+ */
+export type LearnedSkillDetail = LearnedSkillContent & {
+  recordings?: LearnedSkillRecording[];
 };
 
 /** Where a person's Learning comes from: a container of recordings or of conversations. */

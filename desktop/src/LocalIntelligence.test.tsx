@@ -1004,6 +1004,31 @@ test("polling stops when cancelled", async () => {
   expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
 });
 
+/*
+ * Closing the window halts the setup and asks the CLI to stop, but the call it made settles only once the CLI has. The
+ * download it followed was asked about every second until then, from a window no longer there: in App.test.tsx those
+ * asks landed in later tests, one of which counts every call the window makes while it quits.
+ */
+test("a closed window stops asking how far the download has got, before the CLI call it followed has settled", async () => {
+  invokeHandler = async (command) => {
+    if (command === "set_up_local_eval") return new Promise(() => {});
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    throw new Error(`unexpected ${command}`);
+  };
+  const screen = view();
+  const asked = () =>
+    invokeCalls.filter((call) => call.command === "local_eval_download").length;
+  await waitFor(() => expect(asked()).toBe(1));
+  screen.unmount();
+  expect(
+    invokeCalls.filter((call) => call.command === "cancel_local_eval"),
+  ).toHaveLength(1);
+  // Past the next ask (DOWNLOAD_EVERY_MS, one second): none comes.
+  await new Promise((resolve) => setTimeout(resolve, 1_300));
+  expect(asked()).toBe(1);
+});
+
 test("a stopped stack is started, then polled", async () => {
   const stopped = report({ readiness: "stopped", licence: "valid" });
   invokeHandler = async (command, args) => {

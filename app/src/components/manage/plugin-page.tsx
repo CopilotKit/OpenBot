@@ -79,6 +79,7 @@ import {
   botSharedAppsQueryOptions,
   describeApproval,
 } from "@/lib/plugins/shared-use";
+import { toolInWords } from "@/lib/plugins/tool-words";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -140,6 +141,26 @@ function BotApprovalText({
     <span className="text-muted-foreground text-xs">
       {app.approval ? describeApproval(app.approval) : "Not approved"}
     </span>
+  );
+}
+
+/**
+ * One tool's row content in the personal edition: its words, as Activity names the same tool, and
+ * the first sentence of what it does. Admin keeps the stored name. See `toolInWords`.
+ */
+function ToolInWords({
+  serverId,
+  tool,
+}: {
+  serverId: string;
+  tool: { name: string; description: string };
+}) {
+  const { label, summary } = toolInWords(serverId, tool);
+  return (
+    <>
+      <ItemTitle>{label}</ItemTitle>
+      {summary ? <ItemDescription>{summary}</ItemDescription> : null}
+    </>
   );
 }
 
@@ -395,8 +416,9 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
 
   /* Bound once because the brokered row below is told it twice — once inside the whole
      disconnected sentence and once on its own — and two copies of it would drift. */
-  const reassurance =
-    "Setup is complete without it, and it reaches your documents only.";
+  /* It names this app's own account. It said "your documents" on every app, Gmail included,
+     because it was written for Google Drive. */
+  const reassurance = `Setup is complete without it, and it reaches only your own ${title} account.`;
 
   /*
    * A SHARED APP'S ROW IS THE TEAM ACCOUNT, NOT THIS ADMINISTRATOR'S.
@@ -453,6 +475,13 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
      */
     checkable: accountRow?.checkable ?? false,
   });
+  /*
+   * The app the brokered sentences name in the personal edition, where the one person reading is
+   * spoken to as "you". Undefined in the team edition, whose sentences are about each person.
+   */
+  const brokeredApp = personal
+    ? { title, kind: brokeredAccount.kind }
+    : undefined;
 
   /** Adding is two writes when a token was typed: the credential, then the record pointing at it. */
   const add = async () => {
@@ -798,16 +827,21 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
       {server ? (
         <PageSection
           description={
+            /* The personal edition has one person, so each sentence speaks to them and names nobody else. */
             auth === "user-oauth"
-              ? `This vendor answers as whoever is asking. ${personal ? "OpenBot" : "The deployment"} registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see.`
+              ? personal
+                ? `Connect your ${title} account through OpenBot. OpenBot registers an OAuth client, and your Bots see only what you can see.`
+                : "This vendor answers as whoever is asking. The deployment registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see."
               : auth === "builtin"
-                ? `Built into ${paths.deploymentName}. There is no vendor to reach and no credential to keep. A call runs as whoever asked.`
+                ? `Built into ${paths.deploymentName}. There is no vendor to reach and no credential to keep. ${personal ? "A call runs as you." : "A call runs as whoever asked."}`
                 : auth === "brokered"
                   ? /* The row below says how, at length. This says whose account it is, which is the part that decides what an admin has to do here — which is nothing. */
-                    brokeredConnectionDescription(provider)
+                    brokeredConnectionDescription(provider, brokeredApp)
                   : auth === "person-entra"
                     ? "This server answers as whoever is asking. Each call carries a token Microsoft Entra issues for that person, so a Bot only sees what they can see."
-                    : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
+                    : personal
+                      ? `What OpenBot sends to ${title}. Your Bots all use it.`
+                      : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
           }
           title="Connection"
         >
@@ -866,12 +900,12 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 <ItemContent>
                   <ItemTitle>How this is reached</ItemTitle>
                   <ItemDescription>
-                    {brokeredReach(provider, paths.deploymentName).description}
+                    {brokeredReach(provider, brokeredApp).description}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
-                    {brokeredReach(provider, paths.deploymentName).badge}
+                    {brokeredReach(provider, brokeredApp).badge}
                   </span>
                 </ItemActions>
               </Item>
@@ -1021,7 +1055,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 ) : shared ? (
                   <BrokeredAccountRow
                     account={brokeredAccount}
-                    deployment={paths.deploymentName}
+                    edition={paths.edition}
                     connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot with these tools acts as this account.`}
                     disconnectedDescription="No team account is connected. Bots with these tools are refused."
                     heading="Team account"
@@ -1032,18 +1066,29 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 ) : (
                   <BrokeredAccountRow
                     account={brokeredAccount}
-                    deployment={paths.deploymentName}
+                    edition={paths.edition}
                     /* Said beside the button rather than after it: disconnecting ends the account
                        at Composio, so what it undoes is not the row here but the grant on this
-                       person's mailbox, and connecting again is a fresh consent. */
-                    connectedDescription={`Connected. A Bot with these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`}
-                    disconnectedDescription={`Connect your own account to try this connector. ${reassurance}`}
+                       person's mailbox, and connecting again is a fresh consent. Every Bot has
+                       every tool in the personal edition, as the OAuth row below says. */
+                    connectedDescription={
+                      personal
+                        ? `Connected. Your Bots use your ${title} as you. ${brokeredDisconnectNote(provider)}`
+                        : `Connected. A Bot with these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`
+                    }
+                    /* One person: connecting is what lets their Bots use it, as the OAuth row
+                       below says, and there is no setup it could be beside. */
+                    disconnectedDescription={
+                      personal
+                        ? `Connect your ${title} account so your Bots can use it.`
+                        : `Connect your own account to try this connector. ${reassurance}`
+                    }
                     /* The half of the line above that is true whichever way this app connects.
                        An app whose key somebody types gets a different first sentence from the
                        row — pressing Connect opens a form rather than leaving for a consent
                        screen — and an administrator still has to be told they are not the step
                        that finishes the connector. */
-                    disconnectedReassurance={reassurance}
+                    disconnectedReassurance={personal ? undefined : reassurance}
                     provider={provider}
                     title={title}
                   />
@@ -1068,7 +1113,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                             : `Connect your ${title} account so your Bots can use it.`
                           : youConnected
                             ? `Connected. A Bot with these tools uses your ${title} as you. Everybody else connects their own.`
-                            : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
+                            : `Connect your own account to try this connector. ${reassurance}`}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
@@ -1179,8 +1224,9 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
               )}
               {!plugins.data?.redirectUri ? (
                 <p className="mt-3 text-destructive text-sm" role="alert">
-                  {atStart(paths.deploymentName)} has no public URL, so nobody
-                  can finish connecting. Set OPENBOT_PUBLIC_URL.
+                  {atStart(paths.deploymentName)} has no public URL, so{" "}
+                  {personal ? "you can't" : "nobody can"} finish connecting. Set
+                  OPENBOT_PUBLIC_URL.
                 </p>
               ) : server?.dynamicClient ? null : (
                 /* Selectable and monospaced: it is copied by hand into somebody else's console. */
@@ -1240,7 +1286,10 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
           }
           title="Tools"
         >
-          <SkippedToolsNotice names={server.skippedTools ?? []} />
+          <SkippedToolsNotice
+            names={server.skippedTools ?? []}
+            serverId={personal ? key : undefined}
+          />
           {server.tools.length === 0 ? (
             <PageEmpty icon={IconTool} title="No tools listed">
               {server.lastError ?? "Refresh tools to check again."}
@@ -1260,10 +1309,16 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                     size="sm"
                   >
                     <ItemContent>
-                      <ItemTitle className="font-mono text-xs">
-                        {tool.name}
-                      </ItemTitle>
-                      <ItemDescription>{tool.description}</ItemDescription>
+                      {personal ? (
+                        <ToolInWords serverId={key} tool={tool} />
+                      ) : (
+                        <>
+                          <ItemTitle className="font-mono text-xs">
+                            {tool.name}
+                          </ItemTitle>
+                          <ItemDescription>{tool.description}</ItemDescription>
+                        </>
+                      )}
                     </ItemContent>
                     <ItemActions>
                       {/*

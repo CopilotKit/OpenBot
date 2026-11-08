@@ -12,6 +12,7 @@ pub mod env;
 pub mod harness;
 pub mod host_access;
 pub mod install;
+pub mod learning_model;
 pub mod local_eval;
 pub mod local_eval_state;
 pub mod local_images;
