@@ -96,10 +96,9 @@ export function sanitizeSeededHistory(
    * ONLY A USER ROW IS A BOUNDARY, though the API also stops at a system row. That is because it
    * checks the converted messages, and `BuiltInAgent` drops every `system` and `developer` row on
    * the way there unless `forwardSystemMessages` or `forwardDeveloperMessages` is set, which this
-   * deployment never does (`builtInAgentConfiguration` in `copilot.ts`). A skill's instructions
-   * arrive as a system row the browser inserts ahead of the person's message, so a call answered
-   * after one of those is answered as far as the model call is concerned, and treating the row as
-   * a boundary would drop a call the request would have carried fine. If either forwarding flag is
+   * deployment never does (`builtInAgentConfiguration` in `copilot.ts`). So a call answered after a
+   * system row a browser inserted is answered as far as the model call is concerned, and treating
+   * the row as a boundary would drop a call the request would have carried fine. If either forwarding flag is
    * ever turned on, that role becomes a boundary here too.
    */
   const boundaryAfter: number[] = new Array(history.length).fill(

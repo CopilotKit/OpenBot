@@ -69,10 +69,7 @@ import {
 } from "@/lib/copilot/thread-messages";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
-import {
-  skillInstructionsFor,
-  useSkillCommands,
-} from "@/lib/plugins/skill-commands";
+import { useSkillCommands } from "@/lib/plugins/skill-commands";
 import {
   askChannelAgent,
   messageText,
@@ -395,12 +392,7 @@ export function ChannelChat({
    */
   const [first] = useState(() => {
     const pending = takeFirstMessage(channel.id);
-    return pending
-      ? {
-          seed: seedMessage(pending.text, newId()),
-          skillInstructions: pending.skillInstructions,
-        }
-      : null;
+    return pending ? { seed: seedMessage(pending.text, newId()) } : null;
   });
   const seed = first?.seed ?? null;
 
@@ -817,7 +809,6 @@ export function ChannelChat({
    */
   const deliver = async (
     trimmed: string,
-    skillInstructions: string[],
     attachments: Attachment[],
     sent?: Message,
   ) => {
@@ -876,24 +867,12 @@ export function ChannelChat({
     awaitingReply.current = true;
 
     /*
-     * THE SKILL GOES IN FRONT OF THE MESSAGE, AS A SYSTEM TURN. A `/` chip is one token in the
-     * composer; what it stands for is the instruction added here, ahead of what the person typed, so
-     * the Bot reads the job before the request.
-     *
-     * A system message rather than text prepended to theirs, because the two are not the same kind
-     * of thing: the transcript should show what a person said, and pasting the skill into their
-     * words puts sentences in their mouth and makes the reply quote instructions back at them.
-     *
-     * `transcriptMessages` draws user and assistant turns, so this never appears on screen — the
-     * chip is what says a skill was used, and it stays visible in the message they sent.
+     * NO SKILL ROW. A `/` skill stays at the start of the person's words as `/<command>`, and the
+     * server gives the Bot that skill's stored instructions in the instructions it writes for the run
+     * (server/src/plugins/picked-skill.ts). A system row added here never reached a Bot as an
+     * instruction: a built-in Bot's runtime drops it, and every harness reads one the browser wrote
+     * as conversation data.
      */
-    for (const instruction of skillInstructions) {
-      target.addMessage({
-        content: instruction,
-        id: newId(),
-        role: "system",
-      });
-    }
 
     const voiceHistory = voiceArchiveContext(priorCalls);
     // Older development calls used a system row, which built-in agents discard.
@@ -998,7 +977,6 @@ export function ChannelChat({
    */
   const say = async (
     text: string,
-    skillInstructions: string[] = [],
     attachments: Attachment[] = [],
     /** The message to send for `text`, when it is more than the words: an answer to a question. */
     sent?: Message,
@@ -1022,12 +1000,7 @@ export function ChannelChat({
       void setChannelBusy({ channelId: channel.id, busy: true });
     }
     try {
-      const reply = await deliver(
-        trimmed,
-        skillInstructions,
-        attachments,
-        sent,
-      );
+      const reply = await deliver(trimmed, attachments, sent);
       /*
        * The person left while this turn was running (holding control of the Bot's browser, say) and the turn went on
        * without this screen. The run-finished subscription that tells the roster what the Bot said went with it, so the
@@ -1153,7 +1126,7 @@ export function ChannelChat({
       inConversation: idle,
     });
     if (continueHere) {
-      await say(text, [], [], sent);
+      await say(text, [], sent);
       return;
     }
     setAnsweredId(sent.id);
@@ -1229,11 +1202,10 @@ export function ChannelChat({
     // Swallowed for the reason `askFromComponent` above records: `say` throws on a failed turn, and
     // the seed has no box to go back into — it was typed on a screen that has already navigated
     // away. The transcript keeps the seeded message and the notice under it says what happened.
-    // Its `/` skills go with it, so they arrive in front of it as they do for a message typed here.
+    // A `/` skill is still at the start of its words, where the server finds it.
     void sayRef
       .current(
         typeof pending.seed.content === "string" ? pending.seed.content : "",
-        pending.skillInstructions,
       )
       .catch(() => undefined);
 
@@ -1401,23 +1373,18 @@ export function ChannelChat({
               // channel is pinned to one `runtimeAgentId` for the life of its thread, so honouring a
               // per-message mention is a change to that binding, not to the composer.
               //
-              // `commandIds` are the `/` chips that survived into the send, in the order they were
-              // typed; see `skillInstructionsFor`.
-              const skillInstructions = skillInstructionsFor(
-                draft.commandIds,
-                skillCommands,
-              );
-
-              // An answer is words only: a draft carrying files or a skill is sent as a turn.
+              // An answer is words only: a draft carrying files or a `/` skill is sent as a turn. The
+              // skill stays at the start of the words as `/<command>`, where the server finds it and
+              // gives the Bot its instructions (server/src/plugins/picked-skill.ts).
               const asked =
-                draft.attachments.length === 0 && skillInstructions.length === 0
+                draft.attachments.length === 0 && draft.commandIds.length === 0
                   ? await waitingQuestion()
                   : undefined;
               if (asked) {
                 await answerTo(draft.text, asked);
                 return;
               }
-              await say(draft.text, skillInstructions, draft.attachments);
+              await say(draft.text, draft.attachments);
             }}
             /**
              * Stop through the core so the abort signal reaches frontend tools; `say` repairs any
