@@ -18,6 +18,10 @@ import { createBotLifecycleRoutes } from "../src/agents/lifecycle-routes";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
+import {
+  createCarriedOnTurns,
+  waitForReplyInTranscript,
+} from "../src/approvals/carried-on";
 import { createApprovalResumeTick } from "../src/approvals/resume-sweep";
 import { createApprovalRoutes } from "../src/approvals/routes";
 import { createApprovalService } from "../src/approvals/service";
@@ -147,6 +151,56 @@ const providerDown = (input: RunAgentInput) =>
 
 let script: (input: RunAgentInput) => BaseEvent[] = (input) =>
   reply(input, "Done.");
+/**
+ * Which runs a model that works until it is stopped answers, rather than the script: it starts, says
+ * a few words and holds its stream open until the run is aborted. None unless a test says so.
+ */
+let working: ((input: RunAgentInput) => boolean) | undefined;
+/** Runs the working model has started, by thread. */
+const workingIn: string[] = [];
+function workUntilStopped(input: RunAgentInput, signal?: AbortSignal | null) {
+  workingIn.push(input.threadId);
+  const encoder = new TextEncoder();
+  const line = (event: unknown) =>
+    encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          line({
+            type: EventType.RUN_STARTED,
+            threadId: input.threadId,
+            runId: input.runId,
+          }),
+        );
+        controller.enqueue(
+          line({
+            type: EventType.TEXT_MESSAGE_START,
+            messageId: "working",
+            role: "assistant",
+          }),
+        );
+        controller.enqueue(
+          line({
+            type: EventType.TEXT_MESSAGE_CONTENT,
+            messageId: "working",
+            delta: "Looking through the places near",
+          }),
+        );
+        const end = () => {
+          try {
+            controller.close();
+          } catch {
+            // Already closed.
+          }
+        };
+        if (signal?.aborted) end();
+        signal?.addEventListener("abort", end, { once: true });
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
 const asked: RunAgentInput[] = [];
 const persisted: Message[][] = [];
 const initiators: unknown[] = [];
@@ -240,6 +294,7 @@ const runTurn = createTurnRunner({
       fetch: async (_url, init) => {
         const input = JSON.parse(String(init?.body)) as RunAgentInput;
         asked.push(input);
+        if (working?.(input)) return workUntilStopped(input, init?.signal);
         return new Response(
           script(input)
             .map((event) => `data: ${JSON.stringify(event)}\n\n`)
@@ -305,22 +360,28 @@ const tasks = createTaskRunner({
   retryMs: 0,
 });
 
-const resumeApproval = createApprovalResumeTick({
-  approvalQueue: queue,
-  approvalOwner: `${prefix}-approval`,
-  approvalService,
-  executeApprovedAction: (action) =>
-    sendMessage(action.args, action.actorId, action.botId),
-  database,
-  // Read only for a responsibility's waiting run, which these turns never are.
-  responsibilityStore: {} as ResponsibilityStore,
-  // Not a group conversation: carried on as one Bot's, as the real one does for these.
-  groupConversations: { continueWaiting: (_approvalId, run) => run() },
-  approvalContinuationRunner: runTurn,
-  channelStore,
-  actorFor,
-  notify: async () => undefined,
-});
+/** The approval resume loop, as index.ts builds it, with whatever a test adds or swaps in. */
+const resumeTick = (
+  extra: Partial<Parameters<typeof createApprovalResumeTick>[0]> = {},
+) =>
+  createApprovalResumeTick({
+    approvalQueue: queue,
+    approvalOwner: `${prefix}-approval`,
+    approvalService,
+    executeApprovedAction: (action) =>
+      sendMessage(action.args, action.actorId, action.botId),
+    database,
+    // Read only for a responsibility's waiting run, which these turns never are.
+    responsibilityStore: {} as ResponsibilityStore,
+    // Not a group conversation: carried on as one Bot's, as the real one does for these.
+    groupConversations: { continueWaiting: (_approvalId, run) => run() },
+    approvalContinuationRunner: runTurn,
+    channelStore,
+    actorFor,
+    notify: async () => undefined,
+    ...extra,
+  });
+const resumeApproval = resumeTick();
 
 const app = new Hono<{ Variables: AppVariables }>();
 app.route(
@@ -1062,6 +1123,180 @@ describe("where a task stands", () => {
         "Reply to Sam about the spec\n\nSam asked for the spec by Friday.\n\nSource: https://mail.example.test/m/1",
     });
     expect((await taskStore.get(owner.id, id)).status).toBe("ready_for_review");
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * The turn the server carries a conversation on in, once the person has decided its approval.
+ * ---------------------------------------------------------------------------------------------- */
+
+/** A task whose turn asked to send a reply and stopped for Allow once. */
+async function waitingOnApproval(replyText: string) {
+  const { owner, item } = await seed();
+  await approvalStore.setEnabled(owner.id, true);
+  script = (input) =>
+    input.messages.at(-1)?.role === "tool"
+      ? reply(input, replyText)
+      : callTool(input, "send_message", {
+          to: "sam@example.test",
+          body: "Friday works for the spec.",
+        });
+  const task = await start(owner, item.id);
+  await tasks.idle();
+  const [request] = await database
+    .select()
+    .from(approvalRequests)
+    .where(
+      and(
+        eq(approvalRequests.ownerUserId, owner.id),
+        eq(approvalRequests.status, "pending"),
+      ),
+    );
+  if (!request) throw new Error("No approval was asked for.");
+  return { owner, task, request, threadId: request.action.threadId };
+}
+
+async function until(done: () => boolean, what: string) {
+  const deadline = Date.now() + 10_000;
+  while (!done()) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
+    await Bun.sleep(10);
+  }
+}
+
+describe("carried on after the person decides", () => {
+  /*
+   * Found on the Mac: Stop after Allow once stayed on screen and the whole answer arrived anyway. The
+   * Stop reached the runtime's runner, which holds only browser runs; the turn the resume loop runs
+   * is held by another. Run through the carried-on turns, the Stop that `carried-on-stop.test.ts`
+   * sends through the runtime's route reaches it, and the decision is finished rather than tried
+   * again, which would carry the conversation on a second time.
+   */
+  test("a person's Stop stops the turn the conversation is carried on in, and the decision is finished, not tried again", async () => {
+    const { owner, request, threadId } = await waitingOnApproval(
+      "I sent your reply to Sam.",
+    );
+    working = (input) =>
+      input.threadId === threadId && input.messages.at(-1)?.role === "tool";
+    const carried = createCarriedOnTurns();
+    try {
+      await approvalService.decide(owner.id, request.id, "allow_once");
+      const resuming = resumeTick({ carriedOn: carried })();
+      await until(
+        () => workingIn.includes(threadId),
+        "the carried-on turn to start",
+      );
+
+      expect(await carried.stop(threadId)).toBe(true);
+      await resuming;
+
+      expect((await approvalStore.get(owner.id, request.id)).status).toBe(
+        "completed",
+      );
+      const [resume] = await database
+        .select()
+        .from(workItems)
+        .where(
+          and(
+            eq(workItems.kind, "approval.resume"),
+            eq(workItems.key, request.id),
+          ),
+        );
+      expect(resume?.finishedAt).not.toBeNull();
+      // Run once: the stopped turn is not started again.
+      expect(workingIn.filter((thread) => thread === threadId)).toHaveLength(1);
+    } finally {
+      working = undefined;
+    }
+  });
+
+  /*
+   * Between the decision and the turn, the server runs the approved action. A Stop then cannot undo
+   * the action, which was approved, but the conversation is not carried on after it.
+   */
+  test("a Stop while the approved action runs keeps the conversation from being carried on after it", async () => {
+    const { owner, request, threadId } = await waitingOnApproval(
+      "I sent your reply to Sam.",
+    );
+    const carried = createCarriedOnTurns();
+    const before = sent.length;
+    const continued = () =>
+      asked.filter(
+        (input) =>
+          input.threadId === threadId && input.messages.at(-1)?.role === "tool",
+      ).length;
+    const continuedBefore = continued();
+
+    await approvalService.decide(owner.id, request.id, "allow_once");
+    await resumeTick({
+      carriedOn: carried,
+      executeApprovedAction: async (action) => {
+        expect(await carried.stop(threadId)).toBe(true);
+        return sendMessage(action.args, action.actorId, action.botId);
+      },
+    })();
+
+    // The approved send happened, once; the Bot was not asked to go on.
+    expect(sent.length).toBe(before + 1);
+    expect(continued()).toBe(continuedBefore);
+    expect((await approvalStore.get(owner.id, request.id)).status).toBe(
+      "completed",
+    );
+  });
+
+  /*
+   * Found on the Mac: in a folder conversation the reply after Allow once read "...shared with" until
+   * the conversation was opened again. The conversation reads its history when the channel says the
+   * Bot replied, the platform's read of a thread can trail the run that wrote it, and a message the
+   * browser already holds is never read twice. So the channel is told only once the stored history
+   * holds the reply to its end.
+   */
+  test("the conversation is told the Bot replied only once its stored history holds the whole reply", async () => {
+    const whole =
+      "I saved the notes to your folder and shared them with Ana and the design team.";
+    const { owner, task, request, threadId } = await waitingOnApproval(whole);
+    // The platform's read, a beat behind the run: half the reply twice, then all of it.
+    let reads = 0;
+    let holdsWhole = false;
+    const transcript = async (input: { threadId: string }) => {
+      expect(input.threadId).toBe(threadId);
+      reads += 1;
+      const said =
+        reads < 3 ? whole.slice(0, whole.indexOf("with") + 4) : whole;
+      holdsWhole = said === whole;
+      return [{ role: "assistant", content: said }];
+    };
+    const told: boolean[] = [];
+    const resume = resumeTick({
+      channelStore: {
+        ...channelStore,
+        recordActivity: (
+          ...args: Parameters<typeof channelStore.recordActivity>
+        ) => {
+          told.push(holdsWhole);
+          return channelStore.recordActivity(...args);
+        },
+      },
+      transcriptHolds: waitForReplyInTranscript({
+        read: transcript,
+        everyMs: 5,
+      }),
+    });
+
+    await approvalService.decide(owner.id, request.id, "allow_once");
+    for (let tick = 0; tick < 10; tick += 1) {
+      await resume();
+      if (
+        (await approvalStore.get(owner.id, request.id)).status === "completed"
+      )
+        break;
+    }
+
+    // Told once, and only after the read that a refreshing conversation makes holds all of it.
+    expect(told).toEqual([true]);
+    expect(await conversation(task.channelId)).toMatchObject({
+      lastMessage: whole,
+    });
   });
 });
 

@@ -83,6 +83,21 @@ let status: "pending" | "approved" | "consumed" | "completed";
 /** When the person decided it, as the server stamps it; null while it waits. */
 let decidedAt: string | null;
 let decisions: string[] = [];
+/** The thread's history as the platform's read returns it now. */
+let stored: Message[];
+/** How many times the conversation has read it. */
+let historyReads = 0;
+const searched = {
+  id: "search-result",
+  role: "tool",
+  toolCallId: "call-search",
+  content: '[{"name":"Blue Bottle","rating":4.6}]',
+} satisfies Message;
+const WHOLE =
+  "Blue Bottle on Market St is the closest, a four minute walk, and it is open until six today.";
+/** The reply the server's turn wrote, as much of it as the platform's read holds. */
+const said = (content: string) =>
+  ({ id: "reply-maps", role: "assistant", content }) satisfies Message;
 let stops: string[] = [];
 let originalFetch: typeof fetch;
 
@@ -215,10 +230,10 @@ beforeAll(() => {
         return new NativeResponse(null, { status: 204 });
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (/\/threads\/[^/]+\/messages$/.test(url.pathname))
-        return NativeResponse.json({
-          messages: [ask, geocode, geocoded, search],
-        });
+      if (/\/threads\/[^/]+\/messages$/.test(url.pathname)) {
+        historyReads += 1;
+        return NativeResponse.json({ messages: stored });
+      }
       throw new Error(`Unexpected fixture request: ${method} ${url.pathname}`);
     },
     {
@@ -241,6 +256,7 @@ afterAll(async () => {
 function mounting() {
   status = "pending";
   decidedAt = null;
+  stored = [ask, geocode, geocoded, search];
   decisions = [];
   stops = [];
   queryClient.setQueryData(channelKeys.list(), {
@@ -338,3 +354,92 @@ test("a decision older than the server's longest carried-on turn no longer count
     false,
   );
 });
+
+/** Decide, and let the server finish its turn, with `history` what a read of the thread returns. */
+async function carriedOnThenEnded(
+  view: ReturnType<typeof mounting>,
+  history: Message[],
+) {
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  const allow = await view.findByRole("button", { name: "Allow once" });
+  /*
+   * The reads opening the conversation makes are over (its restore, and the refresh that tries again
+   * for two and a quarter seconds), so nothing but the end of the server's turn reads the thread again.
+   */
+  let reads = -1;
+  while (reads !== historyReads) {
+    reads = historyReads;
+    await act(() => Bun.sleep(2_000));
+  }
+  await user.click(allow);
+  await waitFor(() =>
+    expect(view.container.querySelector(STOP)).not.toBeNull(),
+  );
+  stored = history;
+  status = "completed";
+  await act(() => queryClient.invalidateQueries({ queryKey: ["approvals"] }));
+  await waitFor(() => expect(view.container.querySelector(STOP)).toBeNull());
+}
+
+/*
+ * A turn the person stopped has no reply for the roster to announce, and the roster is what told
+ * the conversation to read its history again. So what the turn did say only appeared on reopening.
+ */
+test("when the server's turn ends, the conversation shows what it wrote without being opened again", async () => {
+  const view = mounting();
+  await carriedOnThenEnded(view, [
+    ask,
+    geocode,
+    geocoded,
+    search,
+    searched,
+    said(WHOLE),
+  ]);
+  expect(await view.findByText(WHOLE)).toBeTruthy();
+}, 20_000);
+
+/*
+ * Found on the Mac: a reply read while the platform was still catching up read "...shared with" until
+ * the conversation was opened again, because a message the conversation already holds was never read
+ * twice. A later read now lengthens it.
+ */
+test("a reply first read half written is shown whole once a later read holds all of it", async () => {
+  const view = mounting();
+  const half = WHOLE.slice(0, WHOLE.indexOf("walk") + 4);
+  await carriedOnThenEnded(view, [
+    ask,
+    geocode,
+    geocoded,
+    search,
+    searched,
+    said(half),
+  ]);
+  expect(await view.findByText(half)).toBeTruthy();
+
+  // The platform catches up, and the roster says the Bot replied.
+  stored = [ask, geocode, geocoded, search, searched, said(WHOLE)];
+  act(() => {
+    queryClient.setQueryData(channelKeys.list(), {
+      pages: [
+        {
+          channels: [
+            {
+              ...channel,
+              summary: null,
+              lastMessage: WHOLE,
+              lastMessageAgentId: "maps-bot",
+              lastMessageAt: "2026-11-08T09:01:00.000Z",
+              createdAt: "2026-11-08T08:59:00.000Z",
+              pinned: false,
+              lastReadAt: null,
+            },
+          ],
+          nextCursor: null,
+        },
+      ],
+      pageParams: [""],
+    });
+  });
+  expect(await view.findByText(WHOLE)).toBeTruthy();
+  expect(view.queryByText(half)).toBeNull();
+}, 20_000);

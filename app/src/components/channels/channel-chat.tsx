@@ -204,6 +204,12 @@ export function channelHistoryNotice({
  * following shared anchor, append the missing tail: the store cannot place it among local-only rows.
  * Return the original array when nothing was added so refreshes can wait for the store to catch up.
  *
+ * ONE KIND OF LOCAL CONTENT GIVES WAY: a Bot's words that the store holds more of. A reply this tab
+ * never streamed (a turn the server carried on) is known here only from a read, and a read taken
+ * while the platform was still catching up holds it half written. Kept as it was, "...shared with"
+ * stayed the reply until the conversation was opened again. Only a reply the stored copy carries on
+ * from is replaced, so a read can lengthen what is on screen and never cut it short or change it.
+ *
  * Exported for its tests.
  */
 export function mergeStoredMessages(
@@ -245,9 +251,28 @@ export function mergeStoredMessages(
       pending.push(message);
     }
   }
-  if (before.size === 0 && pending.length === 0) return local;
+  const storedById = new Map(stored.map((message) => [message.id, message]));
+  let lengthened = false;
+  const current = local.map((message) => {
+    const later = storedById.get(message.id);
+    if (
+      message.role !== "assistant" ||
+      later?.role !== "assistant" ||
+      typeof message.content !== "string" ||
+      typeof later.content !== "string" ||
+      later.content.length <= message.content.length ||
+      !later.content.startsWith(message.content)
+    )
+      return message;
+    lengthened = true;
+    return { ...message, content: later.content };
+  });
+  if (!lengthened && before.size === 0 && pending.length === 0) return local;
   return [
-    ...local.flatMap((message) => [...(before.get(message.id) ?? []), message]),
+    ...current.flatMap((message) => [
+      ...(before.get(message.id) ?? []),
+      message,
+    ]),
     ...pending,
   ];
 }
@@ -566,6 +591,8 @@ export function ChannelChat({
    * Retried briefly, because the roster is patched when the turn is on record with the runner and
    * the platform's read of the thread can be a beat behind it.
    */
+  /* The read below, for a turn that ends without the roster saying so: see `carryingOn`. */
+  const pullHistoryRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const authoredActivity = (): ChannelActivitySignature | null => {
       const cache = queryClient.getQueryData<{
@@ -649,6 +676,7 @@ export function ChannelChat({
      * streamed here, so it is read: see `turns-finished-away.ts`.
      */
     const offFinishedAway = onTurnFinishedAway(channel.id, pull);
+    pullHistoryRef.current = pull;
     void (async () => {
       await joinGatePromise;
       if (
@@ -663,6 +691,7 @@ export function ChannelChat({
       cancelled = true;
       unsubscribe();
       offFinishedAway();
+      pullHistoryRef.current = null;
     };
   }, [channel.id, channel.threadId, joinGatePromise, runtimeAgentId]);
 
@@ -802,6 +831,16 @@ export function ChannelChat({
           ? 2_000
           : 10_000,
     }).data === true;
+  /*
+   * When the server's turn ends, what it wrote is read, whether or not the roster says the Bot
+   * replied. A turn the person stopped has no reply to announce, and what it said before the Stop
+   * would otherwise appear only when the conversation was opened again.
+   */
+  const wasCarryingOn = useRef(false);
+  useEffect(() => {
+    if (wasCarryingOn.current && !carryingOn) pullHistoryRef.current?.();
+    wasCarryingOn.current = carryingOn;
+  }, [carryingOn]);
 
   /**
    * Tell the roster what was just said. Failures here must not block the conversation.

@@ -2871,6 +2871,12 @@ export function mountCopilotRuntime(
       gate: NonNullable<CopilotRuntimeHooks["onBeforeHandler"]>;
       selectLearningContainers: GetTrajectoryLearningContainerIds;
     };
+    /**
+     * A person's Stop on a thread whose run this runtime's runner does not hold: the turn the server
+     * carries a conversation on in after an approval (`approvals/carried-on.ts`). Whether it stopped
+     * one. Absent, such a Stop answers "no active run", as the runtime's own does.
+     */
+    stopCarriedOn?: (threadId: string) => Promise<boolean>;
   } = {},
 ) {
   const { intelligence } = config.runtime;
@@ -3017,6 +3023,24 @@ export function mountCopilotRuntime(
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(identifyActor, resolver) as never,
   });
+
+  /*
+   * A person's Stop on a conversation the server is carrying on after an approval.
+   *
+   * The browser has no run of its own to name there, so its Stop is the thread's, and the runtime
+   * hands it to its own runner, which stops only the runs it holds. The carried-on turn is held by
+   * another runner, possibly on another replica, so the runner answered false and the route said
+   * "no active run" while the turn ran to the end. A thread-wide Stop the runner could not place is
+   * offered to the carried-on turns instead; one that names a run stays the runner's alone. The route
+   * has already checked the person may reach this thread before the runner is asked.
+   */
+  const { stopCarriedOn } = options;
+  if (stopCarriedOn) {
+    const stop = runtime.runner.stop.bind(runtime.runner);
+    runtime.runner.stop = async (request) =>
+      (await stop(request)) ||
+      (request.runId === undefined && (await stopCarriedOn(request.threadId)));
+  }
 
   /*
    * A person's Stop on a browser run, as this server learns of it: Intelligence relays the Stop to
