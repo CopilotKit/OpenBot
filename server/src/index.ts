@@ -94,6 +94,7 @@ import {
   personBrowserPlace,
   withPersonBrowsers,
 } from "./browser/host";
+import { personBrowserId, personBrowserInstallId } from "./browser/person";
 import {
   loadAttachmentForTurn,
   markAttachmentsSent,
@@ -161,6 +162,7 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  recorderConnections,
   users,
 } from "./db/schema";
 import { createDeliveryRouter, DELIVERY_WORK_KINDS } from "./delivery/router";
@@ -913,6 +915,27 @@ const computerGateway = computerProvider
               .where(inArray(users.id, ids))
           ).map((row) => [row.id, { name: row.name, email: row.email }]),
         ),
+      // Whose OpenBot browser each one is: the server minted its Recorder connection under the browser's own install id.
+      browserOwners: async (computerIds) => {
+        const rows = await database
+          .selectDistinct({ userId: recorderConnections.userId })
+          .from(recorderConnections)
+          .where(
+            and(
+              eq(recorderConnections.via, "openbot-browser"),
+              inArray(
+                recorderConnections.installId,
+                computerIds.map(personBrowserInstallId),
+              ),
+            ),
+          );
+        const wanted = new Set(computerIds);
+        return new Map(
+          rows
+            .map((row) => [personBrowserId(row.userId), row.userId] as const)
+            .filter(([computerId]) => wanted.has(computerId)),
+        );
+      },
       auditStore: bootAuditStore,
       approvalGate: approvalService.gate,
       policy: () => policyStore.get(),

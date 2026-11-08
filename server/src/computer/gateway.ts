@@ -20,12 +20,13 @@
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
 
+import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import type {
   ControlRequestInput,
   RequestHelpInput,
   RequestHelpSource,
 } from "@openbot/shared/computer-control";
-import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
+import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import {
   ApprovalAlreadyAnsweredError,
@@ -187,6 +188,11 @@ export type ComputerGatewayOptions = {
   people?: (
     ids: string[],
   ) => Promise<Map<string, { name: string | null; email: string }>>;
+  /**
+   * Whose OpenBot browser each of these computers is (`person-` ids, browser/person.ts), as user ids. A person's browser
+   * is a computer of its own named by a hash, so without this the admin screen cannot say whose it is.
+   */
+  browserOwners?: (computerIds: string[]) => Promise<Map<string, string>>;
 };
 
 /** One computer, or one seat on the shared computer, as the admin screen lists it. */
@@ -196,6 +202,7 @@ export type FleetComputer = {
   kind: ComputerKey["kind"];
   /** The person it belongs to, on a person's computer. */
   personId?: string;
+  /** That person's name and address; on a person's own OpenBot browser, whose browser it is. */
   person?: { name: string | null; email: string };
   /** The Bot: an isolated Bot's own computer, or one Bot's seat on the shared computer. */
   botId?: string;
@@ -1128,12 +1135,27 @@ export function createComputerGateway(
      */
     async computers() {
       const computers = await provider.list();
+      const botIdOf = (computer: (typeof computers)[number]) =>
+        computer.botId ??
+        (computer.key.kind === "bot" ? computer.key.botId : undefined);
+      // A person's own OpenBot browser (Teach a Bot's) is listed under its own id, which is no Bot's: say whose it is.
+      const browserIds = computers.flatMap((computer) => {
+        const id = botIdOf(computer);
+        return id && isPersonBrowserId(id) ? [id] : [];
+      });
+      const owners =
+        browserIds.length > 0 && options.browserOwners
+          ? await options
+              .browserOwners(browserIds)
+              .catch(() => new Map<string, string>())
+          : new Map<string, string>();
       const personIds = [
-        ...new Set(
-          computers.flatMap((computer) =>
+        ...new Set([
+          ...computers.flatMap((computer) =>
             computer.key.kind === "person" ? [computer.key.personId] : [],
           ),
-        ),
+          ...owners.values(),
+        ]),
       ];
       const people =
         personIds.length > 0 && options.people
@@ -1142,13 +1164,14 @@ export function createComputerGateway(
       return {
         isolation: provider.isolation,
         computers: computers.map((computer): FleetComputer => {
+          const botId = botIdOf(computer);
+          const owner = botId ? owners.get(botId) : undefined;
           const person =
             computer.key.kind === "person"
               ? people.get(computer.key.personId)
-              : undefined;
-          const botId =
-            computer.botId ??
-            (computer.key.kind === "bot" ? computer.key.botId : undefined);
+              : owner
+                ? people.get(owner)
+                : undefined;
           return {
             computer: computerKeyText(computer.key),
             kind: computer.key.kind,
