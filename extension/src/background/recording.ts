@@ -1928,9 +1928,17 @@ export function installRecording(
       } finally {
         pendingStop = null;
       }
+    } else if (mode.kind === "signed-out" && disconnecting === 0) {
+      /*
+       * A recording kept for its person waits for the document to say it stored the outcome, as Stop does, but is never
+       * reopened for it. The drain is marked waiting next, and a document whose drains all wait is closed: closed
+       * before it answered, it was closed mid-store, so the outcome that says the recording was signed out was lost
+       * (Chrome ends a closed document's work) and the reconnect's recover ended the recording as interrupted instead.
+       */
+      await awaitStopped(recordingId, since, message);
     } else {
-      // A recording kept for its person, or discarded (a Disconnect is under way), waits only for a reconnecting
-      // document to hear of it.
+      // A recording discarded, or ended while a Disconnect is under way, waits only for a reconnecting document to hear
+      // of it.
       await sendToDocument(message);
     }
 
