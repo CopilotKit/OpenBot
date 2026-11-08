@@ -1731,14 +1731,21 @@ fn command_for(
     folder: Option<&std::path::Path>,
     engine: Option<&CliEngine>,
 ) -> std::process::Command {
-    command_inheriting(
+    let mut command = command_inheriting(
         cli,
         arguments,
         folder,
         engine,
         |name| std::env::var_os(name),
         crate::docker_config::owned(),
-    )
+    );
+    // The registry mirror, for the node `local setup` creates: the CLI hands its environment to
+    // `k3d cluster create`, which writes the file into the node before it first starts. See
+    // `local_images::Mirror`.
+    if let Some(file) = crate::local_images::registries_file() {
+        command.env("K3D_REGISTRIES_CONFIG", file);
+    }
+    command
 }
 
 /// `command_for`, with this process's environment read through `var` and OpenBot's Docker
