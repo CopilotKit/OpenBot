@@ -357,7 +357,28 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     });
   }
 
+  /** The retrying sentence last told to the service worker, by recording (`offscreen.retrying`). */
+  const retrying = new Map<string, string>();
+
+  /** Tells the service worker when a recording's events stop going out while the streamer retries, and when they go
+   * out again: a stopped recording's streamer reports no status of its own, and its drain should not read as sending. */
+  function retryingStatus(update: StreamerStatus): void {
+    const recordingId = owners.get(update.trajectoryId);
+    if (recordingId === undefined) return;
+    const reason =
+      update.intelligence === "retrying" ? update.reason : undefined;
+    if (retrying.get(recordingId) === reason) return;
+    if (reason === undefined) retrying.delete(recordingId);
+    else retrying.set(recordingId, reason);
+    post({
+      type: "offscreen.retrying",
+      recordingId,
+      ...(reason === undefined ? {} : { reason }),
+    });
+  }
+
   function streamerStatus(stream: Stream, update: StreamerStatus): void {
+    retryingStatus(update);
     const target = live;
     // Only the live recording's streamer reports a status; the service worker also filters by trajectory.
     if (!target || target.stream !== stream) return;

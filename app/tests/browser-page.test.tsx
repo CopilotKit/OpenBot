@@ -517,6 +517,53 @@ test("a recording that stops refreshes the list under the page", async () => {
   await waitFor(() => expect(recordingsAsked).toBeGreaterThan(before));
 });
 
+test("a stopped recording the Recorder held lands later, and the list under the page shows it then", async () => {
+  // OpenBot Desktop, 2026-11-07: three held recordings reached the back end minutes after Stop, and the list showed
+  // none of them until the person left Teach a Bot and came back.
+  const held = {
+    recordingId: "rec-1",
+    title: "Refund an order",
+    stoppedAt: Date.now() - 60_000,
+    actions: 2,
+    phrases: 0,
+  };
+  state = nativeState();
+  state.recorder = {
+    connected: true,
+    phase: "idle",
+    actions: 0,
+    narration: "own",
+    lastStopped: { ...held, kept: "refused" },
+  } as BrowserApiState["recorder"];
+  const view = draw(<BrowserPage />);
+  await view.findByText(/No recordings yet/);
+  const before = recordingsAsked;
+  const recordedAt = new Date(held.stoppedAt - 30_000);
+  recordingRows = [
+    {
+      id: "t-1",
+      title: "Refund an order",
+      recordedAt: recordedAt.toISOString(),
+      ended: "succeeded",
+      reason: null,
+    },
+  ];
+  // The Recorder sent it: its report no longer says it is kept.
+  state = {
+    ...state,
+    recorder: {
+      connected: true,
+      phase: "idle",
+      actions: 0,
+      narration: "own",
+      lastStopped: held,
+    },
+  };
+  await queryClient.invalidateQueries({ queryKey: browserKeys.state });
+  await waitFor(() => expect(recordingsAsked).toBeGreaterThan(before));
+  expect(await view.findByText(recordedAt.toLocaleString())).toBeTruthy();
+});
+
 test("on OpenBot Desktop arriving opens nothing: the page offers the task's name and narration", async () => {
   state = { ...nativeState(), open: false, recorder: undefined };
   delete state.browser;
@@ -806,6 +853,18 @@ test("a recording Intelligence refused, or one still on its way, is never said t
         shape === "native"
           ? "Check example.com headingSaving to your Learning space: 1 action."
           : "Saving “Check example.com heading” to your Learning space: 1 action.",
+      ],
+      // OpenBot Desktop, 2026-11-07: the capture pass could not reach OpenBot and the Recorder retried it for half an
+      // hour, while the page said "Saving" the whole time.
+      [
+        {
+          sending: true,
+          retrying:
+            "OpenBot's back end is busy or unreachable. Retrying; nothing is lost.",
+        },
+        shape === "native"
+          ? "Check example.com headingNot saved to your Learning space yet. OpenBot's back end is busy or unreachable. Retrying; nothing is lost."
+          : "“Check example.com heading” wasn't saved to your Learning space yet. OpenBot's back end is busy or unreachable. Retrying; nothing is lost.",
       ],
     ] as const) {
       cleanup();

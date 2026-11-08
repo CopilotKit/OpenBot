@@ -215,20 +215,27 @@ export function lastStopped(
 
 /**
  * Where a stopped recording has got to on its way to Intelligence, from its drain (it goes on offscreen.done, once all
- * of it is sent): still `sending` while the drain is neither kept for later nor being discarded; `kept` when Intelligence
- * refused it (a hold or park row) or it waits for its person to connect again. Neither once all of it is sent.
+ * of it is sent): still `sending` while the drain is neither kept for later nor being discarded, with `retrying` saying
+ * why while the document keeps failing to send it; `kept` when Intelligence refused it (a hold or park row) or it waits
+ * for its person to connect again. Neither once all of it is sent.
  */
 async function delivery(
   recordingId: string,
 ): Promise<
-  Pick<NonNullable<LauncherState["lastStopped"]>, "sending" | "kept">
+  Pick<
+    NonNullable<LauncherState["lastStopped"]>,
+    "sending" | "kept" | "retrying"
+  >
 > {
   const drains = (await readLocal("drains")) ?? [];
   const drain = drains.find(
     (entry) => entry.recordingId === recordingId && !entry.discarding,
   );
   if (!drain) return {};
-  if (drain.kept === undefined) return { sending: true };
+  if (drain.kept === undefined)
+    return drain.retrying === undefined
+      ? { sending: true }
+      : { sending: true, retrying: drain.retrying };
   return { kept: drain.kept.waitingForReconnect ? "signed-out" : "refused" };
 }
 
