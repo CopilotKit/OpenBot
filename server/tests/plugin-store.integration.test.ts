@@ -5019,7 +5019,7 @@ test("a Composio call whose url names no app is refused rather than falling back
       botId: "bot_helper",
       actorId: "user_asker",
     }),
-  ).rejects.toThrow(/no Composio app in its url/i);
+  ).rejects.toThrow(/no app in its url/i);
 
   expect(reached).toEqual([]);
 });

@@ -36,10 +36,7 @@ import {
 } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
 import { newId } from "@/lib/new-id";
-import {
-  skillInstructionsFor,
-  useAnyBotSkillCommands,
-} from "@/lib/plugins/skill-commands";
+import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
 const EXPLORE_SHOWN = 4;
@@ -90,7 +87,7 @@ function RouteComponent() {
    * routed to after sending, so the menu offers them all and sending picks a Bot that has the one
    * used. Without this the box fell back to a placeholder command no Bot has.
    */
-  const { commands: skillCommands, botsFor } = useAnyBotSkillCommands(
+  const { commands: skillCommands } = useAnyBotSkillCommands(
     agents?.map((agent) => agent.id) ?? [],
   );
   const fallback = defaultAgentProfile(
@@ -111,25 +108,13 @@ function RouteComponent() {
    * looking at the placeholder; otherwise the next home page they open shows it.
    */
   const startBehind = async (pendingId: string, draft: ComposerDraft) => {
-    // With its `/` skills, put in front of the first message as a conversation does for every later
-    // one; see `skillInstructionsFor`.
-    const skills = skillInstructionsFor(draft.commandIds, skillCommands);
+    // A `/` skill stays at the start of the words, where the server finds it and gives the Bot its
+    // instructions, only if the Bot holds it (server/src/plugins/picked-skill.ts).
     try {
       if (draft.agentId) {
         // Recorded and started as one sequence, shared with `/channel/new`: the person already
         // decided, and the trail has to say so wherever they decided it.
-        // Only the skills this Bot offers, as in a conversation with it.
-        const chosen = draft.agentId;
-        await startChosen(
-          chosen,
-          draft.text,
-          skillInstructionsFor(
-            draft.commandIds.filter((slug) => botsFor(slug).includes(chosen)),
-            skillCommands,
-          ),
-          undefined,
-          pendingId,
-        );
+        await startChosen(draft.agentId, draft.text, undefined, pendingId);
         return;
       }
       let agentId: string | undefined;
@@ -146,7 +131,7 @@ function RouteComponent() {
       }
       if (!agentId)
         throw new Error("There's no Bot to send this to. Reload the page.");
-      await start(agentId, draft.text, skills, undefined, pendingId);
+      await start(agentId, draft.text, undefined, pendingId);
     } catch (caught) {
       stashFailedStart({
         text: draft.text,

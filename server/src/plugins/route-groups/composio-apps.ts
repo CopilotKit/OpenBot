@@ -241,7 +241,7 @@ export async function enableComposioApp(
     return {
       ok: false,
       error: slug
-        ? `${slug} is not an app ${BROKERED_PROFILE[activeProvider].vendor} lists for this deployment.`
+        ? `${slug} isn't one of the apps you can connect.`
         : "An app is required.",
       status: 400,
     };
@@ -390,7 +390,7 @@ export async function enableComposioApp(
       ok: false,
       ...brokerRefusal(
         error,
-        `${app.name} could not be enabled, and ${activeVendor} said nothing about why. Try again, and check this deployment's ${activeVendor} key if it persists.`,
+        `Couldn't turn on ${app.name}, and no reason was given. Try again, and check ${BROKERED_PROFILE[activeProvider].envVar} if it keeps happening.`,
       ),
     };
   }

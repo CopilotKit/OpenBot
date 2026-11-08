@@ -175,7 +175,7 @@ test("each store refuses a slug its own parser cannot read, naming its own vendo
       by: "admin@example.com",
       connection: consent,
     }),
-  ).rejects.toThrow(/^bap\.Dotted is not a name an Arcade app can have\./);
+  ).rejects.toThrow(/^bap\.Dotted isn't a name an app can have\./);
   await expect(
     storeFor("composio").addBrokeredApp({
       slug: "bap dotted",
@@ -183,7 +183,7 @@ test("each store refuses a slug its own parser cannot read, naming its own vendo
       by: "admin@example.com",
       connection: consent,
     }),
-  ).rejects.toThrow(/^bap dotted is not a name a Composio app can have\./);
+  ).rejects.toThrow(/^bap dotted isn't a name an app can have\./);
   expect(await row("arcade-bap.Dotted")).toBeUndefined();
   expect(await row("composio-bap dotted")).toBeUndefined();
 });
@@ -218,7 +218,6 @@ for (const provider of ["composio", "arcade"] as const) {
   for (const prefix of ["composio-", "arcade-"]) {
     test(`a ${provider} store refuses a URL-added server named ${prefix}x`, async () => {
       const id = `${prefix}bapx`;
-      const vendor = prefix === "arcade-" ? "Arcade" : "Composio";
       await expect(
         storeFor(provider).addCustomServer({
           id,
@@ -228,7 +227,7 @@ for (const provider of ["composio", "arcade"] as const) {
         }),
       ).rejects.toThrow(
         new CustomServerRefusedError(
-          `Names beginning ${prefix} belong to the ${vendor} apps this deployment enables, so ${id} is not a name a server added by URL can take. Choose another.`,
+          `Names beginning ${prefix} are kept for the apps people connect through OpenBot, so ${id} can't be used for a server added by URL. Choose another.`,
         ).message,
       );
       expect(await row(id)).toBeUndefined();

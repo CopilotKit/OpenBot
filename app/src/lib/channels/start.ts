@@ -39,17 +39,11 @@ import { routeMessage } from "./route";
 export async function startWithChosen(input: {
   agentId: string;
   text: string;
-  /** The first message's `/` skills; see `FirstMessage`. */
-  skillInstructions?: readonly string[];
   record: (text: string, agentId: string) => Promise<unknown>;
-  start: (
-    agentId: string,
-    text: string,
-    skillInstructions: readonly string[],
-  ) => Promise<void>;
+  start: (agentId: string, text: string) => Promise<void>;
 }): Promise<void> {
   void input.record(input.text, input.agentId).catch(() => undefined);
-  await input.start(input.agentId, input.text, input.skillInstructions ?? []);
+  await input.start(input.agentId, input.text);
 }
 
 /**
@@ -137,8 +131,6 @@ export function useStartChannel() {
   const start = (
     agentId: string,
     text: string,
-    /** The first message's `/` skills; see `FirstMessage`. */
-    skillInstructions: readonly string[] = [],
     /** A model and effort picked before the conversation existed, saved before its first message runs. */
     pick?: ConversationModel | null,
     /** The placeholder this was started behind, if any; see the hook's own comment. */
@@ -156,7 +148,7 @@ export function useStartChannel() {
         await discardFailedStart.mutateAsync(channelId);
       },
       open: async (channelId) => {
-        stashFirstMessage(channelId, text, skillInstructions);
+        stashFirstMessage(channelId, text);
         if (pendingId !== undefined) {
           // Remembered whether or not they are looking, so coming back to the placeholder opens it.
           settlePendingStart(pendingId, channelId);
@@ -207,17 +199,14 @@ export function useStartChannel() {
     startChosen: (
       agentId: string,
       text: string,
-      skillInstructions: readonly string[] = [],
       pick?: ConversationModel | null,
       pendingId?: string,
     ) =>
       startWithChosen({
         agentId,
         text,
-        skillInstructions,
         record: routeMessage,
-        start: (id, message, skills) =>
-          start(id, message, skills, pick, pendingId),
+        start: (id, message) => start(id, message, pick, pendingId),
       }),
   };
 }

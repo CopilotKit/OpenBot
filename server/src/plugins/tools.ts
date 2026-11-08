@@ -1,8 +1,8 @@
+import { DESTRUCTIVE_TOOL_NOTE } from "@openbot/shared/bot-prompt";
 import {
   addressedTo,
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
-import { DESTRUCTIVE_TOOL_NOTE } from "@openbot/shared/bot-prompt";
 import { RESEARCH_TOOLS, type ResearchRole } from "@openbot/shared/research";
 import { type GrantedTool, parametersFor } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
@@ -412,5 +412,6 @@ export async function grantedSkills(options: {
     title: skill.title,
     summary: skill.summary,
     tools: skill.tools,
+    instructions: skill.instructions,
   }));
 }

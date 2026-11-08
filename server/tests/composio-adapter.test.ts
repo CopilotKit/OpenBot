@@ -9139,10 +9139,13 @@ describe("accounts named by holder", () => {
     ).toBeNull();
   });
 
-  test("an unconfigured broker names the provider it is missing", () => {
+  test("an unconfigured broker names the variable it is missing, and no vendor", () => {
     expect(new BrokerUnconfiguredError("arcade", "operator").message).toMatch(
-      /Arcade/,
+      /ARCADE_API_KEY/,
     );
+    expect(
+      new BrokerUnconfiguredError("arcade", "operator").message,
+    ).not.toMatch(/\bArcade\b/);
     expect(new BrokerUnconfiguredError("composio", "operator").message).toMatch(
       /COMPOSIO_API_KEY/,
     );

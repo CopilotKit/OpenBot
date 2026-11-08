@@ -912,11 +912,11 @@ export class BrokerUnconfiguredError extends BrokerRefusalError {
    * vocabulary spec D11 keeps off their screen, so theirs names neither.
    */
   constructor(provider: BrokerProvider, reader: "operator" | "person") {
-    const { vendor, envVar } = BROKERED_PROFILE[provider];
+    const { envVar } = BROKERED_PROFILE[provider];
     super(
       reader === "person"
         ? "Connecting apps isn't set up yet, so nothing was asked. Ask an admin to set it up."
-        : `${vendor} is not configured for this deployment, so nothing was asked. Set ${envVar} to make the brokered apps available; until it is set there is nothing to connect, nothing to grant and no ${vendor} tool for a Bot to call, and the admin Plugins page shows one row under More apps that goes nowhere.`,
+        : `Connecting apps isn't set up on this deployment, so nothing was asked. Set ${envVar} to make these apps available. Until it is set there is nothing to connect, nothing to grant and no tool from these apps for a Bot to call.`,
     );
     this.name = "BrokerUnconfiguredError";
   }
