@@ -5,6 +5,8 @@ import {
   botAttentionQueryOptions,
   lastPingQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
+// The page a notification is about, which OpenBot Desktop opens on a click.
+import { noticeOptions } from "@/lib/notifications/notice";
 // Whether this browser, or OpenBot Desktop, lets OpenBot interrupt: the same answer the offer to
 // turn notifications on reads, so the two cannot disagree.
 import { notificationsAllowed } from "@/lib/notifications/permission";
@@ -71,22 +73,6 @@ export function attentionSummary(bot: BotAttention): string {
     parts.push(count(bot.tasks.failed, "failed task", "failed tasks"));
   if (bot.unread) parts.push(`${bot.unread} unread`);
   return parts.join(", ");
-}
-
-/**
- * A notification's options, with the page it is about. OpenBot Desktop opens that page when the
- * notification is clicked (`open_from_notification` in desktop/src-tauri): there `Notification` is
- * the notification plugin's, which hands `extra` on to the shell. A browser ignores it.
- */
-function noticeOptions(
-  options: NotificationOptions,
-  path: string,
-): NotificationOptions {
-  const withPath: NotificationOptions & { extra: { path: string } } = {
-    ...options,
-    extra: { path },
-  };
-  return withPath;
 }
 
 /** A push body is cut here too, so the browser says what the phone says. */

@@ -128,6 +128,14 @@ export function botAttentionQueryOptions() {
   });
 }
 
+/**
+ * The same read, whole, for code outside a component that reads it once rather than watching it:
+ * `ensureQueryData` hands back what the badge's poll already holds.
+ */
+export function botAttentionBodyQueryOptions() {
+  return queryOptions(attentionQuery);
+}
+
 /** The person's newest ping, for the one browser notification each new ping sends. */
 export function lastPingQueryOptions() {
   return queryOptions({

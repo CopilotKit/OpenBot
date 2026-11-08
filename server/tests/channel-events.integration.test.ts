@@ -238,6 +238,63 @@ describe("channel activity delivery", () => {
       memberIds: [owner.id],
     });
   });
+
+  /*
+   * A Bot's reply is what a browser notification shows when it lands while OpenBot is out of sight:
+   * its first line, as plain text. The roster's preview collapses every line into one, so it cannot
+   * say where the first one ends.
+   */
+  test("a Bot's reply carries its first line as plain text, and a person's message carries none", async () => {
+    const owner = await createTestUser("Channel Events Test User");
+    const profile = await profileStore.create(owner, {
+      name: "Expense Manager",
+      title: "Finance Operations",
+      roleDescription: "Review receipts.",
+      visibility: "private",
+    });
+    createdAgentIds.push(profile.id);
+    const channel = await store.create(owner, [profile.id]);
+    createdChannelIds.push(channel.id);
+
+    const hub = createChannelEventHub();
+    const replies: ChannelActivityEvent[] = [];
+    let heardReply = () => {};
+    const replied = new Promise<void>((resolve) => {
+      heardReply = resolve;
+    });
+    hub.register(owner.id, (payload) => {
+      const event: ChannelActivityEvent = JSON.parse(payload);
+      if (event.lastMessage === null) return;
+      replies.push(event);
+      if (event.lastMessageAgentId !== null) heardReply();
+    });
+    const listener = await startChannelActivityListener(databaseUrl, hub);
+
+    try {
+      const asked = new Date();
+      await store.recordActivity(owner, channel.id, {
+        agentId: null,
+        at: asked,
+        text: "Sort my receipts\nfrom March",
+      });
+      await store.recordActivity(owner, channel.id, {
+        agentId: profile.id,
+        at: new Date(asked.getTime() + 1000),
+        text: "\n\nCategorized **three** expenses.\n\nThe receipts are in [Drive](https://drive.example.test/march).",
+      });
+      await within5s(replied);
+    } finally {
+      await listener.stop();
+    }
+
+    const person = replies.find((event) => event.lastMessageAgentId === null);
+    const bot = replies.find((event) => event.lastMessageAgentId !== null);
+    expect(person?.firstLine).toBeUndefined();
+    expect(bot).toMatchObject({
+      lastMessage: "Categorized three expenses. The receipts are in Drive.",
+      firstLine: "Categorized three expenses.",
+    });
+  });
 });
 
 async function createTestUser(name: string): Promise<AgentActor> {
