@@ -503,11 +503,37 @@ test("your recordings show under a browser shown in the page", async () => {
   openAnswer = answerFor("screen");
   recordingRows = [recording("Refund an order")];
   const view = draw(<BrowserPage />);
-  expect(await view.findByRole("heading", { name: "Browser" })).toBeTruthy();
+  expect(
+    await view.findByRole("heading", { name: "Teach a Bot" }),
+  ).toBeTruthy();
   const recordings = await view.findByText("Your recordings");
   // Its own scrolling strip, capped so many rows can't squeeze the browser, rather than bare in the pane.
-  expect(recordings.closest(".overflow-y-auto")).not.toBeNull();
+  expect(
+    recordings.closest('[data-slot="recordings-strip"]')?.className,
+  ).toContain("overflow-y-auto");
   expect(await view.findByText("Refund an order")).toBeTruthy();
+});
+
+test("Teach a Bot says what it is above the browser, and leads from the recordings to Settings, Learning", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  expect(await view.findByLabelText(SCREEN)).toBeTruthy();
+  // One page: the title and how, above the browser it is done in, never a second title for the browser itself.
+  const titles = view.getAllByRole("heading", { level: 1 });
+  expect(titles).toHaveLength(1);
+  expect(titles[0]?.textContent).toBe("Teach a Bot");
+  expect(
+    view.getByText(
+      "Show your Bots how to do a task. Press Record, name the task, and do it once in the browser.",
+    ),
+  ).toBeTruthy();
+  // What the recordings taught is in Settings, Learning, with the settings for it; this page only leads there.
+  const learned = await view.findByRole("link", {
+    name: "See what your Bots learned",
+  });
+  expect(learned.getAttribute("href")).toBe("/settings/learning");
+  expect(view.queryByRole("switch", { name: /automatically/i })).toBeNull();
 });
 
 test("under a browser shown in the page, no empty strip draws while the list loads", async () => {
@@ -518,12 +544,18 @@ test("under a browser shown in the page, no empty strip draws while the list loa
     release = resolve;
   });
   const view = draw(<BrowserPage />);
-  expect(await view.findByRole("heading", { name: "Browser" })).toBeTruthy();
+  expect(
+    await view.findByRole("heading", { name: "Teach a Bot" }),
+  ).toBeTruthy();
   await waitFor(() => expect(recordingsAsked).toBeGreaterThan(0));
-  expect(view.container.querySelector(".overflow-y-auto")).toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="recordings-strip"]'),
+  ).toBeNull();
   release();
   await view.findByText(/No recordings yet/);
-  expect(view.container.querySelector(".overflow-y-auto")).not.toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="recordings-strip"]'),
+  ).not.toBeNull();
 });
 
 test("arriving from the Recorder's link shows the recordings and opens no browser", async () => {
@@ -992,7 +1024,7 @@ test("while the browser opens, the page's description names the button the page 
   // The Desktop's run of 2026-11-08 read "press Start recording" here, above a button that says Record.
   expect(
     await view.findByText(
-      "Show your Bots how to do a task. Name it, press Record, and do it in the browser that opens.",
+      "Show your Bots how to do a task. Press Record, name the task, and do it once in the browser.",
     ),
   ).toBeTruthy();
   expect(view.queryByText(/Start recording/)).toBeNull();

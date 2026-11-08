@@ -4,7 +4,7 @@ import type {
   RealBrowserOpenResponse,
 } from "@openbot/shared/openbot-browser";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useSearch } from "@tanstack/react-router";
+import { Link, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,35 @@ import { recordingOnItsWay, YourRecordings } from "./your-recordings";
 
 const TITLE = TEACH_A_BOT;
 const DESCRIPTION =
-  "Show your Bots how to do a task. Name it, press Record, and do it in the browser that opens.";
+  "Show your Bots how to do a task. Press Record, name the task, and do it once in the browser.";
+
+/**
+ * The way from what was taught to what it became: the skills a Bot learned from recordings are in Settings, Learning,
+ * with automatic learning and sharing. A link there, so this page stays the place to teach and the settings stay there.
+ */
+function LearnedLink() {
+  return (
+    <Link
+      className="text-muted-foreground text-sm underline-offset-4 hover:text-foreground hover:underline"
+      to="/settings/learning"
+    >
+      See what your Bots learned
+    </Link>
+  );
+}
+
+/**
+ * What Teach a Bot is for, above the browser it is done in: the page's title and the whole of how, in one sentence.
+ * The page's own title, as every page has one; the browser below it is the tool, not the page.
+ */
+function TeachHeading() {
+  return (
+    <header className="flex flex-col gap-1">
+      <h1 className="font-semibold text-2xl tracking-tight">{TITLE}</h1>
+      <p className="text-pretty text-muted-foreground text-sm">{DESCRIPTION}</p>
+    </header>
+  );
+}
 
 /**
  * The Browser page: the signed-in person's own browser, opened when they arrive, and Record and Stop for it.
@@ -56,7 +84,7 @@ export function BrowserPage() {
         <p className="mt-6 text-destructive text-sm" role="alert">
           Couldn't load your browser. Reload the page.
         </p>
-        <YourRecordings />
+        <YourRecordings action={<LearnedLink />} />
       </PageShell>
     );
   }
@@ -68,7 +96,7 @@ export function BrowserPage() {
           {state.data.note ??
             "OpenBot isn't set up to run a browser for you. Ask an admin."}
         </PageEmpty>
-        <YourRecordings />
+        <YourRecordings action={<LearnedLink />} />
       </PageShell>
     );
   }
@@ -126,6 +154,7 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
           </div>
         ) : null}
         <YourRecordings
+          action={<LearnedLink />}
           waiting={recordingOnItsWay(state.recorder?.lastStopped)}
         />
       </PageShell>
@@ -133,20 +162,22 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
   }
   // The person's own everyday browser has no screen here: it is a window on their desktop.
   if ("window" in opened && opened.window === "screen") {
-    // ScreenBrowser is deliberately not a PageShell (it fills the pane), so the list sits beneath it unframed.
+    // ScreenBrowser is deliberately not a PageShell (the browser takes the pane). The page's title goes above the
+    // browser and the list under it, in the one column the browser sets the width of.
     return (
-      <>
-        <ScreenBrowser
-          computerId={opened.computerId}
-          state={state}
-          reopen={() => reopen.mutate()}
-          reopening={reopen.isPending}
-        />
+      <ScreenBrowser
+        computerId={opened.computerId}
+        heading={<TeachHeading />}
+        state={state}
+        reopen={() => reopen.mutate()}
+        reopening={reopen.isPending}
+      >
         <YourRecordings
+          action={<LearnedLink />}
           variant="pane"
           waiting={recordingOnItsWay(state.recorder?.lastStopped)}
         />
-      </>
+      </ScreenBrowser>
     );
   }
   // Only an older server says nothing of where its browser shows, and it may answer with a window after all.
@@ -164,6 +195,7 @@ function NativeBrowser({ state }: { state: BrowserApiState }) {
     <PageShell title={TITLE}>
       <TeachSteps state={state} />
       <YourRecordings
+        action={<LearnedLink />}
         waiting={recordingOnItsWay(state.recorder?.lastStopped)}
       />
     </PageShell>

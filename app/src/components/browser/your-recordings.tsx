@@ -2,7 +2,7 @@ import type { LauncherState } from "@openbot/shared/openbot-browser";
 import type { RecordingRow } from "@openbot/shared/recorder-api";
 import { IconVideo } from "@tabler/icons-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import React from "react";
+import React, { type ReactNode } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -53,19 +53,24 @@ export function recordingOnItsWay(
   );
 }
 
+const EMPTY = "No recordings yet. Each task you record shows up here.";
+
 /**
  * The browser section's list of the person's own recordings, with how each one ended.
  *
- * `variant="pane"` frames it as a strip of its own under a browser that fills the page: capped, scrolling, and drawn
+ * `variant="pane"` sets it under the browser, in the browser's column: capped, scrolling, and drawn
  * only once there is something to show, so no empty strip appears while the list loads. `waiting` while a stopped
- * recording has not reached the back end yet (`recordingOnItsWay`): the list asks again until it lands.
+ * recording has not reached the back end yet (`recordingOnItsWay`): the list asks again until it lands. `action` sits
+ * on the title's line (Teach a Bot's way to what the recordings taught).
  */
 export function YourRecordings({
   variant = "page",
   waiting = false,
+  action,
 }: {
   variant?: "page" | "pane";
   waiting?: boolean;
+  action?: ReactNode;
 }) {
   const recordings = useInfiniteQuery(recordingsQueryOptions({ waiting }));
   if (recordings.isPending) return null;
@@ -75,16 +80,18 @@ export function YourRecordings({
   // A failed "Show more" or refresh keeps the rows already loaded: the error goes below them, where Show more retries.
   const failure = recordings.error;
   const section = (
-    <PageSection title="Your recordings">
+    <PageSection action={action} title="Your recordings">
       {failure && rows.length === 0 ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {failure.message}
         </p>
       ) : rows.length === 0 && !recordings.hasNextPage && !unavailable ? (
-        <PageEmpty>
-          No recordings yet. Record a task with the OpenBot Recorder to see it
-          here.
-        </PageEmpty>
+        variant === "pane" ? (
+          // One line under the browser, not a box: every bit of height here is taken from the page above.
+          <p className="mt-1 text-muted-foreground text-sm">{EMPTY}</p>
+        ) : (
+          <PageEmpty>{EMPTY}</PageEmpty>
+        )
       ) : (
         <>
           <PageRows>
@@ -145,12 +152,13 @@ export function YourRecordings({
     </PageSection>
   );
   if (variant === "page") return section;
-  // Capped and scrolling on its own, in the page column's width and padding, so many rows cannot squeeze the browser.
+  // Under the browser, in its column: capped and scrolling on its own, so many rows never shrink the browser above.
   return (
-    <div className="max-h-[40%] shrink-0 overflow-y-auto border-t border-border">
-      <div className="mx-auto w-full max-w-3xl px-4 pb-8 [&>section]:mt-6">
-        {section}
-      </div>
+    <div
+      className="max-h-44 shrink-0 overflow-y-auto [&>section]:mt-0"
+      data-slot="recordings-strip"
+    >
+      {section}
     </div>
   );
 }

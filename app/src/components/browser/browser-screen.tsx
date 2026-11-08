@@ -1,7 +1,7 @@
 import type { BrowserApiState } from "@openbot/shared/openbot-browser";
 import { IconSearch } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
-import { type RefObject, useId, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
 import {
   LiveScreen,
   type LiveScreenHandle,
@@ -46,24 +46,37 @@ import { useNarration } from "./use-narration";
 const SCREEN_ASPECT_RATIO = 1280 / 800;
 
 /**
+ * The narrowest the browser's column gets while the pane is wider: half the browser's own width, where its page can
+ * still be read and clicked. In a shorter pane the page scrolls instead.
+ */
+const MIN_COLUMN_WIDTH = 640;
+
+/**
  * THE PERSON'S BROWSER, SHOWN IN THE PAGE (hosted OpenBot). A cloud browser has no window of its own, so the page is
  * the window: a bar with the recording controls, the tabs, the address bar with back, forward and reload, and the live
  * screen, which the person already drives (it is their browser, so there is no wheel to take).
  *
  * NOT A PageShell, ON PURPOSE. A browser is a canvas, not a column of settings: in the 720px prose column a 1280px
- * page is drawn at little more than half size, too small to read or click. It fills the pane instead, as a
- * conversation does, with the conversation page's own header bar above it.
+ * page is drawn at little more than half size, too small to read or click. It takes the pane instead, in one column
+ * sized with it: `heading` above the window (what the page is for) and `children` under it (the recordings), both as
+ * wide as the window, so the three read as one page.
  */
 export function ScreenBrowser({
   computerId,
   state,
   reopen,
   reopening,
+  heading,
+  children,
 }: {
   computerId: string;
   state: BrowserApiState;
   reopen: () => void;
   reopening: boolean;
+  /** Above the window, as wide as it. Without one the page's name is said to screen readers only. */
+  heading?: ReactNode;
+  /** Under the window, as wide as it. Kept short by its own cap, since its height is taken from the page's. */
+  children?: ReactNode;
 }) {
   const language = narrationLanguage();
   const choice = useNarrationChoice();
@@ -89,8 +102,14 @@ export function ScreenBrowser({
   const ids = useId();
   const screen = useRef<LiveScreenHandle>(null);
   const desk = useRef<HTMLDivElement>(null);
-  const frame = useRef<HTMLDivElement>(null);
-  const width = useFittedWidth(desk, frame, SCREEN_ASPECT_RATIO);
+  const column = useRef<HTMLDivElement>(null);
+  const width = useFittedWidth(
+    desk,
+    column,
+    SCREEN_ASPECT_RATIO,
+    true,
+    MIN_COLUMN_WIDTH,
+  );
   // The refusal of whatever the person asked last: an older one (a tab that would not close) never hides a newer one
   // (Record refused) in the one line there is for them.
   const failure = latest([
@@ -109,20 +128,19 @@ export function ScreenBrowser({
    * Laid out as a desktop browser's window, top to bottom: the tabs on the window's frame, the toolbar (back, forward,
    * reload, the address, and Record at its end, where a browser keeps its own actions), what a recording or a request
    * just did, the page, and, while a recording runs, a status bar that says whether narration is heard. Before Record
-   * the narration switch in Record's popover already says whether it is on, so the bar would only repeat it. The page's
-   * name is for screen readers: the sidebar already says where you are, and a browser's window has no title row of its
-   * own.
+   * the narration switch in Record's popover already says whether it is on, so the bar would only repeat it.
    *
-   * The window is sized to its page (`useFittedWidth`): the browser behind it has a fixed shape, so a window that took
-   * the whole pane left a blank band under the page. It sits centred on the pane instead, as a window on a desk, and at
-   * the top on a phone, where a page starts at the top.
+   * The column is sized to the page (`useFittedWidth`): the browser behind the window has a fixed shape, so a window that
+   * took the whole pane left a blank band under the page. The heading, the window and what is under it are as wide as
+   * the page lets them be while all three fit the pane, centred on it as a window on a desk, and at the top on a phone,
+   * where a page starts at the top. In a pane too short for that at a usable width (`MIN_COLUMN_WIDTH`), the pane
+   * scrolls; auto margins rather than centring, so a column taller than the pane starts at its top and is never cut.
    */
   return (
     <div
       ref={desk}
-      className="flex min-h-0 flex-1 items-start justify-center bg-muted/40 p-3 sm:items-center"
+      className="flex min-h-0 flex-1 overflow-y-auto bg-muted/40 p-3 sm:p-5"
     >
-      <h1 className="sr-only">Browser</h1>
       <NarrationChoiceDialog {...recording.question} />
       <ClearBrowserDialog
         clear={clear}
@@ -130,87 +148,91 @@ export function ScreenBrowser({
         onOpenChange={clearing.setAsking}
       />
       <div
-        ref={frame}
-        className="flex w-full flex-col overflow-clip rounded-xl border bg-background shadow-sm"
+        ref={column}
+        className="mx-auto flex h-fit w-full min-w-0 shrink-0 flex-col gap-4 sm:my-auto"
         style={width === undefined ? undefined : { width }}
       >
-        <TabStrip
-          ids={ids}
-          tabs={state.tabs}
-          disabled={!state.open}
-          onActivate={(tabId) => tabs.mutate({ action: "activate", tabId })}
-          onClose={(tabId, closed) =>
-            tabs.mutate(
-              { action: "close", tabId },
-              closed ? { onSuccess: closed } : undefined,
-            )
-          }
-          onNew={() =>
-            tabs.mutate({ action: "new" }, { onSuccess: newTab.opened })
-          }
-          start={<SidebarToggle />}
-        />
-        <TabPanel active={active} className="flex flex-col" ids={ids}>
-          <div className="flex flex-wrap items-center gap-x-2 border-border border-b bg-background pr-3">
-            <AddressBar
-              // A new tab, or switching to one, starts the bar again from that tab's own address.
-              key={active?.id ?? "none"}
-              className="min-w-64 flex-1 border-b-0"
-              address={shownAddress(active)}
-              disabled={!state.open || !active}
-              focus={newTab.focus}
-              onFocused={newTab.onFocused}
-              onGo={go}
-              onMove={(action) => navigate.mutate({ action })}
-              // Open or closed, or not answering (often why it is cleared), its data is there to wipe. A recording that is
-              // starting or stopping is let finish first; one that is running is ended by the clear itself.
-              clear={{
-                disabled: recording.starting || recording.stopping,
-                ask: clearing.ask,
-              }}
-            />
-            <div className="ml-auto py-1.5 pl-2">
-              <RecordingBar recording={recording}>
-                <NarrationSwitch
-                  narration={narration}
-                  recording={recording.phase !== "idle"}
-                  onChange={(on) => {
-                    narration.setOn(on);
-                    choice.choose(on);
-                  }}
-                />
-              </RecordingBar>
+        {heading ?? <h1 className="sr-only">Browser</h1>}
+        <div className="flex flex-col overflow-clip rounded-xl border bg-background shadow-sm">
+          <TabStrip
+            ids={ids}
+            tabs={state.tabs}
+            disabled={!state.open}
+            onActivate={(tabId) => tabs.mutate({ action: "activate", tabId })}
+            onClose={(tabId, closed) =>
+              tabs.mutate(
+                { action: "close", tabId },
+                closed ? { onSuccess: closed } : undefined,
+              )
+            }
+            onNew={() =>
+              tabs.mutate({ action: "new" }, { onSuccess: newTab.opened })
+            }
+            start={<SidebarToggle />}
+          />
+          <TabPanel active={active} className="flex flex-col" ids={ids}>
+            <div className="flex flex-wrap items-center gap-x-2 border-border border-b bg-background pr-3">
+              <AddressBar
+                // A new tab, or switching to one, starts the bar again from that tab's own address.
+                key={active?.id ?? "none"}
+                className="min-w-64 flex-1 border-b-0"
+                address={shownAddress(active)}
+                disabled={!state.open || !active}
+                focus={newTab.focus}
+                onFocused={newTab.onFocused}
+                onGo={go}
+                onMove={(action) => navigate.mutate({ action })}
+                // Open or closed, or not answering (often why it is cleared), its data is there to wipe. A recording that is
+                // starting or stopping is let finish first; one that is running is ended by the clear itself.
+                clear={{
+                  disabled: recording.starting || recording.stopping,
+                  ask: clearing.ask,
+                }}
+              />
+              <div className="ml-auto py-1.5 pl-2">
+                <RecordingBar recording={recording}>
+                  <NarrationSwitch
+                    narration={narration}
+                    recording={recording.phase !== "idle"}
+                    onChange={(on) => {
+                      narration.setOn(on);
+                      choice.choose(on);
+                    }}
+                  />
+                </RecordingBar>
+              </div>
             </div>
-          </div>
-          {recording.stopped ? (
-            <StoppedNotice stopped={recording.stopped} />
-          ) : null}
-          {failure ? (
-            <p
-              className="border-b border-border bg-background px-3 py-2 text-destructive text-sm"
-              role="alert"
-            >
-              {failure.message}
-            </p>
-          ) : null}
-          <Screen
-            blank={!shownAddress(active)}
-            computerId={computerId}
-            notAnswering={state.problem}
-            onGo={go}
-            open={state.open}
-            reopen={reopen}
-            reopening={reopening}
-            screen={screen}
-          />
-        </TabPanel>
-        {recording.phase === "idle" ? null : (
-          <NarrationNotice
-            className="border-t border-b-0 bg-transparent px-3 py-1.5 text-xs"
-            narration={narration}
-            language={language}
-          />
-        )}
+            {recording.stopped ? (
+              <StoppedNotice stopped={recording.stopped} />
+            ) : null}
+            {failure ? (
+              <p
+                className="border-b border-border bg-background px-3 py-2 text-destructive text-sm"
+                role="alert"
+              >
+                {failure.message}
+              </p>
+            ) : null}
+            <Screen
+              blank={!shownAddress(active)}
+              computerId={computerId}
+              notAnswering={state.problem}
+              onGo={go}
+              open={state.open}
+              reopen={reopen}
+              reopening={reopening}
+              screen={screen}
+            />
+          </TabPanel>
+          {recording.phase === "idle" ? null : (
+            <NarrationNotice
+              className="border-t border-b-0 bg-transparent px-3 py-1.5 text-xs"
+              narration={narration}
+              language={language}
+            />
+          )}
+        </div>
+        {children}
       </div>
     </div>
   );

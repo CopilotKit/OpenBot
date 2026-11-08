@@ -14,12 +14,17 @@ import { type RefObject, useLayoutEffect, useState } from "react";
  * from a Tailwind token). Undefined until the first measurement, and where nothing is laid out (a test's DOM), so the
  * window falls back to its full width there. `shown` says whether the window is drawn at all, so measuring starts when
  * it appears.
+ *
+ * `minWidth` is a floor (never more than the space is wide). Fitting a short space can otherwise spiral: a narrower
+ * window wraps more of what is above and below its page, which takes more height and narrows it again, until the page
+ * is too small to use. At the floor the window is as wide as that and its space scrolls instead.
  */
 export function useFittedWidth(
   area: RefObject<HTMLElement | null>,
   frame: RefObject<HTMLElement | null>,
   ratio: number,
   shown = true,
+  minWidth = 0,
 ): number | undefined {
   const [width, setWidth] = useState<number>();
   useLayoutEffect(() => {
@@ -45,8 +50,10 @@ export function useFittedWidth(
         availableWidth - border,
         (availableHeight - bars) * ratio,
       );
-      // Narrowing only ever wraps the toolbar more, so this settles rather than flipping between two widths.
-      const next = Math.max(0, Math.floor(page + border));
+      // Narrowing only ever wraps more, so this settles rather than flipping between two widths; the floor stops it
+      // settling too small.
+      const floor = Math.min(minWidth, Math.floor(availableWidth));
+      const next = Math.max(0, floor, Math.floor(page + border));
       setWidth((current) => (current === next ? current : next));
     };
     const observer = new ResizeObserver(fit);
@@ -54,6 +61,6 @@ export function useFittedWidth(
     observer.observe(inner);
     fit();
     return () => observer.disconnect();
-  }, [area, frame, ratio, shown]);
+  }, [area, frame, ratio, shown, minWidth]);
   return width;
 }
