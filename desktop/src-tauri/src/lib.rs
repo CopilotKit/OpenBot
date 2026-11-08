@@ -15,6 +15,7 @@ pub mod install;
 pub mod learning_model;
 pub mod local_eval;
 pub mod local_eval_state;
+pub mod local_images;
 pub mod logging;
 pub mod paths;
 pub mod plan;

@@ -1,36 +1,41 @@
-import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
-import type {
-  LearningAutoAssignState,
-  LearningDeliveryStatus,
-  LearningEvidence,
-  LearningOverview,
-  LearningProposal,
-  LearningProposalDetail,
-  LearningTarget,
+import {
+  isLearnedSkillName,
+  isLearningPersonalReview,
+  type LearnedSkillContent,
+  type LearningAutoAssignState,
+  type LearningDeliveryStatus,
+  type LearningOverview,
+  type LearningTarget,
+  type PeopleProposals,
+  type SharingRequest,
 } from "@openbot/shared/learning";
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { type AppVariables, requireAdmin } from "../auth/guards";
+import { recordApprovalBefore, type SkillApprovalStore } from "./approvals";
 import type { LearningAutoAssign } from "./auto-assign";
 import type { InspectorLearning, InspectorLearningRequest } from "./inspector";
+import {
+  CANDIDATE_ID,
+  type LearningManagement,
+  type LearningModelUnavailable,
+  learningFailure,
+  noLearningModel,
+  readProposal,
+  readProposals,
+  requestFailure,
+  reviewProposal,
+  runSummary,
+} from "./review";
 import { type LearningSettingsStore, parseLearningSettings } from "./settings";
+
+export type { LearningManagement, LearningModelUnavailable };
+export { learningModelUnavailable } from "./review";
 
 /** The longest the settings page waits for an automatic check before answering without it. */
 const AUTO_ASSIGN_WAIT_MS = 3_000;
 
-/** The runtime key's own Learning routes: a project's containers, runs and proposed Skills. */
-export type LearningManagement = Pick<
-  CopilotKitIntelligence["experimental"]["learning"],
-  | "getLearningContainer"
-  | "listLearningRuns"
-  | "startLearningRun"
-  | "listLearningCandidates"
-  | "getLearningCandidate"
-  | "getLearningInsightEvidence"
-  | "reviewLearningCandidate"
->;
 export type LearningAdminDependencies = {
   store: LearningSettingsStore;
   autoAssign?: LearningAutoAssign;
@@ -44,32 +49,31 @@ export type LearningAdminDependencies = {
    * `OPENBOT_LEARNING_MODEL_UNAVAILABLE`. See `learningModelUnavailable`.
    */
   modelUnavailable?: LearningModelUnavailable;
+  /** What admins decided about skills people learned, kept by OpenBot. */
+  approvals?: SkillApprovalStore;
+  /** The people whose recordings are learned from, each with their own Learning space. */
+  people?: () => Promise<
+    { userId: string; name: string; containerId: string }[]
+  >;
+  /** Called when a decision changes which skills are open, so the open-skill index reads again. */
+  invalidate?: () => void;
+  /** The titles of a person's recordings, by recording id. */
+  recordingTitles?: (
+    userId: string,
+    ids: string[],
+  ) => Promise<Map<string, string | null>>;
+  /** One Skill a person published, with its files; null when they have none by that name. */
+  personSkill?: (
+    userId: string,
+    name: string,
+  ) => Promise<LearnedSkillContent | null>;
+  /** The Skills published to a container, with their files. */
+  skills?: (
+    containerId: string,
+  ) => Promise<
+    { skills: LearnedSkillContent[] } | { unavailable: "off" | "unavailable" }
+  >;
 };
-
-/** Why Learning has no model on this machine, as OpenBot Desktop recorded it. */
-export type LearningModelUnavailable = "unsupported";
-
-/**
- * Desktop's reason, or undefined. Only Desktop writes the setting, so an OpenBot whose Learning runs
- * on an organization's Intelligence keeps the message for whoever runs that back end.
- */
-export function learningModelUnavailable(
-  environment: Record<string, string | undefined>,
-): LearningModelUnavailable | undefined {
-  return environment.OPENBOT_LEARNING_MODEL_UNAVAILABLE?.trim() ===
-    "unsupported"
-    ? "unsupported"
-    : undefined;
-}
-
-/** What Learn now says when the Learning agent has no model. */
-export function noLearningModel(
-  unavailable: LearningModelUnavailable | undefined,
-): string {
-  return unavailable === "unsupported"
-    ? "Learning can't run on the model you signed in with. To use it, sign OpenBot in with an OpenAI or Anthropic API key, or a Claude or ChatGPT plan."
-    : "The back end has no Learning model yet. Give its Learning agent a model and key, then try again.";
-}
 
 /** An Inspector link, when it is one a browser can open on the dashboard's own origin. */
 function link(
@@ -170,130 +174,39 @@ async function managedOverview(
   };
 }
 
-/** The HTTP status and Intelligence error code a Learning request failed with. */
-function requestFailure(error: unknown): { status?: number; code?: string } {
-  if (error === null || typeof error !== "object") return {};
-  const { status, code } = error as { status?: unknown; code?: unknown };
-  return {
-    ...(typeof status === "number" ? { status } : {}),
-    ...(typeof code === "string" ? { code } : {}),
-  };
+/** The `updated_at` stamp the approval store writes: a full timestamp with a zone, as Postgres prints it. */
+const STAMP =
+  /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|[+-]\d{2}(?::?\d{2})?)$/;
+
+function isStamp(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = STAMP.exec(value);
+  if (!match) return false;
+  const [year, month, day, hour, minute, second] = match
+    .slice(1)
+    .map(Number) as [number, number, number, number, number, number];
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59)
+    return false;
+  return day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
-/** What to tell an admin when Intelligence refused a Learning request, and with which status. */
-function learningFailure(
-  error: unknown,
-  unavailable?: LearningModelUnavailable,
-): {
-  status: ContentfulStatusCode;
-  error: string;
-} {
-  const { status, code } = requestFailure(error);
-  if (status === 404 && code === "ROUTE_NOT_FOUND")
-    return {
-      status: 409,
-      error:
-        "Learning is switched off in the back end. Turn it on there (learning.enabled in its Helm chart).",
-    };
-  if (code === "LEARNING_CONTAINER_NOT_FOUND")
-    return {
-      status: 404,
-      error: "This Learning container doesn't exist in the back end yet.",
-    };
-  if (code === "LEARNING_CANDIDATE_NOT_FOUND")
-    return {
-      status: 404,
-      error: "The back end no longer has this skill. Refresh the list.",
-    };
-  if (code === "LEARNING_CANDIDATE_CONFLICT")
-    return {
-      status: 409,
-      error: "This skill was already reviewed. Refresh the list to see it.",
-    };
-  if (code === "LEARNING_NOT_ENABLED")
-    return {
-      status: 403,
-      error: "The back end's licence doesn't include Learning.",
-    };
-  if (code === "LEARNING_MODEL_NOT_CONFIGURED")
-    return {
-      status: 409,
-      error: noLearningModel(unavailable),
-    };
-  if (status === 429 || code === "RATE_LIMIT_EXCEEDED")
-    return {
-      status: 429,
-      error: "The back end is busy. Try again in a minute.",
-    };
-  return {
-    status: 502,
-    error: "Couldn't reach Learning in the back end. Try again.",
-  };
-}
-
-const CANDIDATE_ID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** The most Insights one proposal shows evidence for. */
-const MAX_INSIGHTS = 10;
-/** The longest cited message shown, in characters. */
-const MAX_MESSAGE = 4_000;
-
-type Candidate = Awaited<
-  ReturnType<LearningManagement["listLearningCandidates"]>
->[number];
-type CandidateDetail = Awaited<
-  ReturnType<LearningManagement["getLearningCandidate"]>
->;
-type Evidence = Awaited<
-  ReturnType<LearningManagement["getLearningInsightEvidence"]>
->[number];
-
-function proposal(candidate: Candidate): LearningProposal {
-  return {
-    id: candidate.id,
-    title: candidate.title,
-    description: candidate.description,
-    reason: candidate.reason,
-    operation: candidate.operation,
-    status: candidate.status,
-    createdAt: candidate.createdAt,
-    reviewedAt: candidate.reviewedAt,
-  };
-}
-
-function evidence(entry: Evidence): LearningEvidence {
-  if ("kind" in entry && entry.kind === "trajectory")
-    return {
-      kind: "recording",
-      id: entry.trajectoryId,
-      available: entry.trajectoryPresent && entry.unavailable === null,
-      eventCount: entry.eventCount,
-      events: entry.events.map((event) => event.name),
-    };
-  const thread = entry as Extract<Evidence, { threadId: string }>;
-  return {
-    kind: "conversation",
-    id: thread.threadId,
-    title: thread.threadName,
-    available: thread.threadPresent && thread.unavailable === null,
-    messages: thread.cited.map((message) => ({
-      id: message.id,
-      role: message.role,
-      content: message.content.slice(0, MAX_MESSAGE),
-    })),
-  };
-}
-
-function proposalDetail(
-  candidate: CandidateDetail,
-  insights: LearningProposalDetail["insights"],
-): LearningProposalDetail {
-  const files = [...candidate.bundle.files]
-    .sort((a, b) =>
-      a.path === "SKILL.md" ? -1 : b.path === "SKILL.md" ? 1 : 0,
-    )
-    .map((file) => ({ path: file.path, content: file.content }));
-  return { ...proposal(candidate), files, insights };
+/** Maps `items` with at most `limit` calls running at once, keeping the order. */
+async function mapLimited<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await work(items[index] as T);
+      }
+    }),
+  );
+  return results;
 }
 
 export function createLearningRoutes(
@@ -303,6 +216,26 @@ export function createLearningRoutes(
   audit?: AuditStore,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
+  /**
+   * Records an audit event for something that already happened. A failed write is logged and never changes the
+   * answer: the review or decision it describes is done, and its error is what the admin should see.
+   */
+  const recordSettled = async (
+    event: Parameters<typeof recordAuditEvent>[1],
+  ) => {
+    if (!audit) return;
+    try {
+      await recordAuditEvent(audit, event);
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "learning-audit-failed",
+          eventType: event.eventType,
+          errorType: error instanceof Error ? error.name : "unknown",
+        }),
+      );
+    }
+  };
   routes.use("*", requireUser, async (context, next) => {
     const denied = requireAdmin(context);
     if (denied) return denied;
@@ -402,7 +335,14 @@ export function createLearningRoutes(
         await context.req.json().catch(() => null),
       );
       if (!parsed.ok) return context.json({ error: parsed.error }, 400);
-      const settings = await dependencies.store.write(parsed.settings);
+      const stored = await dependencies.store.read();
+      const next = { ...parsed.settings };
+      const personalReview =
+        parsed.settings.personalReview ?? stored.personalReview;
+      const autoApprove = parsed.settings.autoApprove ?? stored.autoApprove;
+      if (personalReview !== undefined) next.personalReview = personalReview;
+      if (autoApprove !== undefined) next.autoApprove = autoApprove;
+      const settings = await dependencies.store.write(next);
       if (audit)
         await recordAuditEvent(audit, {
           eventType: "configuration.changed",
@@ -412,6 +352,47 @@ export function createLearningRoutes(
             enabled: settings.enabled,
             defaultContainerId: settings.defaultTarget?.containerId ?? null,
             botMappingCount: Object.keys(settings.agents).length,
+          },
+        });
+      return context.json({ settings });
+    },
+  );
+  routes.put(
+    "/personal-review",
+    bodyLimit({ maxSize: 4 * 1024 }),
+    async (context) => {
+      if (!sameOriginJson(context)) {
+        return context.json(
+          {
+            error:
+              "Use a same-origin JSON request to change who approves skills.",
+          },
+          403,
+        );
+      }
+      const body = (await context.req.json().catch(() => null)) as {
+        personalReview?: unknown;
+      } | null;
+      const personalReview = body?.personalReview;
+      if (!isLearningPersonalReview(personalReview))
+        return context.json(
+          { error: "Choose admins or people to approve skills." },
+          400,
+        );
+      const current = await dependencies.store.read();
+      const settings = await dependencies.store.write({
+        ...current,
+        personalReview,
+      });
+      if (audit)
+        await recordAuditEvent(audit, {
+          eventType: "configuration.changed",
+          targetType: "learning",
+          actorUserId: context.var.actor.id,
+          payload: {
+            change: "personal_review",
+            from: current.personalReview ?? "admins",
+            to: personalReview,
           },
         });
       return context.json({ settings });
@@ -498,8 +479,10 @@ export function createLearningRoutes(
       return context.json({ containerId: null, proposals: [] });
     const containerId = scope.target.containerId;
     try {
-      const candidates = await manage.listLearningCandidates({ containerId });
-      return context.json({ containerId, proposals: candidates.map(proposal) });
+      return context.json({
+        containerId,
+        proposals: await readProposals(manage, containerId),
+      });
     } catch (error) {
       const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
@@ -522,32 +505,298 @@ export function createLearningRoutes(
       return context.json({ error: "No Learning container is assigned." }, 404);
     const containerId = scope.target.containerId;
     try {
-      const candidate = await manage.getLearningCandidate({
-        containerId,
-        candidateId,
+      return context.json({
+        proposal: await readProposal(manage, containerId, candidateId),
       });
-      const insights = await Promise.all(
-        candidate.supportingInsights
-          .slice(0, MAX_INSIGHTS)
-          .map(async (insight) => ({
-            id: insight.id,
-            statement: insight.statement,
-            impact: insight.impact,
-            evidence: await manage
-              .getLearningInsightEvidence({
-                containerId,
-                insightId: insight.id,
-              })
-              .then((entries) => entries.map(evidence))
-              .catch(() => null),
-          })),
-      );
-      return context.json({ proposal: proposalDetail(candidate, insights) });
     } catch (error) {
       const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
   });
+  /** Each person's pending proposals, or null for a person whose space can't be read. */
+  routes.get("/people/proposals", async (context) => {
+    const { manage, people } = dependencies;
+    if (!manage || !people)
+      return context.json(
+        { error: "Reviewing skills from people is unavailable." },
+        503,
+      );
+    const listed = await people();
+    const result: PeopleProposals = {
+      people: await mapLimited(listed, 4, async (person) => ({
+        userId: person.userId,
+        name: person.name,
+        proposals: await readProposals(manage, person.containerId)
+          .then((all) => all.filter((p) => p.status === "pending_review"))
+          .catch((error: unknown) => {
+            // A person who never recorded has no space yet: nothing is pending, and nothing is wrong.
+            const { status, code } = requestFailure(error);
+            if (code !== "LEARNING_CONTAINER_NOT_FOUND")
+              console.error(
+                JSON.stringify({
+                  type: "learning-people-proposals-failed",
+                  userId: person.userId,
+                  errorType: error instanceof Error ? error.name : "unknown",
+                  ...(status !== undefined ? { status } : {}),
+                  ...(code !== undefined ? { code } : {}),
+                }),
+              );
+            return null;
+          }),
+      })),
+    };
+    return context.json(result);
+  });
+  /** One proposal learned from a person's recordings, with their titles. */
+  routes.get("/people/:userId/proposals/:candidateId", async (context) => {
+    const { manage, people, recordingTitles } = dependencies;
+    if (!manage || !people)
+      return context.json(
+        { error: "Reviewing skills from people is unavailable." },
+        503,
+      );
+    const candidateId = context.req.param("candidateId");
+    if (!CANDIDATE_ID.test(candidateId))
+      return context.json({ error: "Invalid skill ID." }, 400);
+    const userId = context.req.param("userId");
+    const person = (await people()).find((entry) => entry.userId === userId);
+    if (!person)
+      return context.json({ error: "This person doesn't exist." }, 404);
+    try {
+      return context.json({
+        proposal: await readProposal(
+          manage,
+          person.containerId,
+          candidateId,
+          recordingTitles ? (ids) => recordingTitles(userId, ids) : undefined,
+        ),
+      });
+    } catch (error) {
+      const failure = learningFailure(error, dependencies.modelUnavailable);
+      return context.json({ error: failure.error }, failure.status);
+    }
+  });
+  /** One Skill a person published, with its files. */
+  routes.get("/people/:userId/skills/:name", async (context) => {
+    const { people, personSkill } = dependencies;
+    if (!people || !personSkill)
+      return context.json(
+        { error: "Reading skills from people is unavailable." },
+        503,
+      );
+    const name = context.req.param("name");
+    if (!isLearnedSkillName(name))
+      return context.json({ error: "Invalid skill name." }, 400);
+    const userId = context.req.param("userId");
+    if (!(await people()).some((entry) => entry.userId === userId))
+      return context.json({ error: "This person doesn't exist." }, 404);
+    const skill = await personSkill(userId, name).catch(() => undefined);
+    if (skill === undefined)
+      return context.json(
+        {
+          error:
+            "Couldn't read this person's Skills from the back end just now. Try again.",
+        },
+        503,
+      );
+    if (!skill)
+      return context.json({ error: "This skill doesn't exist." }, 404);
+    return context.json({ skill });
+  });
+  routes.get("/sharing-requests", async (context) => {
+    const { approvals, people } = dependencies;
+    if (!approvals || !people)
+      return context.json(
+        { error: "Reviewing sharing requests is unavailable." },
+        503,
+      );
+    const names = new Map(
+      (await people()).map((entry) => [entry.userId, entry.name]),
+    );
+    const requests: SharingRequest[] = (await approvals.requests()).map(
+      (entry) => ({
+        userId: entry.userId,
+        name: names.get(entry.userId) ?? entry.userId,
+        skillName: entry.skillName,
+        requestedAt: entry.updatedAt,
+      }),
+    );
+    return context.json({ requests });
+  });
+  /** Answer a person's request to open a skill they approved to every Bot. */
+  for (const action of ["approve", "decline"] as const) {
+    routes.post(
+      `/sharing-requests/:userId/:skillName/${action}`,
+      bodyLimit({
+        maxSize: 4 * 1024,
+        onError: (context) =>
+          context.json({ error: "That request is too large." }, 413),
+      }),
+      async (context) => {
+        if (!sameOriginJson(context))
+          return context.json(
+            { error: "Use a same-origin JSON request to decide sharing." },
+            403,
+          );
+        const { approvals, people } = dependencies;
+        if (!approvals || !people)
+          return context.json(
+            { error: "Reviewing sharing requests is unavailable." },
+            503,
+          );
+        const skillName = context.req.param("skillName");
+        if (!isLearnedSkillName(skillName))
+          return context.json({ error: "Invalid skill name." }, 400);
+        const userId = context.req.param("userId");
+        if (!(await people()).some((entry) => entry.userId === userId))
+          return context.json({ error: "This person doesn't exist." }, 404);
+        const decision = action === "approve" ? "approved" : "declined";
+        const body = (await context.req.json().catch(() => null)) as {
+          requestedAt?: unknown;
+        } | null;
+        const requestedAt = body?.requestedAt;
+        if (!isStamp(requestedAt))
+          return context.json(
+            { error: "Open the request again, then decide." },
+            400,
+          );
+        if (
+          !(await approvals.decideSharing(
+            userId,
+            skillName,
+            decision,
+            requestedAt,
+          ))
+        ) {
+          // A stale `requestedAt` also fails; tell the two apart so the admin knows to open the skill again.
+          if (
+            (await approvals.requests()).some(
+              (entry) =>
+                entry.userId === userId && entry.skillName === skillName,
+            )
+          )
+            return context.json(
+              {
+                error:
+                  "This skill changed after you opened it. Open it again to see the new version.",
+              },
+              409,
+            );
+          return context.json(
+            { error: "This sharing request doesn't exist." },
+            404,
+          );
+        }
+        dependencies.invalidate?.();
+        await recordSettled({
+          eventType: "learning.sharing_decided",
+          targetType: "learned_skill",
+          targetId: skillName,
+          actorUserId: context.var.actor.id,
+          payload: { skill: skillName, userId, decision },
+        });
+        return context.json({ sharing: decision });
+      },
+    );
+  }
+  /**
+   * Approve or reject a proposal learned from a person's recordings. On approve, OpenBot records the skill as
+   * admin-approved before Intelligence is asked, and takes that record back if Intelligence refuses.
+   */
+  for (const action of ["approve", "reject"] as const) {
+    routes.post(
+      `/people/:userId/proposals/:candidateId/${action}`,
+      async (context) => {
+        if (!sameOriginJson(context))
+          return context.json(
+            { error: "Use a same-origin JSON request to review a skill." },
+            403,
+          );
+        const { manage, people, approvals } = dependencies;
+        if (!manage || !people)
+          return context.json(
+            { error: "Reviewing skills from people is unavailable." },
+            503,
+          );
+        const candidateId = context.req.param("candidateId");
+        if (!CANDIDATE_ID.test(candidateId))
+          return context.json({ error: "Invalid skill ID." }, 400);
+        const userId = context.req.param("userId");
+        const person = (await people()).find(
+          (entry) => entry.userId === userId,
+        );
+        if (!person)
+          return context.json({ error: "This person doesn't exist." }, 404);
+        const containerId = person.containerId;
+        const actor = context.var.actor;
+        try {
+          const recordApproval =
+            action === "approve" && approvals
+              ? recordApprovalBefore(approvals, userId, "admin")
+              : undefined;
+          let review: Awaited<ReturnType<typeof reviewProposal>>;
+          try {
+            review = await reviewProposal({
+              manage,
+              containerId,
+              candidateId,
+              action,
+              ...(recordApproval
+                ? {
+                    before: async (
+                      ...args: Parameters<typeof recordApproval>
+                    ) => {
+                      try {
+                        return await recordApproval(...args);
+                      } finally {
+                        dependencies.invalidate?.();
+                      }
+                    },
+                  }
+                : {}),
+            });
+          } finally {
+            dependencies.invalidate?.();
+          }
+          await recordSettled({
+            eventType: "configuration.changed",
+            targetType: "learning_skill",
+            targetId: candidateId,
+            actorUserId: actor.id,
+            payload: {
+              change:
+                action === "approve" ? "skill_approved" : "skill_rejected",
+              userId,
+              containerId,
+              title: review.title,
+              operation: review.operation,
+              by: actor.email,
+            },
+          });
+          return context.json({
+            proposal: { id: candidateId, status: review.status },
+          });
+        } catch (error) {
+          await recordSettled({
+            eventType: "configuration.changed",
+            targetType: "learning_skill",
+            targetId: candidateId,
+            actorUserId: actor.id,
+            payload: {
+              change: "skill_review_failed",
+              decision: action,
+              userId,
+              containerId,
+              code: requestFailure(error).code ?? null,
+              by: actor.email,
+            },
+          });
+          const failure = learningFailure(error, dependencies.modelUnavailable);
+          return context.json({ error: failure.error }, failure.status);
+        }
+      },
+    );
+  }
   /**
    * Approve (which publishes it to every Bot on the container) or reject a proposal. Intelligence
    * records the runtime key as the reviewer, so OpenBot's own audit records which admin it was.
@@ -587,46 +836,63 @@ export function createLearningRoutes(
           candidateId,
           action,
         });
-        if (audit)
-          await recordAuditEvent(audit, {
-            eventType: "configuration.changed",
-            targetType: "learning_skill",
-            targetId: candidateId,
-            actorUserId: actor.id,
-            payload: {
-              change:
-                action === "approve" ? "skill_approved" : "skill_rejected",
-              containerId,
-              title,
-              operation: review.operation,
-              publishedSkillId: review.publishedSkillId,
-              by: actor.email,
-            },
-          });
+        await recordSettled({
+          eventType: "configuration.changed",
+          targetType: "learning_skill",
+          targetId: candidateId,
+          actorUserId: actor.id,
+          payload: {
+            change: action === "approve" ? "skill_approved" : "skill_rejected",
+            containerId,
+            title,
+            operation: review.operation,
+            publishedSkillId: review.publishedSkillId,
+            by: actor.email,
+          },
+        });
         return context.json({
           proposal: { id: candidateId, status: review.status },
         });
       } catch (error) {
         const failure = learningFailure(error, dependencies.modelUnavailable);
-        if (audit)
-          await recordAuditEvent(audit, {
-            eventType: "configuration.changed",
-            targetType: "learning_skill",
-            targetId: candidateId,
-            actorUserId: actor.id,
-            payload: {
-              change: "skill_review_failed",
-              decision: action,
-              containerId,
-              ...(title ? { title } : {}),
-              code: requestFailure(error).code ?? null,
-              by: actor.email,
-            },
-          });
+        await recordSettled({
+          eventType: "configuration.changed",
+          targetType: "learning_skill",
+          targetId: candidateId,
+          actorUserId: actor.id,
+          payload: {
+            change: "skill_review_failed",
+            decision: action,
+            containerId,
+            ...(title ? { title } : {}),
+            code: requestFailure(error).code ?? null,
+            by: actor.email,
+          },
+        });
         return context.json({ error: failure.error }, failure.status);
       }
     });
   }
+  /** The container's analysis runs, in the order Intelligence lists them. */
+  routes.get("/runs", async (context) => {
+    const manage = dependencies.manage;
+    if (!manage)
+      return context.json(
+        { error: "Reviewing Learning here is unavailable." },
+        503,
+      );
+    const scope = await targetFor(context);
+    if (!scope.ok) return context.json({ error: "Invalid Bot ID." }, 400);
+    if (!scope.target) return context.json({ containerId: null, runs: [] });
+    const containerId = scope.target.containerId;
+    try {
+      const runs = await manage.listLearningRuns({ containerId });
+      return context.json({ containerId, runs: runs.map(runSummary) });
+    } catch (error) {
+      const failure = learningFailure(error, dependencies.modelUnavailable);
+      return context.json({ error: failure.error }, failure.status);
+    }
+  });
   /** Learn now: start a Learning run on the container over every finished conversation not yet used. */
   routes.post("/runs", async (context) => {
     if (!sameOriginJson(context))
@@ -664,6 +930,62 @@ export function createLearningRoutes(
       const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
+  });
+  const skillsUnavailable = (kind: "off" | "unavailable") =>
+    kind === "off"
+      ? "Automatic learning is turned off. Turn it on to see published skills."
+      : "Couldn't load published Skills from the back end. Try again.";
+  /** The Skills published to the container, by name and description. */
+  routes.get("/skills", async (context) => {
+    const skills = dependencies.skills;
+    if (!skills)
+      return context.json(
+        { error: "Reading published skills here is unavailable." },
+        503,
+      );
+    const scope = await targetFor(context);
+    if (!scope.ok) return context.json({ error: "Invalid Bot ID." }, 400);
+    if (!scope.target) return context.json({ containerId: null, skills: [] });
+    const containerId = scope.target.containerId;
+    const result = await skills(containerId);
+    if ("unavailable" in result)
+      return context.json(
+        { error: skillsUnavailable(result.unavailable) },
+        503,
+      );
+    return context.json({
+      containerId,
+      skills: result.skills.map(({ name, description }) => ({
+        name,
+        description,
+      })),
+    });
+  });
+  /** One published Skill with its files. */
+  routes.get("/skills/:name", async (context) => {
+    const skills = dependencies.skills;
+    if (!skills)
+      return context.json(
+        { error: "Reading published skills here is unavailable." },
+        503,
+      );
+    const name = context.req.param("name");
+    if (!isLearnedSkillName(name))
+      return context.json({ error: "Invalid skill name." }, 400);
+    const scope = await targetFor(context);
+    if (!scope.ok) return context.json({ error: "Invalid Bot ID." }, 400);
+    if (!scope.target)
+      return context.json({ error: "No Learning container is assigned." }, 404);
+    const result = await skills(scope.target.containerId);
+    if ("unavailable" in result)
+      return context.json(
+        { error: skillsUnavailable(result.unavailable) },
+        503,
+      );
+    const skill = result.skills.find((entry) => entry.name === name);
+    if (!skill)
+      return context.json({ error: "This skill doesn't exist." }, 404);
+    return context.json({ skill });
   });
   routes.get("/status/:agentId", async (context) => {
     if (!dependencies.status)

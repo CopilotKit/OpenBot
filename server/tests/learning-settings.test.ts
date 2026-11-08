@@ -60,6 +60,38 @@ describe("learning settings", () => {
     },
   );
 
+  test("old rows without the new fields still parse, and the fields round-trip", async () => {
+    const old = { enabled: true, defaultTarget: null, agents: {} };
+    const parsed = parseLearningSettings(old);
+    expect(parsed).toEqual({ ok: true, settings: old });
+    const store = createLearningSettingsStore();
+    const saved = {
+      ...old,
+      personalReview: "people" as const,
+      autoApprove: true,
+    };
+    await store.write(saved);
+    expect(await store.read()).toEqual(saved);
+  });
+
+  test("an unknown personalReview is refused", () => {
+    const result = parseLearningSettings({
+      enabled: true,
+      defaultTarget: null,
+      agents: {},
+      personalReview: "everyone",
+    });
+    expect(result.ok).toBe(false);
+    expect(
+      parseLearningSettings({
+        enabled: true,
+        defaultTarget: null,
+        agents: {},
+        autoApprove: "yes",
+      }).ok,
+    ).toBe(false);
+  });
+
   test("first thread assignment remains stable across mapping edits and competing bots", async () => {
     const store = createLearningSettingsStore();
     expect(

@@ -43,6 +43,7 @@ import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
+import { useOffersMemory } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { memoriesQueryOptions } from "@/lib/memory";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
@@ -488,7 +489,9 @@ function WorkspaceLinks({
   onNavigate: () => void;
 }) {
   const routines = useQuery(routinesQueryOptions());
-  const memories = useQuery(memoriesQueryOptions());
+  // No Memories row where memory isn't offered (see `offersMemory`).
+  const memory = useOffersMemory();
+  const memories = useQuery({ ...memoriesQueryOptions(), enabled: memory });
   // OpenDots keeps these rows in the chrome's olive ink; the row you are on only gains the tint.
   const row = (section: string) =>
     cn(
@@ -522,17 +525,19 @@ function WorkspaceLinks({
         <span className="min-w-0 flex-1 truncate">Routines</span>
         <Count value={routines.data?.routines.length} />
       </Link>
-      <Link
-        aria-current={current("memories")}
-        className={row("memories")}
-        onClick={onNavigate}
-        params={{ screen: "memories" }}
-        to="/s/$screen"
-      >
-        <IconBook />
-        <span className="min-w-0 flex-1 truncate">Memories</span>
-        <Count value={memories.data?.length} />
-      </Link>
+      {memory ? (
+        <Link
+          aria-current={current("memories")}
+          className={row("memories")}
+          onClick={onNavigate}
+          params={{ screen: "memories" }}
+          to="/s/$screen"
+        >
+          <IconBook />
+          <span className="min-w-0 flex-1 truncate">Memories</span>
+          <Count value={memories.data?.length} />
+        </Link>
+      ) : null}
       {/* OpenBot's own destinations, from the one list every frame reads. */}
       {navigation.map((item) => (
         <NavigationTarget

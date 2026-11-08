@@ -14,7 +14,8 @@ import { settleReactWork } from "./settle-react-work";
  * width of a small screen. 768px is the reading width ChatGPT and Claude.ai give an answer; wider, a
  * line of prose gets long enough to be hard to read. The answers' text sits inset in that column, so
  * the composer reaches a little past it on both sides, and a drawer on the composer lines up with
- * the text. Skins keep the column they were drawn with, 672px for both.
+ * the text. In a pane narrower than the column, both keep 16px off its edges. Skins keep the column
+ * they were drawn with, 672px for both.
  */
 
 class OfflineWebSocket extends EventTarget {
@@ -78,7 +79,11 @@ test("a conversation's answers and its composer share one column", () => {
     );
     const { answers, composer } = columns(view.container);
     centredUpTo(answers, "max-w-3xl");
-    centredUpTo(composer, "max-w-3xl");
+    // The composer's column pads like the answers' (`px-4`) and is 2rem wider to pay for it, so the
+    // composer itself is 768px from an 800px pane up and keeps 16px off each edge below that.
+    centredUpTo(composer, "max-w-[calc(var(--container-3xl)+2rem)]");
+    expect(answers).toContain("px-4");
+    expect(composer).toContain("px-4");
     cleanup();
   }
 });
@@ -113,4 +118,11 @@ test("every skin keeps its answers and its composer in its own column", () => {
     );
   // `max-w-2xl`, read from the theme token.
   expect(rule?.[1]?.trim()).toBe("max-width: var(--container-2xl);");
+  // OpenBot's `px-4` on the composer's column is taken off again, at a specificity a skin's own
+  // padding outranks, so a skin's composer is as wide as it was drawn.
+  const padding =
+    /:where\(:root\[data-skin\]\)\s+\[data-slot="composer-column"\]\s*\{([^}]*)\}/.exec(
+      css,
+    );
+  expect(padding?.[1]?.trim()).toBe("padding-inline: 0;");
 });

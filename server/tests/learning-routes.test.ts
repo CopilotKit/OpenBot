@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type {
+  LearnedSkillContent,
   LearningOverview,
   LearningProposalDetail,
 } from "@openbot/shared/learning";
@@ -52,7 +53,19 @@ function routes(role: "admin" | "user" = "admin") {
 test("only administrators can read or write learning settings", async () => {
   const { app } = routes("user");
   expect((await app.request("/settings")).status).toBe(403);
-  expect((await app.request("/settings", { method: "PUT" })).status).toBe(403);
+  // Same-origin JSON, so the refusal is the admin guard and not the origin check.
+  const sameOrigin = await app.request("https://openbot.example.com/settings", {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      origin: "https://openbot.example.com",
+    },
+    body: JSON.stringify({ enabled: true, agents: {} }),
+  });
+  expect(sameOrigin.status).toBe(403);
+  expect(await sameOrigin.json()).toEqual({
+    error: "Only an admin can do this.",
+  });
 });
 
 test("administrators see learning enabled before selecting a container", async () => {
@@ -114,6 +127,99 @@ test("validates and persists a same-origin admin save", async () => {
       })
     ).status,
   ).toBe(400);
+});
+
+test("a settings save keeps who approves and automatic approval when it leaves them out", async () => {
+  const { app, store } = routes();
+  await store.write({
+    enabled: true,
+    defaultTarget: null,
+    agents: {},
+    personalReview: "people",
+    autoApprove: false,
+  });
+  const response = await app.request("https://openbot.example.com/settings", {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      origin: "https://openbot.example.com",
+    },
+    body: JSON.stringify({
+      enabled: true,
+      defaultTarget: { containerId: "support" },
+      agents: {},
+    }),
+  });
+  expect(response.status).toBe(200);
+  expect(await store.read()).toMatchObject({
+    defaultTarget: { containerId: "support" },
+    personalReview: "people",
+    autoApprove: false,
+  });
+});
+
+test("an admin switches who approves, and a later settings save keeps it", async () => {
+  const store = createLearningSettingsStore();
+  const events: AuditEventInput[] = [];
+  const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
+    context,
+    next,
+  ) => {
+    context.set("actor", {
+      id: "admin-ada",
+      email: "ada@example.com",
+      role: "admin",
+    });
+    await next();
+  };
+  const app = createLearningRoutes(
+    { store },
+    requireUser,
+    ["https://openbot.example.com"],
+    { insert: async (event) => void events.push(event) },
+  );
+  const put = (
+    path: string,
+    body: unknown,
+    origin = "https://openbot.example.com",
+  ) =>
+    app.request(`https://openbot.example.com${path}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        origin,
+      },
+      body: JSON.stringify(body),
+    });
+  expect(
+    (
+      await put(
+        "/personal-review",
+        { personalReview: "people" },
+        "https://evil.example",
+      )
+    ).status,
+  ).toBe(403);
+  expect(
+    (await put("/personal-review", { personalReview: "nobody" })).status,
+  ).toBe(400);
+  const response = await put("/personal-review", { personalReview: "people" });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    settings: { personalReview: "people" },
+  });
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    eventType: "configuration.changed",
+    targetType: "learning",
+    actorUserId: "admin-ada",
+    payload: { change: "personal_review", from: "admins", to: "people" },
+  });
+  expect(
+    (await put("/settings", { enabled: true, defaultTarget: null, agents: {} }))
+      .status,
+  ).toBe(200);
+  expect((await store.read()).personalReview).toBe("people");
 });
 
 test("upstream errors never expose credentials", async () => {
@@ -291,6 +397,92 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
       agents: {},
     });
 
+  test("an admin lists the container's analysis runs", async () => {
+    const { app, store } = admin();
+    await useDefault(store);
+    const response = await app.request("/runs");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      containerId: string;
+      runs: unknown[];
+    };
+    expect(body.containerId).toBe("openbot");
+    expect(body.runs[0]).toMatchObject({
+      status: "succeeded",
+      trigger: expect.any(String),
+    });
+    expect((await admin("current", "user").app.request("/runs")).status).toBe(
+      403,
+    );
+  });
+
+  test("published skills say it is automatic learning that is off", async () => {
+    const store = createLearningSettingsStore();
+    await useDefault(store);
+    const app = createLearningRoutes(
+      { store, skills: async () => ({ unavailable: "off" }) },
+      async (context, next) => {
+        context.set("actor", {
+          id: "admin-ada",
+          email: "ada@example.com",
+          name: "Ada",
+          role: "admin",
+        });
+        await next();
+      },
+    );
+    const response = await app.request("/skills");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error:
+        "Automatic learning is turned off. Turn it on to see published skills.",
+    });
+  });
+
+  test("an admin reads a published skill's files", async () => {
+    const store = createLearningSettingsStore();
+    await useDefault(store);
+    const skill: LearnedSkillContent = {
+      name: "weekly-report",
+      description: "Write the weekly report.",
+      files: [{ path: "SKILL.md", text: "# Weekly report" }],
+    };
+    const build = (role: "admin" | "user") =>
+      createLearningRoutes(
+        {
+          store,
+          skills: async (containerId) =>
+            containerId === "openbot" ? { skills: [skill] } : { skills: [] },
+        },
+        async (context, next) => {
+          context.set("actor", {
+            id: "admin-ada",
+            email: "ada@example.com",
+            name: "Ada",
+            role,
+          });
+          await next();
+        },
+      );
+    const app = build("admin");
+    const list = await app.request("/skills");
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({
+      containerId: "openbot",
+      skills: [
+        { name: "weekly-report", description: "Write the weekly report." },
+      ],
+    });
+    const found = await app.request("/skills/weekly-report");
+    expect(found.status).toBe(200);
+    expect(await found.json()).toEqual({ skill });
+    expect((await app.request("/skills/unknown")).status).toBe(404);
+    expect((await app.request("/skills/a%2Fb")).status).toBe(400);
+    expect((await build("user").request("/skills/weekly-report")).status).toBe(
+      403,
+    );
+  });
+
   test("only an admin may list, read, approve, reject or start Learning", async () => {
     const { app, intelligence } = admin("current", "user");
     for (const response of [
@@ -342,6 +534,7 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
       {
         kind: "recording",
         id: "0198a012-a20f-77c0-9e33-8992f18e74b0",
+        title: null,
         available: true,
         eventCount: 1,
         events: ["click"],

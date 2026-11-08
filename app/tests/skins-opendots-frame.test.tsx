@@ -126,6 +126,7 @@ let actor: Actor = person;
 let bots: AgentProfile[] = [];
 let channels: ReturnType<typeof channel>[] = [];
 let agentsFail = false;
+let edition: "team" | "personal" = "team";
 const paused = new Set<string>();
 
 let originalFetch: typeof fetch;
@@ -165,8 +166,8 @@ async function serve(path: string, init?: RequestInit): Promise<Response> {
     });
   }
   if (url.pathname === "/api/capabilities") {
-    // A team deployment, where people sign in, so Sign out is offered.
-    return Response.json({ localEvaluation: false, edition: "team" });
+    // A team deployment unless a test says otherwise, where people sign in, so Sign out is offered.
+    return Response.json({ localEvaluation: false, edition });
   }
   if (url.pathname === "/api/channels") {
     return Response.json({ channels, nextCursor: null });
@@ -227,6 +228,7 @@ beforeEach(() => {
   requests.length = 0;
   actor = person;
   agentsFail = false;
+  edition = "team";
   paused.clear();
   bots = [
     profile("ada", "Ada"),
@@ -594,9 +596,58 @@ describe("OpenDots screens", () => {
         <Screen />
       </QueryClientProvider>,
     );
-    expect(view.getByRole("heading", { name: "Memories" })).toBeTruthy();
+    expect(await view.findByRole("heading", { name: "Memories" })).toBeTruthy();
     expect(await view.findByText("No memories yet")).toBeTruthy();
     expect(view.getByRole("button", { name: /Remember a fact/ })).toBeTruthy();
+  });
+});
+
+/** The personal edition has no memory: OpenBot Desktop's local Intelligence isn't licensed for it. */
+describe("OpenDots in the personal edition", () => {
+  test("has no Memories row", async () => {
+    edition = "personal";
+    const { view } = draw("/");
+    const workspace = await view.findByRole("navigation", {
+      name: "Workspace",
+    });
+    await within(workspace).findByText("Routines");
+    await waitFor(() =>
+      expect(within(workspace).queryByText("Memories")).toBeNull(),
+    );
+    expect(hrefs(view.container)).not.toContain("/s/memories");
+    expect(requests.some((request) => request.path === "/api/memory")).toBe(
+      false,
+    );
+  });
+
+  test("sends the Memories screen home", async () => {
+    edition = "personal";
+    const Screen = opendots.screens?.memories;
+    if (!Screen) throw new Error("OpenDots has no memories screen");
+    const root = createRootRoute({ component: Outlet });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/s/memories"] }),
+      routeTree: root.addChildren([
+        createRoute({
+          getParentRoute: () => root,
+          path: "/",
+          component: () => <p>OpenBot home</p>,
+        }),
+        createRoute({
+          getParentRoute: () => root,
+          path: "/s/memories",
+          component: () => <Screen />,
+        }),
+      ]),
+    });
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    expect(await view.findByText("OpenBot home")).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/");
+    expect(view.queryByRole("heading", { name: "Memories" })).toBeNull();
   });
 });
 

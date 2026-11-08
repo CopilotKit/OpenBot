@@ -992,10 +992,13 @@ test("a command the person declines on the Bot's own approval card is listed onc
   // header and its status, so the word appears three times: once on the card and twice in the pane.
   expect(view.getAllByText("Declined")).toHaveLength(3);
   expect(activityOf(view).getAllByText("Declined")).toHaveLength(2);
+  // The card's own command line, not the inline code the Bot wrote into its summary, which the card
+  // now draws as markdown the way a reply would.
+  const commandLines = (root: Element) =>
+    root.querySelectorAll('code:not([data-streamdown="inline-code"])').length;
   expect(
-    view.container.querySelectorAll("code").length -
-      view.getByRole("region", { name: "Activity" }).querySelectorAll("code")
-        .length,
+    commandLines(view.container) -
+      commandLines(view.getByRole("region", { name: "Activity" })),
   ).toBe(1);
 });
 

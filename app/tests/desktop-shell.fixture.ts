@@ -18,6 +18,12 @@ export type DesktopShellOptions = {
   heard?: DesktopSpeechEvent[];
   /** What it hands over when asked to stop, before its end. */
   atStop?: DesktopSpeechEvent[];
+  /**
+   * The problem the desktop answers each start with while set, as on a computer with no microphone
+   * (`audio-capture`): its error, then its end, and never a start (speech.rs, `Emitter::fail`). Read at each start,
+   * so a test can plug a microphone in.
+   */
+  fails?: string;
   /** Deliver each pair of channel messages the wrong way round, as two evaluations may land. */
   reorder?: boolean;
 };
@@ -82,7 +88,9 @@ export function installDesktopShell(options: DesktopShellOptions = {}) {
             throw new Error("invalid channel");
           const session = nextSession++;
           sessions.set(session, { callback, index: 0, ended: false });
-          deliver(session, [{ type: "start" }, ...(options.heard ?? [])]);
+          if (options.fails)
+            deliver(session, [{ type: "error", error: options.fails }], true);
+          else deliver(session, [{ type: "start" }, ...(options.heard ?? [])]);
           return session;
         }
         case "speech_stop":

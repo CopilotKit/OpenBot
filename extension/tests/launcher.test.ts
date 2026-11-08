@@ -419,11 +419,13 @@ test("connect stores the connection as an approved Connect does, with no Connect
       via: "openbot-browser",
     },
   });
-  // With the connection it holds by id, which OpenBot keeps rather than making another at every open.
+  // With the connection it holds by id and the address it reaches OpenBot at, which OpenBot keeps rather than making
+  // another at every open while that is still its address.
   expect(await launcher().state()).toEqual({
     connected: true,
     userId: ada.id,
     connectionId: connection().connectionId,
+    openbotUrl: gateway.httpUrl,
     phase: "idle",
     actions: 0,
     narration: "external",
@@ -1105,6 +1107,43 @@ test("a recording Intelligence refused is reported kept, never sent or still sen
   });
   expect(stopped).not.toHaveProperty("sending");
   expect(stopped).not.toHaveProperty("discarded");
+}, 15_000);
+
+test("a stopped recording whose capture pass keeps failing reports why while it retries, and goes once OpenBot answers", async () => {
+  // OpenBot Desktop, 2026-11-07: the capture pass could not reach OpenBot, the Recorder retried it for half an hour
+  // before holding it, and the whole time Teach a Bot said "Saving … to your Learning space" with no reason.
+  passRefusal = { status: 503, body: {} };
+  await launcher().connect({ connection: connection(), narration: "external" });
+  openOrder();
+  const started = await launcher().record({
+    action: "start",
+    title: "Check example.com heading",
+  });
+  expect(started).toMatchObject({ ok: true, state: { phase: "recording" } });
+  const recordingId = (await launcher().state()).recordingId;
+  clock += 10_000;
+  expect(await launcher().record({ action: "stop" })).toMatchObject({
+    ok: true,
+    state: { phase: "idle" },
+  });
+  await until(
+    async () => (await launcher().state()).lastStopped?.retrying !== undefined,
+    "the retry to reach the stopped recording",
+  );
+  expect((await launcher().state()).lastStopped).toMatchObject({
+    recordingId: recordingId ?? "",
+    sending: true,
+    retrying:
+      "OpenBot's back end is busy or unreachable. Retrying; nothing is lost.",
+  });
+  // OpenBot answers again: the reason goes, and so does the rest of the recording.
+  passRefusal = null;
+  const drains = () =>
+    (fake.storage.local.get("drains") as DrainRecord[] | undefined) ?? [];
+  await until(() => drains().length === 0, "the recording to be sent");
+  const after = (await launcher().state()).lastStopped;
+  expect(after).not.toHaveProperty("retrying");
+  expect(after).not.toHaveProperty("sending");
 }, 15_000);
 
 test("a stopped recording a disconnect catches part sent is kept for its person, and no longer said to be sending", async () => {

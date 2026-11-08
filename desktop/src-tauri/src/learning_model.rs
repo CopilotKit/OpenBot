@@ -405,6 +405,7 @@ mod tests {
             licence: crate::local_eval::Licence::Valid,
             licence_expires_at: None,
             update_to: None,
+            checks_passed: readiness == crate::local_eval::Readiness::Ready,
         }
     }
 
