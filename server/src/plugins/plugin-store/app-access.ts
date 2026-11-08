@@ -31,6 +31,7 @@ import {
   type AppAccess,
   type AppAccessFacts,
   type AppAccessRequestKind,
+  type AppConnect,
   type AppProvider,
   accountOf,
   appAccessState,
@@ -41,7 +42,7 @@ import {
   type Unavailable,
   unavailableReason,
 } from "../app-access";
-import type { BrokerApp } from "../broker";
+import type { BrokerApp, BrokerConnection } from "../broker";
 import {
   CATALOGUE,
   type CatalogueEntry,
@@ -71,6 +72,8 @@ type AppCandidate = {
   toolkit: string | null;
   entry: CatalogueEntry | null;
   authScheme: string | null;
+  /** How the directory says an app with no row connects. See {@link AppAccessFacts.listedConnect}. */
+  listedConnect: AppConnect;
   accountMode: "personal" | "shared" | null;
   hasCredential: boolean;
   /** The answering row's `owner_grants`, null where nobody chose or there is no row. */
@@ -257,6 +260,7 @@ export function appAccessMethods(context: StoreContext) {
           toolkit,
           entry,
           authScheme: toolkit ? (head?.authScheme ?? null) : source.authScheme,
+          listedConnect: null,
           accountMode: toolkit ? (head?.accountMode ?? null) : null,
           hasCredential: source.credentialId !== null,
           ownerGrants: source.ownerGrants,
@@ -285,6 +289,7 @@ export function appAccessMethods(context: StoreContext) {
     toolkit?: string | null;
     entry?: CatalogueEntry | null;
     vouched?: boolean;
+    listedConnect?: AppConnect;
   }): AppCandidate {
     return {
       key: input.key,
@@ -297,6 +302,7 @@ export function appAccessMethods(context: StoreContext) {
       toolkit: input.toolkit ?? null,
       entry: input.entry ?? null,
       authScheme: null,
+      listedConnect: input.listedConnect ?? null,
       accountMode: null,
       hasCredential: false,
       ownerGrants: null,
@@ -316,6 +322,24 @@ export function appAccessMethods(context: StoreContext) {
       return await directory();
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * The directory's word for whether an app signs in, in the card's terms: a consent app does (a
+   * self-registering app registers its client at the sign-in). Everything else stays null until the
+   * app is on and its row records a scheme: a field app is turned on first and then set up on its
+   * page, as it always was.
+   */
+  function connectOfListing(connection: BrokerConnection): AppConnect {
+    switch (connection.kind) {
+      case "consent":
+      case "self-registering":
+        return "consent";
+      case "fields":
+      case "no-auth":
+      case "unsupported":
+        return null;
     }
   }
 
@@ -344,6 +368,7 @@ export function appAccessMethods(context: StoreContext) {
         logo: app.logo,
         provider: brokerProvider,
         toolkit: app.slug,
+        listedConnect: connectOfListing(app.connection),
       });
     /*
      * An id in the broker's namespace that the directory cannot vouch for is still an app somebody
@@ -733,6 +758,7 @@ export function appAccessMethods(context: StoreContext) {
           present: app.present,
           composioConfigured: input.composioConfigured,
           authScheme: app.authScheme,
+          listedConnect: app.listedConnect,
           accountMode: app.accountMode,
           catalogueAuth: app.entry?.auth ?? null,
           hasCredential: app.hasCredential,
@@ -1001,6 +1027,7 @@ export function appAccessMethods(context: StoreContext) {
           present: app.present,
           composioConfigured: input.composioConfigured,
           authScheme: app.authScheme,
+          listedConnect: app.listedConnect,
           accountMode: app.accountMode,
           catalogueAuth: app.entry?.auth ?? null,
           hasCredential: app.hasCredential,

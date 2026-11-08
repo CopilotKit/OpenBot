@@ -1,3 +1,4 @@
+import { currentEdition } from "../../edition";
 import { PluginRefusedError } from "../store";
 import type { PluginRouteContext } from "./context";
 
@@ -103,13 +104,23 @@ export function mountSkillRoutes({
       ? (body.tools as string[]).map((ref) => ref.trim())
       : undefined;
 
+    /*
+     * FOR EVERYBODY ONLY WHERE THERE IS SOMEBODY ELSE. The personal edition has one person, and its
+     * Settings > Skills is the page Admin > Skills is, so it saves with `global` too. Stored as
+     * nobody's, the skill was missing from everything that lists the person's own, such as a Bot's
+     * "Your skills". There it is the person's. Existing rows are given to them at startup
+     * (`ensurePersonalSkillsOwned`).
+     */
+    const forEverybody =
+      body.global === true && currentEdition() !== "personal";
+
     try {
       await store.installSkill({
         slug: body.slug,
         title: body.title.trim(),
         summary: body.summary ?? "",
         instructions: body.instructions.trim(),
-        ownerUserId: body.global ? null : actor.id,
+        ownerUserId: forEverybody ? null : actor.id,
         ...(tools === undefined ? {} : { tools }),
         by: actorEmail(context),
       });
