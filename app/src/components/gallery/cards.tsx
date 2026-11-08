@@ -258,7 +258,7 @@ export const GALLERY: GalleryComponent[] = [
     summary:
       "Shows one thing and its details, such as an order, a person or a ticket.",
     description:
-      "Show one thing and its fields, an order, a person, a ticket. Use instead of describing a record in prose.",
+      "Show one thing and its fields, an order, a person, a ticket. Use when there are several fields worth reading side by side; a fact or two about it belong in a Markdown reply.",
     parameters: RecordCardProps,
     Component: RecordCard as GalleryComponent["Component"],
     preview: {
@@ -279,7 +279,7 @@ export const GALLERY: GalleryComponent[] = [
     kind: "card",
     summary: "Shows up to six headline figures and how each one has changed.",
     description:
-      "Show up to six headline figures, each with an optional movement. Use for a summary somebody reads at a glance.",
+      "Show up to six headline figures, each with an optional movement. Use for figures somebody reads at a glance, not for a written summary.",
     parameters: MetricsCardProps,
     Component: MetricsCard as GalleryComponent["Component"],
     preview: {

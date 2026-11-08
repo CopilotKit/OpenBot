@@ -36,9 +36,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Bots answer ordinary questions, summaries and short lists directly in Markdown by default. A
   notice card is kept for a distinct alert that needs you to act, or for when you ask for one, and
   other components for when a chart, table or card makes the answer easier to use. A Bot asked for
-  its top emails used to wrap the list in a notice. An existing deployment keeps the Notice and
-  Checklist descriptions it already published; an admin can bring them up to date on Admin → UI
-  components, from the new text in `app/src/components/gallery/cards.tsx`.
+  its top emails used to wrap the list in a notice. An existing deployment keeps the Notice,
+  Checklist, Record, Headline figures and Data table descriptions it already published; an admin
+  can bring them up to date on Admin → UI components, from the new text in
+  `app/src/components/gallery/cards.tsx` and `table.tsx`.
 - A notice card's supporting point that is itself a list is drawn as that list, without a stray dot
   and an extra indent beside it, and a long link in a notice wraps where it ran under the card's edge.
 
