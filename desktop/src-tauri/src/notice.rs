@@ -73,27 +73,111 @@ process to set the foreground window"). The running OpenBot then restores and ac
 #[cfg(windows)]
 pub fn let_running_openbot_come_forward() {
     use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
-    if let Err(error) = unsafe { AllowSetForegroundWindow(ASFW_ANY) } {
-        log::warn!("[notification] could not pass on the foreground: {error}");
-    }
+    let outcome = match unsafe { AllowSetForegroundWindow(ASFW_ANY) } {
+        Ok(()) => "passed the foreground on".to_owned(),
+        Err(error) => format!("could not pass the foreground on: {error}"),
+    };
+    // This launch exits before it has a log; the running OpenBot logs it (`take_handoff`).
+    let _ = std::fs::write(handoff_record(), outcome);
 }
 
-/// Restores the window if it is minimised and makes it the foreground window, with the right a
-/// notification's launch passed on (`let_running_openbot_come_forward`).
+/// Where a notification's launch leaves how its hand-off went, for the running OpenBot's log.
 #[cfg(windows)]
-pub fn bring_to_front(hwnd: *mut core::ffi::c_void) {
+fn handoff_record() -> std::path::PathBuf {
+    std::env::temp_dir().join("ai.copilotkit.openbot.desktop-foreground-handoff.txt")
+}
+
+/// How the last notification's launch fared passing the foreground on, once.
+#[cfg(windows)]
+pub fn take_handoff() -> Option<String> {
+    let record = handoff_record();
+    let outcome = std::fs::read_to_string(&record).ok();
+    let _ = std::fs::remove_file(&record);
+    outcome
+}
+
+/// How the window came to the front, in the order `bring_to_front` tries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub enum Forward {
+    /// `SetForegroundWindow`, with the right the notification's launch passed on.
+    Granted,
+    /// `SetForegroundWindow` again, with this thread's input attached to the foreground window's.
+    AttachedInput,
+    /// Neither: raised above the other windows (a moment's topmost), but not activated.
+    RaisedOnly,
+}
+
+/**
+The ways to the front, tried in order until one works: each later one is a fallback the earlier one
+did not need. MEASURED on Windows (0.3.4, 8fb4cf53c): `SetForegroundWindow` alone was refused after a
+click on a toast, though the click's launch had passed the foreground on, and OpenBot stayed behind
+Edge. Mozilla met the same with Thunderbird: the process that takes the click holds the right, and
+handing it on to the running instance "is heuristic and can break" (bugzilla 1863798).
+*/
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn forward_ways() -> [Forward; 3] {
+    [
+        Forward::Granted,
+        Forward::AttachedInput,
+        Forward::RaisedOnly,
+    ]
+}
+
+/**
+Restores the window if it is minimised and brings it to the front: with the right a notification's
+launch passed on (`let_running_openbot_come_forward`), else with this thread's input attached to the
+foreground window's thread (`AttachThreadInput`, which lets the call act as the foreground thread),
+else by raising it above the other windows for a moment (`HWND_TOPMOST`, then `HWND_NOTOPMOST`).
+Called on the window's own thread. Says which worked.
+*/
+#[cfg(windows)]
+pub fn bring_to_front(hwnd: *mut core::ffi::c_void) -> Forward {
     use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows::Win32::UI::WindowsAndMessaging::{
-        IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
+        SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
     };
     let hwnd = HWND(hwnd);
     unsafe {
         if IsIconic(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_RESTORE);
         }
-        if !SetForegroundWindow(hwnd).as_bool() {
-            log::warn!("[notification] Windows kept another window in front");
+        for way in forward_ways() {
+            match way {
+                Forward::Granted => {
+                    if SetForegroundWindow(hwnd).as_bool() {
+                        return way;
+                    }
+                }
+                Forward::AttachedInput => {
+                    let foreground = GetForegroundWindow();
+                    let theirs = GetWindowThreadProcessId(foreground, None);
+                    let ours = GetCurrentThreadId();
+                    if theirs == 0 || theirs == ours {
+                        continue;
+                    }
+                    let attached = AttachThreadInput(ours, theirs, true).as_bool();
+                    let _ = BringWindowToTop(hwnd);
+                    let forward = SetForegroundWindow(hwnd).as_bool();
+                    if attached {
+                        let _ = AttachThreadInput(ours, theirs, false);
+                    }
+                    if forward {
+                        return way;
+                    }
+                }
+                Forward::RaisedOnly => {
+                    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
+                    let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+                    let _ = SetWindowPos(hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags);
+                    let _ = BringWindowToTop(hwnd);
+                }
+            }
         }
+        Forward::RaisedOnly
     }
 }
 
@@ -243,6 +327,49 @@ mod tests {
         assert!(!launched_by_link(args(&["--restarted"])));
         // The executable's own path is never the link, whatever folder it is in.
         assert!(!launched_by_link(vec!["openbot:\\OpenBot.exe".to_owned()]));
+    }
+
+    /// The launch Windows makes for a toast's link passes the foreground on first thing in `main`,
+    /// before the Tauri builder: the single-instance plugin hands the link over and exits the
+    /// process in its setup (`std::process::exit(0)` after `SendMessageW(.., WM_COPYDATA, ..)`,
+    /// tauri-plugin-single-instance 2.4.4, platform_impl/windows.rs), so nothing after the builder
+    /// ever runs in that launch.
+    #[test]
+    fn a_notices_launch_passes_the_foreground_on_before_the_builder() {
+        let source = include_str!("main.rs");
+        let main = source
+            .find("\nfn main() {\n    let args")
+            .expect("the app's main");
+        let after = |needle: &str| {
+            main + source[main..]
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle} in main"))
+        };
+        let handoff = after("notice::let_running_openbot_come_forward()");
+        let condition = after("notice::launched_by_link(");
+        assert!(condition < handoff);
+        for later in [
+            "tauri::Builder::default()",
+            "tauri_plugin_single_instance::init(",
+            "recorder_host::caller_origin(",
+        ] {
+            assert!(handoff < after(later), "{later} comes before the hand-off");
+        }
+    }
+
+    /// The ways to the front are tried in order, each a fallback the earlier did not need: the
+    /// right the launch passed on, then this thread's input attached to the foreground's, and only
+    /// then a raise above the other windows without activating.
+    #[test]
+    fn the_ways_to_the_front_fall_back_in_order() {
+        assert_eq!(
+            forward_ways(),
+            [
+                Forward::Granted,
+                Forward::AttachedInput,
+                Forward::RaisedOnly
+            ]
+        );
     }
 
     /// A conversation's tag reaches the toast as it is, so its next notice replaces it; a tag too

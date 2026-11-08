@@ -84,7 +84,7 @@ objc2-av-foundation = { version = "0.3", default-features = false, features = ["
 
 # Narration on Windows: the SAPI in-process recognizer. See `speech/sapi.rs`. The version Tauri uses.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

@@ -7054,12 +7054,22 @@ page waits for it: `open_waiting_notice_page` opens it once OpenBot's page has l
 */
 fn open_notice_page(app: &tauri::AppHandle, path: Option<String>) {
     show_whichever_applies(app);
+    // On the window's own thread, which is the thread `AttachThreadInput` lends the foreground's
+    // input to. Logged with how the click's launch fared passing the foreground on.
     #[cfg(windows)]
     if let Some(hwnd) = app
         .get_webview_window("main")
         .and_then(|window| window.hwnd().ok())
     {
-        notice::bring_to_front(hwnd.0 as *mut core::ffi::c_void);
+        let hwnd = hwnd.0 as isize;
+        let _ = app.run_on_main_thread(move || {
+            let handoff = notice::take_handoff();
+            let forward = notice::bring_to_front(hwnd as *mut core::ffi::c_void);
+            log::info!(
+                "[notification] to the front: {forward:?} (the click's launch: {})",
+                handoff.as_deref().unwrap_or("no record")
+            );
+        });
     }
     let Some(path) = path else {
         return;
