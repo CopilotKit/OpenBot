@@ -51,10 +51,12 @@ Watch a Bot use its browser and tools, review interactive results, and take over
 
 ## Your workspace. Your stack.
 
+<div align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/openbot-stack-dark.svg">
-  <img src="docs/assets/openbot-stack-light.svg" alt="OpenBot's modular stack: an enterprise workspace over built-in or AG-UI agents, your models, MCP tools, configurable infrastructure, and deployment on your laptop or Kubernetes." width="100%">
+  <img src="docs/assets/openbot-stack-light.svg" alt="OpenBot's modular stack: an enterprise workspace over built-in or AG-UI agents, your models, MCP tools, configurable infrastructure, and deployment on your laptop or Kubernetes." width="90%">
 </picture>
+</div>
 
 - **Choose your models.** Use OpenAI, Claude, Gemini, or open models through an OpenAI-compatible endpoint, hosted by a provider or on your own infrastructure. Keep your provider relationships and change models as your needs change.
 - **Bring your agents.** Run built-in Bots in the OpenBot server, or connect your existing agents through AG-UI from any agent execution platform. LangChain, Claude Agent SDK, Google ADK, Mastra, CrewAI, AWS Strands, and more can work in the same workspace.
