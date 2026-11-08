@@ -2686,8 +2686,10 @@ pub(crate) fn setup_with(
                 images_limits,
             )?,
             // A first setup: its node does not exist until the CLI makes it, so its download is
-            // followed while the CLI pulls (`local_images::follow_new_stack`).
+            // followed while the CLI pulls (`local_images::follow_new_stack`). The images k3d
+            // pulls through the engine to make the node come from OpenBot's mirror first.
             None => {
+                pull_engine_images(&images.engine, cancel);
                 return setup_followed(
                     cli,
                     installation,
@@ -2697,13 +2699,38 @@ pub(crate) fn setup_with(
                     &images,
                     attempt,
                     images_limits,
-                )
+                );
             }
         },
         None => false,
     };
     let limits = if downloaded { limits.0 } else { limits.1 };
     setup(cli, installation, accepted, limits, cancel)
+}
+
+/// Pull what `k3d cluster create` would pull through the engine (`CliImages::engine`) before a
+/// first setup runs it, through `pull_metrics::pull_image`, so each comes from downloads.copilotkit.ai
+/// first (`image_mirror`) and k3d finds it here. One that cannot be pulled is left for k3d to pull,
+/// as before.
+fn pull_engine_images(images: &[String], cancel: &Cancel) {
+    let Some(address) = ENGINE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+    else {
+        return;
+    };
+    for image in images {
+        if cancel.requested() {
+            return;
+        }
+        if let Err(problem) = crate::pull_metrics::pull_image(&address, image, |_| {}, |_| {}) {
+            log::warn!(
+                "[local] {image} is left for k3d to pull: {}",
+                problem.detail.as_deref().unwrap_or(&problem.said)
+            );
+        }
+    }
 }
 
 /**

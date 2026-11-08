@@ -8,10 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- OpenBot Desktop downloads everything from downloads.copilotkit.ai first, and from GitHub only
-  when that fails: OpenBot's images and the back end's images (named as their ghcr.io images, so
-  nothing downloads them again), the release's image list, the latest release, and the Podman and
-  Compose builds it installs.
+- OpenBot Desktop downloads everything from downloads.copilotkit.ai first, and from GitHub or
+  Docker Hub only when that fails: OpenBot's images and the back end's images (named as their
+  ghcr.io or Docker Hub images, so nothing downloads them again), the k3s node and k3d images a
+  first back end setup creates its cluster from, the release's image list, the latest release, and
+  the Podman and Compose builds it installs.
 - downloads.copilotkit.ai now serves everything OpenBot Desktop downloads for the Latest release,
   not only its installers: every container image the app pulls (its own and the bundled back
   end's, copied from GitHub's registry under the registry's own paths), the release's
