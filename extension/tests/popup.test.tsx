@@ -1225,7 +1225,7 @@ const SENDING =
   "The rest of the recording is on its way. You can keep browsing.";
 
 test("after stop with nothing still sending, the popup says the recording went to OpenBot's back end and into your Learning space", async () => {
-  const { findByText, getByText, queryByText, queryByRole } = setup(
+  const { findByText, getByText, queryByText } = setup(
     stateResponse({
       state: { ...STOPPED, learning: learning("assigned"), draining: 0 },
     }),
@@ -1234,9 +1234,47 @@ test("after stop with nothing still sending, the popup says the recording went t
   expect(getByText(INTO_YOUR_SPACE)).toBeTruthy();
   expect(queryByText(/Recorded for/)).toBeNull();
   expect(queryByText(SENDING)).toBeNull();
-  // Nothing about OpenBot keeping it or drafting from it, and nothing to open there.
+  // Nothing about OpenBot keeping it or drafting from it.
   expect(queryByText(/Review it in OpenBot|Saved|draft/)).toBeNull();
+});
+
+test("after sending, the popup links to Teach a Bot", async () => {
+  const { findByText, queryByRole } = setup(
+    stateResponse({
+      state: { ...STOPPED, learning: learning("assigned"), draining: 1 },
+    }),
+  );
+  await findByText("Sending to OpenBot's back end");
   expect(queryByRole("link")).toBeNull();
+  cleanup();
+  const sent = setup(
+    stateResponse({
+      state: { ...STOPPED, learning: learning("assigned"), draining: 0 },
+    }),
+  );
+  const link = await sent.findByRole("link", { name: "See it on Teach a Bot" });
+  expect(link.getAttribute("href")).toBe(
+    "https://openbot.example.test/browser?recordings=1",
+  );
+  expect(link.getAttribute("target")).toBe("_blank");
+  expect(link.getAttribute("rel")).toBe("noreferrer");
+});
+
+test("the Teach a Bot link keeps a path prefix on the OpenBot address", async () => {
+  const sent = setup(
+    stateResponse({
+      state: { ...STOPPED, learning: learning("assigned"), draining: 0 },
+      connection: {
+        openbotUrl: "https://example.test/openbot",
+        user: { name: "Ada Lovelace", email: "ada@example.test" },
+        via: "web",
+      },
+    }),
+  );
+  const link = await sent.findByRole("link", { name: "See it on Teach a Bot" });
+  expect(link.getAttribute("href")).toBe(
+    "https://example.test/openbot/browser?recordings=1",
+  );
 });
 
 test("after stop with Automatic Learning off, the popup says Learning will not see the recording, and that it still went to OpenBot's back end", async () => {

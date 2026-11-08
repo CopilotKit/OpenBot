@@ -1,9 +1,10 @@
 import {
   isLearningContainerId,
+  isLearningPersonalReview,
   type LearningSettings,
   type LearningTarget,
 } from "@openbot/shared/learning";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
   learningSettings,
@@ -14,14 +15,24 @@ import { currentEdition } from "../edition";
 export type LearningSettingsStore = {
   read(): Promise<LearningSettings>;
   write(settings: LearningSettings): Promise<LearningSettings>;
-  /** Whether an administrator has saved settings, including a saved off. */
+  /**
+   * Save only `autoApprove`, leaving every other stored key (a stored off included) as it is.
+   * With nothing saved yet it saves the defaults (a configured default container included)
+   * alongside it.
+   */
+  setAutoApprove(autoApprove: boolean): Promise<void>;
+  /**
+   * Whether an administrator has saved settings, including a saved off. In the personal edition,
+   * which has no Admin screen to choose a default container, only a saved default container counts.
+   */
   saved(): Promise<boolean>;
   /**
    * Save `target` as the default only while nothing is saved, and say whether this call saved it.
    *
-   * One conditional insert, so replicas racing at boot cannot overwrite each other or an
-   * administrator who saved between the check and the write: the first row wins and every later
-   * call returns false.
+   * One conditional write, so replicas racing at boot cannot overwrite each other or an
+   * administrator who saved between the check and the write: the first one wins and every later
+   * call returns false. In the personal edition a saved row without a default container (one that
+   * only holds automatic approval, say) still takes the target, keeping its other keys.
    */
   adoptDefault(target: LearningTarget): Promise<boolean>;
   bindThread(input: {
@@ -65,7 +76,14 @@ export function parseLearningSettings(
     !target(input.defaultTarget) ||
     !object(input.agents) ||
     Object.keys(input).some(
-      (key) => !["enabled", "defaultTarget", "agents"].includes(key),
+      (key) =>
+        ![
+          "enabled",
+          "defaultTarget",
+          "agents",
+          "personalReview",
+          "autoApprove",
+        ].includes(key),
     )
   ) {
     return {
@@ -86,7 +104,58 @@ export function parseLearningSettings(
         "Each Bot mapping must name a valid container or be null to exclude the Bot.",
     };
   }
+  if (
+    (input.personalReview !== undefined &&
+      !isLearningPersonalReview(input.personalReview)) ||
+    (input.autoApprove !== undefined && typeof input.autoApprove !== "boolean")
+  ) {
+    return {
+      ok: false,
+      error:
+        "Choose who reviews personal Learning (admins or people), and turn automatic approval on or off.",
+    };
+  }
   return { ok: true, settings: structuredClone(input) as LearningSettings };
+}
+
+/**
+ * A saved row as this build reads it: the keys it knows, and nothing it does not.
+ *
+ * A newer build may save a key this one has never heard of, and builds do go back (an update that is
+ * rolled back). Read strictly, one such key ("autoApprove") made the whole row invalid, and every chat
+ * run failed with "Failed to resolve Learning Container". What is written is still checked strictly
+ * (`parseLearningSettings`); only what is read back is forgiving.
+ */
+export function parseStoredLearningSettings(
+  input: unknown,
+): ReturnType<typeof parseLearningSettings> {
+  const known = (value: unknown, keys: readonly string[]) =>
+    object(value)
+      ? Object.fromEntries(
+          Object.entries(value).filter(([key]) => keys.includes(key)),
+        )
+      : value;
+  const targetKeys = ["containerId", "revision"] as const;
+  if (!object(input)) return parseLearningSettings(input);
+  const kept = known(input, [
+    "enabled",
+    "defaultTarget",
+    "agents",
+    "personalReview",
+    "autoApprove",
+  ]) as Record<string, unknown>;
+  return parseLearningSettings({
+    ...kept,
+    defaultTarget: known(kept.defaultTarget, targetKeys),
+    agents: object(kept.agents)
+      ? Object.fromEntries(
+          Object.entries(kept.agents).map(([id, value]) => [
+            id,
+            known(value, targetKeys),
+          ]),
+        )
+      : kept.agents,
+  });
 }
 
 /** Reads the database each time so changes take effect across replicas without a stale cache. */
@@ -110,19 +179,23 @@ export function createLearningSettingsStore(
       .where(eq(learningSettings.id, "current"))
       .limit(1);
     if (!row) return structuredClone(fallback);
-    const parsed = parseLearningSettings(row.settings);
+    const parsed = parseStoredLearningSettings(row.settings);
     if (!parsed.ok) throw new Error("Stored learning settings are invalid.");
     return parsed.settings;
   };
   return {
     async saved() {
-      if (!database) return written;
+      const personal = currentEdition() === "personal";
+      if (!database)
+        return written && (!personal || current.defaultTarget !== null);
       const [row] = await database
-        .select({ id: learningSettings.id })
+        .select({ settings: learningSettings.settings })
         .from(learningSettings)
         .where(eq(learningSettings.id, "current"))
         .limit(1);
-      return row !== undefined;
+      return (
+        row !== undefined && (!personal || row.settings.defaultTarget !== null)
+      );
     },
     async adoptDefault(target) {
       const settings: LearningSettings = {
@@ -132,18 +205,36 @@ export function createLearningSettingsStore(
       };
       const parsed = parseLearningSettings(settings);
       if (!parsed.ok) throw new TypeError(parsed.error);
+      // A saved row with no default container is an admin's choice in the team edition only.
+      const personal = currentEdition() === "personal";
       if (!database) {
-        if (written) return false;
-        current = structuredClone(parsed.settings);
-        written = true;
+        if (!written) {
+          current = structuredClone(parsed.settings);
+          written = true;
+          return true;
+        }
+        if (!personal || current.defaultTarget !== null) return false;
+        current = { ...current, defaultTarget: parsed.settings.defaultTarget };
         return true;
       }
-      const inserted = await database
+      const insert = database
         .insert(learningSettings)
-        .values({ id: "current", settings: parsed.settings })
-        .onConflictDoNothing({ target: learningSettings.id })
-        .returning({ id: learningSettings.id });
-      return inserted.length > 0;
+        .values({ id: "current", settings: parsed.settings });
+      const adopted = personal
+        ? await insert
+            .onConflictDoUpdate({
+              target: learningSettings.id,
+              set: {
+                settings: sql`jsonb_set(${learningSettings.settings}, '{defaultTarget}', ${JSON.stringify(parsed.settings.defaultTarget)}::text::jsonb)`,
+                updatedAt: new Date(),
+              },
+              setWhere: sql`${learningSettings.settings}->'defaultTarget' = 'null'::jsonb`,
+            })
+            .returning({ id: learningSettings.id })
+        : await insert
+            .onConflictDoNothing({ target: learningSettings.id })
+            .returning({ id: learningSettings.id });
+      return adopted.length > 0;
     },
     async read() {
       const settings = await stored();
@@ -168,6 +259,26 @@ export function createLearningSettingsStore(
         written = true;
       }
       return structuredClone(parsed.settings);
+    },
+    async setAutoApprove(autoApprove) {
+      if (typeof autoApprove !== "boolean")
+        throw new TypeError("Automatic approval is on or off.");
+      if (!database) {
+        current = { ...current, autoApprove };
+        written = true;
+        return;
+      }
+      const settings: LearningSettings = { ...fallback, autoApprove };
+      await database
+        .insert(learningSettings)
+        .values({ id: "current", settings })
+        .onConflictDoUpdate({
+          target: learningSettings.id,
+          set: {
+            settings: sql`jsonb_set(${learningSettings.settings}, '{autoApprove}', to_jsonb(${autoApprove}::boolean))`,
+            updatedAt: new Date(),
+          },
+        });
     },
     async bindThread(input) {
       if (database) {

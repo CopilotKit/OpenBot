@@ -1,8 +1,10 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import type { MiddlewareHandler } from "hono";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import type { MiddlewareHandler } from "hono";
+import type { AppVariables } from "../src/auth/guards";
 import {
+  createModelChoiceRoutes,
   createModelChoices,
   ModelChoiceError,
 } from "../src/channels/model-choice";
@@ -13,8 +15,6 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import type { AppVariables } from "../src/auth/guards";
-import { createModelChoiceRoutes } from "../src/channels/model-choice";
 import {
   createModelCatalogue,
   createModelRoutes,
@@ -251,28 +251,45 @@ describe("a person's model pick for a conversation", () => {
     expect((await anthropic.forRun(userId, threadId)).model).not.toBe("gpt-4o");
   });
 
-  test("is only ever the person's own", async () => {
-    const owner = await person();
-    const stranger = await person();
-    const { channelId, threadId } = await conversation(owner);
-    const store = choices();
-    await store.save(owner, channelId, { model: "gpt-4o", effort: null });
+  /*
+   * Whichever of the stranger's two attempts answers first. Both used to be started at once and
+   * awaited in turn, so when the save was refused before the read (a slower database round trip, as
+   * on a busy CI runner) its refusal had no handler yet, and the test failed on an unhandled
+   * "Couldn't find that conversation." that was exactly the answer it expected. Each attempt is now
+   * started where it is awaited; `slower` holds one back to pin both orders.
+   */
+  test.each(["read", "save"] as const)(
+    "is only ever the person's own, when the stranger's %s answers last",
+    async (slower) => {
+      const owner = await person();
+      const stranger = await person();
+      const { channelId, threadId } = await conversation(owner);
+      const store = choices();
+      await store.save(owner, channelId, { model: "gpt-4o", effort: null });
+      const held = <T>(which: "read" | "save", attempt: () => Promise<T>) =>
+        which === slower
+          ? new Promise((resolve) => setTimeout(resolve, 100)).then(attempt)
+          : attempt();
 
-    for (const attempt of [
-      store.read(stranger, channelId),
-      store.save(stranger, channelId, { model: "o3", effort: null }),
-    ]) {
-      const refused = await attempt.catch((error: unknown) => error);
-      expect((refused as ModelChoiceError).status).toBe(404);
-    }
-    expect((await store.forRun(stranger, threadId)).model).toBe(
-      "gpt-6.1-terra",
-    );
-    expect(await store.read(owner, channelId)).toEqual({
-      model: "gpt-4o",
-      effort: null,
-    });
-  });
+      for (const attempt of [
+        () => held("read", () => store.read(stranger, channelId)),
+        () =>
+          held("save", () =>
+            store.save(stranger, channelId, { model: "o3", effort: null }),
+          ),
+      ]) {
+        const refused = await attempt().catch((error: unknown) => error);
+        expect((refused as ModelChoiceError).status).toBe(404);
+      }
+      expect((await store.forRun(stranger, threadId)).model).toBe(
+        "gpt-6.1-terra",
+      );
+      expect(await store.read(owner, channelId)).toEqual({
+        model: "gpt-4o",
+        effort: null,
+      });
+    },
+  );
 });
 
 /*

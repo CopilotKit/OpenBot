@@ -52,9 +52,9 @@ function draw(edition: "team" | "personal", at: string) {
   );
 }
 
-test("in the personal edition, Memory is its own page that goes back to Bots", async () => {
-  const view = draw("personal", "/capabilities/memory");
-  expect(await view.findByRole("heading", { name: "Memory" })).toBeTruthy();
+test("in the personal edition, Skills is its own page that goes back to Bots", async () => {
+  const view = draw("personal", "/capabilities/skills");
+  expect(await view.findByRole("heading", { name: "Skills" })).toBeTruthy();
   expect(view.getByRole("button", { name: /Bots/ }).getAttribute("href")).toBe(
     "/bots",
   );

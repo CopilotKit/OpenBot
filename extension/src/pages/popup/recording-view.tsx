@@ -53,6 +53,15 @@ type RecordingActions = {
   voice?: VoiceActions;
 };
 
+/**
+ * Where "See it on Teach a Bot" goes: the page's list of recordings, which opens no browser on arrival (`?recordings`).
+ * Resolved relative to OpenBot's address, so a path prefix on it is kept.
+ */
+function teachABotUrl(openbotUrl: string): string {
+  const base = openbotUrl.endsWith("/") ? openbotUrl : `${openbotUrl}/`;
+  return new URL("browser?recordings=1", base).toString();
+}
+
 /** What the popup shows while a recording runs: time, actions, the voice, the capture rows, and Stop or Start over. */
 export function RecordingView({
   state,
@@ -234,10 +243,12 @@ export function afterStopLearningSentence(
 export function AfterStop({
   state,
   connected,
+  openbotUrl,
   onDiscard,
 }: {
   state: RecorderState;
   connected: boolean;
+  openbotUrl?: string;
   onDiscard: () => void;
 }) {
   const [asking, setAsking] = useState(false);
@@ -274,6 +285,16 @@ export function AfterStop({
                   {line}
                 </ItemDescription>
               ))}
+              {sent && openbotUrl ? (
+                <a
+                  href={teachABotUrl(openbotUrl)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm underline"
+                >
+                  See it on Teach a Bot
+                </a>
+              ) : null}
             </ItemContent>
           </Item>
         ) : null}
