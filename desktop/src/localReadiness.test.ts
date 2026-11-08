@@ -87,7 +87,7 @@ test("every failure gives a plain, non-empty sentence without its own name or In
 
 test("the reason and failure lists in this test match the source", () => {
   expect(new Set(reasons).size).toBe(18);
-  expect(localFailures.length).toBe(17);
+  expect(localFailures.length).toBe(18);
 });
 
 test("Docker reasons block the runtime when the probe has no answer", () => {
