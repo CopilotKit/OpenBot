@@ -6,6 +6,10 @@ import {
   auditEventWords,
   dataWords,
 } from "@openbot/shared/audit-words";
+import {
+  type ConnectPrompt,
+  readConnectPrompt,
+} from "@openbot/shared/connect-prompt";
 import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import { connectorName, humanise, inFolder } from "@openbot/shared/tool-name";
 import { Fragment, type ReactNode } from "react";
@@ -478,6 +482,7 @@ export function decisionText(event: AuditEvent): string {
     routed ??
     approvalText(event) ??
     (legacy?.outcome === "requested" ? "Asked for" : undefined) ??
+    notConnectedText(event) ??
     (legacy ? undefined : DECISIONS[event.eventType]) ??
     (outcome === "refused"
       ? "Blocked"
@@ -485,6 +490,44 @@ export function decisionText(event: AuditEvent): string {
         ? "Did not happen"
         : "Allowed")
   );
+}
+
+/**
+ * The app a call needed and the asker had not connected, when that is why it did not happen.
+ *
+ * The server records the refusal as the Bot was given it, so `failure` opens with the
+ * `[connect-app]{...}` marker the chat draws as a connect card. Read with the chat's own reader,
+ * so the page and the card agree on what counts as one; nothing of the marker is drawn here.
+ */
+function connectPromptOf(event: AuditEvent): ConnectPrompt | null {
+  const failure = event.payload?.failure;
+  return typeof failure === "string" ? readConnectPrompt(failure) : null;
+}
+
+/**
+ * Not "The server didn't answer": it answered, and the answer was that the app isn't connected.
+ * Still the colour of something that did not happen, which it is.
+ */
+function notConnectedText(event: AuditEvent): string | undefined {
+  const prompt = connectPromptOf(event);
+  if (!prompt) return undefined;
+  return prompt.reason === "reconnect"
+    ? "No longer connected"
+    : "Not connected";
+}
+
+/**
+ * The line under "Not connected". Admin reads the refusal's own sentence, as its other reasons
+ * read as recorded. A page anybody can open says it in its own words, because the recorded one
+ * tells the Bot to "ask again" and this is a page, not a conversation.
+ */
+function notConnectedLine(prompt: ConnectPrompt, storedNames: boolean): string {
+  if (storedNames && prompt.message) return prompt.message;
+  if (prompt.reason === "reconnect")
+    return `${prompt.title} is no longer connected. Reconnect it in Connections.`;
+  if (prompt.reason === "shared")
+    return `${prompt.title} uses a shared account nobody has connected yet. Ask an admin to connect it.`;
+  return `${prompt.title} isn't connected. Connect it in Connections.`;
 }
 
 /**
@@ -624,7 +667,10 @@ export function decisionDetails(
     lines.push(payload.reason);
   if (event.eventType === "bot.declined" && typeof payload.reason === "string")
     lines.push(`${payload.reason}, reported by the Bot itself`);
-  if (failed && typeof payload.failure === "string")
+  const notConnected = connectPromptOf(event);
+  if (failed && notConnected)
+    lines.push(notConnectedLine(notConnected, storedNames));
+  else if (failed && typeof payload.failure === "string")
     lines.push(payload.failure);
   /*
    * The two numbers the stall row is worth reading for. Without them every stalled turn looks the
