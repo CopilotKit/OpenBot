@@ -82,10 +82,18 @@ def provider_refusal(error: BaseException) -> bool:
     person reads it, and the server reads it to notice a model that is no longer offered.
     """
     refusals = []
+    unanswered = ()
     try:
-        from openai import APIStatusError as OpenAIRefusal
+        # `APIError`, not only `APIStatusError`: a refusal that arrives inside a streamed answer, as
+        # the Codex backend sends one, is raised as the base class with no status at all. Seen live:
+        # "Invalid JSON schema: regex lookaround is not supported. Found at
+        # $.properties.email_address.pattern." A connection that never reached the provider is not
+        # its refusal, and is left to the run's own error.
+        from openai import APIConnectionError
+        from openai import APIError as OpenAIRefusal
 
         refusals.append(OpenAIRefusal)
+        unanswered = (APIConnectionError,)
     except ImportError:
         pass
     try:
@@ -103,7 +111,7 @@ def provider_refusal(error: BaseException) -> bool:
     # `langchain-google-genai` raises its own error from Google's, with Google's text in it.
     seen = set()
     while error is not None and id(error) not in seen:
-        if isinstance(error, tuple(refusals)):
+        if isinstance(error, tuple(refusals)) and not isinstance(error, unanswered):
             return True
         seen.add(id(error))
         error = error.__cause__
@@ -225,6 +233,9 @@ def provider_message(error: BaseException) -> str:
     return message
 
 
+# What a person reads when a run fails for a reason that is not the provider's.
+RUN_FAILED = "The Bot stopped before it finished answering. Try again."
+
 _current: ContextVar[RunTools | None] = ContextVar("openbot_run_tools", default=None)
 
 
@@ -257,6 +268,7 @@ class ToolAwareAgent(WholeThreadAgent):
         # cancellation. Current input.tools is authoritative; checkpoint/state
         # tools must not resurrect an offer removed by the caller.
         token = _current.set(context)
+        ended = False
         try:
             clean_props = {
                 key: value for key, value in props.items() if key not in OPENBOT_PROPS
@@ -271,6 +283,8 @@ class ToolAwareAgent(WholeThreadAgent):
                         event = event.model_copy(
                             update={"code": "OPENBOT_MODEL_AUTH_REQUIRED"}
                         )
+                    if event.type in (EventType.RUN_FINISHED, EventType.RUN_ERROR):
+                        ended = True
                     yield event
         except UnofferedToolError:
             yield RunErrorEvent(
@@ -307,8 +321,14 @@ class ToolAwareAgent(WholeThreadAgent):
                 yield RunErrorEvent(
                     type=EventType.RUN_ERROR, message=message, code="OPENBOT_MODEL_REFUSED"
                 )
-            else:
+            elif ended:
                 raise
+            else:
+                # Raised, it ends the response stream with no terminal event, and all the server can
+                # say is "Remote agent ended without a terminal event." Every run ends with one: the
+                # error itself goes to this harness's log, and the person reads what to do.
+                logger.exception("The run failed before it finished")
+                yield RunErrorEvent(type=EventType.RUN_ERROR, message=RUN_FAILED)
         finally:
             _current.reset(token)
 

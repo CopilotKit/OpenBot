@@ -5,7 +5,11 @@ import { useRef, useState } from "react";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
-import { STARTER_SUGGESTIONS, showStarterTour } from "./suggestions";
+import {
+  INTERACTIVE_STARTER,
+  STARTER_SUGGESTIONS,
+  showStarterTour,
+} from "./suggestions";
 
 type Props = {
   agentId: string | undefined;
@@ -45,7 +49,12 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
   const choose = async (index: number) => {
     if (disabled || sendingRef.current) return;
     setError(null);
-    if (index === 1 && capabilities.data?.generativeUi !== true) {
+    const suggestion = STARTER_SUGGESTIONS[index];
+    if (!suggestion) return;
+    if (
+      suggestion === INTERACTIVE_STARTER &&
+      capabilities.data?.generativeUi !== true
+    ) {
       setError(
         capabilities.isPending
           ? "Still checking whether interactive answers are available. Try again in a moment."
@@ -53,8 +62,6 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
       );
       return;
     }
-    const suggestion = STARTER_SUGGESTIONS[index];
-    if (!suggestion) return;
     sendingRef.current = true;
     setSending(true);
     try {
@@ -72,9 +79,16 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
   };
 
   return (
+    /*
+     * Inset by the composer's own padding (`px-3`), so the first task lines up with "Ask anything"
+     * rather than with the composer's border. In a window narrower than the conversation column the
+     * composer runs to the pane's edge, and with no inset the first task sat on that edge too, its
+     * border lost in the pane's. `mb-3` is the app's gap between stacked controls; the 8px it had
+     * read as the row sitting on the composer.
+     */
     <section
       aria-label="Starter tasks"
-      className="relative mb-2 w-full max-w-2xl [&>div]:gap-1 [&>div]:bg-transparent"
+      className="relative mb-3 w-full max-w-2xl px-3 [&>div]:gap-1 [&>div]:bg-transparent"
     >
       <CopilotChatSuggestionView
         suggestions={STARTER_SUGGESTIONS}

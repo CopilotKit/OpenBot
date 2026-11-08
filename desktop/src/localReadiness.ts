@@ -174,6 +174,11 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
     "The back end needs Podman in rootful mode. Stop your Podman machine, run podman machine set --rootful, then start it again.",
     "retry",
   ),
+  // No new bytes for three minutes. What arrived is kept, and the next download continues from it.
+  "download-stalled": blocked(
+    "The back end download stopped. Retry continues where it left off.",
+    "retry",
+  ),
 };
 
 function intelligenceRow(

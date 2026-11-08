@@ -164,6 +164,50 @@ export async function ensurePersonalSkills(
 }
 
 /**
+ * At startup, in the personal edition: the skills the person wrote become theirs, if a build before
+ * this stored them as nobody's.
+ *
+ * Settings > Skills saves with `global`, as Admin > Skills does, and the route stored every such
+ * skill as the deployment's, so a Bot's "Your skills" read "No skills yet" beside a Bot that held
+ * one. The route now gives it to the person (`route-groups/skills.ts`); this gives them the ones
+ * written before that.
+ *
+ * Only skills the person installed: `installed_by` is their email, which is what the route records.
+ * A skill OpenBot ships has none, and one the person edited keeps it, so both stay OpenBot's, as an
+ * edit keeps the owner a skill already had. Writes nothing once there are none left, and then an
+ * audit row naming them, started by OpenBot.
+ *
+ * @returns the slugs it gave to the person
+ */
+export async function ensurePersonalSkillsOwned(
+  database: Pick<Database, "update">,
+  person: { id: string; email: string },
+  audit?: AuditStore,
+): Promise<string[]> {
+  if (currentEdition() !== "personal") return [];
+  const owned = await database
+    .update(skills)
+    .set({ ownerUserId: person.id })
+    .where(
+      and(
+        isNull(skills.ownerUserId),
+        eq(skills.origin, "yours"),
+        eq(skills.installedBy, person.email),
+      ),
+    )
+    .returning({ slug: skills.slug });
+  const slugs = owned.map((row) => row.slug).sort();
+  if (slugs.length > 0 && audit)
+    await recordAuditEvent(audit, {
+      eventType: "configuration.changed",
+      targetType: "skill",
+      initiator: DEPLOYMENT_INITIATOR,
+      payload: { change: "skills_owned_personal", skills: slugs },
+    });
+  return slugs;
+}
+
+/**
  * In the personal edition every Bot takes part in Automatic Learning: its conversations go to the
  * Learning container and it uses every Skill learned there and in the person's own space. There is
  * no switch for one Bot there (the Admin screen that has one is the team edition's), so a Bot left

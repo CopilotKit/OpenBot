@@ -41,6 +41,7 @@ import {
   botResetPlanQueryOptions,
   type ResetPlan,
 } from "@/lib/bot-lifecycle/queries";
+import { useOffersMemory } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 
 /** Each count the notice lists, in the words the person reads, skipping the kinds with nothing. */
@@ -75,6 +76,7 @@ function ResetDialog({
     enabled: open,
   });
   const reset = useMutation(resetBotMutationOptions(queryClient));
+  const memory = useOffersMemory();
   const lines = plan.data ? resetLines(plan.data) : [];
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -114,9 +116,12 @@ function ResetDialog({
                   shared with other people or Bots and will be kept.
                 </p>
               ) : null}
-              <p className="text-muted-foreground">
-                Memories you told a Bot yourself are kept.
-              </p>
+              {/* Where memory isn't offered there are no memories to keep (see `offersMemory`). */}
+              {memory ? (
+                <p className="text-muted-foreground">
+                  Memories you told a Bot yourself are kept.
+                </p>
+              ) : null}
             </div>
           )}
           {reset.error ? (
@@ -172,6 +177,7 @@ export function ManageSection({
   const remove = useMutation(deleteAgentMutationOptions(queryClient));
   const [resetOpen, setResetOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const memory = useOffersMemory();
   const error = setPinned.error ?? setHidden.error ?? duplicate.error;
   // An administrator put it in this person's list; it stays pinned and cannot be hidden.
   const assigned = agent.assignedToMe === true;
@@ -270,8 +276,10 @@ export function ManageSection({
           <ItemContent>
             <ItemTitle>Reset</ItemTitle>
             <ItemDescription>
-              Delete your conversations with it, what it remembers for you, and
-              its scheduled work. You'll see the list first.
+              {/* Where memory isn't offered a Bot remembers nothing to delete (see `offersMemory`). */}
+              {memory
+                ? "Delete your conversations with it, what it remembers for you, and its scheduled work. You'll see the list first."
+                : "Delete your conversations with it and its scheduled work. You'll see the list first."}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
